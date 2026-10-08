@@ -1100,7 +1100,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
         await fetch(`${environment.configuration.PLATFORM_URL}/api/v1/agent/jobs/claim`, {
           method: "POST",
           headers: credentials,
-          body: "{}",
+          body: JSON.stringify({ accessRules: 2 }),
         })
       ).json(),
     );
