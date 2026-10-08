@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { copyFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { createAppService } from "../src/lib/server/apps.ts";
 import { createAppAccessService } from "../src/lib/server/app-access.ts";
@@ -75,6 +77,8 @@ describe("App policy reconciliation", () => {
   });
 
   it("reprojects a replacement issuer without reusing old grants or accepting stale writers", async () => {
+    const directory = environment.configuration.PLATFORM_AUTH_DIRECTORY;
+    await copyFile(join(directory, "desired.json"), join(directory, "active.json"));
     const service = services();
 
     const parent = (
@@ -125,6 +129,7 @@ describe("App policy reconciliation", () => {
         .set({ appliedAccessRevision: revision })
         .where(eq(apps.id, appId));
     const previous = await environment.database.db.select().from(appRoleAssignments);
+    const previousApps = await environment.database.db.select().from(apps).orderBy(apps.id);
     const settings = (await environment.settings.read(admin())).settings;
 
     if (!settings.identity) throw new Error("Missing identity");
@@ -148,6 +153,48 @@ describe("App policy reconciliation", () => {
       },
       false,
     );
+    const replacement = await environment.settings.resolve();
+    await writeFile(
+      join(directory, "status.json"),
+      JSON.stringify({
+        revision: replacement.revision,
+        state: "failed",
+        message: "Synthetic startup failure",
+      }),
+    );
+    expect((await environment.settings.read(admin())).activation.state).toBe("failed");
+    expect(await environment.database.db.select().from(apps).orderBy(apps.id)).toEqual(
+      previousApps,
+    );
+    expect(await environment.database.db.select().from(jobs)).toHaveLength(0);
+
+    if (!replacement.identity) throw new Error("Missing replacement identity");
+
+    const replacementConfiguration = {
+      ...environment.configuration,
+      IDENTITY: replacement.identity,
+    };
+
+    expect(
+      await createAppAccessService(environment.database.db, replacementConfiguration).change(
+        admin(),
+        parent.id,
+        { revision: 3, allAuthenticated: false },
+      ),
+    ).toMatchObject({ error: { code: "CONFLICT" } });
+    expect(
+      await createAppService(environment.database.db, replacementConfiguration).create(admin(), {
+        slug: "not-active",
+        displayName: "Not active",
+        parentId: null,
+      }),
+    ).toMatchObject({ error: { code: "CONFLICT" } });
+
+    // Only a successful supervisor start publishes active.json. Regular runtime
+    // resolution (including agent polling) then reconciles the affected policies.
+    await copyFile(join(directory, "desired.json"), join(directory, "active.json"));
+    await environment.settings.resolve();
+    await environment.settings.resolve();
     const changed = (await service.access.read(admin(), parent.id)).unwrap();
     expect(changed).toMatchObject({
       provider: "https://replacement.example.test",

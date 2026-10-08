@@ -9,12 +9,13 @@ import { z } from "zod";
 import { appSsoConfiguration } from "../../../tools/edge-configuration.ts";
 import {
   appCallbackUrl,
+  authBundleIssuer,
   buildAuthBundle,
   publishAuthBundle,
   readActivation,
   readActiveAuthBundle,
 } from "./auth-bundle.ts";
-import { companyAccountProvider, companyIdentity, providerIssuer } from "./company-identity.ts";
+import { companyAccountProvider, companyIdentity } from "./company-identity.ts";
 import { projectAppAccess } from "./app-access.ts";
 import { companyLoginRevision, type Authentication } from "./auth.ts";
 import type { Configuration } from "./config.ts";
@@ -41,6 +42,51 @@ export const createSettingsService = (
   cookieSecret: string,
 ) => {
   const secrets = createInstallationSecrets(database, encryptionKey);
+
+  const reconcileAppAccess = async () => {
+    const active = await readActiveAuthBundle(configuration);
+
+    if (!active) return;
+    const issuer = authBundleIssuer(active);
+
+    const affected = (provider: string) =>
+      and(isNull(apps.parentId), ne(apps.state, "deleting"), ne(apps.accessProvider, provider));
+
+    const [pending] = await database
+      .select({ id: apps.id })
+      .from(apps)
+      .where(affected(issuer))
+      .limit(1);
+
+    if (!pending) return;
+    await database.transaction(async (transaction) => {
+      // Serialize with settings saves, app creation and role writes. The active
+      // bundle is published only after SSO starts successfully, and survives a
+      // failed replacement. Re-read it after waiting for the lock.
+      await transaction
+        .select({ id: installation.id })
+        .from(installation)
+        .where(eq(installation.id, installationId))
+        .for("update");
+      const current = await readActiveAuthBundle(configuration);
+
+      if (!current) return;
+      const provider = authBundleIssuer(current);
+
+      const originals = await transaction
+        .select()
+        .from(apps)
+        .where(affected(provider))
+        .orderBy(apps.id)
+        .for("update");
+
+      for (const app of originals) {
+        const projected = await projectAppAccess(transaction, app, provider);
+
+        if (projected.isErr()) throw projected.error;
+      }
+    });
+  };
 
   const resolveCurrent = (force = false) =>
     database.transaction(
@@ -118,7 +164,13 @@ export const createSettingsService = (
   let publication = Promise.resolve();
 
   const resolve = (force = false) => {
-    const result = publication.then(() => resolveCurrent(force));
+    const result = publication.then(async () => {
+      const resolved = await resolveCurrent(force);
+      await reconcileAppAccess();
+
+      return resolved;
+    });
+
     publication = result.then(
       () => undefined,
       () => undefined,
@@ -202,13 +254,6 @@ export const createSettingsService = (
         .where(eq(installation.id, installationId))
         .for("update");
       const identity = next.identity;
-      const current = await readInstallation(transaction);
-
-      const previousIssuer = current.settings.identity
-        ? providerIssuer(current.settings.identity.provider)
-        : "";
-
-      const nextIssuer = identity ? providerIssuer(identity.provider) : "";
 
       const saved = identity
         ? identitySettings.parse({
@@ -239,21 +284,6 @@ export const createSettingsService = (
           }),
         })
         .where(eq(installation.id, installationId));
-
-      if (previousIssuer !== nextIssuer) {
-        const originals = await transaction
-          .select()
-          .from(apps)
-          .where(and(isNull(apps.parentId), ne(apps.state, "deleting")))
-          .orderBy(apps.id)
-          .for("update");
-
-        for (const app of originals) {
-          const projected = await projectAppAccess(transaction, app, nextIssuer);
-
-          if (projected.isErr()) throw projected.error;
-        }
-      }
 
       const referenced = [saved?.management, saved?.apps, saved?.directory].flatMap((client) =>
         client?.secret.type === "stored" ? [client.secret.id] : [],

@@ -15,6 +15,16 @@ export const authBundle = z.strictObject({
   domain: z.string().min(1),
 });
 
+export const authBundleIssuer = (bundle: z.infer<typeof authBundle>) => {
+  const proxy = z
+    .object({
+      providers: z.tuple([z.object({ oidcConfig: z.object({ issuerURL: z.string().min(1) }) })]),
+    })
+    .parse(bundle.proxy);
+
+  return proxy.providers[0].oidcConfig.issuerURL;
+};
+
 export const appCallbackUrl = (configuration: Configuration) =>
   `https://auth.${configuration.APP_DOMAIN}${configuration.APP_HTTPS_PORT === 443 ? "" : `:${configuration.APP_HTTPS_PORT}`}/oauth2/callback`;
 

@@ -57,11 +57,14 @@ App SSO retains its configured session lifetime (currently a one-hour cookie
 without refresh). Directory membership changes are visible when that session is
 renewed. No additional fixed hourly management reauthentication policy is imposed.
 
-Replacing the company issuer creates new access revisions for apps and previews.
+After a replacement company issuer starts successfully, the control plane creates
+new access revisions for apps and previews. Failed SSO activation retains the
+previous running configuration and app policies. App permission writes and app
+creation wait for the replacement issuer to activate.
 Assignments keep their original issuer and do not grant rights in the replacement
 directory. A platform administrator can reassign ownership and roles there. The
-explicit all-authenticated switch remains enabled where selected. Gateway status
-stays pending until the agent confirms the replacement rules.
+explicit all-authenticated switch remains enabled where selected. Once projected,
+gateway status stays pending until the agent confirms the replacement rules.
 
 ## CLI
 
