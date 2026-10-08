@@ -37,7 +37,7 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")(
 
       const provider = companyProvider.parse({
         type: "oidc",
-        issuer: "http://127.0.0.1:4181",
+        issuer: "http://127.0.0.1:4182",
         label: "Test",
       });
 
@@ -47,12 +47,12 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")(
         ...configuration,
         providers: configuration.providers.map((entry) => ({
           ...entry,
-          loginURL: "http://127.0.0.1:4181/authorize",
-          redeemURL: "http://127.0.0.1:4181/token",
+          loginURL: "http://127.0.0.1:4182/authorize",
+          redeemURL: "http://127.0.0.1:4182/token",
           oidcConfig: {
             ...entry.oidcConfig,
             skipDiscovery: true,
-            jwksURL: "http://127.0.0.1:4181/jwks",
+            jwksURL: "http://127.0.0.1:4182/jwks",
           },
         })),
       };
@@ -97,12 +97,24 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")(
           const result = await fetch(base + callback.pathname + callback.search, {redirect:"manual", headers:{cookie, host:"auth.apps.example.test", "x-forwarded-proto":"https"}});
           const session = result.headers.getSetCookie().map(value => value.split(";")[0]).join("; ");
           const authenticated = await fetch(base + "/oauth2/auth", {redirect:"manual", headers:{cookie:session}});
-          console.log(JSON.stringify({callback:result.status, authenticated:authenticated.status}));
+          const authorize = async (users, provider = "http://127.0.0.1:4182") => {
+            const policy = Buffer.from(JSON.stringify({revision:1, groups:[], users, provider, allAuthenticated:false})).toString("base64url");
+            return (await fetch("http://127.0.0.1:4181/authorize?policy=" + policy, {redirect:"manual",headers:{cookie:session}})).status;
+          };
+          console.log(JSON.stringify({callback:result.status, authenticated:authenticated.status,
+            allowed: await authorize(["rotation-user"]), empty: await authorize([]),
+            otherIssuer: await authorize(["rotation-user"], "https://other.example.test") }));
         `,
         );
 
         return z
-          .object({ callback: z.number(), authenticated: z.number() })
+          .object({
+            callback: z.number(),
+            authenticated: z.number(),
+            allowed: z.number(),
+            empty: z.number(),
+            otherIssuer: z.number(),
+          })
           .parse(JSON.parse(response.stdout));
       };
 
@@ -135,7 +147,14 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")(
           timeout: 15_000,
         });
         await docker("cp", fixture, `${name}:/runtime/provider.mjs`);
-        await docker("exec", "-d", name, "node", "/runtime/provider.mjs");
+        await docker(
+          "exec",
+          "-d",
+          name,
+          "sh",
+          "-c",
+          "node /runtime/provider.mjs > /runtime/provider.log 2>&1",
+        );
         await vi.waitFor(
           async () => {
             await docker(
@@ -143,7 +162,7 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")(
               name,
               "node",
               "--eval",
-              'fetch("http://127.0.0.1:4181/jwks").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))',
+              'fetch("http://127.0.0.1:4182/jwks").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))',
             );
           },
           { timeout: 15_000 },
@@ -196,13 +215,19 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")(
           { timeout: 15_000 },
         );
         const first = await inspect();
-        expect(await login()).toEqual({ callback: 302, authenticated: 202 });
+        expect(await login()).toEqual({
+          callback: 302,
+          authenticated: 202,
+          allowed: 202,
+          empty: 403,
+          otherIssuer: 403,
+        });
         await docker(
           "exec",
           name,
           "node",
           "--eval",
-          'fetch("http://127.0.0.1:4181/rotate", {method:"POST",body:"rotated-secret"}).then(r=>process.exit(r.ok?0:1))',
+          'fetch("http://127.0.0.1:4182/rotate", {method:"POST",body:"rotated-secret"}).then(r=>process.exit(r.ok?0:1))',
         );
         expect((await login()).authenticated).toBe(401);
         await publish({ ...bundle, revision: "secret", clientSecret: "rotated-secret" });
@@ -215,7 +240,13 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")(
           status: { state: "active" },
         });
 
-        expect(await login()).toEqual({ callback: 302, authenticated: 202 });
+        expect(await login()).toEqual({
+          callback: 302,
+          authenticated: 202,
+          allowed: 202,
+          empty: 403,
+          otherIssuer: 403,
+        });
 
         const replacement = {
           ...bundle,
@@ -286,6 +317,8 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")(
       } catch (cause) {
         const logs = await docker("logs", name);
         console.error(logs.stdout, logs.stderr);
+        const providerLogs = await docker("exec", name, "cat", "/runtime/provider.log");
+        console.error(providerLogs.stdout, providerLogs.stderr);
         throw cause;
       } finally {
         await docker("rm", "--force", name).catch(() => undefined);

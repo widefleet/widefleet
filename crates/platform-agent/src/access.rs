@@ -1,4 +1,5 @@
 use crate::{config::Configuration, docker};
+use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use bollard::Docker;
 use platform_core::{Error, Result, model::Job};
 use reqwest::Url;
@@ -11,13 +12,18 @@ pub fn middleware(configuration: &Configuration, job: &Job) -> Result<Value> {
         .as_ref()
         .ok_or_else(|| Error::invalid("App job has no access rules".into()))?;
     if access.groups.len() > 100
-        || access.groups.iter().any(|group| {
-            group.is_empty()
-                || group.trim() != group
-                || group.chars().count() > 256
-                || group.contains(',')
-                || group.chars().any(|character| character.is_ascii_control())
-        })
+        || access.users.len() > 100
+        || access
+            .groups
+            .iter()
+            .chain(access.users.iter())
+            .any(|group| {
+                group.is_empty()
+                    || group.trim() != group
+                    || group.chars().count() > 256
+                    || group.contains(',')
+                    || group.chars().any(|character| character.is_ascii_control())
+            })
     {
         return Err(Error::invalid("Invalid app access groups".into()));
     }
@@ -31,14 +37,14 @@ pub fn middleware(configuration: &Configuration, job: &Job) -> Result<Value> {
         || address.path() != "/"
     {
         return Err(Error::invalid(
-            "PLATFORM_APP_AUTH_URL must be the OAuth2 Proxy HTTP(S) origin".into(),
+            "PLATFORM_APP_AUTH_URL must be the local authorizer HTTP(S) origin".into(),
         ));
     }
-    if !access.groups.is_empty() {
-        address
-            .query_pairs_mut()
-            .append_pair("allowed_groups", &access.groups.join(","));
-    }
+    address.set_path("/authorize");
+    address.query_pairs_mut().append_pair(
+        "policy",
+        &URL_SAFE_NO_PAD.encode(serde_json::to_vec(access)?),
+    );
     Ok(json!({ "forwardAuth": {
         "address": address.as_str(),
         "authRequestHeaders": ["Cookie", "User-Agent", "Accept"],
@@ -92,14 +98,6 @@ fn observation(headers: &str) -> String {
 
 pub async fn verify(docker: &Docker, configuration: &Configuration, job: &Job) -> Result<()> {
     let expected = marker(job)?;
-    if job
-        .access
-        .as_ref()
-        .is_some_and(|access| access.revision == 0 && access.groups.is_empty())
-    {
-        // Revision zero preserves the existing installation-wide SSO rule.
-        return Ok(());
-    }
     let origin =
         Url::parse(&configuration.proxy_url).map_err(|error| Error::invalid(error.to_string()))?;
     if origin.scheme() != "https"
@@ -176,7 +174,7 @@ mod tests {
             "id": uuid::Uuid::new_v4(), "fleetId": uuid::Uuid::new_v4(), "appId": uuid::Uuid::new_v4(),
             "kind": "configure", "hostname": "review.notes.apps.example.test", "attempt": 1,
             "leaseToken": uuid::Uuid::new_v4(), "leaseUntil": "2099-01-01T00:00:00Z",
-            "access": { "revision": 7, "groups": ["team&allowed_groups=other", "engineering"] }
+            "access": { "revision": 7, "groups": ["team&allowed_groups=other", "engineering"], "users": ["owner"], "provider": "https://login.example.test", "allAuthenticated": false }
         }))?;
         docker::route(&configuration, &job).await?;
         let name = format!("platform-app-{}", job.app_id()?);
@@ -199,13 +197,23 @@ mod tests {
                 .ok_or_else(|| Error::invalid("No auth address".into()))?,
         )
         .map_err(|error| Error::invalid(error.to_string()))?;
+        assert_eq!(address.path(), "/authorize");
+        let policy = address
+            .query_pairs()
+            .find(|(name, _)| name == "policy")
+            .ok_or_else(|| Error::invalid("Missing policy".into()))?
+            .1;
+        let decoded: Value = serde_json::from_slice(
+            &URL_SAFE_NO_PAD
+                .decode(policy.as_bytes())
+                .map_err(|error| Error::invalid(error.to_string()))?,
+        )?;
         assert_eq!(
-            address.query_pairs().collect::<Vec<_>>(),
-            vec![(
-                "allowed_groups".into(),
-                "team&allowed_groups=other,engineering".into()
-            )]
+            decoded["groups"],
+            json!(["team&allowed_groups=other", "engineering"])
         );
+        assert_eq!(decoded["users"], json!(["owner"]));
+        assert_eq!(decoded["allAuthenticated"], false);
         assert_eq!(route["http"]["middlewares"][format!("{name}-auth")], auth);
         job.access
             .as_mut()
@@ -218,9 +226,11 @@ mod tests {
             .ok_or_else(|| Error::invalid("No access snapshot".into()))?
             .groups
             .clear();
-        assert_eq!(
-            middleware(&configuration, &job)?["forwardAuth"]["address"],
-            "http://oauth2-proxy:4180/"
+        let restricted = middleware(&configuration, &job)?;
+        assert!(
+            restricted["forwardAuth"]["address"]
+                .as_str()
+                .is_some_and(|url| url.contains("/authorize?policy="))
         );
         job.access = None;
         assert!(docker::route(&configuration, &job).await.is_err());

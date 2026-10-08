@@ -293,7 +293,7 @@ async fn run(
         let claimed = async {
             json::<Option<Job>>(
                 api.authenticated(Method::POST, "/agent/jobs/claim", &configuration.token)
-                    .json(&value!({ "accessRules": 1 }))
+                    .json(&value!({ "accessRules": 2 }))
                     .send()
                     .await?,
             )

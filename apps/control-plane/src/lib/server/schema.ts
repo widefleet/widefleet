@@ -11,6 +11,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { user } from "./auth-schema.ts";
 
 export const fleets = pgTable("fleet", {
@@ -64,13 +65,15 @@ export const apps = pgTable(
     fleetId: uuid("fleet_id")
       .notNull()
       .references(() => fleets.id),
-    ownerId: text("owner_id").notNull(),
     hostname: text().notNull().unique(),
     state: text({ enum: ["created", "active", "deleting"] })
       .notNull()
       .default("created"),
     activeDeploymentId: uuid("active_deployment_id"),
     accessGroups: jsonb("access_groups").notNull().default([]),
+    accessUsers: jsonb("access_users").notNull().default([]),
+    accessProvider: text("access_provider").notNull().default(""),
+    allAuthenticated: boolean("all_authenticated").notNull().default(false),
     accessRevision: integer("access_revision").notNull().default(0),
     appliedAccessRevision: integer("applied_access_revision"),
     accessError: text("access_error"),
@@ -87,17 +90,31 @@ export const apps = pgTable(
   (table) => [index("app_parent_idx").on(table.parentId)],
 );
 
-export const appGrants = pgTable(
-  "app_grant",
+export const appRoleAssignments = pgTable(
+  "app_role_assignment",
   {
+    id: uuid().primaryKey(),
     appId: uuid("app_id")
       .notNull()
       .references(() => apps.id, { onDelete: "cascade" }),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
+    type: text({ enum: ["user", "group"] }).notNull(),
+    provider: text().notNull(),
+    subject: text().notNull(),
+    role: text({ enum: ["user", "developer", "admin", "owner"] }).notNull(),
   },
-  (table) => [primaryKey({ columns: [table.appId, table.userId] })],
+  (table) => [
+    uniqueIndex("app_role_assignment_unique").on(
+      table.appId,
+      table.type,
+      table.provider,
+      table.subject,
+      table.role,
+    ),
+    uniqueIndex("app_role_assignment_owner")
+      .on(table.appId)
+      .where(sql`${table.role} = 'owner'`),
+    index("app_role_assignment_principal").on(table.provider, table.type, table.subject),
+  ],
 );
 
 export const uploadSessions = pgTable(

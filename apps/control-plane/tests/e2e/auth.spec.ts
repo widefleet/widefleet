@@ -6,7 +6,13 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { app, artifact } from "@platform/contracts";
 import { member } from "../../src/lib/server/auth-schema.ts";
-import { agents, appGrants, apps, artifacts, deployments } from "../../src/lib/server/schema.ts";
+import {
+  agents,
+  appRoleAssignments,
+  apps,
+  artifacts,
+  deployments,
+} from "../../src/lib/server/schema.ts";
 import { apiResource, cliClientId } from "../../src/lib/server/auth-options.ts";
 import { createTestEnvironment } from "../environment.ts";
 
@@ -641,10 +647,7 @@ test.describe("member forms without JavaScript", () => {
     ).toEqual([{ role: "admin" }]);
   });
 
-  test("preserves app access search after grants, revokes and rejected submissions", async ({
-    page,
-    context,
-  }) => {
+  test("preserves role search and rejected native form submissions", async ({ page, context }) => {
     const person = environment.users.createUser({
       name: "Native Grant User",
       email: "native-grant@example.test",
@@ -670,7 +673,7 @@ test.describe("member forms without JavaScript", () => {
       has: page.getByRole("button", { name: "Revoke access" }),
     });
 
-    await revoke.locator(`input[value="${person.id}"]`).evaluate((input: HTMLInputElement) => {
+    await revoke.locator('input[name^="assignmentId/"]').evaluate((input: HTMLInputElement) => {
       input.value = "";
     });
     await revoke.getByRole("button").click();
@@ -679,11 +682,10 @@ test.describe("member forms without JavaScript", () => {
     await expect(page.getByLabel("Find a member by name or email")).toHaveValue("native-grant");
     expect(
       await environment.database.db
-        .select({ userId: appGrants.userId })
-        .from(appGrants)
-        .where(eq(appGrants.appId, record.id)),
-    ).toEqual([{ userId: person.id }]);
-
+        .select({ subject: appRoleAssignments.subject, role: appRoleAssignments.role })
+        .from(appRoleAssignments)
+        .where(eq(appRoleAssignments.appId, record.id)),
+    ).toEqual(expect.arrayContaining([{ subject: person.id, role: "developer" }]));
     await page.goto(path);
     await page.getByRole("button", { name: "Revoke access" }).click();
     await expect(page.locator("#access").getByRole("status")).toHaveText("App access saved.");
@@ -693,7 +695,7 @@ test.describe("member forms without JavaScript", () => {
       has: page.getByRole("button", { name: "Grant access" }),
     });
 
-    await grant.locator(`input[value="${person.id}"]`).evaluate((input: HTMLInputElement) => {
+    await grant.locator('input[name^="subject/"]').evaluate((input: HTMLInputElement) => {
       input.value = "missing-user";
     });
     await grant.getByRole("button").click();
@@ -702,8 +704,22 @@ test.describe("member forms without JavaScript", () => {
     await expect(page.getByLabel("Find a member by name or email")).toHaveValue("native-grant");
     expect(new URL(page.url()).searchParams.get("q")).toBe("native-grant");
     expect(
-      await environment.database.db.select().from(appGrants).where(eq(appGrants.appId, record.id)),
-    ).toEqual([]);
+      await environment.database.db
+        .select()
+        .from(appRoleAssignments)
+        .where(eq(appRoleAssignments.appId, record.id)),
+    ).toHaveLength(1);
+
+    await page.goto(path);
+    await page.getByText("Native Grant User als Owner einsetzen", { exact: true }).click();
+    await page.getByRole("button", { name: "An Native Grant User übertragen" }).click();
+    await expect(page).toHaveURL("/");
+    expect(
+      await environment.database.db
+        .select({ role: appRoleAssignments.role, subject: appRoleAssignments.subject })
+        .from(appRoleAssignments)
+        .where(eq(appRoleAssignments.appId, record.id)),
+    ).toEqual([{ role: "owner", subject: person.id }]);
   });
 });
 
@@ -1045,7 +1061,8 @@ for (const javaScriptEnabled of [true, false]) {
         .poll(async () => {
           const response = await context.request.get(`/api/v1/apps/${parent.id}/access`);
 
-          return z.object({ groups: z.array(z.string()) }).parse(await response.json()).groups;
+          return z.object({ allAuthenticated: z.boolean() }).parse(await response.json())
+            .allAuthenticated;
         })
         .toEqual(["finance"]);
       await expect(page.getByLabel("Allowed groups for this app", { exact: true })).toHaveValue(
@@ -1082,7 +1099,7 @@ for (const javaScriptEnabled of [true, false]) {
 
       const competing = await context.request.patch(`/api/v1/apps/${parent.id}/access`, {
         headers: { origin: environment.configuration.PLATFORM_URL },
-        data: { groups: ["qa"], revision: 1 },
+        data: { allAuthenticated: false, revision: 2 },
       });
 
       expect(competing.status()).toBe(200);
@@ -1120,7 +1137,7 @@ for (const javaScriptEnabled of [true, false]) {
           "unsaved-group",
         );
         const response = await context.request.get(`/api/v1/apps/${parent.id}/access`);
-        expect(await response.json()).toMatchObject({ groups: ["qa"], revision: 2 });
+        expect(await response.json()).toMatchObject({ allAuthenticated: false, revision: 3 });
       }
 
       await page.getByRole("link", { name: "Discard draft and reload rules", exact: true }).click();
@@ -1133,7 +1150,8 @@ for (const javaScriptEnabled of [true, false]) {
         .poll(async () => {
           const response = await context.request.get(`/api/v1/apps/${preview.id}/access`);
 
-          return z.object({ groups: z.array(z.string()) }).parse(await response.json()).groups;
+          return z.object({ allAuthenticated: z.boolean() }).parse(await response.json())
+            .allAuthenticated;
         })
         .toEqual([]);
       await page.goto(`/apps/${preview.id}?tab=access&scope=app`);

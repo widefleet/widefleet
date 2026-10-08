@@ -29,6 +29,7 @@ export const companyProvider = z.discriminatedUnion("type", [
     issuer: identityUrl,
     label: z.string().min(1).max(100),
     groupsClaim: claimName.default("groups"),
+    subjectClaim: claimName.default("sub"),
     nameClaim: claimName.default("name"),
     emailClaim: claimName.default("email"),
   }),

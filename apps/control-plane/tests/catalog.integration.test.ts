@@ -1,3 +1,4 @@
+import { createAppAccessService } from "../src/lib/server/app-access.ts";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createAppService } from "../src/lib/server/apps.ts";
@@ -15,7 +16,7 @@ describe("App catalog", () => {
     await environment.users.saveUser(record);
     await environment.linkMicrosoftUser(record.id);
 
-    return { ...record, role: "member" as const, admin: false, creator: true };
+    return { ...record, role: "member" as const, admin: false, creator: true, company: undefined };
   };
 
   const admin = () => ({
@@ -23,6 +24,7 @@ describe("App catalog", () => {
     role: "owner" as const,
     admin: true,
     creator: true,
+    company: undefined,
   });
 
   beforeAll(async () => {
@@ -85,7 +87,17 @@ describe("App catalog", () => {
   it("lets administrators change listings but rejects ordinary app collaborators", async () => {
     const app = await createApp("shared-app");
     await activate(app.id);
-    (await service.grant(creator, app.id, colleague.id)).unwrap();
+    (
+      await createAppAccessService(environment.database.db, environment.configuration).grant(
+        creator,
+        app.id,
+        {
+          principal: { type: "user", provider: "widefleet", subject: colleague.id },
+          role: "developer",
+          revision: 1,
+        },
+      )
+    ).unwrap();
     expect(await service.setCatalogListing(colleague, app.id, true)).toMatchObject({
       error: { code: "FORBIDDEN" },
     });
@@ -106,13 +118,22 @@ describe("App catalog", () => {
     { state: "active", deployed: true, preview: true },
     { state: "deleting", deployed: true, preview: false },
   ] as const)("excludes ineligible apps: %j", async ({ state, deployed, preview }) => {
-    const app = await createApp("ineligible");
+    const parent = preview ? await createApp("parent") : null;
+
+    const app = (
+      await service.create(creator, {
+        slug: "ineligible",
+        displayName: "Ineligible",
+        parentId: parent?.id ?? null,
+      })
+    ).unwrap();
+
     await environment.database.db
       .update(apps)
       .set({
         state,
         activeDeploymentId: deployed ? crypto.randomUUID() : null,
-        parentId: preview ? crypto.randomUUID() : null,
+        parentId: parent?.id ?? null,
       })
       .where(eq(apps.id, app.id));
 

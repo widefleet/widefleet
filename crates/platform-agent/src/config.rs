@@ -45,11 +45,11 @@ pub struct Configuration {
         default_value = "https://app-platform-proxy:8443"
     )]
     pub proxy_url: String,
-    /// OAuth2 Proxy endpoint as reached by Traefik.
+    /// Local app authorizer origin as reached by Traefik.
     #[arg(
         long,
         env = "PLATFORM_APP_AUTH_URL",
-        default_value = "http://oauth2-proxy:4180/"
+        default_value = "http://oauth2-proxy:4181/"
     )]
     pub app_auth_url: String,
     /// Match the certificate mode configured for Traefik.

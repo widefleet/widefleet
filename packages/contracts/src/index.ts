@@ -12,6 +12,8 @@ export * from "./network.ts";
 
 export * from "./app-access.ts";
 
+export * from "./app-roles.ts";
+
 export * from "./directory.ts";
 
 export * from "./reporting.ts";

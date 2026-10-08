@@ -135,7 +135,7 @@ jobs:
           cargo clippy --workspace --all-targets -- -D warnings
           cargo test --workspace
           cargo build --workspace
-          RUN_CLI_TESTS=1 pnpm exec vitest run apps/control-plane/tests/cli.test.ts apps/control-plane/tests/network-cli.test.ts apps/control-plane/tests/access-cli.test.ts apps/control-plane/tests/connector-cli.test.ts apps/control-plane/tests/auth-cli.test.ts apps/control-plane/tests/auth-cli.integration.test.ts apps/control-plane/tests/reporting-cli.test.ts
+          RUN_CLI_TESTS=1 pnpm exec vitest run apps/control-plane/tests/cli.test.ts apps/control-plane/tests/network-cli.test.ts apps/control-plane/tests/access-cli.test.ts apps/control-plane/tests/roles-cli.test.ts apps/control-plane/tests/connector-cli.test.ts apps/control-plane/tests/auth-cli.test.ts apps/control-plane/tests/auth-cli.integration.test.ts apps/control-plane/tests/reporting-cli.test.ts
       - name: Build the runtime image
         if: matrix.suite == 'rust-runtime'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0

@@ -2,7 +2,7 @@ import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createAppService, enqueueAppRemoval, managedApp } from "../src/lib/server/apps.ts";
 import { createAppAccessService } from "../src/lib/server/app-access.ts";
-import { apps, jobs } from "../src/lib/server/schema.ts";
+import { appRoleAssignments, apps, jobs } from "../src/lib/server/schema.ts";
 import { createTestEnvironment } from "./environment.ts";
 
 describe("App removal trees", () => {
@@ -16,7 +16,7 @@ describe("App removal trees", () => {
     await environment.users.saveUser(record);
     await environment.linkMicrosoftUser(record.id);
 
-    return { ...record, role: "member" as const, admin: false, creator: true };
+    return { ...record, role: "member" as const, admin: false, creator: true, company: undefined };
   };
 
   beforeAll(async () => {
@@ -39,7 +39,10 @@ describe("App removal trees", () => {
 
   const legacyPreview = async (slug: string, parentId: string) => {
     const app = await create(slug);
-    await environment.database.db.update(apps).set({ parentId }).where(eq(apps.id, app.id));
+    await environment.database.db.transaction(async (transaction) => {
+      await transaction.delete(appRoleAssignments).where(eq(appRoleAssignments.appId, app.id));
+      await transaction.update(apps).set({ parentId }).where(eq(apps.id, app.id));
+    });
 
     return { ...app, parentId };
   };
@@ -50,9 +53,19 @@ describe("App removal trees", () => {
       error: { code: "NOT_FOUND" },
     });
     expect(await environment.database.db.select().from(jobs)).toHaveLength(0);
-    (await service.grant(creator, parent.id, colleague.id)).unwrap();
+    (
+      await createAppAccessService(environment.database.db, environment.configuration).grant(
+        creator,
+        parent.id,
+        {
+          principal: { type: "user", provider: "widefleet", subject: colleague.id },
+          role: "developer",
+          revision: 1,
+        },
+      )
+    ).unwrap();
     const preview = await create("preview", parent.id, colleague);
-    expect(await service.get(creator, preview.id)).toMatchObject({ error: { code: "NOT_FOUND" } });
+    expect((await service.get(creator, preview.id)).unwrap().id).toBe(preview.id);
     const unrelated = await create("unrelated");
 
     (await service.remove(creator, parent.id)).unwrap();
@@ -139,17 +152,17 @@ describe("App removal trees", () => {
     const nested = await create("nested");
     const preview = await create("preview", parent.id);
     const sibling = await create("sibling", parent.id);
-    await environment.database.db
-      .update(apps)
-      .set({ parentId: preview.id })
-      .where(eq(apps.id, nested.id));
+    await environment.database.db.transaction(async (transaction) => {
+      await transaction.delete(appRoleAssignments).where(eq(appRoleAssignments.appId, nested.id));
+      await transaction.update(apps).set({ parentId: preview.id }).where(eq(apps.id, nested.id));
+    });
     // Put the nested row before its parent in heap order. An unordered bulk UPDATE
     // can otherwise lock the nested row before waiting for the preview's removal.
     await environment.database.db
       .update(apps)
       .set({ displayName: "Preview" })
       .where(eq(apps.id, preview.id));
-    const access = createAppAccessService(environment.database.db);
+    const access = createAppAccessService(environment.database.db, environment.configuration);
     let change: ReturnType<typeof access.change> | undefined;
 
     await environment.database.db.transaction(async (transaction) => {
@@ -163,7 +176,7 @@ describe("App removal trees", () => {
 
       if (!pid) throw new Error("Missing transaction backend");
 
-      change = access.change(creator, parent.id, { revision: 0, groups: ["engineering"] });
+      change = access.change(creator, parent.id, { revision: 1, allAuthenticated: true });
       await expect
         .poll(async () => {
           const waiting = await environment.database.db.execute<{ blocked: boolean }>(sql`
@@ -191,13 +204,13 @@ describe("App removal trees", () => {
       expect.arrayContaining([
         expect.objectContaining({
           id: parent.id,
-          accessGroups: ["engineering"],
-          accessRevision: 1,
+          allAuthenticated: true,
+          accessRevision: 2,
         }),
         expect.objectContaining({
           id: sibling.id,
-          accessGroups: ["engineering"],
-          accessRevision: 1,
+          allAuthenticated: true,
+          accessRevision: 2,
         }),
       ]),
     );

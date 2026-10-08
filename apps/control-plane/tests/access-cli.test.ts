@@ -32,6 +32,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App access CLI", () => {
   let directory: string;
   let origin: string;
   let groups: string[] = [];
+  let allAuthenticated = false;
   let written = false;
   let polls = 0;
   let rejection = 0;
@@ -84,7 +85,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App access CLI", () => {
         }
 
         written = true;
-        groups = change.data.groups;
+        allAuthenticated = change.data.allAuthenticated;
       } else if (written) polls += 1;
 
       const revision = written ? (superseded && polls > 0 ? 4 : 3) : 2;
@@ -102,6 +103,9 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App access CLI", () => {
         JSON.stringify(
           contract.appAccessState.parse({
             groups,
+            users: [],
+            provider: "https://login.example.test",
+            allAuthenticated,
             revision,
             appliedRevision: state === "active" ? revision : null,
             state,
@@ -116,6 +120,9 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App access CLI", () => {
                       appId: previewId,
                       hostname: "review.inventory.apps.localhost",
                       groups,
+                      users: [],
+                      provider: "https://login.example.test",
+                      allAuthenticated,
                       revision,
                       appliedRevision: previewState === "active" ? revision : 2,
                       state: previewState,
@@ -138,6 +145,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App access CLI", () => {
   beforeEach(() => {
     requests.length = 0;
     groups = ["original-group"];
+    allAuthenticated = false;
     written = false;
     polls = 0;
     rejection = 0;
@@ -188,12 +196,12 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App access CLI", () => {
     expect(requests.every((request) => request.method === "GET")).toBe(true);
   });
 
-  it("replaces the list using project context and waits for inherited preview activation", async () => {
-    const result = await cli("set", "--group", "finance", "--group", "audit");
+  it("sets the audience using project context and waits for inherited preview activation", async () => {
+    const result = await cli("set", "--all-authenticated", "true");
     expect(JSON.parse(result.stdout)).toMatchObject({
-      groups: ["finance", "audit"],
+      allAuthenticated: true,
       state: "active",
-      previews: [{ groups: ["finance", "audit"], state: "active" }],
+      previews: [{ allAuthenticated: true, state: "active" }],
     });
     expect(requests.map(({ method, path }) => `${method} ${path}`)).toEqual([
       "GET /api/v1/apps/by-name/inventory",
@@ -203,7 +211,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App access CLI", () => {
       `GET /api/v1/apps/${app.id}/access`,
     ]);
     expect(JSON.parse(requests[2]?.body ?? "")).toEqual({
-      groups: ["finance", "audit"],
+      allAuthenticated: true,
       revision: 2,
     });
     expect(
@@ -211,17 +219,17 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App access CLI", () => {
     ).toBe(true);
   });
 
-  it("explicitly removes restrictions without waiting or writing to previews", async () => {
-    const result = await cli("set", "--all-authenticated", "--app", app.id, "--no-wait");
-    expect(JSON.parse(result.stdout)).toMatchObject({ groups: [], state: "pending" });
+  it("explicitly broadens the audience without waiting or writing to previews", async () => {
+    const result = await cli("set", "--all-authenticated", "true", "--app", app.id, "--no-wait");
+    expect(JSON.parse(result.stdout)).toMatchObject({ allAuthenticated: true, state: "pending" });
     expect(requests.map(({ method }) => method)).toEqual(["GET", "PATCH"]);
-    expect(JSON.parse(requests[1]?.body ?? "")).toEqual({ groups: [], revision: 2 });
+    expect(JSON.parse(requests[1]?.body ?? "")).toEqual({ allAuthenticated: true, revision: 2 });
   });
 
   it.each([
     ["set"],
-    ["set", "--group", "finance", "--all-authenticated"],
-    ["set", "--previews", "--group", "finance"],
+    ["set", "--all-authenticated", "true", "--all-authenticated"],
+    ["set", "--previews", "--all-authenticated", "true"],
   ])("rejects ambiguous or separate preview settings: %s", async (...args) => {
     await expect(cli(...args)).rejects.toMatchObject({ code: 2 });
     expect(requests).toHaveLength(0);
@@ -229,7 +237,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App access CLI", () => {
 
   it("rejects edits on a preview and identifies its original app", async () => {
     inherited = true;
-    await expect(cli("set", "--group", "finance", "--app", app.id)).rejects.toThrow(
+    await expect(cli("set", "--all-authenticated", "true", "--app", app.id)).rejects.toThrow(
       `Change the original app with --app ${previewId}`,
     );
     expect(requests.map(({ method }) => method)).toEqual(["GET"]);
@@ -237,27 +245,31 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App access CLI", () => {
 
   it.each([403, 409])("preserves API rejection %s without retrying a write", async (status) => {
     rejection = status;
-    await expect(cli("set", "--group", "finance")).rejects.toThrow("Synthetic access rejection");
+    await expect(cli("set", "--all-authenticated", "true")).rejects.toThrow(
+      "Synthetic access rejection",
+    );
     expect(requests.filter((request) => request.method === "PATCH")).toHaveLength(1);
   });
 
   it("reports failed preview activation and superseding changes", async () => {
     failed = true;
-    await expect(cli("set", "--group", "finance")).rejects.toThrow(
+    await expect(cli("set", "--all-authenticated", "true")).rejects.toThrow(
       "Preview review.inventory.apps.localhost: Synthetic proxy failure",
     );
     written = false;
     polls = 0;
     failed = false;
     superseded = true;
-    await expect(cli("set", "--group", "audit")).rejects.toThrow("A newer access change was saved");
+    await expect(cli("set", "--all-authenticated", "false")).rejects.toThrow(
+      "A newer access change was saved",
+    );
   });
 
   it("stores rules for an unpublished app without waiting for its first deployment", async () => {
     unpublished = true;
-    expect(JSON.parse((await cli("set", "--group", "finance")).stdout)).toMatchObject({
+    expect(JSON.parse((await cli("set", "--all-authenticated", "true")).stdout)).toMatchObject({
       state: "saved",
-      groups: ["finance"],
+      allAuthenticated: true,
     });
     expect(polls).toBe(0);
   });

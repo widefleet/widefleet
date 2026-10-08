@@ -32,7 +32,7 @@ export const createMigrationService = (database: Database, storage: ArtifactStor
     input: z.infer<typeof contract.migrationRequest>,
   ) =>
     transact(database, async (transaction) => {
-      const access = await managedApp(transaction, principal, appId);
+      const access = await managedApp(transaction, principal, appId, "migrate");
 
       if (access.isErr()) return access;
       const app = access.value;
@@ -131,7 +131,7 @@ export const createMigrationService = (database: Database, storage: ArtifactStor
     }),
   read: (principal: Principal, appId: string, jobId: string) =>
     transact(database, async (transaction) => {
-      const access = await managedApp(transaction, principal, appId);
+      const access = await managedApp(transaction, principal, appId, "migrate");
 
       if (access.isErr()) return access;
 

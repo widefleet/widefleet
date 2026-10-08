@@ -475,12 +475,44 @@ export const createApi = (runtime: Runtime) => {
       .handler(async ({ context, input }) =>
         unwrap(await runtime.appAccess.change(context.principal, input.appId, input)),
       ),
-    grant: write
-      .route({ method: "PUT", path: "/apps/{appId}/creators/{userId}" })
-      .input(contract.appPath.extend({ userId: z.string().min(1).max(128) }))
-      .output(z.object({ granted: z.boolean() }))
+    appRoles: read
+      .route({ method: "GET", path: "/apps/{appId}/roles" })
+      .input(contract.appPath)
+      .output(contract.appRoleState)
       .handler(async ({ context, input }) =>
-        unwrap(await runtime.apps.grant(context.principal, input.appId, input.userId)),
+        unwrap(await runtime.appAccess.roles(context.principal, input.appId)),
+      ),
+    roleCandidates: read
+      .route({ method: "GET", path: "/apps/{appId}/roles/candidates" })
+      .input(contract.appPath.extend({ search: z.string().trim().min(1).max(200) }))
+      .output(
+        z.array(
+          z.object({ name: z.string(), email: z.string(), principal: contract.appPrincipal }),
+        ),
+      )
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.appAccess.candidates(context.principal, input.appId, input.search)),
+      ),
+    grantRole: write
+      .route({ method: "POST", path: "/apps/{appId}/roles" })
+      .input(contract.appPath.extend(contract.appRoleGrant.shape))
+      .output(contract.appRoleState)
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.appAccess.grant(context.principal, input.appId, input)),
+      ),
+    revokeRole: write
+      .route({ method: "DELETE", path: "/apps/{appId}/roles/{assignmentId}" })
+      .input(contract.appPath.extend(contract.appRoleRevoke.shape))
+      .output(contract.appRoleState)
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.appAccess.revoke(context.principal, input.appId, input)),
+      ),
+    transferOwnership: write
+      .route({ method: "PUT", path: "/apps/{appId}/owner" })
+      .input(contract.appPath.extend(contract.appOwnershipTransfer.shape))
+      .output(contract.appRoleState)
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.appAccess.transfer(context.principal, input.appId, input)),
       ),
     history: read
       .route({ method: "GET", path: "/apps/{appId}/deployments" })
@@ -488,13 +520,6 @@ export const createApi = (runtime: Runtime) => {
       .output(z.array(contract.deployment))
       .handler(async ({ context, input }) =>
         unwrap(await runtime.apps.history(context.principal, input.appId)),
-      ),
-    revoke: write
-      .route({ method: "DELETE", path: "/apps/{appId}/creators/{userId}" })
-      .input(contract.appPath.extend({ userId: z.string().min(1).max(128) }))
-      .output(z.object({ revoked: z.boolean() }))
-      .handler(async ({ context, input }) =>
-        unwrap(await runtime.apps.revoke(context.principal, input.appId, input.userId)),
       ),
     events: read
       .route({ method: "GET", path: "/apps/{appId}/deployments/{deploymentId}/events" })
@@ -569,10 +594,12 @@ export const createApi = (runtime: Runtime) => {
       ),
     claimJob: agent
       .route({ method: "POST", path: "/agent/jobs/claim" })
-      .input(z.object({ accessRules: z.literal(1).optional() }).default({}))
+      .input(
+        z.object({ accessRules: z.union([z.literal(1), z.literal(2)]).optional() }).default({}),
+      )
       .output(contract.job.nullable())
       .handler(async ({ context, input }) =>
-        unwrap(await runtime.jobs.claim(context.agent.id, input.accessRules === 1)),
+        unwrap(await runtime.jobs.claim(context.agent.id, input.accessRules === 2)),
       ),
     heartbeat: agent
       .route({ method: "POST", path: "/agent/jobs/{jobId}/heartbeat" })
@@ -644,7 +671,7 @@ export const createApi = (runtime: Runtime) => {
               type: "http",
               scheme: "bearer",
               description:
-                "CLI OAuth access token with platform:read, platform:write or network:manage scope. Network changes also require app ownership or administrator access. Agent endpoints require a separate agent token.",
+                "CLI OAuth access token with platform:read, platform:write or network:manage scope. Network changes also require app-admin, owner or installation-administrator access. Agent endpoints require a separate agent token.",
             },
           },
         },

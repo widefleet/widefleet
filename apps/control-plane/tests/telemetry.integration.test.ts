@@ -201,7 +201,7 @@ describe.runIf(process.env["RUN_TELEMETRY_TESTS"] === "1")(
         telemetry,
         apps: createAppService(environment.database.db, configuration),
         network: createNetworkService(environment.database.db),
-        appAccess: createAppAccessService(environment.database.db),
+        appAccess: createAppAccessService(environment.database.db, environment.configuration),
         workflows: createWorkflowService(environment.database.db),
         migrations: createMigrationService(environment.database.db, storage),
         connectors: createConnectorService(

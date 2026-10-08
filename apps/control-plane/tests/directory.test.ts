@@ -12,6 +12,7 @@ const creator = {
   role: "member" as const,
   admin: false,
   creator: true,
+  company: undefined,
 };
 
 const configuration = {

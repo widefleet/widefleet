@@ -60,6 +60,7 @@ describe
     const network = `platform-edge-test-${randomUUID()}`;
     const containers: string[] = [];
     let directory: string;
+    let accessIssuer: string;
     let browser: Awaited<ReturnType<typeof chromium.launch>>;
     const docker = (...args: string[]) => execute("docker", args);
 
@@ -137,6 +138,7 @@ describe
         ),
       };
 
+      accessIssuer = alpha.providers[0]?.oidcConfig.issuerURL ?? "";
       await writeFile(join(directory, "oauth2-proxy.json"), JSON.stringify(alpha));
       await writeFile(join(directory, "client-secret"), "local-test-only");
       const routes = edgeRoutes(configuration);
@@ -215,6 +217,17 @@ describe
         "--cookie-domain=.apps.localhost",
         "--whitelist-domain=.apps.localhost:25443",
         "--redirect-url=https://auth.apps.localhost:25443/oauth2/callback",
+      ]);
+      await start("app-authorizer", [
+        "-v",
+        `${root}:${root}:ro`,
+        "-w",
+        root,
+        "-v",
+        `${directory}/oauth2-proxy.json:/config/alpha.json:ro`,
+        "node:26.8.2-bookworm-slim",
+        "node",
+        "apps/control-plane/tests/edge/app-authorizer.ts",
       ]);
       await start("traefik", [
         "-p",
@@ -367,7 +380,7 @@ describe
       },
       30_000,
     );
-    it("enforces per-host group rules before app code and applies changes to an existing session", async () => {
+    it("enforces person and group roles before app code and updates existing sessions", async () => {
       const context = await browser.newContext({ ignoreHTTPSErrors: true });
       const page = await context.newPage();
       const previewOrigin = "https://review.notes.apps.localhost:25443";
@@ -375,7 +388,12 @@ describe
       const allowed =
         providerMode === "overage" ? "00000000-0000-4000-8000-000000000204" : "test-group";
 
-      const writeRules = async (groups: string[], revision: number) => {
+      const writeRules = async (
+        groups: string[],
+        revision: number,
+        users: string[] = [],
+        allAuthenticated = false,
+      ) => {
         const entries = [
           { name: "fixture", host: "notes.apps.localhost", groups },
           { name: "preview", host: "review.notes.apps.localhost", groups },
@@ -425,7 +443,7 @@ describe
                         `${name}-groups`,
                         {
                           forwardAuth: {
-                            address: `http://oauth2-proxy:4180/${selected.length ? `?${new URLSearchParams({ allowed_groups: selected.join(",") })}` : ""}`,
+                            address: `http://app-authorizer:4181/authorize?${new URLSearchParams({ policy: Buffer.from(JSON.stringify({ revision, provider: accessIssuer, groups: selected, users, allAuthenticated })).toString("base64url") })}`,
                             authRequestHeaders: ["Cookie", "User-Agent", "Accept"],
                             authResponseHeaders: [
                               "X-Auth-Request-User",
@@ -469,7 +487,18 @@ describe
         if (providerMode === "emulate")
           await page.getByRole("button", { name: /sso@example.test/ }).click();
         await vi.waitFor(() => expect(page.url()).toBe(`${appOrigin}/echo`));
-        await writeRules(providerMode === "emulate" ? [] : ["unrelated", allowed], 1);
+
+        const signedIn = observed.parse(
+          await (await context.request.get(`${appOrigin}/echo`)).json(),
+        );
+
+        const subject = z.string().parse(signedIn.headers["x-auth-request-user"]);
+        await writeRules(
+          providerMode === "emulate" ? [] : ["unrelated", allowed],
+          1,
+          [],
+          providerMode === "emulate",
+        );
         expect((await context.request.get(`${appOrigin}/echo`)).status()).toBe(200);
         expect((await context.request.get(`${previewOrigin}/echo`)).status()).toBe(200);
         await writeRules(["denied-group"], 2);
@@ -486,10 +515,17 @@ describe
         expect(
           (await context.request.post(`${appOrigin}/echo`, { data: "not delivered" })).status(),
         ).toBe(403);
-        await writeRules([], 3);
+        await writeRules([], 3, [subject]);
         expect((await context.request.get(`${appOrigin}/echo`)).status()).toBe(200);
         expect((await context.request.get(`${previewOrigin}/echo`)).status()).toBe(200);
-        await docker("restart", `${network}-traefik`);
+        await writeRules([], 4, ["another-person"]);
+        expect((await context.request.get(`${appOrigin}/echo`)).status()).toBe(403);
+        await writeRules([], 5);
+        expect((await context.request.get(`${appOrigin}/echo`)).status()).toBe(403);
+        await writeRules([], 6, [], true);
+        expect((await context.request.get(`${appOrigin}/echo`)).status()).toBe(200);
+        expect((await context.request.get(`${previewOrigin}/echo`)).status()).toBe(200);
+        await docker("restart", `${network}-traefik`, `${network}-app-authorizer`);
         await vi.waitFor(
           async () =>
             expect((await context.request.get(`${previewOrigin}/echo`)).status()).toBe(200),

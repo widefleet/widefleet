@@ -34,6 +34,7 @@ describe("Platform setup and managed settings", () => {
     role: "owner" as const,
     admin: true,
     creator: true,
+    company: undefined,
   });
 
   const input = async () =>

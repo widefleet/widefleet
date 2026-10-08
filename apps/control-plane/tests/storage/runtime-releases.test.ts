@@ -39,6 +39,7 @@ describe("Runtime installation with PostgreSQL and Azure Blob Storage", () => {
     role: "owner" as const,
     admin: true,
     creator: true,
+    company: undefined,
   });
 
   const bundledRelease = async () =>

@@ -211,9 +211,13 @@ impl Job {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AppAccessSnapshot {
     pub revision: u64,
     pub groups: Vec<String>,
+    pub users: Vec<String>,
+    pub provider: String,
+    pub all_authenticated: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

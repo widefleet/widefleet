@@ -11,6 +11,7 @@ mod migrations;
 mod network;
 mod preview;
 mod reporting;
+mod roles;
 mod runtime;
 mod settings;
 mod workflows;
@@ -73,6 +74,8 @@ enum Command {
     Network(network::Options),
     /// Manage app access groups inherited automatically by every preview.
     Access(access::Options),
+    /// Manage app roles and transfer ownership to a person or SSO group.
+    Roles(roles::Options),
     /// Deploy IT connectors and manage native RPC bindings.
     Connector(connector::Options),
     /// Create an application; use --parent for an isolated preview.
@@ -117,14 +120,6 @@ enum Command {
     DisableAgent {
         agent: Uuid,
     },
-    Grant {
-        app: Uuid,
-        user: String,
-    },
-    Revoke {
-        app: Uuid,
-        user: String,
-    },
 }
 
 fn print_json(value: &impl serde::Serialize) -> Result<()> {
@@ -150,13 +145,13 @@ async fn run(args: Arguments) -> Result<()> {
         _ => {}
     }
     let token = auth::access_token(&api, &credentials).await?;
-    let grant = matches!(&args.command, Command::Grant { .. });
     match args.command {
         Command::Logs(options) => logs::run(&api, &credentials, options).await,
         Command::Migrations(options) => migrations::run(&api, &credentials, options).await,
         Command::Workflows(options) => workflows::run(&api, &credentials, options).await,
         Command::Network(options) => network::run(&api, &credentials, options).await,
         Command::Access(options) => access::run(&api, &credentials, options).await,
+        Command::Roles(options) => roles::run(&api, &credentials, options).await,
         Command::Connector(options) => connector::run(&api, &credentials, options).await,
         Command::Runtime(options) => runtime::run(&api, &credentials, &token, options).await,
         Command::Settings(options) => settings::run(&api, &token, options).await,
@@ -269,22 +264,6 @@ async fn run(args: Arguments) -> Result<()> {
             )
             .await?,
         ),
-        Command::Grant { app, user } | Command::Revoke { app, user } => {
-            let method = if grant { Method::PUT } else { Method::DELETE };
-            let mut url = api.origin.clone();
-            url.path_segments_mut()
-                .map_err(|()| platform_core::Error::invalid("Invalid platform origin".into()))?
-                .extend(["api", "v1", "apps", &app.to_string(), "creators", &user]);
-            let response = api
-                .client
-                .request(method, url)
-                .header("origin", api.origin_text())
-                .bearer_auth(&token)
-                .json(&value!({}))
-                .send()
-                .await?;
-            print_json(&json::<Value>(response).await?)
-        }
         Command::Telemetry(_) | Command::Init { .. } | Command::Login(_) | Command::Logout => {
             unreachable!("Local and authentication commands return before API dispatch")
         }
@@ -321,8 +300,7 @@ async fn main() {
         Command::Agents => "agents",
         Command::RegisterAgent { .. } => "register_agent",
         Command::DisableAgent { .. } => "disable_agent",
-        Command::Grant { .. } => "grant",
-        Command::Revoke { .. } => "revoke",
+        Command::Roles(_) => "roles",
     };
     let telemetry = if command == "telemetry" {
         None

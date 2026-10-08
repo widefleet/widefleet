@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appAccessChange } from "./app-access.ts";
+import { appAccessGroups, appAccessChange } from "./app-access.ts";
 
 describe("app access group restrictions", () => {
   it.each([
@@ -9,13 +9,16 @@ describe("app access group restrictions", () => {
     [""],
     ["finance", " finance "],
   ])("rejects ambiguous or duplicate group IDs %j", (...groups) => {
-    expect(appAccessChange.safeParse({ revision: 0, groups }).success).toBe(false);
+    expect(appAccessGroups.safeParse(groups).success).toBe(false);
   });
 
-  it("allows an explicit empty restriction and preserves IDs that require URL encoding", () => {
-    expect(appAccessChange.parse({ revision: 3, groups: [] }).groups).toEqual([]);
-    expect(
-      appAccessChange.parse({ revision: 3, groups: ["team&allowed_groups=other"] }).groups,
-    ).toEqual(["team&allowed_groups=other"]);
+  it("requires an explicit audience choice and preserves literal IDs", () => {
+    expect(appAccessChange.parse({ revision: 3, allAuthenticated: false }).allAuthenticated).toBe(
+      false,
+    );
+    expect(appAccessChange.safeParse({ revision: 3 }).success).toBe(false);
+    expect(appAccessGroups.parse(["team&allowed_groups=other"])).toEqual([
+      "team&allowed_groups=other",
+    ]);
   });
 });

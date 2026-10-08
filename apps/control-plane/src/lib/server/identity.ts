@@ -3,7 +3,11 @@ import { and, eq } from "drizzle-orm";
 import { createLocalJWKSet, jwtVerify } from "jose";
 import { z } from "zod";
 import { apiResource } from "./auth-options.ts";
-import { member, user } from "./auth-schema.ts";
+import { account, member, user } from "./auth-schema.ts";
+import { readCompanyClaims } from "./company-claims.ts";
+import { appRoleAssignments } from "./schema.ts";
+import { checkCompanyGroups } from "./company-groups.ts";
+import { companyAccountProvider } from "./company-identity.ts";
 import {
   installationOrganizationId,
   organizationRole,
@@ -26,6 +30,8 @@ export const createIdentityService = (
   database: Database,
   configuration: Configuration,
 ) => {
+  const memberships = new Map<string, { expiresAt: number; groups: string[] }>();
+
   const resolveUser = (userId: string) =>
     Result.gen(async function* () {
       const [record] = yield* Result.await(
@@ -67,6 +73,73 @@ export const createIdentityService = (
           message: "An active organization membership is required",
         });
 
+      const company = yield* Result.await(
+        Result.tryPromise({
+          try: async () => {
+            if (!configuration.IDENTITY) return undefined;
+
+            const [linked] = await database
+              .select()
+              .from(account)
+              .where(
+                and(
+                  eq(account.userId, record.id),
+                  eq(account.providerId, companyAccountProvider(configuration.IDENTITY)),
+                ),
+              );
+
+            const claims = linked
+              ? readCompanyClaims(configuration.IDENTITY.provider, linked)
+              : undefined;
+
+            if (!claims || !linked || !claims.overage || claims.groupsExpired) return claims;
+
+            const assigned = await database
+              .selectDistinct({ subject: appRoleAssignments.subject })
+              .from(appRoleAssignments)
+              .where(
+                and(
+                  eq(appRoleAssignments.provider, claims.provider),
+                  eq(appRoleAssignments.type, "group"),
+                ),
+              );
+
+            const groups = assigned
+              .flatMap(({ subject }) => {
+                const id = z.uuid().safeParse(subject);
+
+                return id.success ? [id.data] : [];
+              })
+              .sort();
+
+            const key = JSON.stringify([linked.id, linked.idToken, groups]);
+            const cached = memberships.get(key);
+
+            if (cached && cached.expiresAt > Date.now())
+              return { ...claims, groups: cached.groups };
+
+            const token = await auth.api.getAccessToken({
+              body: { accountId: linked.id, userId: record.id },
+            });
+
+            const current = await checkCompanyGroups(
+              z.string().min(1).parse(token.accessToken),
+              groups,
+            );
+
+            for (const [key, cached] of memberships)
+              if (cached.expiresAt <= Date.now()) memberships.delete(key);
+
+            if (memberships.size >= 1000) memberships.clear();
+            memberships.set(key, { expiresAt: claims.expiresAt, groups: current });
+
+            return { ...claims, groups: current };
+          },
+          catch: (cause) =>
+            new DatabaseUnavailable({ message: "Could not read company identity", cause }),
+        }),
+      );
+
       return Result.ok({
         id: record.id,
         name: record.name,
@@ -74,6 +147,7 @@ export const createIdentityService = (
         role: role.data,
         admin: organizationRoles[role.data].authorize({ agent: ["manage"] }).success,
         creator: organizationRoles[role.data].authorize({ app: ["create"] }).success,
+        company,
       });
     });
 

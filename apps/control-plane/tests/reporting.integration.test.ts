@@ -27,6 +27,7 @@ describe("Installation reporting with synthetic PostHog transport", () => {
     role: "owner" as const,
     admin: true,
     creator: true,
+    company: undefined,
   };
 
   const transport: typeof fetch = async (input, init) => {
