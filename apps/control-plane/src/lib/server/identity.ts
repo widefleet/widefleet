@@ -29,6 +29,7 @@ export const createIdentityService = (
   auth: Authentication,
   database: Database,
   configuration: Configuration,
+  request: typeof fetch = fetch,
 ) => {
   const memberships = new Map<string, { expiresAt: number; groups: string[] }>();
 
@@ -125,7 +126,11 @@ export const createIdentityService = (
             const current = await checkCompanyGroups(
               z.string().min(1).parse(token.accessToken),
               groups,
+              request,
             );
+
+            if (claims.expiresAt <= Date.now())
+              return { ...claims, groups: [], groupsExpired: true };
 
             for (const [key, cached] of memberships)
               if (cached.expiresAt <= Date.now()) memberships.delete(key);

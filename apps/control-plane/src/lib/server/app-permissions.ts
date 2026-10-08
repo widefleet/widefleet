@@ -35,6 +35,7 @@ export const matchingPrincipal = (principal: Principal) =>
               ? and(
                   eq(appRoleAssignments.type, "group"),
                   inArray(appRoleAssignments.subject, principal.company.groups),
+                  sql`${principal.company.expiresAt} > extract(epoch from clock_timestamp()) * 1000`,
                 )
               : sql`false`,
           ),
@@ -68,14 +69,18 @@ export const appActions = async (
   rootId: string,
 ) => {
   const assignments = await database
-    .select({ role: appRoleAssignments.role })
+    .select({ role: appRoleAssignments.role, type: appRoleAssignments.type })
     .from(appRoleAssignments)
     .where(and(eq(appRoleAssignments.appId, rootId), matchingPrincipal(principal)));
 
   return appAction.options.filter(
     (action) =>
       (principal.admin && action !== "use") ||
-      assignments.some(({ role }) => rolesForAction(action).includes(role)),
+      assignments.some(
+        ({ role, type }) =>
+          (type !== "group" || (principal.company?.expiresAt ?? 0) > Date.now()) &&
+          rolesForAction(action).includes(role),
+      ),
   );
 };
 
@@ -104,7 +109,7 @@ export const managedApp = async (
   if (!root)
     return Result.err(
       new InvalidOperation(
-        principal.company?.groupsExpired
+        principal.company && principal.company.expiresAt <= Date.now()
           ? {
               code: "FORBIDDEN",
               message:
@@ -114,18 +119,20 @@ export const managedApp = async (
       ),
     );
 
+  const [preview] =
+    target.parentId === null
+      ? [root]
+      : await transaction
+          .select()
+          .from(apps)
+          .where(and(eq(apps.id, appId), eq(apps.parentId, root.id)))
+          .for("update");
+
+  // The issuer's deadline may have passed while either row lock was pending.
   if (!(await appActions(transaction, principal, root.id)).includes(action))
     return Result.err(
       new InvalidOperation({ code: "FORBIDDEN", message: `App permission required: ${action}` }),
     );
-
-  if (target.parentId === null) return Result.ok(root);
-
-  const [preview] = await transaction
-    .select()
-    .from(apps)
-    .where(and(eq(apps.id, appId), eq(apps.parentId, root.id)))
-    .for("update");
 
   return preview
     ? Result.ok(preview)

@@ -4,7 +4,7 @@ import {
   settingsInput,
   settingsUpdate,
 } from "@platform/contracts";
-import { eq, inArray, notInArray, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, notInArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { appSsoConfiguration } from "../../../tools/edge-configuration.ts";
 import {
@@ -14,7 +14,8 @@ import {
   readActivation,
   readActiveAuthBundle,
 } from "./auth-bundle.ts";
-import { companyAccountProvider, companyIdentity } from "./company-identity.ts";
+import { companyAccountProvider, companyIdentity, providerIssuer } from "./company-identity.ts";
+import { projectAppAccess } from "./app-access.ts";
 import { companyLoginRevision, type Authentication } from "./auth.ts";
 import type { Configuration } from "./config.ts";
 import type { Database } from "./database.ts";
@@ -23,7 +24,7 @@ import { InvalidOperation } from "./errors.ts";
 import { createInstallationSecrets } from "./installation-secrets.ts";
 import { installationId, readInstallation } from "./installation-store.ts";
 import { session, oauthRefreshToken } from "./auth-schema.ts";
-import { installation, installationSecrets } from "./schema.ts";
+import { apps, installation, installationSecrets } from "./schema.ts";
 
 const requireAdmin = (principal: Principal) => {
   if (!principal.admin)
@@ -201,6 +202,13 @@ export const createSettingsService = (
         .where(eq(installation.id, installationId))
         .for("update");
       const identity = next.identity;
+      const current = await readInstallation(transaction);
+
+      const previousIssuer = current.settings.identity
+        ? providerIssuer(current.settings.identity.provider)
+        : "";
+
+      const nextIssuer = identity ? providerIssuer(identity.provider) : "";
 
       const saved = identity
         ? identitySettings.parse({
@@ -231,6 +239,21 @@ export const createSettingsService = (
           }),
         })
         .where(eq(installation.id, installationId));
+
+      if (previousIssuer !== nextIssuer) {
+        const originals = await transaction
+          .select()
+          .from(apps)
+          .where(and(isNull(apps.parentId), ne(apps.state, "deleting")))
+          .orderBy(apps.id)
+          .for("update");
+
+        for (const app of originals) {
+          const projected = await projectAppAccess(transaction, app, nextIssuer);
+
+          if (projected.isErr()) throw projected.error;
+        }
+      }
 
       const referenced = [saved?.management, saved?.apps, saved?.directory].flatMap((client) =>
         client?.secret.type === "stored" ? [client.secret.id] : [],

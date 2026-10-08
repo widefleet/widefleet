@@ -18,6 +18,7 @@ import { transact, type Transaction } from "./transactions.ts";
 import { defaultFleet } from "./fleets.ts";
 
 import { appVisibility, managedApp, personalPrincipal } from "./app-permissions.ts";
+import { lockAppProvider } from "./app-provider.ts";
 
 export { appVisibility, managedApp } from "./app-permissions.ts";
 
@@ -162,6 +163,7 @@ const provisionApp = (
   mode: "create" | "resolve",
 ) =>
   transact(database, async (transaction) => {
+    await lockAppProvider(transaction, configuration);
     await transaction.execute(
       sql`select pg_advisory_xact_lock(hashtextextended(${input.slug}, 0))`,
     );

@@ -4,6 +4,7 @@ import { and, eq, inArray, ne } from "drizzle-orm";
 import type { z } from "zod";
 import { lockAppDescendants } from "./apps.ts";
 import { appActions, managedApp } from "./app-permissions.ts";
+import { lockAppProvider } from "./app-provider.ts";
 import type { Configuration } from "./config.ts";
 import { providerIssuer, companyAccountProvider } from "./company-identity.ts";
 import { readCompanyClaims } from "./company-claims.ts";
@@ -93,7 +94,7 @@ const assignments = (transaction: Transaction, rootId: string) =>
     .where(eq(appRoleAssignments.appId, rootId))
     .orderBy(appRoleAssignments.role, appRoleAssignments.provider, appRoleAssignments.subject);
 
-const projectAccess = async (
+export const projectAppAccess = async (
   transaction: Transaction,
   app: typeof apps.$inferSelect,
   provider: string,
@@ -134,6 +135,17 @@ const projectAccess = async (
 
   for (const target of [app, ...descendants]) {
     if (target.state === "deleting") continue;
+
+    if (
+      target.accessRevision === revision &&
+      target.appliedAccessRevision === revision &&
+      target.accessError === null &&
+      target.accessProvider === values.accessProvider &&
+      target.allAuthenticated === values.allAuthenticated &&
+      JSON.stringify(target.accessUsers) === JSON.stringify(values.accessUsers) &&
+      JSON.stringify(target.accessGroups) === JSON.stringify(values.accessGroups)
+    )
+      continue;
     await transaction.update(apps).set(values).where(eq(apps.id, target.id));
 
     const [deployment] = await transaction
@@ -249,16 +261,26 @@ export const createAppAccessService = (database: Database, configuration: Config
     mutate: (transaction: Transaction) => Promise<Result<null, InvalidOperation>>,
   ) =>
     transact(database, async (transaction) => {
+      await lockAppProvider(transaction, configuration);
       const access = await managedApp(transaction, principal, appId, action);
 
       if (access.isErr()) return access;
       const valid = writable(access.value, revision);
 
       if (valid.isErr()) return valid;
+      await lockAppDescendants(transaction, appId);
+
+      if (!(await appActions(transaction, principal, appId)).includes(action))
+        return Result.err(
+          new InvalidOperation({
+            code: "FORBIDDEN",
+            message: `App permission required: ${action}`,
+          }),
+        );
       const changed = await mutate(transaction);
 
       if (changed.isErr()) return changed;
-      const updated = await projectAccess(transaction, access.value, provider());
+      const updated = await projectAppAccess(transaction, access.value, provider());
 
       if (updated.isErr()) return updated;
 
@@ -360,14 +382,21 @@ export const createAppAccessService = (database: Database, configuration: Config
       input: z.infer<typeof contract.appAccessChange>,
     ) =>
       transact(database, async (transaction) => {
+        await lockAppProvider(transaction, configuration);
         const access = await managedApp(transaction, principal, appId, "roles");
 
         if (access.isErr()) return access;
         const valid = writable(access.value, input.revision);
 
         if (valid.isErr()) return valid;
+        await lockAppDescendants(transaction, appId);
 
-        const updated = await projectAccess(
+        if (!(await appActions(transaction, principal, appId)).includes("roles"))
+          return Result.err(
+            new InvalidOperation({ code: "FORBIDDEN", message: "App permission required: roles" }),
+          );
+
+        const updated = await projectAppAccess(
           transaction,
           { ...access.value, allAuthenticated: input.allAuthenticated },
           provider(),
