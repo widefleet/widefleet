@@ -17,7 +17,7 @@ jq -e '.data.repository != null' "$metadata"
 
 if jq -e '.data.repository.release == null' "$metadata" > /dev/null; then
   gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
-    --draft --verify-tag --target "${REVISION:?}" --title "Widefleet $RELEASE_TAG" --generate-notes
+    --draft --verify-tag --target "${REVISION:?}" --title "$RELEASE_TAG" --generate-notes
 fi
 
 # Preserve existing draft notes, and never start a new publication for a public release.

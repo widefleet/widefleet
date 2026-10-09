@@ -54,5 +54,5 @@ jobs:
           cd packages/app-runtime/dist
           sha256sum release.json > release.json.sha256
           gh release create "$RELEASE_TAG" release.json release.json.sha256 \
-            --repo "$GITHUB_REPOSITORY" --verify-tag --latest=false --title "Widefleet app runtime $RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --latest=false --title "$RELEASE_TAG" \
             --notes 'Independent app runtime artifact. Install with widefleet runtime update VERSION; no agent rebuild is required.'
