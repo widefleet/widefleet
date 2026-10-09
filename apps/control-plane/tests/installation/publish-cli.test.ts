@@ -52,7 +52,10 @@ const fixture = async (registry = "https://registry.npmjs.org") => {
       join(directory, `${name}.remote.json`),
       JSON.stringify({
         ...manifest,
-        dist: { integrity: `sha512-${createHash("sha512").update(bytes).digest("base64")}` },
+        dist: {
+          integrity: `sha512-${createHash("sha512").update(bytes).digest("base64")}`,
+          tarball: `https://registry.npmjs.org/${name}/-/${name}-0.3.0.tgz`,
+        },
       }),
     );
   }
@@ -62,41 +65,89 @@ const fixture = async (registry = "https://registry.npmjs.org") => {
       curl: `#!/bin/bash
 set -euo pipefail
 url=\${!#}
-name=\${url%/*}
-name=\${name##*/}
 output=
+accept=
 while [[ $# -gt 0 ]]; do
-  if [[ "$1" == --output ]]; then output=$2; break; fi
+  if [[ "$1" == --output ]]; then output=$2; fi
+  if [[ "$1" == --header ]]; then accept=$2; fi
   shift
 done
+if [[ "$url" == */0.3.0 ]]; then
+  name=\${url%/*}
+  name=\${name##*/}
+  kind=version
+elif [[ "$url" == */-/*.tgz ]]; then
+  name=\${url##*/}
+  name=\${name%-0.3.0.tgz}
+  kind=tarball
+else
+  name=\${url##*/}
+  kind=full
+  if [[ "$accept" == *application/vnd.npm.install-v1+json ]]; then kind=install; fi
+fi
 cp "$FIXTURE/$name.remote.json" "$output"
 if [[ "\${MISMATCH_PACKAGE:-}" == "$name" ]]; then
   jq '.dist.integrity = "sha512-other"' "$output" > "$output.tmp"
   mv "$output.tmp" "$output"
 fi
-if [[ " \${EXISTING_PACKAGES:-} " == *" $name "* ]]; then
-  printf 200
-else
-  printf '%s' "$HTTP_STATUS"
+if [[ "$kind" == version ]]; then
+  if [[ " \${EXISTING_PACKAGES:-} " == *" $name "* ]]; then
+    printf 200
+  else
+    printf '%s' "$HTTP_STATUS"
+  fi
+  exit
 fi
+count=0
+if [[ -f "$FIXTURE/$name.$kind.count" ]]; then count=$(cat "$FIXTURE/$name.$kind.count"); fi
+count=$((count + 1))
+printf '%s' "$count" > "$FIXTURE/$name.$kind.count"
+printf 'check %s %s\\n' "$name" "$kind" >> "$FIXTURE/events.log"
+if [[ "$name" == widefleet-linux-x64-gnu ]]; then
+  if [[ "$kind" == full ]]; then
+    if [[ -n "\${AVAILABILITY_HTTP_STATUS:-}" ]]; then printf '%s' "$AVAILABILITY_HTTP_STATUS"; exit; fi
+    if [[ -n "\${TRANSIENT_STATUS:-}" && "$count" == 1 ]]; then
+      if [[ "$TRANSIENT_STATUS" == 000 ]]; then exit 7; fi
+      printf '%s' "$TRANSIENT_STATUS"; exit
+    fi
+    if ((count <= \${REGISTRY_404_POLLS:-0})); then printf 404; exit; fi
+  fi
+  if [[ "$kind" == install ]] && ((count <= \${INSTALL_METADATA_POLLS:-0})); then
+    echo '{"versions":{}}' > "$output"; printf 200; exit
+  fi
+  if [[ "$kind" == tarball ]] && ((count <= \${TARBALL_404_POLLS:-0})); then printf 404; exit; fi
+  if [[ "\${WRONG_INTEGRITY:-}" == "$kind" ]]; then
+    jq '.dist.integrity = "sha512-other"' "$output" > "$output.tmp"
+    mv "$output.tmp" "$output"
+  fi
+  if [[ "\${WRONG_REPOSITORY:-false}" == true ]]; then
+    jq '.repository.url = "git+https://example.test/other.git"' "$output" > "$output.tmp"
+    mv "$output.tmp" "$output"
+  fi
+fi
+if [[ "$kind" == tarball ]]; then
+  printf 'available %s\\n' "$name" >> "$FIXTURE/events.log"
+else
+  jq '{versions: {"0.3.0": .}}' "$output" > "$output.tmp"
+  mv "$output.tmp" "$output"
+fi
+printf 200
 `,
       npm: `#!/bin/bash
 set -euo pipefail
 printf '%s\\n' "$*" >> "$FIXTURE/npm.log"
 case "$1" in
-  publish) ;;
-  view)
-    name=\${2%@*}
-    if [[ "$3" == dist.integrity ]]; then
-      jq '.dist.integrity' "$FIXTURE/$name.remote.json"
-    else
-      printf '%s\\n' '"git+https://github.com/widefleet/widefleet.git"'
-    fi
+  publish)
+    name=\${2##*/}
+    name=\${name%-0.3.0.tgz}
+    printf 'publish %s\\n' "$name" >> "$FIXTURE/events.log"
+    test "\${PUBLISH_FAIL:-false}" != true
     ;;
   *) exit 1 ;;
 esac
 `,
-      pnpm: "#!/bin/sh\nexit 0\n",
+      pnpm: '#!/bin/sh\nprintf "install\\n" >> "$FIXTURE/events.log"\n',
+      sleep: '#!/bin/sh\nprintf "%s\\n" "$*" >> "$FIXTURE/sleep.log"\n/bin/sleep 0.01\n',
       widefleet: `#!/bin/bash
 set -euo pipefail
 if [[ "$1" == --version ]]; then
@@ -112,6 +163,7 @@ fi
   const run = (environment = {}) =>
     execute("bash", [script], {
       cwd: directory,
+      timeout: 10_000,
       env: {
         PATH: `${directory}:${process.env["PATH"] ?? "/usr/bin:/bin"}`,
         FIXTURE: directory,
@@ -119,6 +171,7 @@ fi
         GITHUB_STEP_SUMMARY: join(directory, "summary"),
         VERSION: "0.3.0",
         HTTP_STATUS: "404",
+        NPM_PROPAGATION_TIMEOUT_SECONDS: "2",
         ...environment,
       },
     });
@@ -154,7 +207,7 @@ it("accepts an identical existing version without publishing again", async () =>
 
   try {
     await run({ HTTP_STATUS: "200" });
-    expect(await readFile(join(directory, "npm.log"), "utf8")).not.toContain("publish ");
+    await expect(readFile(join(directory, "npm.log"))).rejects.toThrow();
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -222,6 +275,109 @@ it("rejects an archive targeting another registry before publication", async () 
   try {
     await expect(run()).rejects.toThrow();
     await expect(readFile(join(directory, "npm.log"))).rejects.toThrow();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("waits for metadata and tarballs before publishing the launcher without repeating uploads", async () => {
+  const { directory, run } = await fixture();
+
+  try {
+    await run({ REGISTRY_404_POLLS: "2", INSTALL_METADATA_POLLS: "2", TARBALL_404_POLLS: "2" });
+    const events = (await readFile(join(directory, "events.log"), "utf8")).trim().split("\n");
+
+    expect(events.filter((event) => event.startsWith("publish "))).toEqual(
+      packages.map((name) => `publish ${name}`),
+    );
+
+    for (const name of packages.slice(0, -1)) {
+      expect(events).toContain(`available ${name}`);
+      expect(events.indexOf(`available ${name}`)).toBeLessThan(events.indexOf("publish widefleet"));
+    }
+
+    expect(events.at(-1)).toBe("install");
+    expect(await readFile(join(directory, "widefleet-linux-x64-gnu.full.count"), "utf8")).toBe("7");
+    expect(await readFile(join(directory, "widefleet-linux-x64-gnu.install.count"), "utf8")).toBe(
+      "5",
+    );
+    expect(await readFile(join(directory, "widefleet-linux-x64-gnu.tarball.count"), "utf8")).toBe(
+      "3",
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it.each(["000", "408", "429", "503"])(
+  "recovers from transient availability failure %s",
+  async (status) => {
+    const { directory, run } = await fixture();
+
+    try {
+      await run({ TRANSIENT_STATUS: status });
+      const events = (await readFile(join(directory, "events.log"), "utf8")).trim().split("\n");
+
+      expect(events.filter((event) => event === "publish widefleet-linux-x64-gnu")).toHaveLength(1);
+      expect(events.at(-1)).toBe("install");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+it("times out without republishing or publishing a launcher with unavailable dependencies", async () => {
+  const { directory, run } = await fixture();
+
+  try {
+    await expect(
+      run({ AVAILABILITY_HTTP_STATUS: "404", NPM_PROPAGATION_TIMEOUT_SECONDS: "1" }),
+    ).rejects.toThrow(
+      "Timed out after 1s waiting for npm availability: widefleet-linux-x64-gnu@0.3.0",
+    );
+    const events = (await readFile(join(directory, "events.log"), "utf8")).trim().split("\n");
+
+    expect(events.filter((event) => event.startsWith("publish "))).toEqual([
+      "publish widefleet-linux-x64-gnu",
+    ]);
+    expect(events).not.toContain("install");
+    await expect(readFile(join(directory, "summary"))).rejects.toThrow();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it.each([
+  { environment: { AVAILABILITY_HTTP_STATUS: "401" }, error: "HTTP 401" },
+  { environment: { AVAILABILITY_HTTP_STATUS: "403" }, error: "HTTP 403" },
+  { environment: { WRONG_INTEGRITY: "full" }, error: "npm integrity mismatch" },
+  { environment: { WRONG_INTEGRITY: "install" }, error: "npm integrity mismatch" },
+  { environment: { WRONG_REPOSITORY: "true" }, error: "npm repository mismatch" },
+])("fails immediately on $error during availability checks", async ({ environment, error }) => {
+  const { directory, run } = await fixture();
+
+  try {
+    await expect(run(environment)).rejects.toThrow(error);
+    await expect(readFile(join(directory, "sleep.log"))).rejects.toThrow();
+    const events = (await readFile(join(directory, "events.log"), "utf8")).trim().split("\n");
+
+    expect(events.filter((event) => event.startsWith("publish "))).toEqual([
+      "publish widefleet-linux-x64-gnu",
+    ]);
+    expect(events).not.toContain("install");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("stops on a publication failure instead of waiting or retrying the upload", async () => {
+  const { directory, run } = await fixture();
+
+  try {
+    await expect(run({ PUBLISH_FAIL: "true" })).rejects.toThrow();
+    expect((await readFile(join(directory, "events.log"), "utf8")).trim()).toBe(
+      "publish widefleet-linux-x64-gnu",
+    );
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

@@ -65,10 +65,8 @@ for package in "${packages[@]}"; do
     npm publish "$directory/$package-$version.tgz" \
       --registry=https://registry.npmjs.org --access=public --provenance --ignore-scripts
   fi
-  npm view "$package@$version" dist.integrity --json --registry=https://registry.npmjs.org \
-    | jq -e --arg integrity "$(cat "$directory/$package.integrity")" '. == $integrity'
-  npm view "$package@$version" repository.url --json --registry=https://registry.npmjs.org \
-    | jq -e '. == "git+https://github.com/widefleet/widefleet.git"'
+  bash "$(dirname "${BASH_SOURCE[0]}")/wait-for-npm-package.sh" \
+    "$package" "$version" "$(cat "$directory/$package.integrity")"
 done
 
 export PNPM_HOME="$directory/registry-install"
