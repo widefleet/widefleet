@@ -85,7 +85,7 @@ Management stores configuration and deployment jobs. The agent installs built co
 
 The reference installation runs on one Linux x86-64 Docker host. You operate identity configuration, DNS, certificates, backups and upgrades. Follow the [installation guide](https://widefleet.com/docs/self-hosting/installation); use [external services](https://widefleet.com/docs/self-hosting/external-services) for external PostgreSQL, cloud storage and automatic HTTPS.
 
-Widefleet is an early-stage platform for trusted company app creators. The included starter uses SvelteKit and the Workers runtime. Node.js compatibility is partial, app cookies are stripped by SSO, and automatic multi-node scaling is not implemented. See [runtime limits](https://widefleet.com/docs/reference/runtime#compatibility-and-current-limits).
+Widefleet is a platform for trusted company app creators. The included starter uses SvelteKit and the Workers runtime. Node.js compatibility is partial, app cookies are stripped by SSO, and automatic multi-node scaling is not implemented. See [runtime limits](https://widefleet.com/docs/reference/runtime#compatibility-and-current-limits).
 
 This README describes the current source branch. Published releases can lag behind it; use matching CLI, management and agent builds and check each guide's version requirements. Workflows require a compatible agent and a runtime advertising Workflow support. See [releases](https://github.com/widefleet/widefleet/releases) and [runtime updates](https://widefleet.com/docs/reference/runtime#versions-and-updates).
 
