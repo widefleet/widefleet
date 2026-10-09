@@ -107,7 +107,12 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     const cli = (...args: string[]) =>
       execute(
         process.env["CLI_BINARY"] ??
-          fileURLToPath(new URL("../../../target/debug/widefleet", import.meta.url)),
+          fileURLToPath(
+            new URL(
+              `../../../target/debug/widefleet${process.platform === "win32" ? ".exe" : ""}`,
+              import.meta.url,
+            ),
+          ),
         args,
         {
           cwd: directory,
@@ -116,7 +121,10 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
             ...process.env,
             PLATFORM_URL: origin,
             PLATFORM_ACCESS_TOKEN: "fixture-normal-token",
-            PLATFORM_SESSION_FILE: join(directory, "credentials", "session.json"),
+            PLATFORM_SESSION_FILE:
+              process.platform === "win32"
+                ? undefined
+                : join(directory, "credentials", "session.json"),
           },
         },
       );

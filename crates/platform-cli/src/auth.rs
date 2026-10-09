@@ -115,8 +115,15 @@ fn epoch() -> Result<u64> {
 
 fn credential_entry(origin: &str) -> Result<keyring::Entry> {
     keyring::Entry::store_status().as_ref().map_err(|error| {
+        let guidance = if cfg!(windows) {
+            "Check that Windows Credential Manager is available. For noninteractive use, set PLATFORM_ACCESS_TOKEN"
+        } else if cfg!(target_os = "macos") {
+            "Check that your login Keychain is available and unlocked. For headless login, choose --session-file PATH (unencrypted, owner-only file). For noninteractive use, set PLATFORM_ACCESS_TOKEN"
+        } else {
+            "On Linux, an available, unlocked Secret Service and a session D-Bus are required. For headless login, choose --session-file PATH (unencrypted, owner-only file). For noninteractive use, set PLATFORM_ACCESS_TOKEN"
+        };
         Error::credentials(format!(
-            "Could not initialize the operating system credential store: {error}. On Linux, an available, unlocked Secret Service and a session D-Bus are required. For headless login, choose --session-file PATH (unencrypted, owner-only file). For noninteractive use, set PLATFORM_ACCESS_TOKEN"
+            "Could not initialize the operating system credential store: {error}. {guidance}"
         ))
     })?;
     keyring::Entry::new("app-platform", origin)

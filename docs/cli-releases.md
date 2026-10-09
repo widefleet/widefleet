@@ -4,7 +4,19 @@ Pushing a stable `vVERSION` tag to `widefleet/widefleet` starts **Publish Widefl
 
 ## Configure npm publishing
 
-In the npm package's **Settings → Trusted Publisher**, add GitHub Actions with:
+Configure **Settings → Trusted Publisher** on all five public npm packages before
+tagging the first cross-platform release:
+
+- `widefleet` — shared launcher
+- `widefleet-linux-x64-gnu`
+- `widefleet-darwin-arm64`
+- `widefleet-darwin-x64`
+- `widefleet-win32-x64-msvc`
+
+Each native package is a separate npm destination with its own ownership and
+publisher settings. Provision any missing packages under the release maintainers'
+control first; the release workflow does not configure npm accounts or package
+permissions. Use the same GitHub Actions trusted publisher on each package:
 
 - Organization: `widefleet`
 - Repository: `widefleet`
@@ -29,16 +41,18 @@ Enable **Settings → General → Releases → Enable release immutability** aft
    git push origin refs/tags/vVERSION
    ```
 
-3. Wait for **Publish Widefleet** to succeed. It creates a draft with generated release notes, or preserves an existing draft and its notes. Both the CLI deployment tests and packaged image tests must pass before either registry publication starts. The GitHub Release becomes public only after both registry publications and all six attachment verifications succeed; do not publish the draft manually.
-4. Verify `pnpm add --global widefleet@VERSION --registry=https://registry.npmjs.org` and `widefleet --version` on Linux x64 with glibc. The completed GitHub Release contains the CLI archives, image digest manifest and checksums.
+3. Wait for **Publish Widefleet** to succeed. It creates a draft with generated release notes, or preserves an existing draft and its notes. All four native CLI targets, the Linux deployment tests and packaged image tests must pass before either registry publication starts. The GitHub Release becomes public only after both registry publications and every attachment verification succeed; do not publish the draft manually.
+4. Verify `pnpm add --global widefleet@VERSION` and `widefleet --version` on a supported host. pnpm installs the matching exact-version optional native package, including with install scripts disabled. The completed GitHub Release contains five npm archives, four standalone CLI archives, the image digest manifest and their checksums.
 
 Ordinary pushes to `main` and GitHub Release events do not publish packages. Tags outside the `vMAJOR.MINOR.PATCH` format are rejected. Both project versions must match the tag, and its commit must be reachable from `main`. An existing published release is rejected during preparation.
 
-The workflow builds the CLI and agent in the pinned Debian toolchain, bundles esbuild and the starter, and installs the resulting npm archive in isolation for a real deployment test against local services. Only the tested archive is passed to the publishing job. Publication checks its checksum and package destination, then verifies the npm integrity hash and a fresh registry installation.
+The Linux release job continues to build the CLI and agent in the pinned Debian toolchain. A reusable native workflow builds macOS Apple Silicon, macOS Intel and Windows x64 on matching hosts. Each native package bundles the matching esbuild executable, starter and licenses. Native tests cover CLI operations, macOS/Windows saved logins and concurrent refresh, and package installation from a disposable local registry. The package tests build a generated app and upload it to a local API fixture. Linux/macOS also test launcher signal forwarding and child cleanup; Windows console Ctrl+C requires an interactive check because Node's signal API does not deliver a console event.
+
+The Linux release job additionally installs the launcher and its native dependency from the exact local archives for the real deployment suite. Only tested artifacts are passed to publication. The publisher checks every archive and existing immutable version before its first publish, publishes the four native dependencies before the launcher, and verifies npm integrity, repository metadata and a fresh registry installation. npm trusted publishing and provenance remain in `publish-cli.yaml`.
 
 To recover from a failure, use **Re-run failed jobs** on the original GitHub Actions run. The workflow checks out the commit that triggered that run, keeping npm provenance tied to the tested source even if `main` has advanced. An existing npm version is accepted only when its bytes and repository metadata match; it is never overwritten. Changed bytes require a new version and release.
 
-The tested npm archive, manual archive and checksums are attached to the draft alongside the image manifest after both registry jobs succeed. Existing attachments are downloaded and compared before a retry proceeds; they are never overwritten. Actions artifacts are used only to transport the tested files between jobs. A failed run leaves the GitHub Release in draft, although a registry may already contain some artifacts; publication across GitHub, npm and Docker Hub is not atomic. If the final publication succeeds but its response is lost, rerunning the failed job verifies the completed release without modifying its assets.
+All tested npm archives, standalone archives and checksums are attached to the draft alongside the image manifest after both registry jobs succeed. Existing attachments are downloaded and compared before a retry proceeds; they are never overwritten. Actions artifacts are used only to transport the tested files between jobs. A failed run leaves the GitHub Release in draft, although a registry may already contain some artifacts; publication across GitHub, npm and Docker Hub is not atomic. If the final publication succeeds but its response is lost, rerunning the failed job verifies the completed release without modifying its assets.
 
 ## Build a release locally
 
@@ -49,6 +63,24 @@ pnpm install --frozen-lockfile
 pnpm package:cli
 ```
 
-The command creates `widefleet-VERSION.tgz`, `widefleet-cli-VERSION-linux-x64.tar.gz` and their SHA-256 files under `.local/releases`. It refuses to overwrite an existing output directory and normalizes archive timestamps and ownership. The package includes the MIT license and the starter's hidden files and independent lockfile.
+The command creates the launcher `widefleet-VERSION.tgz`, one native npm archive,
+one standalone archive, and their SHA-256 files under `.local/releases`:
 
-To package an existing binary, pass `--binary PATH --output DIRECTORY`. Run the deployment suite with `CLI_NPM_PACKAGE=/absolute/path/to/widefleet-VERSION.tgz RUN_RUNTIME_TESTS=1 pnpm exec vitest run apps/control-plane/tests/runtime/deployment.test.ts`. The suite also accepts `CLI_RELEASE_ARCHIVE` for the manual archive installation. These tests use local services and synthetic accounts.
+| Host                | Native npm archive                     | Standalone archive suffix |
+| ------------------- | -------------------------------------- | ------------------------- |
+| Linux x64, glibc    | `widefleet-linux-x64-gnu-VERSION.tgz`  | `linux-x64`               |
+| macOS Apple Silicon | `widefleet-darwin-arm64-VERSION.tgz`   | `darwin-arm64`            |
+| macOS Intel         | `widefleet-darwin-x64-VERSION.tgz`     | `darwin-x64`              |
+| Windows x64         | `widefleet-win32-x64-msvc-VERSION.tgz` | `win32-x64`               |
+
+Standalone files are named `widefleet-cli-VERSION-SUFFIX.tar.gz`. Packaging refuses
+to replace existing output and normalizes archive timestamps and ownership on
+Linux. Packages preserve the starter's hidden configuration, line-ending policy
+and independent lockfile. The release uses the Linux-built launcher for all hosts.
+
+To package an existing native binary, pass `--binary PATH --output DIRECTORY`.
+Run the package suite with `RUN_CLI_PACKAGE_TESTS=1 pnpm test:cli-package`; set
+`CLI_PACKAGE_DIR` when using another output directory. The required **Check**
+workflow runs the native suite on all four hosts.
+
+Run the Linux deployment suite with `CLI_NPM_PACKAGE=/absolute/path/to/widefleet-VERSION.tgz RUN_RUNTIME_TESTS=1 pnpm exec vitest run apps/control-plane/tests/runtime/deployment.test.ts`. Keep the matching Linux native archive and both checksums beside the launcher archive. The suite serves these files from a disposable local registry; it never substitutes a published npm version. It also accepts `CLI_RELEASE_ARCHIVE` for the manual archive installation. These tests use local services and synthetic accounts.

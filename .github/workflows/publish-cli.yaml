@@ -45,8 +45,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: bash tools/prepare-release.sh
 
+  build-native:
+    name: Build and test macOS and Windows CLI
+    needs: prepare
+    uses: ./.github/workflows/cli-platforms.yaml
+    with:
+      ref: ${{ needs.prepare.outputs.revision }}
+      platforms: '["darwin-arm64", "darwin-x64", "win32-x64-msvc"]'
+
   build:
-    name: Build and test CLI
+    name: Build and test Linux CLI
     needs: prepare
     runs-on: ubuntu-24.04
     steps:
@@ -75,6 +83,8 @@ jobs:
           pnpm package:cli --binary "$RELEASE_BINARIES/source/target/release/widefleet" --output "$RUNNER_TEMP/cli"
           mkdir -p target/debug
           cp "$RELEASE_BINARIES/source/target/release/"{widefleet,platform-agent} target/debug/
+      - name: Verify npm package selection and the generated app
+        run: RUN_CLI_PACKAGE_TESTS=1 CLI_PACKAGE_DIR="$RUNNER_TEMP/cli" pnpm test:cli-package
       - name: Prepare the packaged CLI deployment test
         run: |
           pnpm --filter @platform/control-plane build
@@ -113,7 +123,7 @@ jobs:
       recover-existing: true
 
   publish-images:
-    needs: [prepare, build, build-images]
+    needs: [prepare, build, build-native, build-images]
     uses: ./.github/workflows/publish-images.yaml
     with:
       ref: ${{ needs.prepare.outputs.revision }}
@@ -124,7 +134,7 @@ jobs:
 
   publish:
     name: Publish CLI to npm
-    needs: [prepare, build, build-images]
+    needs: [prepare, build, build-native, build-images]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -146,6 +156,11 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: tested-cli
+          path: ${{ env.CLI_RELEASE_DIRECTORY }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: cli-*
+          merge-multiple: true
           path: ${{ env.CLI_RELEASE_DIRECTORY }}
       - name: Publish using npm trusted publishing and verify installation
         run: |
@@ -172,6 +187,11 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: tested-cli
+          path: ${{ env.CLI_RELEASE_DIRECTORY }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: cli-*
+          merge-multiple: true
           path: ${{ env.CLI_RELEASE_DIRECTORY }}
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:

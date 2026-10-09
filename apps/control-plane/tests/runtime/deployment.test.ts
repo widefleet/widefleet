@@ -26,6 +26,7 @@ import { z } from "zod";
 import { apiResource } from "../../src/lib/server/auth-options.ts";
 import { hashAsset } from "../../src/lib/server/asset-hash.ts";
 import { createTestEnvironment } from "../environment.ts";
+import { startCliRegistry } from "../cli-registry.ts";
 
 const execute = promisify(execFile);
 
@@ -261,25 +262,34 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       const pnpmHome = join(state, "pnpm home");
       const bin = join(pnpmHome, "bin");
       await mkdir(bin, { recursive: true });
-      await execute(
-        "pnpm",
-        [
-          `--config.global-dir=${join(state, "global packages")}`,
-          "add",
-          "--global",
-          "--ignore-scripts",
-          npmPackage,
-        ],
-        {
-          cwd: state,
-          env: {
-            ...clientEnvironment,
-            PNPM_HOME: pnpmHome,
-            PATH: `${bin}${delimiter}${clientEnvironment.PATH}`,
+      const registry = await startCliRegistry(npmPackage);
+
+      try {
+        await execute(
+          "pnpm",
+          [
+            `--config.global-dir=${join(state, "global packages")}`,
+            "add",
+            "--global",
+            "--ignore-scripts",
+            "--registry",
+            registry.url,
+            `widefleet@${registry.version}`,
+          ],
+          {
+            cwd: state,
+            env: {
+              ...clientEnvironment,
+              PNPM_HOME: pnpmHome,
+              PATH: `${bin}${delimiter}${clientEnvironment.PATH}`,
+            },
+            maxBuffer: 8 * 1024 * 1024,
           },
-          maxBuffer: 8 * 1024 * 1024,
-        },
-      );
+        );
+      } finally {
+        await registry.close();
+      }
+
       cliExecutable = join(bin, "widefleet");
     } else {
       const installed = join(state, "installed CLI");

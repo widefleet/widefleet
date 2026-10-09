@@ -1,7 +1,8 @@
+import { esbuildBinary } from "../../../tools/cli-tools.ts";
 import * as contract from "@platform/contracts";
 import { execFile } from "node:child_process";
 import { once } from "node:events";
-import { copyFile, mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,6 +12,10 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { z } from "zod";
 
 const execute = promisify(execFile);
+
+const executableName = process.platform === "win32" ? "widefleet.exe" : "widefleet";
+
+const bundlerName = process.platform === "win32" ? "esbuild.exe" : "esbuild";
 
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 
@@ -301,17 +306,17 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     beforeAll(async () => {
       state = await mkdtemp(join(tmpdir(), "widefleet-cli-test-"));
       const installation = join(state, "installation");
-      const project = join(state, "project");
+      const project = join(state, "project with spaces");
       await mkdir(installation);
       await mkdir(join(project, "public"), { recursive: true });
       await copyFile(
-        process.env["CLI_BINARY"] ?? join(root, "target/debug/widefleet"),
-        join(installation, "widefleet"),
+        process.env["CLI_BINARY"] ?? join(root, "target/debug", executableName),
+        join(installation, executableName),
       );
-      const esbuild = await realpath(fileURLToPath(import.meta.resolve("esbuild/bin/esbuild")));
-      await copyFile(esbuild, join(installation, "esbuild"));
+      const esbuild = esbuildBinary();
+      await copyFile(esbuild, join(installation, bundlerName));
 
-      const version = (await execute(join(installation, "widefleet"), ["--version"])).stdout
+      const version = (await execute(join(installation, executableName), ["--version"])).stdout
         .trim()
         .replace(/^widefleet /, "");
 
@@ -370,15 +375,15 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     });
 
     const cli = (...args: string[]) =>
-      execute(join(state, "installation/widefleet"), ["deploy", ...args], {
-        cwd: join(state, "project"),
+      execute(join(state, "installation", executableName), ["deploy", ...args], {
+        cwd: join(state, "project with spaces"),
         timeout: 15_000,
         env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken },
       });
 
     const previewCli = (...args: string[]) =>
-      execute(join(state, "installation/widefleet"), ["preview", ...args], {
-        cwd: join(state, "project"),
+      execute(join(state, "installation", executableName), ["preview", ...args], {
+        cwd: join(state, "project with spaces"),
         timeout: 15_000,
         env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken },
       });
@@ -398,10 +403,14 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       for (const args of [[], ["--follow"]]) {
         requests.length = 0;
         await expect(
-          execute(join(state, "installation/widefleet"), ["logs", app.id, "--json", ...args], {
-            timeout: 5000,
-            env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken },
-          }),
+          execute(
+            join(state, "installation", executableName),
+            ["logs", app.id, "--json", ...args],
+            {
+              timeout: 5000,
+              env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken },
+            },
+          ),
         ).rejects.toMatchObject({
           code: 1,
           stdout: "",
@@ -416,7 +425,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken },
       };
 
-      const binary = join(state, "installation/widefleet");
+      const binary = join(state, "installation", executableName);
       const listing = await execute(binary, ["catalog", "list"], options);
       expect(z.array(contract.catalogEntry).parse(JSON.parse(listing.stdout))).toEqual([
         {
@@ -444,7 +453,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     });
 
     it("preserves catalog listing in app list JSON", async () => {
-      const result = await execute(join(state, "installation/widefleet"), ["apps"], {
+      const result = await execute(join(state, "installation", executableName), ["apps"], {
         env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken },
       });
 
@@ -456,7 +465,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
 
     it("returns provider-independent group discovery as JSON", async () => {
       const result = await execute(
-        join(state, "installation/widefleet"),
+        join(state, "installation", executableName),
         ["groups", "search", "Einkauf", "--limit", "2", "--json"],
         {
           env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken },
@@ -480,19 +489,19 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       throw new Error("Expected the CLI to fail");
     };
 
-    it.each(["release.json", "esbuild"])(
+    it.each(["release.json", bundlerName])(
       "rejects an installation missing %s before building or contacting the API",
       async (missing) => {
         const installation = join(state, `missing-${missing}`);
         await mkdir(installation);
 
-        for (const file of ["widefleet", "release.json", "esbuild"])
+        for (const file of [executableName, "release.json", bundlerName])
           if (file !== missing)
             await copyFile(join(state, "installation", file), join(installation, file));
 
         const result = await failure(
-          execute(join(installation, "widefleet"), ["deploy"], {
-            cwd: join(state, "project"),
+          execute(join(installation, executableName), ["deploy"], {
+            cwd: join(state, "project with spaces"),
             env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken },
           }),
         );
@@ -509,10 +518,10 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       const installation = join(state, "mismatched-bundler");
       await mkdir(installation);
 
-      for (const file of ["widefleet", "esbuild"])
+      for (const file of [executableName, bundlerName])
         await copyFile(join(state, "installation", file), join(installation, file));
 
-      const version = (await execute(join(installation, "widefleet"), ["--version"])).stdout
+      const version = (await execute(join(installation, executableName), ["--version"])).stdout
         .trim()
         .replace(/^widefleet /, "");
 
@@ -522,8 +531,8 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       );
 
       const result = await failure(
-        execute(join(installation, "widefleet"), ["deploy"], {
-          cwd: join(state, "project"),
+        execute(join(installation, executableName), ["deploy"], {
+          cwd: join(state, "project with spaces"),
           env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken },
         }),
       );
@@ -585,10 +594,10 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         );
 
         const result = await execute(
-          join(state, "installation/widefleet"),
+          join(state, "installation", executableName),
           ["preview", "--name", "review", "--skip-build", "--session-file", sessionFile],
           {
-            cwd: join(state, "project"),
+            cwd: join(state, "project with spaces"),
             timeout: 15_000,
             env: {
               ...process.env,
@@ -607,8 +616,8 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     );
 
     it("accepts an explicit parent ID and custom config and returns the queued preview as JSON", async () => {
-      const configuration = join(state, "project/preview.jsonc");
-      await copyFile(join(state, "project/wrangler.jsonc"), configuration);
+      const configuration = join(state, "project with spaces/preview.jsonc");
+      await copyFile(join(state, "project with spaces/wrangler.jsonc"), configuration);
 
       const result = await previewCli(
         "--app",
@@ -633,7 +642,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     });
 
     it("uses the Git branch from the configured project for a stable preview name", async () => {
-      const project = join(state, "project");
+      const project = join(state, "project with spaces");
       await execute("git", ["init", "--initial-branch=feature/login", project]);
 
       try {
@@ -713,7 +722,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     });
 
     it("does not create a preview when the local build fails", async () => {
-      const build = join(state, "project/build.mjs");
+      const build = join(state, "project with spaces/build.mjs");
       await writeFile(build, 'console.log("Synthetic build failure"); process.exit(1);\n');
 
       try {
@@ -736,7 +745,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
 
     it("uses the ordinary credential for runtime status and rollback and reports activation failure", async () => {
       const runtimeCli = (...args: string[]) =>
-        execute(join(state, "installation/widefleet"), ["runtime", ...args], {
+        execute(join(state, "installation", executableName), ["runtime", ...args], {
           env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken },
         });
 
@@ -758,7 +767,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       await writeFile(settingsFile, JSON.stringify({ identity: null, externallyManaged: false }));
 
       const settingsCli = (...args: string[]) =>
-        execute(join(state, "installation/widefleet"), ["settings", ...args], {
+        execute(join(state, "installation", executableName), ["settings", ...args], {
           env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken },
         });
 
@@ -825,7 +834,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     });
 
     it("leaves stdout empty if the local build fails", async () => {
-      const build = join(state, "project/build.mjs");
+      const build = join(state, "project with spaces/build.mjs");
       await writeFile(build, 'console.log("Synthetic build failure"); process.exit(1);\n');
 
       try {
@@ -838,20 +847,24 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       }
     });
 
-    it("does not emit a result when waiting is interrupted", async () => {
-      const deployment = cli("--json", "--skip-build");
-      const interrupted = failure(deployment);
+    // Node kills Windows processes instead of delivering console Ctrl+C.
+    it.skipIf(process.platform === "win32")(
+      "does not emit a result when waiting is interrupted",
+      async () => {
+        const deployment = cli("--json", "--skip-build");
+        const interrupted = failure(deployment);
 
-      try {
-        await vi.waitFor(() => expect(historyReads).toBe(1));
-        deployment.child.kill("SIGINT");
-        const result = await interrupted;
-        expect(result).toMatchObject({ code: 1, stdout: "" });
-        expect(result.stderr).toContain("Stopped waiting");
-      } finally {
-        deployment.child.kill("SIGKILL");
-      }
-    });
+        try {
+          await vi.waitFor(() => expect(historyReads).toBe(1));
+          deployment.child.kill("SIGINT");
+          const result = await interrupted;
+          expect(result).toMatchObject({ code: 1, stdout: "" });
+          expect(result.stderr).toContain("Stopped waiting");
+        } finally {
+          deployment.child.kill("SIGKILL");
+        }
+      },
+    );
 
     it.each([{ args: [] }, { args: ["--json"] }])(
       "exits unsuccessfully without a result on activation failure %j",

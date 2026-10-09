@@ -1,0 +1,118 @@
+name: Build and test native CLI packages
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Commit to build and test
+        type: string
+        default: ""
+      platforms:
+        description: Native platforms to build as a JSON array
+        type: string
+        default: '["linux-x64-gnu", "darwin-arm64", "darwin-x64", "win32-x64-msvc"]'
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  PLATFORM_USAGE_REPORTING: "false"
+  PLATFORM_CRASH_REPORTING: "false"
+  WIDEFLEET_TELEMETRY_DISABLED: "1"
+  WRANGLER_SEND_METRICS: "false"
+
+jobs:
+  native:
+    name: CLI ${{ matrix.platform }}
+    runs-on: ${{ fromJSON('{"linux-x64-gnu":"ubuntu-24.04","darwin-arm64":"macos-15","darwin-x64":"macos-15-intel","win32-x64-msvc":"windows-2025"}')[matrix.platform] }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJSON(inputs.platforms) }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 26.8.2
+          package-manager-cache: false
+      - name: Install dependencies and check the native target
+        env:
+          CLI_PLATFORM: ${{ matrix.platform }}
+        run: |
+          npm install --global pnpm@12.4.2
+          pnpm install --frozen-lockfile
+          node --input-type=module -e 'import { cliPlatform } from "./tools/cli-platforms.ts"; if (cliPlatform(process.platform, process.arch).name !== process.env.CLI_PLATFORM) throw new Error("Runner architecture does not match the CLI target")'
+          pnpm --filter @platform/control-plane exec svelte-kit sync
+      - name: Install Rust toolchain
+        run: rustup toolchain install 1.99.0 --profile minimal --component clippy,rustfmt
+      - name: Check and test the native Rust CLI
+        run: |
+          cargo fmt --all --check
+          cargo clippy --locked -p platform-core -p platform-cli --all-targets -- -D warnings
+          cargo test --locked -p platform-core -p platform-cli
+          cargo build --locked --release -p platform-cli
+      - name: Package native binaries and the launcher
+        run: pnpm package:cli
+      - name: Verify checksums and extract the native installation
+        env:
+          CLI_PLATFORM: ${{ matrix.platform }}
+        run: |
+          node --input-type=module <<'JS'
+          import { createHash } from 'node:crypto';
+          import { readFile } from 'node:fs/promises';
+          import manifest from './package.json' with { type: 'json' };
+          const { version } = manifest;
+          const archive = `${process.platform}-${process.arch}`;
+          for (const file of [
+            `widefleet-${version}.tgz`,
+            `widefleet-${process.env.CLI_PLATFORM}-${version}.tgz`,
+            `widefleet-cli-${version}-${archive}.tar.gz`,
+          ]) {
+            const path = `.local/releases/${file}`;
+            const digest = createHash('sha256').update(await readFile(path)).digest('hex');
+            if ((await readFile(`${path}.sha256`, 'utf8')).trim() !== `${digest}  ${file}`)
+              throw new Error(`Checksum mismatch: ${file}`);
+          }
+          JS
+          version=$(node -p 'require("./package.json").version')
+          archive=$(node -p 'process.platform + "-" + process.arch')
+          mkdir -p .local/cli-installed
+          tar -xzf ".local/releases/widefleet-cli-$version-$archive.tar.gz" -C .local/cli-installed
+          node --input-type=module -e 'import { appendFileSync } from "node:fs"; import { resolve } from "node:path"; import manifest from "./package.json" with { type: "json" }; const { version } = manifest; const suffix = process.platform === "win32" ? ".exe" : ""; const archive = `${process.platform}-${process.arch}`; appendFileSync(process.env.GITHUB_ENV, `CLI_BINARY=${resolve(`.local/cli-installed/widefleet-cli-${version}-${archive}/widefleet${suffix}`)}\n`)'
+      - name: Verify native API commands and credential storage
+        id: cli-commands
+        env:
+          RUN_CLI_TESTS: "1"
+          RUN_CLI_NATIVE_AUTH: ${{ runner.os != 'Linux' && '1' || '0' }}
+        run: pnpm exec vitest run apps/control-plane/tests/cli.test.ts apps/control-plane/tests/network-cli.test.ts apps/control-plane/tests/access-cli.test.ts apps/control-plane/tests/connector-cli.test.ts apps/control-plane/tests/auth-cli.test.ts apps/control-plane/tests/auth-native-cli.test.ts apps/control-plane/tests/reporting-cli.test.ts
+      - name: Verify pnpm installation and the generated app
+        if: ${{ !cancelled() && (steps.cli-commands.outcome == 'success' || steps.cli-commands.outcome == 'failure') }}
+        env:
+          RUN_CLI_PACKAGE_TESTS: "1"
+        run: pnpm test:cli-package
+      - name: Keep the tested native release artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cli-${{ matrix.platform }}
+          path: |
+            .local/releases/*.tar.gz*
+            .local/releases/widefleet-${{ matrix.platform }}-*.tgz*
+          if-no-files-found: error
+          retention-days: 3
+          overwrite: true
+      - name: Keep the shared launcher
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cli-launcher
+          path: .local/releases/widefleet-[0-9]*.tgz*
+          if-no-files-found: error
+          retention-days: 3
+          overwrite: true

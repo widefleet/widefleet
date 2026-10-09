@@ -9,19 +9,17 @@ access to a Widefleet installation; if you do not have one yet, start with the
 
 ## Install the CLI
 
-The CLI supports Linux x64 with glibc. Install Node.js 26 and pnpm 12.4.2
-for app development. The public npm package does not require a GitHub account
-or registry token. Use a CLI version compatible with your installation;
-the example below installs `0.3.0`.
+The CLI supports Linux x64 with glibc, macOS on Apple Silicon and Intel,
+and Windows x64. Install Node.js 26 and pnpm 12.4.2 for app development.
 
 ```sh
-pnpm add --global widefleet@0.3.0 --registry=https://registry.npmjs.org
+pnpm add --global widefleet
 widefleet --version
 ```
 
-The installation commands work in Fish too. If pnpm reports that its global bin directory is missing from PATH, run `pnpm setup`, open a new terminal, and retry the installation. This configures pnpm's global command directory for your shell. If you previously installed an archive manually, remove only its old `~/.local/bin/widefleet` symlink so that it cannot shadow the pnpm-managed command; use `type -a widefleet` to inspect command resolution.
+The installation commands work in Fish too. If pnpm reports that its global bin directory is missing from PATH, run `pnpm setup`, open a new terminal, and retry the installation. This configures pnpm's global command directory for your shell.
 
-To update later, rerun the install command with the desired published version. To uninstall, run `pnpm remove --global widefleet`. pnpm owns the complete installation directory; keep its package contents together.
+To update, rerun the install command. To uninstall, run `pnpm remove --global widefleet`. pnpm owns the complete installation directory; keep its package contents together.
 
 App access groups, the catalog, D1 migration commands and Workflows require
 CLI and platform `0.3.0` or newer. Update matching platform components together;
@@ -56,10 +54,11 @@ widefleet deploy
 ```
 
 In Fish, use `set -gx PLATFORM_URL https://platform.example.com` instead of `export`.
+In PowerShell, use `$env:PLATFORM_URL = "https://platform.example.com"`.
 
 Approve the device code in your browser. The CLI stores credentials in your
-operating system's credential store. On Linux, an available and unlocked Secret
-Service is required.
+operating system's credential store: Keychain on macOS, Credential Manager on
+Windows, and Secret Service on Linux. The store must be available and unlocked.
 
 For the local demo, use `http://localhost:25450` as `PLATFORM_URL` and approve the
 code with `admin@example.test`.
@@ -74,7 +73,7 @@ For ongoing development, follow [app development](/guides/app-development).
 
 ## Headless login
 
-On Unix without an available credential store, CLI 0.2.1 or newer supports an
+On Linux and macOS without an available credential store, CLI 0.2.1 or newer supports an
 explicit session file. Set it before login and keep it set for subsequent commands:
 
 ```sh
@@ -88,6 +87,10 @@ session automatically. Use `widefleet logout` with the same setting to revoke th
 refresh token and remove the file. See [CLI authentication](/reference/authentication)
 for exact file permissions, token scopes, renewal, logout failures and external credentials.
 
+Session files require Unix file permissions and are unavailable on Windows. Use
+Credential Manager for saved logins or `PLATFORM_ACCESS_TOKEN` for noninteractive
+commands. In PowerShell, set a token with `$env:PLATFORM_ACCESS_TOKEN = "TOKEN"`.
+
 ## Inspect runtime logs
 
 ```sh
@@ -100,38 +103,13 @@ includes them. A failed log query is not evidence that the app has no errors.
 
 ## If setup fails
 
-| Symptom                                  | Next step                                                                                                                                   |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| Registry returns 404                     | Check the package name and published version on [npm](https://www.npmjs.com/package/widefleet); use the matching release archive if needed. |
-| `widefleet` is not found                 | Reopen the terminal after `pnpm setup`; check `type -a widefleet` for an older installation on PATH.                                        |
-| Login cannot access the credential store | Unlock the desktop Secret Service or explicitly use the headless session-file flow above.                                                   |
-| Deployment fails or stays queued         | Follow [deployment diagnostics](/guides/deployments#inspect-a-failure).                                                                     |
+| Symptom                                  | Next step                                                                                                                                                       |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Registry returns 404                     | Check the package name and published version on [npm](https://www.npmjs.com/package/widefleet).                                                                 |
+| `widefleet` is not found                 | Reopen the terminal after `pnpm setup`; check `Get-Command widefleet -All` in PowerShell or `type -a widefleet` in Bash/Fish for an older installation on PATH. |
+| Login cannot access the credential store | Check your operating system's credential store; see [headless login](#headless-login) for alternatives.                                                         |
+| Deployment fails or stays queued         | Follow [deployment diagnostics](/guides/deployments#inspect-a-failure).                                                                                         |
 
 Next, [share the app with colleagues](/guides/applications) or
 [publish an isolated preview](/guides/deployments). The [CLI reference](/reference/cli)
 lists common commands and output behavior.
-
-## Install a release archive manually
-
-Download the matching CLI `.tar.gz` archive and `.sha256` file from [GitHub Releases](https://github.com/widefleet/widefleet/releases). Verify and extract them together in a directory you own:
-
-```sh
-sha256sum --check widefleet-cli-0.3.0-linux-x64.tar.gz.sha256
-mkdir -p "$HOME/.local/lib/widefleet" "$HOME/.local/bin"
-tar -xzf widefleet-cli-0.3.0-linux-x64.tar.gz -C "$HOME/.local/lib/widefleet"
-ln -s "$HOME/.local/lib/widefleet/widefleet-cli-0.3.0-linux-x64/widefleet" "$HOME/.local/bin/widefleet"
-export PATH="$HOME/.local/bin:$PATH"
-widefleet --version
-widefleet init my-app
-cd my-app
-pnpm install --frozen-lockfile
-pnpm check
-```
-
-Keep the complete extracted release directory: `widefleet` finds `esbuild`, `release.json` and `starter` beside its resolved executable, including when invoked through a symlink. Copying only the Rust executable is not a complete installation. To upgrade, extract the new release in its own directory and update your symlink; existing app projects remain unchanged.
-
-In environments without `/proc/self/exe`, the CLI resolves its invocation path, searching `PATH` when invoked by command name and following symlinks to the installation directory. Wrappers must preserve a resolvable executable path or command name in `argv[0]`. Deployment validates the installation metadata and bundled esbuild before starting the app build. These checks also run with `--skip-build`.
-
-Follow the generated project's README for login, app creation and deployment. Set `PLATFORM_URL` to your installation's management origin. For the local demo that is `http://localhost:25450`; choose `admin@example.test` when approving device login. Select additional API scopes with `widefleet login --scope platform:read platform:write network:manage`; commands share one saved session. See [network permissions](/guides/network) for project-based grant management. The default credential store on Linux requires an available, unlocked Secret Service and a session D-Bus. The demo's `./dev cli` wrapper is a separate Docker convenience and does not exercise native credential storage.
-
-`widefleet init` works offline and needs no account. Installing the generated project's dependencies requires access to the npm registry. The project has its own lockfile, strict TypeScript configuration, type-aware lint rules and formatter. Its identity helper is normal app source; later helper changes must be applied to existing apps deliberately.
