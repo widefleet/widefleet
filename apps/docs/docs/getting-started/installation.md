@@ -9,25 +9,25 @@ access to a Widefleet installation; if you do not have one yet, start with the
 
 ## Install the CLI
 
-Release `0.3.0` supports Linux x64 with glibc. Native macOS Apple Silicon,
-macOS Intel and Windows x64 support is implemented but unreleased. Choose a
-release that lists your platform before installing on macOS or Windows.
+The CLI supports Linux x64 with glibc, macOS on Apple Silicon and Intel,
+and Windows x64.
 Windows ARM64 and Linux musl are not release targets.
 
 Install Node.js 26 and pnpm 12.4.2
 for app development. The public npm package does not require a GitHub account
-or registry token. Use a CLI version compatible with your installation;
-the example below installs `0.3.0`.
+or registry token. Use a CLI version compatible with your installation.
 
 ```sh
-pnpm add --global widefleet@0.3.0 --registry=https://registry.npmjs.org
+pnpm add --global widefleet --registry=https://registry.npmjs.org
 widefleet --version
 ```
 
-Cross-platform releases use a small `widefleet` launcher with exact-version,
-platform-specific optional dependencies. pnpm downloads only the matching native
-package. Keep optional dependencies enabled; installation works with scripts disabled
-and the launcher does not download binaries when it starts.
+This installs the latest release. To install a specific version, use
+`widefleet@VERSION` in the command above.
+
+pnpm downloads the native package for your operating system and CPU. Keep optional
+dependencies enabled; installation works with scripts disabled and the CLI does
+not download binaries when it starts.
 
 The installation commands work in Fish too. If pnpm reports that its global bin directory is missing from PATH, run `pnpm setup`, open a new terminal, and retry the installation. This configures pnpm's global command directory for your shell. If you previously installed an archive manually, remove only its old `~/.local/bin/widefleet` symlink so that it cannot shadow the pnpm-managed command; use `type -a widefleet` to inspect command resolution.
 
@@ -115,12 +115,12 @@ includes them. A failed log query is not evidence that the app has no errors.
 
 ## If setup fails
 
-| Symptom                                  | Next step                                                                                                                                   |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| Registry returns 404                     | Check the package name and published version on [npm](https://www.npmjs.com/package/widefleet); use the matching release archive if needed. |
-| `widefleet` is not found                 | Reopen the terminal after `pnpm setup`; check `type -a widefleet` for an older installation on PATH.                                        |
-| Login cannot access the credential store | Unlock the desktop Secret Service or explicitly use the headless session-file flow above.                                                   |
-| Deployment fails or stays queued         | Follow [deployment diagnostics](/guides/deployments#inspect-a-failure).                                                                     |
+| Symptom                                  | Next step                                                                                                                                                       |
+| ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Registry returns 404                     | Check the package name and published version on [npm](https://www.npmjs.com/package/widefleet); use the matching release archive if needed.                     |
+| `widefleet` is not found                 | Reopen the terminal after `pnpm setup`; check `Get-Command widefleet -All` in PowerShell or `type -a widefleet` in Bash/Fish for an older installation on PATH. |
+| Login cannot access the credential store | Check your operating system's credential store; see [headless login](#headless-login) for alternatives.                                                         |
+| Deployment fails or stays queued         | Follow [deployment diagnostics](/guides/deployments#inspect-a-failure).                                                                                         |
 
 Next, [share the app with colleagues](/guides/applications) or
 [publish an isolated preview](/guides/deployments). The [CLI reference](/reference/cli)
@@ -128,7 +128,7 @@ lists common commands and output behavior.
 
 ## Install a release archive manually
 
-Download the matching CLI `.tar.gz` archive and `.sha256` file from [GitHub Releases](https://github.com/widefleet/widefleet/releases). Cross-platform releases use these archive suffixes:
+Download the matching CLI `.tar.gz` archive and `.sha256` file from [GitHub Releases](https://github.com/widefleet/widefleet/releases). The archive suffix identifies the platform:
 
 | Platform             | Archive suffix |
 | -------------------- | -------------- |
@@ -137,13 +137,14 @@ Download the matching CLI `.tar.gz` archive and `.sha256` file from [GitHub Rele
 | macOS, Intel         | `darwin-x64`   |
 | Windows x64          | `win32-x64`    |
 
-Verify and extract the archive in a directory you own. For Linux `0.3.0`:
+Verify and extract the archive in a directory you own. In the Linux example below,
+replace `VERSION` with the downloaded release's version:
 
 ```sh
-sha256sum --check widefleet-cli-0.3.0-linux-x64.tar.gz.sha256
+sha256sum --check widefleet-cli-VERSION-linux-x64.tar.gz.sha256
 mkdir -p "$HOME/.local/lib/widefleet" "$HOME/.local/bin"
-tar -xzf widefleet-cli-0.3.0-linux-x64.tar.gz -C "$HOME/.local/lib/widefleet"
-ln -s "$HOME/.local/lib/widefleet/widefleet-cli-0.3.0-linux-x64/widefleet" "$HOME/.local/bin/widefleet"
+tar -xzf widefleet-cli-VERSION-linux-x64.tar.gz -C "$HOME/.local/lib/widefleet"
+ln -s "$HOME/.local/lib/widefleet/widefleet-cli-VERSION-linux-x64/widefleet" "$HOME/.local/bin/widefleet"
 export PATH="$HOME/.local/bin:$PATH"
 widefleet --version
 widefleet init my-app
@@ -156,7 +157,8 @@ Keep the complete extracted release directory: `widefleet` finds `esbuild`, `rel
 
 On macOS, use the matching archive suffix and verify with `shasum -a 256 --check ARCHIVE.tar.gz.sha256` instead of `sha256sum`.
 
-On Windows, download a release that includes `win32-x64` and run these commands in PowerShell, replacing `VERSION` with its version:
+On Windows, use the `win32-x64` archive and run these commands in PowerShell,
+replacing `VERSION` with the downloaded release's version:
 
 ```powershell
 $archive = "widefleet-cli-VERSION-win32-x64.tar.gz"
