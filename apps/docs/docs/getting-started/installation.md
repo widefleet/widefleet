@@ -10,28 +10,16 @@ access to a Widefleet installation; if you do not have one yet, start with the
 ## Install the CLI
 
 The CLI supports Linux x64 with glibc, macOS on Apple Silicon and Intel,
-and Windows x64.
-Windows ARM64 and Linux musl are not release targets.
-
-Install Node.js 26 and pnpm 12.4.2
-for app development. The public npm package does not require a GitHub account
-or registry token. Use a CLI version compatible with your installation.
+and Windows x64. Install Node.js 26 and pnpm 12.4.2 for app development.
 
 ```sh
-pnpm add --global widefleet --registry=https://registry.npmjs.org
+pnpm add --global widefleet
 widefleet --version
 ```
 
-This installs the latest release. To install a specific version, use
-`widefleet@VERSION` in the command above.
-
-pnpm downloads the native package for your operating system and CPU. Keep optional
-dependencies enabled; installation works with scripts disabled and the CLI does
-not download binaries when it starts.
-
 The installation commands work in Fish too. If pnpm reports that its global bin directory is missing from PATH, run `pnpm setup`, open a new terminal, and retry the installation. This configures pnpm's global command directory for your shell. If you previously installed an archive manually, remove only its old `~/.local/bin/widefleet` symlink so that it cannot shadow the pnpm-managed command; use `type -a widefleet` to inspect command resolution.
 
-To update later, rerun the install command with the desired published version. To uninstall, run `pnpm remove --global widefleet`. pnpm owns the complete installation directory; keep its package contents together.
+To update, rerun the install command. To uninstall, run `pnpm remove --global widefleet`. pnpm owns the complete installation directory; keep its package contents together.
 
 App access groups, the catalog, D1 migration commands and Workflows require
 CLI and platform `0.3.0` or newer. Update matching platform components together;

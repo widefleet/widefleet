@@ -42,7 +42,7 @@ Enable **Settings → General → Releases → Enable release immutability** aft
    ```
 
 3. Wait for **Publish Widefleet** to succeed. It creates a draft with generated release notes, or preserves an existing draft and its notes. All four native CLI targets, the Linux deployment tests and packaged image tests must pass before either registry publication starts. The GitHub Release becomes public only after both registry publications and every attachment verification succeed; do not publish the draft manually.
-4. Verify `pnpm add --global widefleet@VERSION --registry=https://registry.npmjs.org` and `widefleet --version` on a supported host. pnpm installs the matching exact-version optional native package, including with install scripts disabled. The completed GitHub Release contains five npm archives, four standalone CLI archives, the image digest manifest and their checksums.
+4. Verify `pnpm add --global widefleet@VERSION` and `widefleet --version` on a supported host. pnpm installs the matching exact-version optional native package, including with install scripts disabled. The completed GitHub Release contains five npm archives, four standalone CLI archives, the image digest manifest and their checksums.
 
 Ordinary pushes to `main` and GitHub Release events do not publish packages. Tags outside the `vMAJOR.MINOR.PATCH` format are rejected. Both project versions must match the tag, and its commit must be reachable from `main`. An existing published release is rejected during preparation.
 
