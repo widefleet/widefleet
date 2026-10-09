@@ -127,7 +127,7 @@ jobs:
           platforms: linux/amd64
           load: true
           push: false
-          tags: docker.io/widefleet/widefleet-runtime:${{ env.VERSION }}
+          tags: docker.io/widefleet/runtime:${{ env.VERSION }}
           build-args: SOURCE_DATE_EPOCH=${{ env.SOURCE_DATE_EPOCH }}
           labels: |
             org.opencontainers.image.source=https://github.com/widefleet/widefleet
@@ -161,10 +161,10 @@ jobs:
           platforms: linux/amd64
           load: true
           push: false
-          tags: docker.io/widefleet/widefleet-${{ matrix.component }}:${{ env.VERSION }}
+          tags: docker.io/widefleet/${{ matrix.component }}:${{ env.VERSION }}
           build-args: |
             SOURCE_DATE_EPOCH=${{ env.SOURCE_DATE_EPOCH }}
-            ${{ matrix.component == 'agent' && format('RUNTIME_IMAGE=docker.io/widefleet/widefleet-runtime:{0}', env.VERSION) || '' }}
+            ${{ matrix.component == 'agent' && format('RUNTIME_IMAGE=docker.io/widefleet/runtime:{0}', env.VERSION) || '' }}
           # A named context replaces the Dockerfile's build stage, preserving the
           # ordinary local build while using the cached, matching Debian binaries.
           build-contexts: ${{ matrix.component == 'agent' && steps.missing.outputs.cached-cargo == 'true' && format('build={0}', env.RELEASE_BINARIES) || '' }}
@@ -194,7 +194,7 @@ jobs:
             rm "$RELEASE_IMAGES/runtime.existing"
           fi
           for component in "${components[@]}"; do
-            image="docker.io/widefleet/widefleet-$component:$VERSION"
+            image="docker.io/widefleet/$component:$VERSION"
             docker image inspect "$image" --format '{{.Id}}' > "$RELEASE_IMAGES/$component.id"
             docker save --output "$RELEASE_IMAGES/$component.tar" "$image"
           done

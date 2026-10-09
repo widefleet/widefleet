@@ -2,7 +2,7 @@
 set -euo pipefail
 
 for component in runtime agent control-plane sso; do
-  image="docker.io/widefleet/widefleet-$component:${VERSION:?}"
+  image="docker.io/widefleet/$component:${VERSION:?}"
   docker load --input "$RELEASE_IMAGES/$component.tar"
   test "$(docker image inspect "$image" --format '{{.Id}}')" = "$(cat "$RELEASE_IMAGES/$component.id")"
   docker image inspect "$image" | jq -e --arg revision "$REVISION" --arg version "$VERSION" '

@@ -10,7 +10,7 @@ const execute = promisify(execFile);
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
 
-const digest = `docker.io/widefleet/widefleet-agent@sha256:${"a".repeat(64)}`;
+const digest = `docker.io/widefleet/agent@sha256:${"a".repeat(64)}`;
 
 const revision = "b".repeat(40);
 
@@ -51,7 +51,7 @@ esac
   );
 
   const metadata = {
-    name: "widefleet-agent",
+    name: "agent",
     namespace: "widefleet",
     is_private: false,
   };
@@ -102,7 +102,7 @@ it("recovers matching images and retains their registry digest across image tran
     expect(await readFile(join(directory, "agent.existing"), "utf8")).toBe("1\n");
     expect(await readFile(join(directory, "agent.digest"), "utf8")).toBe(`${digest}\n`);
     expect(await readFile(join(directory, "docker.log"), "utf8")).toContain(
-      `pull --platform linux/amd64 docker.io/widefleet/widefleet-agent:${version}`,
+      `pull --platform linux/amd64 docker.io/widefleet/agent:${version}`,
     );
   } finally {
     await rm(directory, { recursive: true, force: true });

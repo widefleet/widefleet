@@ -2,12 +2,12 @@
 
 Publishing a stable GitHub Release in `widefleet/widefleet` starts **Publish Docker Hub images**. It builds, tests and publishes four Linux amd64 images:
 
-| Docker Hub repository               | Purpose                                         |
-| ----------------------------------- | ----------------------------------------------- |
-| `widefleet/widefleet-runtime`       | celld runtime                                   |
-| `widefleet/widefleet-agent`         | Deployment agent and CLI                        |
-| `widefleet/widefleet-control-plane` | Management server, API and initialization tools |
-| `widefleet/widefleet-sso`           | OAuth2 Proxy and configuration supervisor       |
+| Docker Hub repository     | Purpose                                         |
+| ------------------------- | ----------------------------------------------- |
+| `widefleet/runtime`       | celld runtime                                   |
+| `widefleet/agent`         | Deployment agent and CLI                        |
+| `widefleet/control-plane` | Management server, API and initialization tools |
+| `widefleet/sso`           | OAuth2 Proxy and configuration supervisor       |
 
 Operators use the [installation guide](https://widefleet.com/docs/self-hosting/installation#pull-the-release-images) to pull and pin the images.
 
