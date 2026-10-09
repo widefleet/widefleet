@@ -1,0 +1,49 @@
+name: Check release images
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/*release-images.yaml
+      - .github/workflows/publish-images.yaml
+      - .github/workflows/publish-cli.yaml
+      - .dockerignore
+      - LICENSE
+      - tools/*release*.sh
+      - infra/**
+      - crates/**
+      - Cargo.*
+      - rust-toolchain.toml
+      - apps/control-plane/**
+      - apps/*/package.json
+      - starters/**
+      - packages/**
+      - patches/**
+      - package.json
+      - pnpm-*.yaml
+      - tsconfig*.json
+      - vitest.config.ts
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+cache-mode: none
+
+concurrency:
+  group: check-release-images-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pull-request:
+    if: github.event_name == 'pull_request'
+    cache-mode: read
+    uses: ./.github/workflows/build-release-images.yaml
+    with:
+      ref: ${{ github.sha }}
+  main:
+    if: github.event_name == 'push'
+    cache-mode: write
+    uses: ./.github/workflows/build-release-images.yaml
+    with:
+      ref: ${{ github.sha }}

@@ -1,0 +1,58 @@
+name: Publish app runtime
+
+on:
+  push:
+    tags: ["runtime-v*"]
+
+permissions:
+  contents: write
+
+cache-mode: none
+
+concurrency:
+  group: app-runtime-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ github.ref_name }}
+  PLATFORM_USAGE_REPORTING: "false"
+  PLATFORM_CRASH_REPORTING: "false"
+  WIDEFLEET_TELEMETRY_DISABLED: "1"
+
+jobs:
+  publish:
+    if: github.repository == 'widefleet/widefleet'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 26.8.2
+      - name: Build the independently versioned runtime
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^runtime-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          git merge-base --is-ancestor HEAD refs/remotes/origin/main
+          test "$(git rev-parse "$RELEASE_TAG^{commit}")" = "$(git rev-parse HEAD)"
+          test "$RELEASE_TAG" = "runtime-v$(node -p 'require("./packages/app-runtime/package.json").version')"
+          npm install --global pnpm@12.4.2
+          pnpm install --frozen-lockfile
+          pnpm check
+      - name: Verify native capabilities on the pinned celld
+        run: |
+          bash tools/install-celld.sh
+          RUN_DYNAMIC_TESTS=1 pnpm exec vitest run apps/control-plane/tests/runtime/dynamic.test.ts
+      - name: Publish the tested artifact without replacing existing versions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd packages/app-runtime/dist
+          sha256sum release.json > release.json.sha256
+          gh release create "$RELEASE_TAG" release.json release.json.sha256 \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --latest=false --title "Widefleet app runtime $RELEASE_TAG" \
+            --notes 'Independent app runtime artifact. Install with widefleet runtime update VERSION; no agent rebuild is required.'

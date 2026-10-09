@@ -1,0 +1,43 @@
+name: Check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+cache-mode: none
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # PRs can restore caches but only main pushes receive cache-write tokens.
+  pull-request-checks:
+    if: github.event_name == 'pull_request'
+    cache-mode: read
+    uses: ./.github/workflows/check-suites.yaml
+
+  main-checks:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    cache-mode: write
+    uses: ./.github/workflows/check-suites.yaml
+
+  # Preserve the existing status check and require every suite to succeed.
+  source-and-integration:
+    runs-on: ubuntu-24.04
+    needs: [pull-request-checks, main-checks]
+    if: always()
+    steps:
+      - name: Require all checks to pass
+        env:
+          PR_RESULT: ${{ needs.pull-request-checks.result }}
+          MAIN_RESULT: ${{ needs.main-checks.result }}
+        run: |
+          case "$PR_RESULT:$MAIN_RESULT" in
+            success:skipped|skipped:success) ;;
+            *) exit 1 ;;
+          esac

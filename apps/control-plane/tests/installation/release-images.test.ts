@@ -10,7 +10,7 @@ const execute = promisify(execFile);
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
 
-const digest = `ghcr.io/getmendra/widefleet-agent@sha256:${"a".repeat(64)}`;
+const digest = `docker.io/widefleet/agent@sha256:${"a".repeat(64)}`;
 
 const revision = "b".repeat(40);
 
@@ -23,13 +23,14 @@ const fixture = async () => {
       curl: `#!/bin/bash
 set -euo pipefail
 while [[ "$1" != --output ]]; do shift; done
-cp "$RUNNER_TEMP/package.json" "$2"
-printf '%s' "$HTTP_STATUS"
-`,
-      gh: `#!/bin/bash
-set -euo pipefail
-test "$1" = api
-cat "$RUNNER_TEMP/versions.json"
+output=$2
+if [[ "\${!#}" == */tags/* ]]; then
+  cp "$RUNNER_TEMP/tag.json" "$output"
+  printf '%s' "$TAG_STATUS"
+else
+  cp "$RUNNER_TEMP/package.json" "$output"
+  printf '%s' "$HTTP_STATUS"
+fi
 `,
       docker: `#!/bin/bash
 set -euo pipefail
@@ -50,10 +51,9 @@ esac
   );
 
   const metadata = {
-    name: "widefleet-agent",
-    package_type: "container",
-    visibility: "private",
-    repository: { full_name: "getmendra/widefleet" },
+    name: "agent",
+    namespace: "widefleet",
+    is_private: false,
   };
 
   const image = {
@@ -62,7 +62,7 @@ esac
     RepoDigests: [digest],
     Config: {
       Labels: {
-        "org.opencontainers.image.source": "https://github.com/getmendra/widefleet",
+        "org.opencontainers.image.source": "https://github.com/widefleet/widefleet",
         "org.opencontainers.image.revision": revision,
         "org.opencontainers.image.version": version,
       },
@@ -71,10 +71,7 @@ esac
 
   await Promise.all([
     writeFile(join(directory, "package.json"), JSON.stringify(metadata)),
-    writeFile(
-      join(directory, "versions.json"),
-      JSON.stringify([{ metadata: { container: { tags: [version] } } }]),
-    ),
+    writeFile(join(directory, "tag.json"), JSON.stringify({ name: version })),
     writeFile(join(directory, "image.json"), JSON.stringify([image])),
   ]);
 
@@ -85,11 +82,11 @@ esac
         PATH: `${directory}:${process.env["PATH"] ?? "/usr/bin:/bin"}`,
         RUNNER_TEMP: directory,
         RELEASE_IMAGES: directory,
-        GH_TOKEN: "fixture-token",
         VERSION: version,
         REVISION: revision,
         REQUIRE_EXISTING: "false",
         HTTP_STATUS: "200",
+        TAG_STATUS: "200",
         ...environment,
       },
     });
@@ -105,7 +102,7 @@ it("recovers matching images and retains their registry digest across image tran
     expect(await readFile(join(directory, "agent.existing"), "utf8")).toBe("1\n");
     expect(await readFile(join(directory, "agent.digest"), "utf8")).toBe(`${digest}\n`);
     expect(await readFile(join(directory, "docker.log"), "utf8")).toContain(
-      `pull --platform linux/amd64 ghcr.io/getmendra/widefleet-agent:${version}`,
+      `pull --platform linux/amd64 docker.io/widefleet/agent:${version}`,
     );
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -122,30 +119,31 @@ it("allows missing images only before publication and fails on registry errors",
       run("recover-release-image", { HTTP_STATUS: "404", REQUIRE_EXISTING: "true" }),
     ).rejects.toThrow("refusing to rebuild");
     await expect(run("recover-release-image", { HTTP_STATUS: "500" })).rejects.toThrow();
-    await writeFile(join(directory, "versions.json"), "[]");
-    await expect(run("recover-release-image", { REQUIRE_EXISTING: "true" })).rejects.toThrow(
-      "refusing to rebuild",
-    );
+    await expect(
+      run("recover-release-image", { TAG_STATUS: "404", REQUIRE_EXISTING: "true" }),
+    ).rejects.toThrow("refusing to rebuild");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
 });
 
-it.each([
-  { visibility: "public" },
-  { visibility: "internal" },
-  { repository: { full_name: "example/other" } },
-])("rejects an unsafe package destination: %j", async (override) => {
-  const { directory, metadata, run } = await fixture();
+it.each([{ is_private: true }, { namespace: "example" }, { name: "other" }])(
+  "rejects an unsafe package destination: %j",
+  async (override) => {
+    const { directory, metadata, run } = await fixture();
 
-  try {
-    await writeFile(join(directory, "package.json"), JSON.stringify({ ...metadata, ...override }));
-    await expect(run()).rejects.toThrow();
-    await expect(readFile(join(directory, "docker.log"))).rejects.toThrow();
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-});
+    try {
+      await writeFile(
+        join(directory, "package.json"),
+        JSON.stringify({ ...metadata, ...override }),
+      );
+      await expect(run()).rejects.toThrow();
+      await expect(readFile(join(directory, "docker.log"))).rejects.toThrow();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
 
 it("rejects an existing image from another source commit", async () => {
   const { directory, image, run } = await fixture();

@@ -1,8 +1,46 @@
 # CLI release publishing
 
-Build, test and publish the bundled CLI from this repository. Installation and app development are documented in the [user guide](https://widefleet.com/docs/getting-started/installation).
+Pushing a stable `vVERSION` tag to `widefleet/widefleet` starts **Publish Widefleet**. The workflow prepares a draft GitHub Release, builds and tests the CLI and images, publishes to npm and Docker Hub, and publishes the completed GitHub Release last. The npm package is `widefleet` at `https://registry.npmjs.org`. Installation and app development are documented in the [user guide](https://widefleet.com/docs/getting-started/installation).
 
-## Build a release from source
+## Configure npm publishing
+
+In the npm package's **Settings → Trusted Publisher**, add GitHub Actions with:
+
+- Organization: `widefleet`
+- Repository: `widefleet`
+- Workflow filename: `publish-cli.yaml`
+- Environment: leave empty
+- Allowed action: `npm publish`
+
+The publishing job uses OpenID Connect and has `id-token: write`. It does not need an `NPM_TOKEN` or a GitHub Packages token. npm generates provenance for the public repository and package. See [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/).
+
+## Configure GitHub Releases
+
+Enable **Settings → General → Releases → Enable release immutability** after the release workflows are on `main`. All downloads are uploaded and verified while the release is a draft. Publishing then locks its assets and tag. See [GitHub release immutability](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases).
+
+## Publish a version
+
+1. Update `package.json` and the Cargo workspace version together and merge the change into `main`.
+2. Push a stable `vVERSION` tag pointing to that commit on `main`. For example, version `0.3.0` uses `v0.3.0`. Replace `VERSION` and `COMMIT_SHA` below with the version and the checked commit:
+
+   ```sh
+   git fetch origin main
+   git tag -a vVERSION COMMIT_SHA -m "Widefleet vVERSION"
+   git push origin refs/tags/vVERSION
+   ```
+
+3. Wait for **Publish Widefleet** to succeed. It creates a draft with generated release notes, or preserves an existing draft and its notes. Both the CLI deployment tests and packaged image tests must pass before either registry publication starts. The GitHub Release becomes public only after both registry publications and all six attachment verifications succeed; do not publish the draft manually.
+4. Verify `pnpm add --global widefleet@VERSION --registry=https://registry.npmjs.org` and `widefleet --version` on Linux x64 with glibc. The completed GitHub Release contains the CLI archives, image digest manifest and checksums.
+
+Ordinary pushes to `main` and GitHub Release events do not publish packages. Tags outside the `vMAJOR.MINOR.PATCH` format are rejected. Both project versions must match the tag, and its commit must be reachable from `main`. An existing published release is rejected during preparation.
+
+The workflow builds the CLI and agent in the pinned Debian toolchain, bundles esbuild and the starter, and installs the resulting npm archive in isolation for a real deployment test against local services. Only the tested archive is passed to the publishing job. Publication checks its checksum and package destination, then verifies the npm integrity hash and a fresh registry installation.
+
+To recover from a failure, use **Re-run failed jobs** on the original GitHub Actions run. The workflow checks out the commit that triggered that run, keeping npm provenance tied to the tested source even if `main` has advanced. An existing npm version is accepted only when its bytes and repository metadata match; it is never overwritten. Changed bytes require a new version and release.
+
+The tested npm archive, manual archive and checksums are attached to the draft alongside the image manifest after both registry jobs succeed. Existing attachments are downloaded and compared before a retry proceeds; they are never overwritten. Actions artifacts are used only to transport the tested files between jobs. A failed run leaves the GitHub Release in draft, although a registry may already contain some artifacts; publication across GitHub, npm and Docker Hub is not atomic. If the final publication succeeds but its response is lost, rerunning the failed job verifies the completed release without modifying its assets.
+
+## Build a release locally
 
 Maintainers need the repository's pinned Node, pnpm and Rust toolchains:
 
@@ -11,20 +49,6 @@ pnpm install --frozen-lockfile
 pnpm package:cli
 ```
 
-The command builds the release CLI and creates the archive and SHA-256 file under `.local/releases`. It refuses to overwrite an existing release directory. Tests can pass `--binary target/debug/widefleet --output /tmp/a-new-release-directory` to package an already built binary. Release artifacts must be tested outside this workspace before publishing.
+The command creates `widefleet-VERSION.tgz`, `widefleet-cli-VERSION-linux-x64.tar.gz` and their SHA-256 files under `.local/releases`. It refuses to overwrite an existing output directory and normalizes archive timestamps and ownership. The package includes the MIT license and the starter's hidden files and independent lockfile.
 
-The same command also creates `getmendra-widefleet-VERSION.tgz` and its SHA-256 file for pnpm. This npm-compatible archive preserves the starter's hidden files and independent lockfile. Run the deployment suite with `CLI_NPM_PACKAGE=/absolute/path/to/getmendra-widefleet-VERSION.tgz RUN_RUNTIME_TESTS=1 pnpm exec vitest run apps/control-plane/tests/runtime/deployment.test.ts` to exercise an isolated global pnpm installation through a real deployment. The suite also accepts `CLI_RELEASE_ARCHIVE` for the manual archive installation.
-
-## Public npm release target
-
-The public repository is `widefleet/widefleet`; the CLI package is `@widefleet/widefleet` on `https://registry.npmjs.org`, with public access. Installation requires no registry token. Before the first public release, migrate `tools/package-cli.ts` and `.github/workflows/publish-cli.yaml` together: package scope and archive filename, source URL, registry, publication authentication, visibility checks and registry installation verification. Configure the npm organization and the workflow's publishing identity before publishing a new version.
-
-The implementation below describes the existing GitHub Packages pipeline, which still needs that migration. Do not use it to publish the public npm package.
-
-## Existing GitHub Packages pipeline
-
-Attach the tested `.tgz` and its checksum to the matching `vVERSION` GitHub release. Run the repository's **Publish CLI package** workflow manually with that version, without the `v` prefix. The workflow downloads and verifies the release asset, checks installation, publishes through `GITHUB_TOKEN` with `packages: write`, checks private/internal visibility and the registry manifest's repository, and verifies installation from the registry.
-
-Repository linking and access inheritance are checked in GitHub Package Settings: the REST API's repository field is optional and nullable, so its absence does not establish that a package is unlinked. If the settings show an unlinked package, open the existing package page, choose **Connect repository** and select `widefleet`. In Package Settings, enable **Inherit access from repository**. Rerun the workflow with `verify_only` enabled: this checks the existing package without attempting to publish the same version again. Registry verification compares the downloaded package's integrity with the tested release artifact before running it.
-
-The package manifest pins the publication registry to `https://npm.pkg.github.com` with restricted access. New GitHub Packages default to private visibility. The workflow refuses to publish to an existing public package, one whose registry manifest names another repository, or one whose API response explicitly links another repository. Existing package versions are immutable; create a new release version for changes. No personal publishing token is stored in the repository.
+To package an existing binary, pass `--binary PATH --output DIRECTORY`. Run the deployment suite with `CLI_NPM_PACKAGE=/absolute/path/to/widefleet-VERSION.tgz RUN_RUNTIME_TESTS=1 pnpm exec vitest run apps/control-plane/tests/runtime/deployment.test.ts`. The suite also accepts `CLI_RELEASE_ARCHIVE` for the manual archive installation. These tests use local services and synthetic accounts.

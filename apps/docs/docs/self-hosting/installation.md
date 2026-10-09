@@ -141,14 +141,14 @@ Search returns Entra object IDs, matching app tokens configured to emit Group ID
 
 ## Pull the release images
 
-Releases provide four public Linux amd64 images on GHCR. Pulling them does not require a GitHub account or registry login:
+Releases provide four public Linux amd64 images on Docker Hub. Pulling them does not require a GitHub account or registry login:
 
-| Image                                       | Purpose                                                                             |
-| ------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `ghcr.io/widefleet/widefleet-control-plane` | Management server, API, database/storage initialization and edge configuration tool |
-| `ghcr.io/widefleet/widefleet-agent`         | Deployment agent and its matching celld publish executable                          |
-| `ghcr.io/widefleet/widefleet-sso`           | Independent OAuth2 Proxy and configuration supervisor                               |
-| `ghcr.io/widefleet/widefleet-runtime`       | celld runtime used for the shared fleet                                             |
+| Image                               | Purpose                                                                             |
+| ----------------------------------- | ----------------------------------------------------------------------------------- |
+| `docker.io/widefleet/control-plane` | Management server, API, database/storage initialization and edge configuration tool |
+| `docker.io/widefleet/agent`         | Deployment agent and its matching celld publish executable                          |
+| `docker.io/widefleet/sso`           | Independent OAuth2 Proxy and configuration supervisor                               |
+| `docker.io/widefleet/runtime`       | celld runtime used for the shared fleet                                             |
 
 Every image has the same release tag, for example `0.3.0`, and OCI labels for its source repository, source commit and version. Installation uses exact digests from the release attachment `widefleet-images-VERSION.env`, verified with its accompanying `.sha256` file. There is no floating `latest` tag and no automatic update of running installations.
 
@@ -161,7 +161,7 @@ curl --fail --location --remote-name https://github.com/widefleet/widefleet/rele
 sha256sum --check widefleet-images-VERSION.env.sha256
 ```
 
-The non-secret configuration manifest contains four `ghcr.io/widefleet/widefleet-*` references pinned by SHA-256 digest. Keep it with the private deployment environment and supply both files to Compose. Pull **all four images**, including the runtime used by new app containers:
+The non-secret configuration manifest contains the four `docker.io/widefleet/` image references pinned by SHA-256 digest. Keep it with the private deployment environment and supply both files to Compose. Pull **all four images**, including the runtime used by new app containers:
 
 ```sh
 docker compose --env-file widefleet-images-VERSION.env --env-file /absolute/path/deployment.env -f infra/compose.yaml --profile agent --profile images pull

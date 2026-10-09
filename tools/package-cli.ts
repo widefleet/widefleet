@@ -130,7 +130,7 @@ await writeFile(
   join(npmPackage, "package.json"),
   JSON.stringify(
     {
-      name: "@getmendra/widefleet",
+      name: "widefleet",
       version,
       description: "Widefleet CLI with its Worker bundler and app starter",
       license: "MIT",
@@ -147,8 +147,8 @@ await writeFile(
         "README.md",
         "LICENSE",
       ],
-      repository: { type: "git", url: "git+https://github.com/getmendra/widefleet.git" },
-      publishConfig: { registry: "https://npm.pkg.github.com", access: "restricted" },
+      repository: { type: "git", url: "git+https://github.com/widefleet/widefleet.git" },
+      publishConfig: { registry: "https://registry.npmjs.org", access: "public" },
     },
     null,
     2,
@@ -159,7 +159,7 @@ await writeFile(
 // starter files such as .gitignore. Both archives must preserve the whole template.
 for (const item of [
   { file: archive, directory: output, entry: name },
-  { file: `getmendra-widefleet-${version}.tgz`, directory: npmDirectory, entry: "package" },
+  { file: `widefleet-${version}.tgz`, directory: npmDirectory, entry: "package" },
 ]) {
   await execute("tar", [
     "--sort=name",
