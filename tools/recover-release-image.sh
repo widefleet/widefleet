@@ -2,38 +2,44 @@
 set -euo pipefail
 
 component=${1:?Expected image component}
+case "$component" in runtime|agent|control-plane|sso) ;; *) exit 1 ;; esac
 package="widefleet-$component"
-image="ghcr.io/getmendra/$package:${VERSION:?}"
-metadata="$RUNNER_TEMP/$package.json"
-status=$(curl --silent --show-error --output "$metadata" --write-out '%{http_code}' \
-  --header "Authorization: Bearer $GH_TOKEN" --header 'Accept: application/vnd.github+json' \
-  "https://api.github.com/orgs/getmendra/packages/container/$package")
+image="docker.io/widefleet/$package:${VERSION:?}"
+metadata="${RELEASE_IMAGES:?}/$component.registry.json"
+endpoint="https://hub.docker.com/v2/namespaces/widefleet/repositories/$package"
 existing=0
+status=$(curl --silent --show-error --retry 3 --connect-timeout 15 --max-time 60 \
+  --output "$metadata" --write-out '%{http_code}' "$endpoint")
 case "$status" in
   200)
     jq -e --arg package "$package" '
-      .name == $package and .package_type == "container" and .visibility == "private" and
-      (.repository == null or .repository.full_name == "getmendra/widefleet")
+      .name == $package and .namespace == "widefleet" and .is_private == false
     ' "$metadata"
-    existing=$(gh api --paginate "orgs/getmendra/packages/container/$package/versions?per_page=100" \
-      | jq -s --arg version "$VERSION" '[.[][] | select(.metadata.container.tags | index($version))] | length')
+    status=$(curl --silent --show-error --retry 3 --connect-timeout 15 --max-time 60 \
+      --output "$metadata" --write-out '%{http_code}' "$endpoint/tags/$VERSION")
+    case "$status" in
+      200) jq -e --arg version "$VERSION" '.name == $version' "$metadata"; existing=1 ;;
+      404) ;;
+      *) echo "Docker Hub tag lookup failed: HTTP $status" >&2; exit 1 ;;
+    esac
     ;;
-  404) ;; # New GHCR packages default to private.
-  *) cat "$metadata"; exit 1 ;;
+  404) ;;
+  *) echo "Docker Hub repository lookup failed: HTTP $status" >&2; exit 1 ;;
 esac
-if [[ "$existing" != 0 ]]; then
+if [[ "$existing" == 1 ]]; then
   docker pull --platform linux/amd64 "$image"
-  docker image inspect "$image" | jq -e --arg revision "$REVISION" --arg version "$VERSION" '
+  docker image inspect "$image" | jq -e --arg revision "${REVISION:?}" --arg version "$VERSION" '
     .[0] | .Os == "linux" and .Architecture == "amd64" and
-    .Config.Labels["org.opencontainers.image.source"] == "https://github.com/getmendra/widefleet" and
+    .Config.Labels["org.opencontainers.image.source"] == "https://github.com/widefleet/widefleet" and
     .Config.Labels["org.opencontainers.image.revision"] == $revision and
     .Config.Labels["org.opencontainers.image.version"] == $version
   '
-  # docker save/load preserves the image ID, but not registry digest references.
-  docker image inspect "$image" | jq -er --arg prefix "ghcr.io/getmendra/$package@sha256:" \
-    '.[0].RepoDigests[] | select(startswith($prefix))' > "$RELEASE_IMAGES/$component.digest"
-elif [[ "$REQUIRE_EXISTING" == true ]]; then
-  echo "Published release is missing $image; refusing to rebuild it." >&2
+  # Docker Hub may omit docker.io when reporting canonical digest references.
+  docker image inspect "$image" | jq -er --arg prefix "widefleet/$package@sha256:" '
+    .[0].RepoDigests[] | ltrimstr("docker.io/") | select(startswith($prefix)) | "docker.io/" + .
+  ' > "$RELEASE_IMAGES/$component.digest"
+elif [[ "${REQUIRE_EXISTING:-false}" == true ]]; then
+  echo "Published image is missing: $image; refusing to rebuild it." >&2
   exit 1
 fi
 printf '%s\n' "$existing" > "$RELEASE_IMAGES/$component.existing"

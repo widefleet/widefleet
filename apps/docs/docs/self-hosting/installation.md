@@ -141,27 +141,36 @@ Search returns Entra object IDs, matching app tokens configured to emit Group ID
 
 ## Pull the release images
 
-Releases provide four public Linux amd64 images on GHCR. Pulling them does not require a GitHub account or registry login:
+Releases provide four public Linux amd64 images on Docker Hub. Pulling them does not require a registry login:
 
-| Image                                       | Purpose                                                                             |
-| ------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `ghcr.io/widefleet/widefleet-control-plane` | Management server, API, database/storage initialization and edge configuration tool |
-| `ghcr.io/widefleet/widefleet-agent`         | Deployment agent and its matching celld publish executable                          |
-| `ghcr.io/widefleet/widefleet-sso`           | Independent OAuth2 Proxy and configuration supervisor                               |
-| `ghcr.io/widefleet/widefleet-runtime`       | celld runtime used for the shared fleet                                             |
+| Image                                         | Purpose                                                                             |
+| --------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `docker.io/widefleet/widefleet-control-plane` | Management server, API, database/storage initialization and edge configuration tool |
+| `docker.io/widefleet/widefleet-agent`         | Deployment agent and its matching celld publish executable                          |
+| `docker.io/widefleet/widefleet-sso`           | Independent OAuth2 Proxy and configuration supervisor                               |
+| `docker.io/widefleet/widefleet-runtime`       | celld runtime used for the shared fleet                                             |
 
-Every image has the same release tag, for example `0.3.0`, and OCI labels for its source repository, source commit and version. Installation uses exact digests from the release attachment `widefleet-images-VERSION.env`, verified with its accompanying `.sha256` file. There is no floating `latest` tag and no automatic update of running installations.
+Every image has the same release tag, for example `0.3.0`, and OCI labels for its source repository, source commit and version. Publishing a stable [GitHub Release](https://github.com/widefleet/widefleet/releases) starts the registry builds; wait for the Docker publication workflow to succeed before installing it. There is no floating `latest` tag and no automatic update of running installations.
 
-From the repository root, use the matching release configuration and download its digest manifest. Replace `VERSION` with the release version. The files are also available on [GitHub Releases](https://github.com/widefleet/widefleet/releases).
+From the matching repository checkout, pull the versioned images and record their exact digests in a non-secret manifest. The following commands require Bash, Docker and `jq`:
 
 ```sh
-git checkout vVERSION
-curl --fail --location --remote-name https://github.com/widefleet/widefleet/releases/download/vVERSION/widefleet-images-VERSION.env
-curl --fail --location --remote-name https://github.com/widefleet/widefleet/releases/download/vVERSION/widefleet-images-VERSION.env.sha256
-sha256sum --check widefleet-images-VERSION.env.sha256
+VERSION=0.3.0
+git checkout "v$VERSION"
+manifest="widefleet-images-$VERSION.env"
+: > "$manifest"
+for component in runtime agent control-plane sso; do
+  image="docker.io/widefleet/widefleet-$component:$VERSION"
+  docker pull --platform linux/amd64 "$image"
+  digest=$(docker image inspect "$image" | jq -er --arg prefix "widefleet/widefleet-$component@sha256:" '
+    .[0].RepoDigests[] | ltrimstr("docker.io/") | select(startswith($prefix)) | "docker.io/" + .
+  ')
+  variable="PLATFORM_${component^^}_IMAGE"
+  printf '%s=%s\n' "${variable//-/_}" "$digest" >> "$manifest"
+done
 ```
 
-The non-secret configuration manifest contains four `ghcr.io/widefleet/widefleet-*` references pinned by SHA-256 digest. Keep it with the private deployment environment and supply both files to Compose. Pull **all four images**, including the runtime used by new app containers:
+The manifest contains four image references pinned by SHA-256 digest. Keep it with the private deployment environment and supply both files to Compose. Pull **all four images**, including the runtime used by new app containers:
 
 ```sh
 docker compose --env-file widefleet-images-VERSION.env --env-file /absolute/path/deployment.env -f infra/compose.yaml --profile agent --profile images pull

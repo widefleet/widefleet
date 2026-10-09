@@ -90,7 +90,7 @@ async fn download(version: &str) -> Result<RuntimeRelease> {
         .ok();
     download_release(
         &client,
-        "https://api.github.com/repos/getmendra/widefleet",
+        "https://api.github.com/repos/widefleet/widefleet",
         token.as_deref(),
         version,
     )
