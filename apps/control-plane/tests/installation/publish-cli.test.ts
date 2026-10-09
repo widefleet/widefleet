@@ -93,7 +93,9 @@ it("publishes the checked archive with public access and provenance, then verifi
     expect(await readFile(join(directory, "npm.log"), "utf8")).toContain(
       `publish ${directory}/widefleet-0.3.0.tgz --registry=https://registry.npmjs.org --access=public --provenance --ignore-scripts`,
     );
-    expect(await readFile(join(directory, "summary"), "utf8")).toContain("Published and verified");
+    expect(await readFile(join(directory, "summary"), "utf8")).toContain(
+      "Verified widefleet@0.3.0",
+    );
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -105,6 +107,32 @@ it("accepts an identical existing version without publishing again", async () =>
   try {
     await run({ HTTP_STATUS: "200" });
     expect(await readFile(join(directory, "npm.log"), "utf8")).not.toContain("publish ");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("verifies an existing version in verify-only mode", async () => {
+  const { directory, run } = await fixture();
+
+  try {
+    await run({ HTTP_STATUS: "200", VERIFY_ONLY: "true" });
+    expect(await readFile(join(directory, "npm.log"), "utf8")).not.toContain("publish ");
+    expect(await readFile(join(directory, "summary"), "utf8")).toContain(
+      "Verified widefleet@0.3.0",
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("refuses to publish a missing version in verify-only mode", async () => {
+  const { directory, run } = await fixture();
+
+  try {
+    await expect(run({ VERIFY_ONLY: "true" })).rejects.toThrow();
+    await expect(readFile(join(directory, "npm.log"))).rejects.toThrow();
+    await expect(readFile(join(directory, "summary"))).rejects.toThrow();
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

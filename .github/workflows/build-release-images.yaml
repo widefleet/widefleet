@@ -1,0 +1,255 @@
+name: Build and test release images
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        required: true
+      recover-existing:
+        type: boolean
+        default: false
+      require-existing:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+# The caller controls cache-mode. Only main pushes may save caches.
+env:
+  PLATFORM_USAGE_REPORTING: "false"
+  PLATFORM_CRASH_REPORTING: "false"
+  WIDEFLEET_TELEMETRY_DISABLED: "1"
+
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 26.8.2
+      - name: Check source
+        run: |
+          npm install --global pnpm@12.4.2
+          pnpm install --frozen-lockfile
+          pnpm check
+
+  build:
+    name: Build ${{ matrix.component }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # The agent needs the runtime as its final base image.
+        component: [agent, control-plane, sso]
+    steps:
+      - name: Check out the workflow tools
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Keep workflow tools when checking out an older release tag
+        run: |
+          mkdir -p "$RUNNER_TEMP/release-tools"
+          cp tools/*release*.sh "$RUNNER_TEMP/release-tools/"
+          echo "RELEASE_TOOLS=$RUNNER_TEMP/release-tools" >> "$GITHUB_ENV"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Identify the release source
+        env:
+          COMPONENT: ${{ matrix.component }}
+        run: |
+          version=$(jq -er .version package.json)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "REVISION=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)" >> "$GITHUB_ENV"
+          RELEASE_IMAGES="$RUNNER_TEMP/release-images"
+          echo "RELEASE_IMAGES=$RELEASE_IMAGES" >> "$GITHUB_ENV"
+          echo "RELEASE_CARGO_CACHE=$RUNNER_TEMP/release-cargo" >> "$GITHUB_ENV"
+          echo "RELEASE_BINARIES=$RUNNER_TEMP/release-binaries" >> "$GITHUB_ENV"
+          mkdir -p "$RELEASE_IMAGES"
+          echo "0" > "$RELEASE_IMAGES/$COMPONENT.existing"
+          echo "0" > "$RELEASE_IMAGES/runtime.existing"
+      - uses: docker/setup-docker-action@2bf61fb9464cc67f0cbdeabed6aa0380accd1c70 # v5
+        with:
+          version: v29.8.1
+          daemon-config: |
+            {"features": {"containerd-snapshotter": true}}
+      - name: Set up the image cache builder
+        id: buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: v0.37.1
+          # Docker 29's containerd store supports gha caching and lets the agent
+          # use the exact runtime loaded into this daemon without a registry push.
+          driver: docker
+          cache-binary: false
+      - name: Recover existing release images
+        if: inputs.recover-existing
+        env:
+          REQUIRE_EXISTING: ${{ inputs.require-existing }}
+          COMPONENT: ${{ matrix.component }}
+        run: |
+          if [[ "$COMPONENT" == agent ]]; then
+            bash "$RELEASE_TOOLS"/recover-release-image.sh runtime
+          fi
+          bash "$RELEASE_TOOLS"/recover-release-image.sh "$COMPONENT"
+      - name: Select missing images
+        id: missing
+        env:
+          COMPONENT: ${{ matrix.component }}
+        run: |
+          echo "component=$(cat "$RELEASE_IMAGES/$COMPONENT.existing")" >> "$GITHUB_OUTPUT"
+          echo "runtime=$(cat "$RELEASE_IMAGES/runtime.existing")" >> "$GITHUB_OUTPUT"
+          # Older release tags still use their original Dockerfile build stage.
+          if grep -q '^FROM .* AS toolchain$' infra/agent/Dockerfile; then
+            echo "cached-cargo=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build the runtime image
+        if: matrix.component == 'agent' && steps.missing.outputs.runtime == '0'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: infra/runtime/Dockerfile
+          builder: ${{ steps.buildx.outputs.name }}
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: docker.io/widefleet/widefleet-runtime:${{ env.VERSION }}
+          build-args: SOURCE_DATE_EPOCH=${{ env.SOURCE_DATE_EPOCH }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/widefleet/widefleet
+            org.opencontainers.image.revision=${{ env.REVISION }}
+            org.opencontainers.image.version=${{ env.VERSION }}
+            org.opencontainers.image.title=Widefleet runtime
+          cache-from: |
+            type=gha,scope=release-runtime-v1
+            type=gha,scope=check-runtime-v1
+          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'type=gha,scope=release-runtime-v1,mode=max' || '' }}
+      - name: Restore the release Cargo cache
+        if: matrix.component == 'agent' && steps.missing.outputs.component == '0' && steps.missing.outputs.cached-cargo == 'true'
+        id: cargo-cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ${{ env.RELEASE_CARGO_CACHE }}
+          key: release-cargo-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('infra/agent/Dockerfile', 'tools/build-release-binaries.sh', 'rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}-${{ hashFiles('crates/**') }}
+          restore-keys: |
+            release-cargo-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('infra/agent/Dockerfile', 'tools/build-release-binaries.sh', 'rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}-
+            release-cargo-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('infra/agent/Dockerfile', 'tools/build-release-binaries.sh', 'rust-toolchain.toml') }}-
+      - name: Compile the agent and CLI in the pinned release toolchain
+        if: matrix.component == 'agent' && steps.missing.outputs.component == '0' && steps.missing.outputs.cached-cargo == 'true'
+        run: bash "$RELEASE_TOOLS"/build-release-binaries.sh
+      - name: Build the component image
+        if: steps.missing.outputs.component == '0'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: infra/${{ matrix.component }}/Dockerfile
+          builder: ${{ steps.buildx.outputs.name }}
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: docker.io/widefleet/widefleet-${{ matrix.component }}:${{ env.VERSION }}
+          build-args: |
+            SOURCE_DATE_EPOCH=${{ env.SOURCE_DATE_EPOCH }}
+            ${{ matrix.component == 'agent' && format('RUNTIME_IMAGE=docker.io/widefleet/widefleet-runtime:{0}', env.VERSION) || '' }}
+          # A named context replaces the Dockerfile's build stage, preserving the
+          # ordinary local build while using the cached, matching Debian binaries.
+          build-contexts: ${{ matrix.component == 'agent' && steps.missing.outputs.cached-cargo == 'true' && format('build={0}', env.RELEASE_BINARIES) || '' }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/widefleet/widefleet
+            org.opencontainers.image.revision=${{ env.REVISION }}
+            org.opencontainers.image.version=${{ env.VERSION }}
+            org.opencontainers.image.title=Widefleet ${{ matrix.component }}
+          cache-from: |
+            type=gha,scope=release-${{ matrix.component }}-v1
+            type=gha,scope=check-${{ matrix.component }}-v1
+          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && format('type=gha,scope=release-{0}-v1,mode=max', matrix.component) || '' }}
+      - name: Save the release Cargo cache
+        if: matrix.component == 'agent' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cargo-cache.outputs.cache-hit != 'true' && steps.missing.outputs.component == '0' && steps.missing.outputs.cached-cargo == 'true'
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ${{ env.RELEASE_CARGO_CACHE }}
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
+      - name: Export exact images for testing and publication
+        env:
+          COMPONENT: ${{ matrix.component }}
+        run: |
+          components=("$COMPONENT")
+          if [[ "$COMPONENT" == agent ]]; then
+            components+=(runtime)
+          else
+            rm "$RELEASE_IMAGES/runtime.existing"
+          fi
+          for component in "${components[@]}"; do
+            image="docker.io/widefleet/widefleet-$component:$VERSION"
+            docker image inspect "$image" --format '{{.Id}}' > "$RELEASE_IMAGES/$component.id"
+            docker save --output "$RELEASE_IMAGES/$component.tar" "$image"
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-images-${{ matrix.component }}
+          path: ${{ env.RELEASE_IMAGES }}
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 1
+          overwrite: true
+
+  test:
+    name: Test packaged release
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out the workflow tools
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Keep workflow tools when checking out an older release tag
+        run: |
+          mkdir -p "$RUNNER_TEMP/release-tools"
+          cp tools/*release*.sh "$RUNNER_TEMP/release-tools/"
+          echo "RELEASE_TOOLS=$RUNNER_TEMP/release-tools" >> "$GITHUB_ENV"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 26.8.2
+      - uses: docker/setup-docker-action@2bf61fb9464cc67f0cbdeabed6aa0380accd1c70 # v5
+        with:
+          version: v29.8.1
+      - name: Prepare packaged tests
+        run: |
+          echo "RELEASE_IMAGES=$RUNNER_TEMP/release-images" >> "$GITHUB_ENV"
+          echo "VERSION=$(jq -er .version package.json)" >> "$GITHUB_ENV"
+          echo "REVISION=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          npm install --global pnpm@12.4.2
+          pnpm install --frozen-lockfile
+          pnpm --filter @platform/app-runtime build
+          pnpm --filter @platform/control-plane exec svelte-kit sync
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-images-*
+          merge-multiple: true
+          path: ${{ env.RELEASE_IMAGES }}
+      - name: Load and verify the built images
+        run: bash "$RELEASE_TOOLS"/load-release-images.sh
+      - name: Test the exact images before publishing
+        run: bash "$RELEASE_TOOLS"/test-release-images.sh
+      - name: Stop disposable services
+        if: always()
+        run: docker compose -f infra/test/compose.yaml down --volumes

@@ -18,7 +18,10 @@ status=$(curl --silent --show-error --retry 3 --connect-timeout 15 --max-time 60
   --output "$metadata" --write-out '%{http_code}' "https://registry.npmjs.org/widefleet/$VERSION")
 case "$status" in
   200) ;; # Compare existing bytes below; npm versions are never replaced.
-  404) npm publish "$package" --registry=https://registry.npmjs.org --access=public --provenance --ignore-scripts ;;
+  404)
+    test "${VERIFY_ONLY:-false}" != true
+    npm publish "$package" --registry=https://registry.npmjs.org --access=public --provenance --ignore-scripts
+    ;;
   *) echo "npm version lookup failed: HTTP $status" >&2; exit 1 ;;
 esac
 expected="sha512-$(openssl dgst -sha512 -binary "$package" | openssl base64 -A)"
@@ -36,4 +39,4 @@ test "$(widefleet --version)" = "widefleet $VERSION"
 widefleet init "$directory/registry-app"
 test -f "$directory/registry-app/.gitignore"
 test -f "$directory/registry-app/pnpm-lock.yaml"
-echo "Published and verified widefleet@$VERSION on npm." >> "${GITHUB_STEP_SUMMARY:?}"
+echo "Verified widefleet@$VERSION on npm." >> "${GITHUB_STEP_SUMMARY:?}"

@@ -1,0 +1,172 @@
+name: Check suites
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+# Cache access is inherited from the caller: PRs read, main pushes read and write.
+jobs:
+  checks:
+    name: ${{ matrix.suite }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each suite owns its services and fixed test ports on a separate runner.
+        # Keep Rust and runtime tests together to reuse the CLI and agent binaries.
+        suite: [source, integration, packaged-sso, rust-runtime]
+    env:
+      PLATFORM_USAGE_REPORTING: "false"
+      PLATFORM_CRASH_REPORTING: "false"
+      WIDEFLEET_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 26.8.2
+      - uses: docker/setup-docker-action@2bf61fb9464cc67f0cbdeabed6aa0380accd1c70 # v5
+        if: matrix.suite != 'source'
+        with:
+          version: v29.8.1
+      - name: Set up the image cache builder
+        if: matrix.suite == 'packaged-sso' || matrix.suite == 'rust-runtime'
+        id: buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: v0.37.1
+          # Runtime tests build derived images from the local Docker image store.
+          use: false
+          cache-binary: false
+      - name: Install dependencies
+        run: |
+          npm install --global pnpm@12.4.2
+          pnpm install --frozen-lockfile
+      - name: Install browser
+        if: matrix.suite == 'integration' || matrix.suite == 'rust-runtime'
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Check source
+        if: matrix.suite == 'source'
+        run: pnpm check
+      - name: Build the app runtime for packaged tests
+        if: matrix.suite == 'packaged-sso'
+        run: pnpm --filter @platform/app-runtime build
+      - name: Generate the control-plane test configuration
+        if: matrix.suite == 'packaged-sso'
+        run: pnpm --filter @platform/control-plane exec svelte-kit sync
+      - name: Build the control plane and app runtime
+        if: matrix.suite == 'integration' || matrix.suite == 'rust-runtime'
+        run: pnpm --filter @platform/control-plane build
+      - name: Start disposable services
+        if: matrix.suite != 'source'
+        run: docker compose -f infra/test/compose.yaml up -d --wait
+      - name: Install the pinned app runtime
+        if: matrix.suite == 'integration' || matrix.suite == 'rust-runtime'
+        run: bash tools/install-celld.sh
+      - name: Test dynamic app isolation and native capabilities
+        if: matrix.suite == 'integration'
+        run: RUN_DYNAMIC_TESTS=1 pnpm exec vitest run apps/control-plane/tests/runtime/dynamic.test.ts apps/control-plane/tests/runtime/workflows.test.ts apps/control-plane/tests/runtime/workflow-adapter.test.ts
+      - name: Test services and identity boundaries
+        if: matrix.suite == 'integration'
+        run: pnpm exec vitest run
+      - name: Test SSO proxies and Compose configurations
+        if: matrix.suite == 'integration'
+        run: RUN_EDGE_TESTS=1 RUN_INSTALLATION_TESTS=1 RUN_ENTRA_TESTS=1 pnpm exec vitest run --no-file-parallelism apps/control-plane/tests/edge apps/control-plane/tests/installation
+      - name: Test browser login and management
+        if: matrix.suite == 'integration'
+        run: pnpm --filter @platform/control-plane test:e2e
+      - name: Build the control-plane image
+        if: matrix.suite == 'packaged-sso'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: infra/control-plane/Dockerfile
+          builder: ${{ steps.buildx.outputs.name }}
+          load: true
+          push: false
+          tags: widefleet-control-plane:sso-check
+          cache-from: type=gha,scope=check-control-plane-v1
+          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'type=gha,scope=check-control-plane-v1,mode=max' || '' }}
+      - name: Build the SSO image
+        if: matrix.suite == 'packaged-sso'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: infra/sso/Dockerfile
+          builder: ${{ steps.buildx.outputs.name }}
+          load: true
+          push: false
+          tags: widefleet-sso:setup-check
+          cache-from: type=gha,scope=check-sso-v1
+          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'type=gha,scope=check-sso-v1,mode=max' || '' }}
+      - name: Test packaged SSO configuration
+        if: matrix.suite == 'packaged-sso'
+        run: RUN_PACKAGED_EDGE_TESTS=1 pnpm exec vitest run apps/control-plane/tests/installation/packaged-edge.test.ts apps/control-plane/tests/installation/sso-supervisor.test.ts apps/control-plane/tests/installation/sso-tls.test.ts apps/control-plane/tests/installation/startup.test.ts
+      - name: Install Rust toolchain
+        if: matrix.suite == 'rust-runtime'
+        run: rustup toolchain install 1.99.0 --profile minimal --component clippy,rustfmt
+      - name: Restore Cargo dependencies and build outputs
+        if: matrix.suite == 'rust-runtime'
+        id: cargo-cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/src
+            ~/.cargo/git/db
+            ~/.cargo/git/checkouts
+            target
+          key: check-cargo-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', '**/Cargo.toml') }}-${{ hashFiles('crates/**') }}
+          restore-keys: |
+            check-cargo-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', '**/Cargo.toml') }}-
+      - name: Check and test Rust
+        if: matrix.suite == 'rust-runtime'
+        env:
+          CARGO_INCREMENTAL: "0"
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+          cargo build --workspace
+          RUN_CLI_TESTS=1 pnpm exec vitest run apps/control-plane/tests/cli.test.ts apps/control-plane/tests/network-cli.test.ts apps/control-plane/tests/access-cli.test.ts apps/control-plane/tests/connector-cli.test.ts apps/control-plane/tests/auth-cli.test.ts apps/control-plane/tests/auth-cli.integration.test.ts apps/control-plane/tests/reporting-cli.test.ts
+      - name: Build the runtime image
+        if: matrix.suite == 'rust-runtime'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: infra/runtime/Dockerfile
+          builder: ${{ steps.buildx.outputs.name }}
+          load: true
+          push: false
+          tags: app-platform-runtime:0.1.0
+          cache-from: type=gha,scope=check-runtime-v1
+          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'type=gha,scope=check-runtime-v1,mode=max' || '' }}
+      - name: Test shared fleets, runtime releases and persistent app resources
+        if: matrix.suite == 'rust-runtime'
+        run: |
+          # Match the packaged agent's UID with the runtime's UID on this rootful
+          # daemon; cap_drop=ALL remains enabled on the runtime container.
+          sudo env "PATH=$PATH" "CI=true" \
+            "DOCKER_HOST=$(docker context inspect --format '{{.Endpoints.docker.Host}}')" \
+            "PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright" \
+            PLATFORM_USAGE_REPORTING=false PLATFORM_CRASH_REPORTING=false WIDEFLEET_TELEMETRY_DISABLED=1 \
+            RUN_RUNTIME_TESTS=1 pnpm exec vitest run apps/control-plane/tests/runtime/deployment.test.ts
+      - name: Save Cargo dependencies and build outputs
+        if: matrix.suite == 'rust-runtime' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cargo-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/src
+            ~/.cargo/git/db
+            ~/.cargo/git/checkouts
+            target
+          key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
+      - name: Stop disposable services
+        if: always() && matrix.suite != 'source'
+        run: docker compose -f infra/test/compose.yaml down --volumes

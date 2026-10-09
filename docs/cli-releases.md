@@ -25,9 +25,9 @@ Ordinary pushes to `main`, tag pushes, drafts and prereleases do not publish pac
 
 The workflow builds the CLI and agent in the pinned Debian toolchain, bundles esbuild and the starter, and installs the resulting npm archive in isolation for a real deployment test against local services. Only the tested archive is passed to the publishing job. Publication checks its checksum and package destination, then verifies the npm integrity hash and a fresh registry installation.
 
-Rerun a failed workflow, or run it manually from `main` with the existing published release tag. An existing npm version is accepted only when its bytes and repository metadata match; it is never overwritten. Changed bytes require a new version and release.
+Rerun a failed workflow, or run it manually from `main` with the existing published release tag. An existing npm version is accepted only when its bytes and repository metadata match; it is never overwritten. Changed bytes require a new version and release. The manual workflow also retains `verify_only`, which checks an existing npm version without publishing a missing version.
 
-The tested npm archive, manual archive and checksums are retained in the workflow's `tested-cli` artifact for 90 days. The workflow does not modify published release assets, so it also works with immutable GitHub Releases. Users install the package directly from npm.
+The tested npm archive, manual archive and checksums are attached to the same GitHub Release. Existing attachments are downloaded and compared before a retry proceeds; they are never overwritten. Actions artifacts are used only to transport the tested files between jobs.
 
 ## Build a release locally
 

@@ -100,26 +100,26 @@ includes them. A failed log query is not evidence that the app has no errors.
 
 ## If setup fails
 
-| Symptom                                  | Next step                                                                                                                                                              |
-| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Registry returns 404                     | Check the package name and published version on [npm](https://www.npmjs.com/package/widefleet); check the release workflow status if the version is not available yet. |
-| `widefleet` is not found                 | Reopen the terminal after `pnpm setup`; check `type -a widefleet` for an older installation on PATH.                                                                   |
-| Login cannot access the credential store | Unlock the desktop Secret Service or explicitly use the headless session-file flow above.                                                                              |
-| Deployment fails or stays queued         | Follow [deployment diagnostics](/guides/deployments#inspect-a-failure).                                                                                                |
+| Symptom                                  | Next step                                                                                                                                   |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Registry returns 404                     | Check the package name and published version on [npm](https://www.npmjs.com/package/widefleet); use the matching release archive if needed. |
+| `widefleet` is not found                 | Reopen the terminal after `pnpm setup`; check `type -a widefleet` for an older installation on PATH.                                        |
+| Login cannot access the credential store | Unlock the desktop Secret Service or explicitly use the headless session-file flow above.                                                   |
+| Deployment fails or stays queued         | Follow [deployment diagnostics](/guides/deployments#inspect-a-failure).                                                                     |
 
 Next, [share the app with colleagues](/guides/applications) or
 [publish an isolated preview](/guides/deployments). The [CLI reference](/reference/cli)
 lists common commands and output behavior.
 
-## Install the npm archive manually
+## Install a release archive manually
 
-Download the same verified package from npm and extract it into a directory you own. Node.js and npm are required for the download:
+Download the matching CLI `.tar.gz` archive and `.sha256` file from [GitHub Releases](https://github.com/widefleet/widefleet/releases). Verify and extract them together in a directory you own:
 
 ```sh
-npm pack widefleet@0.3.0 --registry=https://registry.npmjs.org --ignore-scripts
-mkdir -p "$HOME/.local/lib/widefleet/0.3.0" "$HOME/.local/bin"
-tar -xzf widefleet-0.3.0.tgz -C "$HOME/.local/lib/widefleet/0.3.0" --strip-components=1
-ln -s "$HOME/.local/lib/widefleet/0.3.0/widefleet" "$HOME/.local/bin/widefleet"
+sha256sum --check widefleet-cli-0.3.0-linux-x64.tar.gz.sha256
+mkdir -p "$HOME/.local/lib/widefleet" "$HOME/.local/bin"
+tar -xzf widefleet-cli-0.3.0-linux-x64.tar.gz -C "$HOME/.local/lib/widefleet"
+ln -s "$HOME/.local/lib/widefleet/widefleet-cli-0.3.0-linux-x64/widefleet" "$HOME/.local/bin/widefleet"
 export PATH="$HOME/.local/bin:$PATH"
 widefleet --version
 widefleet init my-app

@@ -159,3 +159,21 @@ Better Auth 1.7.7 declares a SvelteKit 2 peer range. `pnpm-workspace.yaml` allow
 The TypeScript version remains 6.0.3 for the selected Svelte compiler integration. Oxlint and `@oxlint/plugins` must stay on the same version. Wrangler's asset hash implementation uses `blake3-wasm` 2.1.5.
 
 The starter checks authored TypeScript and Svelte sources. JavaScript checking is disabled there because Wrangler's generated `GlobalProps` imports the adapter's generated Worker bundle; checking that JavaScript would re-check bundled dependencies as application source. All `strictest` TypeScript options remain enabled.
+
+## GitHub Actions
+
+The repository has seven workflows:
+
+| Workflow                    | Trigger and purpose                                                                                         |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `check.yaml`                | Pull requests and pushes to `main`; requires all source and integration suites to pass.                     |
+| `check-suites.yaml`         | Reusable source, integration/browser, packaged SSO, and Rust/runtime test suites.                           |
+| `check-release-images.yaml` | Relevant pull requests and pushes to `main`; builds and tests the packaged images without publishing.       |
+| `build-release-images.yaml` | Reusable parallel image builds, Cargo and image caching, artifact transport, and packaged deployment tests. |
+| `publish-cli.yaml`          | Published stable `vVERSION` GitHub Releases; publishes the tested CLI to npm.                               |
+| `publish-images.yaml`       | Published stable `vVERSION` GitHub Releases; publishes the tested images to Docker Hub.                     |
+| `publish-app-runtime.yaml`  | `runtime-vVERSION` tag pushes; tests and creates the independent app-runtime GitHub Release.                |
+
+Publishing workflows also accept manual runs from `main` for their respective existing tags. The npm and Docker workflows require an already published stable GitHub Release. See [CLI releases](cli-releases.md), [container releases](container-releases.md) and [runtime releases](runtime-releases.md) for authentication and release instructions.
+
+PR jobs receive read-only cache access; only checks triggered by pushes to `main` can save caches. Test jobs use disposable services and synthetic fixtures.
