@@ -62,10 +62,12 @@ export async function startCliRegistry(archive: string) {
   const server = createServer((request, response) => {
     request.resume();
     const path = decodeURIComponent(request.url ?? "").slice(1);
+
+    // Record failed downloads too: optional dependencies can swallow a 404.
+    if (path.endsWith(".tgz")) downloads.push(path);
     const bytes = tarballs.get(path);
 
     if (bytes) {
-      downloads.push(path);
       response.setHeader("content-type", "application/octet-stream");
       response.end(bytes);
 
@@ -81,6 +83,9 @@ export async function startCliRegistry(archive: string) {
     }
 
     const file = `${manifest.name}-${version}.tgz`;
+
+    // npm includes integrity even for incompatible targets. Without it pnpm
+    // fetches their tarballs before deciding whether to install them.
     const tarball = tarballs.get(file);
     response.setHeader("content-type", "application/json");
     response.end(
@@ -92,9 +97,9 @@ export async function startCliRegistry(archive: string) {
             ...manifest,
             dist: {
               tarball: `${origin}/${file}`,
-              ...(tarball && {
-                integrity: `sha512-${createHash("sha512").update(tarball).digest("base64")}`,
-              }),
+              integrity: `sha512-${createHash("sha512")
+                .update(tarball ?? file)
+                .digest("base64")}`,
             },
           },
         },
