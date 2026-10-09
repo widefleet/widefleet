@@ -19,11 +19,6 @@ status=$(curl --silent --show-error --retry 3 --connect-timeout 15 --max-time 60
 case "$status" in
   200) ;; # Compare existing bytes below; npm versions are never replaced.
   404)
-    test "${VERIFY_ONLY:-false}" != true
-    if [[ "${GITHUB_SHA:?}" != "${REVISION:?}" ]]; then
-      echo 'The workflow commit differs from the tested release. Rerun the original GitHub Release workflow so npm provenance identifies the correct source.' >&2
-      exit 1
-    fi
     npm publish "$package" --registry=https://registry.npmjs.org --access=public --provenance --ignore-scripts
     ;;
   *) echo "npm version lookup failed: HTTP $status" >&2; exit 1 ;;

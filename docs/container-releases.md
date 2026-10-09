@@ -36,7 +36,7 @@ Images use exact version tags and source commit labels. There is no floating `la
 
 ## Retry a partial publication
 
-Rerun the failed workflow or dispatch it manually from `main`, supplying the existing published GitHub Release tag. Existing images must match the release's source commit, version, platform and source URL. They are pulled and retested with any missing images. This lets a retry finish a partial push without rebuilding or replacing published images. A conflicting version fails and needs a new release version.
+Use **Re-run failed jobs** on the original GitHub Actions run. Existing images must match the release's source commit, version, platform and source URL. If a build job is rerun, it pulls and retests existing images with any missing images. This lets a rerun finish a partial push without rebuilding or replacing published images. A conflicting version fails and needs a new release version.
 
 Ordinary pushes, tag creation, draft releases and prereleases do not publish. The npm and Docker workflows report their outcomes separately; a failure in one does not undo the other registry's publication.
 

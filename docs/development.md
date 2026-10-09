@@ -174,6 +174,6 @@ The repository has seven workflows:
 | `publish-images.yaml`       | Published stable `vVERSION` GitHub Releases; publishes the tested images to Docker Hub.                     |
 | `publish-app-runtime.yaml`  | `runtime-vVERSION` tag pushes; tests and creates the independent app-runtime GitHub Release.                |
 
-Publishing workflows also accept manual runs from `main` for their respective existing tags. The npm and Docker workflows require an already published stable GitHub Release. See [CLI releases](cli-releases.md), [container releases](container-releases.md) and [runtime releases](runtime-releases.md) for authentication and release instructions.
+The npm and Docker workflows require a published stable GitHub Release. Failed runs use GitHub Actions' built-in rerun controls. See [CLI releases](cli-releases.md), [container releases](container-releases.md) and [runtime releases](runtime-releases.md) for authentication and release instructions.
 
 PR jobs receive read-only cache access; only checks triggered by pushes to `main` can save caches. Test jobs use disposable services and synthetic fixtures.

@@ -3,23 +3,12 @@ name: Publish CLI to npm
 on:
   release:
     types: [published]
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: Published stable GitHub release tag (vMAJOR.MINOR.PATCH)
-        required: true
-        type: string
-      verify_only:
-        description: Verify an existing npm version without publishing it again
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: read
 
 concurrency:
-  group: publish-cli-${{ github.event.release.tag_name || inputs.tag }}
+  group: publish-cli-${{ github.event.release.tag_name }}
   cancel-in-progress: false
 
 defaults:
@@ -27,7 +16,7 @@ defaults:
     shell: bash
 
 env:
-  RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+  RELEASE_TAG: ${{ github.event.release.tag_name }}
   PLATFORM_USAGE_REPORTING: "false"
   PLATFORM_CRASH_REPORTING: "false"
   WIDEFLEET_TELEMETRY_DISABLED: "1"
@@ -36,15 +25,14 @@ jobs:
   build:
     if: >-
       github.repository == 'widefleet/widefleet' &&
-      ((github.event_name == 'release' && !github.event.release.prerelease && startsWith(github.event.release.tag_name, 'v')) ||
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
+      !github.event.release.prerelease && startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-24.04
     outputs:
       revision: ${{ steps.release.outputs.revision }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - name: Validate the published release and its main-branch source
@@ -125,7 +113,6 @@ jobs:
           name: tested-cli
           path: ${{ env.CLI_RELEASE_DIRECTORY }}
       - name: Attach the tested CLI archives and checksums to the GitHub Release
-        if: ${{ !inputs.verify_only }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -135,8 +122,6 @@ jobs:
             "$CLI_RELEASE_DIRECTORY/widefleet-cli-$VERSION-linux-x64.tar.gz" \
             "$CLI_RELEASE_DIRECTORY/widefleet-cli-$VERSION-linux-x64.tar.gz.sha256"
       - name: Publish using npm trusted publishing and verify installation
-        env:
-          VERIFY_ONLY: ${{ inputs.verify_only || false }}
         run: |
           npm install --global pnpm@12.4.2
           bash tools/publish-cli.sh
