@@ -1,13 +1,20 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 
 await mkdir(new URL("../.platform", import.meta.url), { recursive: true });
 
+const manifest = new URL(import.meta.resolve("wrangler/package.json"));
+
+const { bin } = z
+  .object({ bin: z.object({ wrangler: z.string() }) })
+  .parse(JSON.parse(await readFile(manifest, "utf8")));
+
 const child = spawn(
-  process.platform === "win32" ? "pnpm.cmd" : "pnpm",
-  ["exec", "wrangler", "types", ".platform/worker-configuration.d.ts"],
+  process.execPath,
+  [fileURLToPath(new URL(bin.wrangler, manifest)), "types", ".platform/worker-configuration.d.ts"],
   { stdio: "inherit" },
 );
 

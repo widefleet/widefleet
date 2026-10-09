@@ -8,6 +8,9 @@ permissions:
 
 # Cache access is inherited from the caller: PRs read, main pushes read and write.
 jobs:
+  cli-platforms:
+    uses: ./.github/workflows/cli-platforms.yaml
+
   checks:
     name: ${{ matrix.suite }}
     runs-on: ubuntu-24.04
@@ -148,9 +151,12 @@ jobs:
       - name: Test shared fleets, runtime releases and persistent app resources
         if: matrix.suite == 'rust-runtime'
         run: |
+          pnpm package:cli --binary target/debug/widefleet --output "$RUNNER_TEMP/cli"
+          version=$(node -p 'require("./package.json").version')
           # Match the packaged agent's UID with the runtime's UID on this rootful
           # daemon; cap_drop=ALL remains enabled on the runtime container.
-          sudo env "PATH=$PATH" "CI=true" \
+          sudo env -u SUDO_USER "PATH=$PATH" "CI=true" \
+            "CLI_NPM_PACKAGE=$RUNNER_TEMP/cli/widefleet-$version.tgz" \
             "DOCKER_HOST=$(docker context inspect --format '{{.Endpoints.docker.Host}}')" \
             "PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright" \
             PLATFORM_USAGE_REPORTING=false PLATFORM_CRASH_REPORTING=false WIDEFLEET_TELEMETRY_DISABLED=1 \

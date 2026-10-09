@@ -121,7 +121,12 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     const cli = (...args: string[]) =>
       execute(
         process.env["CLI_BINARY"] ??
-          fileURLToPath(new URL("../../../target/debug/widefleet", import.meta.url)),
+          fileURLToPath(
+            new URL(
+              `../../../target/debug/widefleet${process.platform === "win32" ? ".exe" : ""}`,
+              import.meta.url,
+            ),
+          ),
         ["connector", ...args],
         {
           cwd: directory,

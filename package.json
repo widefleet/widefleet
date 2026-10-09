@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p crates/platform-agent/tsconfig.json && pnpm -r --if-present typecheck",
     "check": "pnpm --filter @platform/app-runtime build && pnpm typecheck && pnpm format:check && pnpm lint",
     "build": "pnpm -r --if-present build",
-    "package:cli": "node tools/package-cli.ts"
+    "package:cli": "node tools/package-cli.ts",
+    "test:cli-package": "vitest run apps/control-plane/tests/cli-package.test.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20261003.1",

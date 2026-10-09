@@ -10,6 +10,10 @@ import { z } from "zod";
 
 const execute = promisify(execFile);
 
+const binary =
+  process.env["CLI_BINARY"] ??
+  `target/debug/widefleet${process.platform === "win32" ? ".exe" : ""}`;
+
 const status = z.object({
   id: z.uuid(),
   preferences: z.object({ usage: z.boolean(), crashes: z.boolean() }),
@@ -40,7 +44,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     });
 
     it("persists identity and controls categories without a platform login", async () => {
-      const initial = await execute("target/debug/widefleet", ["telemetry", "status"], {
+      const initial = await execute(binary, ["telemetry", "status"], {
         env: environment(),
       });
 
@@ -48,11 +52,11 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
 
       expect(first.preferences).toEqual({ usage: true, crashes: true });
       expect(initial.stderr).not.toContain("[widefleet telemetry]");
-      await execute("target/debug/widefleet", ["telemetry", "disable", "--crashes"], {
+      await execute(binary, ["telemetry", "disable", "--crashes"], {
         env: environment(),
       });
 
-      const changed = await execute("target/debug/widefleet", ["telemetry", "status"], {
+      const changed = await execute(binary, ["telemetry", "status"], {
         env: environment(),
       });
 
@@ -70,9 +74,9 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     it.each(["apps", "login"])(
       "prints %s errors before telemetry and honors opt-out",
       async (command) => {
-        await execute("target/debug/widefleet", ["telemetry", "enable"], { env: environment() });
+        await execute(binary, ["telemetry", "enable"], { env: environment() });
 
-        const failure = await execute("target/debug/widefleet", [command], {
+        const failure = await execute(binary, [command], {
           env: environment(),
         }).then(
           () => null,
@@ -119,9 +123,9 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
           "crates/platform-cli/src/main.rs",
         );
 
-        await execute("target/debug/widefleet", ["telemetry", "disable"], { env: environment() });
+        await execute(binary, ["telemetry", "disable"], { env: environment() });
 
-        const disabled = await execute("target/debug/widefleet", [command], {
+        const disabled = await execute(binary, [command], {
           env: environment(),
         }).then(
           () => null,
@@ -134,12 +138,12 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     );
     it("preserves both opt-outs when preference updates run concurrently", async () => {
       for (let attempt = 0; attempt < 5; attempt += 1) {
-        await execute("target/debug/widefleet", ["telemetry", "enable"], { env: environment() });
+        await execute(binary, ["telemetry", "enable"], { env: environment() });
         await Promise.all([
-          execute("target/debug/widefleet", ["telemetry", "disable", "--usage"], {
+          execute(binary, ["telemetry", "disable", "--usage"], {
             env: environment(),
           }),
-          execute("target/debug/widefleet", ["telemetry", "disable", "--crashes"], {
+          execute(binary, ["telemetry", "disable", "--crashes"], {
             env: environment(),
           }),
         ]);
@@ -155,7 +159,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     it.each(["disabled", "missing"])(
       "honors %s preferences while another command waits for its API",
       async (mode) => {
-        await execute("target/debug/widefleet", ["telemetry", "enable"], { env: environment() });
+        await execute(binary, ["telemetry", "enable"], { env: environment() });
         const gate = new EventEmitter();
 
         const server = createServer((request, response) => {
@@ -174,7 +178,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
           const received = once(server, "request");
 
           const completed = execute(
-            "target/debug/widefleet",
+            binary,
             ["--url", `http://127.0.0.1:${address.port}`, "whoami"],
             {
               env: { ...environment(), PLATFORM_ACCESS_TOKEN: "synthetic-telemetry-test-token" },
@@ -188,7 +192,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
           await received;
 
           if (mode === "disabled")
-            await execute("target/debug/widefleet", ["telemetry", "disable"], {
+            await execute(binary, ["telemetry", "disable"], {
               env: environment(),
             });
           else await rm(join(directory, "widefleet/telemetry.json"));
@@ -205,14 +209,14 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       },
     );
     it("reads saved status without creating a lock in read-only storage", async () => {
-      await execute("target/debug/widefleet", ["telemetry", "disable"], { env: environment() });
+      await execute(binary, ["telemetry", "disable"], { env: environment() });
       const stateDirectory = join(directory, "widefleet");
       const lock = join(stateDirectory, "telemetry.lock");
       await rm(lock);
       await chmod(stateDirectory, 0o500);
 
       try {
-        const saved = await execute("target/debug/widefleet", ["telemetry", "status"], {
+        const saved = await execute(binary, ["telemetry", "status"], {
           env: environment(),
         });
 

@@ -1,9 +1,12 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmod, copyFile, cp, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { chmod, copyFile, cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, promisify } from "node:util";
+import { build } from "esbuild";
+import { cliPlatform, cliPlatforms } from "./cli-platforms.ts";
+import { esbuildBinary, runPnpm } from "./cli-tools.ts";
 
 const execute = promisify(execFile);
 
@@ -13,31 +16,40 @@ const { values } = parseArgs({
   options: { binary: { type: "string" }, output: { type: "string", default: ".local/releases" } },
 });
 
-// Release support is intentionally limited to the platform exercised by runtime tests.
-if (process.platform !== "linux" || process.arch !== "x64")
-  throw new Error("CLI release packaging currently supports Linux x64 (glibc)");
+const platform = cliPlatform(process.platform, process.arch);
+
+const executableName = `widefleet${platform.extension}`;
+
+const bundlerName = `esbuild${platform.extension}`;
 
 if (!values.binary)
   await execute(
-    "bash",
-    ["tools/cargo.sh", "build", "--locked", "--release", "-p", "platform-cli"],
+    process.platform === "win32" ? "cargo" : "bash",
+    [
+      ...(process.platform === "win32" ? [] : ["tools/cargo.sh"]),
+      "build",
+      "--locked",
+      "--release",
+      "-p",
+      "platform-cli",
+    ],
     {
       cwd: root,
       maxBuffer: 16 * 1024 * 1024,
     },
   );
 
-const binary = resolve(root, values.binary ?? "target/release/widefleet");
+const binary = resolve(root, values.binary ?? `target/release/${executableName}`);
 
 const version = (await execute(binary, ["--version"])).stdout.trim().replace(/^widefleet /, "");
 
 if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error("Unexpected CLI version output");
 
-const esbuild = await realpath(fileURLToPath(import.meta.resolve("esbuild/bin/esbuild")));
+const esbuild = esbuildBinary();
 
 const esbuildVersion = (await execute(esbuild, ["--version"])).stdout.trim();
 
-const name = `widefleet-cli-${version}-linux-x64`;
+const name = `widefleet-cli-${version}-${platform.os}-${platform.cpu}`;
 
 const output = resolve(root, values.output);
 
@@ -48,13 +60,13 @@ await mkdir(output, { recursive: true });
 // Refuse to replace an existing release, including locally produced artifacts.
 await mkdir(release);
 
-await copyFile(binary, join(release, "widefleet"));
+await copyFile(binary, join(release, executableName));
 
-await copyFile(esbuild, join(release, "esbuild"));
+await copyFile(esbuild, join(release, bundlerName));
 
-await chmod(join(release, "widefleet"), 0o755);
+await chmod(join(release, executableName), 0o755);
 
-await chmod(join(release, "esbuild"), 0o755);
+await chmod(join(release, bundlerName), 0o755);
 
 await writeFile(
   join(release, "release.json"),
@@ -79,7 +91,7 @@ for (const file of [
 ])
   await cp(join(root, "starters/sveltekit", file), join(template, file), { recursive: true });
 
-for (const file of [".gitignore", ".oxlintrc.json", ".oxfmtrc.json"])
+for (const file of [".gitattributes", ".gitignore", ".oxlintrc.json", ".oxfmtrc.json"])
   await copyFile(join(root, file), join(template, file));
 
 await cp(join(root, "tools/oxlint"), join(template, "tools/oxlint"), { recursive: true });
@@ -90,10 +102,7 @@ await writeFile(
 );
 
 // Verify the committed independent lockfile without resolving new versions during packaging.
-await execute("pnpm", ["install", "--lockfile-only", "--frozen-lockfile", "--ignore-scripts"], {
-  cwd: template,
-  maxBuffer: 8 * 1024 * 1024,
-});
+await runPnpm(["install", "--lockfile-only", "--frozen-lockfile", "--ignore-scripts"], template);
 
 await mkdir(join(release, "licenses"));
 
@@ -126,29 +135,73 @@ const npmPackage = join(npmDirectory, "package");
 
 await cp(release, npmPackage, { recursive: true });
 
+const metadata = {
+  name: `widefleet-${platform.name}`,
+  version,
+  description: "Widefleet CLI with its Worker bundler and app starter",
+  license: "MIT",
+  exports: { "./widefleet": `./${executableName}`, "./package.json": "./package.json" },
+  os: [platform.os],
+  cpu: [platform.cpu],
+  files: [
+    executableName,
+    bundlerName,
+    "release.json",
+    "starter",
+    "licenses",
+    "README.md",
+    "LICENSE",
+  ],
+  repository: { type: "git", url: "git+https://github.com/widefleet/widefleet.git" },
+  publishConfig: { registry: "https://registry.npmjs.org", access: "public" },
+};
+
+if (platform.os === "linux") Object.assign(metadata, { libc: ["glibc"] });
+
+await writeFile(join(npmPackage, "package.json"), JSON.stringify(metadata, null, 2) + "\n");
+
+const launcherDirectory = join(output, `${name}-launcher`);
+
+const launcherPackage = join(launcherDirectory, "package");
+
+await mkdir(launcherDirectory);
+
+await mkdir(join(launcherPackage, "bin"), { recursive: true });
+
+await build({
+  entryPoints: [join(root, "tools/cli-launcher.ts")],
+  outfile: join(launcherPackage, "bin/widefleet.mjs"),
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  target: "node26",
+});
+
+await chmod(join(launcherPackage, "bin/widefleet.mjs"), 0o755);
+
+await copyFile(join(root, "LICENSE"), join(launcherPackage, "LICENSE"));
+
+await copyFile(join(release, "README.md"), join(launcherPackage, "README.md"));
+
 await writeFile(
-  join(npmPackage, "package.json"),
+  join(launcherPackage, "package.json"),
   JSON.stringify(
     {
       name: "widefleet",
       version,
       description: "Widefleet CLI with its Worker bundler and app starter",
       license: "MIT",
-      bin: { widefleet: "./widefleet" },
-      os: ["linux"],
-      cpu: ["x64"],
-      libc: ["glibc"],
-      files: [
-        "widefleet",
-        "esbuild",
-        "release.json",
-        "starter",
-        "licenses",
-        "README.md",
-        "LICENSE",
-      ],
-      repository: { type: "git", url: "git+https://github.com/widefleet/widefleet.git" },
-      publishConfig: { registry: "https://registry.npmjs.org", access: "public" },
+      type: "module",
+      bin: { widefleet: "./bin/widefleet.mjs" },
+      engines: { node: ">=26" },
+      os: ["linux", "darwin", "win32"],
+      cpu: ["x64", "arm64"],
+      files: ["bin", "README.md", "LICENSE"],
+      optionalDependencies: Object.fromEntries(
+        cliPlatforms.map((entry) => [`widefleet-${entry.name}`, version]),
+      ),
+      repository: metadata.repository,
+      publishConfig: metadata.publishConfig,
     },
     null,
     2,
@@ -159,20 +212,30 @@ await writeFile(
 // starter files such as .gitignore. Both archives must preserve the whole template.
 for (const item of [
   { file: archive, directory: output, entry: name },
-  { file: `widefleet-${version}.tgz`, directory: npmDirectory, entry: "package" },
+  {
+    file: `widefleet-${platform.name}-${version}.tgz`,
+    directory: npmDirectory,
+    entry: "package",
+  },
+  { file: `widefleet-${version}.tgz`, directory: launcherDirectory, entry: "package" },
 ]) {
-  await execute("tar", [
-    "--sort=name",
-    "--mtime=@0",
-    "--owner=0",
-    "--group=0",
-    "--numeric-owner",
-    "-czf",
-    join(output, item.file),
-    "-C",
-    item.directory,
-    item.entry,
-  ]);
+  // A second target may share this output directory; never replace existing artifacts.
+  await writeFile(join(output, item.file), "", { flag: "wx" });
+
+  await execute(
+    "tar",
+    [
+      ...(process.platform === "linux"
+        ? ["--sort=name", "--mtime=@0", "--owner=0", "--group=0", "--numeric-owner"]
+        : []),
+      "-czf",
+      item.file,
+      "-C",
+      item.directory,
+      item.entry,
+    ],
+    { cwd: output },
+  );
 
   const digest = createHash("sha256")
     .update(await readFile(join(output, item.file)))

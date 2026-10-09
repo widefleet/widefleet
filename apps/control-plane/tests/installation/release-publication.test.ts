@@ -19,7 +19,14 @@ const fixture = async () => {
 
   const assets = [
     "widefleet-0.3.0.tgz",
+    "widefleet-linux-x64-gnu-0.3.0.tgz",
+    "widefleet-darwin-arm64-0.3.0.tgz",
+    "widefleet-darwin-x64-0.3.0.tgz",
+    "widefleet-win32-x64-msvc-0.3.0.tgz",
     "widefleet-cli-0.3.0-linux-x64.tar.gz",
+    "widefleet-cli-0.3.0-darwin-arm64.tar.gz",
+    "widefleet-cli-0.3.0-darwin-x64.tar.gz",
+    "widefleet-cli-0.3.0-win32-x64.tar.gz",
     "widefleet-images-0.3.0.env",
   ];
 
@@ -76,7 +83,7 @@ case "$operation" in
   edit)
     [[ " $* " == *" --draft=false "* ]]
     [[ " $* " == *" --verify-tag "* ]]
-    jq -e '.isDraft == true and (.assets | length) == 6' "$FIXTURE/metadata.json" > /dev/null
+    jq -e '.isDraft == true and (.assets | length) == 20' "$FIXTURE/metadata.json" > /dev/null
     jq '.isDraft = false' "$FIXTURE/metadata.json" > "$FIXTURE/updated.json"
     mv "$FIXTURE/updated.json" "$FIXTURE/metadata.json"
     # Simulate a server-side success followed by a lost response.
@@ -108,7 +115,7 @@ esac
   return { directory, local, run };
 };
 
-it("creates a draft and publishes only after all six verified assets are attached", async () => {
+it("creates a draft and publishes only after every platform's verified assets are attached", async () => {
   const { directory, run } = await fixture();
 
   try {
@@ -121,7 +128,7 @@ it("creates a draft and publishes only after all six verified assets are attache
     expect(JSON.parse(await readFile(join(directory, "metadata.json"), "utf8"))).toMatchObject({
       isDraft: false,
     });
-    expect(await readdir(join(directory, "remote"))).toHaveLength(6);
+    expect(await readdir(join(directory, "remote"))).toHaveLength(20);
     const commands = await readFile(join(directory, "gh.log"), "utf8");
     expect(commands.lastIndexOf("release download")).toBeLessThan(commands.indexOf("release edit"));
   } finally {
@@ -194,7 +201,7 @@ it("leaves a partial upload in draft and completes it on a rerun", async () => {
     expect(JSON.parse(await readFile(join(directory, "metadata.json"), "utf8"))).toMatchObject({
       isDraft: true,
     });
-    expect(await readdir(join(directory, "remote"))).toHaveLength(4);
+    expect(await readdir(join(directory, "remote"))).toHaveLength(18);
     expect(await readFile(join(directory, "gh.log"), "utf8")).not.toContain("release edit");
     await run("publish-github-release.sh");
     expect(JSON.parse(await readFile(join(directory, "metadata.json"), "utf8"))).toMatchObject({
@@ -218,18 +225,22 @@ it("recovers after a lost publication response without modifying a published rel
     const commands = await readFile(join(directory, "gh.log"), "utf8");
     expect(commands).not.toContain("release upload");
     expect(commands).not.toContain("release edit");
-    expect(commands.match(/release download/g)).toHaveLength(6);
+    expect(commands.match(/release download/g)).toHaveLength(20);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
 });
 
-it("keeps the release in draft if transported artifacts have invalid checksums", async () => {
+it.each([
+  "widefleet-images-0.3.0.env",
+  "widefleet-darwin-arm64-0.3.0.tgz",
+  "widefleet-cli-0.3.0-win32-x64.tar.gz",
+])("keeps the release in draft if %s has an invalid checksum", async (asset) => {
   const { directory, local, run } = await fixture();
 
   try {
     await run("prepare-release.sh");
-    await writeFile(join(local, "widefleet-images-0.3.0.env"), "corrupt");
+    await writeFile(join(local, asset), "corrupt");
     await expect(run("publish-github-release.sh")).rejects.toThrow();
     expect(await readdir(join(directory, "remote"))).toEqual([]);
     expect(await readFile(join(directory, "gh.log"), "utf8")).not.toContain("release edit");

@@ -36,7 +36,12 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("CLI authentication diagnos
     try {
       await execute(
         process.env["CLI_BINARY"] ??
-          fileURLToPath(new URL("../../../target/debug/widefleet", import.meta.url)),
+          fileURLToPath(
+            new URL(
+              `../../../target/debug/widefleet${process.platform === "win32" ? ".exe" : ""}`,
+              import.meta.url,
+            ),
+          ),
         ["--url", unavailableOrigin, "whoami"],
         {
           timeout: 10000,
@@ -85,7 +90,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("CLI authentication diagnos
     expect(result.stderr).toContain("[widefleet telemetry]");
     expect(diagnostic).toContain("HTTP request failed");
     expect(diagnostic).toContain("Caused by:");
-    expect(diagnostic).toMatch(/connection refused/i);
+    expect(diagnostic).toMatch(/connection refused|actively refused/i);
     expect(result.stderr).not.toContain(unavailableOrigin);
     expect(result.stderr).not.toContain("synthetic-access-token-never-log");
     expect(result.stderr).not.toContain("Credential store failed");

@@ -9,7 +9,12 @@ access to a Widefleet installation; if you do not have one yet, start with the
 
 ## Install the CLI
 
-The CLI supports Linux x64 with glibc. Install Node.js 26 and pnpm 12.4.2
+Release `0.3.0` supports Linux x64 with glibc. Native macOS Apple Silicon,
+macOS Intel and Windows x64 support is implemented but unreleased. Choose a
+release that lists your platform before installing on macOS or Windows.
+Windows ARM64 and Linux musl are not release targets.
+
+Install Node.js 26 and pnpm 12.4.2
 for app development. The public npm package does not require a GitHub account
 or registry token. Use a CLI version compatible with your installation;
 the example below installs `0.3.0`.
@@ -18,6 +23,11 @@ the example below installs `0.3.0`.
 pnpm add --global widefleet@0.3.0 --registry=https://registry.npmjs.org
 widefleet --version
 ```
+
+Cross-platform releases use a small `widefleet` launcher with exact-version,
+platform-specific optional dependencies. pnpm downloads only the matching native
+package. Keep optional dependencies enabled; installation works with scripts disabled
+and the launcher does not download binaries when it starts.
 
 The installation commands work in Fish too. If pnpm reports that its global bin directory is missing from PATH, run `pnpm setup`, open a new terminal, and retry the installation. This configures pnpm's global command directory for your shell. If you previously installed an archive manually, remove only its old `~/.local/bin/widefleet` symlink so that it cannot shadow the pnpm-managed command; use `type -a widefleet` to inspect command resolution.
 
@@ -56,10 +66,11 @@ widefleet deploy
 ```
 
 In Fish, use `set -gx PLATFORM_URL https://platform.example.com` instead of `export`.
+In PowerShell, use `$env:PLATFORM_URL = "https://platform.example.com"`.
 
 Approve the device code in your browser. The CLI stores credentials in your
-operating system's credential store. On Linux, an available and unlocked Secret
-Service is required.
+operating system's credential store: Keychain on macOS, Credential Manager on
+Windows, and Secret Service on Linux. The store must be available and unlocked.
 
 For the local demo, use `http://localhost:25450` as `PLATFORM_URL` and approve the
 code with `admin@example.test`.
@@ -74,7 +85,7 @@ For ongoing development, follow [app development](/guides/app-development).
 
 ## Headless login
 
-On Unix without an available credential store, CLI 0.2.1 or newer supports an
+On Linux and macOS without an available credential store, CLI 0.2.1 or newer supports an
 explicit session file. Set it before login and keep it set for subsequent commands:
 
 ```sh
@@ -87,6 +98,10 @@ project and shared folders. The CLI restricts its permissions and renews the sav
 session automatically. Use `widefleet logout` with the same setting to revoke the
 refresh token and remove the file. See [CLI authentication](/reference/authentication)
 for exact file permissions, token scopes, renewal, logout failures and external credentials.
+
+Session files require Unix file permissions and are unavailable on Windows. Use
+Credential Manager for saved logins or `PLATFORM_ACCESS_TOKEN` for noninteractive
+commands. In PowerShell, set a token with `$env:PLATFORM_ACCESS_TOKEN = "TOKEN"`.
 
 ## Inspect runtime logs
 
@@ -113,7 +128,16 @@ lists common commands and output behavior.
 
 ## Install a release archive manually
 
-Download the matching CLI `.tar.gz` archive and `.sha256` file from [GitHub Releases](https://github.com/widefleet/widefleet/releases). Verify and extract them together in a directory you own:
+Download the matching CLI `.tar.gz` archive and `.sha256` file from [GitHub Releases](https://github.com/widefleet/widefleet/releases). Cross-platform releases use these archive suffixes:
+
+| Platform             | Archive suffix |
+| -------------------- | -------------- |
+| Linux x64, glibc     | `linux-x64`    |
+| macOS, Apple Silicon | `darwin-arm64` |
+| macOS, Intel         | `darwin-x64`   |
+| Windows x64          | `win32-x64`    |
+
+Verify and extract the archive in a directory you own. For Linux `0.3.0`:
 
 ```sh
 sha256sum --check widefleet-cli-0.3.0-linux-x64.tar.gz.sha256
@@ -129,6 +153,25 @@ pnpm check
 ```
 
 Keep the complete extracted release directory: `widefleet` finds `esbuild`, `release.json` and `starter` beside its resolved executable, including when invoked through a symlink. Copying only the Rust executable is not a complete installation. To upgrade, extract the new release in its own directory and update your symlink; existing app projects remain unchanged.
+
+On macOS, use the matching archive suffix and verify with `shasum -a 256 --check ARCHIVE.tar.gz.sha256` instead of `sha256sum`.
+
+On Windows, download a release that includes `win32-x64` and run these commands in PowerShell, replacing `VERSION` with its version:
+
+```powershell
+$archive = "widefleet-cli-VERSION-win32-x64.tar.gz"
+$expected = (Get-Content "$archive.sha256").Split(" ")[0]
+if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne $expected) { throw "Checksum mismatch" }
+$directory = "$env:LOCALAPPDATA\widefleet"
+New-Item -ItemType Directory -Force $directory | Out-Null
+tar -xzf $archive -C $directory
+$env:PATH = "$directory\widefleet-cli-VERSION-win32-x64;$env:PATH"
+widefleet --version
+```
+
+Add that extracted directory to your user PATH through Windows Environment Variables
+to keep it available in new terminals. Keep `widefleet.exe`, `esbuild.exe`,
+`release.json` and `starter` together.
 
 In environments without `/proc/self/exe`, the CLI resolves its invocation path, searching `PATH` when invoked by command name and following symlinks to the installation directory. Wrappers must preserve a resolvable executable path or command name in `argv[0]`. Deployment validates the installation metadata and bundled esbuild before starting the app build. These checks also run with `--skip-build`.
 
