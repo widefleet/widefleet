@@ -76,6 +76,8 @@ fi
         CLI_RELEASE_DIRECTORY: directory,
         GITHUB_STEP_SUMMARY: join(directory, "summary"),
         VERSION: "0.3.0",
+        GITHUB_SHA: "release-commit",
+        REVISION: "release-commit",
         HTTP_STATUS: "404",
         INTEGRITY: integrity,
         ...environment,
@@ -116,7 +118,7 @@ it("verifies an existing version in verify-only mode", async () => {
   const { directory, run } = await fixture();
 
   try {
-    await run({ HTTP_STATUS: "200", VERIFY_ONLY: "true" });
+    await run({ HTTP_STATUS: "200", VERIFY_ONLY: "true", GITHUB_SHA: "newer-main-commit" });
     expect(await readFile(join(directory, "npm.log"), "utf8")).not.toContain("publish ");
     expect(await readFile(join(directory, "summary"), "utf8")).toContain(
       "Verified widefleet@0.3.0",
@@ -133,6 +135,19 @@ it("refuses to publish a missing version in verify-only mode", async () => {
     await expect(run({ VERIFY_ONLY: "true" })).rejects.toThrow();
     await expect(readFile(join(directory, "npm.log"))).rejects.toThrow();
     await expect(readFile(join(directory, "summary"))).rejects.toThrow();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("refuses to publish with provenance identifying a different source commit", async () => {
+  const { directory, run } = await fixture();
+
+  try {
+    await expect(run({ GITHUB_SHA: "newer-main-commit" })).rejects.toThrow(
+      "Rerun the original GitHub Release workflow",
+    );
+    await expect(readFile(join(directory, "npm.log"))).rejects.toThrow();
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
