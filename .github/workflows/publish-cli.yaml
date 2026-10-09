@@ -84,7 +84,8 @@ jobs:
           docker compose -f infra/test/compose.yaml up -d --wait
       - name: Test the npm archive through a real local deployment
         run: |
-          sudo env "PATH=$PATH" "CI=true" \
+          # The runtime fixture needs root; pnpm installs into its disposable global directory.
+          sudo env -u SUDO_USER "PATH=$PATH" "CI=true" \
             "DOCKER_HOST=$(docker context inspect --format '{{.Endpoints.docker.Host}}')" \
             "PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright" \
             "CLI_NPM_PACKAGE=$RUNNER_TEMP/cli/widefleet-$VERSION.tgz" \
