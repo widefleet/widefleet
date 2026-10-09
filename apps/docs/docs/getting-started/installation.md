@@ -17,7 +17,7 @@ pnpm add --global widefleet
 widefleet --version
 ```
 
-The installation commands work in Fish too. If pnpm reports that its global bin directory is missing from PATH, run `pnpm setup`, open a new terminal, and retry the installation. This configures pnpm's global command directory for your shell. If you previously installed an archive manually, remove only its old `~/.local/bin/widefleet` symlink so that it cannot shadow the pnpm-managed command; use `type -a widefleet` to inspect command resolution.
+The installation commands work in Fish too. If pnpm reports that its global bin directory is missing from PATH, run `pnpm setup`, open a new terminal, and retry the installation. This configures pnpm's global command directory for your shell.
 
 To update, rerun the install command. To uninstall, run `pnpm remove --global widefleet`. pnpm owns the complete installation directory; keep its package contents together.
 
@@ -105,7 +105,7 @@ includes them. A failed log query is not evidence that the app has no errors.
 
 | Symptom                                  | Next step                                                                                                                                                       |
 | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Registry returns 404                     | Check the package name and published version on [npm](https://www.npmjs.com/package/widefleet); use the matching release archive if needed.                     |
+| Registry returns 404                     | Check the package name and published version on [npm](https://www.npmjs.com/package/widefleet).                                                                 |
 | `widefleet` is not found                 | Reopen the terminal after `pnpm setup`; check `Get-Command widefleet -All` in PowerShell or `type -a widefleet` in Bash/Fish for an older installation on PATH. |
 | Login cannot access the credential store | Check your operating system's credential store; see [headless login](#headless-login) for alternatives.                                                         |
 | Deployment fails or stays queued         | Follow [deployment diagnostics](/guides/deployments#inspect-a-failure).                                                                                         |
@@ -113,58 +113,3 @@ includes them. A failed log query is not evidence that the app has no errors.
 Next, [share the app with colleagues](/guides/applications) or
 [publish an isolated preview](/guides/deployments). The [CLI reference](/reference/cli)
 lists common commands and output behavior.
-
-## Install a release archive manually
-
-Download the matching CLI `.tar.gz` archive and `.sha256` file from [GitHub Releases](https://github.com/widefleet/widefleet/releases). The archive suffix identifies the platform:
-
-| Platform             | Archive suffix |
-| -------------------- | -------------- |
-| Linux x64, glibc     | `linux-x64`    |
-| macOS, Apple Silicon | `darwin-arm64` |
-| macOS, Intel         | `darwin-x64`   |
-| Windows x64          | `win32-x64`    |
-
-Verify and extract the archive in a directory you own. In the Linux example below,
-replace `VERSION` with the downloaded release's version:
-
-```sh
-sha256sum --check widefleet-cli-VERSION-linux-x64.tar.gz.sha256
-mkdir -p "$HOME/.local/lib/widefleet" "$HOME/.local/bin"
-tar -xzf widefleet-cli-VERSION-linux-x64.tar.gz -C "$HOME/.local/lib/widefleet"
-ln -s "$HOME/.local/lib/widefleet/widefleet-cli-VERSION-linux-x64/widefleet" "$HOME/.local/bin/widefleet"
-export PATH="$HOME/.local/bin:$PATH"
-widefleet --version
-widefleet init my-app
-cd my-app
-pnpm install --frozen-lockfile
-pnpm check
-```
-
-Keep the complete extracted release directory: `widefleet` finds `esbuild`, `release.json` and `starter` beside its resolved executable, including when invoked through a symlink. Copying only the Rust executable is not a complete installation. To upgrade, extract the new release in its own directory and update your symlink; existing app projects remain unchanged.
-
-On macOS, use the matching archive suffix and verify with `shasum -a 256 --check ARCHIVE.tar.gz.sha256` instead of `sha256sum`.
-
-On Windows, use the `win32-x64` archive and run these commands in PowerShell,
-replacing `VERSION` with the downloaded release's version:
-
-```powershell
-$archive = "widefleet-cli-VERSION-win32-x64.tar.gz"
-$expected = (Get-Content "$archive.sha256").Split(" ")[0]
-if ((Get-FileHash $archive -Algorithm SHA256).Hash -ne $expected) { throw "Checksum mismatch" }
-$directory = "$env:LOCALAPPDATA\widefleet"
-New-Item -ItemType Directory -Force $directory | Out-Null
-tar -xzf $archive -C $directory
-$env:PATH = "$directory\widefleet-cli-VERSION-win32-x64;$env:PATH"
-widefleet --version
-```
-
-Add that extracted directory to your user PATH through Windows Environment Variables
-to keep it available in new terminals. Keep `widefleet.exe`, `esbuild.exe`,
-`release.json` and `starter` together.
-
-In environments without `/proc/self/exe`, the CLI resolves its invocation path, searching `PATH` when invoked by command name and following symlinks to the installation directory. Wrappers must preserve a resolvable executable path or command name in `argv[0]`. Deployment validates the installation metadata and bundled esbuild before starting the app build. These checks also run with `--skip-build`.
-
-Follow the generated project's README for login, app creation and deployment. Set `PLATFORM_URL` to your installation's management origin. For the local demo that is `http://localhost:25450`; choose `admin@example.test` when approving device login. Select additional API scopes with `widefleet login --scope platform:read platform:write network:manage`; commands share one saved session. See [network permissions](/guides/network) for project-based grant management. The default credential store on Linux requires an available, unlocked Secret Service and a session D-Bus. The demo's `./dev cli` wrapper is a separate Docker convenience and does not exercise native credential storage.
-
-`widefleet init` works offline and needs no account. Installing the generated project's dependencies requires access to the npm registry. The project has its own lockfile, strict TypeScript configuration, type-aware lint rules and formatter. Its identity helper is normal app source; later helper changes must be applied to existing apps deliberately.
