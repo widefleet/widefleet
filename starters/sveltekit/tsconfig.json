@@ -1,0 +1,17 @@
+{
+  "extends": ["$app/tsconfig", "@tsconfig/strictest/tsconfig.json"],
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "allowJs": false,
+    "checkJs": false
+  },
+  "include": ["src", "tools", "vite.config.ts", ".platform/worker-configuration.d.ts"],
+  "exclude": ["tools/oxlint"]
+}

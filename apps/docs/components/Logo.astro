@@ -1,0 +1,94 @@
+---
+interface Props {
+  logo?: { href: string } | null;
+}
+
+const { logo } = Astro.props;
+---
+
+<div class="widefleet-identity">
+  <a class="widefleet-brand" href={logo?.href ?? "/"} aria-label="Widefleet home" data-astro-reload>
+    <img src="/docs/brand/widefleet-mark-q2.svg" width="1052" height="563" alt="" />
+    <span>widefleet</span>
+  </a>
+  <a class="docs-label" href="/docs" aria-label="Documentation home">Docs</a>
+</div>
+
+<style>
+  .widefleet-identity {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+
+  .widefleet-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    color: #000;
+    font-size: 26px;
+    font-weight: 600;
+    letter-spacing: -1.4px;
+    line-height: 1;
+    text-decoration: none;
+  }
+
+  .widefleet-brand img {
+    width: auto;
+    height: 26px;
+    flex-shrink: 0;
+  }
+
+  .docs-label {
+    padding-left: 12px;
+    border-left: 1px solid var(--blume-border);
+    font-size: 12px;
+    color: var(--blume-muted-foreground);
+    text-decoration: none;
+  }
+
+  .docs-label:hover {
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+
+  :global([data-theme="dark"]) .widefleet-brand {
+    padding: 6px 9px;
+    border-radius: 3px;
+    background: #fafaf7;
+  }
+
+  @media (max-width: 480px) {
+    .widefleet-brand {
+      font-size: 24px;
+    }
+
+    .widefleet-brand img {
+      height: 24px;
+    }
+
+    .widefleet-identity {
+      gap: 8px;
+    }
+
+    .docs-label {
+      padding-left: 8px;
+    }
+  }
+
+  @media (max-width: 360px) {
+    .widefleet-brand {
+      font-size: 22px;
+      gap: 7px;
+    }
+
+    .widefleet-brand img {
+      height: 20px;
+    }
+
+    .docs-label {
+      display: none;
+    }
+  }
+</style>

@@ -1,0 +1,22 @@
+services:
+  control-plane:
+    environment:
+      TLS_MODE: cloudflare
+      ACME_ENVIRONMENT: ${ACME_ENVIRONMENT:-production}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL}
+  agent:
+    environment:
+      TLS_MODE: cloudflare
+  proxy:
+    environment:
+      CF_DNS_API_TOKEN_FILE: /run/secrets/cloudflare_dns_token
+    volumes:
+      - acme:/acme
+      - type: bind
+        source: ${CLOUDFLARE_DNS_TOKEN_FILE:?Set the absolute Cloudflare token file path}
+        target: /run/secrets/cloudflare_dns_token
+        read_only: true
+        bind: { create_host_path: false }
+
+volumes:
+  acme:

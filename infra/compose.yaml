@@ -1,0 +1,9 @@
+# Reference installation with local PostgreSQL and RustFS.
+# External services compose the same base with the selected storage file instead.
+name: app-platform
+include:
+  - path:
+      - compose.base.yaml
+      - compose.postgres.yaml
+      - compose.s3.yaml
+      - compose.rustfs.yaml

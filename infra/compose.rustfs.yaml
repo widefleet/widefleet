@@ -1,0 +1,23 @@
+services:
+  storage:
+    image: rustfs/rustfs:1.0.1@sha256:1803faef57627e2d9c2e7d89d655d712ddded5389040054987163043fecb6a3c
+    container_name: app-platform-storage
+    restart: unless-stopped
+    environment:
+      RUSTFS_ACCESS_KEY: ${S3_ACCESS_KEY_ID:?Set S3_ACCESS_KEY_ID}
+      RUSTFS_SECRET_KEY: ${S3_SECRET_ACCESS_KEY:?Set S3_SECRET_ACCESS_KEY}
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ENABLE: "false"
+      RUSTFS_OBS_LOGGER_LEVEL: warn
+    volumes:
+      - ${PLATFORM_DATA_DIRECTORY}/objects:/data
+    tmpfs:
+      - /logs:uid=10001,gid=10001
+    networks: [management]
+
+  control-plane:
+    depends_on:
+      storage: { condition: service_started }
+  agent:
+    environment:
+      PLATFORM_TRUSTED_CONTAINERS: app-platform-proxy,app-platform-storage

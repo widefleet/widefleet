@@ -1,0 +1,80 @@
+---
+title: Applications
+description: Give colleagues access to a deployed app and publish it in the app catalog.
+---
+
+Use this guide to share a deployed app with your team. You need an authenticated
+CLI session and app-owner or organization-administrator permissions. Start with
+[your first deployment](/getting-started/installation) if the app is not running yet.
+
+:::note[Version requirement]
+App access groups and the catalog require CLI and platform `0.3.0` or newer.
+Ask your operator for matching CLI, management and agent versions. Check that
+`widefleet access --help` and `widefleet catalog --help` are available before continuing.
+:::
+
+## Check the app
+
+Run these commands from the app project, with `PLATFORM_URL` set to your installation:
+
+```sh
+widefleet whoami
+widefleet apps
+widefleet access
+```
+
+`apps` lists the apps you can manage, including their IDs. `access` reads the app
+named in `wrangler.jsonc`; it does not change who can open the app.
+
+## Choose who can open it
+
+Company sign-in is always required. An empty access-group list admits every user
+allowed by the installation's app SSO. To restrict access, obtain a stable group
+ID from your identity provider and replace `GROUP_ID` below:
+
+```sh
+widefleet access set --group GROUP_ID
+widefleet access
+```
+
+`set` replaces the entire group list. Repeat `--group` to allow several groups;
+membership in any one is sufficient. The command waits for activation by default.
+Existing and future previews inherit the same rule.
+
+To deliberately allow all authenticated company users again:
+
+```sh
+widefleet access set --all-authenticated
+```
+
+You can also edit these rules in the app's **Access** tab. App usage and management
+permissions are separate: permission to edit an app does not bypass its usage
+rules. Business permissions inside the app remain the app author's responsibility.
+
+## Make the app discoverable
+
+Replace `APP_UUID` with the app ID shown by `widefleet apps`:
+
+```sh
+widefleet catalog publish APP_UUID
+widefleet catalog list
+```
+
+Only original apps with an active deployment can be listed; previews cannot. Colleagues can
+find it in **App catalog** and follow its launch URL. Listing an app does not grant
+management access or bypass its SSO and group rules. Use
+`widefleet catalog unpublish APP_UUID` to withdraw the listing without deleting the app.
+
+## Verify access
+
+Open the launch URL with an intended user's account. Check that an account outside
+the allowed groups is denied. After changing directory memberships, sign in again:
+existing SSO sessions can retain earlier group claims.
+
+If access activation fails, inspect `widefleet access` and the reported error. The
+last installed rules can remain active; a saved change is not proof of enforcement.
+After the operator resolves the cause, save the intended rules again and verify.
+
+Next, [publish a preview or update the app](/guides/deployments).
+
+See [app access reference](/reference/app-access) for activation states, the API and custom proxy topology.

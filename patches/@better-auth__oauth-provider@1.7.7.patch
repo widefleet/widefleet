@@ -1,0 +1,51 @@
+diff --git a/dist/oauth-Dtt-caL2.d.mts b/dist/oauth-Dtt-caL2.d.mts
+index 7dc7a3b92fe1a7df8a8561992059ba37f9668d50..2e63e480bfa22e5e061923a16b524d9af549cef0 100644
+--- a/dist/oauth-Dtt-caL2.d.mts
++++ b/dist/oauth-Dtt-caL2.d.mts
+@@ -786,9 +786,6 @@ declare const oauthProvider: <O extends OAuthOptions<Scope[]>>(options: O) => {
+             required: false;
+             schema: {
+               type: "string";
+-              format?: undefined;
+-              minimum?: undefined;
+-              items?: undefined;
+             };
+             description: string;
+           } | {
+@@ -797,9 +794,6 @@ declare const oauthProvider: <O extends OAuthOptions<Scope[]>>(options: O) => {
+             required: true;
+             schema: {
+               type: "string";
+-              format?: undefined;
+-              minimum?: undefined;
+-              items?: undefined;
+             };
+             description: string;
+           } | {
+@@ -809,8 +803,6 @@ declare const oauthProvider: <O extends OAuthOptions<Scope[]>>(options: O) => {
+             schema: {
+               type: "string";
+               format: string;
+-              minimum?: undefined;
+-              items?: undefined;
+             };
+             description: string;
+           } | {
+@@ -820,8 +812,6 @@ declare const oauthProvider: <O extends OAuthOptions<Scope[]>>(options: O) => {
+             schema: {
+               type: "integer";
+               minimum: number;
+-              format?: undefined;
+-              items?: undefined;
+             };
+             description: string;
+           } | {
+@@ -833,8 +823,6 @@ declare const oauthProvider: <O extends OAuthOptions<Scope[]>>(options: O) => {
+               items: {
+                 type: "string";
+               };
+-              format?: undefined;
+-              minimum?: undefined;
+             };
+             description: string;
+           })[];

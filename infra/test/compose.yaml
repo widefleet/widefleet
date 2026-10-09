@@ -1,0 +1,30 @@
+name: internal-app-platform-test
+services:
+  rustfs:
+    image: rustfs/rustfs:1.0.1@sha256:1803faef57627e2d9c2e7d89d655d712ddded5389040054987163043fecb6a3c
+    ports:
+      - "127.0.0.1:25400:9000"
+    environment:
+      RUSTFS_ACCESS_KEY: local-tests
+      RUSTFS_SECRET_KEY: local-tests-only
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ENABLE: "false"
+      RUSTFS_OBS_LOGGER_LEVEL: warn
+    tmpfs:
+      - /data:uid=10001,gid=10001
+      - /logs:uid=10001,gid=10001
+  postgres:
+    image: postgres:18.1
+    environment:
+      POSTGRES_USER: platform_test
+      POSTGRES_PASSWORD: local-test-only
+      POSTGRES_DB: platform_test
+    ports:
+      - "127.0.0.1:25432:5432"
+    tmpfs:
+      - /var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U platform_test -d platform_test"]
+      interval: 1s
+      timeout: 3s
+      retries: 30

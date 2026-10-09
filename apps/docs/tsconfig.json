@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "include": [
+    "blume.config.ts",
+    "components.ts",
+    "docs/**/meta.ts",
+    "playwright.config.ts",
+    "tests/**/*.ts",
+    "scripts/**/*.ts"
+  ]
+}

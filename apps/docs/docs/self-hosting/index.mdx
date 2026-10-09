@@ -1,0 +1,61 @@
+---
+title: Self-hosting
+description: Requirements and installation guidance for operating Widefleet on your own infrastructure.
+sidebar:
+  label: Overview
+---
+
+Run the Widefleet platform in your own environment. Your team builds and deploys
+apps; you operate management, app runtimes, identity integration, updates and
+backups.
+
+For a first look without company SSO or DNS configuration, use the
+[local quickstart](/getting-started/quickstart).
+
+## Requirements
+
+- A Linux x86-64 host with Docker Engine 29.8.1 and Docker Compose 2.20.0 or newer.
+- A management hostname and a separate app domain with DNS and HTTPS configured.
+- PostgreSQL and object storage, either on the host or supplied by external services.
+- Microsoft Entra or another supported OpenID Connect provider for company sign-in.
+- An operator responsible for upgrades, monitoring, backups and recovery.
+
+Published platform images include the required runtime and setup tools. The
+operator host does not need a local Node.js, pnpm or Rust installation.
+
+## Install the platform
+
+Follow the [single-host installation guide](/self-hosting/installation)
+for the maintained Compose configuration and commands. Run its commands from a
+checkout of the matching release. It covers:
+
+1. Configuring domains, database and storage credentials, persistent data and TLS.
+2. Starting the platform and creating the first administrator.
+3. Connecting management and app sign-in to your identity provider.
+4. Verifying company sign-in before completing setup.
+5. Operating, upgrading and recovering the installation.
+
+Keep first setup accessible only to the installing administrator, or configure
+the documented bootstrap file before exposing it. The first person who completes
+setup becomes the installation owner.
+
+## External services
+
+The default Compose configuration uses PostgreSQL and RustFS. See
+[external services and automatic HTTPS](/self-hosting/external-services)
+for external PostgreSQL, cloud storage and certificate options, and
+[storage backends](/self-hosting/storage)
+for supported storage configurations and their verification limits.
+
+## Operate the installation
+
+- [Upgrades](/self-hosting/installation#upgrade-deliberately): update matching components and verify existing apps.
+- [Backup and restore](/self-hosting/installation#whole-installation-backup-and-restore): preserve and recover the coordinated installation state.
+- [Runtime logs](/self-hosting/runtime-logs): enable telemetry and investigate app failures.
+- [Installation reporting](/self-hosting/installation-reporting): inspect reporting and control its two opt-outs.
+- [Runtime updates](/reference/runtime#versions-and-updates): select, verify and roll back runtime packages.
+
+## Hosted version
+
+**Widefleet Cloud is coming soon.** Self-hosting is the available way to operate
+the platform today.

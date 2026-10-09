@@ -1,0 +1,65 @@
+extensions:
+  file_storage:
+    directory: /var/lib/otelcol
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+        include_metadata: true
+        max_request_body_size: 16777216
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 384
+    spike_limit_mib: 64
+  resource/app:
+    attributes:
+      # The receiver is private. Only the authenticated management ingress can
+      # supply this header; never expose this receiver directly to app networks.
+      - key: service.name
+        action: upsert
+        from_context: metadata.x-widefleet-app-id
+        default_value: rejected
+      - key: widefleet.app_id
+        action: upsert
+        from_context: metadata.x-widefleet-app-id
+        default_value: rejected
+
+exporters:
+  clickhouse:
+    endpoint: tcp://clickhouse:9000
+    username: widefleet_ingest
+    password: ${env:CLICKHOUSE_INGEST_PASSWORD}
+    database: widefleet
+    create_schema: false
+    timeout: 10s
+    logs_table_name: otel_logs
+    traces_table_name: otel_traces
+    sending_queue:
+      storage: file_storage
+      queue_size: 10000
+      num_consumers: 1
+      batch:
+        min_size: 1000
+        max_size: 10000
+        flush_timeout: 1s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 30s
+      max_elapsed_time: 0s
+
+service:
+  extensions: [file_storage]
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resource/app]
+      exporters: [clickhouse]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource/app]
+      exporters: [clickhouse]

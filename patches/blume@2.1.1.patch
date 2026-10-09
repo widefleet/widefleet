@@ -1,0 +1,169 @@
+diff --git a/src/analytics/posthog.ts b/src/analytics/posthog.ts
+index 77b477d12d7aa6bc3bd378399ab99d17ad35f8d1..59702b13b0dc5e9119c4f3cc9b37278bd3a03938 100644
+--- a/src/analytics/posthog.ts
++++ b/src/analytics/posthog.ts
+@@ -87,10 +87,48 @@ export const posthogHead = (options: PosthogOptions): HeadScript[] => {
+   const { host, key, ...init } = options;
+   const initOptions = { api_host: host ?? POSTHOG_DEFAULT_HOST, ...init };
+   const pageviews = capturesNavigations(init) ? POSTHOG_SPA_PAGEVIEWS : "";
++  const managesConsent =
++    init.cookieless_mode === "on_reject" && init.opt_out_capturing_by_default === true;
++  // This mode starts with cookieless pageviews and lets the SDK own the
++  // transition to cookies. Other providers still wait for Blume's consent.
++  const initialize = managesConsent
++    ? `(() => {
++        const consent = window.blumeConsent;
++        const options = ${inlineJson(initOptions)};
++        if (consent) {
++          const autocapture = options.autocapture ?? true;
++          const disablePersistence = options.disable_persistence ?? false;
++          options.autocapture = consent.analytics === true ? autocapture : false;
++          options.disable_persistence = consent.analytics !== true || disablePersistence;
++          options.before_send = (event) => {
++            if (consent.analytics === true) return event;
++            return event.event === "$pageview" && event.properties?.$cookieless_mode === true ? event : null;
++          };
++          options.loaded = (sdk) => {
++            const sync = () => {
++              const accepted = consent.analytics === true;
++              sdk.set_config({
++                autocapture: accepted ? autocapture : false,
++                disable_persistence: !accepted || disablePersistence,
++              });
++              const status = sdk.get_explicit_consent_status();
++              if (accepted && status !== "granted") {
++                sdk.opt_in_capturing({ captureEventName: false });
++              } else if (!accepted && status === "granted") {
++                sdk.opt_out_capturing();
++              }
++            };
++            window.addEventListener("blume:consent", sync);
++            sync();
++          };
++        }
++        posthog.init(${inlineJson(key)}, options);
++      })();`
++    : `posthog.init(${inlineJson(key)},${inlineJson(initOptions)});`;
+   return [
+     {
+-      attributes: {},
+-      content: `${POSTHOG_LOADER}posthog.init(${inlineJson(key)},${inlineJson(initOptions)});${pageviews}`,
++      attributes: managesConsent ? { "data-blume-posthog-consent": "cookieless" } : {},
++      content: `${POSTHOG_LOADER}${initialize}${pageviews}`,
+     },
+   ];
+ };
+diff --git a/src/components/layout/Analytics.astro b/src/components/layout/Analytics.astro
+index 35a212676aadb23f3d82859d508154a7af55752d..cdb35184ea7e5489b295c085c30a59822cb41239 100644
+--- a/src/components/layout/Analytics.astro
++++ b/src/components/layout/Analytics.astro
+@@ -12,19 +12,17 @@ import type { BlumeDataConfig } from "../../core/data.ts";
+ // in production builds so `blume dev` stays clean and local traffic never
+ // reaches your analytics.
+ //
+-// With `consent` configured, every tag is held as inert `text/plain` until
++// With `consent` configured, tags are held as inert `text/plain` until
+ // the reader allows analytics, when the consent runtime runs it
+ // (`consent/client.ts`); Vercel's component sends nothing until then instead
+-// (`consent/init.ts`).
++// (`consent/init.ts`). PostHog's cookieless default mode manages its own
++// consent and loads immediately, sending only pageviews before approval.
+ interface Props {
+   analytics?: BlumeDataConfig["analytics"] | null;
+ }
+
+ const { analytics } = Astro.props;
+ const nodes = analyticsHead(import.meta.env.PROD ? (analytics ?? []) : []);
+-const held = data.config.consent
+-  ? { "data-blume-consent": "analytics", type: "text/plain" }
+-  : {};
+ ---
+
+ {
+@@ -32,6 +30,12 @@ const held = data.config.consent
+     if (node.type === "vercel") {
+       return <VercelAnalytics {...node.props} />;
+     }
++    const held =
++      data.config.consent &&
++      node.attributes["data-blume-consent"] !== "essential" &&
++      node.attributes["data-blume-posthog-consent"] !== "cookieless"
++        ? { "data-blume-consent": "analytics", type: "text/plain" }
++        : {};
+     return node.content === null ? (
+       <script is:inline {...node.attributes} {...held} />
+     ) : (
+diff --git a/src/components/layout/Header.astro b/src/components/layout/Header.astro
+index 801b3f910cca11565cb35d0db39498ef368f0210..1f6e8fb60037a484c504d171df91d6939bc64d00 100644
+--- a/src/components/layout/Header.astro
++++ b/src/components/layout/Header.astro
+@@ -281,8 +281,7 @@ const clickScript = `(()=>{const dr=()=>{const h=document.querySelector("[data-b
+       )
+     }
+     {
+-      /* Plain links first, then the one filled button: the reader's eye lands
+-         on the button because nothing beside it competes. */
++      /* Secondary links precede search and theme controls; the CTA comes last. */
+       (navigation.actions ?? []).map((action) => (
+         <a
+           class={actionClass}
+@@ -293,18 +292,6 @@ const clickScript = `(()=>{const dr=()=>{const h=document.querySelector("[data-b
+         </a>
+       ))
+     }
+-    {
+-      navigation.cta && (
+-        <a
+-          class={ctaClass}
+-          href={withBase(navigation.cta.href)}
+-          {...newTabAttrs(navigation.cta.href)}
+-        >
+-          {navigation.cta.label}
+-          <Icon name="chevron-right" size={14} />
+-        </a>
+-      )
+-    }
+     {
+       /* The icon buttons, each named by a tooltip. The site's repository and
+          social profiles live in the footer. */
+@@ -330,6 +317,18 @@ const clickScript = `(()=>{const dr=()=>{const h=document.querySelector("[data-b
+       <span class="hidden dark:inline-flex"><Icon name="moon" size={18} /></span>
+     </button>
+     {assistantEnabled && <Ask strings={assistantStrings} />}
++    {
++      navigation.cta && (
++        <a
++          class={ctaClass}
++          href={withBase(navigation.cta.href)}
++          {...newTabAttrs(navigation.cta.href)}
++        >
++          {navigation.cta.label}
++          <Icon name="chevron-right" size={14} />
++        </a>
++      )
++    }
+   </div>
+ </header>
+ <script is:inline set:html={clickScript} />
+diff --git a/src/consent/init.ts b/src/consent/init.ts
+index 35ac8b6eef10a32c3d25f354cca02d7fb8b00205..27a8fad7775c3dfb4f43cc0ef94dc63695db39c2 100644
+--- a/src/consent/init.ts
++++ b/src/consent/init.ts
+@@ -4,7 +4,8 @@
+  * held analytics. It creates `window.blumeConsent`, the one contract every
+  * consent adapter talks to:
+  *
+- * - `analytics`: `null` until an adapter reports, then the reader's choice.
++ * - `analytics`: the native banner's stored choice, or `null` until an
++ *   adapter reports, then the reader's choice.
+  * - `set({ analytics })`: what an adapter calls with the reader's choice, on
+  *   load for a returning reader and again whenever it changes. A change fires
+  *   a `blume:consent` event on `window` (`detail: { analytics }`), which the
+@@ -26,4 +27,6 @@
+  * router never runs an inline script twice, and the state it creates lives
+  * on across navigations.
+  */
+-export const CONSENT_INIT_SCRIPT = `(()=>{if(window.blumeConsent){return;}const c={analytics:null,kind:document.currentScript?.dataset.kind??"",set(s){const a=s?.analytics===true;if(c.analytics===a){return;}c.analytics=a;dispatchEvent(new CustomEvent("blume:consent",{detail:{analytics:a}}));}};window.blumeConsent=c;window.webAnalyticsBeforeSend=(e)=>c.analytics===true?e:null;})();`;
++import { CONSENT_STORAGE_KEY } from "../components/layout/consent/native.ts";
++
++export const CONSENT_INIT_SCRIPT = `(()=>{if(window.blumeConsent){return;}const c={analytics:null,kind:document.currentScript?.dataset.kind??"",set(s){const a=s?.analytics===true;if(c.analytics===a){return;}c.analytics=a;dispatchEvent(new CustomEvent("blume:consent",{detail:{analytics:a}}));}};if(c.kind==="native"){try{const v=localStorage.getItem(${JSON.stringify(CONSENT_STORAGE_KEY)});if(v==="granted"||v==="denied"){c.analytics=v==="granted";}}catch{}}window.blumeConsent=c;window.webAnalyticsBeforeSend=(e)=>c.analytics===true?e:null;})();`;

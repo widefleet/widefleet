@@ -1,0 +1,48 @@
+services:
+  control-plane:
+    environment:
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: widefleet_reader
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_READ_PASSWORD:?Set CLICKHOUSE_READ_PASSWORD}
+      OTEL_COLLECTOR_URL: http://otel-collector:4318
+    networks: [telemetry]
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.8.18.2@sha256:d97c9867f770fab06113bfe82f2cd17dcc9535f0773972469a2464b4fefc6a48
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_SKIP_USER_SETUP: "1"
+      CLICKHOUSE_READ_PASSWORD: ${CLICKHOUSE_READ_PASSWORD:?Set CLICKHOUSE_READ_PASSWORD}
+      CLICKHOUSE_INGEST_PASSWORD: ${CLICKHOUSE_INGEST_PASSWORD:?Set CLICKHOUSE_INGEST_PASSWORD}
+    volumes:
+      - ${PLATFORM_DATA_DIRECTORY:?Set PLATFORM_DATA_DIRECTORY}/clickhouse:/var/lib/clickhouse
+      - ./telemetry/users.xml:/etc/clickhouse-server/users.d/widefleet.xml:ro
+      - ./telemetry/schema.sql:/docker-entrypoint-initdb.d/001-widefleet.sql:ro
+    networks: [telemetry]
+    healthcheck:
+      test: [CMD, clickhouse-client, --query, "SELECT 1 FROM widefleet.runtime_logs LIMIT 0"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    ulimits:
+      nofile: { soft: 262144, hard: 262144 }
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.162.0@sha256:39923a8e431bd1f57be82411999d389fcfe40857492e4365456d97a4c1f74be6
+    restart: unless-stopped
+    user: "10001:10001"
+    command: [--config=/etc/otelcol/config.yaml]
+    environment:
+      CLICKHOUSE_INGEST_PASSWORD: ${CLICKHOUSE_INGEST_PASSWORD:?Set CLICKHOUSE_INGEST_PASSWORD}
+    volumes:
+      - ./telemetry/collector.yaml:/etc/otelcol/config.yaml:ro
+      - ${PLATFORM_DATA_DIRECTORY}/otel-queue:/var/lib/otelcol
+    networks: [telemetry]
+    depends_on:
+      clickhouse: { condition: service_healthy }
+    mem_limit: 512m
+    stop_grace_period: 30s
+
+networks:
+  telemetry:
+    internal: true

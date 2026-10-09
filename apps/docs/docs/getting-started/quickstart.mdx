@@ -1,0 +1,72 @@
+---
+title: Quickstart
+description: Run Widefleet locally with a working notes app and synthetic test identities.
+---
+
+Try the complete platform locally. The demo starts Widefleet, a local identity
+provider and the **Team Notes** app with a database and private photo uploads.
+
+## Prerequisites
+
+- Linux x86-64 with Docker Engine 29.8.1 and Docker Compose 2.20.0 or newer.
+- Bash, Git and an internet connection for the pinned dependencies.
+- Available ports `25450`, `25452` and `25453`.
+
+Rootless Docker is supported. You do not need a local Node.js, pnpm or Rust
+installation, a company identity-provider registration, or a domain.
+
+## Start the demo
+
+```sh
+git clone https://github.com/widefleet/widefleet.git
+cd widefleet
+./dev up
+```
+
+Open [the local management app](http://localhost:25450). Choose the Microsoft
+sign-in button and select `admin@example.test` in the local identity provider.
+
+Open **Team Notes** in management, choose **Open app**, and sign in with the same
+account. Add a note and a photo to try the app's database and private file storage.
+
+:::note[Local HTTPS]
+The demo uses self-signed certificates. On the first visit, accept the browser's
+certificate exception for `https://auth.apps.localhost:25453` and
+`https://team-notes.apps.localhost:25453`. These hosts are local to your machine;
+the demo does not install a system certificate.
+:::
+
+## Make a change
+
+Edit the included app in `starters/sveltekit`, then deploy it:
+
+```sh
+./dev deploy
+./dev cli apps
+./dev cli logs --level error --json
+```
+
+The demo CLI wrapper uses a short-lived test-administrator token. To work on a
+separate app, follow [CLI installation](/getting-started/installation).
+
+## Stop and resume
+
+```sh
+./dev down
+./dev up
+```
+
+Stopping the demo preserves its apps and data. The local demo uses synthetic
+identities and is separate from a real company installation. Follow
+[self-hosting](/self-hosting) to operate Widefleet for your team.
+
+## If the demo does not start
+
+| Symptom                                        | Next step                                                                                                                                                                                                                            |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Docker is unavailable or the context is remote | Start a local Linux Docker engine and select its context. The demo requires a local Unix socket.                                                                                                                                     |
+| A port is already in use                       | Free ports `25450`, `25452` and `25453`.                                                                                                                                                                                             |
+| Another checkout owns the local demo           | Run `./dev up` from that checkout. `./dev down` preserves its containers and ownership. To switch checkouts, first run `./dev reset --yes` from the owning checkout only if you intend to permanently delete its demo apps and data. |
+| Management opens but the app does not          | Check both local certificate exceptions above, then inspect `./dev logs`.                                                                                                                                                            |
+
+Once you can save a note and photo, [create an independent app](/getting-started/installation).

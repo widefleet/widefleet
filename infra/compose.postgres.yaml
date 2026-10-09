@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:18.1
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: platform
+      POSTGRES_DB: platform
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - ${PLATFORM_DATA_DIRECTORY:?Use an absolute data directory}/postgres:/var/lib/postgresql
+    networks: [management]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U platform -d platform"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  control-plane:
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      DATABASE_URL: postgres://platform:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/platform

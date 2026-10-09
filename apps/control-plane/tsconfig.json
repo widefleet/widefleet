@@ -1,0 +1,12 @@
+{
+  "extends": ["$app/tsconfig", "../../tsconfig.base.json"],
+  "include": [
+    "src",
+    "tools",
+    "local",
+    "tests",
+    "vite.config.ts",
+    "drizzle.config.ts",
+    "playwright.config.ts"
+  ]
+}

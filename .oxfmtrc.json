@@ -1,0 +1,33 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "ignorePatterns": [
+    "tools/oxlint/anti-slop/**",
+    "pnpm-lock.yaml",
+    "**/Cargo.lock",
+    "**/.svelte-kit/**",
+    "**/.blume/**",
+    "**/.blume-verify/**",
+    "**/.wrangler/**",
+    "**/dist/**",
+    "**/build/**",
+    "**/target/**",
+    ".tools/**",
+    ".local/**"
+  ],
+  "tabWidth": 2,
+  "useTabs": false,
+  "overrides": [
+    {
+      "files": [
+        "apps/control-plane/src/routes/**/*.svelte",
+        "apps/control-plane/src/lib/*.svelte",
+        "apps/control-plane/src/lib/components/*.svelte",
+        "apps/control-plane/src/lib/components/ui/button/button.svelte",
+        "apps/control-plane/src/lib/components/ui/native-select/native-select.svelte"
+      ],
+      "options": {
+        "svelte": true
+      }
+    }
+  ]
+}

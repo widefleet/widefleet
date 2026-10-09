@@ -1,0 +1,30 @@
+name: widefleet-telemetry-test
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.8.18.2@sha256:d97c9867f770fab06113bfe82f2cd17dcc9535f0773972469a2464b4fefc6a48
+    environment:
+      CLICKHOUSE_SKIP_USER_SETUP: "1"
+      CLICKHOUSE_READ_PASSWORD: local-reader-only
+      CLICKHOUSE_INGEST_PASSWORD: local-ingest-only
+    ports: ["127.0.0.1:25481:8123"]
+    volumes:
+      - ../telemetry/users.xml:/etc/clickhouse-server/users.d/widefleet.xml:ro
+      - ../telemetry/schema.sql:/docker-entrypoint-initdb.d/001-widefleet.sql:ro
+    tmpfs: [/var/lib/clickhouse, /var/log/clickhouse-server]
+    healthcheck:
+      test: [CMD, clickhouse-client, --query, "SELECT 1 FROM widefleet.runtime_logs LIMIT 0"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.162.0@sha256:39923a8e431bd1f57be82411999d389fcfe40857492e4365456d97a4c1f74be6
+    user: "10001:10001"
+    command: [--config=/etc/otelcol/config.yaml]
+    environment:
+      CLICKHOUSE_INGEST_PASSWORD: local-ingest-only
+    ports: ["127.0.0.1:25482:4318"]
+    volumes:
+      - ../telemetry/collector.yaml:/etc/otelcol/config.yaml:ro
+    tmpfs: ["/var/lib/otelcol:uid=10001,gid=10001"]
+    depends_on:
+      clickhouse: { condition: service_healthy }

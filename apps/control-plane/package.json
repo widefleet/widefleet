@@ -1,0 +1,71 @@
+{
+  "name": "@platform/control-plane",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "files": [
+    "build",
+    "migrations",
+    "src",
+    "tools"
+  ],
+  "type": "module",
+  "imports": {
+    "#lib/*": "./src/lib/*.ts",
+    "#server/*": "./src/lib/server/*.ts",
+    "#shadcn/*": "./src/lib/*"
+  },
+  "scripts": {
+    "test:e2e": "playwright test",
+    "initialize": "node tools/initialize.ts",
+    "dev": "vite --host 127.0.0.1",
+    "build": "pnpm --filter @platform/app-runtime build && vite build && node tools/reporting-maps.ts",
+    "start": "node build",
+    "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "3.1146.0",
+    "@azure/identity": "4.13.3",
+    "@azure/storage-blob": "12.34.0",
+    "@better-auth/oauth-provider": "1.7.7",
+    "@google-cloud/storage": "8.2.0",
+    "@jridgewell/trace-mapping": "0.3.31",
+    "@orpc/openapi": "1.15.4",
+    "@orpc/server": "1.15.4",
+    "@orpc/zod": "1.15.4",
+    "@platform/app-runtime": "workspace:*",
+    "@platform/contracts": "workspace:*",
+    "better-auth": "1.7.7",
+    "better-result": "3.0.1",
+    "blake3-wasm": "2.1.5",
+    "drizzle-orm": "0.45.3",
+    "jose": "6.2.10",
+    "pg": "8.23.1",
+    "posthog-node": "5.55.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@internationalized/date": "3.12.4",
+    "@lucide/svelte": "1.52.0",
+    "@sveltejs/adapter-node": "6.0.0",
+    "@sveltejs/kit": "3.0.0",
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
+    "@tailwindcss/vite": "4.3.3",
+    "@tanstack/svelte-table": "9.2.6",
+    "@types/pg": "8.23.1",
+    "bits-ui": "2.19.5",
+    "cn": "0.3.3",
+    "emulate": "0.12.1",
+    "layerchart": "2.5.2",
+    "mode-watcher": "1.1.0",
+    "shadcn-svelte": "1.7.0",
+    "svelte": "5.57.1",
+    "svelte-check": "4.7.6",
+    "svelte-sonner": "1.2.1",
+    "tailwind-variants": "3.3.1",
+    "tailwindcss": "4.3.3",
+    "tw-animate-css": "1.4.0",
+    "vaul-svelte": "1.0.0-next.7",
+    "vite": "8.3.2"
+  }
+}

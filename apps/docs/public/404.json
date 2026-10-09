@@ -1,0 +1,13 @@
+{
+  "type": "about:blank",
+  "title": "Page not found",
+  "status": 404,
+  "detail": "The requested documentation page does not exist at this address.",
+  "links": [
+    { "title": "Documentation", "href": "https://widefleet.com/docs" },
+    { "title": "Quickstart", "href": "https://widefleet.com/docs/getting-started/quickstart" },
+    { "title": "Documentation index", "href": "https://widefleet.com/docs/llms.txt" },
+    { "title": "Documentation API", "href": "https://widefleet.com/docs/openapi.json" },
+    { "title": "Widefleet home", "href": "https://widefleet.com/" }
+  ]
+}

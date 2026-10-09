@@ -1,0 +1,148 @@
+---
+import RootLayout from "blume/components/layout/RootLayout.astro";
+import SiteFooter from "blume/components/layout/SiteFooter.astro";
+import Icon from "blume/components/Icon.astro";
+import data from "blume:data";
+import Logo from "../components/Logo.astro";
+
+export const prerender = true;
+
+const { config } = data;
+---
+
+<RootLayout
+  site={{ title: config.title, description: config.description }}
+  logo={config.logo}
+  favicon={config.favicon}
+  appleIcon={config.appleIcon}
+  banner={config.banner}
+  analytics={config.analytics}
+  navigation={data.navigation}
+  page={{ title: "404 — Page not found", route: "/404" }}
+  pageMode="custom"
+  layout={{ Logo }}
+  headings={[]}
+  themeMode={config.theme.mode}
+  fontCssVars={data.fontCssVars}
+  searchEnabled={config.search.enabled}
+  ui={data.ui}
+  indexable={false}
+  noindex={true}
+>
+  <section class="not-found not-prose" aria-labelledby="error-title">
+    <p class="error-code">404</p>
+    <div class="error-copy">
+      <h1 id="error-title">Page not found.</h1>
+      <p class="description">
+        The page you’re looking for isn’t at this address. Here’s a way back.
+      </p>
+      <nav class="recovery" aria-label="Where to go next">
+        <a class="primary" href="/docs" data-astro-reload>
+          Back to docs <Icon name="arrow-right" size={16} />
+        </a>
+        <a class="secondary" href={config.logo?.href ?? "/"} data-astro-reload>
+          Widefleet home <Icon name="arrow-right" size={15} />
+        </a>
+      </nav>
+    </div>
+  </section>
+  <div class="not-prose">
+    <SiteFooter footer={config.footer} navigation={data.navigation} ui={data.ui} />
+  </div>
+</RootLayout>
+
+<style>
+  :global(body:has(.not-found) #blume-content) {
+    padding: 0;
+  }
+  .not-found {
+    box-sizing: border-box;
+    width: min(1000px, calc(100% - 96px));
+    min-height: calc(100svh - var(--widefleet-header-height));
+    margin-inline: auto;
+    padding-block: 80px 112px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-content: center;
+    align-items: center;
+    gap: 64px;
+    color: var(--blume-foreground);
+  }
+  .error-code {
+    margin: 0;
+    font-size: clamp(140px, 20vw, 260px);
+    font-weight: 400;
+    letter-spacing: -0.085em;
+    line-height: 0.9;
+  }
+  h1 {
+    margin: 0;
+    font-size: clamp(32px, 3.5vw, 44px);
+    font-weight: 450;
+    letter-spacing: -0.055em;
+    line-height: 1.12;
+  }
+  .description {
+    max-width: 360px;
+    margin: 20px 0 0;
+    color: var(--blume-muted-foreground);
+    font-size: 15px;
+    line-height: 1.7;
+  }
+  .recovery {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 16px 24px;
+    margin-top: 32px;
+  }
+  .recovery a {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    min-height: 44px;
+    font-size: 12px;
+    text-decoration: none;
+  }
+  .primary {
+    padding: 11px 15px;
+    border: 1px solid var(--blume-accent);
+    border-radius: 3px;
+    background: var(--blume-accent);
+    color: var(--blume-accent-foreground);
+  }
+  .primary:hover {
+    opacity: 0.85;
+  }
+  .secondary {
+    color: var(--blume-foreground);
+  }
+  .secondary:hover {
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+  .recovery a:focus-visible {
+    outline: 2px solid #2a50bb;
+    outline-offset: 4px;
+  }
+  @media (max-width: 760px) {
+    .not-found {
+      width: calc(100% - 40px);
+      grid-template-columns: 1fr;
+      gap: 40px;
+      padding-block: 64px 96px;
+      text-align: center;
+    }
+    .error-code {
+      font-size: clamp(140px, 32vw, 220px);
+      padding-right: 0.085em;
+    }
+    .description {
+      margin-inline: auto;
+    }
+    .recovery {
+      justify-content: center;
+    }
+  }
+</style>

@@ -1,0 +1,34 @@
+{
+  "name": "internal-app-platform",
+  "version": "0.3.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "lint": "oxlint --type-aware --deny-warnings .",
+    "lint:fix": "oxlint --type-aware --fix .",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check .",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p crates/platform-agent/tsconfig.json && pnpm -r --if-present typecheck",
+    "check": "pnpm --filter @platform/app-runtime build && pnpm typecheck && pnpm format:check && pnpm lint",
+    "build": "pnpm -r --if-present build",
+    "package:cli": "node tools/package-cli.ts"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261003.1",
+    "@oxlint/plugins": "1.86.0",
+    "@playwright/test": "1.63.0",
+    "@tsconfig/strictest": "2.0.8",
+    "@types/node": "26.6.4",
+    "esbuild": "0.28.2",
+    "oxfmt": "0.71.0",
+    "oxlint": "1.86.0",
+    "oxlint-tsgolint": "7.0.2003",
+    "typescript": "6.0.3",
+    "vitest": "5.0.3"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@12.4.2"
+}

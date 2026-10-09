@@ -1,0 +1,86 @@
+---
+title: Deployments
+description: Preview changes, publish an app update and recover from a failed deployment.
+---
+
+Use this guide after [deploying your first app](/getting-started/installation).
+Run commands from that app's project with `PLATFORM_URL` set and a current login.
+You need management access to the app and compatible CLI, management and agent builds.
+
+## Publish a preview
+
+The parent app must already exist. Check the project, then publish a named preview:
+
+```sh
+pnpm check
+widefleet preview --name review
+```
+
+The CLI builds locally and prints the preview URL after activation. Open it, sign
+in and exercise the change. Repeating the command updates the same preview and
+preserves its data. Without `--name`, the CLI derives a name from the Git branch;
+use an explicit name outside Git or with a detached HEAD.
+
+Previews have separate databases and files. On builds supporting app access
+groups, they inherit the parent's rule. They do not copy its data, network
+permissions or connector grants.
+
+Preview URLs use an extra hostname label, such as `review.notes.apps.example.com`.
+The operator must provide DNS and TLS for that hostname. A successful deployment
+confirms app activation; initial certificate issuance may still be pending.
+
+## Publish the update
+
+```sh
+widefleet deploy
+```
+
+This builds and publishes the current project to the app named in `wrangler.jsonc`.
+It does not promote or copy the preview's database. Open the printed app URL and
+verify the changed behavior. Code deployments preserve existing data.
+
+For scripts, `widefleet deploy --json` returns the completed deployment, including
+`appId`, deployment `id`, `status` and `url`. Build output and progress go to stderr.
+With `--no-wait`, the result only confirms queueing; it does not confirm activation.
+
+## Inspect a failure
+
+Use `widefleet apps` to find `APP_UUID`, then inspect its deployment history:
+
+```sh
+widefleet history APP_UUID
+widefleet events APP_UUID DEPLOYMENT_UUID
+widefleet logs APP_UUID --level error --since 1h
+```
+
+Use the same app or preview ID for all three commands; omitting it from `logs`
+selects the app in the current project's configuration. Replace `DEPLOYMENT_UUID`
+with the history entry's `id`. Deployment events describe
+installation progress; runtime logs describe app execution and require the
+installation's telemetry services.
+
+| Symptom                         | Next step                                                                             |
+| ------------------------------- | ------------------------------------------------------------------------------------- |
+| Local build fails               | Run `pnpm check` and `pnpm build`, fix the reported error, then retry.                |
+| Deployment remains queued       | Ask the operator to check the registered agent and its availability.                  |
+| Activation fails                | Read the deployment events. A rejected update retains the previously serving version. |
+| Preview has a certificate error | Ask the operator to check that DNS and TLS cover the nested preview hostname.         |
+| An external request is denied   | Check `widefleet network` for the selected app or preview; grants are separate.       |
+
+## Roll back code
+
+From the history, select the `artifactId` of a previously successful deployment:
+
+```sh
+widefleet rollback APP_UUID ARTIFACT_UUID
+```
+
+Rollback waits for activation unless `--no-wait` is supplied. It restores code;
+database contents, uploaded files and current access rules are retained. Check that
+the old code is compatible with the current schema before rolling back, then open
+the app and verify it.
+
+See [configuration](/reference/configuration) for resource declarations and the
+explicit migration workflow, and [CLI reference](/reference/cli) for command syntax.
+
+See [preview reference](/reference/previews) for naming, parent selection, cleanup and DNS requirements.

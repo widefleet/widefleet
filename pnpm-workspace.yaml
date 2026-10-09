@@ -1,0 +1,23 @@
+packages:
+  - apps/*
+  - packages/*
+  - starters/*
+
+strictPeerDependencies: true
+
+peerDependencyRules:
+  allowedVersions:
+    # Deliberately limited to this tested pair. Keep the production-server browser tests green.
+    "better-auth@1.7.7>@sveltejs/kit": "3.0.0"
+    # Bits UI and LayerChart use runed's framework-independent exports; verified with SvelteKit 3 and browser checks.
+    "runed@0.35.1>@sveltejs/kit": "3.0.0"
+    "runed@0.37.1>@sveltejs/kit": "3.0.0"
+
+patchedDependencies:
+  "@better-auth/oauth-provider@1.7.7": patches/@better-auth__oauth-provider@1.7.7.patch
+  blume@2.1.1: patches/blume@2.1.1.patch
+
+allowBuilds:
+  esbuild: true
+  sharp: true
+  workerd: true

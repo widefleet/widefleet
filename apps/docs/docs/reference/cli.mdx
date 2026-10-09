@@ -1,0 +1,76 @@
+---
+title: CLI
+description: Common Widefleet commands, app selection, authentication and deployment output.
+---
+
+For installation and your first deployment, start with [CLI setup](/getting-started/installation).
+Use `widefleet --version` and `widefleet --help` to check the installed release.
+Each command also accepts `--help`; newer commands require matching platform components.
+
+This reference describes CLI `0.3.0`. The `access`, `catalog`, `migrations` and
+`workflows` commands require CLI and platform `0.3.0` or newer. Use matching
+management and agent versions; Workflows also require a compatible app runtime.
+
+## Authentication and target
+
+| Setting or command                              | Meaning                                                                                                   |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `PLATFORM_URL` / `--url URL`                    | Management origin for the selected installation.                                                          |
+| `widefleet login`                               | Browser device login; requests `platform:read platform:write` by default.                                 |
+| `widefleet whoami`                              | Inspect the authenticated user.                                                                           |
+| `widefleet logout`                              | Revoke the stored refresh token and remove the saved session.                                             |
+| `PLATFORM_SESSION_FILE` / `--session-file PATH` | Explicit, unencrypted session file for headless Unix use instead of the OS credential store.              |
+| `PLATFORM_ACCESS_TOKEN`                         | Externally supplied token; overrides saved credentials for API commands and does not renew automatically. |
+
+Keep session files outside projects and shared artifacts. The CLI restricts file
+permissions and renews saved sessions automatically. See [headless login](/getting-started/installation#headless-login).
+
+## App commands
+
+`APP_UUID`, `DEPLOYMENT_UUID` and `ARTIFACT_UUID` below are placeholders. Find app
+IDs with `widefleet apps` and deployment IDs and artifact IDs with `widefleet history APP_UUID`.
+
+| Command                                     | Purpose                                                              |
+| ------------------------------------------- | -------------------------------------------------------------------- |
+| `widefleet init DIRECTORY`                  | Create an independent SvelteKit project; no login required.          |
+| `widefleet apps`                            | List apps you can manage.                                            |
+| `widefleet deploy [APP_UUID]`               | Build and deploy; normally selects the configured app name.          |
+| `widefleet preview --name review`           | Build and deploy an isolated preview of an existing app.             |
+| `widefleet history APP_UUID`                | Read deployment history as JSON.                                     |
+| `widefleet events APP_UUID DEPLOYMENT_UUID` | Read deployment events.                                              |
+| `widefleet rollback APP_UUID ARTIFACT_UUID` | Activate a retained code artifact.                                   |
+| `widefleet logs --level error --since 1h`   | Query app runtime errors; `--follow` keeps polling.                  |
+| `widefleet migrations list DB` / `apply DB` | Inspect or explicitly apply SQL migrations to a deployed D1 binding. |
+| `widefleet access`                          | Inspect app usage rules; `set` changes the group list.               |
+| `widefleet network`                         | Inspect external destinations; `allow` and `deny` change grants.     |
+| `widefleet connector bindings`              | Inspect IT-managed connector bindings.                               |
+| `widefleet catalog list`                    | List published app launch URLs.                                      |
+| `widefleet delete APP_UUID --yes`           | Request removal of an app and all its previews.                      |
+
+The target is `PLATFORM_URL` plus `name` in `wrangler.jsonc`. The first deploy creates that app; subsequent deploys update it after checking the user's app permissions. A changed name selects a different app. The server assigns the host, and existing apps keep their host and data. No app ID, host selection or local project-link file is needed for normal deployment.
+Logs, access, network and migrations also use project context; history, events and
+rollback require IDs. Check a command's help before assuming it accepts `--app`.
+
+## Deployment flags and output
+
+These flags apply to both `deploy` and `preview`:
+
+| Flag            | Behavior                                                                      |
+| --------------- | ----------------------------------------------------------------------------- |
+| `--config PATH` | Read another Wrangler configuration; project paths are relative to that file. |
+| `--skip-build`  | Upload the existing build instead of running the app build.                   |
+| `--no-wait`     | Return after queueing; does not confirm activation.                           |
+| `--json`        | Print one result on stdout; build output and progress go to stderr.           |
+
+After activation, the command prints `Deployment succeeded` and the app URL. For automation, use `widefleet deploy --json`: stdout contains one JSON object with the final deployment fields and `url`, while build output and progress go to stderr. The `id` field identifies the deployment and `appId` identifies the app. Existing scripts that parsed the default JSON output must add `--json`. With `--no-wait --json`, the result describes the queued deployment and does not confirm activation. Uploading with `--no-wait` requires only `platform:write`; waiting for deployment events and history also requires `platform:read`. Failures exit nonzero and leave stdout empty. Update the management server together with the CLI so it can provide the complete URL, including its configured HTTPS port.
+
+Output formats for other commands vary; use their own help rather than assuming `--json` is universal.
+
+For a complete task, follow [sharing an app](/guides/applications) or
+[deployments and recovery](/guides/deployments).
+
+## Deployment compatibility
+
+Upgrade both the CLI and the management server to 0.1.5 or newer for this flow. For the local demo, update the checkout and run `./dev up` to rebuild the server. Projects generated by older CLI versions may still have `name: "team-notes"`; change it to your intended app name before deploying, or it will target that existing app if you have access. Explicit `widefleet deploy APP_UUID` remains supported for older scripts.
+
+See [CLI authentication](/reference/authentication) for credential stores and headless sessions.

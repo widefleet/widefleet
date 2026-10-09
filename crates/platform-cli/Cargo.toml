@@ -1,0 +1,29 @@
+[package]
+name = "platform-cli"
+version.workspace = true
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "widefleet"
+path = "src/main.rs"
+
+[dependencies]
+platform-core.workspace = true
+tokio.workspace = true
+clap.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+keyring.workspace = true
+jsonc-parser.workspace = true
+tempfile.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+rustix.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,1 @@
+ALTER TABLE "user" DROP COLUMN "entra_object_id";

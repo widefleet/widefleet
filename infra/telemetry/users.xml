@@ -1,0 +1,30 @@
+<clickhouse>
+  <users>
+    <default>
+      <networks replace="replace"><ip>127.0.0.1</ip><ip>::1</ip></networks>
+    </default>
+    <widefleet_ingest>
+      <password from_env="CLICKHOUSE_INGEST_PASSWORD" />
+      <networks><ip>::/0</ip></networks>
+      <profile>default</profile>
+      <quota>default</quota>
+      <grants><query>GRANT SELECT, INSERT ON widefleet.*</query></grants>
+    </widefleet_ingest>
+    <widefleet_reader>
+      <password from_env="CLICKHOUSE_READ_PASSWORD" />
+      <networks><ip>::/0</ip></networks>
+      <profile>widefleet_readonly</profile>
+      <quota>default</quota>
+      <grants><query>GRANT SELECT ON widefleet.*</query></grants>
+    </widefleet_reader>
+  </users>
+  <profiles>
+    <widefleet_readonly>
+      <readonly>1</readonly>
+      <max_execution_time>15</max_execution_time>
+      <max_memory_usage>268435456</max_memory_usage>
+      <max_result_rows>1000</max_result_rows>
+      <max_result_bytes>33554432</max_result_bytes>
+    </widefleet_readonly>
+  </profiles>
+</clickhouse>

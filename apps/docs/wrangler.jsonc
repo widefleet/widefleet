@@ -1,0 +1,32 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "widefleet-docs",
+  "compatibility_date": "2026-10-05",
+  "workers_dev": false,
+  "preview_urls": false,
+  "previews": {},
+  "assets": {
+    "directory": ".wrangler/docs-assets",
+    "html_handling": "drop-trailing-slash",
+    "not_found_handling": "404-page",
+  },
+  "routes": [
+    // Routes include query strings, so reserve these prefixes with a trailing *.
+    // Keep the host exact: website and docs Previews have separate ownership.
+    { "pattern": "widefleet.com/docs*", "zone_name": "widefleet.com" },
+    { "pattern": "widefleet.com/SKILL.md*", "zone_name": "widefleet.com" },
+    {
+      "pattern": "widefleet.com/.well-known/agent-skills/index.json*",
+      "zone_name": "widefleet.com",
+    },
+    { "pattern": "widefleet.com/.well-known/ai-catalog.json*", "zone_name": "widefleet.com" },
+    { "pattern": "widefleet.com/.well-known/ard.json*", "zone_name": "widefleet.com" },
+    { "pattern": "widefleet.com/.well-known/api-catalog*", "zone_name": "widefleet.com" },
+    {
+      "pattern": "docs.widefleet.com",
+      "custom_domain": true,
+      "enabled": false,
+      "previews_enabled": true,
+    },
+  ],
+}

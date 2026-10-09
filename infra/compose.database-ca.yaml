@@ -1,0 +1,9 @@
+# Add sslmode=verify-full&sslrootcert=/run/secrets/postgres-ca.pem to DATABASE_URL.
+services:
+  control-plane:
+    volumes:
+      - type: bind
+        source: ${DATABASE_CA_HOST_FILE:?Set the absolute PostgreSQL CA bundle path}
+        target: /run/secrets/postgres-ca.pem
+        read_only: true
+        bind: { create_host_path: false }

@@ -1,0 +1,93 @@
+name: app-platform
+
+services:
+  control-plane:
+    image: ${PLATFORM_CONTROL_PLANE_IMAGE:?Load the release images environment file}
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-}
+      PLATFORM_URL: ${PLATFORM_URL:?Set PLATFORM_URL}
+      PLATFORM_USAGE_REPORTING: ${PLATFORM_USAGE_REPORTING:-}
+      PLATFORM_CRASH_REPORTING: ${PLATFORM_CRASH_REPORTING:-}
+      APP_DOMAIN: ${APP_DOMAIN:?Set APP_DOMAIN}
+      PLATFORM_CONFIG_DIRECTORY: /var/lib/widefleet/edge
+      PLATFORM_AUTH_DIRECTORY: /var/lib/widefleet/auth
+      PLATFORM_ENCRYPTION_KEY: ${PLATFORM_ENCRYPTION_KEY:-}
+    volumes:
+      - platform-state:/var/lib/widefleet
+      - edge-config:/var/lib/widefleet/edge
+      - app-auth:/var/lib/widefleet/auth
+    networks: [management, edge]
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          --eval,
+          "fetch('http://localhost:3000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  oauth2-proxy:
+    image: ${PLATFORM_SSO_IMAGE:?Load the release images environment file}
+    restart: unless-stopped
+    volumes:
+      - app-auth:/auth
+    networks: [edge]
+
+  proxy:
+    image: traefik:v3.7.13@sha256:24841fe2de7304c149343d877d2923b4c8800a38ba015dea9174c23b20e344a0
+    container_name: app-platform-proxy
+    restart: unless-stopped
+    entrypoint: [/bin/sh, -ec]
+    command:
+      - |
+        until [ -s /config/traefik.json ]; do sleep 1; done
+        exec traefik --configFile=/config/traefik.json
+    ports: ["80:8080", "443:8443"]
+    volumes:
+      - edge-config:/config:ro
+      - ${PLATFORM_DATA_DIRECTORY}/tls:/tls:ro
+    networks: [edge]
+
+  agent:
+    image: ${PLATFORM_AGENT_IMAGE:?Load the release images environment file}
+    profiles: [agent]
+    restart: unless-stopped
+    environment:
+      PLATFORM_URL: ${PLATFORM_URL}
+      PLATFORM_USAGE_REPORTING: ${PLATFORM_USAGE_REPORTING:-}
+      PLATFORM_CRASH_REPORTING: ${PLATFORM_CRASH_REPORTING:-}
+      PLATFORM_AGENT_TOKEN: ${PLATFORM_AGENT_TOKEN:-}
+      DOCKER_HOST: unix:///var/run/docker.sock
+      PLATFORM_AGENT_STATE: /state
+      PLATFORM_AGENT_HOST_STATE: ${PLATFORM_DATA_DIRECTORY}/agent
+      PLATFORM_ROUTING_DIRECTORY: /config/routes
+      APP_DOMAIN: ${APP_DOMAIN:?Set APP_DOMAIN}
+      CELLD_BINARY: /usr/local/bin/celld
+      PLATFORM_RUNTIME_IMAGE: ${PLATFORM_RUNTIME_IMAGE:?Load the release images environment file}
+      PLATFORM_TRUSTED_CONTAINERS: app-platform-proxy
+    volumes:
+      - ${DOCKER_SOCKET_FILE:?Set the Docker socket path}:/var/run/docker.sock
+      - ${PLATFORM_DATA_DIRECTORY}/agent:/state
+      - edge-config:/config
+    networks: [management]
+    stop_grace_period: 45s
+
+  # Pull this image before the agent creates fleet containers on the same Docker host.
+  runtime-image:
+    image: ${PLATFORM_RUNTIME_IMAGE:?Load the release images environment file}
+    profiles: [images]
+    entrypoint: [/usr/local/bin/celld]
+    command: [--version]
+
+networks:
+  management:
+  edge:
+
+volumes:
+  platform-state:
+  edge-config:
+  app-auth:

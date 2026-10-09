@@ -1,0 +1,108 @@
+/* Widefleet website colors, typography and controls. */
+:root {
+  --blume-foreground: #1d1d1b;
+  --blume-muted-foreground: #6b6b68;
+  --blume-muted: #f1f2e9;
+  --blume-border: #deded8;
+  --blume-code-background: #f0f0e9;
+  --blume-radius: 3px;
+  --widefleet-card-background: #fff;
+  --widefleet-button-hover: #3c3c39;
+  --widefleet-header-height: 86px;
+  scroll-padding-top: calc(var(--widefleet-header-height) + 8px);
+}
+
+:root[data-theme="dark"] {
+  --blume-foreground: #fafaf7;
+  --blume-muted-foreground: #bbbcb4;
+  --blume-muted: #22221f;
+  --blume-border: #3c3c39;
+  --blume-code-background: #22221f;
+  --widefleet-card-background: #22221f;
+  --widefleet-button-hover: #fafaf7;
+}
+
+.prose {
+  font-size: 15px;
+}
+
+.prose :where(h1, h2) {
+  font-weight: 450;
+}
+
+.prose :where(h1) {
+  letter-spacing: -0.057em;
+}
+
+.prose :where(h2) {
+  letter-spacing: -0.04em;
+}
+
+[data-blume-card].bg-background {
+  background: var(--widefleet-card-background);
+}
+
+.blume-nav-link,
+.blume-nav-drill,
+.blume-nav-summary,
+.blume-nav-heading-link,
+[data-blume-header] .rounded-full {
+  border-radius: var(--blume-radius);
+}
+
+[data-blume-header] {
+  height: var(--widefleet-header-height);
+  border-bottom: 1px solid var(--blume-border);
+  background: var(--blume-background);
+}
+
+[data-blume-header] a.rounded-full {
+  font-size: 12px;
+  font-weight: 400;
+}
+
+[data-blume-header] a.bg-accent {
+  min-height: 40px;
+  gap: 18px;
+  padding: 9px 13px;
+  border: 1px solid var(--blume-accent);
+}
+
+[data-blume-header] a.bg-accent:hover {
+  background: var(--widefleet-button-hover);
+  opacity: 1;
+}
+
+[data-blume-consent-choice] {
+  min-height: 40px;
+  padding: 9px 13px;
+  border-color: var(--blume-muted-foreground);
+  border-radius: var(--blume-radius);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+[data-blume-consent-choice]:hover {
+  border-color: var(--blume-accent);
+  background: var(--blume-muted);
+}
+
+[data-blume-consent-choice]:focus-visible {
+  outline: 2px solid #2a50bb;
+  outline-offset: 3px;
+}
+
+/* Keep the docs' sticky navigation below the taller shared header. */
+@media (min-width: 1024px) {
+  [data-blume-nav-drawer],
+  [data-blume-toc] {
+    top: var(--widefleet-header-height);
+    height: calc(100dvh - var(--widefleet-header-height));
+  }
+}
+
+@media (max-width: 960px) {
+  :root {
+    --widefleet-header-height: 76px;
+  }
+}

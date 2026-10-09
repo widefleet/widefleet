@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.base.json",
+  "include": ["vitest.config.ts", "tools/*.ts", "packages/app-runtime/build.ts"],
+  "exclude": ["tools/oxlint/anti-slop"]
+}

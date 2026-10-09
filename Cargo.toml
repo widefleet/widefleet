@@ -1,0 +1,51 @@
+[workspace]
+members = ["crates/platform-core", "crates/platform-cli", "crates/platform-agent"]
+resolver = "3"
+
+[workspace.package]
+license = "MIT"
+version = "0.3.0"
+edition = "2024"
+rust-version = "1.99"
+
+[workspace.dependencies]
+platform-core = { path = "crates/platform-core" }
+tokio = { version = "=1.53.2", features = [
+  "macros",
+  "rt-multi-thread",
+  "time",
+  "signal",
+  "process",
+  "fs",
+  "io-util",
+  "sync",
+] }
+clap = { version = "=4.6.7", features = ["derive", "env"] }
+reqwest = { version = "=0.13.5", features = ["json", "form", "query", "multipart"] }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+tracing = "=0.1.44"
+tracing-subscriber = { version = "=0.3.23", features = ["env-filter"] }
+thiserror = "=2.0.21"
+uuid = { version = "=1.27.0", features = ["v4", "serde"] }
+sha2 = "=0.11.0"
+blake3 = "=1.8.7"
+base64 = "=0.23.1"
+keyring = "=4.2.0"
+jsonc-parser = { version = "=0.34.0", features = ["serde"] }
+tempfile = "=3.27.0"
+rustix = { version = "=1.1.5", features = ["fs"] }
+futures-util = "=0.3.34"
+bollard = "=0.21.1"
+object_store = { version = "=0.14.2", features = ["aws", "azure", "gcp"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+
+# Preserve source locations for sanitized native panic reports.
+[profile.release]
+debug = "line-tables-only"

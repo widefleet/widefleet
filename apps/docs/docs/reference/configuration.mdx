@@ -1,0 +1,69 @@
+---
+title: Configuration
+description: App configuration fields, storage bindings and settings managed by the platform.
+---
+
+App projects use `wrangler.jsonc`. The CLI accepts a defined subset of Wrangler
+configuration and rejects unknown fields. Use the generated starter as the baseline;
+a configuration accepted by Cloudflare is not automatically supported by Widefleet.
+
+## Minimal app configuration
+
+The SvelteKit starter builds the Worker and assets at the paths shown here:
+
+```jsonc
+{
+  "name": "my-app",
+  "main": "build/worker.js",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": { "directory": "build/public", "binding": "ASSETS" },
+}
+```
+
+The included notes app also needs its generated `DB` and `FILES` bindings. Keep
+those declarations while using that example; the minimal configuration above is
+for app code that does not use storage.
+
+| Field                                 | Meaning                                                                                                                                                                       |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`                                | App identifier within the selected installation. Use 1–48 lowercase letters, digits or hyphens, starting with a letter and ending with a letter or digit. `auth` is reserved. |
+| `main`                                | Built Worker entry module, relative to the configuration file.                                                                                                                |
+| `compatibility_date`                  | Worker compatibility date; does not enable every Cloudflare API.                                                                                                              |
+| `compatibility_flags`                 | Supported flags are `nodejs_compat` and `nodejs_als`. Node.js compatibility remains partial.                                                                                  |
+| `assets.directory` / `assets.binding` | Built static asset directory and the binding exposed to app code.                                                                                                             |
+| `vars`                                | Plain-text string values. Never put credentials here.                                                                                                                         |
+
+Changing `name` selects another app on the next deployment. It does not rename an
+existing app or move its data. `PLATFORM_URL` selects the installation; see
+[CLI configuration](/reference/cli#authentication-and-target).
+
+## Resources
+
+| Configuration                           | Resource                                                                                                                                               |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `d1_databases`                          | D1 database bindings with `binding`, `database_name` and optional `database_id` and migration settings.                                                |
+| `r2_buckets`                            | File storage bindings with `binding` and `bucket_name`.                                                                                                |
+| `kv_namespaces`                         | Key-value bindings with `binding` and `id`.                                                                                                            |
+| `queues.producers` / `queues.consumers` | Queue producers and Worker queue handlers.                                                                                                             |
+| `triggers.crons`                        | Schedules delivered to an exported `scheduled` handler.                                                                                                |
+| `workflows`                             | Named Workflow classes with `binding`, `name` and `class_name`; requires CLI and platform `0.3.0` or newer and a runtime advertising Workflow support. |
+
+Resources are scoped to each app or preview. Keep resource identifiers stable to
+preserve access to existing data. Removing a declaration does not migrate or erase
+its native data. The SvelteKit HTTP adapter does not generate Cron, Queue or Workflow
+handlers; a custom entry module must export them.
+
+## Database migrations
+
+`widefleet deploy` does not apply SQL migrations. CLI and platform `0.3.0` or newer
+provide explicit migration commands. Follow [database migrations](/guides/migrations)
+for file configuration, Drizzle, first-schema deployment and failure recovery.
+
+## Settings outside this file
+
+Company SSO, app access groups, network grants and connector bindings are managed
+by the platform. They are not Wrangler fields. Use the management UI or the relevant
+[CLI commands](/reference/cli); code rollback does not revert access or network rules.
+
+After changing app configuration, [publish a preview and verify it](/guides/deployments).
