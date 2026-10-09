@@ -22,9 +22,9 @@ const fixture = async (existing: Record<string, string> = {}) => {
   await writeFile(
     join(directory, "metadata.json"),
     JSON.stringify({
-      tag_name: "v0.3.0",
-      draft: false,
-      prerelease: false,
+      tagName: "v0.3.0",
+      isDraft: true,
+      isPrerelease: false,
       assets: Object.keys(existing).map((name) => ({ name })),
     }),
   );
@@ -34,16 +34,15 @@ const fixture = async (existing: Record<string, string> = {}) => {
 set -euo pipefail
 printf '%s\\n' "$*" >> "$FIXTURE/gh.log"
 case "$1" in
-  api)
-    test "$2" = repos/widefleet/widefleet/releases/tags/v0.3.0
-    test "\${LOOKUP_FAIL:-false}" != true
-    cat "$FIXTURE/metadata.json"
-    ;;
   release)
     operation=$2
     test "$3" = v0.3.0
     shift 3
     case "$operation" in
+      view)
+        test "\${LOOKUP_FAIL:-false}" != true
+        cat "$FIXTURE/metadata.json"
+        ;;
       upload)
         source=$1
         test "$2" = --repo
@@ -90,7 +89,7 @@ esac
   return { directory, assets, run };
 };
 
-it("uploads missing release attachments and verifies their downloaded bytes", async () => {
+it("uploads missing draft attachments and verifies their downloaded bytes", async () => {
   const { directory, assets, run } = await fixture();
 
   try {
@@ -150,6 +149,26 @@ it("does not treat a failed release lookup as missing attachments", async () => 
   try {
     await expect(run({ LOOKUP_FAIL: "true" })).rejects.toThrow();
     expect(await readdir(join(directory, "remote"))).toEqual([]);
+    expect(await readFile(join(directory, "gh.log"), "utf8")).not.toContain("release upload");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("does not add missing assets to a published release", async () => {
+  const { directory, run } = await fixture();
+
+  try {
+    await writeFile(
+      join(directory, "metadata.json"),
+      JSON.stringify({
+        tagName: "v0.3.0",
+        isDraft: false,
+        isPrerelease: false,
+        assets: [],
+      }),
+    );
+    await expect(run()).rejects.toThrow();
     expect(await readFile(join(directory, "gh.log"), "utf8")).not.toContain("release upload");
   } finally {
     await rm(directory, { recursive: true, force: true });

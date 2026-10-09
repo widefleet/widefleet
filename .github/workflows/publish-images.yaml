@@ -1,70 +1,46 @@
 name: Publish Docker Hub images
 
 on:
-  release:
-    types: [published]
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        required: true
+      tag:
+        type: string
+        required: true
+    secrets:
+      DOCKERHUB_USERNAME:
+        required: true
+      DOCKERHUB_TOKEN:
+        required: true
 
 permissions:
   contents: read
 
 cache-mode: none
 
-concurrency:
-  group: publish-images-${{ github.event.release.tag_name }}
-  cancel-in-progress: false
-
 defaults:
   run:
     shell: bash
 
 env:
-  RELEASE_TAG: ${{ github.event.release.tag_name }}
+  RELEASE_TAG: ${{ inputs.tag }}
   PLATFORM_USAGE_REPORTING: "false"
   PLATFORM_CRASH_REPORTING: "false"
   WIDEFLEET_TELEMETRY_DISABLED: "1"
 
 jobs:
-  prepare:
-    if: >-
-      github.repository == 'widefleet/widefleet' &&
-      !github.event.release.prerelease && startsWith(github.event.release.tag_name, 'v')
-    runs-on: ubuntu-24.04
-    outputs:
-      revision: ${{ steps.release.outputs.revision }}
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Validate the published release and its main-branch source
-        id: release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: bash tools/check-release.sh
-
-  build:
-    needs: prepare
-    cache-mode: read
-    uses: ./.github/workflows/build-release-images.yaml
-    with:
-      ref: ${{ needs.prepare.outputs.revision }}
-      recover-existing: true
-
   publish:
-    needs: [prepare, build]
-    permissions:
-      contents: write
+    if: github.repository == 'widefleet/widefleet'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ needs.prepare.outputs.revision }}
+          ref: ${{ inputs.ref }}
           fetch-depth: 0
           persist-credentials: false
       - name: Validate the release again before publication
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           bash tools/check-release.sh
           echo "RELEASE_IMAGES=$RUNNER_TEMP/release-images" >> "$GITHUB_ENV"
@@ -88,13 +64,15 @@ jobs:
           printf '%s' "$DOCKERHUB_TOKEN" | docker login docker.io --username "$DOCKERHUB_USERNAME" --password-stdin
       - name: Publish and verify anonymous digest pulls
         run: bash tools/publish-release-images.sh
-      - name: Attach the digest manifest and checksum to the GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          bash tools/upload-release-assets.sh \
-            "$RELEASE_IMAGES/widefleet-images-$VERSION.env" \
-            "$RELEASE_IMAGES/widefleet-images-$VERSION.env.sha256"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-manifest
+          path: |
+            ${{ env.RELEASE_IMAGES }}/widefleet-images-*.env
+            ${{ env.RELEASE_IMAGES }}/widefleet-images-*.env.sha256
+          if-no-files-found: error
+          retention-days: 3
+          overwrite: true
       - name: Remove registry credentials
         if: always()
         run: docker logout docker.io

@@ -1,6 +1,6 @@
 # CLI release publishing
 
-Publishing a stable GitHub Release in `widefleet/widefleet` starts **Publish CLI to npm**. The workflow publishes the `widefleet` package to `https://registry.npmjs.org`. Installation and app development are documented in the [user guide](https://widefleet.com/docs/getting-started/installation).
+Pushing a stable `vVERSION` tag to `widefleet/widefleet` starts **Publish Widefleet**. The workflow prepares a draft GitHub Release, builds and tests the CLI and images, publishes to npm and Docker Hub, and publishes the completed GitHub Release last. The npm package is `widefleet` at `https://registry.npmjs.org`. Installation and app development are documented in the [user guide](https://widefleet.com/docs/getting-started/installation).
 
 ## Configure npm publishing
 
@@ -14,20 +14,31 @@ In the npm package's **Settings → Trusted Publisher**, add GitHub Actions with
 
 The publishing job uses OpenID Connect and has `id-token: write`. It does not need an `NPM_TOKEN` or a GitHub Packages token. npm generates provenance for the public repository and package. See [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/).
 
+## Configure GitHub Releases
+
+Enable **Settings → General → Releases → Enable release immutability** after the release workflows are on `main`. All downloads are uploaded and verified while the release is a draft. Publishing then locks its assets and tag. See [GitHub release immutability](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases).
+
 ## Publish a version
 
 1. Update `package.json` and the Cargo workspace version together and merge the change into `main`.
-2. In GitHub Releases, create a stable release with tag `vVERSION`, targeting that commit on `main`, and publish it. For example, version `0.3.0` uses `v0.3.0`.
-3. Wait for **Publish CLI to npm** to succeed. Publishing the GitHub Release starts the build; it does not mean the npm package is available yet.
-4. Verify `pnpm add --global widefleet@VERSION --registry=https://registry.npmjs.org` and `widefleet --version` on Linux x64 with glibc.
+2. Push a stable `vVERSION` tag pointing to that commit on `main`. For example, version `0.3.0` uses `v0.3.0`. Replace `VERSION` and `COMMIT_SHA` below with the version and the checked commit:
 
-Ordinary pushes to `main`, tag pushes, drafts and prereleases do not publish packages. Tags outside the `vMAJOR.MINOR.PATCH` format are rejected. Both project versions must match the tag, and its commit must be reachable from `main`.
+   ```sh
+   git fetch origin main
+   git tag -a vVERSION COMMIT_SHA -m "Widefleet vVERSION"
+   git push origin refs/tags/vVERSION
+   ```
+
+3. Wait for **Publish Widefleet** to succeed. It creates a draft with generated release notes, or preserves an existing draft and its notes. Both the CLI deployment tests and packaged image tests must pass before either registry publication starts. The GitHub Release becomes public only after both registry publications and all six attachment verifications succeed; do not publish the draft manually.
+4. Verify `pnpm add --global widefleet@VERSION --registry=https://registry.npmjs.org` and `widefleet --version` on Linux x64 with glibc. The completed GitHub Release contains the CLI archives, image digest manifest and checksums.
+
+Ordinary pushes to `main` and GitHub Release events do not publish packages. Tags outside the `vMAJOR.MINOR.PATCH` format are rejected. Both project versions must match the tag, and its commit must be reachable from `main`. An existing published release is rejected during preparation.
 
 The workflow builds the CLI and agent in the pinned Debian toolchain, bundles esbuild and the starter, and installs the resulting npm archive in isolation for a real deployment test against local services. Only the tested archive is passed to the publishing job. Publication checks its checksum and package destination, then verifies the npm integrity hash and a fresh registry installation.
 
 To recover from a failure, use **Re-run failed jobs** on the original GitHub Actions run. The workflow checks out the commit that triggered that run, keeping npm provenance tied to the tested source even if `main` has advanced. An existing npm version is accepted only when its bytes and repository metadata match; it is never overwritten. Changed bytes require a new version and release.
 
-The tested npm archive, manual archive and checksums are attached to the same GitHub Release. Existing attachments are downloaded and compared before a retry proceeds; they are never overwritten. Actions artifacts are used only to transport the tested files between jobs.
+The tested npm archive, manual archive and checksums are attached to the draft alongside the image manifest after both registry jobs succeed. Existing attachments are downloaded and compared before a retry proceeds; they are never overwritten. Actions artifacts are used only to transport the tested files between jobs. A failed run leaves the GitHub Release in draft, although a registry may already contain some artifacts; publication across GitHub, npm and Docker Hub is not atomic. If the final publication succeeds but its response is lost, rerunning the failed job verifies the completed release without modifying its assets.
 
 ## Build a release locally
 

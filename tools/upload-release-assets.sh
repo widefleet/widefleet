@@ -4,12 +4,13 @@ set -euo pipefail
 test "$#" -gt 0
 directory=$(mktemp -d)
 trap 'rm -rf -- "$directory"' EXIT
-gh api "repos/${GITHUB_REPOSITORY:?}/releases/tags/${RELEASE_TAG:?}" > "$directory/release.json"
+gh release view "${RELEASE_TAG:?}" --repo "${GITHUB_REPOSITORY:?}" \
+  --json tagName,isDraft,isPrerelease,assets > "$directory/release.json"
 jq -e --arg tag "$RELEASE_TAG" '
-  .tag_name == $tag and .draft == false and .prerelease == false
+  .tagName == $tag and .isPrerelease == false
 ' "$directory/release.json"
 
-# Check existing attachments before adding anything; never replace published bytes.
+# Check every attachment before adding anything; published releases are read-only.
 for asset in "$@"; do
   test -f "$asset"
   name=$(basename "$asset")
@@ -18,6 +19,8 @@ for asset in "$@"; do
   if [[ "$count" == 1 ]]; then
     gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$name" --dir "$directory"
     cmp "$asset" "$directory/$name"
+  else
+    jq -e '.isDraft == true' "$directory/release.json"
   fi
 done
 for asset in "$@"; do

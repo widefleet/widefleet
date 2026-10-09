@@ -1,14 +1,16 @@
-name: Publish CLI to npm
+name: Publish Widefleet
 
 on:
-  release:
-    types: [published]
+  push:
+    tags: ["v*"]
 
 permissions:
   contents: read
 
+cache-mode: none
+
 concurrency:
-  group: publish-cli-${{ github.event.release.tag_name }}
+  group: publish-widefleet-${{ github.ref }}
   cancel-in-progress: false
 
 defaults:
@@ -16,16 +18,16 @@ defaults:
     shell: bash
 
 env:
-  RELEASE_TAG: ${{ github.event.release.tag_name }}
+  RELEASE_TAG: ${{ github.ref_name }}
   PLATFORM_USAGE_REPORTING: "false"
   PLATFORM_CRASH_REPORTING: "false"
   WIDEFLEET_TELEMETRY_DISABLED: "1"
 
 jobs:
-  build:
-    if: >-
-      github.repository == 'widefleet/widefleet' &&
-      !github.event.release.prerelease && startsWith(github.event.release.tag_name, 'v')
+  prepare:
+    if: github.repository == 'widefleet/widefleet'
+    permissions:
+      contents: write
     runs-on: ubuntu-24.04
     outputs:
       revision: ${{ steps.release.outputs.revision }}
@@ -35,10 +37,25 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Validate the published release and its main-branch source
+      - name: Validate the version tag and its main-branch source
         id: release
+        run: bash tools/check-release.sh
+      - name: Prepare the draft GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+        run: bash tools/prepare-release.sh
+
+  build:
+    name: Build and test CLI
+    needs: prepare
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.revision }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate the release source
         run: bash tools/check-release.sh
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
@@ -86,21 +103,38 @@ jobs:
         if: always()
         run: docker compose -f infra/test/compose.yaml down --volumes
 
+  build-images:
+    needs: prepare
+    cache-mode: read
+    uses: ./.github/workflows/build-release-images.yaml
+    with:
+      ref: ${{ needs.prepare.outputs.revision }}
+      recover-existing: true
+
+  publish-images:
+    needs: [prepare, build, build-images]
+    uses: ./.github/workflows/publish-images.yaml
+    with:
+      ref: ${{ needs.prepare.outputs.revision }}
+      tag: ${{ github.ref_name }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
   publish:
-    needs: build
+    name: Publish CLI to npm
+    needs: [prepare, build, build-images]
     runs-on: ubuntu-24.04
     permissions:
-      contents: write
+      contents: read
       id-token: write
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ needs.build.outputs.revision }}
+          ref: ${{ needs.prepare.outputs.revision }}
           fetch-depth: 0
           persist-credentials: false
       - name: Validate the release again before publication
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           bash tools/check-release.sh
           echo "CLI_RELEASE_DIRECTORY=$RUNNER_TEMP/cli" >> "$GITHUB_ENV"
@@ -112,16 +146,37 @@ jobs:
         with:
           name: tested-cli
           path: ${{ env.CLI_RELEASE_DIRECTORY }}
-      - name: Attach the tested CLI archives and checksums to the GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          bash tools/upload-release-assets.sh \
-            "$CLI_RELEASE_DIRECTORY/widefleet-$VERSION.tgz" \
-            "$CLI_RELEASE_DIRECTORY/widefleet-$VERSION.tgz.sha256" \
-            "$CLI_RELEASE_DIRECTORY/widefleet-cli-$VERSION-linux-x64.tar.gz" \
-            "$CLI_RELEASE_DIRECTORY/widefleet-cli-$VERSION-linux-x64.tar.gz.sha256"
       - name: Publish using npm trusted publishing and verify installation
         run: |
           npm install --global pnpm@12.4.2
           bash tools/publish-cli.sh
+
+  release:
+    name: Publish the completed GitHub Release
+    needs: [prepare, publish, publish-images]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.revision }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate the release source before final publication
+        run: |
+          bash tools/check-release.sh
+          echo "CLI_RELEASE_DIRECTORY=$RUNNER_TEMP/cli" >> "$GITHUB_ENV"
+          echo "RELEASE_IMAGES=$RUNNER_TEMP/release-images" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: tested-cli
+          path: ${{ env.CLI_RELEASE_DIRECTORY }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-manifest
+          path: ${{ env.RELEASE_IMAGES }}
+      - name: Attach verified downloads and publish the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash tools/publish-github-release.sh

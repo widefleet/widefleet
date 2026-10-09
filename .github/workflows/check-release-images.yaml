@@ -5,6 +5,7 @@ on:
     paths:
       - .github/workflows/*release-images.yaml
       - .github/workflows/publish-images.yaml
+      - .github/workflows/publish-cli.yaml
       - .dockerignore
       - LICENSE
       - tools/*release*.sh

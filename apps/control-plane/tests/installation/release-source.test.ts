@@ -27,18 +27,12 @@ const fixture = async () => {
   await git("commit", "-m", "Fixture");
   await git("update-ref", "refs/remotes/origin/main", "HEAD");
   await git("tag", "v0.3.0");
-  const release = { tag_name: "v0.3.0", draft: false, prerelease: false };
-  await writeFile(join(directory, "release.json"), JSON.stringify(release));
-  await writeFile(join(directory, "gh"), '#!/bin/sh\ncat "$FIXTURE/release.json"\n', {
-    mode: 0o755,
-  });
 
   const run = (environment = {}) =>
     execute("bash", [script], {
       cwd: directory,
       env: {
         PATH: `${directory}:${process.env["PATH"] ?? "/usr/bin:/bin"}`,
-        FIXTURE: directory,
         GITHUB_REPOSITORY: "widefleet/widefleet",
         RELEASE_TAG: "v0.3.0",
         GITHUB_ENV: join(directory, "environment"),
@@ -47,10 +41,10 @@ const fixture = async () => {
       },
     });
 
-  return { directory, git, release, run };
+  return { directory, git, run };
 };
 
-it("accepts a published matching release from main and records its exact revision", async () => {
+it("accepts a version tag from main without requiring a published release", async () => {
   const { directory, git, run } = await fixture();
 
   try {
@@ -64,20 +58,30 @@ it("accepts a published matching release from main and records its exact revisio
   }
 });
 
-it.each([{ draft: true }, { prerelease: true }, { tag_name: "v0.2.0" }])(
-  "rejects an unpublished or mismatched release: %j",
-  async (override) => {
-    const { directory, release, run } = await fixture();
+it("resolves annotated version tags to the tested commit", async () => {
+  const { directory, git, run } = await fixture();
 
-    try {
-      await writeFile(join(directory, "release.json"), JSON.stringify({ ...release, ...override }));
-      await expect(run()).rejects.toThrow();
-      await expect(readFile(join(directory, "environment"))).rejects.toThrow();
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
-  },
-);
+  try {
+    await git("tag", "--force", "--annotate", "v0.3.0", "--message", "Release fixture");
+    await run();
+    const revision = (await git("rev-parse", "HEAD")).stdout.trim();
+    expect(await readFile(join(directory, "outputs"), "utf8")).toBe(`revision=${revision}\n`);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("rejects a checkout that differs from the version tag even when both are on main", async () => {
+  const { directory, git, run } = await fixture();
+
+  try {
+    await git("commit", "--allow-empty", "-m", "Newer main commit");
+    await git("update-ref", "refs/remotes/origin/main", "HEAD");
+    await expect(run()).rejects.toThrow();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 it("rejects source outside main even when its tag and versions match", async () => {
   const { directory, git, run } = await fixture();

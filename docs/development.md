@@ -164,16 +164,16 @@ The starter checks authored TypeScript and Svelte sources. JavaScript checking i
 
 The repository has seven workflows:
 
-| Workflow                    | Trigger and purpose                                                                                         |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `check.yaml`                | Pull requests and pushes to `main`; requires all source and integration suites to pass.                     |
-| `check-suites.yaml`         | Reusable source, integration/browser, packaged SSO, and Rust/runtime test suites.                           |
-| `check-release-images.yaml` | Relevant pull requests and pushes to `main`; builds and tests the packaged images without publishing.       |
-| `build-release-images.yaml` | Reusable parallel image builds, Cargo and image caching, artifact transport, and packaged deployment tests. |
-| `publish-cli.yaml`          | Published stable `vVERSION` GitHub Releases; publishes the tested CLI to npm.                               |
-| `publish-images.yaml`       | Published stable `vVERSION` GitHub Releases; publishes the tested images to Docker Hub.                     |
-| `publish-app-runtime.yaml`  | `runtime-vVERSION` tag pushes; tests and creates the independent app-runtime GitHub Release.                |
+| Workflow                    | Trigger and purpose                                                                                           |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `check.yaml`                | Pull requests and pushes to `main`; requires all source and integration suites to pass.                       |
+| `check-suites.yaml`         | Reusable source, integration/browser, packaged SSO, and Rust/runtime test suites.                             |
+| `check-release-images.yaml` | Relevant pull requests and pushes to `main`; builds and tests the packaged images without publishing.         |
+| `build-release-images.yaml` | Reusable parallel image builds, Cargo and image caching, artifact transport, and packaged deployment tests.   |
+| `publish-cli.yaml`          | `vVERSION` tag pushes; coordinates tests, npm/Docker publication, then publishes the completed draft release. |
+| `publish-images.yaml`       | Reusable publication of tested images to Docker Hub and transport of the verified digest manifest.            |
+| `publish-app-runtime.yaml`  | `runtime-vVERSION` tag pushes; tests and creates the independent app-runtime GitHub Release.                  |
 
-The npm and Docker workflows require a published stable GitHub Release. Failed runs use GitHub Actions' built-in rerun controls. See [CLI releases](cli-releases.md), [container releases](container-releases.md) and [runtime releases](runtime-releases.md) for authentication and release instructions.
+The platform release starts from a stable version tag on `main`. Both build/test paths must succeed before either registry job starts, and the GitHub Release remains in draft until both registry jobs and all attachment checks succeed. This supports GitHub release immutability. Failed runs use GitHub Actions' built-in rerun controls. See [CLI releases](cli-releases.md), [container releases](container-releases.md) and [runtime releases](runtime-releases.md) for authentication and release instructions.
 
 PR jobs receive read-only cache access; only checks triggered by pushes to `main` can save caches. Test jobs use disposable services and synthetic fixtures.

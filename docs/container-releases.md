@@ -1,6 +1,6 @@
 # Container release publishing
 
-Publishing a stable GitHub Release in `widefleet/widefleet` starts **Publish Docker Hub images**. It builds, tests and publishes four Linux amd64 images:
+Pushing a stable `vVERSION` tag to `widefleet/widefleet` starts **Publish Widefleet**. Its Docker jobs build, test and publish four Linux amd64 images:
 
 | Docker Hub repository     | Purpose                                         |
 | ------------------------- | ----------------------------------------------- |
@@ -25,12 +25,12 @@ Keep tokens in GitHub Actions secrets. Docker Hub credentials are provided only 
 ## Publish a version
 
 1. Update `package.json` and the Cargo workspace version together and merge the change into `main`.
-2. Publish a stable GitHub Release with tag `vVERSION` pointing to that commit. The same release starts [npm CLI publication](cli-releases.md).
-3. Wait for **Publish Docker Hub images** to succeed. The published release entry alone does not confirm registry publication.
+2. Follow the [release setup and tag-push instructions](cli-releases.md#publish-a-version). The same run prepares a draft GitHub Release and handles npm publication.
+3. Wait for **Publish Widefleet** to succeed. Both CLI and image tests must pass before publishing to either registry. The GitHub Release stays in draft until npm publication, Docker publication and all attachment verifications succeed.
 
-The workflow checks the release state, version and commit's ancestry on `main`. It calls the same reusable build workflow as the pull-request and main-branch image checks. The agent, control-plane and SSO builds run in parallel; the agent job first builds its runtime base. Main-branch checks populate the Cargo and image-layer caches, while pull requests and release builds can only restore them. Disposable PostgreSQL and RustFS services exercise installation, authentication, configuration, storage and a real packaged app deployment before any image is pushed.
+The workflow checks the version tag and commit's ancestry on `main`. It calls the same reusable build workflow as the pull-request and main-branch image checks. The agent, control-plane and SSO builds run in parallel; the agent job first builds its runtime base. Main-branch checks populate the Cargo and image-layer caches, while pull requests and release builds can only restore them. Disposable PostgreSQL and RustFS services exercise installation, authentication, configuration, storage and a real packaged app deployment before any image is pushed.
 
-The publishing job downloads the tested images, verifies their image IDs and source/version labels, and pushes only missing version tags. It then pulls each digest anonymously and checks it against the tested image ID. The resulting `widefleet-images-VERSION.env` digest manifest and its checksum are attached to the same GitHub Release and verified by downloading them again. Existing attachments must match exactly and are never overwritten. Actions artifacts only transport the tested images between jobs.
+The publishing job downloads the tested images, verifies their image IDs and source/version labels, and pushes only missing version tags. It then pulls each digest anonymously and checks it against the tested image ID. The resulting `widefleet-images-VERSION.env` digest manifest and its checksum are transported to the final job, attached to the draft GitHub Release with the CLI archives, and verified by downloading them again before the draft is published. Existing attachments must match exactly and are never overwritten. Actions artifacts only transport the tested images between jobs.
 
 Images use exact version tags and source commit labels. There is no floating `latest` tag and no update to running installations. Published version tags are never replaced by the workflow. Enable Docker Hub tag immutability for the version tags as an additional registry control if available for your account.
 
@@ -38,7 +38,7 @@ Images use exact version tags and source commit labels. There is no floating `la
 
 Use **Re-run failed jobs** on the original GitHub Actions run. Existing images must match the release's source commit, version, platform and source URL. If a build job is rerun, it pulls and retests existing images with any missing images. This lets a rerun finish a partial push without rebuilding or replacing published images. A conflicting version fails and needs a new release version.
 
-Ordinary pushes, tag creation, draft releases and prereleases do not publish. The npm and Docker workflows report their outcomes separately; a failure in one does not undo the other registry's publication.
+Ordinary pushes to `main` and GitHub Release events do not publish. A failed registry job leaves the GitHub Release in draft but does not undo the other registry's publication. Rerun the failed jobs on the same run to finish publication; do not move or recreate the version tag.
 
 ## Local verification
 
