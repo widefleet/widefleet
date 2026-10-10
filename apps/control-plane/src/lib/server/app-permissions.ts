@@ -98,7 +98,7 @@ export const managedApp = async (
   if (!target)
     return Result.err(new InvalidOperation({ code: "NOT_FOUND", message: "App not found" }));
 
-  // Lock the authorization root first, so a concurrent transfer or revocation
+  // Lock the authorization root first, so a concurrent role change
   // cannot race a mutation of either the original app or one of its previews.
   const [root] = await transaction
     .select()

@@ -10,7 +10,7 @@ import { createWorkflowService } from "../src/lib/server/workflows.ts";
 import { appRoleAssignments, apps, jobs } from "../src/lib/server/schema.ts";
 import { createTestEnvironment } from "./environment.ts";
 
-describe("App roles and ownership", () => {
+describe("App roles", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
   let service: ReturnType<typeof createAppService>;
   let access: ReturnType<typeof createAppAccessService>;
@@ -74,11 +74,11 @@ describe("App roles and ownership", () => {
     await environment.close();
   });
 
-  it("starts with one personal owner and a closed audience", async () => {
+  it("starts with the creator as an admin and a closed audience", async () => {
     const app = await create("personal");
     const state = (await access.roles(creator, app.id)).unwrap();
     expect(state.assignments).toHaveLength(1);
-    expect(state.assignments[0]).toMatchObject({ principal: recipient("creator"), role: "owner" });
+    expect(state.assignments[0]).toMatchObject({ principal: recipient("creator"), role: "admin" });
     expect((await access.read(creator, app.id)).unwrap()).toMatchObject({
       groups: [],
       users: ["creator"],
@@ -172,13 +172,6 @@ describe("App roles and ownership", () => {
     await grant(app.id, "colleague", "admin");
     const current = (await access.roles(colleague, app.id)).unwrap();
     expect(current.actions).toContain("delete");
-    expect(current.actions).not.toContain("transfer");
-    expect(
-      await access.transfer(colleague, app.id, {
-        principal: recipient("colleague"),
-        revision: current.revision,
-      }),
-    ).toMatchObject({ error: { code: "FORBIDDEN" } });
   });
 
   it("scopes group IDs to the issuer and removes group rights on the next request", async () => {
@@ -201,7 +194,7 @@ describe("App roles and ownership", () => {
     });
   });
 
-  it("inherits roles and owner through previews without inheriting network grants", async () => {
+  it("inherits roles through previews without inheriting network grants", async () => {
     const app = await create("root");
     await grant(app.id, "colleague", "developer");
 
@@ -218,7 +211,7 @@ describe("App roles and ownership", () => {
     const inherited = (await access.roles(colleague, preview.id)).unwrap();
     expect(inherited.inheritedFrom).toBe(app.id);
     expect(
-      inherited.assignments.find((assignment) => assignment.role === "owner")?.principal,
+      inherited.assignments.find((assignment) => assignment.role === "admin")?.principal,
     ).toEqual(recipient("creator"));
     const state = (await access.roles(creator, app.id)).unwrap();
     expect(
@@ -228,12 +221,21 @@ describe("App roles and ownership", () => {
         revision: state.revision,
       }),
     ).toMatchObject({ error: { code: "FORBIDDEN" } });
-    await access.transfer(creator, app.id, {
-      principal: recipient("ops", "group"),
-      revision: state.revision,
-    });
-    const newOwner = person("operator", ["ops"]);
-    expect((await access.roles(newOwner, preview.id)).unwrap().actions).toContain("transfer");
+    const shared = await grant(app.id, "ops", "admin", "group");
+
+    const creatorAssignment = shared.assignments.find(
+      ({ principal }) => principal.subject === "creator",
+    );
+
+    if (!creatorAssignment) throw new Error("Missing creator assignment");
+    const newAdmin = person("operator", ["ops"]);
+    (
+      await access.revoke(newAdmin, app.id, {
+        assignmentId: creatorAssignment.id,
+        revision: shared.revision,
+      })
+    ).unwrap();
+    expect((await access.roles(newAdmin, preview.id)).unwrap().actions).toContain("roles");
     expect(await service.get(creator, app.id)).toMatchObject({ error: { code: "NOT_FOUND" } });
 
     const [stored] = await environment.database.db
@@ -255,37 +257,126 @@ describe("App roles and ownership", () => {
     ).toEqual([]);
   });
 
-  it("serializes competing transfers and preserves exactly one owner", async () => {
-    const app = await create("transfer");
+  it("protects the last admin, including platform recovery and direct database writes", async () => {
+    const app = await create("last-admin");
     const current = (await access.roles(creator, app.id)).unwrap();
+    const assignment = current.assignments[0];
+
+    if (!assignment) throw new Error("Missing creator assignment");
+
+    for (const principal of [creator, { ...colleague, admin: true }]) {
+      expect(
+        await access.revoke(principal, app.id, {
+          assignmentId: assignment.id,
+          revision: current.revision,
+        }),
+      ).toMatchObject({ error: { code: "FORBIDDEN" } });
+    }
+
+    await expect(
+      environment.database.db
+        .delete(appRoleAssignments)
+        .where(eq(appRoleAssignments.id, assignment.id)),
+    ).rejects.toThrow();
+    await expect(
+      environment.database.db
+        .update(appRoleAssignments)
+        .set({ role: "developer" })
+        .where(eq(appRoleAssignments.id, assignment.id)),
+    ).rejects.toThrow();
+    expect((await access.roles(creator, app.id)).unwrap()).toEqual(current);
+  });
+
+  it("allows admins to hand over and remove themselves without privileged creator rights", async () => {
+    const app = await create("handover");
+    const shared = await grant(app.id, "colleague", "admin");
+    expect(await appActions(environment.database.db, colleague, app.id)).toEqual(
+      await appActions(environment.database.db, creator, app.id),
+    );
+    const assignment = shared.assignments.find(({ principal }) => principal.subject === "creator");
+
+    if (!assignment) throw new Error("Missing creator assignment");
+
+    const result = (
+      await access.revoke(creator, app.id, {
+        assignmentId: assignment.id,
+        revision: shared.revision,
+      })
+    ).unwrap();
+
+    expect(result.actions).toEqual([]);
+    expect(result.assignments).toEqual([
+      expect.objectContaining({ role: "admin", principal: recipient("colleague") }),
+    ]);
+    expect((await access.read(colleague, app.id)).unwrap().users).toEqual(["colleague"]);
+    expect(await access.roles(creator, app.id)).toMatchObject({ error: { code: "NOT_FOUND" } });
+
+    const recovered = (
+      await access.grant({ ...creator, admin: true }, app.id, {
+        revision: result.revision,
+        role: "admin",
+        principal: recipient("ops", "group"),
+      })
+    ).unwrap();
+
+    expect(recovered.assignments).toHaveLength(2);
+  });
+
+  it("serializes competing admin revocations and rejects removal of the survivor", async () => {
+    const app = await create("concurrent-admins");
+    const shared = await grant(app.id, "colleague", "admin");
+    const platformAdmin = { ...colleague, admin: true };
 
     const results = await Promise.all(
-      ["first", "second"].map((subject) =>
-        access.transfer({ ...creator, admin: true }, app.id, {
-          principal: recipient(subject),
-          revision: current.revision,
+      shared.assignments.map((assignment) =>
+        access.revoke(platformAdmin, app.id, {
+          assignmentId: assignment.id,
+          revision: shared.revision,
         }),
       ),
     );
 
     expect(results.filter((result) => result.isOk())).toHaveLength(1);
     expect(results.find((result) => result.isErr())).toMatchObject({ error: { code: "CONFLICT" } });
+    const current = (await access.roles(platformAdmin, app.id)).unwrap();
+    expect(current.assignments).toHaveLength(1);
+    const survivor = current.assignments[0];
 
-    const [owner] = await environment.database.db
-      .select()
-      .from(appRoleAssignments)
-      .where(and(eq(appRoleAssignments.appId, app.id), eq(appRoleAssignments.role, "owner")));
-
-    if (!owner) throw new Error("Owner missing");
-    await expect(
-      environment.database.db.delete(appRoleAssignments).where(eq(appRoleAssignments.id, owner.id)),
-    ).rejects.toThrow();
+    if (!survivor) throw new Error("Missing surviving admin");
     expect(
-      await access.revoke(person(owner.subject), app.id, {
-        assignmentId: owner.id,
-        revision: current.revision + 1,
+      await access.revoke(platformAdmin, app.id, {
+        assignmentId: survivor.id,
+        revision: current.revision,
       }),
     ).toMatchObject({ error: { code: "FORBIDDEN" } });
+  });
+
+  it("preserves an admin under concurrent database deletions and allows whole-app deletion", async () => {
+    const app = await create("database-admins");
+    const shared = await grant(app.id, "colleague", "admin");
+
+    const results = await Promise.allSettled(
+      shared.assignments.map((assignment) =>
+        environment.database.db
+          .delete(appRoleAssignments)
+          .where(eq(appRoleAssignments.id, assignment.id)),
+      ),
+    );
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(
+      await environment.database.db
+        .select()
+        .from(appRoleAssignments)
+        .where(and(eq(appRoleAssignments.appId, app.id), eq(appRoleAssignments.role, "admin"))),
+    ).toHaveLength(1);
+    await environment.database.db.delete(apps).where(eq(apps.id, app.id));
+    expect(
+      await environment.database.db
+        .select()
+        .from(appRoleAssignments)
+        .where(eq(appRoleAssignments.appId, app.id)),
+    ).toEqual([]);
   });
 
   it("keeps platform recovery independent of app use and waits for gateway activation", async () => {

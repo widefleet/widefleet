@@ -184,7 +184,7 @@ pub async fn run(api: &Api, credentials: &auth::Credentials, options: Options) -
     }
     if !current.can_manage {
         return Err(Error::invalid(
-            "Only the app owner or an administrator can change access rules".into(),
+            "Only an app admin or installation administrator can change access rules".into(),
         ));
     }
     let policy = serde_json::json!({

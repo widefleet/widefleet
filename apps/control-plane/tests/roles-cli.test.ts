@@ -21,10 +21,10 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App roles CLI", () => {
       {
         id: assignmentId,
         principal: { type: "user", provider: "https://login.example.test", subject: "creator" },
-        role: "owner",
+        role: "admin",
       },
     ],
-    actions: ["read", "roles", "transfer"],
+    actions: ["read", "roles"],
     provider: "https://login.example.test",
   });
 
@@ -101,13 +101,15 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App roles CLI", () => {
       revision: 7,
     });
   });
-  it("transfers to a person and revokes an assignment through distinct operations", async () => {
-    await cli("transfer", "--person", "successor");
-    const transfer = requests.find((request) => request.method === "PUT");
-    expect(transfer?.path).toBe(`/api/v1/apps/${appId}/owner`);
-    expect(contract.appOwnershipTransfer.parse(JSON.parse(transfer?.body ?? "")).principal).toEqual(
-      { type: "user", provider: state.provider, subject: "successor" },
-    );
+  it("grants a person admin rights and revokes an assignment", async () => {
+    await cli("grant", "--person", "successor", "--role", "admin");
+    const write = requests.find((request) => request.method === "POST");
+    expect(write?.path).toBe(`/api/v1/apps/${appId}/roles`);
+    expect(contract.appRoleGrant.parse(JSON.parse(write?.body ?? ""))).toEqual({
+      principal: { type: "user", provider: state.provider, subject: "successor" },
+      role: "admin",
+      revision: 7,
+    });
     await cli("revoke", assignmentId);
     expect(requests.at(-1)).toEqual({
       path: `/api/v1/apps/${appId}/roles/${assignmentId}`,
@@ -124,15 +126,16 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App roles CLI", () => {
     requests.length = 0;
     rejection = false;
     inherited = true;
-    await expect(cli("transfer", "--group", "operations")).rejects.toThrow(
+    await expect(cli("grant", "--group", "operations", "--role", "admin")).rejects.toThrow(
       "Previews inherit roles",
     );
     expect(requests.every((request) => request.method === "GET")).toBe(true);
   });
   it.each([
     ["grant", "--group", "team", "--role", "owner"],
-    ["transfer", "--person", "user", "--group", "team"],
+    ["grant", "--person", "user", "--group", "team", "--role", "admin"],
     ["transfer"],
+    ["grant", "--role", "admin"],
   ])("rejects ambiguous role changes: %s", async (...args) => {
     await expect(cli(...args)).rejects.toMatchObject({ code: 2 });
     expect(requests).toHaveLength(0);

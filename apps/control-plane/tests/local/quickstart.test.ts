@@ -32,9 +32,9 @@ describe.runIf(process.env["RUN_LOCAL_TESTS"] === "1")("local quickstart", () =>
         ).json(),
       );
 
-      const owner = roles.assignments.find((assignment) => assignment.role === "owner");
-      expect(owner?.principal.type).toBe("user");
-      expect(owner?.principal.provider).not.toBe("widefleet");
+      const admin = roles.assignments.find((assignment) => assignment.role === "admin");
+      expect(admin?.principal.type).toBe("user");
+      expect(admin?.principal.provider).not.toBe("widefleet");
       expect(
         appAccessState.parse(
           await (
@@ -43,7 +43,7 @@ describe.runIf(process.env["RUN_LOCAL_TESTS"] === "1")("local quickstart", () =>
         ),
       ).toMatchObject({
         allAuthenticated: false,
-        users: [owner?.principal.subject],
+        users: [admin?.principal.subject],
         groups: [],
         state: "active",
       });

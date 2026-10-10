@@ -209,9 +209,9 @@ const provisionApp = (
       : "";
 
     let allAuthenticated = false;
-    const owner = personalPrincipal(principal);
+    const creator = personalPrincipal(principal);
 
-    if (owner.provider === accessProvider) accessUsers = [owner.subject];
+    if (creator.provider === accessProvider) accessUsers = [creator.subject];
 
     if (input.previewName !== undefined && input.parentId === null)
       return Result.err(
@@ -298,8 +298,8 @@ const provisionApp = (
       await transaction.insert(appRoleAssignments).values({
         id: crypto.randomUUID(),
         appId: record.id,
-        ...owner,
-        role: "owner",
+        ...creator,
+        role: "admin",
       });
 
     return Result.ok(presentApp(record, configuration));

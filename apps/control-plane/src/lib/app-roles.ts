@@ -12,7 +12,6 @@ export const appRoles = {
   user: access.newRole({ app: ["use"] }),
   developer: access.newRole({ app: developer }),
   admin: access.newRole({ app: admin }),
-  owner: access.newRole({ app: [...admin, "transfer"] }),
 };
 
 export const rolesForAction = (action: z.infer<typeof appAction>) =>

@@ -74,7 +74,7 @@ enum Command {
     Network(network::Options),
     /// Manage app access groups inherited automatically by every preview.
     Access(access::Options),
-    /// Manage app roles and transfer ownership to a person or SSO group.
+    /// Manage app roles for people and SSO groups.
     Roles(roles::Options),
     /// Deploy IT connectors and manage native RPC bindings.
     Connector(connector::Options),

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { appAccessGroup } from "./app-access.ts";
 
-export const appRole = z.enum(["user", "developer", "admin", "owner"]);
+export const appRole = z.enum(["user", "developer", "admin"]);
 
 export const appAction = z.enum([
   "use",
@@ -15,7 +15,6 @@ export const appAction = z.enum([
   "network",
   "catalog",
   "delete",
-  "transfer",
 ]);
 
 export const appPrincipal = z.strictObject({
@@ -32,17 +31,12 @@ export const appRoleAssignment = z.strictObject({
 
 export const appRoleGrant = z.strictObject({
   principal: appPrincipal,
-  role: appRole.exclude(["owner"]),
+  role: appRole,
   revision: z.number().int().nonnegative(),
 });
 
 export const appRoleRevoke = z.strictObject({
   assignmentId: z.uuid(),
-  revision: z.number().int().nonnegative(),
-});
-
-export const appOwnershipTransfer = z.strictObject({
-  principal: appPrincipal,
   revision: z.number().int().nonnegative(),
 });
 

@@ -397,7 +397,7 @@ test("manages organization roles and app access by name while members create the
     const appPath = new URL(page.url()).pathname;
     expect((await memberContext.request.get(appPath)).status()).toBe(404);
     await page.getByRole("link", { name: "Access", exact: true }).click();
-    await page.getByRole("link", { name: "Roles and ownership", exact: true }).click();
+    await page.getByRole("link", { name: "App roles", exact: true }).click();
     await page.getByLabel("Find a member by name or email").fill("member-ui@");
     await page.getByRole("button", { name: "Find member" }).click();
     await page.getByLabel("Role for Member Example").selectOption("developer");
@@ -714,15 +714,31 @@ test.describe("member forms without JavaScript", () => {
     ).toHaveLength(1);
 
     await page.goto(path);
-    await page.getByText("Transfer ownership to Native Grant User", { exact: true }).click();
-    await page.getByRole("button", { name: "Confirm transfer to Native Grant User" }).click();
-    await expect(page).toHaveURL("/");
+    await page.getByLabel("Role for Native Grant User").selectOption("admin");
+    await page.getByRole("button", { name: "Grant role to Native Grant User" }).click();
+    await expect(page.locator("#access").getByRole("status")).toHaveText("Role changes saved.");
+
+    const shared = appRoleState.parse(
+      await (await context.request.get(`/api/v1/apps/${record.id}/roles`)).json(),
+    );
+
+    const previousAdmin = shared.assignments.find(
+      ({ principal }) => principal.subject !== person.id,
+    );
+
+    if (!previousAdmin) throw new Error("Missing previous admin");
+    await page
+      .locator("form")
+      .filter({ has: page.locator(`input[value="${previousAdmin.id}"]`) })
+      .getByRole("button", { name: "Revoke role" })
+      .click();
+    await expect(page.getByRole("button", { name: "Revoke role" })).toHaveCount(0);
     expect(
       await environment.database.db
         .select({ role: appRoleAssignments.role, subject: appRoleAssignments.subject })
         .from(appRoleAssignments)
         .where(eq(appRoleAssignments.appId, record.id)),
-    ).toEqual([{ role: "owner", subject: person.id }]);
+    ).toEqual([{ role: "admin", subject: person.id }]);
   });
 });
 
@@ -973,7 +989,7 @@ test("remote endpoints recheck sessions, roles, input and request origin", async
 });
 
 for (const javaScriptEnabled of [true, false]) {
-  test(`preserves ownership drafts through polling and rejection with JavaScript ${javaScriptEnabled}`, async ({
+  test(`preserves role drafts through polling and rejection with JavaScript ${javaScriptEnabled}`, async ({
     browser,
   }) => {
     const session = await environment.users.login({ userId: environment.owner.id });
@@ -997,8 +1013,8 @@ for (const javaScriptEnabled of [true, false]) {
       const created = await context.request.post("/api/v1/apps", {
         headers: { origin: environment.configuration.PLATFORM_URL },
         data: {
-          slug: `transfer-draft-${javaScriptEnabled ? "js" : "html"}`,
-          displayName: "Transfer draft fixture",
+          slug: `role-draft-${javaScriptEnabled ? "js" : "html"}`,
+          displayName: "Role draft fixture",
         },
       });
 
@@ -1010,44 +1026,45 @@ for (const javaScriptEnabled of [true, false]) {
       );
 
       const recipient = crypto.randomUUID();
-      const competingOwner = crypto.randomUUID();
+      const competingAdmin = crypto.randomUUID();
       const page = await context.newPage();
       await page.goto(`/apps/${record.id}?tab=access&scope=management`, {
         waitUntil: "networkidle",
       });
 
-      const editor = page
-        .locator("details")
-        .filter({ has: page.locator("summary", { hasText: /^Transfer ownership$/ }) });
+      const editor = page.locator("details").filter({
+        has: page.locator("summary", { hasText: /^Assign a role by person or group ID$/ }),
+      });
 
       await editor.locator("summary").click();
-      await editor.getByLabel("New owner ID").fill(recipient);
+      await editor.getByLabel("Stable ID").fill(recipient);
 
-      const competing = await context.request.put(`/api/v1/apps/${record.id}/owner`, {
+      const competing = await context.request.post(`/api/v1/apps/${record.id}/roles`, {
         headers: { origin: environment.configuration.PLATFORM_URL },
         data: {
           revision: state.revision,
-          principal: { type: "group", provider: state.provider, subject: competingOwner },
+          role: "admin",
+          principal: { type: "group", provider: state.provider, subject: competingAdmin },
         },
       });
 
       expect(competing.status()).toBe(200);
 
       if (javaScriptEnabled) {
-        await expect(page.getByText(competingOwner, { exact: true })).toBeVisible({
+        await expect(page.getByText(competingAdmin, { exact: true })).toBeVisible({
           timeout: 12_000,
         });
         await page.getByRole("link", { name: "Overview", exact: true }).click();
         await page.getByRole("link", { name: "Access", exact: true }).click();
-        await page.getByRole("link", { name: "Roles and ownership", exact: true }).click();
+        await page.getByRole("link", { name: "App roles", exact: true }).click();
       }
 
       for (let attempt = 0; attempt < 2; attempt++) {
-        await expect(editor.getByLabel("New owner ID")).toHaveValue(recipient);
+        await expect(editor.getByLabel("Stable ID")).toHaveValue(recipient);
         await expect(editor.locator('input[name^="n:revision/"]')).toHaveValue(
           String(state.revision),
         );
-        await editor.getByRole("button", { name: "Transfer ownership", exact: true }).click();
+        await editor.getByRole("button", { name: "Grant role", exact: true }).click();
         await expect(editor.getByRole("alert")).toContainText("Permissions have changed");
       }
 
@@ -1055,25 +1072,35 @@ for (const javaScriptEnabled of [true, false]) {
         await (await context.request.get(`/api/v1/apps/${record.id}/roles`)).json(),
       );
 
-      expect(
-        unchanged.assignments.find((assignment) => assignment.role === "owner")?.principal.subject,
-      ).toBe(competingOwner);
+      expect(unchanged.assignments).toContainEqual(
+        expect.objectContaining({
+          role: "admin",
+          principal: { type: "group", provider: state.provider, subject: competingAdmin },
+        }),
+      );
+      expect(unchanged.assignments.some(({ principal }) => principal.subject === recipient)).toBe(
+        false,
+      );
       await page
         .getByRole("link", { name: "Discard drafts and reload roles", exact: true })
         .click();
       await editor.locator("summary").click();
-      await editor.getByLabel("New owner ID").fill(recipient);
-      await editor.getByRole("button", { name: "Transfer ownership", exact: true }).click();
-      await expect(page).toHaveURL("/");
+      await editor.getByLabel("Stable ID").fill(recipient);
+      await editor.getByRole("button", { name: "Grant role", exact: true }).click();
+      await expect(page.locator("#access").getByRole("status").first()).toHaveText(
+        "Role changes saved.",
+      );
 
-      const transferred = appRoleState.parse(
+      const granted = appRoleState.parse(
         await (await context.request.get(`/api/v1/apps/${record.id}/roles`)).json(),
       );
 
-      expect(
-        transferred.assignments.find((assignment) => assignment.role === "owner")?.principal
-          .subject,
-      ).toBe(recipient);
+      expect(granted.assignments).toContainEqual(
+        expect.objectContaining({
+          role: "user",
+          principal: { type: "group", provider: state.provider, subject: recipient },
+        }),
+      );
     } finally {
       await context.close();
     }
@@ -1220,7 +1247,7 @@ for (const javaScriptEnabled of [true, false]) {
       expect(competing.status()).toBe(200);
 
       if (javaScriptEnabled) {
-        await page.getByRole("link", { name: "Roles and ownership", exact: true }).click();
+        await page.getByRole("link", { name: "App roles", exact: true }).click();
         await page.getByRole("link", { name: "App usage", exact: true }).click();
         await expect(
           page.getByLabel("Allow everyone signed in through company SSO", { exact: true }),
@@ -1325,10 +1352,10 @@ test.describe("workspace experience", () => {
       page.getByRole("heading", { name: "Ready for your first deployment." }),
     ).toBeVisible();
     await page.getByRole("link", { name: "Access", exact: true }).click();
-    await page.getByRole("link", { name: "Roles and ownership", exact: true }).click();
+    await page.getByRole("link", { name: "App roles", exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/apps/${record.id}\\?tab=access&scope=management$`));
     await page.reload();
-    await expect(page.getByRole("heading", { name: "Roles and ownership" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "App roles" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Access", exact: true })).toHaveAttribute(
       "aria-current",
       "page",

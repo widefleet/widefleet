@@ -76,7 +76,8 @@ describe("Management company groups with Better Auth", () => {
     ).unwrap();
 
     (
-      await access.transfer(admin, app.id, {
+      await access.grant(admin, app.id, {
+        role: "admin",
         revision: 1,
         principal: { type: "group", provider, subject: group },
       })
@@ -119,9 +120,7 @@ describe("Management company groups with Better Auth", () => {
       expect(result.unwrap().company?.groups).toEqual([context.group]);
     expect(lookups).toBe(1);
     expect(principal.company?.groups).toEqual([context.group]);
-    expect(await appActions(environment.database.db, principal, context.app.id)).toContain(
-      "transfer",
-    );
+    expect(await appActions(environment.database.db, principal, context.app.id)).toContain("roles");
     (await identity.authenticate(context.request, "platform:read")).unwrap();
     expect(lookups).toBe(1);
     (
@@ -138,7 +137,7 @@ describe("Management company groups with Better Auth", () => {
     expect(expired.company).toMatchObject({ groups: [], groupsExpired: true });
     expect(lookups).toBe(1);
     expect(await appActions(environment.database.db, principal, context.app.id)).not.toContain(
-      "transfer",
+      "roles",
     );
   });
 
@@ -163,7 +162,7 @@ describe("Management company groups with Better Auth", () => {
     ).toMatchObject({ groups: [], groupsExpired: true });
   });
 
-  it("rejects group ownership transfer after waiting past expiry for the app lock", async () => {
+  it("rejects group-admin grants after waiting past expiry for the app lock", async () => {
     const context = await fixture();
 
     const identity = createIdentityService(
@@ -187,7 +186,8 @@ describe("Management company groups with Better Auth", () => {
 
     await locked;
 
-    const transfer = context.access.transfer(principal, context.app.id, {
+    const grant = context.access.grant(principal, context.app.id, {
+      role: "admin",
       revision: 2,
       principal: { type: "user", provider: context.provider, subject: "replacement" },
     });
@@ -206,7 +206,7 @@ describe("Management company groups with Better Auth", () => {
       await holding;
     }
 
-    expect(await transfer).toMatchObject({ error: { code: "FORBIDDEN" } });
+    expect(await grant).toMatchObject({ error: { code: "FORBIDDEN" } });
   });
 
   it("fails closed when delegated membership lookup fails", async () => {

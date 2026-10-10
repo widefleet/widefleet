@@ -63,18 +63,3 @@ export const revokeAppRole = form(
     return refresh(appId, search);
   },
 );
-
-export const transferAppOwnership = form(
-  target,
-  async ({ appId, type, provider, subject, revision }) => {
-    const { runtime, principal } = await remoteContext(true);
-    formValue(
-      await runtime.appAccess.transfer(principal, appId, {
-        principal: { type, provider, subject },
-        revision,
-      }),
-    );
-    await getApps().refresh();
-    redirect(303, "/");
-  },
-);

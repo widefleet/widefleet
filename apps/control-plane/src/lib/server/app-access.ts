@@ -257,12 +257,11 @@ export const createAppAccessService = (database: Database, configuration: Config
     principal: Principal,
     appId: string,
     revision: number,
-    action: "roles" | "transfer",
     mutate: (transaction: Transaction) => Promise<Result<null, InvalidOperation>>,
   ) =>
     transact(database, async (transaction) => {
       await lockAppProvider(transaction, configuration);
-      const access = await managedApp(transaction, principal, appId, action);
+      const access = await managedApp(transaction, principal, appId, "roles");
 
       if (access.isErr()) return access;
       const valid = writable(access.value, revision);
@@ -270,11 +269,11 @@ export const createAppAccessService = (database: Database, configuration: Config
       if (valid.isErr()) return valid;
       await lockAppDescendants(transaction, appId);
 
-      if (!(await appActions(transaction, principal, appId)).includes(action))
+      if (!(await appActions(transaction, principal, appId)).includes("roles"))
         return Result.err(
           new InvalidOperation({
             code: "FORBIDDEN",
-            message: `App permission required: ${action}`,
+            message: "App permission required: roles",
           }),
         );
       const changed = await mutate(transaction);
@@ -322,7 +321,7 @@ export const createAppAccessService = (database: Database, configuration: Config
         return Result.ok(people);
       }),
     grant: (principal: Principal, appId: string, input: z.infer<typeof contract.appRoleGrant>) =>
-      mutateRoles(principal, appId, input.revision, "roles", async (transaction) => {
+      mutateRoles(principal, appId, input.revision, async (transaction) => {
         const valid = await validatePrincipal(transaction, input.principal);
 
         if (valid.isErr()) return valid;
@@ -334,7 +333,7 @@ export const createAppAccessService = (database: Database, configuration: Config
         return Result.ok(null);
       }),
     revoke: (principal: Principal, appId: string, input: z.infer<typeof contract.appRoleRevoke>) =>
-      mutateRoles(principal, appId, input.revision, "roles", async (transaction) => {
+      mutateRoles(principal, appId, input.revision, async (transaction) => {
         const [assignment] = await transaction
           .select()
           .from(appRoleAssignments)
@@ -347,32 +346,31 @@ export const createAppAccessService = (database: Database, configuration: Config
             new InvalidOperation({ code: "NOT_FOUND", message: "Role assignment not found" }),
           );
 
-        if (assignment.role === "owner")
-          return Result.err(
-            new InvalidOperation({
-              code: "FORBIDDEN",
-              message: "Transfer ownership to replace the owner",
-            }),
-          );
+        if (assignment.role === "admin") {
+          const remaining = await transaction
+            .select({ id: appRoleAssignments.id })
+            .from(appRoleAssignments)
+            .where(
+              and(
+                eq(appRoleAssignments.appId, appId),
+                eq(appRoleAssignments.role, "admin"),
+                ne(appRoleAssignments.id, assignment.id),
+              ),
+            )
+            .limit(1);
+
+          if (!remaining.length)
+            return Result.err(
+              new InvalidOperation({
+                code: "FORBIDDEN",
+                message: "Add another app admin before revoking the last admin role",
+              }),
+            );
+        }
+
         await transaction
           .delete(appRoleAssignments)
           .where(eq(appRoleAssignments.id, assignment.id));
-
-        return Result.ok(null);
-      }),
-    transfer: (
-      principal: Principal,
-      appId: string,
-      input: z.infer<typeof contract.appOwnershipTransfer>,
-    ) =>
-      mutateRoles(principal, appId, input.revision, "transfer", async (transaction) => {
-        const valid = await validatePrincipal(transaction, input.principal);
-
-        if (valid.isErr()) return valid;
-        await transaction
-          .update(appRoleAssignments)
-          .set(valid.value)
-          .where(and(eq(appRoleAssignments.appId, appId), eq(appRoleAssignments.role, "owner")));
 
         return Result.ok(null);
       }),

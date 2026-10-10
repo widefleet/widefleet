@@ -18,13 +18,12 @@ CREATE TABLE app_role_assignment (
   type text NOT NULL CHECK (type IN ('user', 'group')),
   provider text NOT NULL,
   subject text NOT NULL,
-  role text NOT NULL CHECK (role IN ('user', 'developer', 'admin', 'owner')),
+  role text NOT NULL CHECK (role IN ('user', 'developer', 'admin')),
   UNIQUE (app_id, type, provider, subject, role)
 );
-CREATE UNIQUE INDEX app_role_assignment_owner ON app_role_assignment(app_id) WHERE role = 'owner';
 CREATE INDEX app_role_assignment_principal ON app_role_assignment(provider, type, subject);
 
-CREATE FUNCTION check_app_owner() RETURNS trigger LANGUAGE plpgsql AS $$
+CREATE FUNCTION check_app_admin() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE target uuid;
 BEGIN
   IF TG_TABLE_NAME = 'app' THEN
@@ -35,9 +34,10 @@ BEGIN
     END IF;
     target := COALESCE(NEW.app_id, OLD.app_id);
   END IF;
+  PERFORM 1 FROM app WHERE id = target FOR UPDATE;
   IF EXISTS (SELECT 1 FROM app WHERE id = target AND parent_id IS NULL)
-     AND (SELECT count(*) FROM app_role_assignment WHERE app_id = target AND role = 'owner') <> 1 THEN
-    RAISE EXCEPTION 'An original app must have exactly one owner';
+     AND (SELECT count(*) FROM app_role_assignment WHERE app_id = target AND role = 'admin') < 1 THEN
+    RAISE EXCEPTION 'An original app must have at least one admin';
   END IF;
   IF EXISTS (SELECT 1 FROM app WHERE id = target AND parent_id IS NOT NULL)
      AND EXISTS (SELECT 1 FROM app_role_assignment WHERE app_id = target) THEN
@@ -45,7 +45,7 @@ BEGIN
   END IF;
   RETURN NULL;
 END $$;
-CREATE CONSTRAINT TRIGGER app_owner_required AFTER INSERT OR UPDATE ON app
-  DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION check_app_owner();
-CREATE CONSTRAINT TRIGGER app_role_owner_required AFTER INSERT OR UPDATE OR DELETE ON app_role_assignment
-  DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION check_app_owner();
+CREATE CONSTRAINT TRIGGER app_admin_required AFTER INSERT OR UPDATE ON app
+  DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION check_app_admin();
+CREATE CONSTRAINT TRIGGER app_role_admin_required AFTER INSERT OR UPDATE OR DELETE ON app_role_assignment
+  DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION check_app_admin();

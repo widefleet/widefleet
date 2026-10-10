@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { RemoteFormFields } from "$app/server";
-  import { grantAppRole, revokeAppRole, transferAppOwnership } from "#lib/app-roles.remote";
+  import { grantAppRole, revokeAppRole } from "#lib/app-roles.remote";
   import { searchAccessGroups } from "#lib/app-access.remote";
   import type { getAppDetails } from "#lib/apps.remote";
   import FormIssues from "#shadcn/FormIssues.svelte";
@@ -29,8 +29,6 @@
 
   const grant = $derived(grantAppRole.for(appId));
 
-  const transfer = $derived(transferAppOwnership.for(appId));
-
   const directory = $derived(searchAccessGroups.for(appId));
 
   let selectedProvider = $state<string | undefined>();
@@ -54,7 +52,7 @@
     revisions[key] ??= draftRevision(key, fields);
   }
 
-  const labels = { user: "User", developer: "Developer", admin: "App admin", owner: "Owner" };
+  const labels = { user: "User", developer: "Developer", admin: "App admin" };
 
   const editable = $derived(data.inheritedFrom === null && data.actions.includes("roles"));
 
@@ -67,15 +65,16 @@
 </script>
 
 <section id="access" aria-labelledby="roles-heading" class="max-w-3xl space-y-6">
-  <h2 id="roles-heading" class="text-base font-semibold">Roles and ownership</h2>
+  <h2 id="roles-heading" class="text-base font-semibold">App roles</h2>
   {#if saved}<Feedback kind="success">Role changes saved.</Feedback>{/if}
   <p class="text-muted-foreground text-sm leading-6">
     Every role includes app usage. Developers can deploy, read logs, manage workflows, restore
     versions and run database migrations. App admins also manage roles, network permissions, catalog
-    visibility and deletion. Owners can transfer ownership.
+    visibility and deletion. To hand over an app, add another admin before removing the previous
+    admin role.
   </p>
   {#if data.inheritedFrom}<p>
-      Roles and ownership are inherited from the <a
+      App roles are inherited from the <a
         href={`/apps/${data.inheritedFrom}?tab=access&scope=management`}>original app</a
       >.
     </p>{/if}
@@ -89,7 +88,7 @@
           <p><code class="text-xs break-all">{assignment.principal.subject}</code></p>
           <p class="text-muted-foreground text-xs break-all">{assignment.principal.provider}</p>
         </div>
-        {#if editable && assignment.role !== "owner"}
+        {#if editable && (assignment.role !== "admin" || data.assignments.filter((entry) => entry.role === "admin").length > 1)}
           {@const revoke = revokeAppRole.for(assignment.id)}
           <form
             class="space-y-3"
@@ -173,33 +172,6 @@
               disabled={memberGrant.pending > 0}>Grant role to {person.name}</Button
             >
           </form>
-          {#if data.actions.includes("transfer")}
-            {@const memberTransfer = transferAppOwnership.for(memberKey)}
-            <details
-              class="space-y-4 rounded-lg border p-4"
-              onfocusin={() => beginDraft(`transfer:${memberKey}`, memberTransfer.fields)}
-              open={Boolean(memberTransfer.fields.allIssues()?.length)}
-            >
-              <summary class="text-sm font-medium">Transfer ownership to {person.name}</summary>
-              <form class="space-y-3" {...memberTransfer}>
-                <input {...memberTransfer.fields.appId.as("hidden", appId)} /><input
-                  {...memberTransfer.fields.revision.as(
-                    "hidden",
-                    draftRevision(`transfer:${memberKey}`, memberTransfer.fields),
-                  )}
-                /><input {...memberTransfer.fields.type.as("hidden", "user")} /><input
-                  {...memberTransfer.fields.provider.as("hidden", person.principal.provider)}
-                /><input
-                  {...memberTransfer.fields.subject.as("hidden", person.principal.subject)}
-                />
-                <p>The previous owner loses the owner role when the transfer completes.</p>
-                <FormIssues issues={memberTransfer.fields.allIssues()} /><Button
-                  type="submit"
-                  disabled={memberTransfer.pending > 0}>Confirm transfer to {person.name}</Button
-                >
-              </form>
-            </details>
-          {/if}
         </li>
       {/each}
     </ul>
@@ -289,40 +261,5 @@
           </p>{/if}
       </form>
     </details>
-    {#if data.actions.includes("transfer")}
-      <details
-        class="space-y-4 rounded-lg border p-4"
-        onfocusin={() => beginDraft("transfer", transfer.fields)}
-        open={Boolean(transfer.fields.allIssues()?.length)}
-      >
-        <summary class="text-sm font-medium">Transfer ownership</summary>
-        <p>
-          The selected person or group becomes the owner immediately. The previous owner loses that
-          role; other assignments remain.
-        </p>
-        <form class="space-y-3" {...transfer}>
-          <input {...transfer.fields.appId.as("hidden", appId)} /><input
-            {...transfer.fields.revision.as("hidden", draftRevision("transfer", transfer.fields))}
-          /><label class="grid gap-2 text-sm font-medium"
-            >New owner type<NativeSelect {...transfer.fields.type.as("select")}
-              ><option value="group">SSO group</option><option value="user">Person</option
-              ></NativeSelect
-            ></label
-          ><input {...transfer.fields.provider.as("hidden", data.provider)} /><label
-            class="grid gap-2 text-sm font-medium"
-            >New owner ID<Input
-              {...transfer.fields.subject.as("text")}
-              required
-              maxlength={256}
-            /></label
-          >
-
-          <FormIssues issues={transfer.fields.allIssues()} /><Button
-            type="submit"
-            disabled={transfer.pending > 0}>Transfer ownership</Button
-          >
-        </form>
-      </details>
-    {/if}
   {/if}
 </section>

@@ -80,7 +80,7 @@
     title="Room for your first idea"
     description={data.principal.creator
       ? "A small utility or an everyday tool: create your first app and publish it with the CLI."
-      : "Apps you can manage appear here. Ask an app owner for access."}
+      : "Apps you can manage appear here. Ask an app admin for access."}
   >
     {#snippet icon()}<Layers2 />{/snippet}
     {#if data.principal.creator}<Button href="/apps/new"><Plus />Create your first app</Button>{/if}

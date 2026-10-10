@@ -186,7 +186,7 @@
     The saved rules include {data.users.length} people and {data.groups.length} SSO groups.
     <a
       href={`/apps/${data.inheritedFrom ?? appId}?tab=access&scope=management`}
-      class="text-primary underline underline-offset-4">Manage roles and ownership</a
+      class="text-primary underline underline-offset-4">Manage app roles</a
     >.
   </p>
 

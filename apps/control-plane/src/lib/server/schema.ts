@@ -11,7 +11,6 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
-import { sql } from "drizzle-orm";
 import { user } from "./auth-schema.ts";
 
 export const fleets = pgTable("fleet", {
@@ -100,7 +99,7 @@ export const appRoleAssignments = pgTable(
     type: text({ enum: ["user", "group"] }).notNull(),
     provider: text().notNull(),
     subject: text().notNull(),
-    role: text({ enum: ["user", "developer", "admin", "owner"] }).notNull(),
+    role: text({ enum: ["user", "developer", "admin"] }).notNull(),
   },
   (table) => [
     uniqueIndex("app_role_assignment_unique").on(
@@ -110,9 +109,6 @@ export const appRoleAssignments = pgTable(
       table.subject,
       table.role,
     ),
-    uniqueIndex("app_role_assignment_owner")
-      .on(table.appId)
-      .where(sql`${table.role} = 'owner'`),
     index("app_role_assignment_principal").on(table.provider, table.type, table.subject),
   ],
 );

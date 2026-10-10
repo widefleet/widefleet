@@ -35,13 +35,8 @@ enum Command {
         #[arg(long, value_enum)]
         role: Role,
     },
-    /// Remove an assignment. Ownership must be transferred instead.
+    /// Remove an assignment; at least one app admin must remain.
     Revoke { assignment: Uuid },
-    /// Transfer ownership directly; the previous owner loses owner rights.
-    Transfer {
-        #[command(flatten)]
-        target: Target,
-    },
 }
 
 #[derive(Args)]
@@ -145,11 +140,6 @@ pub async fn run(api: &Api, credentials: &auth::Credentials, options: Options) -
             Method::DELETE,
             format!("{path}/{assignment}"),
             value!({ "revision": current.revision }),
-        ),
-        Some(Command::Transfer { target }) => (
-            Method::PUT,
-            format!("/apps/{app}/owner"),
-            value!({ "principal": principal(target, &current.provider)?, "revision": current.revision }),
         ),
         Some(Command::Show) | None => return output(&current, options.json),
     };

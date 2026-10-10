@@ -327,8 +327,7 @@
     <Button
       href={`/apps/${data.app.id}?tab=access&scope=management`}
       variant={route.accessScope === "management" ? "secondary" : "ghost"}
-      aria-current={route.accessScope === "management" ? "page" : undefined}
-      >Roles and ownership</Button
+      aria-current={route.accessScope === "management" ? "page" : undefined}>App roles</Button
     >
   </nav>
   {#if route.accessScope === "app"}<AppAudience

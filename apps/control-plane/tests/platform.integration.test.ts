@@ -958,6 +958,78 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     expect(inventory.Contents ?? []).toHaveLength(0);
   });
 
+  it("hands over through admin grants and protects the final admin through the API", async () => {
+    const app = await createApp("admin-handover");
+    const path = `/apps/${app.id}/roles`;
+    const initial = contract.appRoleState.parse(await (await json(path, "GET")).json());
+    const creator = initial.assignments[0];
+
+    if (!creator) throw new Error("Missing creator admin");
+    expect(creator.role).toBe("admin");
+    expect(
+      (
+        await json(path, "POST", {
+          principal: { type: "user", provider: "widefleet", subject: outsiderId },
+          role: "owner",
+          revision: initial.revision,
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await json(`/apps/${app.id}/owner`, "PUT", {
+          principal: creator.principal,
+          revision: initial.revision,
+        })
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await json(`${path}/${creator.id}`, "DELETE", {
+          revision: initial.revision,
+        })
+      ).status,
+    ).toBe(403);
+
+    const shared = contract.appRoleState.parse(
+      await (
+        await json(path, "POST", {
+          principal: { type: "user", provider: "widefleet", subject: outsiderId },
+          role: "admin",
+          revision: initial.revision,
+        })
+      ).json(),
+    );
+
+    const handedOver = await json(
+      `${path}/${creator.id}`,
+      "DELETE",
+      {
+        revision: shared.revision,
+      },
+      outsiderHeaders,
+    );
+
+    expect(handedOver.status).toBe(200);
+    const remaining = contract.appRoleState.parse(await handedOver.json());
+    expect(remaining.assignments).toHaveLength(1);
+    const survivor = remaining.assignments[0];
+
+    if (!survivor) throw new Error("Missing remaining admin");
+    expect(
+      (
+        await json(
+          `${path}/${survivor.id}`,
+          "DELETE",
+          {
+            revision: remaining.revision,
+          },
+          outsiderHeaders,
+        )
+      ).status,
+    ).toBe(403);
+  });
+
   it("grants app-specific access and revokes it without renewing the user's session", async () => {
     const app = await createApp("shared");
     expect((await grantRole(app.id, "missing-user")).status).toBe(404);
@@ -2744,7 +2816,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     });
   });
 
-  it("exposes catalog discovery without management access and restricts publication to owners or administrators", async () => {
+  it("exposes catalog discovery without management access and restricts publication to app admins or installation administrators", async () => {
     const app = await createApp("catalog-api");
     const path = `/apps/${app.id}/catalog`;
     expect((await json("/catalog", "GET", undefined, new Headers())).status).toBe(401);

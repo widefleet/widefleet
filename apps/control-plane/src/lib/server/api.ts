@@ -507,13 +507,6 @@ export const createApi = (runtime: Runtime) => {
       .handler(async ({ context, input }) =>
         unwrap(await runtime.appAccess.revoke(context.principal, input.appId, input)),
       ),
-    transferOwnership: write
-      .route({ method: "PUT", path: "/apps/{appId}/owner" })
-      .input(contract.appPath.extend(contract.appOwnershipTransfer.shape))
-      .output(contract.appRoleState)
-      .handler(async ({ context, input }) =>
-        unwrap(await runtime.appAccess.transfer(context.principal, input.appId, input)),
-      ),
     history: read
       .route({ method: "GET", path: "/apps/{appId}/deployments" })
       .input(contract.appPath)
@@ -671,7 +664,7 @@ export const createApi = (runtime: Runtime) => {
               type: "http",
               scheme: "bearer",
               description:
-                "CLI OAuth access token with platform:read, platform:write or network:manage scope. Network changes also require app-admin, owner or installation-administrator access. Agent endpoints require a separate agent token.",
+                "CLI OAuth access token with platform:read, platform:write or network:manage scope. Network changes also require app-admin or installation-administrator access. Agent endpoints require a separate agent token.",
             },
           },
         },
