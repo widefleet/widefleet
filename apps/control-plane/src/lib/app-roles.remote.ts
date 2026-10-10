@@ -18,7 +18,10 @@ const refresh = async (appId: string, search: string) => {
   await getAppAccess({ appId }).refresh();
 
   if (!getRequestEvent().isRemoteRequest)
-    redirect(303, `/apps/${appId}?${new URLSearchParams({ q: search, saved: "1" })}#access`);
+    redirect(
+      303,
+      `/apps/${appId}?${new URLSearchParams({ q: search, saved: "1", tab: "access", scope: "management" })}#access`,
+    );
 
   return { saved: true };
 };

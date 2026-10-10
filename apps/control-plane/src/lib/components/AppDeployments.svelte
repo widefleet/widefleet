@@ -68,7 +68,7 @@
                 title="Deployment ID">{deployment.id}</code
               >
             </div>
-            {#if deployment.status === "succeeded" && deployment.id !== data.app.activeDeploymentId && data.app.state !== "deleting"}
+            {#if deployment.status === "succeeded" && deployment.id !== data.app.activeDeploymentId && data.app.state !== "deleting" && data.roles.actions.includes("rollback")}
               {@const rollback = rollbackApp.for(deployment.id)}
               <form {...rollback.enhance(submitRollback)} class="space-y-3">
                 <input {...rollback.fields.appId.as("hidden", data.app.id)} /><input

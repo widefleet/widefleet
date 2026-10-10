@@ -4,7 +4,7 @@ import type { z } from "zod";
 
 const access = createAccessControl({ app: appAction.options });
 
-const developer = ["use", "read", "logs", "deploy", "rollback", "migrate"] as const;
+const developer = ["use", "read", "logs", "deploy", "rollback", "migrate", "workflows"] as const;
 
 const admin = [...developer, "roles", "network", "catalog", "delete"] as const;
 

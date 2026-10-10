@@ -50,7 +50,12 @@ export const createWorkflowService = (database: Database) => ({
     input: z.infer<typeof contract.workflowRequest>,
   ) =>
     transact(database, async (transaction) => {
-      const access = await managedApp(transaction, principal, appId);
+      const access = await managedApp(
+        transaction,
+        principal,
+        appId,
+        input.action === "list" || input.action === "status" ? "read" : "workflows",
+      );
 
       if (access.isErr()) return access;
       const request = contract.workflowRequest.parse(input);

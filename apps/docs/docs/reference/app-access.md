@@ -7,12 +7,12 @@ Widefleet assigns a role to a person or company SSO group for a specific app.
 Assignments are additive. Group membership comes from company sign-in; Widefleet
 does not maintain a separate team directory.
 
-| Role      | Permissions                                                                                   |
-| --------- | --------------------------------------------------------------------------------------------- |
-| User      | Use the published app                                                                         |
-| Developer | User permissions, management details and logs, deployments, rollbacks and database migrations |
-| App admin | Developer permissions, role assignments, network grants, catalog listing and deletion         |
-| Owner     | App admin permissions and ownership transfer                                                  |
+| Role      | Permissions                                                                                                        |
+| --------- | ------------------------------------------------------------------------------------------------------------------ |
+| User      | Use the published app                                                                                              |
+| Developer | User permissions, management details and logs, deployments, rollbacks, database migrations and Workflow management |
+| App admin | Developer permissions, role assignments, network grants, catalog listing and deletion                              |
+| Owner     | App admin permissions and ownership transfer                                                                       |
 
 Every original app has exactly one owner, initially its creator. The owner can
 be a person or a group. The current owner or a platform administrator can
@@ -161,7 +161,7 @@ UI remote functions and HTTP handlers call the same authorization services.
 
 ## Installation
 
-This pre-launch change replaces personal ownership and the old creator grants.
+The unreleased role model replaces personal ownership and the old creator grants.
 It requires an installation without existing apps; the schema update refuses to
 silently discard existing permissions. Upgrade the control plane, SSO container,
 agent and CLI together. Agents advertise access-rule protocol version 2;
@@ -172,7 +172,3 @@ OAuth2 Proxy on 4180. `PLATFORM_APP_AUTH_URL` defaults to
 `http://oauth2-proxy:4181/`; custom topologies must route it to the local
 authorizer. `PLATFORM_PROXY_URL` remains the agent's private HTTPS verification
 origin. No public authorizer port or additional production service is needed.
-
-Future scoped keys can intersect app actions with the key's app/action ceiling.
-Automation identities, grant expiry, audit, approval requests and optional IaC
-management are not part of this change.

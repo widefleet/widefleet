@@ -207,6 +207,14 @@ The Widefleet JavaScript loader has its own release lifecycle. Use `widefleet ru
 
 Before changing fleet storage, recovering an interrupted activation or publishing a deployment, the agent checks the publisher binary, the selected runtime image and retained fleet-container images with `celld --version`. Image checks capture output directly from disposable containers with stored logging disabled, without network access or fleet-state mounts; new fleet containers use the verified immutable image ID. A mismatch fails the job with the required version and the component to replace. Updating a JavaScript package does not upgrade celld or recreate an incompatible native container.
 
+### Unreleased app roles
+
+The role-based access schema requires an installation without existing apps. Its
+migration refuses to discard existing app permissions; upgrading an installation
+with apps is not supported by this change. Install the matching control plane,
+SSO container, agent and CLI together. New apps require an assigned role unless
+all-authenticated access is explicitly enabled. See [app roles and access](/reference/app-access).
+
 ### Upgrading from 0.2.1 to 0.3.0
 
 This release pairs platform and CLI 0.3.0 with app runtime 0.2.1. The native runtime remains celld 0.6.2, so this upgrade does not require a native storage migration or replacement of an existing compatible fleet container.
@@ -246,7 +254,7 @@ Widefleet uses Better Auth's Organization plugin with one automatically provisio
 
 After the first verified management sign-in, the person appears under **Members**. Owners and admins can search by name or email and change their role there. Role changes apply to existing browser and CLI sessions on their next API request. At least one Owner must remain, including during concurrent changes. Only Owners can change Owner assignments.
 
-On an app's page, role assignments select existing members or stable company person/group IDs. Developers can deploy and roll back; app admins also manage roles, network permissions, catalog publication and deletion. Exactly one person or group owns each original app. Its owner or an installation administrator can transfer ownership atomically. Previews inherit these assignments. Installation administrators retain management access but receive no automatic running-app access. Use `widefleet roles` for the same operations in the CLI; see [app roles and access](/reference/app-access).
+On an app's **Access → Roles and ownership** tab, role assignments select existing members or stable company person/group IDs. Developers can deploy and roll back; app admins also manage roles, network permissions, catalog publication and deletion. Exactly one person or group owns each original app. Its owner or an installation administrator can transfer ownership atomically. Previews inherit these assignments. Installation administrators retain management access but receive no automatic running-app access. Use `widefleet roles` for the same operations in the CLI; see [app roles and access](/reference/app-access).
 
 The first administrator is created by setup or the bootstrap file. Subsequent company sign-ins create Members. Startup never promotes users or overwrites role changes. Organization lifecycle and invitations are not exposed. These management roles do not determine who can use a published app.
 

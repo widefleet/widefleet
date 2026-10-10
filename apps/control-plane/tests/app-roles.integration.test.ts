@@ -6,6 +6,7 @@ import { createAppAccessService } from "../src/lib/server/app-access.ts";
 import { appActions } from "../src/lib/server/app-permissions.ts";
 import { providerIssuer } from "../src/lib/server/company-identity.ts";
 import { createNetworkService } from "../src/lib/server/network.ts";
+import { createWorkflowService } from "../src/lib/server/workflows.ts";
 import { appRoleAssignments, apps, jobs } from "../src/lib/server/schema.ts";
 import { createTestEnvironment } from "./environment.ts";
 
@@ -85,6 +86,38 @@ describe("App roles and ownership", () => {
       state: "saved",
     });
     expect(await service.get(colleague, app.id)).toMatchObject({ error: { code: "NOT_FOUND" } });
+  });
+
+  it("requires a development role for workflow operations, including inherited previews", async () => {
+    const app = await create("workflows");
+    const preview = await create("workflow-preview", app.id);
+    await environment.database.db.update(apps).set({ activeDeploymentId: crypto.randomUUID() });
+    const workflows = createWorkflowService(environment.database.db);
+    const request = { action: "restart" as const, workflow: "EXAMPLE", id: "instance" };
+    await grant(app.id, "colleague", "user");
+    expect(
+      await workflows.create(colleague, preview.id, crypto.randomUUID(), request),
+    ).toMatchObject({ error: { code: "NOT_FOUND" } });
+    const granted = await grant(app.id, "colleague", "developer");
+
+    const operation = (
+      await workflows.create(colleague, preview.id, crypto.randomUUID(), request)
+    ).unwrap();
+
+    expect(operation.state).toBe("queued");
+    expect(await appActions(environment.database.db, colleague, app.id)).toContain("workflows");
+    const assignment = granted.assignments.find(({ role }) => role === "developer");
+
+    if (!assignment) throw new Error("Missing developer assignment");
+    (
+      await access.revoke(creator, app.id, {
+        assignmentId: assignment.id,
+        revision: granted.revision,
+      })
+    ).unwrap();
+    expect(await workflows.read(colleague, preview.id, operation.id)).toMatchObject({
+      error: { code: "NOT_FOUND" },
+    });
   });
 
   it("resolves existing members to the same company person used by app SSO", async () => {

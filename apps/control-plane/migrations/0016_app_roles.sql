@@ -1,5 +1,5 @@
--- The app permission model is replaced before public launch. Existing app
--- installations must be recreated deliberately; never silently drop their grants.
+-- Replacing app permissions requires an installation without existing apps;
+-- never silently drop existing grants.
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM app) THEN
     RAISE EXCEPTION 'App roles require an installation without existing apps';

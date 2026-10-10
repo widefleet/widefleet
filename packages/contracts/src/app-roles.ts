@@ -10,6 +10,7 @@ export const appAction = z.enum([
   "deploy",
   "rollback",
   "migrate",
+  "workflows",
   "roles",
   "network",
   "catalog",

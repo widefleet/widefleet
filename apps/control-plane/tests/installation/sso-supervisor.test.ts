@@ -335,7 +335,7 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")(
 
       const provider = companyProvider.parse({
         type: "oidc",
-        issuer: "https://localhost:4181",
+        issuer: "https://localhost:4182",
         label: "Test",
       });
 
@@ -374,7 +374,7 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")(
           await node(
             "--input-type=module",
             "--eval",
-            'import {connect} from "node:net"; const socket=connect(4181,"127.0.0.1",()=>socket.end()); socket.on("error",()=>process.exit(1));',
+            'import {connect} from "node:net"; const socket=connect(4182,"127.0.0.1",()=>socket.end()); socket.on("error",()=>process.exit(1));',
           );
         });
       };

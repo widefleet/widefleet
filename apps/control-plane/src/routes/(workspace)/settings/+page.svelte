@@ -133,6 +133,7 @@
             issuer: "",
             label: "",
             groupsClaim: "groups",
+            subjectClaim: "sub",
             nameClaim: "name",
             emailClaim: "email",
           };
@@ -466,6 +467,17 @@
                     <summary class="text-muted-foreground text-xs font-medium">Token claims</summary
                     >
                     <div class="mt-4 space-y-4">
+                      <div class="space-y-2">
+                        <Label for="subject-claim">Stable person ID</Label><Input
+                          id="subject-claim"
+                          bind:value={identity.provider.subjectClaim}
+                          required
+                        />
+                        <p class="text-muted-foreground text-xs leading-5">
+                          Use an immutable ID that identifies the same person in management and app
+                          sign-in.
+                        </p>
+                      </div>
                       <div class="space-y-2">
                         <Label for="groups-claim">Groups</Label><Input
                           id="groups-claim"

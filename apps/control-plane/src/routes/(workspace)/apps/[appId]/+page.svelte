@@ -53,12 +53,18 @@
   let audienceDraft = $state<AccessDraft | undefined>(
     untrack(() => {
       const fields = changeAppAccess.for(route.appId).fields;
-      const groups = fields.groups.value();
+      const allAuthenticated = fields.allAuthenticated.value();
       const revision = fields.revision.value();
 
-      return groups === undefined || revision === undefined
+      // Unchecked checkboxes are absent from native submissions. Keep their
+      // original revision after rejection instead of silently accepting a retry.
+      return revision === undefined
         ? undefined
-        : { appId: route.appId, groups, revision: Number(revision) };
+        : {
+            appId: route.appId,
+            allAuthenticated: allAuthenticated ?? false,
+            revision: Number(revision),
+          };
     }),
   );
 
@@ -283,7 +289,7 @@
             : "Available after the first successful deployment."}
         </p>
       </section>
-      {#if data.app.state !== "deleting" && !data.app.parentId}<section
+      {#if data.app.state !== "deleting" && !data.app.parentId && data.roles.actions.includes("deploy")}<section
           class="rounded-xl border p-5 sm:p-6"
         >
           <h2 class="mb-2 flex items-center gap-2 text-sm font-semibold">
@@ -316,7 +322,7 @@
       href={`/apps/${data.app.id}?tab=access&scope=management`}
       variant={route.accessScope === "management" ? "secondary" : "ghost"}
       aria-current={route.accessScope === "management" ? "page" : undefined}
-      >Management access</Button
+      >Roles and ownership</Button
     >
   </nav>
   {#if route.accessScope === "app"}<AppAudience

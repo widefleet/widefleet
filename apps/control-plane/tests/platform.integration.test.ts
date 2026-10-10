@@ -1521,7 +1521,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     const signed = await environment.auth.api.signJWT({
       body: {
         payload: {
-          sub: before.ownerId,
+          sub: environment.owner.id,
           aud: apiResource(environment.configuration),
           iss: `${environment.configuration.PLATFORM_URL}/api/auth`,
           iat: now,
@@ -1554,7 +1554,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       .where(sql`${jobs.id} <> ${requestId} AND ${jobs.state} IN ('queued', 'running')`);
 
     const lease = contract.job.parse(
-      await (await json("/agent/jobs/claim", "POST", undefined, agentHeaders)).json(),
+      await (await json("/agent/jobs/claim", "POST", { accessRules: 2 }, agentHeaders)).json(),
     );
 
     expect(lease).toMatchObject({
