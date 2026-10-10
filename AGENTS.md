@@ -28,6 +28,15 @@ Inferred types over annotations. any is the enemy.
 - Use plain language and small, complete, runnable examples. Verify examples against the documented version.
 - Cover common failures and recovery. Keep navigation predictable and advanced details easy to find.
 
+## Documentation pull requests and releases
+
+- Keep documentation content changes in separate PRs from implementation. Corrections and improvements for already released behavior target `main` and can merge without a software release.
+- Prepare public documentation for new or changed behavior alongside the feature in a separate draft PR. Link the implementation and docs PRs in both descriptions, and record which unreleased changes block publication.
+- During development, base the docs PR on the feature branch so its diff contains only documentation changes. Do not merge it into the feature branch.
+- After the feature is squash-merged, rebase only the docs commits onto `main` and verify the diff contains only documentation changes.
+- Keep release-dependent docs in draft until a published release includes all documented changes and the required artifacts are available. A feature merge, tag or draft release alone does not unblock publication.
+- After every release, review open docs PRs against the released code and artifacts. Update examples and version references, validate the docs, and merge eligible PRs through the normal review and production-approval process. Leave PRs for unreleased changes in draft.
+
 ## Control-plane UI
 
 Design around the user's context, current task, and next step. Prefer focused flows over crowded pages; reveal secondary controls when needed.
