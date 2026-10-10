@@ -6,6 +6,19 @@ export const workflowInstanceId = z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_-]{0
 
 export const workflowEventType = z.string().regex(/^[A-Za-z0-9_][A-Za-z0-9_-]{0,99}$/);
 
+export const workflowStepName = z
+  .string()
+  .max(256)
+  .refine((value) => !Array.from(value).some((character) => character.charCodeAt(0) < 32));
+
+export const workflowRestartFrom = z.strictObject({
+  name: workflowStepName,
+  count: z.number().int().positive().default(1),
+  type: z.enum(["do", "sleep", "waitForEvent"]).default("do"),
+});
+
+export const workflowRestartOptions = z.strictObject({ from: workflowRestartFrom.optional() });
+
 const request = z.discriminatedUnion("action", [
   z.strictObject({
     action: z.literal("list"),
@@ -19,7 +32,12 @@ const request = z.discriminatedUnion("action", [
     params: z.json().optional(),
   }),
   z.strictObject({
-    action: z.enum(["status", "pause", "resume", "restart", "terminate", "delete"]),
+    action: z.enum(["status", "pause", "resume", "terminate", "delete"]),
+    workflow: workflowName,
+    id: workflowInstanceId,
+  }),
+  workflowRestartOptions.extend({
+    action: z.literal("restart"),
     workflow: workflowName,
     id: workflowInstanceId,
   }),

@@ -26,6 +26,12 @@
 
   let cursor = $state("");
 
+  let stepName = $state("");
+
+  let stepCount = $state(1);
+
+  let stepType = $state("do");
+
   let busy = $state(false);
 
   let message = $state("");
@@ -65,6 +71,13 @@
           workflow: name,
           id,
           event: { type: eventType, payload: z.json().parse(JSON.parse(payload)) },
+        };
+      else if (action === "restartFrom")
+        input = {
+          action: "restart",
+          workflow: name,
+          id,
+          from: { name: stepName, count: stepCount, type: stepType },
         };
       else input = { action, workflow: name, id };
       const request = workflowRequest.parse(input);
@@ -139,9 +152,9 @@
         <option value="sendEvent">Send event</option><option value="pause">Pause</option><option
           value="resume">Resume</option
         >
-        <option value="restart">Restart from the beginning</option><option value="terminate"
-          >Terminate</option
-        ><option value="delete">Delete instance</option>
+        <option value="restart">Restart from the beginning</option><option value="restartFrom"
+          >Restart from a step</option
+        ><option value="terminate">Terminate</option><option value="delete">Delete instance</option>
       </NativeSelect>
     </div>
     {#if action !== "list"}<div class="space-y-2">
@@ -181,6 +194,49 @@
         />
       </div>{/if}
     {#if action === "restart"}<Feedback>Previously completed steps will run again.</Feedback>{/if}
+    {#if action === "restartFrom"}
+      <div class="space-y-2">
+        <Label for="workflow-step-name">Step name</Label><Input
+          id="workflow-step-name"
+          bind:value={stepName}
+          maxlength={256}
+          disabled={busy}
+          aria-describedby="workflow-step-name-help"
+        />
+        <p id="workflow-step-name-help" class="text-muted-foreground text-xs leading-5">
+          Use the name from your workflow code. An empty name selects an unnamed step.
+        </p>
+      </div>
+      <div class="grid gap-4 sm:grid-cols-2">
+        <div class="space-y-2">
+          <Label for="workflow-step-count">Occurrence</Label><Input
+            id="workflow-step-count"
+            type="number"
+            min={1}
+            step={1}
+            bind:value={stepCount}
+            required
+            disabled={busy}
+          />
+        </div>
+        <div class="space-y-2">
+          <Label for="workflow-step-type">Step type</Label><NativeSelect
+            id="workflow-step-type"
+            bind:value={stepType}
+            disabled={busy}
+            class="w-full"
+          >
+            <option value="do">Task (do)</option>
+            <option value="sleep">Sleep (sleep / sleepUntil)</option>
+            <option value="waitForEvent">Wait for event</option>
+          </NativeSelect>
+        </div>
+      </div>
+      <Feedback>
+        Earlier step results are retained. The selected step and subsequent steps will run again
+        using the instance's original code and parameters.
+      </Feedback>
+    {/if}
     {#if action === "delete"}<Feedback
         >The instance and its stored steps will be permanently deleted.</Feedback
       >{/if}
