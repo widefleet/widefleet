@@ -22,7 +22,7 @@ _The management workspace with synthetic example apps._
 
 - **Build with your own tools.** Start with an independent SvelteKit project, edit it with your coding agent and deploy through the [CLI](https://widefleet.com/docs/getting-started/installation).
 - **Give colleagues access.** Use company SSO, manage [app roles and ownership](https://widefleet.com/docs/reference/app-access) and make apps discoverable in the shared catalog.
-- **Keep app data together.** Declare databases, file storage and key-value bindings. Data survives code deployments; previews have their own resources. [Runtime and storage](https://widefleet.com/docs/reference/runtime).
+- **Keep app data together.** Declare databases, file storage and key-value bindings. [Runtime and storage](https://widefleet.com/docs/reference/runtime).
 - **Control system access.** Grant specific external destinations through [network permissions](https://widefleet.com/docs/guides/network) and expose IT-managed services through [connectors](https://widefleet.com/docs/guides/connectors).
 - **Run background work.** Use Cron, Queues and durable [Workflows](https://widefleet.com/docs/guides/workflows), including retries and waits for events.
 - **Operate your apps.** Publish [previews](https://widefleet.com/docs/reference/previews), inspect deployment history, roll back code and query [app logs](https://widefleet.com/docs/self-hosting/runtime-logs) from the CLI.
@@ -85,9 +85,7 @@ Management stores configuration and deployment jobs. The agent installs built co
 
 The reference installation runs on one Linux x86-64 Docker host. You operate identity configuration, DNS, certificates, backups and upgrades. Follow the [installation guide](https://widefleet.com/docs/self-hosting/installation); use [external services](https://widefleet.com/docs/self-hosting/external-services) for external PostgreSQL, cloud storage and automatic HTTPS.
 
-Widefleet is a platform for trusted company app creators. The included starter uses SvelteKit and the Workers runtime. Node.js compatibility is partial, app cookies are stripped by SSO, and automatic multi-node scaling is not implemented yet. See [runtime limits](https://widefleet.com/docs/reference/runtime#compatibility-and-current-limits).
-
-This README describes the current source branch. Published releases can lag behind it; use matching CLI, management and agent builds and check each guide's version requirements. Workflows require a compatible agent and a runtime advertising Workflow support. See [releases](https://github.com/widefleet/widefleet/releases) and [runtime updates](https://widefleet.com/docs/reference/runtime#versions-and-updates).
+This README describes the current source branch. Published releases can lag behind it; use matching CLI, management and agent builds and check each guide's version requirements. See [releases](https://github.com/widefleet/widefleet/releases) and [runtime updates](https://widefleet.com/docs/reference/runtime#versions-and-updates).
 
 ## Documentation
 
@@ -104,10 +102,10 @@ The [documentation website](https://widefleet.com/docs) is the home for app crea
 
 ## Contributing and support
 
-Use [GitHub Issues](https://github.com/widefleet/widefleet/issues) for bugs, questions and feature requests. Include the relevant version and a minimal reproduction with synthetic data. For code changes, start with [development and checks](docs/development.md) and follow the repository's [contributor rules](AGENTS.md).
+Use [GitHub Issues](https://github.com/widefleet/widefleet/issues) for bugs, questions and feature requests. Include the relevant version and a minimal reproduction with synthetic data.
 
 ## License
 
-All current Widefleet functionality is available under the [MIT license](LICENSE),
+All Widefleet functionality is available under the [MIT license](LICENSE),
 including the platform, CLI and app starter. Third-party components retain their
 own licenses and notices.
