@@ -112,16 +112,16 @@ The command requires an existing Owner or Admin and prints a one-use link. It op
 
 ### App group claims
 
-**Enable group claims on the app-SSO registration before using group-based permissions in apps.** Successful SSO does not imply that Entra sends group memberships. Widefleet forwards verified group claims but does not enable them in Entra. A registration with `groupMembershipClaims: null` does not request them.
+**Enable group claims on both the management and app-SSO registrations before assigning app roles to groups.** Successful SSO does not imply that Entra sends group memberships. Widefleet reads verified group claims but does not enable them in Entra. A registration with `groupMembershipClaims: null` does not request them. Delegated `User.Read` permission alone does not add group claims or cause Widefleet to query Graph when the token has no overage indicator.
 
-1. In the Microsoft Entra admin center, open **App registrations** and select the registration selected for **Published app sign-in**, not the management registration.
+1. In the Microsoft Entra admin center, open **App registrations**. Apply steps 2–3 to both the management sign-in registration and the registration selected for **Published app sign-in**.
 2. Open **Token configuration → Add groups claim** and select the group types the apps need. For security-group permissions, select **Security groups** (`groupMembershipClaims: "SecurityGroup"`).
 3. Configure the **ID token** to emit **Group ID** in the `groups` claim. Keep object IDs rather than group names and do not select **Emit groups as role claims**: the current proxy reads `groups`.
-4. After a new app-SSO sign-in, verify that an intended group member receives the expected IDs in server-side `locals.user.groups`. The app implements its own authorization using these IDs. Widefleet roles use these claims; assigning an app role does not change directory membership.
+4. Sign in again to management and verify that a member of a group assigned Developer, App admin or Owner permissions can perform the corresponding app operations. After a new app-SSO sign-in, verify the expected IDs in server-side `locals.user.groups`. The app can use those IDs for its own business permissions. Assigning a Widefleet role does not change directory membership.
 
 Entra limits JWT group claims to **200 group memberships per user**, including nested groups. Above that limit, it omits the entire group list and provides an overage indicator for a Microsoft Graph lookup; it does not return the first 200 groups. The generated Widefleet configuration uses OAuth2 Proxy's native Entra provider to resolve that indicator, including all result pages. Grant both the management and app-SSO registrations the delegated **User.Read** permission and consent to it. For management roles, Widefleet reads the signed-in user’s group IDs through `/me/transitiveMemberOf` when the verified token indicates overage; results expire with that token. A failed overage lookup fails the login. Missing group claims without an overage indicator still become `locals.user.groups = []`, so an empty array does not establish that the user has no directory memberships. App authorization must require the expected group explicitly rather than grant access when the list is empty.
 
-For large directories, **Groups assigned to the application** can restrict the emitted set to relevant groups assigned to the app-SSO enterprise application. This mode includes direct memberships only; nested memberships are not included. Choose it only if that matches the apps' permission model.
+For large directories, **Groups assigned to the application** can restrict the emitted set to groups assigned to each enterprise application. When using this mode, assign the required groups to both the management and app-SSO enterprise applications. This mode includes direct memberships only; nested memberships are not included. Choose it only if that matches the apps' permission model.
 
 `groupMembershipClaims` is a Microsoft application-registration setting, not an OpenID Connect standard field. The resulting token claim is named `groups`. See Microsoft's [group-claim configuration and limits](https://learn.microsoft.com/en-us/entra/identity/hybrid/connect/how-to-connect-fed-group-claims) and [optional claims setup](https://learn.microsoft.com/en-us/entra/identity-platform/optional-claims).
 
@@ -129,7 +129,7 @@ For large directories, **Groups assigned to the application** can restrict the e
 
 Choose **OpenID Connect** in Settings, enter the issuer URL and a login-button label, then register the displayed management and app callback URLs. Management requests `openid profile email` and verifies ID tokens. Provider or client changes can produce different user subjects; link the replacement company account deliberately before retiring the former login.
 
-For apps, configure the IdP to include memberships in the ID token. The optional token fields select group, name and email claims; defaults are `groups`, `name` and `email`. The verified user identifier is `sub`. Some providers use different subjects for different clients, so management and app user IDs need not match. Generic OIDC forwards supplied groups; it does not fetch a provider directory. Google Workspace group lookup and SCIM provisioning are not included. Each app implements its own authorization.
+Configure the IdP to include memberships in ID tokens for both management and app SSO. The optional token fields select group, name and email claims; defaults are `groups`, `name` and `email`. The verified user identifier uses `subjectClaim`, which defaults to `sub`. Management and app SSO must receive the same stable person ID. If the provider issues different `sub` values per client, configure a shared immutable claim as `subjectClaim`; see [identity mapping](/reference/app-access#identities-and-company-sign-in). Generic OIDC uses supplied groups and does not fetch a provider directory. Google Workspace group lookup and SCIM provisioning are not included. App code implements its own business permissions.
 
 ### Optional group search
 
@@ -137,7 +137,7 @@ For Entra, enable **Connect Microsoft Graph (optional)** in Settings to let auth
 
 Grant the directory registration Microsoft Graph **GroupMember.Read.All application permission**, with tenant admin consent. Enter the directory client ID and secret for a registration in the same tenant. The API can reuse an existing stored secret reference. This application permission is separate from the app-SSO registration's delegated `User.Read` permission for group overage. See Microsoft's [list groups API and permissions](https://learn.microsoft.com/en-us/graph/api/group-list?view=graph-rest-1.0).
 
-Search returns Entra object IDs, matching app tokens configured to emit Group ID. Choosing a group during development does not grant access to the app; its server-side code checks `locals.user.groups`. Directory credentials stay in the control plane. A directory outage makes search unavailable but does not affect app authentication, which uses the independently configured OAuth2 Proxy and IdP.
+Search returns Entra object IDs, matching tokens configured to emit Group ID. Searching or selecting a group does not change membership or permissions; save an app role assignment to grant Widefleet access. App code can separately check `locals.user.groups` for business permissions. Directory credentials stay in the control plane. A directory outage makes search unavailable but does not affect app authentication, which uses the independently configured OAuth2 Proxy and IdP.
 
 ## Pull the release images
 
