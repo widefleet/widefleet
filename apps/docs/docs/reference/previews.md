@@ -13,7 +13,7 @@ widefleet preview
 widefleet preview --name review
 ```
 
-For an app at `notes.apps.example.com`, the second command deploys to `review.notes.apps.example.com`. The app is resolved from `name` in `wrangler.jsonc` and `PLATFORM_URL`. It must already be registered; a preview never creates or deploys the parent app. Use `--app NAME_OR_UUID` to choose another parent. Previews cannot themselves be preview parents.
+For an app at `notes.apps.example.com`, the second command deploys to `review.notes.apps.example.com`. The app is resolved from `name` in `wrangler.jsonc` and the selected platform URL. It must already be registered; a preview never creates or deploys the parent app. Use `--app NAME_OR_UUID` to choose another parent. Previews cannot themselves be preview parents.
 
 The command builds locally, creates or reuses the preview, uploads the build, waits for activation and prints the server-provided URL. Failed builds do not create previews. A name belonging to an unrelated app, a deleting app or a legacy preview at another hostname is rejected before uploading code.
 
