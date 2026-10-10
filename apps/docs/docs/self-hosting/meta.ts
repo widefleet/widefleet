@@ -6,6 +6,7 @@ export default defineMeta({
   pages: [
     "index",
     "installation",
+    "company-setup",
     "external-services",
     "storage",
     "runtime-logs",
