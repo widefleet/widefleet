@@ -10,7 +10,8 @@ const target = appPath.extend({
   ...appPrincipal.shape,
   revision: appRoleGrant.shape.revision,
   search: z.string().max(200).default(""),
-  id: z.string().max(300).optional(),
+  // Member forms combine the app ID, provider (512) and subject (256).
+  id: z.string().max(1024).optional(),
 });
 
 const refresh = async (appId: string, search: string) => {

@@ -650,6 +650,7 @@ test.describe("member forms without JavaScript", () => {
 
   test("preserves role search and rejected native form submissions", async ({ page, context }) => {
     const person = environment.users.createUser({
+      id: `native-${"a".repeat(249)}`,
       name: "Native Grant User",
       email: "native-grant@example.test",
     });
