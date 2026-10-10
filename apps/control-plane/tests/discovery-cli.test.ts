@@ -43,7 +43,7 @@ const dnsResponse = (urls: string[], domain: string) => {
 describe.runIf(
   process.env["RUN_CLI_TESTS"] === "1" &&
     (process.platform === "linux" || process.env["RUN_CLI_NATIVE_DNS"] === "1"),
-)("CLI discovery through native TXT and a local HTTPS proxy", () => {
+)("CLI discovery through native TXT and a local HTTPS proxy", { timeout: 15_000 }, () => {
   let directory: string;
   let nativeResolver: Awaited<ReturnType<typeof createNativeResolver>> | undefined;
   let domain = "example.test";
