@@ -122,6 +122,8 @@ services:
   agent:
     <<: *local
     network_mode: service:proxy
+    depends_on:
+      app-authorizer: { condition: service_started }
     command: ["node", "--env-file=/data/identity.env", "local/control.ts", "agent"]
     environment:
       <<: *environment

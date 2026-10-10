@@ -1,4 +1,5 @@
 import { chromium } from "@playwright/test";
+import { appRoleState, appAccessState } from "@platform/contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 describe.runIf(process.env["RUN_LOCAL_TESTS"] === "1")("local quickstart", () => {
@@ -22,6 +23,31 @@ describe.runIf(process.env["RUN_LOCAL_TESTS"] === "1")("local quickstart", () =>
         .poll(() => page.getByRole("heading", { name: "Your apps", exact: true }).count())
         .toBe(1);
       await page.getByRole("link", { name: "Team Notes", exact: true }).click();
+      await page.waitForURL(/\/apps\/[\da-f-]{36}$/);
+      const appId = new URL(page.url()).pathname.split("/").at(-1);
+
+      const roles = appRoleState.parse(
+        await (
+          await context.request.get(`http://localhost:25450/api/v1/apps/${appId}/roles`)
+        ).json(),
+      );
+
+      const owner = roles.assignments.find((assignment) => assignment.role === "owner");
+      expect(owner?.principal.type).toBe("user");
+      expect(owner?.principal.provider).not.toBe("widefleet");
+      expect(
+        appAccessState.parse(
+          await (
+            await context.request.get(`http://localhost:25450/api/v1/apps/${appId}/access`)
+          ).json(),
+        ),
+      ).toMatchObject({
+        allAuthenticated: false,
+        users: [owner?.principal.subject],
+        groups: [],
+        state: "active",
+      });
+
       const appLink = page.getByRole("link", { name: "Open app", exact: true });
       expect(await appLink.getAttribute("href")).toBe("https://team-notes.apps.localhost:25453/");
 
@@ -78,6 +104,19 @@ describe.runIf(process.env["RUN_LOCAL_TESTS"] === "1")("local quickstart", () =>
       expect(await image.body()).toEqual(photo);
       await page.reload();
       await expect.poll(() => page.getByText(note, { exact: true }).count()).toBe(1);
+
+      const other = await browser.newContext({ ignoreHTTPSErrors: true });
+
+      try {
+        const denied = await other.newPage();
+        await denied.goto(origin);
+        await denied.getByRole("button", { name: /member@example.test/ }).click();
+        await expect
+          .poll(() => denied.locator("body").textContent())
+          .toContain("App access denied");
+      } finally {
+        await other.close();
+      }
     } finally {
       await context.close();
     }

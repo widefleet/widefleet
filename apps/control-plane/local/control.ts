@@ -155,10 +155,14 @@ if (command === "agent") {
 
     const api = async (
       path: string,
-      body?: { name: string } | z.infer<typeof contract.createAppInput>,
+      body?:
+        | { name: string }
+        | z.infer<typeof contract.createAppInput>
+        | z.infer<typeof contract.appOwnershipTransfer>,
+      method: "POST" | "PUT" = "POST",
     ) => {
       const response = await fetch(`${configuration.PLATFORM_URL}/api/v1${path}`, {
-        method: body ? "POST" : "GET",
+        method: body ? method : "GET",
         headers: {
           authorization: `Bearer ${token}`,
           origin: configuration.PLATFORM_URL,
@@ -207,6 +211,29 @@ if (command === "agent") {
             displayName: "Team Notes",
             parentId: null,
           }),
+        );
+
+      const administrator = identities.find((identity) => identity.userId === "local-admin");
+
+      if (!administrator) throw new Error("Local administrator has no company identity");
+      const roles = contract.appRoleState.parse(await api(`/apps/${demo.id}/roles`));
+      const owner = roles.assignments.find((assignment) => assignment.role === "owner");
+      const provider = `${authority}/${tenant}/v2.0`;
+
+      // The emulator recreates object IDs on restart. Replace the single seeded
+      // owner instead of accumulating grants to obsolete demo identities.
+      if (
+        owner?.principal.type !== "user" ||
+        owner.principal.provider !== provider ||
+        owner.principal.subject !== administrator.accountId
+      )
+        await api(
+          `/apps/${demo.id}/owner`,
+          {
+            revision: roles.revision,
+            principal: { type: "user", provider, subject: administrator.accountId },
+          },
+          "PUT",
         );
 
       await writeFile(stateFile, JSON.stringify({ ...registration, appId: demo.id }), {

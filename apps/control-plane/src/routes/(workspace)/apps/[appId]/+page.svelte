@@ -44,9 +44,15 @@
 
   let workflowAppId = $state<string | null>(null);
 
+  let sharingAppId = $state<string | null>(null);
+
+  const sharingVisible = $derived(activeTab === "access" && route.accessScope === "management");
+
   // Keep the visited workflow editor mounted so tab changes preserve drafts and polling.
   $effect(() => {
     if (activeTab === "workflows") workflowAppId = route.appId;
+
+    if (sharingVisible) sharingAppId = route.appId;
   });
 
   // Tab navigation unmounts the editors, but must preserve their drafts and pending requests.
@@ -329,11 +335,18 @@
       appId={data.app.id}
       initialSaved={route.accessSaved}
       bind:draft={audienceDraft}
-    />{:else}<AppSharing {data} search={route.search} initialSaved={route.saved} />{/if}
+    />{/if}
 {:else if activeTab === "settings" && data.app.state !== "deleting"}<AppSettings
     {data}
     search={route.search}
   />{/if}
+{#if data.app.state !== "deleting" && (sharingVisible || sharingAppId === route.appId)}
+  {#key route.appId}
+    <div hidden={!sharingVisible}>
+      <AppSharing {data} search={route.search} initialSaved={route.saved} />
+    </div>
+  {/key}
+{/if}
 {#if data.app.state !== "deleting" && (activeTab === "workflows" || workflowAppId === route.appId)}
   {#key route.appId}
     <div hidden={activeTab !== "workflows"}>

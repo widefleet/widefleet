@@ -4,7 +4,7 @@ import { EventEmitter, once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import { app, artifact } from "@platform/contracts";
+import { app, artifact, appRoleState } from "@platform/contracts";
 import { member } from "../../src/lib/server/auth-schema.ts";
 import {
   agents,
@@ -973,6 +973,112 @@ test("remote endpoints recheck sessions, roles, input and request origin", async
 });
 
 for (const javaScriptEnabled of [true, false]) {
+  test(`preserves ownership drafts through polling and rejection with JavaScript ${javaScriptEnabled}`, async ({
+    browser,
+  }) => {
+    const session = await environment.users.login({ userId: environment.owner.id });
+
+    const context = await browser.newContext({
+      baseURL: environment.configuration.PLATFORM_URL,
+      extraHTTPHeaders: { "x-forwarded-proto": "http" },
+      javaScriptEnabled,
+    });
+
+    try {
+      await context.addCookies(
+        session.cookies.map((cookie) => ({
+          ...cookie,
+          domain: "localhost",
+          sameSite: "Lax",
+          secure: false,
+        })),
+      );
+
+      const created = await context.request.post("/api/v1/apps", {
+        headers: { origin: environment.configuration.PLATFORM_URL },
+        data: {
+          slug: `transfer-draft-${javaScriptEnabled ? "js" : "html"}`,
+          displayName: "Transfer draft fixture",
+        },
+      });
+
+      expect(created.ok()).toBe(true);
+      const record = app.parse(await created.json());
+
+      const state = appRoleState.parse(
+        await (await context.request.get(`/api/v1/apps/${record.id}/roles`)).json(),
+      );
+
+      const recipient = crypto.randomUUID();
+      const competingOwner = crypto.randomUUID();
+      const page = await context.newPage();
+      await page.goto(`/apps/${record.id}?tab=access&scope=management`, {
+        waitUntil: "networkidle",
+      });
+
+      const editor = page
+        .locator("details")
+        .filter({ has: page.locator("summary", { hasText: /^Transfer ownership$/ }) });
+
+      await editor.locator("summary").click();
+      await editor.getByLabel("New owner ID").fill(recipient);
+
+      const competing = await context.request.put(`/api/v1/apps/${record.id}/owner`, {
+        headers: { origin: environment.configuration.PLATFORM_URL },
+        data: {
+          revision: state.revision,
+          principal: { type: "group", provider: state.provider, subject: competingOwner },
+        },
+      });
+
+      expect(competing.status()).toBe(200);
+
+      if (javaScriptEnabled) {
+        await expect(page.getByText(competingOwner, { exact: true })).toBeVisible({
+          timeout: 12_000,
+        });
+        await page.getByRole("link", { name: "Overview", exact: true }).click();
+        await page.getByRole("link", { name: "Access", exact: true }).click();
+        await page.getByRole("link", { name: "Roles and ownership", exact: true }).click();
+      }
+
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await expect(editor.getByLabel("New owner ID")).toHaveValue(recipient);
+        await expect(editor.locator('input[name^="n:revision/"]')).toHaveValue(
+          String(state.revision),
+        );
+        await editor.getByRole("button", { name: "Transfer ownership", exact: true }).click();
+        await expect(editor.getByRole("alert")).toContainText("Permissions have changed");
+      }
+
+      const unchanged = appRoleState.parse(
+        await (await context.request.get(`/api/v1/apps/${record.id}/roles`)).json(),
+      );
+
+      expect(
+        unchanged.assignments.find((assignment) => assignment.role === "owner")?.principal.subject,
+      ).toBe(competingOwner);
+      await page
+        .getByRole("link", { name: "Discard drafts and reload roles", exact: true })
+        .click();
+      await editor.locator("summary").click();
+      await editor.getByLabel("New owner ID").fill(recipient);
+      await editor.getByRole("button", { name: "Transfer ownership", exact: true }).click();
+      await expect(page).toHaveURL("/");
+
+      const transferred = appRoleState.parse(
+        await (await context.request.get(`/api/v1/apps/${record.id}/roles`)).json(),
+      );
+
+      expect(
+        transferred.assignments.find((assignment) => assignment.role === "owner")?.principal
+          .subject,
+      ).toBe(recipient);
+    } finally {
+      await context.close();
+    }
+  });
+
   test(`edits app and inherited preview access with JavaScript ${javaScriptEnabled}`, async ({
     browser,
   }) => {

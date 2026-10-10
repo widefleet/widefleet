@@ -1,8 +1,7 @@
-import { z } from "zod";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { companyProvider } from "@platform/contracts";
 import { readCompanyClaims } from "../src/lib/server/company-claims.ts";
-import { checkCompanyGroups } from "../src/lib/server/company-groups.ts";
+import { readCompanyGroups } from "../src/lib/server/company-groups.ts";
 
 const provider = companyProvider.parse({
   type: "entra",
@@ -74,27 +73,88 @@ describe("Company authorization claims", () => {
       }),
     ).toBeUndefined();
   });
-  it("checks overage memberships in bounded delegated Graph requests", async () => {
-    const candidates = Array.from({ length: 25 }, () => crypto.randomUUID());
-    const batches: string[][] = [];
+  it("reads all transitive membership pages and accepts only groups", async () => {
+    const signals: (AbortSignal | null | undefined)[] = [];
+    let calls = 0;
 
-    const groups = await checkCompanyGroups("fixture-token", candidates, async (input, init) => {
+    const groups = await readCompanyGroups("fixture-token", subject, async (input, init) => {
       const request = new Request(input, init);
-      expect(request.url).toBe("https://graph.microsoft.com/v1.0/me/checkMemberGroups");
+      expect(request.url).toContain("https://graph.microsoft.com/v1.0/");
       expect(request.headers.get("authorization")).toBe("Bearer fixture-token");
-      const parsed = z.object({ groupIds: z.array(z.uuid()) }).parse(await request.json());
-      batches.push(parsed.groupIds);
+      expect(request.method).toBe("GET");
+      expect(init?.redirect).toBe("error");
+      signals.push(init?.signal);
+      calls += 1;
 
-      return Response.json({ value: parsed.groupIds.slice(0, 1) });
+      const body = {
+        value: [
+          { id: group, "@odata.type": "#microsoft.graph.group" },
+          { id: subject, "@odata.type": "#microsoft.graph.directoryRole" },
+        ],
+      };
+
+      return Response.json(
+        calls === 1
+          ? {
+              ...body,
+              "@odata.nextLink": `https://graph.microsoft.com/v1.0/users/${subject}/transitiveMemberOf?$skiptoken=next`,
+            }
+          : body,
+      );
     });
 
-    expect(batches.map((batch) => batch.length)).toEqual([20, 5]);
-    expect(groups).toEqual([candidates[0], candidates[20]]);
+    expect(groups).toEqual([group]);
+    expect(calls).toBe(2);
+    expect(signals[0]).toBe(signals[1]);
+  });
+
+  it("rejects unsafe pagination, incomplete results and excessive lookup work", async () => {
+    const request = vi.fn(async () =>
+      Response.json({
+        value: [{ id: group, "@odata.type": "#microsoft.graph.group" }],
+        "@odata.nextLink": "https://untrusted.example.test/next",
+      }),
+    );
+
+    await expect(readCompanyGroups("fixture-token", subject, request)).rejects.toThrow(
+      "Unexpected company membership page",
+    );
+    expect(request).toHaveBeenCalledTimes(1);
+
+    const endless = vi.fn(async () =>
+      Response.json({
+        value: [{ id: group, "@odata.type": "#microsoft.graph.group" }],
+        "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/transitiveMemberOf?$skiptoken=next",
+      }),
+    );
+
+    await expect(readCompanyGroups("fixture-token", subject, endless)).rejects.toThrow(
+      "exceed the lookup limit",
+    );
+    expect(endless).toHaveBeenCalledTimes(20);
     await expect(
-      checkCompanyGroups("fixture-token", [group], async () => Response.json({ value: [subject] })),
-    ).rejects.toThrow("Unexpected company group membership");
-    await expect(
-      checkCompanyGroups("fixture-token", [group], async () => new Response(null, { status: 403 })),
+      readCompanyGroups("fixture-token", subject, async () => new Response(null, { status: 403 })),
     ).rejects.toThrow("could not be verified");
+  });
+
+  it("uses one deadline for the whole lookup", async () => {
+    const controller = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(controller.signal);
+
+    const request = vi.fn(async () => {
+      controller.abort(new Error("Lookup deadline"));
+
+      return Response.json({ value: [] });
+    });
+
+    try {
+      await expect(readCompanyGroups("fixture-token", subject, request)).rejects.toThrow(
+        "Lookup deadline",
+      );
+      expect(timeout).toHaveBeenCalledWith(10_000);
+      expect(request).toHaveBeenCalledTimes(1);
+    } finally {
+      timeout.mockRestore();
+    }
   });
 });

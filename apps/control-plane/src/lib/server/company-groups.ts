@@ -1,33 +1,58 @@
 import { z } from "zod";
 
-// Only use Microsoft's fixed endpoint, never URLs supplied in token overage claims.
-// Delegated User.Read can check the signed-in user's relevant memberships.
-export const checkCompanyGroups = async (
+// Delegated User.Read exposes IDs and types for the signed-in user's transitive
+// memberships. Work depends on that person, never the installation's app count.
+export const readCompanyGroups = async (
   token: string,
-  candidates: string[],
+  subject: string,
   request: typeof fetch = fetch,
 ) => {
-  const groups = [];
+  const groups = new Set<string>();
+  const signal = AbortSignal.timeout(10_000);
 
-  for (let offset = 0; offset < candidates.length; offset += 20) {
-    const batch = candidates.slice(offset, offset + 20);
+  let next: string | undefined =
+    "https://graph.microsoft.com/v1.0/me/transitiveMemberOf?$select=id&$top=999";
 
-    const response = await request("https://graph.microsoft.com/v1.0/me/checkMemberGroups", {
-      method: "POST",
+  for (let page = 0; next && page < 20; page++) {
+    signal.throwIfAborted();
+    const url = new URL(next);
+
+    if (
+      url.origin !== "https://graph.microsoft.com" ||
+      url.username ||
+      url.password ||
+      ![
+        "/v1.0/me/transitiveMemberOf",
+        `/v1.0/users/${encodeURIComponent(subject)}/transitiveMemberOf`,
+      ].includes(url.pathname)
+    )
+      throw new Error("Unexpected company membership page");
+
+    const response = await request(url, {
       redirect: "error",
-      signal: AbortSignal.timeout(10_000),
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ groupIds: batch }),
+      signal,
+      headers: { authorization: `Bearer ${token}` },
     });
 
     if (!response.ok) throw new Error("Company group memberships could not be verified");
-    const result = z.object({ value: z.array(z.uuid()).max(20) }).parse(await response.json());
 
-    for (const group of result.value) {
-      if (!batch.includes(group)) throw new Error("Unexpected company group membership");
-      groups.push(group);
-    }
+    const result = z
+      .object({
+        value: z.array(z.object({ id: z.uuid(), "@odata.type": z.string() })).max(999),
+        "@odata.nextLink": z.url().optional(),
+      })
+      .parse(await response.json());
+
+    for (const entry of result.value)
+      if (entry["@odata.type"] === "#microsoft.graph.group") groups.add(entry.id);
+
+    next = result["@odata.nextLink"];
   }
 
-  return [...new Set(groups)];
+  // Never authorize from a partial membership list or extend the total deadline per page.
+  signal.throwIfAborted();
+
+  if (next) throw new Error("Company group memberships exceed the lookup limit");
+
+  return [...groups];
 };

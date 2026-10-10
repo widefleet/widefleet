@@ -5,8 +5,7 @@ import { z } from "zod";
 import { apiResource } from "./auth-options.ts";
 import { account, member, user } from "./auth-schema.ts";
 import { readCompanyClaims } from "./company-claims.ts";
-import { appRoleAssignments } from "./schema.ts";
-import { checkCompanyGroups } from "./company-groups.ts";
+import { readCompanyGroups } from "./company-groups.ts";
 import { companyAccountProvider } from "./company-identity.ts";
 import {
   installationOrganizationId,
@@ -31,7 +30,7 @@ export const createIdentityService = (
   configuration: Configuration,
   request: typeof fetch = fetch,
 ) => {
-  const memberships = new Map<string, { expiresAt: number; groups: string[] }>();
+  const memberships = new Map<string, { expiresAt: number; groups: Promise<string[]> }>();
 
   const resolveUser = (userId: string) =>
     Result.gen(async function* () {
@@ -95,48 +94,48 @@ export const createIdentityService = (
 
             if (!claims || !linked || !claims.overage || claims.groupsExpired) return claims;
 
-            const assigned = await database
-              .selectDistinct({ subject: appRoleAssignments.subject })
-              .from(appRoleAssignments)
-              .where(
-                and(
-                  eq(appRoleAssignments.provider, claims.provider),
-                  eq(appRoleAssignments.type, "group"),
-                ),
-              );
-
-            const groups = assigned
-              .flatMap(({ subject }) => {
-                const id = z.uuid().safeParse(subject);
-
-                return id.success ? [id.data] : [];
-              })
-              .sort();
-
-            const key = JSON.stringify([linked.id, linked.idToken, groups]);
-            const cached = memberships.get(key);
-
-            if (cached && cached.expiresAt > Date.now())
-              return { ...claims, groups: cached.groups };
-
-            const token = await auth.api.getAccessToken({
-              body: { accountId: linked.id, userId: record.id },
-            });
-
-            const current = await checkCompanyGroups(
-              z.string().min(1).parse(token.accessToken),
-              groups,
-              request,
-            );
-
-            if (claims.expiresAt <= Date.now())
-              return { ...claims, groups: [], groupsExpired: true };
-
             for (const [key, cached] of memberships)
               if (cached.expiresAt <= Date.now()) memberships.delete(key);
 
-            if (memberships.size >= 1000) memberships.clear();
-            memberships.set(key, { expiresAt: claims.expiresAt, groups: current });
+            const key = JSON.stringify([linked.id, linked.idToken]);
+            let cached = memberships.get(key);
+
+            if (!cached) {
+              if (memberships.size >= 100) {
+                const oldest = memberships.keys().next().value;
+
+                if (oldest) memberships.delete(oldest);
+              }
+
+              cached = {
+                expiresAt: claims.expiresAt,
+                groups: (async () => {
+                  const token = await auth.api.getAccessToken({
+                    body: { accountId: linked.id, userId: record.id },
+                  });
+
+                  return readCompanyGroups(
+                    z.string().min(1).parse(token.accessToken),
+                    claims.subject,
+                    request,
+                  );
+                })(),
+              };
+              // Share in-flight work as well as completed results for this verified token.
+              memberships.set(key, cached);
+            }
+
+            let current;
+
+            try {
+              current = await cached.groups;
+            } catch (cause) {
+              if (memberships.get(key) === cached) memberships.delete(key);
+              throw cause;
+            }
+
+            if (claims.expiresAt <= Date.now())
+              return { ...claims, groups: [], groupsExpired: true };
 
             return { ...claims, groups: current };
           },

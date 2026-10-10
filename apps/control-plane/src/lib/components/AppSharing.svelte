@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { RemoteFormFields } from "$app/server";
   import { grantAppRole, revokeAppRole, transferAppOwnership } from "#lib/app-roles.remote";
   import { searchAccessGroups } from "#lib/app-access.remote";
   import type { getAppDetails } from "#lib/apps.remote";
@@ -36,11 +37,29 @@
 
   const provider = $derived(selectedProvider ?? data.provider);
 
+  let revisions = $state<Record<string, number>>({});
+
+  type RevisionFields = Pick<RemoteFormFields<{ revision: number }>, "revision" | "allIssues">;
+
+  function draftRevision(key: string, fields: RevisionFields) {
+    // Rejected native submissions retain the serialized hidden field value.
+    return Number(
+      revisions[key] ??
+        (fields.allIssues()?.length ? fields.revision.value() : undefined) ??
+        data.revision,
+    );
+  }
+
+  function beginDraft(key: string, fields: RevisionFields) {
+    revisions[key] ??= draftRevision(key, fields);
+  }
+
   const labels = { user: "User", developer: "Developer", admin: "App admin", owner: "Owner" };
 
   const editable = $derived(data.inheritedFrom === null && data.actions.includes("roles"));
 
   function choose(person: { type: "user" | "group"; provider: string; subject: string }) {
+    beginDraft("grant", grant.fields);
     grant.fields.type.set(person.type);
     selectedProvider = person.provider;
     grant.fields.subject.set(person.subject);
@@ -74,17 +93,19 @@
           {@const revoke = revokeAppRole.for(assignment.id)}
           <form
             class="space-y-3"
+            onfocusin={() => beginDraft(assignment.id, revoke.fields)}
             {...revoke.enhance(async ({ submit }) => {
               saved = false;
               saved = await submit();
+              if (saved) delete revisions[assignment.id];
             })}
           >
             <input {...revoke.fields.appId.as("hidden", appId)} /><input
               {...revoke.fields.assignmentId.as("hidden", assignment.id)}
             />
-            <input {...revoke.fields.revision.as("hidden", data.revision)} /><input
-              {...revoke.fields.search.as("hidden", search)}
-            />
+            <input
+              {...revoke.fields.revision.as("hidden", draftRevision(assignment.id, revoke.fields))}
+            /><input {...revoke.fields.search.as("hidden", search)} />
             <FormIssues issues={revoke.fields.allIssues()} /><Button
               type="submit"
               variant="outline"
@@ -96,6 +117,11 @@
     {/each}
   </ul>
   {#if editable}
+    <a
+      href={`/apps/${appId}?${new URLSearchParams({ tab: "access", scope: "management", q: search })}`}
+      data-sveltekit-reload
+      class="text-muted-foreground text-xs hover:underline">Discard drafts and reload roles</a
+    >
     <form method="GET" action="#access" class="space-y-3">
       <input type="hidden" name="tab" value="access" /><input
         type="hidden"
@@ -111,9 +137,8 @@
     {#if search && !candidates.length}<p>No members found.</p>{/if}
     <ul class="divide-y rounded-xl border">
       {#each candidates as person (`${person.principal.provider}:${person.principal.subject}`)}
-        {@const memberGrant = grantAppRole.for(
-          `${appId}:member:${person.principal.provider}:${person.principal.subject}`,
-        )}
+        {@const memberKey = `${appId}:member:${person.principal.provider}:${person.principal.subject}`}
+        {@const memberGrant = grantAppRole.for(memberKey)}
         <li class="flex flex-wrap items-start justify-between gap-4 p-4">
           <div>
             <strong>{person.name}</strong>
@@ -121,13 +146,18 @@
           </div>
           <form
             class="space-y-3"
+            onfocusin={() => beginDraft(`grant:${memberKey}`, memberGrant.fields)}
             {...memberGrant.enhance(async ({ submit }) => {
               saved = false;
               saved = await submit();
+              if (saved) delete revisions[`grant:${memberKey}`];
             })}
           >
             <input {...memberGrant.fields.appId.as("hidden", appId)} /><input
-              {...memberGrant.fields.revision.as("hidden", data.revision)}
+              {...memberGrant.fields.revision.as(
+                "hidden",
+                draftRevision(`grant:${memberKey}`, memberGrant.fields),
+              )}
             /><input {...memberGrant.fields.search.as("hidden", search)} />
             <input {...memberGrant.fields.type.as("hidden", "user")} /><input
               {...memberGrant.fields.provider.as("hidden", person.principal.provider)}
@@ -144,14 +174,19 @@
             >
           </form>
           {#if data.actions.includes("transfer")}
-            {@const memberTransfer = transferAppOwnership.for(
-              `${appId}:member:${person.principal.provider}:${person.principal.subject}`,
-            )}
-            <details class="space-y-4 rounded-lg border p-4">
+            {@const memberTransfer = transferAppOwnership.for(memberKey)}
+            <details
+              class="space-y-4 rounded-lg border p-4"
+              onfocusin={() => beginDraft(`transfer:${memberKey}`, memberTransfer.fields)}
+              open={Boolean(memberTransfer.fields.allIssues()?.length)}
+            >
               <summary class="text-sm font-medium">Transfer ownership to {person.name}</summary>
               <form class="space-y-3" {...memberTransfer}>
                 <input {...memberTransfer.fields.appId.as("hidden", appId)} /><input
-                  {...memberTransfer.fields.revision.as("hidden", data.revision)}
+                  {...memberTransfer.fields.revision.as(
+                    "hidden",
+                    draftRevision(`transfer:${memberKey}`, memberTransfer.fields),
+                  )}
                 /><input {...memberTransfer.fields.type.as("hidden", "user")} /><input
                   {...memberTransfer.fields.provider.as("hidden", person.principal.provider)}
                 /><input
@@ -168,7 +203,10 @@
         </li>
       {/each}
     </ul>
-    <details class="space-y-4 rounded-lg border p-4">
+    <details
+      class="space-y-4 rounded-lg border p-4"
+      open={Boolean(directory.fields.allIssues()?.length || directory.result)}
+    >
       <summary class="text-sm font-medium">Search the company directory for groups</summary>
       <form class="space-y-3" {...directory}>
         <input {...directory.fields.appId.as("hidden", appId)} /><label
@@ -198,17 +236,22 @@
             </li>{/each}
         </ul>{/if}
     </details>
-    <details class="space-y-4 rounded-lg border p-4" open={Boolean(grant.fields.subject.value())}>
+    <details
+      class="space-y-4 rounded-lg border p-4"
+      open={Boolean(grant.fields.subject.value() || grant.fields.allIssues()?.length)}
+    >
       <summary class="text-sm font-medium">Assign a role by person or group ID</summary>
       <form
         class="space-y-3"
+        onfocusin={() => beginDraft("grant", grant.fields)}
         {...grant.enhance(async ({ submit }) => {
           saved = false;
           saved = await submit();
+          if (saved) delete revisions["grant"];
         })}
       >
         <input {...grant.fields.appId.as("hidden", appId)} /><input
-          {...grant.fields.revision.as("hidden", data.revision)}
+          {...grant.fields.revision.as("hidden", draftRevision("grant", grant.fields))}
         /><input {...grant.fields.search.as("hidden", search)} /><input
           {...grant.fields.provider.as("hidden", provider)}
         />
@@ -247,7 +290,11 @@
       </form>
     </details>
     {#if data.actions.includes("transfer")}
-      <details class="space-y-4 rounded-lg border p-4">
+      <details
+        class="space-y-4 rounded-lg border p-4"
+        onfocusin={() => beginDraft("transfer", transfer.fields)}
+        open={Boolean(transfer.fields.allIssues()?.length)}
+      >
         <summary class="text-sm font-medium">Transfer ownership</summary>
         <p>
           The selected person or group becomes the owner immediately. The previous owner loses that
@@ -255,7 +302,7 @@
         </p>
         <form class="space-y-3" {...transfer}>
           <input {...transfer.fields.appId.as("hidden", appId)} /><input
-            {...transfer.fields.revision.as("hidden", data.revision)}
+            {...transfer.fields.revision.as("hidden", draftRevision("transfer", transfer.fields))}
           /><label class="grid gap-2 text-sm font-medium"
             >New owner type<NativeSelect {...transfer.fields.type.as("select")}
               ><option value="group">SSO group</option><option value="user">Person</option

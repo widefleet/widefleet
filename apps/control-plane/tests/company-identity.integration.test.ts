@@ -1,7 +1,6 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { EventEmitter, once } from "node:events";
 import { and, eq, sql } from "drizzle-orm";
-import { z } from "zod";
 import { account } from "../src/lib/server/auth-schema.ts";
 import { createIdentityService } from "../src/lib/server/identity.ts";
 import { createAppService } from "../src/lib/server/apps.ts";
@@ -86,7 +85,7 @@ describe("Management company groups with Better Auth", () => {
     return { request, app, access, admin, provider, group, user, expiresAt };
   };
 
-  it("selects the linked token, caches memberships and refreshes the relevant group set", async () => {
+  it("shares token-bound lookups and reuses memberships when app assignments change", async () => {
     const context = await fixture();
     let lookups = 0;
 
@@ -96,17 +95,29 @@ describe("Management company groups with Better Auth", () => {
       environment.configuration,
       async (input, options) => {
         const request = new Request(input, options);
-        expect(request.url).toBe("https://graph.microsoft.com/v1.0/me/checkMemberGroups");
+        expect(request.url).toBe(
+          "https://graph.microsoft.com/v1.0/me/transitiveMemberOf?$select=id&$top=999",
+        );
         expect(request.headers.get("authorization")).toBe("Bearer delegated-member-token");
-        const body = z.object({ groupIds: z.array(z.string()) }).parse(await request.json());
-        expect(body.groupIds).toContain(context.group);
         lookups += 1;
 
-        return Response.json({ value: [context.group] });
+        return Response.json({
+          value: [{ id: context.group, "@odata.type": "#microsoft.graph.group" }],
+        });
       },
     );
 
-    const principal = (await identity.authenticate(context.request, "platform:read")).unwrap();
+    const concurrent = await Promise.all(
+      Array.from({ length: 10 }, () => identity.authenticate(context.request, "platform:read")),
+    );
+
+    const principal = concurrent[0]?.unwrap();
+
+    if (!principal) throw new Error("No authenticated principal");
+
+    for (const result of concurrent)
+      expect(result.unwrap().company?.groups).toEqual([context.group]);
+    expect(lookups).toBe(1);
     expect(principal.company?.groups).toEqual([context.group]);
     expect(await appActions(environment.database.db, principal, context.app.id)).toContain(
       "transfer",
@@ -121,11 +132,11 @@ describe("Management company groups with Better Auth", () => {
       })
     ).unwrap();
     (await identity.authenticate(context.request, "platform:read")).unwrap();
-    expect(lookups).toBe(2);
+    expect(lookups).toBe(1);
     vi.spyOn(Date, "now").mockReturnValue(context.expiresAt + 1);
     const expired = (await identity.authenticate(context.request, "platform:read")).unwrap();
     expect(expired.company).toMatchObject({ groups: [], groupsExpired: true });
-    expect(lookups).toBe(2);
+    expect(lookups).toBe(1);
     expect(await appActions(environment.database.db, principal, context.app.id)).not.toContain(
       "transfer",
     );
@@ -141,7 +152,9 @@ describe("Management company groups with Better Auth", () => {
       async () => {
         vi.spyOn(Date, "now").mockReturnValue(context.expiresAt + 1);
 
-        return Response.json({ value: [context.group] });
+        return Response.json({
+          value: [{ id: context.group, "@odata.type": "#microsoft.graph.group" }],
+        });
       },
     );
 
@@ -157,7 +170,8 @@ describe("Management company groups with Better Auth", () => {
       environment.auth,
       environment.database.db,
       environment.configuration,
-      async () => Response.json({ value: [context.group] }),
+      async () =>
+        Response.json({ value: [{ id: context.group, "@odata.type": "#microsoft.graph.group" }] }),
     );
 
     const principal = (await identity.authenticate(context.request, "platform:read")).unwrap();

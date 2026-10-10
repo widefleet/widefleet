@@ -49,8 +49,11 @@ A Widefleet session or CLI token refresh does not extend that deadline. Company
 sign-in renews the claims, and the identity provider decides whether this requires
 user interaction. Personal assignments and platform recovery do not depend on a
 group snapshot. Entra group overage is resolved using delegated `User.Read` and
-Microsoft Graph's `/me/checkMemberGroups`, only for groups assigned app roles;
-results cannot outlive the originating ID token. Both Entra registrations need
+Microsoft Graph's `/me/transitiveMemberOf`, including transitive group IDs.
+In-flight requests and results are shared for the same verified token; app role
+changes do not repeat the lookup. Results cannot outlive that ID token. A complete
+lookup is bounded to 20 pages and ten seconds; failed or incomplete lookups deny
+the request rather than return partial permissions. Both Entra registrations need
 their group claims configured; the management registration also requests `User.Read`.
 
 App SSO retains its configured session lifetime (currently a one-hour cookie
