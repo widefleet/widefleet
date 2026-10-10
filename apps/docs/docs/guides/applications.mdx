@@ -4,7 +4,7 @@ description: Give colleagues access to a deployed app and publish it in the app 
 ---
 
 Use this guide to share a deployed app with your team. You need an authenticated
-CLI session and app-admin, app-owner or organization-administrator permissions. Start with
+CLI session and app-owner or organization-administrator permissions. Start with
 [your first deployment](/getting-started/installation) if the app is not running yet.
 
 ## Check the app
@@ -22,38 +22,28 @@ named in `wrangler.jsonc`; it does not change who can open the app.
 
 ## Choose who can open it
 
-Company sign-in is always required. App roles grant access to a person or SSO group.
-For a group that should only use the app, obtain its stable ID from your identity provider:
+Company sign-in is always required. An empty access-group list admits every user
+allowed by the installation's app SSO. To restrict access, obtain a stable group
+ID from your identity provider and replace `GROUP_ID` below:
 
 ```sh
-widefleet roles grant --group GROUP_ID --role user
-widefleet roles show
+widefleet access set --group GROUP_ID
 widefleet access
 ```
 
-Use `developer` to allow deployments, logs, database migrations and Workflow management,
-or `admin` to also manage permissions, catalog visibility and deletion. Exactly one
-person or group owns the app. Existing and future previews inherit these assignments.
-Role changes save management permissions immediately; `access` shows whether the gateway
-has activated the app usage rules.
+`set` replaces the entire group list. Repeat `--group` to allow several groups;
+membership in any one is sufficient. The command waits for activation by default.
+Existing and future previews inherit the same rule.
 
-To explicitly allow every authenticated company user:
+To deliberately allow all authenticated company users again:
 
 ```sh
-widefleet access set --all-authenticated true
+widefleet access set --all-authenticated
 ```
 
-To require an assigned role again:
-
-```sh
-widefleet access set --all-authenticated false
-```
-
-These commands wait for gateway activation by default. In management, use **Access →
-Roles and ownership** for role assignments and transfers, and **Access → App usage**
-for the all-authenticated switch and activation status. All app roles include usage;
-workspace administration alone does not grant it. Business permissions inside the
-app remain the app author's responsibility.
+You can also edit these rules in the app's **Access** tab. App usage and management
+permissions are separate: permission to edit an app does not bypass its usage
+rules. Business permissions inside the app remain the app author's responsibility.
 
 ## Make the app discoverable
 

@@ -117,9 +117,9 @@ The command requires an existing Owner or Admin and prints a one-use link. It op
 1. In the Microsoft Entra admin center, open **App registrations** and select the registration selected for **Published app sign-in**, not the management registration.
 2. Open **Token configuration → Add groups claim** and select the group types the apps need. For security-group permissions, select **Security groups** (`groupMembershipClaims: "SecurityGroup"`).
 3. Configure the **ID token** to emit **Group ID** in the `groups` claim. Keep object IDs rather than group names and do not select **Emit groups as role claims**: the current proxy reads `groups`.
-4. After a new app-SSO sign-in, verify that an intended group member receives the expected IDs in server-side `locals.user.groups`. The app implements its own authorization using these IDs. Widefleet roles use these claims; assigning an app role does not change directory membership.
+4. After a new app-SSO sign-in, verify that an intended group member receives the expected IDs in server-side `locals.user.groups`. The app implements its own authorization using these IDs. An app's management collaboration grants do not configure these claims.
 
-Entra limits JWT group claims to **200 group memberships per user**, including nested groups. Above that limit, it omits the entire group list and provides an overage indicator for a Microsoft Graph lookup; it does not return the first 200 groups. The generated Widefleet configuration uses OAuth2 Proxy's native Entra provider to resolve that indicator, including all result pages. Grant both the management and app-SSO registrations the delegated **User.Read** permission and consent to it. For management roles, Widefleet reads the signed-in user’s group IDs through `/me/transitiveMemberOf` when the verified token indicates overage; results expire with that token. A failed overage lookup fails the login. Missing group claims without an overage indicator still become `locals.user.groups = []`, so an empty array does not establish that the user has no directory memberships. App authorization must require the expected group explicitly rather than grant access when the list is empty.
+Entra limits JWT group claims to **200 group memberships per user**, including nested groups. Above that limit, it omits the entire group list and provides an overage indicator for a Microsoft Graph lookup; it does not return the first 200 groups. The generated Widefleet configuration uses OAuth2 Proxy's native Entra provider to resolve that indicator, including all result pages. Grant the app-SSO registration the delegated **User.Read** permission and consent to it. A failed overage lookup fails the login. Missing group claims without an overage indicator still become `locals.user.groups = []`, so an empty array does not establish that the user has no directory memberships. App authorization must require the expected group explicitly rather than grant access when the list is empty.
 
 For large directories, **Groups assigned to the application** can restrict the emitted set to relevant groups assigned to the app-SSO enterprise application. This mode includes direct memberships only; nested memberships are not included. Choose it only if that matches the apps' permission model.
 
@@ -207,14 +207,6 @@ The Widefleet JavaScript loader has its own release lifecycle. Use `widefleet ru
 
 Before changing fleet storage, recovering an interrupted activation or publishing a deployment, the agent checks the publisher binary, the selected runtime image and retained fleet-container images with `celld --version`. Image checks capture output directly from disposable containers with stored logging disabled, without network access or fleet-state mounts; new fleet containers use the verified immutable image ID. A mismatch fails the job with the required version and the component to replace. Updating a JavaScript package does not upgrade celld or recreate an incompatible native container.
 
-### Unreleased app roles
-
-The role-based access schema requires an installation without existing apps. Its
-migration refuses to discard existing app permissions; upgrading an installation
-with apps is not supported by this change. Install the matching control plane,
-SSO container, agent and CLI together. New apps require an assigned role unless
-all-authenticated access is explicitly enabled. See [app roles and access](/reference/app-access).
-
 ### Upgrading from 0.2.1 to 0.3.0
 
 This release pairs platform and CLI 0.3.0 with app runtime 0.2.1. The native runtime remains celld 0.6.2, so this upgrade does not require a native storage migration or replacement of an existing compatible fleet container.
@@ -254,7 +246,7 @@ Widefleet uses Better Auth's Organization plugin with one automatically provisio
 
 After the first verified management sign-in, the person appears under **Members**. Owners and admins can search by name or email and change their role there. Role changes apply to existing browser and CLI sessions on their next API request. At least one Owner must remain, including during concurrent changes. Only Owners can change Owner assignments.
 
-On an app's **Access → Roles and ownership** tab, role assignments select existing members or stable company person/group IDs. Developers can deploy and roll back; app admins also manage roles, network permissions, catalog publication and deletion. Exactly one person or group owns each original app. Its owner or an installation administrator can transfer ownership atomically. Previews inherit these assignments. Installation administrators retain management access but receive no automatic running-app access. Use `widefleet roles` for the same operations in the CLI; see [app roles and access](/reference/app-access).
+On an app's **Access** tab, **Management access** lets you search members by name or email and grant or revoke app collaboration. A collaborator can deploy, roll back and delete that app; only its owner or an organization administrator can change its grants. Organization administrators retain access independently of individual grants. The CLI's existing `grant` and `revoke` commands remain compatible.
 
 The first administrator is created by setup or the bootstrap file. Subsequent company sign-ins create Members. Startup never promotes users or overwrites role changes. Organization lifecycle and invitations are not exposed. These management roles do not determine who can use a published app.
 

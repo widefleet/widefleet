@@ -97,7 +97,7 @@ IT-Projekte veröffentlichen eigene reguläre Worker mit `widefleet connector de
 
 Beim App-Aufruf entfernt Traefik mitgeschickte Identitätsheader und setzt die geprüfte Identität. Der SvelteKit-Starter stellt sie als `locals.user` bereit. App-Code erhält keine Login-Tokens oder SSO-Cookies; eigene serverseitige App-Cookies sind im MVP ebenfalls deaktiviert.
 
-Die Control Plane verwaltet Rollen für Personen und SSO-Gruppen pro App. Alle Previews erben Eigentümerschaft, Rollen und Zugang automatisch. UI, API und `widefleet roles` verwenden dieselben Berechtigungsprüfungen. Der Agent installiert daraus abgeleitete Zugangsregeln über persistente Traefik-Konfiguration. Ein lokaler Authorizer prüft sie anhand der von OAuth2 Proxy bestätigten Identität; neue Regeln werden erst nach einem Proxy-Probeaufruf als aktiv gemeldet. App-Aufrufe benötigen weiterhin weder Control Plane noch PostgreSQL. Verhalten bei Regeländerungen, Grenzen und Installation beschreibt [App access](https://widefleet.com/docs/reference/app-access).
+Die Control Plane verwaltet eine Zugriffsgruppenliste pro App. Alle Previews erben diese automatisch ohne eigene Konfiguration oder Overrides. UI, API und `widefleet access` verwalten dieselbe Regel. Der Agent installiert appbezogene OAuth2-Proxy-Prüfungen über persistente Traefik-Konfiguration und bestätigt neue Regeln erst nach einem Proxy-Probeaufruf. App-Aufrufe benötigen weiterhin weder Control Plane noch PostgreSQL. Verhalten bei Regeländerungen, Grenzen und Installation beschreibt [App access](https://widefleet.com/docs/reference/app-access).
 
 ## Mitgliedschaften und App-Rechte
 
@@ -105,7 +105,7 @@ Better Auth verwaltet eine feste Organisation pro Installation mit den Rollen **
 
 Neue Mitglieder entstehen bei der ersten geprüften Anmeldung an der Verwaltung. Wer nur eine veröffentlichte App über deren separates App-SSO benutzt, erhält dadurch keine Verwaltungsmitgliedschaft. Der Identitätsanbieter steuert die Zulassung zu diesen beiden Anmeldungen getrennt.
 
-App-Eigentümerschaft und Rollen bleiben Widefleet-Daten. Sie referenzieren Personen oder Gruppen über stabile IDs des Identitätsanbieters. Ein Member verwaltet Apps entsprechend seiner appbezogenen Rollen; Gruppenmitgliedschaften stammen aus dem Firmen-SSO. Rollen und Übergabe stehen auf der App-Seite, in der API und über `widefleet roles` bereit. Details zu den Rollen und zur Rechteverwaltung stehen im [Operations Guide](https://widefleet.com/docs/self-hosting/installation#management-members-and-app-collaboration).
+App-Eigentümer und appbezogene Freigaben bleiben Widefleet-Daten und verweisen auf Better-Auth-Benutzer. Ein Member kann eigene und ausdrücklich freigegebene Apps verwalten. Die Freigaben lassen sich auf der App-Seite über Name oder E-Mail vergeben und entziehen. Details zu den Rollen und zur Rechteverwaltung stehen im [Operations Guide](https://widefleet.com/docs/self-hosting/installation#management-members-and-app-collaboration).
 
 ## Daten und Laufzeit
 
