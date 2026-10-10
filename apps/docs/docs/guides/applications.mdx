@@ -32,8 +32,10 @@ widefleet access
 ```
 
 Use `developer` to allow deployments, logs, database migrations and Workflow management,
-or `admin` to also manage permissions, catalog visibility and deletion. Exactly one
-person or group owns the app. Existing and future previews inherit these assignments.
+or `admin` to also manage permissions, catalog visibility and deletion. People and
+SSO groups can share App admin with equal permissions. To hand over, grant the new
+admin first and then revoke the previous assignment. Existing and future previews
+inherit these assignments.
 Role changes save management permissions immediately; `access` shows whether the gateway
 has activated the app usage rules.
 
