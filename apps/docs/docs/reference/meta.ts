@@ -5,6 +5,7 @@ export default defineMeta({
   order: 4,
   pages: [
     "cli",
+    "cli-configuration",
     "authentication",
     "configuration",
     "api",

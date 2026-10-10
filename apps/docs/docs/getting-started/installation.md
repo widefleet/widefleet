@@ -40,24 +40,29 @@ local URL printed by `pnpm dev`, then stop that server with Ctrl-C before contin
 
 ## Connect and deploy
 
-Set your installation's management URL. The following commands use Bash:
+Connect to your company and deploy:
 
 ```sh
-export PLATFORM_URL=https://platform.example.com
 widefleet login
 pnpm check
 widefleet deploy
 ```
 
-In Fish, use `set -gx PLATFORM_URL https://platform.example.com` instead of `export`.
-In PowerShell, use `$env:PLATFORM_URL = "https://platform.example.com"`.
+If IT has configured your agent or computer, the CLI uses that platform address.
+Otherwise, it asks for your work email or company domain and looks up the company's
+discovery record. An agent or noninteractive terminal can supply
+`widefleet login --email employee@example.com` or
+`widefleet login --domain example.com`. These commands also work in PowerShell and Fish.
 
-Approve the device code in your browser. The CLI stores credentials in your
+Approve the device code in your browser. The CLI remembers the platform URL and stores credentials in your
 operating system's credential store: Keychain on macOS, Credential Manager on
 Windows, and Secret Service on Linux. The store must be available and unlocked.
 
-For the local demo, use `http://localhost:25450` as `PLATFORM_URL` and approve the
-code with `admin@example.test`.
+Run `widefleet config show` to inspect the selected URL. If discovery is not set
+up, IT can [configure company discovery or distribute configuration](/self-hosting/company-setup).
+
+For the local demo, run `widefleet login --url http://localhost:25450` and approve
+the code with `admin@example.test`.
 
 The target app is identified by your installation and the `name` in
 `wrangler.jsonc`. The first deploy creates it when needed; later deploys update
@@ -104,6 +109,7 @@ includes them. A failed log query is not evidence that the app has no errors.
 | Registry returns 404                     | Check the package name and published version on [npm](https://www.npmjs.com/package/widefleet).                                                                 |
 | `widefleet` is not found                 | Reopen the terminal after `pnpm setup`; check `Get-Command widefleet -All` in PowerShell or `type -a widefleet` in Bash/Fish for an older installation on PATH. |
 | Login cannot access the credential store | Check your operating system's credential store; see [headless login](#headless-login) for alternatives.                                                         |
+| Company discovery fails                  | Check the email domain and ask IT to publish a discovery record or configure the agent; see [company setup](/self-hosting/company-setup).                       |
 | Deployment fails or stays queued         | Follow [deployment diagnostics](/guides/deployments#inspect-a-failure).                                                                                         |
 
 Next, [share the app with colleagues](/guides/applications) or

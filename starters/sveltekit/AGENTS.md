@@ -18,6 +18,10 @@ Use `locals.user` for the authenticated company identity. Never trust identity h
 Keep credentials out of source control. Confirm the target platform and app before a production deployment or destructive operation.
 Discuss new dependencies and lasting architectural changes with the maintainer before implementing them.
 
+## Connect to Widefleet
+
+Check `widefleet config show` before requesting connection details. Use company-provided or saved configuration when available. Otherwise, use a company domain or work email already available in the authorized context, or ask for the employee's work email/domain. Run `widefleet login --domain example.com` or `widefleet login --email employee@example.com`; the CLI discovers and remembers the platform URL after login. Do not ask for the platform URL as the first onboarding step. If discovery fails, report the error so IT can configure discovery or supply managed configuration. An explicit `--url` or `PLATFORM_URL` override must be removed before using email/domain discovery.
+
 ## Network access
 
 External destinations require platform grants. Inspect `widefleet network` before assuming an API is reachable. An authorized owner/admin can use `widefleet network allow https://api.example.com`; add `--browser` only for browser access. Use the normal login with combined scopes, including `network:manage` when changing grants. Do not generate policy files or copy UUIDs/revisions for this flow. Network state is separate from Wrangler configuration and survives code rollback. CSP blocks frames, objects and Web Workers; do not bypass platform controls in app code.

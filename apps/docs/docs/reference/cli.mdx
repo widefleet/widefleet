@@ -9,17 +9,26 @@ Each command also accepts `--help`; newer commands require matching platform com
 
 ## Authentication and target
 
-| Setting or command                              | Meaning                                                                                                   |
-| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `PLATFORM_URL` / `--url URL`                    | Management origin for the selected installation.                                                          |
-| `widefleet login`                               | Browser device login; requests `platform:read platform:write` by default.                                 |
-| `widefleet whoami`                              | Inspect the authenticated user.                                                                           |
-| `widefleet logout`                              | Revoke the stored refresh token and remove the saved session.                                             |
-| `PLATFORM_SESSION_FILE` / `--session-file PATH` | Explicit, unencrypted session file for headless Unix use instead of the OS credential store.              |
-| `PLATFORM_ACCESS_TOKEN`                         | Externally supplied token; overrides saved credentials for API commands and does not renew automatically. |
+| Setting or command                                  | Meaning                                                                                                   |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `PLATFORM_URL` / `--url URL`                        | Explicit management origin; overrides saved and managed configuration.                                    |
+| `widefleet login`                                   | Browser device login; requests `platform:read platform:write` by default.                                 |
+| `widefleet login --email EMAIL` / `--domain DOMAIN` | Discover the installation using a work email or company domain, then log in.                              |
+| `widefleet config show`                             | Inspect the selected platform URL, its source and configuration paths.                                    |
+| `widefleet config set-url URL` / `unset-url`        | Save or clear the platform URL without changing credentials.                                              |
+| `PLATFORM_CONFIG_FILE` / `--config-file PATH`       | Use one explicit configuration file instead of the user and managed defaults.                             |
+| `widefleet whoami`                                  | Inspect the authenticated user.                                                                           |
+| `widefleet logout`                                  | Revoke the stored refresh token and remove the saved session.                                             |
+| `PLATFORM_SESSION_FILE` / `--session-file PATH`     | Explicit, unencrypted session file for headless Unix use instead of the OS credential store.              |
+| `PLATFORM_ACCESS_TOKEN`                             | Externally supplied token; overrides saved credentials for API commands and does not renew automatically. |
 
 Keep session files outside projects and shared artifacts. The CLI restricts file
 permissions and renews saved sessions automatically. See [headless login](/getting-started/installation#headless-login).
+
+Login reuses configured or saved URLs and otherwise asks for a work email or
+company domain. After a successful login it saves the URL. See
+[CLI configuration](/reference/cli-configuration) for precedence, native file paths
+and discovery behavior, or [company setup](/self-hosting/company-setup) to configure employees' agents.
 
 ## App commands
 
@@ -43,7 +52,7 @@ IDs with `widefleet apps` and deployment IDs and artifact IDs with `widefleet hi
 | `widefleet catalog list`                    | List published app launch URLs.                                      |
 | `widefleet delete APP_UUID --yes`           | Request removal of an app and all its previews.                      |
 
-The target is `PLATFORM_URL` plus `name` in `wrangler.jsonc`. The first deploy creates that app; subsequent deploys update it after checking the user's app permissions. A changed name selects a different app. The server assigns the host, and existing apps keep their host and data. No app ID, host selection or local project-link file is needed for normal deployment.
+The target is the selected platform URL plus `name` in `wrangler.jsonc`. The first deploy creates that app; subsequent deploys update it after checking the user's app permissions. A changed name selects a different app. The server assigns the host, and existing apps keep their host and data. No app ID, host selection or local project-link file is needed for normal deployment.
 Logs, access, network and migrations also use project context; history, events and
 rollback require IDs. Check a command's help before assuming it accepts `--app`.
 
