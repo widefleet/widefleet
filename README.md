@@ -58,12 +58,11 @@ widefleet init my-app
 cd my-app
 pnpm install --frozen-lockfile
 pnpm check
-export PLATFORM_URL=https://platform.example.com
 widefleet login
 widefleet deploy
 ```
 
-Replace `PLATFORM_URL` with your management URL and approve the device code in your browser. `widefleet deploy` builds locally, creates the app on its first deployment and prints its URL after activation. Later deployments update the same app.
+The CLI uses your company's configuration or asks for your work email or company domain. Approve the device code in your browser; the CLI remembers the installation. `widefleet deploy` builds locally, creates the app on its first deployment and prints its URL after activation. Later deployments update the same app.
 
 Use `pnpm dev` to develop locally with your coding agent. Run `widefleet preview` to publish an isolated preview, then `widefleet deploy` when ready. See the [app development guide](https://widefleet.com/docs/guides/app-development) for identity, data bindings and migrations.
 

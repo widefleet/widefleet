@@ -12,15 +12,14 @@ Local development uses a synthetic identity. Deployed apps receive the verified 
 
 ## Deploy
 
-Set the management origin supplied by your operator, then authenticate. Approve the device code in your browser; subsequent commands use the stored session.
+Connect to your company, then authenticate. The CLI uses company-provided or saved configuration. Otherwise, it asks for your work email or company domain. Approve the device code in your browser; subsequent commands use the saved URL and session.
 
 ```sh
-export PLATFORM_URL=https://platform.example.com
 widefleet login
 widefleet deploy
 ```
 
-In Fish, set the origin with `set -gx PLATFORM_URL https://platform.example.com`.
+For an agent or noninteractive terminal, use `widefleet login --email employee@example.com` or `widefleet login --domain example.com`. IT must publish the company's TXT record or HTTPS discovery file, or preconfigure the agent's environment. Run `widefleet config show` to inspect the selected URL. An explicit URL supplied by IT remains supported through `widefleet login --url https://platform.example.com`.
 
 The deployment target is the combination of the selected platform and `name` in `wrangler.jsonc`, following Wrangler's account-and-Worker-name model. `widefleet init` derives this name from the project directory. Review it before the first deployment. The first deploy creates the app; later deploys with the same name update it if you have permission. A fresh checkout works with the same configuration and login, without a local app-ID file or linking command. Changing `name` selects another app, and a deleted app is created again if deployed under that name.
 
@@ -28,7 +27,7 @@ The platform assigns the shared fleet. Each app keeps its own identity and resou
 
 This flow requires CLI and management server 0.1.5 or newer. Explicit `widefleet deploy APP_UUID` remains available for existing scripts and overrides the configured name for that invocation. Use `widefleet apps` to inspect app IDs for history, rollback and administration.
 
-Keep `PLATFORM_URL` available in your terminal. Login uses an unlocked OS credential store by default. In a headless Unix shell, a CLI build with `--session-file` support can instead store the session in an explicitly selected, unencrypted file:
+Login uses an unlocked OS credential store by default. In a headless Unix shell, a CLI build with `--session-file` support can instead store the session in an explicitly selected, unencrypted file:
 
 ```sh
 export PLATFORM_SESSION_FILE="$HOME/.local/state/widefleet/session.json"

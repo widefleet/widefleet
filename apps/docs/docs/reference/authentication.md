@@ -3,14 +3,13 @@ title: CLI authentication
 description: Credential stores, headless sessions, token renewal and external credentials.
 ---
 
-Use `widefleet login` to approve a device code in your browser. The default scopes are `platform:read platform:write`; select additional scopes explicitly when needed. On Linux, the default OS credential store requires an available, unlocked Secret Service and a session D-Bus.
+Use `widefleet login` to approve a device code in your browser. Login uses configured or saved platform details, or asks for your work email/domain to discover them. See [CLI configuration](/reference/cli-configuration). The default scopes are `platform:read platform:write`; select additional scopes explicitly when needed. Credentials use Keychain on macOS, Credential Manager on Windows, or Secret Service on Linux. The store must be available and unlocked; Linux also requires a session D-Bus.
 
 ## Headless login
 
 In a Unix shell without an OS credential store, explicitly select a session file. This requires CLI 0.2.1 or newer; `widefleet --help` lists `--session-file`. These commands use Bash syntax:
 
 ```sh
-export PLATFORM_URL=https://platform.example.com
 export PLATFORM_SESSION_FILE="$HOME/.local/state/widefleet/session.json"
 widefleet login --scope platform:read
 widefleet whoami
