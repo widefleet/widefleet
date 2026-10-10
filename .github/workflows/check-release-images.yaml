@@ -22,8 +22,13 @@ on:
       - pnpm-*.yaml
       - tsconfig*.json
       - vitest.config.ts
+      - "!**/*.md"
   push:
     branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "apps/docs/docs/**"
 
 permissions:
   contents: read

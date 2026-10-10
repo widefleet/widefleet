@@ -1,9 +1,18 @@
 name: Check
 
 on:
+  # Keep application code and configuration (including the docs site) covered.
   pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "apps/docs/docs/**"
   push:
     branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "apps/docs/docs/**"
 
 permissions:
   contents: read
