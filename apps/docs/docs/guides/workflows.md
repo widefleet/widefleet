@@ -86,7 +86,7 @@ widefleet workflows terminate process example-1
 widefleet workflows delete process example-1
 ```
 
-Commands print JSON. `--no-wait` returns a queued operation; `widefleet workflows operation OPERATION_UUID` retrieves its outcome. `list --cursor CURSOR` requests the next page. Restart begins again on the instance's original code version and may repeat side effects.
+Commands print JSON. `--no-wait` returns a queued operation; `widefleet workflows operation OPERATION_UUID` retrieves its outcome. `list --cursor CURSOR` requests the next page. Restart without a step selector begins again from the first step on the instance's original code version and may repeat side effects.
 
 The app detail page exposes the same operations. Requests remain visibly pending until the fleet agent confirms their outcome. Workflow names from earlier deployments can still be entered to manage their existing instances.
 
@@ -101,11 +101,73 @@ HTTP management endpoints are:
 
 POST bodies contain a `request` object, for example `{"request":{"action":"create","workflow":"process","id":"example-1","params":{"message":"Example"}}}`. Supply a UUID `Idempotency-Key` header. All endpoints require management access to the app. Management payloads are JSON and bounded to 64 KiB; app-side bindings retain native structured-clone values. Management renders non-JSON outputs with `$type` tags (for example `BigInt`, `Map`, and binary values); repeated object references use `$ref` indices. Listings return instance summaries; use `status` for the output.
 
+## Restart from a step
+
+**Unreleased:** Selective restart requires CLI, control-plane and app-runtime releases containing this feature. It is not available in the currently published releases.
+
+Use selective restart to repeat part of an instance while retaining earlier step results. The target must already exist in that instance's execution history. These examples use the Workflow definition and JSON files above; create a separate instance so that it has not been deleted by the lifecycle example:
+
+```sh
+widefleet workflows create process --id example-restart-1 --params parameters.json
+widefleet workflows send-event process example-restart-1 approval --payload approval.json
+widefleet workflows status process example-restart-1
+```
+
+Once `status` reports `complete`, repeat only `finish`:
+
+```sh
+widefleet workflows restart process example-restart-1 --from-step-name finish
+widefleet workflows status process example-restart-1
+```
+
+The instance completes again with the original prepared message and approval. It does not wait for another approval. From an app handler with access to `env.PROCESS`, the equivalent call is:
+
+```ts
+const instance = await env.PROCESS.get("example-restart-1");
+await instance.restart({ from: { name: "finish" } });
+```
+
+The selector supports repeated names and different step types:
+
+| Binding/API field | CLI flag            | Meaning                                                                                |
+| ----------------- | ------------------- | -------------------------------------------------------------------------------------- |
+| `from.name`       | `--from-step-name`  | Exact step name from the app, including an empty name. Required for selective restart. |
+| `from.count`      | `--from-step-count` | Positive, one-based occurrence of that name and type. Defaults to `1`.                 |
+| `from.type`       | `--from-step-type`  | `do`, `sleep` or `waitForEvent`. Defaults to `do`; `sleep` also selects `sleepUntil`.  |
+
+To request a new approval, restart the event-wait step and then send a fresh event:
+
+```sh
+widefleet workflows restart process example-restart-1 \
+  --from-step-name approval --from-step-type waitForEvent
+widefleet workflows send-event process example-restart-1 approval --payload approval.json
+widefleet workflows status process example-restart-1
+```
+
+In the app's **Workflows** section, choose **Restart from a step**, enter the instance ID and step name, and select the occurrence and type. The request remains pending until the agent confirms it.
+
+For HTTP management, send the same selector to `POST /api/v1/apps/{appId}/workflows` with the authorization and `Idempotency-Key` header described above:
+
+```json
+{
+  "request": {
+    "action": "restart",
+    "workflow": "process",
+    "id": "example-restart-1",
+    "from": { "name": "finish", "count": 1, "type": "do" }
+  }
+}
+```
+
+The selected step and subsequent steps in execution history run again, including later steps in parallel branches. Earlier completed results are reused. Restart keeps the original parameters and pinned app code; deploying a fix does not change the code of this instance. Repeated external writes must tolerate repetition. Buffered, unconsumed events are cleared on restart; restarting an event wait requires a fresh event. A restarted `sleep` waits its duration again, while a restarted `sleepUntil` still requires a future deadline.
+
+If the target is missing, the request fails without resetting the instance. Check the exact name, type and occurrence against the path that ran; a step in an unvisited branch cannot be selected. After restart, use `status` to observe the new run. Delete the instance with `widefleet workflows delete process example-restart-1` when its retained results are no longer needed.
+
 ## Persistence and permissions
 
 A trusted native Workflow drives the app coroutine through a scoped RPC session. App code and callbacks execute inside a separate Dynamic Worker with the existing storage facades, connector grants, telemetry and egress policy. No app callback or native step object crosses RPC. celld owns retries, durable step results, event buffering and timers.
 
-Native checkpoints record command identities, their batch order and which parallel result was delivered next. Replay matches each step by its name and occurrence count, holding early commands until their recorded turn. Committed callback results reconstruct the app coroutine without re-executing committed callbacks. Step names and occurrence counts exposed to app callbacks retain their original values. Parallel branches whose registration order can vary must use distinct step names; repeated uses of the same name must retain their order across replay. Side effects outside steps can repeat during replay; side effects inside an uncommitted or retried step must also tolerate repetition.
+Native checkpoints record command identities, their batch order and which parallel result was delivered next. Replay matches each step by its name, type and occurrence count, holding early commands until their recorded turn. Committed callback results reconstruct the app coroutine without re-executing committed callbacks. Step names and occurrence counts exposed to app callbacks retain their original values. Parallel branches whose registration order can vary must use distinct step names; repeated uses of the same name and type must retain their order across replay. Side effects outside steps can repeat during replay; side effects inside an uncommitted or retried step must also tolerate repetition.
 
 Each instance pins its immutable app version. Redeployment and rollback affect new instances. Existing instances keep their code and declared storage resources, even if a later deployment removes the Workflow or storage declaration. The current network policy and still-granted connector bindings are selected when a Workflow session is reconstructed. Revocation does not undo an already completed external request.
 
@@ -119,6 +181,6 @@ Supported operations are `step.do`, `step.sleep`, `step.sleepUntil` and `step.wa
 
 Short global `setTimeout` waits and `fetch` calls (including response body methods such as `json()` and `text()`) can run between steps while another branch waits for an event. They repeat on replay. Command delivery has a 60-second timeout; use durable steps for longer work. Put other asynchronous I/O, such as direct connector calls, Node APIs and manual stream reads, inside `step.do`, and use `step.sleep` for durable delays.
 
-Function-valued retry delays, selective restart from a named step, step rollback handlers and rollback-on-termination are not supported. Unsupported options are rejected. Workflow scheduling/facets and cross-app bindings are not part of this interface. This adapter does not claim compatibility with every Cloudflare Workflow extension.
+Function-valued retry delays, step rollback handlers and rollback-on-termination are not supported. Unsupported options are rejected. Workflow scheduling/facets and cross-app bindings are not part of this interface. This adapter does not claim compatibility with every Cloudflare Workflow extension.
 
 Cloudflare's `@cloudflare/dynamic-workflows` helper cannot directly supply this transport on celld 0.6.2: dynamic Workflow entrypoint lookup and native step-object transport are unavailable. The platform preserves the supported app API with its own transport, without patching or forking celld.
