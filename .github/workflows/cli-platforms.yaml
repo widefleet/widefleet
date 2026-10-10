@@ -91,7 +91,8 @@ jobs:
         env:
           RUN_CLI_TESTS: "1"
           RUN_CLI_NATIVE_AUTH: ${{ runner.os != 'Linux' && '1' || '0' }}
-        run: pnpm exec vitest run apps/control-plane/tests/cli.test.ts apps/control-plane/tests/network-cli.test.ts apps/control-plane/tests/access-cli.test.ts apps/control-plane/tests/connector-cli.test.ts apps/control-plane/tests/auth-cli.test.ts apps/control-plane/tests/auth-native-cli.test.ts apps/control-plane/tests/reporting-cli.test.ts
+          RUN_CLI_NATIVE_DNS: ${{ runner.os != 'Linux' && '1' || '0' }}
+        run: pnpm exec vitest run apps/control-plane/tests/cli.test.ts apps/control-plane/tests/network-cli.test.ts apps/control-plane/tests/access-cli.test.ts apps/control-plane/tests/connector-cli.test.ts apps/control-plane/tests/auth-cli.test.ts apps/control-plane/tests/configuration-cli.test.ts apps/control-plane/tests/discovery-cli.test.ts apps/control-plane/tests/auth-native-cli.test.ts apps/control-plane/tests/reporting-cli.test.ts
       - name: Verify pnpm installation and the generated app
         if: ${{ !cancelled() && (steps.cli-commands.outcome == 'success' || steps.cli-commands.outcome == 'failure') }}
         env:

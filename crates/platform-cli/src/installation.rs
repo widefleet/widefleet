@@ -157,7 +157,7 @@ pub fn initialize(directory: &Path) -> Result<()> {
     println!("Created SvelteKit project at {}", directory.display());
     println!("App name: {name} (editable in wrangler.jsonc)");
     println!(
-        "In that directory, run pnpm install --frozen-lockfile, then pnpm check. Set PLATFORM_URL, run widefleet login, then widefleet deploy."
+        "In that directory, run pnpm install --frozen-lockfile, then pnpm check. Run widefleet login to connect your company, then widefleet deploy."
     );
     Ok(())
 }

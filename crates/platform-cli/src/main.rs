@@ -2,8 +2,10 @@ mod access;
 mod apps;
 mod auth;
 mod catalog;
+mod configuration;
 mod connector;
 mod deploy;
+mod discovery;
 mod groups;
 mod installation;
 mod logs;
@@ -35,6 +37,9 @@ use uuid::Uuid;
 struct Arguments {
     #[arg(long, env = "PLATFORM_URL", global = true)]
     url: Option<String>,
+    /// Use this CLI configuration file instead of the user and managed defaults.
+    #[arg(long, env = "PLATFORM_CONFIG_FILE", global = true)]
+    config_file: Option<PathBuf>,
     /// Store the login in an unencrypted, owner-only file instead of the OS credential store (Unix).
     #[arg(long, env = "PLATFORM_SESSION_FILE", global = true)]
     session_file: Option<PathBuf>,
@@ -44,6 +49,8 @@ struct Arguments {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Inspect or change local CLI configuration. No login is required.
+    Config(configuration::Options),
     /// Show or change local usage and crash reporting. No login is required.
     Telemetry(reporting::Options),
     /// Create an independent SvelteKit project. No platform login is required.
@@ -133,19 +140,66 @@ fn print_json(value: &impl serde::Serialize) -> Result<()> {
 }
 
 async fn run(args: Arguments) -> Result<()> {
+    if let Command::Config(options) = args.command {
+        return configuration::Files::locate(args.config_file.as_deref())?
+            .command(options, args.url.as_deref());
+    }
     if let Command::Telemetry(options) = args.command {
         return reporting::command(options);
     }
     if let Command::Init { directory } = &args.command {
         return installation::initialize(directory);
     }
-    let origin = args.url.as_deref().ok_or_else(|| {
-        platform_core::Error::invalid("Set --url or PLATFORM_URL to the management origin".into())
-    })?;
-    let api = Api::new(origin)?;
+    let domain = match &args.command {
+        Command::Login(options) => options.discovery.domain(),
+        _ => None,
+    };
+    let origin = if let Some(domain) = domain {
+        if args.url.is_some() {
+            return Err(platform_core::Error::invalid(
+                "--email or --domain cannot be used with --url or PLATFORM_URL; remove the URL override to discover a different company".into(),
+            ));
+        }
+        discovery::resolve(domain).await?
+    } else {
+        match configuration::explicit(args.url.as_deref())? {
+            Some(selected) => selected.platform_url,
+            None => match configuration::Files::locate(args.config_file.as_deref())?.selection()? {
+                Some(selected) => selected.platform_url,
+                None if matches!(args.command, Command::Login(_)) => {
+                    discovery::resolve(&discovery::prompt()?).await?
+                }
+                None => return Err(platform_core::Error::invalid(
+                    "No platform is configured. Run widefleet login --email employee@example.com or widefleet login --domain example.com".into(),
+                )),
+            },
+        }
+    };
+    let api = Api::new(&origin)?;
     let credentials = auth::Credentials::new(args.session_file);
     match args.command {
-        Command::Login(options) => return auth::login(&api, &credentials, options).await,
+        Command::Login(options) => {
+            let files = match configuration::Files::locate(args.config_file.as_deref()) {
+                Ok(files) => Some(files),
+                Err(error) if args.url.is_some() && args.config_file.is_none() => {
+                    eprintln!(
+                        "Platform URL will not be saved: {error}. Continue supplying --url or PLATFORM_URL"
+                    );
+                    None
+                }
+                Err(error) => return Err(error),
+            };
+            auth::login(&api, &credentials, options).await?;
+            if let Some(files) = files {
+                files.save(Some(&api.origin_text()))
+                .map_err(|error| {
+                    platform_core::Error::invalid(format!(
+                        "Login succeeded, but the platform URL could not be saved: {error}. Use --url for subsequent commands or fix the configuration file permissions"
+                    ))
+                })?;
+            }
+            return Ok(());
+        }
         Command::Logout => return auth::logout(&api, &credentials).await,
         _ => {}
     }
@@ -285,7 +339,11 @@ async fn run(args: Arguments) -> Result<()> {
                 .await?;
             print_json(&json::<Value>(response).await?)
         }
-        Command::Telemetry(_) | Command::Init { .. } | Command::Login(_) | Command::Logout => {
+        Command::Config(_)
+        | Command::Telemetry(_)
+        | Command::Init { .. }
+        | Command::Login(_)
+        | Command::Logout => {
             unreachable!("Local and authentication commands return before API dispatch")
         }
     }
@@ -295,6 +353,7 @@ async fn run(args: Arguments) -> Result<()> {
 async fn main() {
     let args = Arguments::parse();
     let command = match &args.command {
+        Command::Config(_) => "config",
         Command::Telemetry(_) => "telemetry",
         Command::Init { .. } => "init",
         Command::Login(_) => "login",
@@ -324,7 +383,7 @@ async fn main() {
         Command::Grant { .. } => "grant",
         Command::Revoke { .. } => "revoke",
     };
-    let telemetry = if command == "telemetry" {
+    let telemetry = if matches!(command, "telemetry" | "config") {
         None
     } else {
         reporting::initialize()

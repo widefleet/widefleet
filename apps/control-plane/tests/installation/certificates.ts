@@ -1,9 +1,12 @@
 import { execFile } from "node:child_process";
+import { generateKeyPair } from "node:crypto";
 import { chmod, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
 const execute = promisify(execFile);
+
+const generate = promisify(generateKeyPair);
 
 export const createCertificates = async (directory: string, extraDomains: string[] = []) => {
   const ca = join(directory, "ca.pem");
@@ -61,7 +64,14 @@ export const createCertificates = async (directory: string, extraDomains: string
     "-extfile",
     extensions,
   ]);
-  await execute("openssl", ["genrsa", "-traditional", "-out", accountKey, "2048"]);
+
+  const { privateKey } = await generate("rsa", {
+    modulusLength: 2048,
+    privateKeyEncoding: { type: "pkcs1", format: "pem" },
+    publicKeyEncoding: { type: "spki", format: "pem" },
+  });
+
+  await writeFile(accountKey, privateKey, { mode: 0o600 });
 
   return { ca, key, certificate, accountKey };
 };
