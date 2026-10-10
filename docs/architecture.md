@@ -1,121 +1,53 @@
-# Architektur
+# Architecture
 
-Die Plattform trennt lokalen Build, Verwaltung und laufende Apps. Die Referenzinstallation läuft auf einem Docker-Host; Einrichtung und Betrieb beschreibt der [Operations Guide](https://widefleet.com/docs/self-hosting/installation).
+These boundaries matter when changing Widefleet across components. For installation and operation, use the [self-hosting guide](https://widefleet.com/docs/self-hosting/installation); for local verification, use [development and checks](development.md).
 
 ```mermaid
-flowchart TB
-    CLI["Ersteller und IT · widefleet CLI<br/>App-/Connector-Deploy · Netzwerkfreigaben · Runtime-Updates"]
-    ADMIN["Verwaltung im Browser"]
-    USER["App-Nutzer"]
-    IDP["Firmen-Identitätsanbieter"]
-    RELEASE["Versionierte Runtime-Releases"]
-    subgraph MANAGEMENT["Control Plane · auch außerhalb des Unternehmensnetzes"]
-        CP["SvelteKit · Verwaltungs-API · Better Auth"]
-        PG[("PostgreSQL<br/>Apps, Rechte, stabile Fleet-ID<br/>Versionsreferenzen und Aufträge")]
-        ART[("Object Storage<br/>App-, Connector- und Runtime-Pakete")]
-        CP <--> PG
-        CP <--> ART
-    end
-    subgraph DATA["Private Data Plane · zunächst ein verwalteter Node"]
-        AGENT["Zustandsloser Rust-Ausführer<br/>holt Aufträge über ausgehendes HTTPS"]
-        PROXY["Traefik · persistente Host-Routen"]
-        SSO["OAuth2 Proxy · App-SSO"]
-        subgraph FLEET["Gemeinsame celld-Fleet · stabile Identität unabhängig vom Agent"]
-            LOADER["Separat versionierter Widefleet-Loader<br/>Backend-Egress · Browser-CSP"]
-            APP1["App A · Dynamic Worker"]
-            APP2["App B / Preview · Dynamic Worker"]
-            NATIVE["Native D1 · R2 · KV · Queues · Cron"]
-            CONNECTOR["IT-Connector · regulärer Worker<br/>eigene Bindings und Ressourcen"]
-            DO[("Optionales IT-eigenes Durable Object")]
-            STATE[("Persistenter Node-Zustand")]
-            LOADER --> APP1
-            LOADER --> APP2
-            APP1 & APP2 -->|"App-bezogene Adapter"| NATIVE
-            NATIVE <--> STATE
-            APP1 & APP2 -->|"Freigegebenes natives RPC-Binding"| CONNECTOR
-            CONNECTOR --> DO
-            DO <--> STATE
-        end
-        STORE[("Fleet-Speicher<br/>Runtime, Connectoren, App-Versionen und Bindings<br/>Daten und Aktivierungsjournal")]
-        AGENT -->|"Aufträge abholen / Ergebnis melden"| CP
-        AGENT -->|"Prüfen und installieren"| STORE
-        AGENT -->|"Container / celld reload"| LOADER
-        AGENT -.->|"Routing-Dateien"| PROXY
-        PROXY -->|"App-Anfrage"| LOADER
-        PROXY -.->|"Identität prüfen"| SSO
-        LOADER & NATIVE <--> STORE
-    end
-    CLI -->|"Login, App-, Connector- und Runtime-Verwaltung"| CP
-    RELEASE -->|"Version automatisch herunterladen"| CLI
-    ADMIN --> CP
-    USER --> PROXY
-    CP & SSO -.->|"OIDC"| IDP
+flowchart LR
+    CLI["CLI and management UI"] --> CP["Control plane"]
+    CP --> PG[("Management database")]
+    CP --> ART[("Deployment artifacts")]
+    AGENT["Deployment agent"] -->|"Poll jobs and report results"| CP
+    AGENT -->|"Install and activate"| FLEET["celld fleet"]
+    AGENT -->|"Persist routes"| PROXY["Traefik"]
+    USER["App users"] --> PROXY
+    PROXY -->|"Authenticate"| SSO["App SSO"]
+    PROXY -->|"Serve app"| FLEET
+    FLEET --> STATE[("Fleet storage and node state")]
 ```
 
-Die Referenz-Compose-Dateien können beide Ebenen auf einem Host betreiben. Der Ausführer benötigt keinen eingehenden Verwaltungszugang ins Unternehmensnetz. Seine Registrierung authentifiziert die Ausführung; sie definiert weder Fleet-Identität noch App-Datenpfade. Ein Ersatz-Agent verwendet dieselbe Fleet, denselben persistenten Node-Speicher und dieselben Routen. Mehrere gleichzeitig verwaltete Nodes und automatisches Load-Balancing sind noch nicht implementiert.
+## Serving apps independently of management
 
-## Einrichtung
+The control plane owns desired configuration and deployment jobs; serving apps use installed state. The agent polls over outgoing HTTPS, so management does not require inbound access to the company network. App requests and runtime restarts must work without the control plane, PostgreSQL or the agent. Proxy, app SSO, runtime and storage remain required.
 
-Infrastrukturwerte bleiben in Compose. Die erste Einrichtung erstellt einen lokalen Owner; die Einstellungen für Firmenanmeldung und optionale Gruppensuche liegen anschließend in PostgreSQL. UI und CLI verwenden dieselben Serverfunktionen. Nach einem geprüften Firmenlogin schließt der Owner den Passwortzugang. Ein optionales Bootstrap-Dokument automatisiert die Ersteinrichtung; spätere Starts importieren es nicht erneut.
+The fleet's identity and data outlive an agent registration. Replacing an agent must reuse the fleet, persistent node state and routes rather than derive new storage paths from the agent ID. See [fleet assignment](../apps/control-plane/src/lib/server/fleets.ts) and [fleet storage](../crates/platform-agent/src/fleet.rs).
 
-Die Control Plane schreibt die App-SSO-Konfiguration in ein gemeinsames Volume. Der SSO-Container prüft sie, übernimmt sie und bewahrt den aktiven Stand für einen eigenständigen Neustart auf. Weder App-Anfragen noch SSO-Neustarts benötigen die Control Plane oder PostgreSQL.
+App SSO also preserves validated configuration for restart without management. Changes to identity setup must retain this separation; the [SSO restart tests](../apps/control-plane/tests/installation/sso-supervisor.test.ts) exercise it.
 
-## Verwaltungsoberfläche und API
+The reference installation uses one managed node and shared storage credentials. It assumes trusted internal app creators; app-scoped bindings do not make it an infrastructure isolation boundary for hostile tenants. Multiple managed nodes and automatic load balancing are not implemented.
 
-Die SvelteKit-Oberfläche liest Daten über Remote Queries und ändert sie über Remote Forms beziehungsweise Commands. Die zugehörigen Module liegen in `apps/control-plane/src/lib/*.remote.ts`. Remote Functions und asynchrone Komponenten sind im SvelteKit-Plugin aktiviert. Die Seiten-Loader prüfen die Anmeldung und laden Queries vor, damit Weiterleitungen und HTTP-Fehler bereits beim Seitenaufruf korrekt zurückgegeben werden. Better Auth übernimmt weiterhin Login, Logout, Gerätefreigabe und Wiederherstellung.
+## Shared authorization, separate identities
 
-Auch die Telemetrie-Einstellungen und die Berichtsvorschau nutzen Remote Functions. Die Erfassung von Browserfehlern verwendet ihre separaten HTTP-Endpunkte mit Timeout und `keepalive`.
+The UI's remote functions and the CLI's HTTP API call shared server operations directly. Resource authorization belongs in those operations so both interfaces apply the same policy. A protected page loader is not sufficient: remote functions are independently callable and must authenticate each request. See [remote request authentication](../apps/control-plane/src/lib/server/remote-support.ts) and [API wiring](../apps/control-plane/src/lib/server/api.ts).
 
-CLI, Deployment-Agent und externe Integrationen verwenden die oRPC/OpenAPI-Endpunkte unter `/api/v1`. Beide Zugänge rufen die Geschäftslogik in `src/lib/server` direkt auf. Die Schnittstellen übernehmen Eingabevalidierung, Authentifizierung, Fehlerdarstellung und das Aktualisieren angezeigter Daten. Geschäftsregeln und ressourcenbezogene Berechtigungen bleiben in den gemeinsamen Serverfunktionen. Auch direkte Remote-Aufrufe prüfen die aktuelle Sitzung und Berechtigungen; ein geschützter Seiten-Loader ersetzt diese Prüfung nicht.
+Management membership and app usage are separate. Signing into a published app must not enroll a management member; management access must not implicitly grant app usage. App access rules also apply to previews through their parent. Keep these boundaries when changing [membership](../apps/control-plane/src/lib/server/organization.ts) or [app access](../apps/control-plane/src/lib/server/app-access.ts); the public [app access reference](https://widefleet.com/docs/reference/app-access) owns the user-facing rules.
 
-App- und Mitgliederformulare funktionieren auch ohne JavaScript. Mit JavaScript zeigen sie laufende Anfragen an und aktualisieren betroffene Queries. Rechteänderungen und angeforderte Deployment- oder Löschaufträge werden erst nach Serverbestätigung angezeigt; ein angenommener Auftrag ist noch keine abgeschlossene Ausführung. Optimistische Updates sind für geeignete reversible Änderungen vorgesehen, einschließlich Fehlerbehandlung und Abgleich mit dem Serverzustand.
+Traefik removes client-supplied identity headers and forwards only the identity established by app SSO. App code must not receive login tokens or SSO cookies. The [edge tests](../apps/control-plane/tests/edge/sso.test.ts) verify this boundary across proxy and runtime changes.
 
-## Deployment
+## Activation is a fleet-wide operation
 
-1. `PLATFORM_URL` und `name` in `wrangler.jsonc` bestimmen die App. Beim ersten Deploy wird sie der Standard-Fleet zugeordnet. Die CLI baut und bündelt lokal; [Installation](https://widefleet.com/docs/getting-started/installation).
-2. Die CLI lädt Assets, Worker und Metadaten hoch. Die Control Plane speichert Artefakte im Object Storage und einen dauerhaften Fleet-Auftrag in PostgreSQL.
-3. Ein registrierter Ausführer holt den nächsten Auftrag. Leases, Heartbeats und Reihenfolge gelten für die ganze Fleet, damit gleichzeitige Veröffentlichungen deren gemeinsame Konfiguration nicht überschreiben.
-4. Der Agent prüft App- und Runtime-Artefakte und installiert den vorbereiteten Stand. Der Loader lädt jede App mit eigenen Bindings als Dynamic Worker. App-Code und Runtime sind unabhängig versioniert; die JavaScript-Runtime ist nicht ins Rust-Binary eingebettet.
-5. Bei neuen nativen Ressourcen oder Runtime-Änderungen wird celld neu geladen. Reine App-Codewechsel wählen einen neuen App-Snapshot. Bereits laufende Requests können ihren alten Stand zu Ende verwenden. Erst nach erfolgreicher Prüfung werden App-Zuordnung und Route aktiviert; ein persistentes Journal sichert Wiederherstellung nach Abbruch.
+Apps share celld configuration, so jobs are serialized per fleet, not per app or agent. Leases fence stale acknowledgments and retries retain their ordering. Changing [job scheduling](../apps/control-plane/src/lib/server/jobs.ts) requires preserving this constraint even when two jobs target different apps.
 
-[Runtime-Updates und Rollbacks](https://widefleet.com/docs/reference/runtime) benötigen innerhalb des unterstützten Paketformats keinen Agent-Release. Installierter Code, Routing und Daten sind lokal beziehungsweise im Fleet-Speicher verfügbar; App-Anfragen und Neustarts benötigen weder Control Plane noch Deployment-Agent.
+An accepted job records intent, not successful activation. The agent prepares and checks candidate snapshots before switching serving state. Runtime and connector changes can affect every published app, including one whose activation has not yet been acknowledged to management. Keep the previous usable state available until those checks pass.
 
-## Netzwerkkontrolle
+Activation spans object storage, the running node and routing files; it is not a database transaction. The [fleet activation journal](../crates/platform-agent/src/fleet.rs) must remain recoverable through agent or runtime interruption. [App access activation](../crates/platform-agent/src/access.rs) additionally probes the proxy before confirming that a rule revision is active. The [deployment suite](../apps/control-plane/tests/runtime/deployment.test.ts) exercises failure and restart recovery.
 
-Backend- und Browser-Freigaben bestehen aus getrennten Listen exakter HTTPS-Origins. Der vertrauenswürdige Loader prüft Backend-Aufrufe außerhalb des App-Codes und setzt CSP auf App-Antworten und Assets. Netzwerkänderungen erzeugen neue App-Snapshots; Code-Rollbacks behalten den aktuellen Regelstand. Die CLI verwendet Projektkontext oder App-Namen und einen normalen Login mit kombinierbaren Scopes. Bedienung und Grenzen beschreibt [Netzwerkkontrolle](https://widefleet.com/docs/guides/network).
+## Code versions do not own current policy or data
 
-IT-Projekte veröffentlichen eigene reguläre Worker mit `widefleet connector deploy`. Die CLI bündelt den Code, übergibt das Artefakt an die Verwaltung und wartet auf die Aktivierung in derselben Fleet. Freigegebene Apps rufen direkte RPC-Methoden auf; eigene DOs bleiben Teil des IT-Projekts. Connector-Updates benötigen weder einen neuen Runtime- noch Agent-Release. Details und aktuelle Grenzen beschreibt [IT connectors](https://widefleet.com/docs/guides/connectors).
+App snapshots are immutable so in-flight requests can finish against the version they started with. A code rollback does not restore database or file contents, or undo current network and connector permissions. Keep those policies separate from the uploaded code when changing deployment selection.
 
-## Authentifizierung
+Previews have independent app resources within the same fleet. Long-running Workflows can retain older code and its resource bindings after a newer app version is published; retaining those bindings must not revive old event subscriptions. See [snapshot preparation](../crates/platform-agent/src/fleet.rs) and the [Workflow adapter tests](../apps/control-plane/tests/runtime/workflow-adapter.test.ts).
 
-| Zugang                | Umsetzung                                                                              |
-| --------------------- | -------------------------------------------------------------------------------------- |
-| Verwaltungsoberfläche | Better Auth mit konfiguriertem OIDC-Anbieter                                           |
-| CLI                   | Better Auth OAuth Device Flow; kurzlebige Access-Tokens und erneuerbare Refresh-Tokens |
-| Ausgeführte Apps      | Traefik prüft über OAuth2 Proxy die konfigurierte Firmenanmeldung                      |
-| Deployment-Agent      | Eigenes, getrenntes Agent-Token                                                        |
+Backend network enforcement lives in the trusted loader outside app code, while browser restrictions depend on response CSP. Neither replaces the other. See [backend egress](../packages/app-runtime/src/egress.ts), [browser policy](../packages/app-runtime/src/csp.ts) and the public [network guide](https://widefleet.com/docs/guides/network).
 
-Beim App-Aufruf entfernt Traefik mitgeschickte Identitätsheader und setzt die geprüfte Identität. Der SvelteKit-Starter stellt sie als `locals.user` bereit. App-Code erhält keine Login-Tokens oder SSO-Cookies; eigene serverseitige App-Cookies sind im MVP ebenfalls deaktiviert.
-
-Die Control Plane verwaltet eine Zugriffsgruppenliste pro App. Alle Previews erben diese automatisch ohne eigene Konfiguration oder Overrides. UI, API und `widefleet access` verwalten dieselbe Regel. Der Agent installiert appbezogene OAuth2-Proxy-Prüfungen über persistente Traefik-Konfiguration und bestätigt neue Regeln erst nach einem Proxy-Probeaufruf. App-Aufrufe benötigen weiterhin weder Control Plane noch PostgreSQL. Verhalten bei Regeländerungen, Grenzen und Installation beschreibt [App access](https://widefleet.com/docs/reference/app-access).
-
-## Mitgliedschaften und App-Rechte
-
-Better Auth verwaltet eine feste Organisation pro Installation mit den Rollen **Owner**, **Admin** und **Member**. Jedes Mitglied darf Apps erstellen. Owner und Admins verwalten zusätzlich alle Apps, Mitglieder und Deployment-Agenten; nur Owner dürfen Owner ernennen oder ändern. Die Verwaltungsoberfläche bietet dafür eine Mitgliedersuche und Rollenwahl. Die API liest die aktuelle Mitgliedschaft bei jedem Browser- und CLI-Aufruf aus PostgreSQL.
-
-Neue Mitglieder entstehen bei der ersten geprüften Anmeldung an der Verwaltung. Wer nur eine veröffentlichte App über deren separates App-SSO benutzt, erhält dadurch keine Verwaltungsmitgliedschaft. Der Identitätsanbieter steuert die Zulassung zu diesen beiden Anmeldungen getrennt.
-
-App-Eigentümer und appbezogene Freigaben bleiben Widefleet-Daten und verweisen auf Better-Auth-Benutzer. Ein Member kann eigene und ausdrücklich freigegebene Apps verwalten. Die Freigaben lassen sich auf der App-Seite über Name oder E-Mail vergeben und entziehen. Details zu den Rollen und zur Rechteverwaltung stehen im [Operations Guide](https://widefleet.com/docs/self-hosting/installation#management-members-and-app-collaboration).
-
-## Daten und Laufzeit
-
-Die Referenzinstallation im Diagramm verwendet RustFS. Der Code unterstützt zusätzlich Azure Blob Storage und Google Cloud Storage für Artefakte und Fleets. Der Agent verwendet dafür cellds native `az://`- beziehungsweise `gs://`-Anbindung; Cloud-Infrastruktur und Datenmigrationen werden dabei nicht angelegt. Konfiguration und Testgrenzen beschreibt [Storage Backends](https://widefleet.com/docs/self-hosting/storage). Die gepflegten [Compose-Konfigurationen](https://widefleet.com/docs/self-hosting/external-services) verbinden dieselben Dienste mit externem PostgreSQL und dem gewählten Speicher. Traefik verwendet wahlweise bereitgestellte Zertifikate oder Let’s Encrypt mit Cloudflare-DNS-Prüfung und persistentem Zertifikatsspeicher.
-
-- PostgreSQL enthält die Verwaltungsdaten und Deployment-Jobs.
-- Der Artefakt-Bucket hält hochgeladene Versionen für Deployments und Rollbacks.
-- Der Loader vermittelt die deklarierten D1-, R2-, KV-, Queue- und Asset-Bindings. Cron- und Queue-Ereignisse werden an den veröffentlichten App-Stand zugestellt. Ressourcen werden nur bei entsprechender Deklaration eingerichtet.
-- Jede Preview bekommt einen eigenen Dynamic Worker und eigene Ressourcen innerhalb derselben Fleet. Ein Code-Rollback erhält die aktuellen Datenbank- und Dateiinhalte.
-
-Laufende Apps können auch bei ausgefallener Control Plane weiterlaufen; Proxy, App-SSO und Speicher bleiben dafür erforderlich. Die Referenzinstallation teilt sich einen Speicherprozess und verwendet installationsweite Speicherzugangsdaten für celld. Sie ist für vertrauenswürdige interne App-Ersteller ausgelegt.
-
-`nodejs_compat` erschließt cellds vorhandene Node-APIs; deren Unterstützung bleibt teilweise. Details stehen im [Starter-Vertrag](../starters/sveltekit/README.md#nodejs-compatibility). Aktivierung, Wiederherstellung und verbleibende Grenzen sind im [Runtime-Vertrag](https://widefleet.com/docs/reference/runtime) beschrieben.
+The JavaScript runtime is versioned separately from the agent, but its package protocol and celld version must match the agent's supported contract. Independent runtime publication is not permission to change that contract without an agent release. Before upgrading celld, review the [native runtime pitfalls](runtime-implementation.md).
