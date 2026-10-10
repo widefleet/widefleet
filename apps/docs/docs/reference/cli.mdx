@@ -26,22 +26,23 @@ permissions and renews saved sessions automatically. See [headless login](/getti
 `APP_UUID`, `DEPLOYMENT_UUID` and `ARTIFACT_UUID` below are placeholders. Find app
 IDs with `widefleet apps` and deployment IDs and artifact IDs with `widefleet history APP_UUID`.
 
-| Command                                     | Purpose                                                              |
-| ------------------------------------------- | -------------------------------------------------------------------- |
-| `widefleet init DIRECTORY`                  | Create an independent SvelteKit project; no login required.          |
-| `widefleet apps`                            | List apps you can manage.                                            |
-| `widefleet deploy [APP_UUID]`               | Build and deploy; normally selects the configured app name.          |
-| `widefleet preview --name review`           | Build and deploy an isolated preview of an existing app.             |
-| `widefleet history APP_UUID`                | Read deployment history as JSON.                                     |
-| `widefleet events APP_UUID DEPLOYMENT_UUID` | Read deployment events.                                              |
-| `widefleet rollback APP_UUID ARTIFACT_UUID` | Activate a retained code artifact.                                   |
-| `widefleet logs --level error --since 1h`   | Query app runtime errors; `--follow` keeps polling.                  |
-| `widefleet migrations list DB` / `apply DB` | Inspect or explicitly apply SQL migrations to a deployed D1 binding. |
-| `widefleet access`                          | Inspect app usage rules; `set` changes the group list.               |
-| `widefleet network`                         | Inspect external destinations; `allow` and `deny` change grants.     |
-| `widefleet connector bindings`              | Inspect IT-managed connector bindings.                               |
-| `widefleet catalog list`                    | List published app launch URLs.                                      |
-| `widefleet delete APP_UUID --yes`           | Request removal of an app and all its previews.                      |
+| Command                                     | Purpose                                                                  |
+| ------------------------------------------- | ------------------------------------------------------------------------ |
+| `widefleet init DIRECTORY`                  | Create an independent SvelteKit project; no login required.              |
+| `widefleet apps`                            | List apps you can manage.                                                |
+| `widefleet deploy [APP_UUID]`               | Build and deploy; normally selects the configured app name.              |
+| `widefleet preview --name review`           | Build and deploy an isolated preview of an existing app.                 |
+| `widefleet history APP_UUID`                | Read deployment history as JSON.                                         |
+| `widefleet events APP_UUID DEPLOYMENT_UUID` | Read deployment events.                                                  |
+| `widefleet rollback APP_UUID ARTIFACT_UUID` | Activate a retained code artifact.                                       |
+| `widefleet logs --level error --since 1h`   | Query app runtime errors; `--follow` keeps polling.                      |
+| `widefleet migrations list DB` / `apply DB` | Inspect or explicitly apply SQL migrations to a deployed D1 binding.     |
+| `widefleet access`                          | Inspect app usage rules; `set` changes all-authenticated access.         |
+| `widefleet roles`                           | Inspect and assign app roles, revoke assignments and transfer ownership. |
+| `widefleet network`                         | Inspect external destinations; `allow` and `deny` change grants.         |
+| `widefleet connector bindings`              | Inspect IT-managed connector bindings.                                   |
+| `widefleet catalog list`                    | List published app launch URLs.                                          |
+| `widefleet delete APP_UUID --yes`           | Request removal of an app and all its previews.                          |
 
 The target is `PLATFORM_URL` plus `name` in `wrangler.jsonc`. The first deploy creates that app; subsequent deploys update it after checking the user's app permissions. A changed name selects a different app. The server assigns the host, and existing apps keep their host and data. No app ID, host selection or local project-link file is needed for normal deployment.
 Logs, access, network and migrations also use project context; history, events and

@@ -1,126 +1,177 @@
 ---
-title: App access
-description: Group rules, permissions, activation and the app access API.
+title: App roles, ownership and access
+description: App roles, ownership transfer, access rules and gateway activation.
 ---
 
-Open an app in management and choose **Access → App access** to select which company
-groups may open it. App owners and organization administrators can change these
-rules. Management collaborators can inspect them but cannot change them.
-Management permissions do not bypass the running app's access rules.
+Widefleet assigns a role to a person or company SSO group for a specific app.
+Assignments are additive. Group membership comes from company sign-in; Widefleet
+does not maintain a separate team directory.
 
-Each original app has one group list shared automatically with all its previews.
-A user needs membership in **any one** listed group. An empty
-list allows every user admitted by the installation's company SSO; it never
-enables anonymous access. Use stable group IDs from the identity provider, one
-per line. The optional Entra directory connection enables searching by name.
-Generic OIDC installations can enter their configured group claim values directly.
-IDs containing commas or control characters are not supported.
+| Role      | Permissions                                                                                                        |
+| --------- | ------------------------------------------------------------------------------------------------------------------ |
+| User      | Use the published app                                                                                              |
+| Developer | User permissions, management details and logs, deployments, rollbacks, database migrations and Workflow management |
+| App admin | Developer permissions, role assignments, network grants, catalog listing and deletion                              |
+| Owner     | App admin permissions and ownership transfer                                                                       |
 
-Previews inherit the original app's group list and cannot override it, even
-when the preview has a different owner. Changes update existing previews as well
-as newly created ones. The lists start empty for existing apps during upgrade.
-Deleting an original app also requests deletion of all its previews. Their
-existing access rules remain in place until the deployment agent removes them.
+Every original app has exactly one owner, initially its creator. The owner can
+be a person or a group. The current owner or a platform administrator can
+transfer ownership directly, without recipient acceptance. The previous owner
+loses the owner role; other personal or group assignments remain. Ordinary role
+writes cannot create, duplicate or remove an owner. Concurrent writes use the
+same revision and return `409` when another change wins.
+
+Previews inherit roles, ownership and app access from the original app. They have
+no independent role assignments. Network and connector grants retain their own
+rules; those permissions are not copied from the parent. Platform administrators
+retain management and recovery access without automatically obtaining access to
+a running app. Connector deployment and enterprise connector grants remain
+platform administrator operations. Catalog visibility alone grants no access.
+
+## Identities and company sign-in
+
+People and groups use stable IDs scoped to their identity provider. Entra uses
+the tenant issuer and object IDs, so renaming a person or group does not change
+permissions. Recreating a deleted group does not recover its old permissions.
+Generic OIDC uses the configured `subjectClaim` (default `sub`). Configure a
+claim that identifies the same person in both management and app SSO clients;
+client-specific pairwise subjects need a shared immutable claim. Never use email
+addresses as a substitute for that identity mapping.
+
+The UI can search existing members and, with the optional directory connection,
+Entra groups. Stable provider IDs can also be entered directly. Installation
+members without a verified company account use the `widefleet` namespace for
+management permissions; those local identities cannot authenticate at app SSO.
+
+Management reads group claims from the provider ID token stored by Better Auth
+after verified sign-in. The issuer's token expiry bounds those group permissions.
+A Widefleet session or CLI token refresh does not extend that deadline. Company
+sign-in renews the claims, and the identity provider decides whether this requires
+user interaction. Personal assignments and platform recovery do not depend on a
+group snapshot. Entra group overage is resolved using delegated `User.Read` and
+Microsoft Graph's `/me/transitiveMemberOf`, including transitive group IDs.
+In-flight requests and results are shared for the same verified token; app role
+changes do not repeat the lookup. Results cannot outlive that ID token. A complete
+lookup is bounded to 20 pages and ten seconds; failed or incomplete lookups deny
+the request rather than return partial permissions. Both Entra registrations need
+their group claims configured; the management registration also requests `User.Read`.
+
+App SSO retains its configured session lifetime (currently a one-hour cookie
+without refresh). Directory membership changes are visible when that session is
+renewed. No additional fixed hourly management reauthentication policy is imposed.
+
+After a replacement company issuer starts successfully, the control plane creates
+new access revisions for apps and previews. Failed SSO activation retains the
+previous running configuration and app policies. App permission writes and app
+creation wait for the replacement issuer to activate.
+Assignments keep their original issuer and do not grant rights in the replacement
+directory. A platform administrator can reassign ownership and roles there. The
+explicit all-authenticated switch remains enabled where selected. Once projected,
+gateway status stays pending until the agent confirms the replacement rules.
 
 ## CLI
 
-Use the ordinary platform login to manage access from an app project:
-
 ```sh
-widefleet access
-widefleet groups search "Finance"
-widefleet access set --group GROUP_ID --group OTHER_GROUP_ID
-widefleet access show --app inventory
-widefleet access set --all-authenticated
+widefleet roles show
+widefleet roles search 'Engineering'
+widefleet groups search 'Engineering'
+widefleet roles grant --group GROUP_ID --role developer
+widefleet roles grant --person PERSON_ID --role user
+widefleet roles revoke ASSIGNMENT_ID
+widefleet roles transfer --group NEW_OWNER_GROUP_ID
+widefleet roles transfer --person NEW_OWNER_PERSON_ID
+widefleet access show
+widefleet access set --all-authenticated true
+widefleet access set --all-authenticated false
 ```
 
-`set` replaces the complete list. Every existing and future preview inherits the
-same rule automatically; there is no separate preview setting. An empty command
-is rejected: use `--all-authenticated` to explicitly remove the group restriction
-while retaining company SSO. Group IDs and `--all-authenticated` are mutually exclusive.
+Commands resolve the app from the project's `wrangler.jsonc`, or accept
+`--app NAME_OR_UUID` and `--config PATH`. `roles search` returns the precise
+principal reference: use `--person` for a company subject or `--member` for an
+internal `widefleet` member ID. Redirected output is JSON; `--json` also selects
+JSON explicitly. Role changes save management permissions immediately. Use
+`widefleet access` to inspect gateway activation after a role change.
 
-The app is resolved from `name` in `wrangler.jsonc`, or from `--app NAME_OR_UUID`.
-`--config PATH` selects another project file. The CLI reads the current revision
-before writing and reports a concurrent edit instead of retrying an overwrite.
-Writing on a preview is rejected with a reference to its original app.
+`access set` waits for the app and published previews to activate unless
+`--no-wait` is supplied. Failed activation or a superseding revision exits
+nonzero. Unpublished apps report `saved` without waiting for a first deployment.
+The normal management token scopes remain a ceiling over app permissions;
+network changes additionally require `network:manage`.
 
-Changes wait for the app and its published previews to activate. Apps without a
-deployment report `saved` without waiting for publication. `--no-wait` returns
-after saving; it does not confirm activation. Failed activation on the app or a
-preview exits nonzero, as does a newer policy superseding the waiting command.
-`show` displays the app's groups, inheritance and each preview's activation status.
-`--json` returns the complete API state; redirected output is JSON by default.
-The default login scopes `platform:read platform:write` are sufficient, subject
-to the same owner or administrator permissions as the management UI.
+## Independent gateway and activation
 
-## Activation and failures
+New apps have a closed audience. All app roles include `app:use`. Access for
+every authenticated company user is a separate explicit switch; empty person
+and group lists never open access. Anonymous access is never enabled.
 
-Saving changes stores the desired rules and queues agent work. **Saved · applies from the first deployment**
-means that the rules will be used on the first deployment. **Activation pending**
-means that a published app is waiting for its new rules. **Active** means that the
-agent has confirmed the revision at Traefik. The parent page also displays each
-preview's activation status. Use **Refresh status** to refresh it.
+The control plane derives a revisioned access snapshot from app roles and the
+explicit audience switch. The agent persists it in each app's Traefik route.
+The local authorizer runs in the existing SSO container and compares verified
+OAuth2 Proxy identities against that snapshot. It has no control-plane or
+database connection. The agent can stop, or management and PostgreSQL can be
+unreachable, while the last installed rules continue protecting running apps.
+The SSO container and its persisted configuration must remain available.
 
-Rules are applied independently to each hostname, not atomically across all
-previews. If a job fails or management is unreachable, the last installed rules
-remain in effect. An unconfirmed change may already have reached the proxy;
-check the reported error and save the same rules again to reconcile it. Code
-deployments and rollbacks always use the current access rules rather than rules
-from the old code artifact. Removing all groups is also an explicit, revisioned
-change.
+Saving permissions and activating them are separate outcomes. `saved` means
+first-deployment rules; `pending` means an update awaits confirmation; `active`
+means the agent has observed the revision at Traefik. `failed` includes the
+activation error. Updates reach app and preview hostnames independently.
+A failed or unconfirmed update can already be installed, so its state does not
+prove that the preceding revision is still serving.
 
-Traefik checks the groups through OAuth2 Proxy before forwarding requests to app
-code or static assets. User-supplied identity headers are removed, and SSO cookies
-and tokens do not reach the app. Internal Cron, Queue and connector invocations
-continue to use their existing capability boundaries; they are not browser SSO
-requests. Resource-level permissions inside an app remain the app's responsibility.
+Revocations take effect at the gateway only when the new rule reaches it. An
+isolated gateway retains the previous policy, including its previous grants.
+Established connections and already delivered data cannot be recalled. Queued
+operations authorized before a role change may finish. Deployments and rollbacks
+always use the current access snapshot, independently of the code version.
 
-Group memberships come from the existing SSO session. The current installation
-uses a one-hour cookie without refresh, so directory changes do not immediately
-revoke an existing session. This feature does not add live directory checks or
-session revocation. A policy change does apply to subsequent requests in an
-existing session after activation. Already delivered data and established
-connections cannot be recalled by changing a rule.
+Incoming identity headers are stripped. Only the verified SSO service supplies
+identity; SSO cookies and OAuth tokens do not reach app code. Internal cron,
+queue and connector calls retain their existing capability boundaries. Business
+permissions inside an app remain the app's responsibility. Deployment approvals
+belong in the company's Git/CI workflow.
 
 ## API
 
-`GET /api/v1/apps/{appId}/access` returns desired groups, revision,
-applied revision, activation state, inheritance and preview status. Management
-read authorization is required.
+| Endpoint                                                | Operation                                                |
+| ------------------------------------------------------- | -------------------------------------------------------- |
+| `GET /api/v1/apps/{appId}/roles`                        | Assignments, effective actions, revision and inheritance |
+| `GET /api/v1/apps/{appId}/roles/candidates?search=NAME` | Existing member search                                   |
+| `POST /api/v1/apps/{appId}/roles`                       | Add a non-owner role                                     |
+| `DELETE /api/v1/apps/{appId}/roles/{assignmentId}`      | Revoke a non-owner assignment                            |
+| `PUT /api/v1/apps/{appId}/owner`                        | Transfer ownership                                       |
+| `GET /api/v1/apps/{appId}/access`                       | Desired rules and activation for app and previews        |
+| `PATCH /api/v1/apps/{appId}/access`                     | Set explicit all-authenticated access                    |
 
-`PATCH /api/v1/apps/{appId}/access` accepts:
+A role grant body contains `principal`, `role` and `revision`:
 
 ```json
-{ "groups": ["company-group-id"], "revision": 0 }
+{
+  "principal": {
+    "type": "group",
+    "provider": "https://login.microsoftonline.com/TENANT_ID/v2.0",
+    "subject": "GROUP_ID"
+  },
+  "role": "developer",
+  "revision": 1
+}
 ```
 
-Change rules on the original app. Supply the revision returned by GET;
-concurrent edits return `409` rather than overwriting newer rules. An empty
-`groups` array removes the group restriction. Writes require management write
-authorization and the original app's owner or an administrator. Preview writes
-return `403`.
+Transfer uses the same body without `role`. Revocation carries `revision`.
+An access change contains only `revision` and `allAuthenticated`. Read the
+current revision before writing; conflicts are never retried as overwrites.
+UI remote functions and HTTP handlers call the same authorization services.
 
-## Installation and verification
+## Installation
 
-Upgrade the control plane and agent together before configuring these rules.
-Agents advertise support when claiming jobs. Older agents cannot claim app jobs
-after access rules have been changed, preventing them from replacing a protected
-route with the legacy SSO-only route.
+The unreleased role model replaces personal ownership and the old creator grants.
+It requires an installation without existing apps; the schema update refuses to
+silently discard existing permissions. Upgrade the control plane, SSO container,
+agent and CLI together. Agents advertise access-rule protocol version 2;
+older agents cannot process protected app jobs.
 
-The standard Compose topology needs no additional service. For a custom topology,
-configure these agent environment variables in its versioned deployment:
-
-| Variable                | Default                           | Purpose                                                |
-| ----------------------- | --------------------------------- | ------------------------------------------------------ |
-| `PLATFORM_APP_AUTH_URL` | `http://oauth2-proxy:4180/`       | OAuth2 Proxy origin reachable from Traefik             |
-| `PLATFORM_PROXY_URL`    | `https://app-platform-proxy:8443` | Private Traefik origin reachable from fleet containers |
-
-The agent writes an app-specific auth middleware and revision marker in the same
-atomic route file update. For changed rules it sends a credential-free request
-through the private proxy and waits for an SSO rejection or redirect carrying
-that revision. This confirms that Traefik loaded the route before acknowledging
-activation. The probe does not follow redirects. Certificate verification is
-disabled only for this private probe because the public certificate does not
-cover Docker hostnames; restrict the fleet network to the trusted proxy as in
-the maintained Compose installation. Unchanged revision-zero routes retain the
-existing installation-wide SSO chain.
+The standard SSO image now exposes its private authorizer on port 4181 alongside
+OAuth2 Proxy on 4180. `PLATFORM_APP_AUTH_URL` defaults to
+`http://oauth2-proxy:4181/`; custom topologies must route it to the local
+authorizer. `PLATFORM_PROXY_URL` remains the agent's private HTTPS verification
+origin. No public authorizer port or additional production service is needed.
