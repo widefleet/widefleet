@@ -1,6 +1,6 @@
 import { NonRetryableError } from "cloudflare:workflows";
 import { z } from "zod";
-import { workflowInstanceId } from "@platform/contracts";
+import { workflowInstanceId, workflowRestartFrom } from "@platform/contracts";
 import type {
   WorkflowEvent,
   WorkflowStepConfig,
@@ -34,6 +34,16 @@ export type StepConfig = Omit<WorkflowStepConfig, "retries"> & {
 };
 
 export type StepContext = WorkflowStepContext;
+
+export const stepId = ({ name, type, count }: z.infer<typeof workflowRestartFrom>) =>
+  JSON.stringify([name, type, count]);
+
+export const nativeStepName = async (id: string) => {
+  // Bounded names avoid truncation and collisions with the bridge's checkpoints.
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(id));
+
+  return `app/${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+};
 
 export type Command =
   | { kind: "do"; id: string; name: string; count: number; config: StepConfig }

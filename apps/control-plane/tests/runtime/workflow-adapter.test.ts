@@ -120,7 +120,17 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
         const url = new URL(request.url ?? "/", "http://observer.fixture");
 
         if (url.pathname === "/record") {
-          records.push(observation.parse(Object.fromEntries(url.searchParams)));
+          const entry = observation.parse(Object.fromEntries(url.searchParams));
+          records.push(entry);
+          response.setHeader("content-type", "application/json");
+          response.end(
+            JSON.stringify({
+              ok: true,
+              count: labels(entry.id).filter((label) => label === entry.label).length,
+            }),
+          );
+
+          return;
         } else if (url.pathname === "/reorder") {
           const key = `${url.searchParams.get("id")}/${url.searchParams.get("branch")}`;
           const count = (fetchCounts.get(key) ?? 0) + 1;
@@ -470,6 +480,168 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
       await status(id, "terminated");
       expect(labels(id)).toEqual(["first", "finish", "first"]);
     });
+
+    it("restarts a completed step while retaining earlier results and consumed events", async () => {
+      const id = await create("sequential");
+      await status(id, "waiting");
+      await call("continue", id);
+      await status(id, "complete");
+      await call("restart", id, { options: JSON.stringify({ from: { name: "finish" } }) });
+      expect(await status(id, "complete")).toMatchObject({ output: 42 });
+      expect(labels(id)).toEqual(["first", "finish", "finish"]);
+    });
+
+    it("selects a repeated step occurrence after an abrupt runtime restart", async () => {
+      const id = await create("loop");
+      await status(id, "complete");
+      await stop(true);
+      await start();
+      await call("restart", id, {
+        options: JSON.stringify({ from: { name: "same-name", count: 2 } }),
+      });
+      expect(await status(id, "complete")).toMatchObject({ output: 3 });
+      expect(labels(id)).toEqual(["loop-0", "loop-1", "loop-2", "loop-1", "loop-2"]);
+    }, 30000);
+
+    it("recovers an errored step without repeating earlier callbacks", async () => {
+      const id = await create("restart-error");
+      await status(id, "errored");
+      await call("restart", id, { options: JSON.stringify({ from: { name: "recover" } }) });
+      expect(await status(id, "complete")).toMatchObject({ output: 2 });
+      expect(labels(id)).toEqual(["first", "recover", "recover"]);
+    });
+
+    it("recomputes branches and checkpoints after a selective restart with active asynchronous work", async () => {
+      const id = await create("restart-branch");
+      expect(await status(id, "complete")).toMatchObject({ output: [1, 99] });
+      await call("restart", id, { options: JSON.stringify({ from: { name: "choose" } }) });
+      expect(await status(id, "complete")).toMatchObject({ output: [2, 99] });
+      expect(labels(id)).toEqual(["first", "choose", "old", "other", "choose", "new", "other"]);
+    });
+
+    it("retains only earlier parallel steps when restarting a repeated name", async () => {
+      const id = await create("parallel");
+      await status(id, "complete");
+      await call("restart", id, {
+        options: JSON.stringify({ from: { name: "same-name", count: 2 } }),
+      });
+      expect(await status(id, "complete")).toMatchObject({ output: 6 });
+      expect(labels(id).sort()).toEqual(["value-1", "value-2", "value-2", "value-3", "value-3"]);
+    });
+
+    it.each(["do", "sleep", "waitForEvent"])(
+      "disambiguates %s steps sharing a name and waits for fresh events",
+      async (type) => {
+        const id = await create("restart-types");
+        await status(id, "waiting");
+        await call("continue", id);
+        expect(await status(id, "complete")).toMatchObject({
+          output: { name: "shared", count: 3 },
+        });
+        await call("restart", id, {
+          options: JSON.stringify({ from: { name: "shared", type, count: type === "do" ? 2 : 1 } }),
+        });
+        await status(id, "waiting");
+        await vi.waitFor(() =>
+          expect(labels(id)).toEqual(
+            type === "waitForEvent" ? ["do-1", "do-2", "do-3"] : ["do-1", "do-2", "do-3", "do-2"],
+          ),
+        );
+        await call("continue", id);
+        expect(await status(id, "complete")).toMatchObject({
+          output: { name: "shared", count: 3 },
+        });
+      },
+    );
+
+    it("selects sleepUntil as a sleep occurrence while the instance is paused", async () => {
+      const id = await create("restart-until");
+      await vi.waitFor(() => expect(labels(id)).toEqual(["before-until"]));
+      await status(id, "waiting");
+      await call("pause", id);
+      await status(id, "paused");
+      await call("restart", id, {
+        options: JSON.stringify({ from: { name: "nap", count: 2, type: "sleep" } }),
+      });
+      await status(id, "waiting");
+      expect(labels(id)).toEqual(["before-until"]);
+      await call("terminate", id);
+      await status(id, "terminated");
+    });
+
+    it("restarts a pending event wait without retaining buffered events", async () => {
+      const id = await create("sequential");
+      await status(id, "waiting");
+      await call("pause", id);
+      await status(id, "paused");
+      await call("continue", id);
+      await call("restart", id, {
+        options: JSON.stringify({ from: { name: "continue", type: "waitForEvent" } }),
+      });
+      await status(id, "waiting");
+      expect(labels(id)).toEqual(["first"]);
+      await call("continue", id);
+      expect(await status(id, "complete")).toMatchObject({ output: 42 });
+      expect(labels(id)).toEqual(["first", "finish"]);
+    });
+
+    it.each(["", "bridge/0", "é/".repeat(128)])(
+      "keeps logical step names distinct from internal checkpoints: %s",
+      async (name) => {
+        const id = await create("restart-name", { name });
+        await status(id, "complete");
+        await call("restart", id, { options: JSON.stringify({ from: { name } }) });
+        expect(await status(id, "complete")).toMatchObject({ output: { count: 2 } });
+        expect(labels(id)).toEqual(["first", "named", "named"]);
+      },
+    );
+
+    it("rejects invalid and absent targets without changing the instance", async () => {
+      const id = await create("loop");
+      await status(id, "complete");
+
+      for (const from of [
+        { name: "missing" },
+        { name: "bridge/0" },
+        { name: "same-name", count: 4 },
+        { name: "same-name", type: "sleep" },
+        { name: "same-name", count: 0 },
+        { name: "same-name", type: "unknown" },
+        { name: "same-name", extra: true },
+      ]) {
+        await expect(call("restart", id, { options: JSON.stringify({ from }) })).rejects.toThrow();
+        expect(await call("status", id)).toMatchObject({ status: "complete", output: 3 });
+        expect(labels(id)).toEqual(["loop-0", "loop-1", "loop-2"]);
+      }
+
+      await expect(
+        call("restart", id, { options: JSON.stringify({ from: { name: "same-name", count: 4 } }) }),
+      ).rejects.toThrow('Workflow history has no do step "same-name" occurrence 4');
+      await expect(call("restart", id, { options: "null" })).rejects.toThrow();
+    });
+
+    it("deduplicates selective management restarts and includes the target in request identity", async () => {
+      const id = await create("loop");
+      await status(id, "complete");
+      const requestId = crypto.randomUUID();
+
+      const request = {
+        action: "restart",
+        workflow: "fixture",
+        id,
+        from: { name: "same-name", count: 3 },
+      };
+
+      expect(await manage(request, requestId)).toEqual({ result: null });
+      await status(id, "complete");
+      await stop(true);
+      await start();
+      expect(await manage(request, requestId)).toEqual({ result: null });
+      expect(labels(id)).toEqual(["loop-0", "loop-1", "loop-2", "loop-2"]);
+      await expect(
+        manage({ ...request, from: { name: "same-name", count: 2 } }, requestId),
+      ).rejects.toThrow("already used");
+    }, 30000);
 
     it("keeps ungranted networking and parent secrets inaccessible to app steps", async () => {
       const id = await create("denied", { url: `${observeOrigin}/denied` });

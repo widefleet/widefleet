@@ -4,12 +4,15 @@ import {
   workflowInstanceId,
   workflowName,
   workflowRequest,
+  workflowRestartOptions,
 } from "@platform/contracts";
 import { z } from "zod";
 import { readApp } from "./catalog.ts";
 import type { ParentEnvironment } from "./types.ts";
 import {
   workflowOptions,
+  nativeStepName,
+  stepId,
   type CreateOptions,
   type WorkflowValue,
   type Start,
@@ -25,7 +28,8 @@ export type WorkflowScope = z.infer<typeof scopeSchema>;
 
 export type InstanceInput =
   | { type: string; payload: WorkflowValue }
-  | { from?: { step: string }; rollback?: boolean };
+  | z.input<typeof workflowRestartOptions>
+  | { rollback?: boolean };
 
 type RecordEntry = {
   creation: Omit<CreateOptions, "id" | "params">;
@@ -235,10 +239,25 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
       case "resume":
         await instance.resume();
         break;
-      case "restart":
-        if (input !== undefined) z.strictObject({ from: z.never().optional() }).parse(input);
-        await instance.restart();
+      case "restart": {
+        const { from } = workflowRestartOptions.parse(input === undefined ? {} : input);
+
+        if (from) {
+          try {
+            await instance.restart({
+              from: { name: await nativeStepName(stepId(from)), type: from.type },
+            });
+          } catch (cause) {
+            if (cause instanceof Error && cause.message.includes("restart() could not find"))
+              throw new Error(
+                `Workflow history has no ${from.type} step ${JSON.stringify(from.name)} occurrence ${from.count}`,
+              );
+            throw cause;
+          }
+        } else await instance.restart();
         break;
+      }
+
       case "terminate":
         if (input !== undefined)
           z.strictObject({ rollback: z.literal(false).optional() }).parse(input);
@@ -339,7 +358,11 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
               scope,
               request.id,
               request.action,
-              request.action === "sendEvent" ? request.event : undefined,
+              request.action === "sendEvent"
+                ? request.event
+                : request.action === "restart"
+                  ? { from: request.from }
+                  : undefined,
             );
 
       await this.ctx.storage.put(operationKey, { request: fingerprint, complete: true, result });

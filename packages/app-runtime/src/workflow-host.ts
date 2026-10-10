@@ -12,6 +12,7 @@ import type { WorkflowRunner } from "./workflow-runner.ts";
 import {
   fault,
   restore,
+  nativeStepName,
   type Start,
   type AppEvent,
   type Reply,
@@ -112,7 +113,6 @@ export class AppWorkflow extends WorkflowEntrypoint<ParentEnvironment, Start> {
 
     let notification: Promise<null> | undefined;
     let ordinal = 0;
-    let commandOrdinal = 0;
     const pending = new Map<string, Promise<Reply>>();
 
     const advance = async (reply: Reply | null, listen = false) => {
@@ -140,7 +140,13 @@ export class AppWorkflow extends WorkflowEntrypoint<ParentEnvironment, Start> {
 
           return {
             replyId: selected?.id ?? null,
-            commands: [...turn.commands],
+            commands: await Promise.all(
+              turn.commands.map(async (command) =>
+                "id" in command
+                  ? { ...command, nativeName: await nativeStepName(command.id) }
+                  : command,
+              ),
+            ),
             active: turn.active,
           };
         },
@@ -174,9 +180,7 @@ export class AppWorkflow extends WorkflowEntrypoint<ParentEnvironment, Start> {
           if (command.kind === "complete") return command.value;
 
           if (command.kind === "error") throw restore(command.error);
-          // The checkpoint fixes this order. Keep native names short regardless
-          // of the length or encoding of the app's logical step names.
-          const name = `app/${++commandOrdinal}`;
+          const name = command.nativeName;
 
           const execute = async () => {
             switch (command.kind) {
@@ -210,12 +214,13 @@ export class AppWorkflow extends WorkflowEntrypoint<ParentEnvironment, Start> {
 
           pending.set(
             command.id,
-            Promise.resolve()
-              .then(execute)
-              .then(
-                (value) => ({ id: command.id, value }),
-                (cause: unknown) => ({ id: command.id, error: fault(cause) }),
-              ),
+            // Register every native step before the next bridge checkpoint.
+            // A selective restart must invalidate checkpoints that consumed
+            // the target's result, including while another branch is active.
+            execute().then(
+              (value) => ({ id: command.id, value }),
+              (cause: unknown) => ({ id: command.id, error: fault(cause) }),
+            ),
           );
         }
 
