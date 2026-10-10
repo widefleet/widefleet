@@ -43,6 +43,10 @@ employee's file. On Linux, an unset or empty `XDG_CONFIG_HOME` falls back to `HO
 These directory values must be absolute. Run `widefleet config show` inside the
 agent's environment to inspect the actual paths.
 
+If no default configuration directory is available, login with an explicit
+`--url` or `PLATFORM_URL` still works. The CLI explains that the URL cannot be
+saved; keep supplying the URL or select a writable `--config-file` to remember it.
+
 The JSON format is:
 
 ```json
