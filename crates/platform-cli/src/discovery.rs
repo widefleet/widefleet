@@ -176,11 +176,11 @@ async fn resolve_with(domain: &Domain, dns: DnsLookup, client: &Client) -> Resul
         DnsLookup::Unavailable(reason) => format!("System DNS unavailable: {reason}"),
     };
     eprintln!("{dns_reason}. Checking {}", domain.endpoint());
-    from_https(client, &domain.endpoint()).await.map_err(|error| {
-        Error::invalid(format!(
-            "Could not discover Widefleet for {}. {dns_reason}. {error}. Ask IT to publish a discovery record or configure the CLI in this environment",
+    from_https(client, &domain.endpoint()).await.inspect_err(|_| {
+        eprintln!(
+            "Could not discover Widefleet for {}. Ask IT to publish a discovery record or configure the CLI in this environment",
             domain.0,
-        ))
+        );
     })
 }
 

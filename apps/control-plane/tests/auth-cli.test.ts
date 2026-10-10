@@ -170,7 +170,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1" && process.platform !== "win
       await rm(directory, { recursive: true, force: true });
     });
 
-    const cli = (...args: string[]) =>
+    const cli = (args: string[], overrides: NodeJS.ProcessEnv = {}) =>
       execute(
         process.env["CLI_BINARY"] ??
           fileURLToPath(new URL("../../../target/debug/widefleet", import.meta.url)),
@@ -187,17 +187,20 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1" && process.platform !== "win
             WIDEFLEET_TELEMETRY_DISABLED: "1",
             NO_PROXY: "127.0.0.1",
             no_proxy: "127.0.0.1",
+            ...overrides,
           },
         },
       );
 
     it("remembers a successful login and uses the URL for API calls and logout", async () => {
-      const login = await cli("--url", origin, "login");
+      const login = await cli(["--url", origin, "login"]);
       expect(JSON.parse(await readFile(configFile, "utf8"))).toEqual({ platform_url: origin });
       expect(login.stdout + login.stderr).not.toContain("synthetic-access-token-never-log");
       expect(login.stdout + login.stderr).not.toContain("synthetic-refresh-token-never-log");
-      expect(JSON.parse((await cli("whoami")).stdout)).toEqual({ email: "employee@example.test" });
-      await cli("logout");
+      expect(JSON.parse((await cli(["whoami"])).stdout)).toEqual({
+        email: "employee@example.test",
+      });
+      await cli(["logout"]);
       expect(requests).toEqual([
         "/api/auth/device/code",
         "/api/auth/oauth2/token",
@@ -207,36 +210,58 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1" && process.platform !== "win
       expect(JSON.parse(await readFile(configFile, "utf8"))).toEqual({ platform_url: origin });
     });
 
+    it.each(["flag", "environment"])(
+      "keeps explicit %s login usable without a home or default configuration directory",
+      async (selection) => {
+        const environment = {
+          HOME: undefined,
+          XDG_CONFIG_HOME: undefined,
+          PLATFORM_CONFIG_FILE: undefined,
+          PLATFORM_URL: selection === "environment" ? origin : undefined,
+        };
+
+        const flags = selection === "flag" ? ["--url", origin] : [];
+        const login = await cli([...flags, "login"], environment);
+        expect(login.stderr).toContain("Platform URL will not be saved");
+        expect(login.stderr).toContain("Continue supplying --url or PLATFORM_URL");
+        expect(JSON.parse((await cli([...flags, "whoami"], environment)).stdout)).toEqual({
+          email: "employee@example.test",
+        });
+        await cli([...flags, "logout"], environment);
+        await expect(readFile(configFile)).rejects.toMatchObject({ code: "ENOENT" });
+      },
+    );
+
     it("keeps the previous URL when a new login is denied", async () => {
-      await cli("config", "set-url", "https://previous.example.test");
+      await cli(["config", "set-url", "https://previous.example.test"]);
       denyLogin = true;
-      await expect(cli("--url", origin, "login")).rejects.toThrow("Device login was denied");
+      await expect(cli(["--url", origin, "login"])).rejects.toThrow("Device login was denied");
       expect(JSON.parse(await readFile(configFile, "utf8"))).toEqual({
         platform_url: "https://previous.example.test",
       });
     });
 
     it("inspects, replaces and clears configuration without contacting an API", async () => {
-      expect(JSON.parse((await cli("config")).stdout)).toMatchObject({ platform_url: null });
-      await cli("config", "set-url", "https://platform.example.test:443/");
-      expect(JSON.parse((await cli("config", "show")).stdout)).toMatchObject({
+      expect(JSON.parse((await cli(["config"])).stdout)).toMatchObject({ platform_url: null });
+      await cli(["config", "set-url", "https://platform.example.test:443/"]);
+      expect(JSON.parse((await cli(["config", "show"])).stdout)).toMatchObject({
         platform_url: "https://platform.example.test",
         source: "user",
         config_file: configFile,
       });
-      expect(JSON.parse((await cli("--url", origin, "config", "show")).stdout)).toMatchObject({
+      expect(JSON.parse((await cli(["--url", origin, "config", "show"])).stdout)).toMatchObject({
         platform_url: origin,
         source: "override",
       });
-      await cli("config", "unset-url");
-      expect(JSON.parse((await cli("config")).stdout)).toMatchObject({ platform_url: null });
+      await cli(["config", "unset-url"]);
+      expect(JSON.parse((await cli(["config"])).stdout)).toMatchObject({ platform_url: null });
       expect(requests).toEqual([]);
     });
 
     it("reports a broken configuration and allows an explicit override to bypass it", async () => {
       await writeFile(configFile, "{");
-      await expect(cli("whoami")).rejects.toThrow("Invalid CLI configuration");
-      expect(JSON.parse((await cli("--url", origin, "config")).stdout)).toMatchObject({
+      await expect(cli(["whoami"])).rejects.toThrow("Invalid CLI configuration");
+      expect(JSON.parse((await cli(["--url", origin, "config"])).stdout)).toMatchObject({
         platform_url: origin,
         source: "override",
       });
@@ -244,8 +269,8 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1" && process.platform !== "win
     });
 
     it("does not change the selected URL when an update is invalid", async () => {
-      await cli("config", "set-url", origin);
-      await expect(cli("config", "set-url", "http://insecure.example.test")).rejects.toThrow(
+      await cli(["config", "set-url", origin]);
+      await expect(cli(["config", "set-url", "http://insecure.example.test"])).rejects.toThrow(
         "Use an HTTPS platform origin",
       );
       expect(JSON.parse(await readFile(configFile, "utf8"))).toEqual({ platform_url: origin });

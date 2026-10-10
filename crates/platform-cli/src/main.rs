@@ -179,14 +179,25 @@ async fn run(args: Arguments) -> Result<()> {
     let credentials = auth::Credentials::new(args.session_file);
     match args.command {
         Command::Login(options) => {
-            let files = configuration::Files::locate(args.config_file.as_deref())?;
+            let files = match configuration::Files::locate(args.config_file.as_deref()) {
+                Ok(files) => Some(files),
+                Err(error) if args.url.is_some() && args.config_file.is_none() => {
+                    eprintln!(
+                        "Platform URL will not be saved: {error}. Continue supplying --url or PLATFORM_URL"
+                    );
+                    None
+                }
+                Err(error) => return Err(error),
+            };
             auth::login(&api, &credentials, options).await?;
-            files.save(Some(&api.origin_text()))
+            if let Some(files) = files {
+                files.save(Some(&api.origin_text()))
                 .map_err(|error| {
                     platform_core::Error::invalid(format!(
                         "Login succeeded, but the platform URL could not be saved: {error}. Use --url for subsequent commands or fix the configuration file permissions"
                     ))
                 })?;
+            }
             return Ok(());
         }
         Command::Logout => return auth::logout(&api, &credentials).await,
