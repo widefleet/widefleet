@@ -99,8 +99,8 @@ impl Files {
             ));
         }
         Ok(Self {
-            user: user.join("widefleet/config.json"),
-            managed: managed.map(|path| path.join("widefleet/config.json")),
+            user: user.join("widefleet").join("config.json"),
+            managed: managed.map(|path| path.join("widefleet").join("config.json")),
         })
     }
 
