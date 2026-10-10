@@ -25,7 +25,7 @@ const config = defineConfig({
     href: websiteUrl,
   },
   theme: {
-    mode: "light",
+    mode: "system",
     accent: { light: "#22221f", dark: "#deded8" },
     background: { light: "#fafaf7", dark: "#1d1d1b" },
     radius: "sm",
