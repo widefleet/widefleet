@@ -47,15 +47,11 @@ export const trustNativeCertificate = async (certificate: string) => {
   );
 
   return async () => {
-    try {
-      await execute("sudo", ["-n", "security", "remove-trusted-cert", "-d", certificate], {
-        timeout: 10_000,
-      });
-    } finally {
-      await execute("sudo", ["-n", "security", "delete-certificate", "-Z", fingerprint, keychain], {
-        timeout: 10_000,
-      });
-    }
+    // remove-trusted-cert hangs on hosted macOS images (runner-images#12116).
+    // Delete our CA; residual trust metadata is discarded with the runner.
+    await execute("sudo", ["-n", "security", "delete-certificate", "-Z", fingerprint, keychain], {
+      timeout: 10_000,
+    });
   };
 };
 
