@@ -3,9 +3,7 @@ title: Runtime compatibility
 description: Verified native runtime differences and Widefleet implementation limits.
 ---
 
-Widefleet currently uses celld **0.6.2**. The individual observations below were
-recorded against **0.6.1 on October 8, 2026**; upgrading does not establish that all
-these limits have changed. Dynamic Worker and deployment tests exercise the new
+Widefleet currently uses celld **0.6.2**. Dynamic Worker and deployment tests exercise the new
 version, including outbound requests, resources, activation and restarts. Additional
 regressions cover `self` in loaded Workers and incoming request cancellation.
 See the [native release notes](https://github.com/denoland/celld/releases/tag/v0.6.2)

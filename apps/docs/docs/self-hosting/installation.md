@@ -29,7 +29,7 @@ All users admitted to the management client become Members and can create apps. 
 
 Management uses Better Auth's verified Generic OAuth integration. Entra accounts use the verified `oid`; generic OIDC accounts use `sub` within an issuer-specific namespace. Linking requires the logged-in administrator's explicit action; matching email addresses do not silently link accounts.
 
-Known runtime limitation: celld `0.6.1` drops incoming header values containing non-ASCII bytes. Display names can therefore be empty in Workers; the stable user identifier remains available for authorization.
+Known runtime limitation: celld `0.6.2` drops incoming header values containing non-ASCII bytes. Display names can therefore be empty in Workers; the stable user identifier remains available for authorization.
 
 ### Automated first setup
 

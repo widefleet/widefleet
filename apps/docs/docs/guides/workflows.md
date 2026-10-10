@@ -3,8 +3,6 @@ title: Workflows
 description: Declare durable background work and manage Workflow instances.
 ---
 
-App runtime 0.2.0 supports Cloudflare-style Workflows in Dynamic Workers on the unchanged celld 0.6.2 release. CLI configuration and management commands for Workflows require CLI and platform 0.3.0 or newer; use matching CLI, control-plane and agent versions. Update the deployment agent and select a runtime release advertising `workflows: 1` before deploying Workflow bindings. Runtime downgrades without this capability are rejected while published apps retain Workflow versions.
-
 ## Declare and export a Workflow
 
 Add a standard `workflows` entry to the app's Wrangler configuration:

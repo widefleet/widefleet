@@ -3,9 +3,6 @@ title: App access
 description: Group rules, permissions, activation and the app access API.
 ---
 
-App access groups require CLI and platform 0.3.0 or newer. Use matching CLI,
-management and agent versions; `widefleet access --help` checks whether the command is available.
-
 Open an app in management and choose **Access → App access** to select which company
 groups may open it. App owners and organization administrators can change these
 rules. Management collaborators can inspect them but cannot change them.

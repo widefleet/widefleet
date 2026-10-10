@@ -5,7 +5,7 @@ description: Apply D1 schema migrations explicitly and recover from failures.
 
 Widefleet runs SQL migrations through explicit CLI commands. Write SQL yourself or generate it with an ORM such as Drizzle. `widefleet deploy` does not apply migrations.
 
-These commands require CLI and platform 0.3.0 or newer. Update the CLI, control plane and agent together to matching versions. The app must already have a successfully deployed D1 binding and its fleet must be running. For a new database, first deploy a version declaring the binding that can start without the new schema. Then apply migrations and deploy the code that uses the schema. For an existing database, keep migrations compatible with the currently serving code until the next deploy completes.
+The app must already have a successfully deployed D1 binding and its fleet must be running. For a new database, first deploy a version declaring the binding that can start without the new schema. Then apply migrations and deploy the code that uses the schema. For an existing database, keep migrations compatible with the currently serving code until the next deploy completes.
 
 ## Commands
 
