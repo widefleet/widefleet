@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { createServer } from "node:http";
+import { once } from "node:events";
+import { z } from "zod";
 import { authorizeAppRequest } from "../tools/app-authorizer.ts";
 
 const issuer = "https://login.example.test/tenant";
@@ -26,6 +29,69 @@ const session =
     });
 
 describe("Local app authorization", () => {
+  it("reads large verified group headers over HTTP and preserves SSO redirects and cookies", async () => {
+    const groups = [...Array.from({ length: 1000 }, () => crypto.randomUUID()), "engineering"];
+
+    const upstream = createServer((incoming, outgoing) => {
+      expect(incoming.headers["x-auth-request-user"]).toBeUndefined();
+
+      if (incoming.url === "/redirect") {
+        outgoing.writeHead(302, {
+          location: "/must-not-follow",
+          "set-cookie": ["csrf=fixture; Path=/", "session=fixture; Path=/"],
+        });
+        outgoing.end("Sign in");
+
+        return;
+      }
+
+      outgoing.writeHead(202, {
+        "x-auth-request-user": "owner",
+        "x-auth-request-groups": groups.join(","),
+      });
+      outgoing.end();
+    });
+
+    upstream.listen(0, "127.0.0.1");
+    await once(upstream, "listening");
+    const address = z.object({ port: z.number().int() }).parse(upstream.address());
+    const url = `http://127.0.0.1:${address.port}`;
+
+    try {
+      for (const rules of [
+        { groups: [] },
+        { users: [] },
+        { users: [], groups: [], allAuthenticated: true },
+      ]) {
+        const response = await authorizeAppRequest(request(rules), issuer, url);
+        expect(response.status).toBe(202);
+        expect(response.headers.get("x-auth-request-groups")).toBe(groups.join(","));
+      }
+
+      expect(
+        (
+          await authorizeAppRequest(
+            request({ users: [], groups: [] }, { "x-auth-request-user": "owner" }),
+            issuer,
+            url,
+          )
+        ).status,
+      ).toBe(403);
+      const redirect = await authorizeAppRequest(request(), issuer, `${url}/redirect`);
+      expect(redirect.status).toBe(302);
+      expect(redirect.headers.get("location")).toBe("/must-not-follow");
+      expect(redirect.headers.getSetCookie()).toEqual([
+        "csrf=fixture; Path=/",
+        "session=fixture; Path=/",
+      ]);
+      expect(await redirect.text()).toBe("Sign in");
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        upstream.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
   it("accepts an individual or any allowed group without a control-plane connection", async () => {
     expect((await authorizeAppRequest(request(), issuer, undefined, session("owner"))).status).toBe(
       202,

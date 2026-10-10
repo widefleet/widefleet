@@ -298,7 +298,7 @@ describe
         expect(initial.headers["x-auth-request-groups"]).toBe(
           providerMode === "overage"
             ? Array.from(
-                { length: 205 },
+                { length: 1000 },
                 (_, index) => `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
               ).join(",")
             : providerMode === "claims" || providerMode === "oidc"
@@ -306,16 +306,19 @@ describe
               : undefined,
         );
 
-        const session = (await context.cookies()).find(
-          (cookie) => cookie.name === "__Secure-platform_sso",
+        const sessions = (await context.cookies()).filter((cookie) =>
+          /^__Secure-platform_sso(?:_\d+)?$/.test(cookie.name),
         );
 
-        expect(session).toMatchObject({
-          httpOnly: true,
-          secure: true,
-          sameSite: "Lax",
-          domain: ".apps.localhost",
-        });
+        expect(sessions.length).toBeGreaterThan(providerMode === "overage" ? 1 : 0);
+
+        for (const session of sessions)
+          expect(session).toMatchObject({
+            httpOnly: true,
+            secure: true,
+            sameSite: "Lax",
+            domain: ".apps.localhost",
+          });
 
         await context.addCookies([{ name: "own_app_cookie", value: "hidden", url: origin }]);
 
@@ -339,7 +342,7 @@ describe
         expect(body.headers["x-auth-request-groups"]).toBe(
           providerMode === "overage"
             ? Array.from(
-                { length: 205 },
+                { length: 1000 },
                 (_, index) => `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
               ).join(",")
             : providerMode === "claims" || providerMode === "oidc"
@@ -386,7 +389,7 @@ describe
       const previewOrigin = "https://review.notes.apps.localhost:25443";
 
       const allowed =
-        providerMode === "overage" ? "00000000-0000-4000-8000-000000000204" : "test-group";
+        providerMode === "overage" ? "00000000-0000-4000-8000-000000000999" : "test-group";
 
       const writeRules = async (
         groups: string[],

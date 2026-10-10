@@ -1,5 +1,33 @@
-import { createServer } from "node:http";
+import { createServer, get, type IncomingMessage } from "node:http";
+import { arrayBuffer } from "node:stream/consumers";
 import { appAccessSnapshot } from "@platform/contracts";
+
+const maxHeaderSize = 512 * 1024;
+
+const readSession = async (
+  upstream: string,
+  options: { headers: Headers; signal: AbortSignal },
+) => {
+  // OAuth2 Proxy returns all verified groups in response headers. Match the
+  // server's limit on this client too; fetch's default is too small for overage.
+  const incoming = await new Promise<IncomingMessage>((resolve, reject) => {
+    get(
+      upstream,
+      { headers: Object.fromEntries(options.headers), signal: options.signal, maxHeaderSize },
+      resolve,
+    ).on("error", reject);
+  });
+
+  const headers = new Headers();
+
+  for (const [name, values] of Object.entries(incoming.headersDistinct))
+    for (const value of values ?? []) headers.append(name, value);
+  const status = incoming.statusCode ?? 502;
+  const body = await arrayBuffer(incoming);
+
+  // The native client does not follow redirects; preserve the SSO response.
+  return new Response([204, 205, 304].includes(status) ? null : body, { status, headers });
+};
 
 const identityHeaders = [
   "x-auth-request-user",
@@ -12,7 +40,7 @@ export const authorizeAppRequest = async (
   request: Request,
   issuer: string | null,
   upstream = "http://127.0.0.1:4180/",
-  send: typeof fetch = fetch,
+  send = readSession,
 ) => {
   const url = new URL(request.url);
   const encoded = url.searchParams.get("policy");
@@ -49,11 +77,11 @@ export const authorizeAppRequest = async (
 
   const verified = await send(upstream, {
     headers,
-    redirect: "manual",
     signal: AbortSignal.timeout(10_000),
   });
 
   if (!verified.ok) return verified;
+  await verified.body?.cancel();
 
   // Identity comes exclusively from OAuth2 Proxy's verified session. Neither
   // caller-supplied identity headers nor app query parameters can supply it.
@@ -88,7 +116,7 @@ export const startAppAuthorizer = (
   port = 4181,
   upstream = "http://127.0.0.1:4180/",
 ) => {
-  const server = createServer({ maxHeaderSize: 512 * 1024 }, (incoming, outgoing) => {
+  const server = createServer({ maxHeaderSize }, (incoming, outgoing) => {
     const respond = async () => {
       const headers = new Headers();
 
