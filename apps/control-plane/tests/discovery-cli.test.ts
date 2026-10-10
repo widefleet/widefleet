@@ -11,7 +11,7 @@ import { promisify } from "node:util";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createCertificates } from "./installation/certificates.ts";
-import { createNativeResolver } from "./fixtures/native-resolver.ts";
+import { createNativeResolver, trustNativeCertificate } from "./fixtures/native-resolver.ts";
 
 const execute = promisify(execFile);
 
@@ -46,6 +46,8 @@ describe.runIf(
 )("CLI discovery through native TXT and a local HTTPS proxy", { timeout: 15_000 }, () => {
   let directory: string;
   let nativeResolver: Awaited<ReturnType<typeof createNativeResolver>> | undefined;
+  let removeTrust: (() => Promise<void>) | undefined;
+  let certificates: Awaited<ReturnType<typeof createCertificates>>;
   let domain = "example.test";
   let dropDnsQueries = false;
   let ca: string;
@@ -102,11 +104,13 @@ describe.runIf(
       });
     }
 
-    const certificates = await createCertificates(directory, [
+    certificates = await createCertificates(directory, [
       nativeResolver ? `*.${nativeResolver.zone}` : "example.test",
     ]);
 
     ca = certificates.ca;
+
+    if (nativeResolver) removeTrust = await trustNativeCertificate(ca);
 
     if (process.platform === "linux")
       await execute("cc", [
@@ -231,7 +235,11 @@ describe.runIf(
   });
 
   afterAll(async () => {
-    await nativeResolver?.close();
+    try {
+      await removeTrust?.();
+    } finally {
+      await nativeResolver?.close();
+    }
 
     for (const socket of sockets) socket.destroy();
 
@@ -373,21 +381,29 @@ describe.runIf(
   it("preserves certificate failure details from HTTPS discovery", async () => {
     const untrusted = join(directory, "untrusted");
     await mkdir(untrusted);
-    const certificates = await createCertificates(untrusted);
+    const untrustedCertificates = await createCertificates(untrusted, [domain]);
+    server.setSecureContext({
+      key: await readFile(untrustedCertificates.key),
+      cert: await readFile(untrustedCertificates.certificate),
+    });
 
-    const failure = await cli(["login", "--domain", domain], {
-      SSL_CERT_FILE: certificates.ca,
-      SSL_CERT_DIR: untrusted,
-    }).then(
-      () => null,
-      (cause: unknown) => z.object({ stderr: z.string() }).parse(cause),
-    );
+    try {
+      const failure = await cli(["login", "--domain", domain]).then(
+        () => null,
+        (cause: unknown) => z.object({ stderr: z.string() }).parse(cause),
+      );
 
-    expect(failure?.stderr).toContain("Could not discover Widefleet");
-    expect(failure?.stderr).toContain("HTTP request failed");
-    expect(failure?.stderr).toContain("Caused by:");
-    expect(failure?.stderr).toMatch(/certificate|issuer/i);
-    expect(requests).toEqual([]);
+      expect(failure?.stderr).toContain("Could not discover Widefleet");
+      expect(failure?.stderr).toContain("HTTP request failed");
+      expect(failure?.stderr).toContain("Caused by:");
+      expect(failure?.stderr).toMatch(/certificate|issuer/i);
+      expect(requests).toEqual([]);
+    } finally {
+      server.setSecureContext({
+        key: await readFile(certificates.key),
+        cert: await readFile(certificates.certificate),
+      });
+    }
   });
 
   it("preserves proxy connection failures without printing proxy credentials", async () => {

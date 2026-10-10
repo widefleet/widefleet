@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
+import { X509Certificate } from "node:crypto";
 import { createSocket } from "node:dgram";
 import { once } from "node:events";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { createServer, type Socket } from "node:net";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -9,12 +10,7 @@ import { promisify } from "node:util";
 
 const execute = promisify(execFile);
 
-// Exercise the real DNS API on disposable runners. Only this random .test zone
-// gets a local resolver; the runner's default DNS configuration is unchanged.
-export const createNativeResolver = async (
-  directory: string,
-  respond: (query: Buffer) => Promise<Buffer | undefined>,
-) => {
+const requireNativeRunner = () => {
   if (
     process.env["GITHUB_ACTIONS"] !== "true" ||
     process.env["RUNNER_ENVIRONMENT"] !== "github-hosted" ||
@@ -23,7 +19,50 @@ export const createNativeResolver = async (
     throw new Error(
       "Native DNS fixtures require an isolated macOS or Windows GitHub-hosted runner",
     );
+};
 
+export const trustNativeCertificate = async (certificate: string) => {
+  requireNativeRunner();
+
+  const fingerprint = new X509Certificate(await readFile(certificate)).fingerprint.replaceAll(
+    ":",
+    "",
+  );
+
+  if (process.platform === "win32") {
+    await execute("certutil", ["-user", "-addstore", "Root", certificate]);
+
+    return async () => {
+      await execute("certutil", ["-user", "-delstore", "Root", fingerprint]);
+    };
+  }
+
+  const keychain = "/Library/Keychains/System.keychain";
+  await execute("sudo", [
+    "-n",
+    "security",
+    "add-trusted-cert",
+    "-d",
+    "-r",
+    "trustRoot",
+    "-k",
+    keychain,
+    certificate,
+  ]);
+
+  return async () => {
+    await execute("sudo", ["-n", "security", "remove-trusted-cert", "-d", certificate]);
+    await execute("sudo", ["-n", "security", "delete-certificate", "-Z", fingerprint, keychain]);
+  };
+};
+
+// Exercise the real DNS API on disposable runners. Only this random .test zone
+// gets a local resolver; the runner's default DNS configuration is unchanged.
+export const createNativeResolver = async (
+  directory: string,
+  respond: (query: Buffer) => Promise<Buffer | undefined>,
+) => {
+  requireNativeRunner();
   const zone = `widefleet-${crypto.randomUUID()}.test`;
   const udp = createSocket("udp4");
   const tcp = createServer();
