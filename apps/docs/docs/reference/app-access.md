@@ -1,6 +1,6 @@
 ---
-title: App roles, ownership and access
-description: App roles, ownership transfer, access rules and gateway activation.
+title: App roles and access
+description: App roles, administration handover, access rules and gateway activation.
 ---
 
 Widefleet assigns a role to a person or company SSO group for a specific app.
@@ -12,16 +12,20 @@ does not maintain a separate team directory.
 | User      | Use the published app                                                                                              |
 | Developer | User permissions, management details and logs, deployments, rollbacks, database migrations and Workflow management |
 | App admin | Developer permissions, role assignments, network grants, catalog listing and deletion                              |
-| Owner     | App admin permissions and ownership transfer                                                                       |
 
-Every original app has exactly one owner, initially its creator. The owner can
-be a person or a group. The current owner or a platform administrator can
-transfer ownership directly, without recipient acceptance. The previous owner
-loses the owner role; other personal or group assignments remain. Ordinary role
-writes cannot create, duplicate or remove an owner. Concurrent writes use the
-same revision and return `409` when another change wins.
+The creator initially receives App admin. People and SSO groups can share that
+role with equal permissions; there is no separate app owner. Any app admin can
+add or revoke other admins. To hand over administration, grant the new person or
+group App admin first, then revoke the previous assignment. Other assignments
+remain effective, including access through groups.
 
-Previews inherit roles, ownership and app access from the original app. They have
+At least one admin assignment must remain, including during concurrent changes.
+This protects an assignment, not the existence or membership of its directory
+group. If the last group's members leave or the group is deleted, a platform
+administrator can add a replacement admin before removing the obsolete grant.
+Concurrent writes use the same revision and return `409` when another change wins.
+
+Previews inherit roles and app access from the original app. They have
 no independent role assignments. Network and connector grants retain their own
 rules; those permissions are not copied from the parent. Platform administrators
 retain management and recovery access without automatically obtaining access to
@@ -65,7 +69,7 @@ new access revisions for apps and previews. Failed SSO activation retains the
 previous running configuration and app policies. App permission writes and app
 creation wait for the replacement issuer to activate.
 Assignments keep their original issuer and do not grant rights in the replacement
-directory. A platform administrator can reassign ownership and roles there. The
+directory. A platform administrator can grant roles in the new directory and revoke the old assignments. The
 explicit all-authenticated switch remains enabled where selected. Once projected,
 gateway status stays pending until the agent confirms the replacement rules.
 
@@ -78,8 +82,8 @@ widefleet groups search 'Engineering'
 widefleet roles grant --group GROUP_ID --role developer
 widefleet roles grant --person PERSON_ID --role user
 widefleet roles revoke ASSIGNMENT_ID
-widefleet roles transfer --group NEW_OWNER_GROUP_ID
-widefleet roles transfer --person NEW_OWNER_PERSON_ID
+widefleet roles grant --group NEW_ADMIN_GROUP_ID --role admin
+widefleet roles revoke PREVIOUS_ADMIN_ASSIGNMENT_ID
 widefleet access show
 widefleet access set --all-authenticated true
 widefleet access set --all-authenticated false
@@ -137,9 +141,8 @@ belong in the company's Git/CI workflow.
 | ------------------------------------------------------- | -------------------------------------------------------- |
 | `GET /api/v1/apps/{appId}/roles`                        | Assignments, effective actions, revision and inheritance |
 | `GET /api/v1/apps/{appId}/roles/candidates?search=NAME` | Existing member search                                   |
-| `POST /api/v1/apps/{appId}/roles`                       | Add a non-owner role                                     |
-| `DELETE /api/v1/apps/{appId}/roles/{assignmentId}`      | Revoke a non-owner assignment                            |
-| `PUT /api/v1/apps/{appId}/owner`                        | Transfer ownership                                       |
+| `POST /api/v1/apps/{appId}/roles`                       | Add a role                                               |
+| `DELETE /api/v1/apps/{appId}/roles/{assignmentId}`      | Revoke an assignment; keep at least one admin            |
 | `GET /api/v1/apps/{appId}/access`                       | Desired rules and activation for app and previews        |
 | `PATCH /api/v1/apps/{appId}/access`                     | Set explicit all-authenticated access                    |
 
@@ -157,7 +160,8 @@ A role grant body contains `principal`, `role` and `revision`:
 }
 ```
 
-Transfer uses the same body without `role`. Revocation carries `revision`.
+Revocation carries `revision`. Removing the last admin returns `403`; add
+a replacement admin first.
 An access change contains only `revision` and `allAuthenticated`. Read the
 current revision before writing; conflicts are never retried as overwrites.
 UI remote functions and HTTP handlers call the same authorization services.

@@ -23,7 +23,7 @@ Explicit names contain 1–48 lowercase letters, digits or internal hyphens. Git
 
 Each preview has a stable app ID and an internal slug based on the parent slug and preview name. Long slugs are shortened with a hash suffix to fit the existing 48-character limit. This does not shorten the preview hostname's two separate labels. Deploying the same name again preserves its data and deployment history.
 
-Previews automatically inherit the original app’s owner, roles and access rules. No preview-specific overrides are supported; later changes apply to existing previews too. Grant access on the original app with `widefleet roles grant --group GROUP_ID --role user`. See [app access](/reference/app-access).
+Previews automatically inherit the original app’s roles and access rules. No preview-specific overrides are supported; later changes apply to existing previews too. Grant access on the original app with `widefleet roles grant --group GROUP_ID --role user`. See [app access](/reference/app-access).
 
 Previews have their own D1, R2, KV and Queue resources. Parent data, network permissions and connector grants are not copied. Plain-text variables and resource declarations come from the project configuration being deployed. Configure network permissions and connector bindings for the preview's own app ID when needed.
 

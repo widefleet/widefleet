@@ -140,4 +140,4 @@ The OpenAPI document includes connector artifact schemas and normal OAuth authen
 | Set one binding                         | `PUT /api/v1/apps/{appId}/bindings/{binding}` with `{ "connector": "erp", "entrypoint": "default" }`  |
 | Remove one binding                      | `DELETE /api/v1/apps/{appId}/bindings/{binding}`                                                      |
 
-Binding updates are atomic and do not require a caller-supplied revision. Connector deployment, listing and grant changes require administrator access. App Developers, App admins and Owners can read their app's bindings. CLI users select names and project context; IDs remain API identifiers.
+Binding updates are atomic and do not require a caller-supplied revision. Connector deployment, listing and grant changes require administrator access. App Developers and App admins can read their app's bindings. CLI users select names and project context; IDs remain API identifiers.

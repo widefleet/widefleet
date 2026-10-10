@@ -24,7 +24,7 @@ App selection uses `name` from the current `wrangler.jsonc`, or an explicit `--a
 
 Changes wait for activation by default. `--no-wait` returns after saving. `widefleet network` shows `saved` before the first deployment, `pending` during activation, `active` after acknowledgment, or `failed` with the reason. A failed activation returns a nonzero exit status; repeating the change retries it. If another change supersedes a waiting command, it stops with an explicit message. `--json` returns the full state; redirected output is JSON by default. Automation can use the same API token via `PLATFORM_ACCESS_TOKEN`.
 
-App admins, the app owner and installation administrators may change network permissions. A token additionally needs `network:manage`; reading requires `platform:read`. These scopes can coexist with deployment permissions in one token. A sufficiently authorized deployment can support combined code/configuration changes in the future; this version manages network state through the dedicated API/CLI, not `widefleet.config.ts`.
+App admins and installation administrators may change network permissions. A token additionally needs `network:manage`; reading requires `platform:read`. These scopes can coexist with deployment permissions in one token. A sufficiently authorized deployment can support combined code/configuration changes in the future; this version manages network state through the dedicated API/CLI, not `widefleet.config.ts`.
 
 ## Destinations and enforcement
 
