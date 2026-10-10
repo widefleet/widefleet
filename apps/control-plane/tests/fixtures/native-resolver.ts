@@ -30,29 +30,32 @@ export const trustNativeCertificate = async (certificate: string) => {
   );
 
   if (process.platform === "win32") {
-    await execute("certutil", ["-user", "-addstore", "Root", certificate]);
+    // The user root store can display a consent dialog even under an elevated
+    // account. The disposable runner's machine store supports unattended import.
+    await execute("certutil", ["-addstore", "Root", certificate], { timeout: 10_000 });
 
     return async () => {
-      await execute("certutil", ["-user", "-delstore", "Root", fingerprint]);
+      await execute("certutil", ["-delstore", "Root", fingerprint], { timeout: 10_000 });
     };
   }
 
   const keychain = "/Library/Keychains/System.keychain";
-  await execute("sudo", [
-    "-n",
-    "security",
-    "add-trusted-cert",
-    "-d",
-    "-r",
-    "trustRoot",
-    "-k",
-    keychain,
-    certificate,
-  ]);
+  await execute(
+    "sudo",
+    ["-n", "security", "add-trusted-cert", "-d", "-r", "trustRoot", "-k", keychain, certificate],
+    { timeout: 10_000 },
+  );
 
   return async () => {
-    await execute("sudo", ["-n", "security", "remove-trusted-cert", "-d", certificate]);
-    await execute("sudo", ["-n", "security", "delete-certificate", "-Z", fingerprint, keychain]);
+    try {
+      await execute("sudo", ["-n", "security", "remove-trusted-cert", "-d", certificate], {
+        timeout: 10_000,
+      });
+    } finally {
+      await execute("sudo", ["-n", "security", "delete-certificate", "-Z", fingerprint, keychain], {
+        timeout: 10_000,
+      });
+    }
   };
 };
 
@@ -129,7 +132,7 @@ export const createNativeResolver = async (
       const destination = `/etc/resolver/${zone}`;
       await writeFile(source, `nameserver 127.0.0.1\nport ${port}\n`);
       removeRule = async () => {
-        await execute("sudo", ["-n", "rm", "-f", destination]);
+        await execute("sudo", ["-n", "rm", "-f", destination], { timeout: 10_000 });
       };
 
       await execute("sudo", ["-n", "mkdir", "-p", "/etc/resolver"]);

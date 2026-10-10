@@ -64,6 +64,11 @@ describe.runIf(
   const requests: { host: string; path: string; authorization: string | undefined }[] = [];
   const connections: string[] = [];
 
+  const trackSocket = (socket: Socket) => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
+  };
+
   beforeAll(async () => {
     directory = await mkdtemp(join(tmpdir(), "widefleet-discovery-"));
 
@@ -174,13 +179,11 @@ describe.runIf(
         }
       },
     );
+    server.on("connection", trackSocket);
     server.listen(0, "127.0.0.1");
     await once(server, "listening");
     const port = z.object({ port: z.number() }).parse(server.address()).port;
-    proxy.on("connection", (socket) => {
-      sockets.add(socket);
-      socket.on("close", () => sockets.delete(socket));
-    });
+    proxy.on("connection", trackSocket);
     proxy.on("connect", (request, downstream, head) => {
       connections.push(request.url ?? "");
 
@@ -197,8 +200,7 @@ describe.runIf(
         downstream.pipe(upstream).pipe(downstream);
       });
 
-      sockets.add(upstream);
-      upstream.on("close", () => sockets.delete(upstream));
+      trackSocket(upstream);
       upstream.on("error", () => downstream.destroy());
       downstream.on("error", () => upstream.destroy());
       downstream.on("close", () => upstream.destroy());
@@ -235,18 +237,21 @@ describe.runIf(
   });
 
   afterAll(async () => {
-    try {
-      await removeTrust?.();
-    } finally {
-      await nativeResolver?.close();
-    }
+    const results = await Promise.allSettled([removeTrust?.(), nativeResolver?.close()]);
 
     for (const socket of sockets) socket.destroy();
 
     if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
     await new Promise<void>((resolve) => proxy.close(() => resolve()));
     await rm(directory, { recursive: true, force: true });
-  });
+
+    const failures = results.flatMap((result) =>
+      result.status === "rejected" ? [z.instanceof(Error).parse(result.reason)] : [],
+    );
+
+    if (failures.length)
+      throw new AggregateError(failures, "Native discovery fixture cleanup failed");
+  }, 30_000);
 
   const cli = (args: string[], overrides: NodeJS.ProcessEnv = {}) =>
     execute(
@@ -309,8 +314,11 @@ describe.runIf(
     async (kind) => {
       if (kind === "absent") await writeFile(responseFile, dnsResponse([], domain));
       const login = await cli(["login", "--email", `private-local-part@${domain}`]);
+      // DNSServiceQueryRecord also reports a SERVFAIL response as NoSuchRecord.
       expect(login.stderr).toContain(
-        kind === "absent" ? "No TXT record" : "System DNS unavailable",
+        kind === "absent" || process.platform === "darwin"
+          ? "No TXT record"
+          : "System DNS unavailable",
       );
       expect(requests[0]).toEqual({
         host: domain,
