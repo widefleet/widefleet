@@ -53,6 +53,8 @@ impl Credentials {
 
 #[derive(clap::Args)]
 pub struct LoginOptions {
+    #[command(flatten)]
+    pub discovery: crate::discovery::Options,
     /// API scopes to request, separated by spaces or commas. Replaces the defaults.
     #[arg(long = "scope", value_delimiter = ',', num_args = 1.., default_values = ["platform:read", "platform:write"])]
     scopes: Vec<String>,

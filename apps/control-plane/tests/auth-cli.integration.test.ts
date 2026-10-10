@@ -212,6 +212,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1" && process.platform !== "win
           env: {
             ...process.env,
             PLATFORM_URL: origin,
+            PLATFORM_CONFIG_FILE: join(directory, "config.json"),
             PLATFORM_SESSION_FILE: sessionFile,
             PLATFORM_ACCESS_TOKEN: externalAccessToken,
             XDG_STATE_HOME: join(directory, "state"),

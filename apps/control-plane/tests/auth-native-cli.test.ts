@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -79,11 +79,13 @@ describe.runIf(process.env["RUN_CLI_NATIVE_AUTH"] === "1")(
     });
 
     const cli = (...args: string[]) =>
-      execute(binary, ["--url", origin, ...args], {
+      execute(binary, args, {
         timeout: 15_000,
         env: {
           ...process.env,
           XDG_STATE_HOME: directory,
+          PLATFORM_URL: undefined,
+          PLATFORM_CONFIG_FILE: join(directory, "config.json"),
           PLATFORM_ACCESS_TOKEN: undefined,
           PLATFORM_SESSION_FILE: undefined,
           WIDEFLEET_TELEMETRY_DISABLED: "1",
@@ -109,7 +111,12 @@ describe.runIf(process.env["RUN_CLI_NATIVE_AUTH"] === "1")(
     });
 
     it("persists login, serializes refresh across processes, and removes the credential on logout", async () => {
-      expect((await cli("login")).stdout).toContain("operating system's credential store");
+      expect((await cli("--url", origin, "login")).stdout).toContain(
+        "operating system's credential store",
+      );
+      expect(JSON.parse(await readFile(join(directory, "config.json"), "utf8"))).toEqual({
+        platform_url: origin,
+      });
       const results = await Promise.all([cli("whoami"), cli("whoami"), cli("whoami")]);
 
       for (const result of results) {
@@ -133,7 +140,13 @@ describe.runIf(process.env["RUN_CLI_NATIVE_AUTH"] === "1")(
     it.runIf(process.platform === "win32")(
       "explains that session files require Unix permissions",
       async () => {
-        const failure = await cli("--session-file", join(directory, "session.json"), "login").then(
+        const failure = await cli(
+          "--url",
+          origin,
+          "--session-file",
+          join(directory, "session.json"),
+          "login",
+        ).then(
           () => null,
           (cause: unknown) => z.object({ code: z.number(), stderr: z.string() }).parse(cause),
         );

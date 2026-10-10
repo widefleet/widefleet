@@ -37,6 +37,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       XDG_STATE_HOME: directory,
       CI: undefined,
       PLATFORM_URL: undefined,
+      PLATFORM_CONFIG_FILE: join(directory, "config.json"),
       WIDEFLEET_TELEMETRY_DEBUG: "1",
       WIDEFLEET_TELEMETRY_DISABLED: "0",
       PLATFORM_USAGE_REPORTING: undefined,
@@ -87,9 +88,10 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         expect(failure?.stderr).toContain('"event":"cli_command_completed"');
         expect(failure?.stderr).toContain('"event":"$exception"');
         expect(failure?.stderr).not.toContain('"message":');
-        expect(failure?.stderr.split("[widefleet telemetry]")[0]).toBe(
-          "Set --url or PLATFORM_URL to the management origin\n",
-        );
+        const diagnostic = failure?.stderr.split("[widefleet telemetry]")[0];
+        expect(diagnostic).toMatch(/^No platform is configured\..*\n$/);
+        expect(diagnostic).toContain("widefleet login --email employee@example.com");
+        expect(diagnostic).toContain("widefleet login --domain example.com");
 
         const line = failure?.stderr
           .split("\n")
@@ -120,7 +122,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
           .parse(JSON.parse(z.string().parse(line).slice("[widefleet telemetry] ".length)));
 
         expect(captured.properties.$exception_list[0]?.stacktrace.frames[0]?.filename).toBe(
-          "crates/platform-cli/src/main.rs",
+          `crates/platform-cli/src/${command === "login" ? "discovery" : "main"}.rs`,
         );
 
         await execute(binary, ["telemetry", "disable"], { env: environment() });
