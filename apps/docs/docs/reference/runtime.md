@@ -24,6 +24,8 @@ If an update returns `409: Runtime versions are immutable`, the installation alr
 
 Platform 0.3.2 bundles app runtime 0.2.2, using installation protocol 1 for celld 0.6.2. The control plane and agent require that celld version in runtime packages. Workflow support additionally requires a deployment agent that provisions Workflow protocol 1 bindings. A compatible loader/adapter update within installed capabilities needs no Rust rebuild; a new installation protocol or celld binary requires a separately reviewed platform update.
 
+App runtime 0.2.2 changes the Workflow checkpoint format. Workflow instances started with 0.2.1 cannot resume after updating to 0.2.2. Finish or terminate those instances before the update and create new instances afterward; earlier instance history is not migrated.
+
 Runtime 0.2.1 forwards incoming HTTP request cancellation explicitly to the loaded app. If the client disconnects before response headers, the app's `request.signal` is aborted. App code must pass that signal to any downstream requests it wants to cancel, for example `env.SERVICE.fetch(url, { signal: request.signal })`. A timeout after a fetch has returned still needs explicit cancellation of the response body; forwarding the incoming signal does not change that celld behavior.
 
 ## Activation and recovery
