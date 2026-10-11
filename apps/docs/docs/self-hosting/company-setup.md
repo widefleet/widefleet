@@ -6,8 +6,8 @@ description: Configure employees' agents and computers so they do not need to kn
 Employees should be able to run `widefleet login` without knowing the management
 URL. Distribute configuration with your existing agent or device setup, or
 publish discovery information under your work email domain. These options can
-be combined. Use a CLI build whose `widefleet login --help` lists `--email` and
-`--domain`; the same setup flow applies on Windows, macOS and Linux.
+be combined. Use CLI 0.3.2 or newer; `widefleet login --help` lists `--email` and
+`--domain`. The same setup flow applies on Windows, macOS and Linux.
 
 ## Preconfigured agents
 

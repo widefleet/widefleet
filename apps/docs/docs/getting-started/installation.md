@@ -40,7 +40,7 @@ local URL printed by `pnpm dev`, then stop that server with Ctrl-C before contin
 
 ## Connect and deploy
 
-Connect to your company and deploy:
+Connect to your company and deploy with CLI 0.3.2 or newer:
 
 ```sh
 widefleet login
