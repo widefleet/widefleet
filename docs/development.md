@@ -21,25 +21,6 @@ This isolated demo uses synthetic identities and local-only credentials. Its CLI
 
 Only loopback ports are published. Demo state lives in `.local/demo` and the `widefleet-local` Compose volumes. One checkout can own the demo at a time. The local fixture is separate from the deployment in `infra/compose.yaml`; use the [operations guide](https://widefleet.com/docs/self-hosting/installation) for a company installation.
 
-## Repository layout
-
-| Location                 | Purpose                                                               |
-| ------------------------ | --------------------------------------------------------------------- |
-| `apps/control-plane`     | Management UI, Better Auth, oRPC/OpenAPI, PostgreSQL and artifact API |
-| `apps/docs`              | Public documentation website                                          |
-| `packages/app-runtime`   | Versioned Worker loader and resource adapters                         |
-| `packages/contracts`     | Validated public API schemas                                          |
-| `crates/platform-cli`    | Creator CLI and device login                                          |
-| `crates/platform-agent`  | Docker and celld deployment execution                                 |
-| `crates/platform-core`   | Shared Rust HTTP, configuration and upload contract                   |
-| `starters/sveltekit`     | SvelteKit app with D1 notes and R2 photos                             |
-| `infra/compose.yaml`     | Single-host reference deployment                                      |
-| `infra/test`             | Disposable PostgreSQL and RustFS fixtures                             |
-| `patches`                | Versioned dependency fixes and docs consent integration               |
-| `tools/oxlint/anti-slop` | Vendored lint rules and their original license                        |
-
-The documentation website lives in `apps/docs`; see [documentation site development and hosting](documentation-site.md).
-
 ## Local verification
 
 Use Node.js 26, pnpm 12.4.2 and Rust 1.99. Docker Engine 29.8.1 must be running. Runtime tests currently target Linux x86-64. The test configuration binds only to loopback and keeps all service data in temporary filesystems. Tests create separate databases and S3 buckets with synthetic identities; they do not need an Entra tenant.
@@ -57,7 +38,7 @@ bash tools/cargo.sh clippy --workspace --all-targets -- -D warnings
 bash tools/cargo.sh test --workspace
 ```
 
-Build the CLI with `bash tools/cargo.sh build -p platform-cli`, then run `RUN_CLI_TESTS=1 pnpm exec vitest run apps/control-plane/tests/cli.test.ts apps/control-plane/tests/network-cli.test.ts` to check deployment output against a local synthetic API. The suite covers activation, failure, queued output, explicit app IDs, server-provided ports and separation of build logs from JSON.
+Build the CLI with `bash tools/cargo.sh build -p platform-cli`, then run `RUN_CLI_TESTS=1 pnpm exec vitest run apps/control-plane/tests/cli.test.ts apps/control-plane/tests/network-cli.test.ts` to check it against a local synthetic API.
 
 Vitest exercises PostgreSQL and S3 through real local services. Playwright starts the built Node server and verifies Microsoft login, device authorization and management forms. The browser suite sends the protocol header that a trusted TLS proxy supplies in deployment.
 
@@ -77,7 +58,7 @@ RUN_EDGE_TESTS=1 pnpm exec vitest run apps/control-plane/tests/edge/sso.test.ts
 The native runtime command above assumes rootless Docker. With a rootful daemon, run that command with the same host UID as the packaged agent/runtime (root), as CI does:
 
 ```sh
-sudo env "PATH=$PATH" \
+sudo env -u SUDO_USER "PATH=$PATH" \
   "DOCKER_HOST=$(docker context inspect --format '{{.Endpoints.docker.Host}}')" \
   "PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/ms-playwright" \
   RUN_RUNTIME_TESTS=1 pnpm exec vitest run apps/control-plane/tests/runtime/deployment.test.ts
@@ -85,26 +66,13 @@ sudo env "PATH=$PATH" \
 
 Otherwise the runtime cannot write the test agent's bind-mounted state and reports `Permission denied` for `/state/node`. Keep the runtime's dropped capabilities and filesystem protections enabled.
 
-The runtime suite extracts a CLI release outside the workspace, initializes and checks an independent app, then uses the actual CLI and agent to deploy it. It saves a note and photo, exercises Node ESM imports and CommonJS builtins with `nodejs_compat`, checks preview isolation and code rollback, restarts an app with management stopped, and deletes its resources. The image suite initializes an empty database and buckets twice, renders proxy configuration using the packaged setup tool, then publishes a Worker through the packaged server and actual agent/runtime containers. Edge tests run the pinned Traefik and OAuth2 Proxy images and verify identity-header spoofing, credential removal, cookie boundaries and paginated Entra group overage, including fresh logins after restarting the proxies without a control plane or database. Finish image builds before running browser tests, and run browser, runtime and edge suites sequentially. Some share ports; creating or removing Docker networks can also interrupt Chromium requests with `ERR_NETWORK_CHANGED`. With `./dev up` running, `RUN_LOCAL_TESTS=1 pnpm exec vitest run apps/control-plane/tests/local/quickstart.test.ts` checks the complete demo through both browser logins and leaves a synthetic note and photo in the example app.
+Finish image builds before browser tests, and run browser, runtime and edge suites sequentially. Some share ports; creating or removing Docker networks can also interrupt Chromium requests with `ERR_NETWORK_CHANGED`. The [CI suite configuration](../.github/workflows/check-suites.yaml) is the maintained source for test selection and setup.
 
-Remove the disposable test services when finished:
-
-```sh
-docker compose -f infra/test/compose.yaml down
-```
-
-These containers have no durable volumes. Stopping them discards their databases and object storage.
-
-### App access
-
-Local tests use synthetic identities with the pinned Traefik and OAuth2 Proxy
-images. They cover per-host allow/deny behavior, spoofed headers and query
-parameters, empty lists, existing sessions, group overage, proxy restart,
-inheritance, activation failures, stale edits, legacy agents and code rollback.
+With `./dev up` running, `RUN_LOCAL_TESTS=1 pnpm exec vitest run apps/control-plane/tests/local/quickstart.test.ts` checks the demo through both browser logins and leaves a synthetic note and photo in the example app.
 
 ### Workflows
 
-Use synthetic data and the pinned local runtime:
+After the integration setup above has installed celld, run the Workflow adapter checks with synthetic data:
 
 ```sh
 pnpm --filter @platform/app-runtime build
@@ -112,12 +80,6 @@ RUN_DYNAMIC_TESTS=1 pnpm exec vitest run \
   apps/control-plane/tests/runtime/workflows.test.ts \
   apps/control-plane/tests/runtime/workflow-adapter.test.ts
 ```
-
-The production adapter suite covers abrupt restarts, retries, timeouts, events, parallel replay, structured-clone results, scoped storage, version pinning, connector revocation and management receipts. The deployment suite also exercises the packaged CLI, agent, retained resources and app removal against a disposable local fleet.
-
-### Installation reporting
-
-Integration tests use isolated local PostgreSQL databases and a synthetic PostHog transport. They exercise payload filtering, independent opt-outs, configuration overrides, queued-batch revocation, authorization and failed delivery without sending events to the real project.
 
 ### Runtime logs
 
@@ -129,13 +91,20 @@ RUN_TELEMETRY_TESTS=1 pnpm exec vitest run apps/control-plane/tests/telemetry.in
 RUN_CAPTURE_TESTS=1 pnpm exec vitest run apps/control-plane/tests/runtime/error-capture.test.ts
 ```
 
-The telemetry suite uses synthetic identities and OTLP payloads, the actual Collector/ClickHouse, real celld and the CLI. It checks app isolation, permissions, source maps from old browser builds, filtering, pagination, delayed exports, read-only name resolution and follow. The capture suite uses a built starter and Chromium to exercise browser and server capture. The deployment suite additionally checks shared runtime activation and restart with existing D1/R2 data.
+The telemetry fixtures use a local Collector and ClickHouse. The browser capture suite builds a starter app and uses Chromium. Installation-reporting tests use a synthetic PostHog transport; they do not send events to the real project.
+
+Remove disposable test services when finished:
+
+```sh
+docker compose -f infra/test/telemetry.yaml down
+docker compose -f infra/test/compose.yaml down
+```
+
+These containers have no durable volumes. Stopping them discards their databases and object storage.
 
 ## Run management from source
 
-The configuration template is `apps/control-plane/.env.example`. Supply PostgreSQL, a private artifact bucket and writable local state. Startup creates the database schema and CLI client; open the browser to create the first administrator and configure company SSO. An optional bootstrap file supports automated first setup. See [configuration, secret storage and recovery](https://widefleet.com/docs/self-hosting/installation).
-
-Better Auth's Organization plugin stores Owner, Admin and Member roles. Every Member can create apps. The setup administrator explicitly links and tests a company account before closing password authentication. Subsequent verified management sign-ins create Members; app-only SSO does not enroll management members. Agent credentials remain separate and are stored as hashes.
+Use [`apps/control-plane/.env.example`](../apps/control-plane/.env.example) with local PostgreSQL, a private test artifact bucket and writable local state. Open the browser after startup to create the first administrator. Identity setup, configuration and recovery are documented in the [self-hosting guide](https://widefleet.com/docs/self-hosting/installation).
 
 ```sh
 cd apps/control-plane
@@ -146,34 +115,18 @@ node --env-file=.env --run dev
 
 To run the built management application, build from the repository root, then use `node --env-file=.env --run start` in `apps/control-plane`. This does not start an agent, app runtime or SSO proxy.
 
-The production server requires `BODY_SIZE_LIMIT=32M` for the supported Worker upload limit. Keep the Node listener private to the trusted proxy. Set `PROTOCOL_HEADER=x-forwarded-proto` only when that proxy overwrites the header. The externally visible origin must match `PLATFORM_URL`. HTTPS is required except for loopback development.
-
-SvelteKit's CSRF protection and Better Auth's protections remain enabled. `/api/auth/*` uses Better Auth's normal SvelteKit integration; there is no custom Node authentication bypass. See the [API contract](https://widefleet.com/docs/reference/api) for client request requirements.
+When testing the built server, use `BODY_SIZE_LIMIT=32M` for supported Worker uploads and match the externally visible origin to `PLATFORM_URL`. For a trusted TLS proxy, set `PROTOCOL_HEADER=x-forwarded-proto` only if the proxy overwrites it and the Node listener stays private. HTTPS is required except for loopback development. Keep SvelteKit and Better Auth's request protections enabled; see the [API contract](https://widefleet.com/docs/reference/api) for client requirements.
 
 ## Dependency constraints
 
-TypeScript extends `@tsconfig/strictest`. Type-aware Oxlint, the generic anti-slop rules and Oxfmt remain enabled. Expected operational errors use `better-result`.
+Better Auth 1.7.7 declares a SvelteKit 2 peer range. The [workspace constraints](../pnpm-workspace.yaml) allow only the selected Better Auth 1.7.7 / SvelteKit 3.0.0 pair. Its integration is covered by tests against the built server. The [OAuth provider patch](../patches/@better-auth__oauth-provider@1.7.7.patch) removes incompatible optional `undefined` declarations from generated OpenAPI types without changing runtime JavaScript. Review these exceptions when upgrading.
 
-Better Auth 1.7.7 declares a SvelteKit 2 peer range. `pnpm-workspace.yaml` allows only the selected Better Auth 1.7.7 / SvelteKit 3.0.0 pair. Its integration is covered by tests against the built server. The OAuth provider patch removes incompatible optional `undefined` declarations from generated OpenAPI types; runtime JavaScript is unchanged. Review both exceptions when upgrading.
-
-The TypeScript version remains 6.0.3 for the selected Svelte compiler integration. Oxlint and `@oxlint/plugins` must stay on the same version. Wrangler's asset hash implementation uses `blake3-wasm` 2.1.5.
+The TypeScript version remains 6.0.3 for the selected Svelte compiler integration. Keep compiler upgrades covered by the starter and control-plane checks.
 
 The starter checks authored TypeScript and Svelte sources. JavaScript checking is disabled there because Wrangler's generated `GlobalProps` imports the adapter's generated Worker bundle; checking that JavaScript would re-check bundled dependencies as application source. All `strictest` TypeScript options remain enabled.
 
-## GitHub Actions
+## CI and releases
 
-The repository has seven workflows:
+The [check workflow](../.github/workflows/check.yaml) and its [reusable suites](../.github/workflows/check-suites.yaml) define required verification. PR jobs receive read-only cache access; only checks triggered by pushes to `main` can save caches. Test jobs use disposable services and synthetic fixtures.
 
-| Workflow                    | Trigger and purpose                                                                                           |
-| --------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `check.yaml`                | Pull requests and pushes to `main`; requires all source and integration suites to pass.                       |
-| `check-suites.yaml`         | Reusable source, integration/browser, packaged SSO, and Rust/runtime test suites.                             |
-| `check-release-images.yaml` | Relevant pull requests and pushes to `main`; builds and tests the packaged images without publishing.         |
-| `build-release-images.yaml` | Reusable parallel image builds, Cargo and image caching, artifact transport, and packaged deployment tests.   |
-| `publish-cli.yaml`          | `vVERSION` tag pushes; coordinates tests, npm/Docker publication, then publishes the completed draft release. |
-| `publish-images.yaml`       | Reusable publication of tested images to Docker Hub and transport of the verified digest manifest.            |
-| `publish-app-runtime.yaml`  | `runtime-vVERSION` tag pushes; tests and creates the independent app-runtime GitHub Release.                  |
-
-The platform release starts from a stable version tag on `main`. Both build/test paths must succeed before either registry job starts, and the GitHub Release remains in draft until both registry jobs and all attachment checks succeed. This supports GitHub release immutability. Failed runs use GitHub Actions' built-in rerun controls. See [CLI releases](cli-releases.md), [container releases](container-releases.md) and [runtime releases](runtime-releases.md) for authentication and release instructions.
-
-PR jobs receive read-only cache access; only checks triggered by pushes to `main` can save caches. Test jobs use disposable services and synthetic fixtures.
+For publication and recovery, follow [CLI releases](cli-releases.md), [container releases](container-releases.md) or [runtime releases](runtime-releases.md). For website changes, use [documentation site maintenance](documentation-site.md).

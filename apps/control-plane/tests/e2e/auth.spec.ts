@@ -3,10 +3,17 @@ import { spawn } from "node:child_process";
 import { EventEmitter, once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { app, artifact } from "@platform/contracts";
 import { member } from "../../src/lib/server/auth-schema.ts";
-import { agents, appGrants, apps, artifacts, deployments } from "../../src/lib/server/schema.ts";
+import {
+  agents,
+  appGrants,
+  apps,
+  artifacts,
+  deployments,
+  jobs,
+} from "../../src/lib/server/schema.ts";
 import { apiResource, cliClientId } from "../../src/lib/server/auth-options.ts";
 import { createTestEnvironment } from "../environment.ts";
 
@@ -405,6 +412,105 @@ test("manages organization roles and app access by name while members create the
   } finally {
     await memberContext.close();
   }
+});
+
+test("submits a selective Workflow restart and waits for the agent's confirmation", async ({
+  page,
+  context,
+}) => {
+  const session = await environment.users.login({ userId: environment.owner.id });
+  await context.addCookies(
+    session.cookies.map((cookie) => ({
+      ...cookie,
+      domain: "localhost",
+      sameSite: "Lax",
+      secure: false,
+    })),
+  );
+
+  const created = await context.request.post("/api/v1/apps", {
+    headers: { origin: environment.configuration.PLATFORM_URL },
+    data: { slug: "workflow-restart-ui", displayName: "Workflow Restart Example" },
+  });
+
+  expect(created.ok()).toBe(true);
+  const record = app.parse(await created.json());
+  const artifactId = crypto.randomUUID();
+  const deploymentId = crypto.randomUUID();
+  await environment.database.db.insert(artifacts).values(
+    artifact.parse({
+      id: artifactId,
+      appId: record.id,
+      metadata: {
+        main_module: "worker.js",
+        compatibility_date: "2026-10-01",
+        assets: { upload_session: crypto.randomUUID() },
+        bindings: [
+          { type: "workflow", name: "WORKFLOW", workflow_name: "example", class_name: "Example" },
+        ],
+      },
+      manifest: {},
+      modules: [{ name: "worker.js", type: "esm", sha256: "0".repeat(64), size: 0 }],
+    }),
+  );
+  await environment.database.db.insert(deployments).values({
+    id: deploymentId,
+    appId: record.id,
+    artifactId,
+    requestId: crypto.randomUUID(),
+    status: "succeeded",
+    finishedAt: new Date(),
+  });
+  await environment.database.db
+    .update(apps)
+    .set({ state: "active", activeDeploymentId: deploymentId })
+    .where(eq(apps.id, record.id));
+  await page.goto(`/apps/${record.id}?tab=workflows`, { waitUntil: "networkidle" });
+  await page.getByLabel("Action", { exact: true }).selectOption("restartFrom");
+  await page.getByLabel("Instance ID", { exact: true }).fill("run-1");
+  await page.getByLabel("Step name", { exact: true }).fill("approval");
+  await expect(page.getByLabel("Occurrence", { exact: true })).toHaveValue("1");
+  await expect(page.getByLabel("Step type", { exact: true })).toHaveValue("do");
+  await page.getByLabel("Occurrence", { exact: true }).fill("2");
+  await page.getByLabel("Step type", { exact: true }).selectOption("waitForEvent");
+  await page.getByRole("button", { name: "Run action", exact: true }).click();
+  await expect(page.getByText("Requested — waiting for the agent.", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Processing request …", exact: true }),
+  ).toBeDisabled();
+  await expect(page.getByLabel("Step name", { exact: true })).toBeDisabled();
+
+  const [job] = await environment.database.db
+    .select()
+    .from(jobs)
+    .where(and(eq(jobs.appId, record.id), eq(jobs.kind, "workflows")));
+
+  expect(job?.workflow).toEqual({
+    action: "restart",
+    workflow: "example",
+    id: "run-1",
+    from: { name: "approval", count: 2, type: "waitForEvent" },
+  });
+
+  if (!job) throw new Error("Missing Workflow request");
+  await environment.database.db
+    .update(jobs)
+    .set({
+      state: "succeeded",
+      result: {
+        leaseToken: crypto.randomUUID(),
+        outcome: "succeeded",
+        message: "Restarted",
+        workflow: null,
+      },
+    })
+    .where(eq(jobs.id, job.id));
+  await expect(page.getByText("Request completed.", { exact: true })).toBeVisible();
+  await page.getByLabel("Action", { exact: true }).selectOption("restart");
+  await expect(page.getByLabel("Step name", { exact: true })).toHaveCount(0);
+  await expect(
+    page.getByText("Previously completed steps will run again.", { exact: true }),
+  ).toBeVisible();
 });
 
 test("refreshes queued rollbacks and distinguishes pending requests from accepted jobs", async ({

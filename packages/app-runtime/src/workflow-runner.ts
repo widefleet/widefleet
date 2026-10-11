@@ -1,5 +1,6 @@
 import { NonRetryableError } from "cloudflare:workflows";
 import { z } from "zod";
+import { workflowRestartFrom, workflowStepName } from "@platform/contracts";
 import {
   WorkerEntrypoint,
   WorkflowEntrypoint,
@@ -12,6 +13,7 @@ import ApplicationWorkflow from "widefleet:workflow";
 import {
   fault,
   restore,
+  stepId,
   type WorkflowValue,
   type AppEvent,
   type Command,
@@ -107,16 +109,14 @@ const operation = (command: Command) => {
   return promise;
 };
 
-const identity = (name: string) => {
-  z.string()
-    .max(256)
-    .refine((value) => !Array.from(value).some((character) => character.charCodeAt(0) < 32))
-    .parse(name);
-  const count = (counts.get(name) ?? 0) + 1;
-  counts.set(name, count);
+const identity = (name: string, type: z.infer<typeof workflowRestartFrom>["type"]) => {
+  workflowStepName.parse(name);
+  const key = JSON.stringify([name, type]);
+  const count = (counts.get(key) ?? 0) + 1;
+  counts.set(key, count);
 
   // Parallel branches can register different names in a different order on replay.
-  return { id: JSON.stringify([name, count]), name, count };
+  return { id: stepId({ name, type, count }), name, count };
 };
 
 export const workflowSteps = {
@@ -151,22 +151,22 @@ export const workflowSteps = {
       }
     }
 
-    const entry = identity(name);
+    const entry = identity(name, "do");
     callbacks.set(entry.id, invoke);
 
     return operation({ kind: "do", ...entry, config: options });
   },
   sleep(name: string, duration: number | WorkflowSleepDuration) {
-    return operation({ kind: "sleep", ...identity(name), duration });
+    return operation({ kind: "sleep", ...identity(name, "sleep"), duration });
   },
   sleepUntil(name: string, deadline: Date | number) {
-    return operation({ kind: "sleepUntil", ...identity(name), deadline });
+    return operation({ kind: "sleepUntil", ...identity(name, "sleep"), deadline });
   },
   waitForEvent(
     name: string,
     options: { type: string; timeout?: number | WorkflowTimeoutDuration },
   ) {
-    return operation({ kind: "waitForEvent", ...identity(name), options });
+    return operation({ kind: "waitForEvent", ...identity(name, "waitForEvent"), options });
   },
 };
 

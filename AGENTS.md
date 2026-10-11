@@ -21,12 +21,31 @@ Inferred types over annotations. any is the enemy.
 - Document implemented behavior and required versions; distinguish unreleased features and known limits. Keep roadmaps, session notes, speculative claims, customer data and secrets out of README and public docs.
 - Each topic has one canonical home; use short introductions and links elsewhere. When moving content, preserve useful details and update navigation, links and code that reads the files. README and repository guides link to public docs URLs for user topics; website pages use site routes. There is no automatic sync between the two folders.
 
+## Internal documentation
+
+Most code changes do not need an internal documentation change. Read the relevant code before adding an explanation.
+
+- Internal architecture and implementation notes in `docs/` capture decisions and their reasons, constraints spanning components, and implementation traps that are hard to discover from source. Before adding text, ask what a maintainer would get wrong without it. If reading the relevant code answers the question, leave it out.
+- Do not document every feature, enumerate fields or methods, narrate control flow, maintain source-file catalogs, or append PR summaries. Types, tests and code already record the implementation.
+- Keep local implementation rationale in a nearby code comment. Use an internal doc when the reasoning crosses component boundaries or needs context the code cannot carry well. Link to the relevant source instead of copying it.
+- When a documented decision or constraint changes, rewrite or remove the affected text instead of appending another account of the new behavior. A new internal page needs a distinct, durable reason to exist.
+- Keep contributor procedures for setup, testing, release publishing and debugging in `docs/`; these remain useful even when the implementation is readable. Instructions for operating an installed Widefleet instance belong in `apps/docs/docs/`.
+
 ## Documentation quality
 
 - Separate tutorials, task guides, explanations and reference; link related pages.
 - Start with the goal and prerequisites; end with an observable result and a clear next step.
 - Use plain language and small, complete, runnable examples. Verify examples against the documented version.
 - Cover common failures and recovery. Keep navigation predictable and advanced details easy to find.
+
+## Documentation pull requests and releases
+
+- Keep documentation content changes in separate PRs from implementation. Corrections and improvements for already released behavior target `main` and can merge without a software release.
+- Prepare public documentation for new or changed behavior alongside the feature in a separate draft PR. Link the implementation and docs PRs in both descriptions, and record which unreleased changes block publication.
+- During development, base the docs PR on the feature branch so its diff contains only documentation changes. Do not merge it into the feature branch.
+- After the feature is squash-merged, rebase only the docs commits onto `main` and verify the diff contains only documentation changes.
+- Keep release-dependent docs in draft until a published release includes all documented changes and the required artifacts are available. A feature merge, tag or draft release alone does not unblock publication.
+- After every release, review open docs PRs against the released code and artifacts. Update examples and version references, validate the docs, and merge eligible PRs through the normal review and production-approval process. Leave PRs for unreleased changes in draft.
 
 ## Control-plane UI
 

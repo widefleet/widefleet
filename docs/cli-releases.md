@@ -1,6 +1,6 @@
 # CLI release publishing
 
-Pushing a stable `vVERSION` tag to `widefleet/widefleet` starts **Publish Widefleet**. The workflow prepares a draft GitHub Release, builds and tests the CLI and images, publishes to npm and Docker Hub, and publishes the completed GitHub Release last. The npm package is `widefleet` at `https://registry.npmjs.org`. Installation and app development are documented in the [user guide](https://widefleet.com/docs/getting-started/installation).
+Publish the CLI and platform images from a checked commit on `main`. Pushing a stable `vVERSION` tag starts [Publish Widefleet](../.github/workflows/publish-cli.yaml), which publishes to npm and Docker Hub before making the completed GitHub Release public. Configure the npm and GitHub destinations below and [Docker Hub publishing](container-releases.md#configure-docker-hub-publishing) first. App creators use the [installation guide](https://widefleet.com/docs/getting-started/installation).
 
 ## Configure npm publishing
 
@@ -28,7 +28,7 @@ The publishing job uses OpenID Connect and has `id-token: write`. It does not ne
 
 ## Configure GitHub Releases
 
-Enable **Settings → General → Releases → Enable release immutability** after the release workflows are on `main`. All downloads are uploaded and verified while the release is a draft. Publishing then locks its assets and tag. See [GitHub release immutability](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases).
+Enable **Settings → General → Releases → Enable release immutability**. All downloads are uploaded and verified while the release is a draft. Publishing then locks its assets and tag. See [GitHub release immutability](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases).
 
 ## Publish a version
 
@@ -46,15 +46,19 @@ Enable **Settings → General → Releases → Enable release immutability** aft
 
 Ordinary pushes to `main` and GitHub Release events do not publish packages. Tags outside the `vMAJOR.MINOR.PATCH` format are rejected. Both project versions must match the tag, and its commit must be reachable from `main`. An existing published release is rejected during preparation.
 
-The Linux release job continues to build the CLI and agent in the pinned Debian toolchain. A reusable native workflow builds macOS Apple Silicon, macOS Intel and Windows x64 on matching hosts. Each native package bundles the matching esbuild executable, starter and licenses. Native tests cover CLI operations, macOS/Windows saved logins and concurrent refresh, and package installation from a disposable local registry. The package tests build a generated app and upload it to a local API fixture. Linux/macOS also test launcher signal forwarding and child cleanup; Windows console Ctrl+C requires an interactive check because Node's signal API does not deliver a console event.
+Native packages must be available before the shared launcher, because it selects an exact-version optional dependency. The publisher waits for npm metadata and tarball availability instead of treating upload acceptance as completed publication. Changing the [publication code](../tools/publish-cli.sh) must preserve that ordering and verify the tested bytes.
 
-The Linux release job additionally installs the launcher and its native dependency from the exact local archives for the real deployment suite. Only tested artifacts are passed to publication. The publisher checks every archive and existing immutable version before its first publish, publishes the four native dependencies before the launcher, and verifies npm integrity, repository metadata and a fresh registry installation. npm trusted publishing and provenance remain in `publish-cli.yaml`.
+## Retry a partial publication
 
-npm can accept an upload before its processing finishes. After each publication, the job waits for the exact version in both full and installation metadata and for its tarball to be downloadable. Checks run every 15 seconds for up to two hours per package. Missing versions and temporary network or registry failures are retried; mismatched bytes, repository metadata, and authorization errors fail immediately. The wait never repeats `npm publish`, and the launcher is published only after all native packages are available.
+Publication across GitHub, npm and Docker Hub is not atomic. A failed run can leave some registry artifacts published while the GitHub Release remains in draft. Do not publish the draft manually, move the tag or replace an existing version.
 
-To recover from a failure, including an npm availability timeout, use **Re-run failed jobs** on the original GitHub Actions run once the underlying problem is resolved. The workflow checks out the commit that triggered that run, keeping npm provenance tied to the tested source even if `main` has advanced. An existing npm version is accepted only when its bytes and repository metadata match; it is never overwritten. Changed bytes require a new version and release.
+Resolve the underlying failure, then use **Re-run failed jobs** on the original GitHub Actions run. The workflow uses that run's source commit even if `main` has advanced, keeping provenance tied to the tested source. Existing npm versions and release attachments must match exactly; different bytes require a new version.
 
-All tested npm archives, standalone archives and checksums are attached to the draft alongside the image manifest after both registry jobs succeed. Existing attachments are downloaded and compared before a retry proceeds; they are never overwritten. Actions artifacts are used only to transport the tested files between jobs. A failed run leaves the GitHub Release in draft, although a registry may already contain some artifacts; publication across GitHub, npm and Docker Hub is not atomic. If the final publication succeeds but its response is lost, rerunning the failed job verifies the completed release without modifying its assets.
+If npm accepts an upload but the package is not yet installable, the publisher retries availability checks for up to two hours per package without repeating `npm publish`. An availability timeout can be retried with the same run. Mismatched bytes, repository metadata and authorization errors fail immediately and need investigation. For partially published images, follow [container recovery](container-releases.md#retry-a-partial-publication).
+
+The [final publication step](../tools/publish-github-release.sh) verifies downloads before publishing the draft. If publication succeeds but its response is lost, rerunning the failed job verifies the completed release without modifying its assets.
+
+After publication, review dependent documentation using the [documentation release rules](../AGENTS.md#documentation-pull-requests-and-releases).
 
 ## Build a release locally
 
@@ -76,13 +80,15 @@ one standalone archive, and their SHA-256 files under `.local/releases`:
 | Windows x64         | `widefleet-win32-x64-msvc-VERSION.tgz` | `win32-x64`               |
 
 Standalone files are named `widefleet-cli-VERSION-SUFFIX.tar.gz`. Packaging refuses
-to replace existing output and normalizes archive timestamps and ownership on
-Linux. Packages preserve the starter's hidden configuration, line-ending policy
-and independent lockfile. The release uses the Linux-built launcher for all hosts.
+to replace existing output; use a fresh output directory for a rebuild. Keep the
+starter's hidden configuration and independent lockfile in packaged fixtures.
+The release uses the Linux-built launcher for all hosts.
 
 To package an existing native binary, pass `--binary PATH --output DIRECTORY`.
 Run the package suite with `RUN_CLI_PACKAGE_TESTS=1 pnpm test:cli-package`; set
 `CLI_PACKAGE_DIR` when using another output directory. The required **Check**
-workflow runs the native suite on all four hosts.
+workflow runs the native suite on all four hosts. Windows console Ctrl+C still
+requires an interactive check because Node's signal API does not deliver a console
+event.
 
 Run the Linux deployment suite with `CLI_NPM_PACKAGE=/absolute/path/to/widefleet-VERSION.tgz RUN_RUNTIME_TESTS=1 pnpm exec vitest run apps/control-plane/tests/runtime/deployment.test.ts`. Keep the matching Linux native archive and both checksums beside the launcher archive. The suite serves these files from a disposable local registry; it never substitutes a published npm version. It also accepts `CLI_RELEASE_ARCHIVE` for the manual archive installation. These tests use local services and synthetic accounts.

@@ -1,93 +1,55 @@
 # Documentation website
 
-Build, preview and maintain the documentation site. Run commands from the repository root. For contributor setup, see [development](development.md).
+Build, preview and maintain the public documentation site. Use the toolchain from [development](development.md) and run commands from the repository root. Content placement and release timing follow the [documentation rules](../AGENTS.md#documentation-scope).
 
 ## Local development
 
-The Blume documentation website lives in `apps/docs`. Its `docs/` directory is the
-canonical source for app creators and installation operators, including self-hosting,
-upgrades, backups and reference material. The repository-root `docs/` contains only
-contributor guidance. No content is synchronized between these directories.
+The website source is `apps/docs/docs/`. Use site routes in published pages, public `https://widefleet.com/docs/...` URLs in repository guides, and each section's `meta.ts` for navigation. When moving pages, update incoming links and packaging inputs: [CLI packaging](../tools/package-cli.ts) reads the public CLI installation guide to generate the release README.
 
-Use site routes in published pages and `https://widefleet.com/docs/...` links from
-repository documents. Keep navigation in each section's `meta.ts`. Validate links
-and build after moving pages; `tools/package-cli.ts` also reads the public CLI
-installation guide to generate the README included in CLI releases.
-The public documentation URL is `https://widefleet.com/docs`. Start the docs at
-`http://localhost:4321/docs`:
+Start the docs at `http://localhost:4321/docs`:
 
 ```sh
 pnpm --filter @platform/docs run dev
 ```
 
-The development server keeps pages, JavaScript, styles, fonts and hot reload
-under `/docs`. A separate website dev server can proxy that prefix, including
-WebSockets, to `http://127.0.0.1:4321` without rewriting paths. Start both servers
-separately. The dev-only integration in `apps/docs/blume.config.ts` lets Vite
-handle the prefix once and preserves the public base for component URLs;
-production builds keep Blume's normal `/docs` configuration.
+The dev server keeps pages, assets and hot reload under `/docs`. An optional website dev server can proxy that prefix, including WebSockets, to `http://127.0.0.1:4321` without rewriting paths. Start the servers separately. The [development integration](../apps/docs/blume.config.ts) preserves the public base for component URLs while letting Vite handle the prefix once; keep this distinction when upgrading Blume.
 
-`DOCS_WEBSITE_URL` controls the website, logo and legal-page destinations. It
-defaults to `http://localhost:5178` in development and `https://widefleet.com` in
-production builds. Override it when using another local website origin. The
-separate **Docs** label returns to `/docs`. The logo stays black in both themes,
-with a light background in dark mode.
+`DOCS_WEBSITE_URL` controls website and legal-page destinations. It defaults to `http://localhost:5178` in development and `https://widefleet.com` in production builds. Override it for another local website origin.
 
-For a local production preview without analytics:
+To validate content and preview production routing without analytics:
 
 ```sh
+pnpm --filter @platform/docs run validate
 DOCS_POSTHOG_KEY= pnpm --filter @platform/docs run build
 pnpm --filter @platform/docs run preview --port 4321
 ```
 
-The build writes `apps/docs/dist`. The preview command prepares the assets and
-uses local Wrangler, matching production routing and headers without deploying.
-Stop the development server before building or
-starting a preview on the same port. To verify a build while the docs dev server
-is running, use `pnpm --filter @platform/docs run build --isolated`; its output
-goes to `.blume-verify/dist`. Generated discovery files are available in the
-production preview after a build; the dev server does not emit them.
+The preview uses local Wrangler and the build in `apps/docs/dist`. Stop the dev server before building or previewing on the same port. To check content while the dev server is running, use `pnpm --filter @platform/docs run build --isolated`; output goes to `.blume-verify/dist`. Use a normal build and production preview to inspect generated discovery files, which the dev server and isolated build omit.
 
 ## Hosting under /docs
 
-Blume uses `deployment.site: "https://widefleet.com"` and
-`deployment.base: "/docs"`. This prefixes pages, assets, canonical URLs,
-Markdown, search, the docs JSON API, sitemap and generated agent resources.
-`apps/docs/wrangler.jsonc` owns the public routes for the `widefleet-docs` static
-asset Worker. Cloudflare sends `/docs` and `/docs/*`, plus the five root discovery
-aliases below, directly to this Worker. The website serves the remaining paths
-on `widefleet.com` and links to `/docs`; no website proxy or service binding is
-required for production docs traffic.
+The [Blume configuration](../apps/docs/blume.config.ts) sets the public origin and `/docs` base. The [Wrangler configuration](../apps/docs/wrangler.jsonc) owns the docs Worker's routes. The website retains its `widefleet.com` Custom Domain and proxied DNS record; the docs routes take precedence only for their reserved prefixes. Production docs traffic needs no website proxy or service binding.
 
-The routes use the exact `widefleet.com` hostname. Their trailing `*` also matches
-query strings, including `/docs?source=website` and `/SKILL.md?version=1`.
-These six prefixes are reserved for the docs: suffixes such as `/docs-missing`
-also reach the docs Worker and return its 404. Unrelated `/.well-known/*` paths
-remain with the website. See [Cloudflare's route matching rules](https://developers.cloudflare.com/workers/configuration/routing/routes/#matching-behavior).
+Keep the hostname exact. Route wildcards include query strings and also reserve suffixes such as `/docs-missing`, which must reach the docs Worker and return its 404. Unrelated `/.well-known/*` paths remain with the website. The separate `docs.widefleet.com` Custom Domain is for docs Previews; `workers.dev` URLs are disabled.
 
-Keep the website's existing `widefleet.com` Custom Domain and proxied DNS record.
-The docs routes take precedence for their paths without taking ownership of the
-whole hostname. See [Cloudflare's Routes documentation](https://developers.cloudflare.com/workers/configuration/routing/routes/#background).
-The separate `docs.widefleet.com` Custom Domain serves only docs Previews;
-`workers.dev` URLs remain disabled.
+Astro's base setting changes URLs without nesting build output. The [asset preparation script](../apps/docs/scripts/prepare-assets.ts) therefore mounts the build beneath `/docs` and keeps response rules at the asset root. Root discovery aliases need their own response headers because their rewrites preserve the requested URL. New aliases require matching changes to the explicit Wrangler routes, asset preparation and [routing tests](../apps/docs/tests/routing.test.ts).
 
-For an explicitly approved manual deployment, authenticate Wrangler and run:
+The website owns the origin's `/robots.txt`, `/llms.txt` and sitemap index, which includes `/docs/sitemap.xml`. The docs build must not introduce a competing robots policy. Generated discovery content belongs to the docs build; do not copy it into the website repository. Its OpenAPI document describes the documentation API, not Widefleet's platform API.
+
+When replacing website forwarding with these routes, deploy and verify the docs routes first, including `/docs`, assets, `/SKILL.md` and the root discovery manifests. Only then remove the website's forwarding hook, alias rewrites and `DOCS` bindings. Website Preview links must point to production docs or a selected docs Preview; they cannot assume their own host serves `/docs`.
+
+## Deployment and Previews
+
+Keep routing and hosting changes in versioned configuration and use the approved merge/deploy process. For an explicitly approved manual production deployment, authenticate Wrangler, rebuild without local URL overrides, then run:
 
 ```sh
 pnpm --filter @platform/docs run build
 pnpm --filter @platform/docs run deploy
 ```
 
-`deploy` first runs `prepare:deploy`, which copies the existing build into
-`.wrangler/docs-assets/docs` and moves Cloudflare response rules to the asset
-root. This is necessary because Astro's base option changes URLs without nesting
-its output directory. It also writes `_redirects` rules that serve the root
-discovery aliases from their generated `/docs` resources with status 200, keeping
-the requested URL. Alias response headers are copied from the generated rules.
-Wrangler then deploys the prepared assets. Rebuild without local URL overrides
-before deployment. There are no compatibility redirects for earlier URLs.
+Deployment commands prepare the existing build before uploading it. They do not rebuild or change embedded analytics settings.
 
-For a Preview, build without analytics before deploying:
+For a docs Preview without analytics:
 
 ```sh
 DOCS_POSTHOG_KEY= pnpm --filter @platform/docs run build
@@ -95,38 +57,11 @@ pnpm --filter @platform/docs run deploy:preview
 pnpm --filter @platform/docs run deploy:preview --name review
 ```
 
-`deploy:preview` prepares the existing build and runs `wrangler preview`. The
-Preview name defaults to the current Git branch; `--name review` serves the docs
-at `https://review.docs.widefleet.com/docs`. The `previews` block inherits the
-static assets configuration. Apply the custom domain configuration through the
-approved production deployment process before deploying Previews, and ensure the
-certificate covers `*.docs.widefleet.com`. For public Previews without a login,
-Cloudflare Access policies must also allow them; this configuration does not
-change Access policies. `prepare:deploy` adds a hostname-specific `X-Robots-Tag: noindex` header
-for `*.docs.widefleet.com`, including named and unique deployment URLs. Production
-requests at `widefleet.com/docs` do not match this rule. See
-[Cloudflare's Preview custom domain documentation](https://developers.cloudflare.com/workers/previews/custom-domains/).
+The Preview name defaults to the current Git branch; `--name review` serves `https://review.docs.widefleet.com/docs`. Apply the custom-domain configuration through the approved production deployment process first, ensure the certificate covers `*.docs.widefleet.com`, and configure Cloudflare Access to allow public Previews if desired. Deploying the project does not change Access policies.
 
-For local Cloudflare testing, prepare the assets and serve the internal Worker:
+The prepared assets add `X-Robots-Tag: noindex` only on `*.docs.widefleet.com`, including named and unique deployment URLs. Preserve that hostname scope so production docs remain indexable. Each docs Preview serves its own discovery aliases; production zone routes do not target Preview deployments.
 
-```sh
-pnpm --filter @platform/docs run prepare:deploy
-pnpm --filter @platform/docs exec wrangler dev --port 8788
-```
-
-Open `http://localhost:8788/docs`, `/SKILL.md` or one of the discovery aliases.
-The docs Worker serves these URLs on its own. A website development server can
-optionally proxy these paths to this local origin.
-
-The routing regression test uses local Workers and synthetic assets. It checks
-the actual Wrangler routes against a separate website fixture, root aliases,
-response headers, query strings and Preview indexing rules:
-
-```sh
-pnpm exec vitest run apps/docs/tests/routing.test.ts
-```
-
-In Cloudflare Workers Builds, keep the root directory at `/` and set:
+In Cloudflare Workers Builds, keep the root directory at `/` and use:
 
 | Setting         | Command                                           |
 | --------------- | ------------------------------------------------- |
@@ -134,112 +69,48 @@ In Cloudflare Workers Builds, keep the root directory at `/` and set:
 | Deploy command  | `pnpm --filter @platform/docs run deploy`         |
 | Preview command | `pnpm --filter @platform/docs run deploy:preview` |
 
-This builds once before the selected deployment command runs. Set
-`DOCS_POSTHOG_KEY` to an empty string in the Preview build environment to disable
-analytics. Deployment commands do not change analytics in already-built files.
+Set `DOCS_POSTHOG_KEY` to an empty string in the Preview build environment. This builds once before the selected deployment command runs.
 
-Each docs branch Preview serves its own build, including the root discovery
-aliases. The production zone routes do not target Preview deployments or website
-Preview hosts. Independently hosted website Previews should link to
-`https://widefleet.com/docs` or a selected docs Preview URL instead of assuming
-their own `/docs` path serves documentation.
+For local Cloudflare routing checks against an existing build:
 
-## Switching from a website proxy
+```sh
+pnpm --filter @platform/docs run prepare:deploy
+pnpm --filter @platform/docs exec wrangler dev --port 8788
+```
 
-Deploy this docs configuration through the approved production deployment
-process first. Its routes take precedence over the website's Custom Domain, so
-production docs traffic no longer enters the website Worker. Verify `/docs`,
-its assets, `/SKILL.md` and the four root discovery manifests on `widefleet.com`.
+Open `http://localhost:8788/docs` and `http://localhost:8788/SKILL.md`. The docs Worker serves them independently of the website.
 
-Then remove the website's docs forwarding hook, root-alias rewrites and `DOCS`
-service bindings, including the binding in its Preview configuration. Update
-website Preview links to the production docs URL or a selected docs Preview URL.
-The website keeps its `/docs` links in production, `/robots.txt`, `/llms.txt`,
-sitemap index and shared consent behavior. Existing website Previews continue
-using their old binding until that separate cleanup is deployed.
+## Shared analytics consent
 
-## Agent and search discovery
+The website and docs share the host-only `widefleet-consent` cookie: `granted` or `denied`, valid for 180 days, `Path=/`, `SameSite=Lax`, and `Secure` on HTTPS. This lets readers answer once across the website and `/docs`. Localhost shares the choice across ports; other subdomains, including Previews, have independent cookies. Keep the preference contract and banner copy consistent across both sites.
 
-The build publishes `/docs/SKILL.md`, `/docs/llms.txt`, `/docs/llms-full.txt`,
-per-page Markdown, `/docs/api/docs/*`, `/docs/openapi.json`,
-`/docs/agent-readability.json` and `/docs/.well-known/*`. The OpenAPI document
-describes the documentation API, not Widefleet's platform API.
+The [consent bridge](../apps/docs/public/consent.js) must reconcile that cookie before PostHog initializes. Local storage alone never authorizes analytics; an absent or expired preference asks again. Withdrawal must stop capture before Blume reloads, and open pages must apply changed preferences when they regain focus or visibility.
 
-The build integration in `apps/docs/blume.config.ts` renames Blume's generated
-skill to `dist/SKILL.md`. The deployed filename is also `SKILL.md`; the lowercase
-file is not retained. Skill content and discovery metadata remain generated by Blume.
+The [Blume patch](../patches/blume@2.1.1.patch) allows the preference bridge to run before analytics consent. That exception is only for reading and saving the preference, never for sending analytics. Preserve the ordering and host-only analytics cookies when updating Blume or PostHog.
 
-The docs deployment also owns these origin-level aliases:
+Analytics settings are embedded at build time. `DOCS_POSTHOG_KEY` overrides the configured public browser project token; never use a personal API key. An explicitly empty key removes analytics and the consent banner. The dev script always supplies an empty key. For local production previews, disable analytics or use a synthetic test project's token.
 
-| Public URL                             | Generated resource                          |
-| -------------------------------------- | ------------------------------------------- |
-| `/SKILL.md`                            | `/docs/SKILL.md`                            |
-| `/.well-known/agent-skills/index.json` | `/docs/.well-known/agent-skills/index.json` |
-| `/.well-known/ai-catalog.json`         | `/docs/.well-known/ai-catalog.json`         |
-| `/.well-known/ard.json`                | `/docs/.well-known/ard.json`                |
-| `/.well-known/api-catalog`             | `/docs/.well-known/api-catalog`             |
+See the [environment template](../apps/docs/.env.example) for URL and ingestion-host overrides. Blume loads `.env` and `.env.local` from the docs directory and its ancestors to the repository root; process environment values take precedence.
 
-`apps/docs/scripts/prepare-assets.ts` creates the asset rewrites and preserves
-their content types and CORS headers. Generated manifests already reference the
-canonical `/docs` resource URLs; no content rewriting or cross-repository file
-copying is needed. When adding an alias, update both the explicit Wrangler route
-and the preparation script, then extend the routing test.
+## Verify maintenance changes
 
-The public website manages the origin's `/robots.txt`, `/llms.txt` and a sitemap
-index that includes `/docs/sitemap.xml`. The docs build does not generate a second
-robots policy below `/docs`.
+For content moves, run validation and a build as shown above. For routing or asset preparation changes:
 
-PostHog uses the public browser project token in `apps/docs/blume.config.ts`.
-Override it with `DOCS_POSTHOG_KEY` in the build environment; personal API keys
-must never be used here. The ingestion host is `https://eu.i.posthog.com`.
-`apps/docs/.env.example` documents the key override. Blume loads `.env` and
-`.env.local` from the docs directory and its ancestors up to the repository root;
-variables already set in the process environment take precedence.
+```sh
+pnpm exec vitest run apps/docs/tests/routing.test.ts
+pnpm --filter @platform/docs run build
+pnpm --filter @platform/docs run typecheck
+```
 
-PostHog loads only after the reader selects **Allow**. Before a choice and after
-**Decline**, there are no PostHog SDK loads, pageviews or interaction requests.
-After consent, pageviews (including client navigation), clicks, code copies and
-search query text can be captured. Withdrawal opts out before Blume reloads the
-page, clearing SDK persistence and stopping analytics. Session recordings and
-person profiles are disabled. The footer's **Cookie settings** link lets readers
-change their choice. Cookieless tracking is not enabled by this configuration.
+The routing test uses local Workers and synthetic assets to check website/docs ownership, root aliases, response headers and Preview indexing. Run formatting and type-aware lint for changed code as required by the [contributor checks](../AGENTS.md#checks).
 
-The website and docs share the `widefleet-consent` preference cookie:
-`granted` or `denied`, valid for 180 days, `Path=/`, `SameSite=Lax`, and `Secure`
-on HTTPS. It is host-only: the website and `/docs` share the preference through
-`Path=/`, so the reader answers once. Both analytics integrations also use
-host-only cookies (`cross_subdomain_cookie: false`).
-`apps/docs/public/consent.js` reconciles this preference with Blume before
-PostHog initializes. The versioned `patches/blume@2.1.1.patch` lets scripts marked
-`data-blume-consent="essential"` run before analytics consent; this is used only
-to read and save the preference. It sends no analytics.
+For consent or Blume patch changes:
 
-Local storage alone never authorizes analytics, and an expired cookie asks again. Open pages apply
-changes when they regain focus or visibility. Cookie settings reopens the same
-banner. Localhost shares the choice across ports. Other subdomains, including
-previews, have independent cookies. Keep the preference
-contract and banner copy consistent across the public website and docs.
+```sh
+pnpm exec vitest run apps/docs/tests/consent.test.ts
+pnpm exec playwright test --config apps/docs/playwright.config.ts
+```
 
-Set `DOCS_POSTHOG_KEY` to an empty string to build without PostHog or the consent
-banner. The docs `dev` script sets an empty key, disabling both analytics and the
-consent banner even when a key is supplied by the shell or an `.env` file.
-Local production previews include analytics unless disabled at build time, so disable
-analytics or override the key with a test project's token before previewing.
-Analytics configuration is embedded in the static build; changing it requires
-rebuilding the docs.
+The browser checks build with a synthetic project token and intercept PostHog event requests locally. They download the public SDK; set `DOCS_POSTHOG_SDK_FIXTURE` to an existing SDK file to avoid that download. `DOCS_POSTHOG_HOST` can point to a local test receiver.
 
-Run the docs consent browser checks with
-`pnpm exec playwright test --config apps/docs/playwright.config.ts`. They build
-with a synthetic project token, load the public PostHog SDK and intercept all
-PostHog browser requests locally. To use an already downloaded SDK file instead,
-set `DOCS_POSTHOG_SDK_FIXTURE` to its path.
-
-Run storage and migration regression checks with
-`pnpm exec vitest run apps/docs/tests/consent.test.ts`. `DOCS_POSTHOG_HOST` overrides the
-EU ingestion host for a local test receiver. Use a synthetic project token when
-testing analytics.
-
-The sidebar uses Blume's collapsible groups: groups start closed, with the current
-page's parent expanded. The Blume patch also places the header CTA after search
-and the theme toggle, keeping visual and keyboard order aligned. Preserve this
-order when updating Blume.
+Before publication, confirm that the preview serves the changed pages and discovery endpoints with the expected headers, and that consent changes produce no analytics before consent or after withdrawal. Follow the [documentation release rules](../AGENTS.md#documentation-pull-requests-and-releases) for publication timing.

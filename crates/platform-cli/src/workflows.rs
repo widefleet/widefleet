@@ -54,6 +54,15 @@ enum Command {
     Restart {
         workflow: String,
         id: String,
+        /// Restart from this step, retaining earlier step results.
+        #[arg(long)]
+        from_step_name: Option<String>,
+        /// One-based occurrence of the step name and type (default: 1).
+        #[arg(long, requires = "from_step_name", value_parser = clap::value_parser!(u64).range(1..=9_007_199_254_740_991))]
+        from_step_count: Option<u64>,
+        /// Step type to select (default: do).
+        #[arg(long, requires = "from_step_name", value_parser = ["do", "sleep", "waitForEvent"])]
+        from_step_type: Option<String>,
     },
     Terminate {
         workflow: String,
@@ -140,8 +149,25 @@ pub async fn run(api: &Api, credentials: &auth::Credentials, options: Options) -
         Command::Resume { workflow, id } => {
             value!({ "action": "resume", "workflow": workflow, "id": id })
         }
-        Command::Restart { workflow, id } => {
-            value!({ "action": "restart", "workflow": workflow, "id": id })
+        Command::Restart {
+            workflow,
+            id,
+            from_step_name,
+            from_step_count,
+            from_step_type,
+        } => {
+            let mut request = value!({ "action": "restart", "workflow": workflow, "id": id });
+            if let Some(name) = from_step_name {
+                let mut from = value!({ "name": name });
+                if let Some(count) = from_step_count {
+                    from["count"] = value!(count);
+                }
+                if let Some(kind) = from_step_type {
+                    from["type"] = value!(kind);
+                }
+                request["from"] = from;
+            }
+            request
         }
         Command::Terminate { workflow, id } => {
             value!({ "action": "terminate", "workflow": workflow, "id": id })

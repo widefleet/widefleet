@@ -1369,12 +1369,20 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     },
   );
 
-  it("authorizes Workflow queries and mutations and completes jobs without changing deployment state", async () => {
-    const app = await createApp("workflow-management");
+  it.each(["create", "restart"])("authorizes Workflow %s through agent jobs", async (action) => {
+    const app = await createApp(`workflow-management-${action}`);
     const base = `/apps/${app.id}/workflows`;
 
     const input = {
-      request: { action: "create", workflow: "example", id: "run-1", params: { value: 1 } },
+      request:
+        action === "create"
+          ? { action, workflow: "example", id: "run-1", params: { value: 1 } }
+          : {
+              action,
+              workflow: "example",
+              id: "run-1",
+              from: { name: "aggregate", count: 2, type: "do" },
+            },
     };
 
     expect((await json(base, "POST", input, outsiderHeaders, crypto.randomUUID())).status).toBe(
@@ -1437,7 +1445,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     expect(
       (await json(`${base}/operations/${requestId}`, "GET", undefined, outsiderHeaders)).status,
     ).toBe(404);
-    const other = await createApp("workflow-elsewhere");
+    const other = await createApp(`workflow-elsewhere-${action}`);
     expect((await json(`/apps/${other.id}/workflows/operations/${requestId}`, "GET")).status).toBe(
       404,
     );
