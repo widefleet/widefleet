@@ -103,7 +103,7 @@ POST bodies contain a `request` object, for example `{"request":{"action":"creat
 
 ## Restart from a step
 
-**Unreleased:** Selective restart requires CLI, control-plane and app-runtime releases containing this feature. It is not available in the currently published releases.
+Selective restart requires CLI and control plane 0.3.2 or newer and app runtime 0.2.2 or newer. Existing fleets retain their selected runtime when the control plane is upgraded; an administrator must [update the app runtime](/reference/runtime) with `widefleet runtime update 0.2.2`. Confirm the active version with `widefleet runtime status` before using selective restart.
 
 Use selective restart to repeat part of an instance while retaining earlier step results. The target must already exist in that instance's execution history. These examples use the Workflow definition and JSON files above; create a separate instance so that it has not been deleted by the lifecycle example:
 
