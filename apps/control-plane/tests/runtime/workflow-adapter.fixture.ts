@@ -45,6 +45,29 @@ export class AppWorkflow extends WorkflowEntrypoint {
       await step.sleepUntil('nap', Date.now() + 60000);
       return step.do('finish', () => record('finish', true));
     }
+    if (mode === 'restart-completed-until') {
+      await step.do('first', () => record('first', null));
+      const deadline = Date.now() + 300;
+      await step.sleepUntil('nap', deadline);
+      return step.do('finish', () => record('finish', deadline));
+    }
+    if (mode === 'restart-configuration') {
+      await step.do('first', () => record('first', null));
+      const { count } = await (await fetch(event.payload.url + '?' + new URLSearchParams({ id, label: 'configuration' }))).json();
+      return step.do('configured', { retries: { limit: count - 1, delay: 1 } }, async ctx => {
+        await record('attempt-' + ctx.attempt, null);
+        if (ctx.attempt === 1) throw new Error('synthetic outage');
+        return ctx.attempt;
+      });
+    }
+    if (mode === 'restart-event-configuration') {
+      await step.do('first', () => record('first', null));
+      const { count } = await (await fetch(event.payload.url + '?' + new URLSearchParams({ id, label: 'configuration' }))).json();
+      const result = await step.waitForEvent('configured', {
+        type: count === 1 ? 'continue' : 'changed', timeout: '5 minutes',
+      });
+      return step.do('finish', () => record('finish', result.type));
+    }
     if (mode === 'restart-name') {
       await step.do('first', () => record('first', null));
       return step.do(event.payload.name, () => this.env.OBSERVE.record(id, 'named'));
@@ -205,7 +228,7 @@ export default { async fetch(request, env) {
   }
   const instance = await env.WORKFLOW.get(id);
   if (url.pathname === '/status') return Response.json(await instance.status());
-  if (url.pathname === '/continue') { await instance.sendEvent({ type: 'continue', payload: { add: 1 } }); return Response.json({ ok: true }); }
+  if (url.pathname === '/continue') { await instance.sendEvent({ type: url.searchParams.get('type') ?? 'continue', payload: { add: 1 } }); return Response.json({ ok: true }); }
   if (url.pathname === '/pause') { await instance.pause(); return Response.json({ ok: true }); }
   if (url.pathname === '/resume') { await instance.resume(); return Response.json({ ok: true }); }
   if (url.pathname === '/terminate') { await instance.terminate(); return Response.json({ ok: true }); }

@@ -244,8 +244,10 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
 
         if (from) {
           try {
+            // Each logical operation starts with a native do checkpoint that
+            // captures its parameters before the operation itself is scheduled.
             await instance.restart({
-              from: { name: await nativeStepName(stepId(from)), type: from.type },
+              from: { name: await nativeStepName(stepId(from)), type: "do" },
             });
           } catch (cause) {
             if (cause instanceof Error && cause.message.includes("restart() could not find"))

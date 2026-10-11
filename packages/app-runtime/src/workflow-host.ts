@@ -17,6 +17,7 @@ import {
   type AppEvent,
   type Reply,
   type ReplayCommand,
+  type Command,
   type StepContext,
 } from "./workflow-protocol.ts";
 
@@ -84,7 +85,16 @@ export class AppWorkflow extends WorkflowEntrypoint<ParentEnvironment, Start> {
     let runner: Rpc.Stub<Session> | undefined;
     let synchronized = 0;
     const history: { results: Reply[]; commands: ReplayCommand[] }[] = [];
+    const commands = new Map<string, Extract<Command, { id: string }>>();
     let synchronization = Promise.resolve();
+
+    const remember = (results: Reply[], emitted: Command[]) => {
+      for (const result of results) commands.delete(result.id);
+
+      for (const command of emitted) {
+        if ("id" in command) commands.set(command.id, command);
+      }
+    };
 
     const ensure = async () => {
       synchronization = synchronization.then(async () => {
@@ -101,7 +111,10 @@ export class AppWorkflow extends WorkflowEntrypoint<ParentEnvironment, Start> {
         while (synchronized < history.length) {
           const turn = history[synchronized++];
 
-          if (turn) await runner.advance(turn.results, turn.commands);
+          if (turn) {
+            const replayed = await runner.advance(turn.results, turn.commands);
+            remember(turn.results, replayed.commands);
+          }
         }
       });
       await synchronization;
@@ -135,7 +148,9 @@ export class AppWorkflow extends WorkflowEntrypoint<ParentEnvironment, Start> {
               ])
             : reply;
 
-          const turn = await target.advance(selected === null ? [] : [selected]);
+          const results = selected === null ? [] : [selected];
+          const turn = await target.advance(results);
+          remember(results, turn.commands);
           synchronized = history.length + 1;
 
           return {
@@ -143,7 +158,11 @@ export class AppWorkflow extends WorkflowEntrypoint<ParentEnvironment, Start> {
             commands: await Promise.all(
               turn.commands.map(async (command) =>
                 "id" in command
-                  ? { ...command, nativeName: await nativeStepName(command.id) }
+                  ? {
+                      kind: command.kind,
+                      id: command.id,
+                      nativeName: await nativeStepName(command.id),
+                    }
                   : command,
               ),
             ),
@@ -176,11 +195,31 @@ export class AppWorkflow extends WorkflowEntrypoint<ParentEnvironment, Start> {
       let turn = await advance(null);
 
       for (;;) {
-        for (const command of turn.commands) {
-          if (command.kind === "complete") return command.value;
+        for (const recorded of turn.commands) {
+          if (recorded.kind === "complete") return recorded.value;
 
-          if (command.kind === "error") throw restore(command.error);
-          const name = command.nativeName;
+          if (recorded.kind === "error") throw restore(recorded.error);
+
+          // Restart at preparation so parameters such as Date.now() + delay are
+          // recomputed. Ordinary recovery retains this checkpoint's parameters.
+          // Prepare and register each operation before preparing its next sibling
+          // so restarting a parallel step retains earlier siblings' results.
+          const command = await step.do(
+            recorded.nativeName,
+            { timeout: 60000, retries: { limit: 0, delay: 0 } },
+            async () => {
+              await ensure();
+
+              const command = commands.get(recorded.id);
+
+              if (!command || command.kind !== recorded.kind)
+                throw new Error("Missing replayed Workflow command");
+
+              return command;
+            },
+          );
+
+          const name = `execute/${recorded.nativeName}`;
 
           const execute = async () => {
             switch (command.kind) {

@@ -203,7 +203,7 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
         export class Gateway extends RuntimeGateway {
           async fetch(request) {
             if (new URL(request.url).origin !== ${JSON.stringify(delayedOrigin)}) return super.fetch(request);
-            if (new URL(request.url).pathname === '/reorder') return fetch(${JSON.stringify(observeOrigin)} + '/reorder' + new URL(request.url).search);
+            if (['/reorder', '/record'].includes(new URL(request.url).pathname)) return fetch(${JSON.stringify(observeOrigin)} + new URL(request.url).pathname + new URL(request.url).search);
             await new Promise(resolve => setTimeout(resolve, 100));
             return new Response(new ReadableStream({ start(controller) {
               controller.enqueue(new TextEncoder().encode('{"ready":'));
@@ -552,6 +552,80 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
           output: { name: "shared", count: 3 },
         });
       },
+    );
+
+    it("recomputes the deadline when restarting a completed sleepUntil", async () => {
+      const id = await create("restart-completed-until");
+      await status(id, "complete");
+      const restarted = Date.now();
+      await call("restart", id, {
+        options: JSON.stringify({ from: { name: "nap", type: "sleep" } }),
+      });
+      const result = z.object({ output: z.number() }).parse(await status(id, "complete"));
+      expect(result.output).toBeGreaterThanOrEqual(restarted + 300);
+      expect(Date.now() - restarted).toBeGreaterThanOrEqual(300);
+      expect(labels(id)).toEqual(["first", "finish", "finish"]);
+    });
+
+    it("retains a fixed sleepUntil deadline returned by an earlier step", async () => {
+      const id = await create("sleep");
+      await status(id, "complete");
+      await call("restart", id, {
+        options: JSON.stringify({ from: { name: "until", type: "sleep" } }),
+      });
+
+      const result = z
+        .object({ error: z.object({ message: z.string() }) })
+        .parse(await status(id, "errored"));
+
+      expect(result.error.message).toContain("needs a future timestamp");
+      expect(labels(id)).toEqual(["first", "finish"]);
+    });
+
+    it("recomputes retry configuration when restarting an errored step", async () => {
+      const id = await create("restart-configuration", { url: `${delayedOrigin}/record` });
+      await status(id, "errored");
+      expect(labels(id)).toEqual(["first", "configuration", "attempt-1"]);
+      await call("restart", id, {
+        options: JSON.stringify({ from: { name: "configured" } }),
+      });
+      expect(await status(id, "complete")).toMatchObject({ output: 2 });
+      expect(labels(id).filter((label) => label !== "configuration")).toEqual([
+        "first",
+        "attempt-1",
+        "attempt-1",
+        "attempt-2",
+      ]);
+    });
+
+    it.each([false, true])(
+      "refreshes event options only for a selective restart after a crash: %s",
+      async (restart) => {
+        const id = await create("restart-event-configuration", { url: `${delayedOrigin}/record` });
+        await status(id, "waiting");
+        await stop(true);
+        await start();
+
+        if (restart) {
+          await call("restart", id, {
+            options: JSON.stringify({ from: { name: "configured", type: "waitForEvent" } }),
+          });
+        }
+
+        await status(id, "waiting");
+        await call("continue", id);
+
+        if (restart) await call("continue", id, { type: "changed" });
+
+        expect(await status(id, "complete")).toMatchObject({
+          output: restart ? "changed" : "continue",
+        });
+        expect(labels(id).filter((label) => label !== "configuration")).toEqual([
+          "first",
+          "finish",
+        ]);
+      },
+      30000,
     );
 
     it("selects sleepUntil as a sleep occurrence while the instance is paused", async () => {
