@@ -1,7 +1,8 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { EventEmitter, once } from "node:events";
 import { and, eq, sql } from "drizzle-orm";
-import { account } from "../src/lib/server/auth-schema.ts";
+import { account, member } from "../src/lib/server/auth-schema.ts";
+import { createRecoveryLink } from "../src/lib/server/recovery.ts";
 import { createIdentityService } from "../src/lib/server/identity.ts";
 import { createAppService } from "../src/lib/server/apps.ts";
 import { createAppAccessService } from "../src/lib/server/app-access.ts";
@@ -208,6 +209,76 @@ describe("Management company groups with Better Auth", () => {
 
     expect(await grant).toMatchObject({ error: { code: "FORBIDDEN" } });
   });
+
+  it.each([403, 503])(
+    "keeps recovery available when Graph returns %s without trusting company groups",
+    async (status) => {
+      const context = await fixture();
+      await environment.database.db
+        .update(member)
+        .set({ role: "admin" })
+        .where(eq(member.userId, context.user.id));
+      const lookup = vi.fn(async () => new Response(null, { status }));
+
+      const identity = createIdentityService(
+        environment.auth,
+        environment.database.db,
+        environment.configuration,
+        lookup,
+      );
+
+      expect((await identity.authenticate(context.request, "platform:read")).isErr()).toBe(true);
+      expect(lookup).toHaveBeenCalledTimes(1);
+      lookup.mockClear();
+
+      const link = new URL(
+        await createRecoveryLink(
+          environment.auth,
+          environment.database.db,
+          environment.configuration,
+          context.user.email,
+        ),
+      );
+
+      const token = new URLSearchParams(link.hash.slice(1)).get("token");
+
+      if (!token) throw new Error("Missing recovery token");
+
+      const response = await environment.auth.api.verifyOneTimeToken({
+        body: { token },
+        asResponse: true,
+      });
+
+      expect(response.status).toBe(200);
+
+      const cookie = response.headers
+        .getSetCookie()
+        .map((value) => value.split(";")[0])
+        .join("; ");
+
+      const request = new Request(`${environment.configuration.PLATFORM_URL}/settings`, {
+        headers: { cookie, origin: environment.configuration.PLATFORM_URL },
+      });
+
+      const principal = (await identity.authenticate(request, "platform:write")).unwrap();
+      expect(principal).toMatchObject({ admin: true, company: undefined });
+      await expect(environment.settings.read(principal)).resolves.toHaveProperty("settings");
+      expect(await appActions(environment.database.db, principal, context.app.id)).not.toContain(
+        "use",
+      );
+      expect(lookup).not.toHaveBeenCalled();
+
+      await environment.database.db
+        .update(member)
+        .set({ role: "member" })
+        .where(eq(member.userId, context.user.id));
+      const demoted = (await identity.authenticate(request, "platform:write")).unwrap();
+      expect(demoted.admin).toBe(false);
+      expect(await appActions(environment.database.db, demoted, context.app.id)).toEqual([]);
+      await expect(environment.settings.read(demoted)).rejects.toMatchObject({ code: "FORBIDDEN" });
+      expect(lookup).not.toHaveBeenCalled();
+    },
+  );
 
   it("fails closed when delegated membership lookup fails", async () => {
     const context = await fixture();

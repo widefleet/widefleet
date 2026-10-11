@@ -48,7 +48,7 @@ struct Target {
     /// Stable SSO group ID.
     #[arg(long, group = "recipient")]
     group: Option<String>,
-    /// Internal member ID, as returned by roles search.
+    /// Internal user ID. For a company subject from roles search, use --person.
     #[arg(long, group = "recipient")]
     member: Option<String>,
 }

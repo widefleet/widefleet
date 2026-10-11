@@ -32,7 +32,7 @@ export const createIdentityService = (
 ) => {
   const memberships = new Map<string, { expiresAt: number; groups: Promise<string[]> }>();
 
-  const resolveUser = (userId: string) =>
+  const resolveUser = (userId: string, recovery = false) =>
     Result.gen(async function* () {
       const [record] = yield* Result.await(
         Result.tryPromise({
@@ -76,7 +76,8 @@ export const createIdentityService = (
       const company = yield* Result.await(
         Result.tryPromise({
           try: async () => {
-            if (!configuration.IDENTITY) return undefined;
+            // Recovery uses the local session and current installation role without an IdP dependency.
+            if (!configuration.IDENTITY || recovery) return undefined;
 
             const [linked] = await database
               .select()
@@ -227,7 +228,7 @@ export const createIdentityService = (
         });
       }
 
-      return resolveUser(session.user.id);
+      return resolveUser(session.user.id, session.session.recovery);
     });
 
   return { authenticate };
