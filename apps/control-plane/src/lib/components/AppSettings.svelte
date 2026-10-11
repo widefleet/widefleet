@@ -31,7 +31,7 @@
             ? "This app is visible in the catalog to all signed-in members."
             : "This app is not listed in the catalog yet."}
         </p>
-        {#if data.access.canManage}<form {...setCatalogListing} class="space-y-3">
+        {#if data.roles.actions.includes("catalog")}<form {...setCatalogListing} class="space-y-3">
             <input {...setCatalogListing.fields.appId.as("hidden", app.id)} />
             <input {...setCatalogListing.fields.search.as("hidden", search)} />
             <input
@@ -56,29 +56,31 @@
         >Open app catalog</a
       >
     </section>{/if}
-  <section class="rounded-xl border border-destructive/25 p-5 sm:p-6">
-    <h2 class="text-destructive flex items-center gap-2 text-sm font-semibold">
-      <Trash2 class="size-4" />Remove app
-    </h2>
-    <p class="text-muted-foreground mt-2 text-sm leading-6">
-      This app, all its previews and their published versions will be removed.
-    </p>
-    <p class="text-muted-foreground mt-2 text-xs leading-6">This action cannot be undone.</p>
-    <details class="mt-5">
-      <summary class="text-sm font-medium">Permanently delete app</summary>
-      <form {...removeApp} class="mt-4 space-y-4">
-        <input {...removeApp.fields.appId.as("hidden", app.id)} /><FormIssues
-          issues={removeApp.fields.allIssues()}
-        /><label class="flex items-start gap-3 text-sm leading-6"
-          ><input
-            {...removeApp.fields.confirmed.as("checkbox")}
-            required
-            class="accent-destructive mt-1 size-4 shrink-0"
-          />I want to permanently delete this app and all its previews.</label
-        ><Button type="submit" variant="destructive" disabled={removeApp.pending > 0}
-          ><Trash2 />{removeApp.pending ? "Requesting deletion …" : "Delete app"}</Button
-        >
-      </form>
-    </details>
-  </section>
+  {#if data.roles.actions.includes("delete")}<section
+      class="rounded-xl border border-destructive/25 p-5 sm:p-6"
+    >
+      <h2 class="text-destructive flex items-center gap-2 text-sm font-semibold">
+        <Trash2 class="size-4" />Remove app
+      </h2>
+      <p class="text-muted-foreground mt-2 text-sm leading-6">
+        This app, all its previews and their published versions will be removed.
+      </p>
+      <p class="text-muted-foreground mt-2 text-xs leading-6">This action cannot be undone.</p>
+      <details class="mt-5">
+        <summary class="text-sm font-medium">Permanently delete app</summary>
+        <form {...removeApp} class="mt-4 space-y-4">
+          <input {...removeApp.fields.appId.as("hidden", app.id)} /><FormIssues
+            issues={removeApp.fields.allIssues()}
+          /><label class="flex items-start gap-3 text-sm leading-6"
+            ><input
+              {...removeApp.fields.confirmed.as("checkbox")}
+              required
+              class="accent-destructive mt-1 size-4 shrink-0"
+            />I want to permanently delete this app and all its previews.</label
+          ><Button type="submit" variant="destructive" disabled={removeApp.pending > 0}
+            ><Trash2 />{removeApp.pending ? "Requesting deletion …" : "Delete app"}</Button
+          >
+        </form>
+      </details>
+    </section>{/if}
 </div>

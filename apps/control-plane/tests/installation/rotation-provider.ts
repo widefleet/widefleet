@@ -9,7 +9,7 @@ import { z } from "zod";
 
 const tlsDirectory = process.env["OIDC_TLS_DIRECTORY"];
 
-const issuer = tlsDirectory ? "https://localhost:4181" : "http://127.0.0.1:4181";
+const issuer = tlsDirectory ? "https://localhost:4182" : "http://127.0.0.1:4182";
 
 const keys = await generateKeyPair("RS256", { extractable: true });
 
@@ -145,4 +145,4 @@ const server = tlsDirectory
     )
   : createServer(listener);
 
-server.listen(4181, "127.0.0.1");
+server.listen(4182, "127.0.0.1");

@@ -211,7 +211,7 @@ export const createTelemetry = (
         const [app] = await database
           .select({ id: apps.id })
           .from(apps)
-          .where(and(eq(apps.id, input.appId), appVisibility(database, principal)))
+          .where(and(eq(apps.id, input.appId), appVisibility(database, principal, "logs")))
           .limit(1);
 
         if (!app) throw new InvalidOperation({ code: "NOT_FOUND", message: "App not found" });

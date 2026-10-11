@@ -26,24 +26,16 @@ pub struct Options {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Show access groups, inheritance and activation for the app and its previews.
+    /// Show access rules, inheritance and activation for the app and its previews.
     Show,
-    /// Replace the app's group list. All previews inherit it automatically.
+    /// Set whether all company SSO users can access the app and its previews.
     Set(Change),
 }
 
 #[derive(Args)]
 struct Change {
-    /// An allowed group ID. Repeat for additional groups; membership in any one suffices.
-    #[arg(
-        long = "group",
-        value_name = "GROUP_ID",
-        required_unless_present = "all_authenticated",
-        conflicts_with = "all_authenticated"
-    )]
-    groups: Vec<String>,
-    /// Allow every company SSO user. Anonymous access remains disabled.
-    #[arg(long)]
+    /// Explicitly allow all company SSO users, or restrict access to assigned app roles.
+    #[arg(long, action = clap::ArgAction::Set, required = true)]
     all_authenticated: bool,
     /// Return after saving, without waiting for the app and published previews.
     #[arg(long)]
@@ -154,10 +146,13 @@ fn output(state: &State, json_output: bool) -> Result<()> {
     } else {
         println!("All existing and new previews inherit these rules automatically.");
     }
-    if state.status.policy.groups.is_empty() {
+    if state.status.policy.all_authenticated {
         println!("All authenticated company SSO users may access the app.");
     } else {
-        println!("Membership in any one of these groups is required:");
+        println!("Access is restricted to assigned people and groups.");
+        for user in &state.status.policy.users {
+            println!("  person: {user}");
+        }
         for group in &state.status.policy.groups {
             println!("  {group}");
         }
@@ -189,17 +184,13 @@ pub async fn run(api: &Api, credentials: &auth::Credentials, options: Options) -
     }
     if !current.can_manage {
         return Err(Error::invalid(
-            "Only the app owner or an administrator can change access rules".into(),
+            "Only an app admin or installation administrator can change access rules".into(),
         ));
     }
-    let policy = AppAccessSnapshot {
-        revision: current.status.policy.revision,
-        groups: if change.all_authenticated {
-            Vec::new()
-        } else {
-            change.groups
-        },
-    };
+    let policy = serde_json::json!({
+        "revision": current.status.policy.revision,
+        "allAuthenticated": change.all_authenticated,
+    });
     let token = auth::access_token(api, credentials).await?;
     let mut current: State = json(
         api.authenticated(Method::PATCH, &format!("/apps/{app}/access"), &token)

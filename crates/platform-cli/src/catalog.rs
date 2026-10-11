@@ -17,9 +17,9 @@ pub struct Options {
 enum Command {
     /// List published apps and their launch URLs as JSON.
     List,
-    /// Publish an active app in the catalog (owner or administrator only).
+    /// Publish an active app in the catalog (app admin or installation administrator only).
     Publish { app: Uuid },
-    /// Withdraw an app's catalog listing (owner or administrator only).
+    /// Withdraw an app's catalog listing (app admin or installation administrator only).
     Unpublish { app: Uuid },
 }
 

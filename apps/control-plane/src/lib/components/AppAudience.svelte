@@ -1,20 +1,16 @@
 <script module lang="ts">
-  export type AccessDraft = { appId: string; groups: string; revision: number };
+  export type AccessDraft = { appId: string; allAuthenticated: boolean; revision: number };
 </script>
 
 <script lang="ts">
   import { onMount } from "svelte";
-  import { changeAppAccess, getAppAccess, searchAccessGroups } from "#lib/app-access.remote";
+  import { changeAppAccess, getAppAccess } from "#lib/app-access.remote";
   import FormIssues from "#shadcn/FormIssues.svelte";
   import { Button } from "#shadcn/components/ui/button/index.js";
-  import { Input } from "#shadcn/components/ui/input/index.js";
-  import { Textarea } from "#shadcn/components/ui/textarea/index.js";
-  import { Label } from "#shadcn/components/ui/label/index.js";
   import { Badge } from "#shadcn/components/ui/badge/index.js";
   import Feedback from "./Feedback.svelte";
   import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
-  import Search from "@lucide/svelte/icons/search";
 
   let {
     appId,
@@ -30,8 +26,6 @@
       throw cause;
     }),
   );
-
-  const search = $derived(searchAccessGroups.for(appId));
 
   const editor = $derived(changeAppAccess.for(appId));
 
@@ -71,19 +65,8 @@
     return () => clearInterval(timer);
   });
 
-  function editGroups(groups: string) {
-    draft = { appId, groups, revision: currentDraft?.revision ?? data.revision };
-  }
-
-  function selectGroup(group: string) {
-    const current = currentDraft?.groups ?? data.groups.join("\n");
-
-    const groups = current
-      .split(/\r?\n/)
-      .map((value) => value.trim())
-      .filter(Boolean);
-
-    editGroups([...new Set([...groups, group])].join("\n"));
+  function editAudience(allAuthenticated: boolean) {
+    draft = { appId, allAuthenticated, revision: currentDraft?.revision ?? data.revision };
   }
 </script>
 
@@ -91,16 +74,16 @@
   <div>
     <h2 id="audience-heading" class="text-base font-semibold">App access</h2>
     <p class="text-muted-foreground mt-2 text-sm leading-6">
-      These rules protect the published app, including its files and API requests. Membership in any
-      selected group grants access. Without group restrictions, anyone signed in through company SSO
-      can use the app.
+      These rules protect the published app, including its files and API requests. People and SSO
+      groups with an app role can use it. You can also explicitly allow everyone signed in through
+      company SSO.
     </p>
   </div>
   <div class="bg-muted/40 flex items-start gap-3 rounded-lg border p-4 text-xs leading-6">
     <ShieldCheck class="text-muted-foreground mt-1 size-4 shrink-0" />
     <p>
-      Group membership changes take effect after a new SSO sign-in. Permissions to manage this app
-      are configured separately under Management access.
+      All app roles include access to the published app. Workspace administration alone does not
+      grant app usage. Group membership changes take effect after a new SSO sign-in.
     </p>
   </div>
   <div class="flex flex-wrap items-center justify-between gap-3">
@@ -150,7 +133,6 @@
 
   {#if data.canManage}
     {#key appId}
-      {@const groupsField = editor.fields.groups.as("text")}
       <form
         {...editor.enhance(async ({ submit }) => {
           const submittedDraft = currentDraft;
@@ -160,23 +142,23 @@
       >
         <input {...editor.fields.appId.as("hidden", appId)} />
         <input {...editor.fields.revision.as("hidden", currentDraft?.revision ?? data.revision)} />
-        <div class="space-y-2">
-          <Label for="groups-app">Allowed groups for this app</Label>
-          <Textarea
-            id="groups-app"
-            name={groupsField.name}
-            aria-invalid={groupsField["aria-invalid"]}
-            bind:value={() => currentDraft?.groups ?? data.groups.join("\n"), editGroups}
+        <label class="flex items-start gap-3 text-sm leading-6">
+          <input
+            {...editor.fields.allAuthenticated.as("checkbox")}
+            type="checkbox"
+            bind:checked={
+              () => currentDraft?.allAuthenticated ?? data.allAuthenticated, editAudience
+            }
             disabled={editor.pending > 0}
-            rows={4}
-            aria-describedby="groups-help"
-            class="font-mono text-sm"
+            aria-describedby="audience-help"
+            class="accent-primary mt-1 size-4 shrink-0"
           />
-          <p id="groups-help" class="text-muted-foreground text-xs leading-6">
-            One group ID per line. Leave blank to allow all signed-in users. All existing and new
-            previews inherit these rules automatically.
-          </p>
-        </div>
+          Allow everyone signed in through company SSO
+        </label>
+        <p id="audience-help" class="text-muted-foreground text-xs leading-6">
+          When disabled, access requires an app role assigned to the person or one of their SSO
+          groups. All previews inherit this setting. An empty list never grants access to everyone.
+        </p>
         <FormIssues issues={editor.fields.allIssues()} />
         <div class="flex flex-wrap items-center gap-3">
           <Button type="submit" disabled={editor.pending > 0}
@@ -193,60 +175,20 @@
           >{/if}
       </form>
     {/key}
-    <details class="rounded-xl border p-5 sm:p-6">
-      <summary class="text-sm font-medium">Search the company directory for groups</summary>
-      <form {...search} class="mt-5 max-w-lg space-y-3">
-        <input {...search.fields.appId.as("hidden", appId)} />
-        <Label for="group-search">Group name</Label>
-        <div class="flex gap-2">
-          <Input
-            id="group-search"
-            {...search.fields.query.as("search")}
-            required
-            placeholder="Search groups …"
-          />
-          <Button type="submit" variant="outline" disabled={search.pending > 0}
-            ><Search />{search.pending ? "Searching …" : "Search groups"}</Button
-          >
-        </div>
-        <FormIssues issues={search.fields.allIssues()} />
-      </form>
-      {#if search.result}
-        {#if search.result.groups.length === 0}<p class="text-muted-foreground mt-4 text-sm">
-            No groups found.
-          </p>{/if}
-        <ul class="mt-4 divide-y">
-          {#each search.result.groups as group (group.id)}<li
-              class="flex flex-wrap items-center justify-between gap-3 py-4"
-            >
-              <div class="min-w-0">
-                <p class="text-sm font-medium">{group.name}</p>
-                <p class="text-muted-foreground mt-1 text-xs wrap-anywhere">
-                  <code>{group.id}</code>
-                </p>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={editor.pending > 0}
-                onclick={() => selectGroup(group.id)}>Select group</Button
-              >
-            </li>{/each}
-        </ul>
-        <p class="text-muted-foreground mt-4 text-xs leading-6">
-          Your selection takes effect after you choose Save app rules. You can also enter group IDs
-          directly in the field.
-        </p>
-        {#if search.result.hasMore}<p class="text-muted-foreground mt-2 text-xs">
-            More results are available. Refine your search.
-          </p>{/if}
-      {/if}
-    </details>
   {:else}
-    <p class="bg-muted/40 rounded-lg p-4 text-sm leading-6 wrap-anywhere">
-      Allowed groups: {data.groups.length ? data.groups.join(", ") : "All signed-in users"}
+    <p class="bg-muted/40 rounded-lg p-4 text-sm leading-6">
+      {data.allAuthenticated
+        ? "Everyone signed in through company SSO can use this app."
+        : "App usage requires an assigned role, directly or through an SSO group."}
     </p>
   {/if}
+  <p class="text-muted-foreground text-xs leading-6">
+    The saved rules include {data.users.length} people and {data.groups.length} SSO groups.
+    <a
+      href={`/apps/${data.inheritedFrom ?? appId}?tab=access&scope=management`}
+      class="text-primary underline underline-offset-4">Manage app roles</a
+    >.
+  </p>
 
   {#if data.previews.length}
     <section class="border-t pt-6">

@@ -57,7 +57,7 @@ export const appSsoConfiguration = (
   clientId: string,
   clientSecretFile: string,
 ) => {
-  const subject = provider.type === "entra" ? "oid" : "sub";
+  const subject = provider.type === "entra" ? "oid" : provider.subjectClaim;
   const name = provider.type === "entra" ? "name" : provider.nameClaim;
 
   return {

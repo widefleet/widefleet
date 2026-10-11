@@ -115,9 +115,15 @@ services:
     volumes:
       - ${WIDEFLEET_LOCAL_DATA}:/config:ro
       - ${WIDEFLEET_LOCAL_DATA}/client-secret:/run/secrets/app_entra_client_secret:ro
+  app-authorizer:
+    <<: *local
+    network_mode: service:proxy
+    command: ["node", "local/app-authorizer.ts"]
   agent:
     <<: *local
     network_mode: service:proxy
+    depends_on:
+      app-authorizer: { condition: service_started }
     command: ["node", "--env-file=/data/identity.env", "local/control.ts", "agent"]
     environment:
       <<: *environment
@@ -134,7 +140,7 @@ services:
       FLEET_S3_SECRET_ACCESS_KEY: local-demo-only
       PLATFORM_TRUSTED_CONTAINERS: widefleet-local-proxy,widefleet-local-storage
       PLATFORM_PROXY_URL: https://widefleet-local-proxy:25453
-      PLATFORM_APP_AUTH_URL: http://127.0.0.1:4180/
+      PLATFORM_APP_AUTH_URL: http://127.0.0.1:4181/
       PLATFORM_RUNTIME_PLATFORM_URL: http://widefleet-local-proxy:25450
     volumes:
       - ${WIDEFLEET_LOCAL_DATA}:/data

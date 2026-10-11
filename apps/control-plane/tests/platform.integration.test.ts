@@ -1,3 +1,4 @@
+import { providerIssuer } from "../src/lib/server/company-identity.ts";
 import { createWorkflowService } from "../src/lib/server/workflows.ts";
 import { createMigrationService } from "../src/lib/server/migrations.ts";
 import { createHash } from "node:crypto";
@@ -32,6 +33,7 @@ import { createIdentityService } from "../src/lib/server/identity.ts";
 import { createJobService } from "../src/lib/server/jobs.ts";
 import {
   agents,
+  appRoleAssignments,
   apps,
   artifacts,
   deployments,
@@ -110,7 +112,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       identity: createIdentityService(environment.auth, environment.database.db, configuration),
       apps: createAppService(environment.database.db, configuration),
       network: createNetworkService(environment.database.db),
-      appAccess: createAppAccessService(environment.database.db),
+      appAccess: createAppAccessService(environment.database.db, environment.configuration),
       workflows: createWorkflowService(environment.database.db),
       migrations: createMigrationService(environment.database.db, storage),
       connectors: createConnectorService(
@@ -179,7 +181,9 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     await environment?.close();
   });
 
-  const json = <T>(
+  const claimedAccess = new Map<string, number>();
+
+  const json = async <T>(
     path: string,
     method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH",
     body?: T,
@@ -199,7 +203,30 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       options.body = JSON.stringify(body);
     }
 
-    return api(new Request(`${environment.configuration.PLATFORM_URL}/api/v1${path}`, options));
+    const completion = z.object({ outcome: z.literal("succeeded") }).safeParse(body);
+
+    if (
+      path.endsWith("/complete") &&
+      completion.success &&
+      !Object.hasOwn(body ?? {}, "accessRevision")
+    ) {
+      const claimed = claimedAccess.get(path.split("/")[3] ?? "");
+
+      if (claimed !== undefined)
+        options.body = JSON.stringify({ ...body, accessRevision: claimed });
+    }
+
+    const response = await api(
+      new Request(`${environment.configuration.PLATFORM_URL}/api/v1${path}`, options),
+    );
+
+    if (path === "/agent/jobs/claim" && response.ok) {
+      const job = contract.job.nullable().parse(await response.clone().json());
+
+      if (job?.access) claimedAccess.set(job.id, job.access.revision);
+    }
+
+    return response;
   };
 
   const createApp = async (slug: string) => {
@@ -212,6 +239,40 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     expect(response.status).toBe(200);
 
     return contract.app.parse(await response.json());
+  };
+
+  const grantRole = async (appId: string, userId = outsiderId, credentials = adminHeaders) => {
+    const state = contract.appRoleState.parse(
+      await (await json(`/apps/${appId}/roles`, "GET")).json(),
+    );
+
+    return json(
+      `/apps/${appId}/roles`,
+      "POST",
+      {
+        principal: { type: "user", provider: "widefleet", subject: userId },
+        role: "developer",
+        revision: state.revision,
+      },
+      credentials,
+    );
+  };
+
+  const revokeRole = async (appId: string, credentials = adminHeaders) => {
+    const state = contract.appRoleState.parse(
+      await (await json(`/apps/${appId}/roles`, "GET")).json(),
+    );
+
+    const assignment = state.assignments.find((entry) => entry.principal.subject === outsiderId);
+
+    if (!assignment) throw new Error("Missing developer assignment");
+
+    return json(
+      `/apps/${appId}/roles/${assignment.id}`,
+      "DELETE",
+      { revision: state.revision },
+      credentials,
+    );
   };
 
   it("authorizes reporting settings and rejects arbitrary diagnostic fields", async () => {
@@ -280,7 +341,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     });
 
     const claim = contract.job.parse(
-      await (await json("/agent/jobs/claim", "POST", {}, agentHeaders)).json(),
+      await (await json("/agent/jobs/claim", "POST", { accessRules: 2 }, agentHeaders)).json(),
     );
 
     expect(claim).toMatchObject({
@@ -350,7 +411,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     expect((await json("/runtime", "PUT", next)).status).toBe(200);
 
     const failed = contract.job.parse(
-      await (await json("/agent/jobs/claim", "POST", {}, agentHeaders)).json(),
+      await (await json("/agent/jobs/claim", "POST", { accessRules: 2 }, agentHeaders)).json(),
     );
 
     expect(
@@ -374,7 +435,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     );
 
     const rollback = contract.job.parse(
-      await (await json("/agent/jobs/claim", "POST", {}, agentHeaders)).json(),
+      await (await json("/agent/jobs/claim", "POST", { accessRules: 2 }, agentHeaders)).json(),
     );
 
     expect(
@@ -577,7 +638,9 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     try {
       const response = await json("/apps", "POST", { slug: "no-host", displayName: "No host" });
       expect(response.status).toBe(200);
-      expect((await json("/agent/jobs/claim", "POST", {}, agentHeaders)).status).toBe(403);
+      expect(
+        (await json("/agent/jobs/claim", "POST", { accessRules: 2 }, agentHeaders)).status,
+      ).toBe(403);
     } finally {
       await environment.database.db
         .update(agents)
@@ -607,11 +670,11 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     expect((await json("/apps/by-name/member-named-app", "PUT", {}, outsiderHeaders)).status).toBe(
       200,
     );
-    expect((await json(`/apps/${app.id}/creators/${outsiderId}`, "PUT", {})).status).toBe(200);
+    expect((await grantRole(app.id)).status).toBe(200);
     const permitted = await json("/apps/by-name/named-app", "PUT", {}, outsiderHeaders);
     expect(permitted.status).toBe(200);
     expect(contract.app.parse(await permitted.json()).id).toBe(app.id);
-    expect((await json(`/apps/${app.id}/creators/${outsiderId}`, "DELETE", {})).status).toBe(200);
+    expect((await revokeRole(app.id)).status).toBe(200);
     const second = await json("/apps/by-name/another-name", "PUT", {});
     expect(second.status).toBe(200);
     expect(contract.app.parse(await second.json()).id).not.toBe(app.id);
@@ -895,11 +958,82 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     expect(inventory.Contents ?? []).toHaveLength(0);
   });
 
+  it("hands over through admin grants and protects the final admin through the API", async () => {
+    const app = await createApp("admin-handover");
+    const path = `/apps/${app.id}/roles`;
+    const initial = contract.appRoleState.parse(await (await json(path, "GET")).json());
+    const creator = initial.assignments[0];
+
+    if (!creator) throw new Error("Missing creator admin");
+    expect(creator.role).toBe("admin");
+    expect(
+      (
+        await json(path, "POST", {
+          principal: { type: "user", provider: "widefleet", subject: outsiderId },
+          role: "owner",
+          revision: initial.revision,
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await json(`/apps/${app.id}/owner`, "PUT", {
+          principal: creator.principal,
+          revision: initial.revision,
+        })
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await json(`${path}/${creator.id}`, "DELETE", {
+          revision: initial.revision,
+        })
+      ).status,
+    ).toBe(403);
+
+    const shared = contract.appRoleState.parse(
+      await (
+        await json(path, "POST", {
+          principal: { type: "user", provider: "widefleet", subject: outsiderId },
+          role: "admin",
+          revision: initial.revision,
+        })
+      ).json(),
+    );
+
+    const handedOver = await json(
+      `${path}/${creator.id}`,
+      "DELETE",
+      {
+        revision: shared.revision,
+      },
+      outsiderHeaders,
+    );
+
+    expect(handedOver.status).toBe(200);
+    const remaining = contract.appRoleState.parse(await handedOver.json());
+    expect(remaining.assignments).toHaveLength(1);
+    const survivor = remaining.assignments[0];
+
+    if (!survivor) throw new Error("Missing remaining admin");
+    expect(
+      (
+        await json(
+          `${path}/${survivor.id}`,
+          "DELETE",
+          {
+            revision: remaining.revision,
+          },
+          outsiderHeaders,
+        )
+      ).status,
+    ).toBe(403);
+  });
+
   it("grants app-specific access and revokes it without renewing the user's session", async () => {
     const app = await createApp("shared");
-    const permissionPath = `/apps/${app.id}/creators/${outsiderId}`;
-    expect((await json(`/apps/${app.id}/creators/missing-user`, "PUT", {})).status).toBe(404);
-    expect((await json(permissionPath, "PUT", {})).status).toBe(200);
+    expect((await grantRole(app.id, "missing-user")).status).toBe(404);
+    expect((await grantRole(app.id)).status).toBe(200);
     expect((await json(`/apps/${app.id}`, "GET", undefined, outsiderHeaders)).status).toBe(200);
     expect(
       (
@@ -911,8 +1045,8 @@ describe("Platform API with PostgreSQL and RustFS", () => {
         )
       ).status,
     ).toBe(200);
-    expect((await json(permissionPath, "DELETE", undefined, outsiderHeaders)).status).toBe(403);
-    expect((await json(permissionPath, "DELETE")).status).toBe(200);
+    expect((await revokeRole(app.id, outsiderHeaders)).status).toBe(403);
+    expect((await revokeRole(app.id)).status).toBe(200);
     expect((await json(`/apps/${app.id}`, "GET", undefined, outsiderHeaders)).status).toBe(404);
     expect(
       (
@@ -930,7 +1064,9 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     // Drain the earlier upload test's independent app before checking this app's queue.
     let pending = contract.job
       .nullable()
-      .parse(await (await json("/agent/jobs/claim", "POST", {}, agentHeaders)).json());
+      .parse(
+        await (await json("/agent/jobs/claim", "POST", { accessRules: 2 }, agentHeaders)).json(),
+      );
 
     while (pending) {
       expect(
@@ -945,7 +1081,9 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       ).toBe(200);
       pending = contract.job
         .nullable()
-        .parse(await (await json("/agent/jobs/claim", "POST", {}, agentHeaders)).json());
+        .parse(
+          await (await json("/agent/jobs/claim", "POST", { accessRules: 2 }, agentHeaders)).json(),
+        );
     }
 
     const app = await createApp("jobs");
@@ -958,8 +1096,8 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     );
 
     const claimed = await Promise.all([
-      json("/agent/jobs/claim", "POST", {}, agentHeaders),
-      json("/agent/jobs/claim", "POST", {}, agentHeaders),
+      json("/agent/jobs/claim", "POST", { accessRules: 2 }, agentHeaders),
+      json("/agent/jobs/claim", "POST", { accessRules: 2 }, agentHeaders),
     ]);
 
     const claims = await Promise.all(
@@ -977,7 +1115,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       .where(eq(jobs.id, claim.id));
 
     const retry = contract.job.parse(
-      await (await json("/agent/jobs/claim", "POST", {}, agentHeaders)).json(),
+      await (await json("/agent/jobs/claim", "POST", { accessRules: 2 }, agentHeaders)).json(),
     );
 
     expect(retry.id).toBe(claim.id);
@@ -1014,7 +1152,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     ).toBe(200);
 
     const next = contract.job.parse(
-      await (await json("/agent/jobs/claim", "POST", {}, agentHeaders)).json(),
+      await (await json("/agent/jobs/claim", "POST", { accessRules: 2 }, agentHeaders)).json(),
     );
 
     expect(next.deploymentId).toBe(second.id);
@@ -1068,10 +1206,10 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     const legacyParent = previews[0]?.id;
 
     if (!legacyParent) throw new Error("Missing preview fixture");
-    await environment.database.db
-      .update(apps)
-      .set({ parentId: legacyParent })
-      .where(eq(apps.id, nested.id));
+    await environment.database.db.transaction(async (transaction) => {
+      await transaction.delete(appRoleAssignments).where(eq(appRoleAssignments.appId, nested.id));
+      await transaction.update(apps).set({ parentId: legacyParent }).where(eq(apps.id, nested.id));
+    });
     previews.push({ ...nested, parentId: legacyParent });
 
     expect((await json(`/apps/${app.id}`, "DELETE")).status).toBe(200);
@@ -1108,7 +1246,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
 
     for (let index = 0; index < previews.length + 1; index += 1) {
       let deletion = contract.job.parse(
-        await (await json("/agent/jobs/claim", "POST", {}, agentHeaders)).json(),
+        await (await json("/agent/jobs/claim", "POST", { accessRules: 2 }, agentHeaders)).json(),
       );
 
       expect(deletion.kind).toBe("delete");
@@ -1131,7 +1269,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
         ).toBe(200);
 
         const retryDeletion = contract.job.parse(
-          await (await json("/agent/jobs/claim", "POST", {}, agentHeaders)).json(),
+          await (await json("/agent/jobs/claim", "POST", { accessRules: 2 }, agentHeaders)).json(),
         );
 
         expect(retryDeletion.id).toBe(deletion.id);
@@ -1169,7 +1307,9 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     }
 
     expect(new Set(removed)).toEqual(new Set([app.id, ...removalOrder]));
-    expect(await (await json("/agent/jobs/claim", "POST", {}, agentHeaders)).json()).toBeNull();
+    expect(
+      await (await json("/agent/jobs/claim", "POST", { accessRules: 2 }, agentHeaders)).json(),
+    ).toBeNull();
   });
 
   it("cleans up previews when completing a deletion queued before cascade cleanup", async () => {
@@ -1197,7 +1337,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     });
 
     const deletion = contract.job.parse(
-      await (await json("/agent/jobs/claim", "POST", {}, agentHeaders)).json(),
+      await (await json("/agent/jobs/claim", "POST", { accessRules: 2 }, agentHeaders)).json(),
     );
 
     expect(deletion.appId).toBe(parent.id);
@@ -1216,12 +1356,16 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       ).status,
     ).toBe(200);
     expect((await json(`/apps/${parent.id}`, "GET")).status).toBe(404);
+    expect((await json(`/apps/${preview.id}`, "GET")).status).toBe(404);
     expect(
-      contract.app.parse(await (await json(`/apps/${preview.id}`, "GET")).json()),
-    ).toMatchObject({ state: "deleting", parentId: parent.id });
+      await environment.database.db
+        .select({ state: apps.state, parentId: apps.parentId })
+        .from(apps)
+        .where(eq(apps.id, preview.id)),
+    ).toEqual([{ state: "deleting", parentId: parent.id }]);
 
     const previewDeletion = contract.job.parse(
-      await (await json("/agent/jobs/claim", "POST", {}, agentHeaders)).json(),
+      await (await json("/agent/jobs/claim", "POST", { accessRules: 2 }, agentHeaders)).json(),
     );
 
     expect(previewDeletion.appId).toBe(preview.id);
@@ -1245,7 +1389,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
 
   it("provides the deploy URL to write-only tokens while preserving read and app permissions", async () => {
     const app = await createApp("write-only");
-    expect((await json(`/apps/${app.id}/creators/${outsiderId}`, "PUT", {})).status).toBe(200);
+    expect((await grantRole(app.id)).status).toBe(200);
     const now = Math.floor(Date.now() / 1000);
 
     const { token } = await environment.auth.api.signJWT({
@@ -1449,7 +1593,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     const signed = await environment.auth.api.signJWT({
       body: {
         payload: {
-          sub: before.ownerId,
+          sub: environment.owner.id,
           aud: apiResource(environment.configuration),
           iss: `${environment.configuration.PLATFORM_URL}/api/auth`,
           iat: now,
@@ -1482,7 +1626,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       .where(sql`${jobs.id} <> ${requestId} AND ${jobs.state} IN ('queued', 'running')`);
 
     const lease = contract.job.parse(
-      await (await json("/agent/jobs/claim", "POST", undefined, agentHeaders)).json(),
+      await (await json("/agent/jobs/claim", "POST", { accessRules: 2 }, agentHeaders)).json(),
     );
 
     expect(lease).toMatchObject({
@@ -1741,7 +1885,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     });
     const [after] = await environment.database.db.select().from(apps).where(eq(apps.id, app.id));
     expect(after).toMatchObject({ activeDeploymentId: deployment.id, appliedNetworkRevision: 1 });
-    expect((await json(`/apps/${app.id}/creators/${outsiderId}`, "PUT", {})).status).toBe(200);
+    expect((await grantRole(app.id)).status).toBe(200);
 
     const listed = await json(
       path,
@@ -1843,14 +1987,19 @@ describe("Platform API with PostgreSQL and RustFS", () => {
 
     const path = `/apps/${app.id}/network`;
     const change = { target: "backend", action: "allow", origins: ["https://api.example.test"] };
-    const deployOnly = await bearer(record.ownerId, "platform:read platform:write");
-    const combined = await bearer(record.ownerId, "platform:read platform:write network:manage");
+    const deployOnly = await bearer(environment.owner.id, "platform:read platform:write");
+
+    const combined = await bearer(
+      environment.owner.id,
+      "platform:read platform:write network:manage",
+    );
+
     const outsider = await bearer(outsiderId, "platform:read platform:write network:manage");
 
     expect((await json(path, "PATCH", change, deployOnly)).status).toBe(403);
     expect((await json(path, "GET", undefined, deployOnly)).status).toBe(200);
     expect((await json(path, "PATCH", change, outsider)).status).toBe(404);
-    expect((await json(`/apps/${app.id}/creators/${outsiderId}`, "PUT", {})).status).toBe(200);
+    expect((await grantRole(app.id)).status).toBe(200);
     expect((await json(path, "PATCH", change, outsider)).status).toBe(403);
     expect((await json(path, "PATCH", change, combined)).status).toBe(200);
     expect(
@@ -1940,7 +2089,9 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     while (true) {
       const pending = contract.job
         .nullable()
-        .parse(await (await json("/agent/jobs/claim", "POST", {}, agentHeaders)).json());
+        .parse(
+          await (await json("/agent/jobs/claim", "POST", { accessRules: 2 }, agentHeaders)).json(),
+        );
 
       if (!pending) break;
       expect(
@@ -2022,7 +2173,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     ).toBe(409);
 
     const pending = contract.job.parse(
-      await (await json("/agent/jobs/claim", "POST", {}, agentHeaders)).json(),
+      await (await json("/agent/jobs/claim", "POST", { accessRules: 2 }, agentHeaders)).json(),
     );
 
     expect(pending).toMatchObject({ kind: "connector", appId: null });
@@ -2152,7 +2303,9 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     const secondValue = "synthetic-connector-secret-two";
 
     const claim = async () =>
-      contract.job.parse(await (await json("/agent/jobs/claim", "POST", {}, agentHeaders)).json());
+      contract.job.parse(
+        await (await json("/agent/jobs/claim", "POST", { accessRules: 2 }, agentHeaders)).json(),
+      );
 
     const packages = async (job: z.infer<typeof contract.job>) =>
       contract.runtimePackages.parse(
@@ -2186,7 +2339,9 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     while (true) {
       const pending = contract.job
         .nullable()
-        .parse(await (await json("/agent/jobs/claim", "POST", {}, agentHeaders)).json());
+        .parse(
+          await (await json("/agent/jobs/claim", "POST", { accessRules: 2 }, agentHeaders)).json(),
+        );
 
       if (!pending) break;
       await complete(pending, "succeeded");
@@ -2228,9 +2383,16 @@ describe("Platform API with PostgreSQL and RustFS", () => {
 
     expect(second.secretRevision).toBe(2);
     expect(await environment.database.db.select().from(installationSecrets)).toEqual(loginSecrets);
+
     // Saving unchanged login settings still runs its credential cleanup. Both
     // the claimed and newer queued connector snapshots must remain decryptable.
-    const owner = { ...environment.owner, role: "owner" as const, admin: true, creator: true };
+    const owner = {
+      ...environment.owner,
+      role: "owner" as const,
+      admin: true,
+      creator: true,
+      company: undefined,
+    };
 
     const settings = contract.settingsInput.parse(
       (await environment.settings.read(owner)).settings,
@@ -2318,7 +2480,11 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       while (true) {
         const job = contract.job
           .nullable()
-          .parse(await (await json("/agent/jobs/claim", "POST", {}, agentHeaders)).json());
+          .parse(
+            await (
+              await json("/agent/jobs/claim", "POST", { accessRules: 2 }, agentHeaders)
+            ).json(),
+          );
 
         if (!job) throw new Error("Expected the connector job to be claimable");
         expect(
@@ -2454,8 +2620,8 @@ describe("Platform API with PostgreSQL and RustFS", () => {
         previewName: "review",
       }),
       json(`/apps/${parent.id}/access`, "PATCH", {
-        groups: ["reviewers"],
-        revision: 0,
+        allAuthenticated: true,
+        revision: 1,
       }),
     ]);
 
@@ -2463,17 +2629,17 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     expect(change.status).toBe(200);
     const preview = contract.app.parse(await creation.json());
     expect(await (await json(`/apps/${preview.id}/access`, "GET")).json()).toMatchObject({
-      groups: ["reviewers"],
-      revision: 1,
+      allAuthenticated: true,
+      revision: 2,
       inheritedFrom: parent.id,
     });
 
     const edits = await Promise.all([
       json(`/apps/${parent.id}/access`, "PATCH", {
-        groups: ["finance"],
-        revision: 1,
+        allAuthenticated: false,
+        revision: 2,
       }),
-      json(`/apps/${parent.id}/access`, "PATCH", { groups: ["audit"], revision: 1 }),
+      json(`/apps/${parent.id}/access`, "PATCH", { allAuthenticated: false, revision: 2 }),
     ]);
 
     expect(edits.map((response) => response.status).sort((left, right) => left - right)).toEqual([
@@ -2481,26 +2647,37 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     ]);
   });
 
-  it("inherits access rules, rejects preview overrides and preserves inherited restrictions until preview cleanup", async () => {
+  it("derives access from roles, rejects preview overrides and keeps restrictions during deletion", async () => {
     const app = await createApp("group-access-parent");
     const path = `/apps/${app.id}/access`;
-    const initial = contract.appAccessState.parse(await (await json(path, "GET")).json());
-    expect(initial).toMatchObject({
+    expect(await (await json(path, "GET")).json()).toMatchObject({
       groups: [],
-      inheritedFrom: null,
-      canManage: true,
+      users: [],
+      allAuthenticated: false,
+      revision: 1,
       state: "saved",
-      revision: 0,
+      canManage: true,
     });
     expect((await json(path, "GET", undefined, outsiderHeaders)).status).toBe(404);
-    expect((await json(`/apps/${app.id}/creators/${outsiderId}`, "PUT", {})).status).toBe(200);
+    expect((await grantRole(app.id)).status).toBe(200);
     expect(
-      (await json(path, "PATCH", { groups: ["finance"], revision: 0 }, outsiderHeaders)).status,
+      (await json(path, "PATCH", { allAuthenticated: true, revision: 2 }, outsiderHeaders)).status,
     ).toBe(403);
-    expect((await json(path, "PATCH", { groups: ["finance,all"], revision: 0 })).status).toBe(400);
-    expect((await json(path, "PATCH", { groups: ["finance"], revision: 0 })).status).toBe(200);
-    expect((await json(path, "PATCH", { groups: ["reviewers"], revision: 0 })).status).toBe(409);
-    expect((await json(path, "PATCH", { groups: ["reviewers"], revision: 1 })).status).toBe(200);
+    const rolesPath = `/apps/${app.id}/roles`;
+    const provider = environment.configuration.IDENTITY.provider;
+    const issuer = providerIssuer(provider);
+
+    const grant = (subject: string, revision: number) =>
+      json(rolesPath, "POST", {
+        principal: { type: "group", provider: issuer, subject },
+        role: "user",
+        revision,
+      });
+
+    expect((await grant("finance,all", 2)).status).toBe(400);
+    expect((await grant("finance", 2)).status).toBe(200);
+    expect((await grant("reviewers", 2)).status).toBe(409);
+    expect((await grant("reviewers", 3)).status).toBe(200);
 
     const preview = contract.app.parse(
       await (
@@ -2515,70 +2692,28 @@ describe("Platform API with PostgreSQL and RustFS", () => {
 
     const previewPath = `/apps/${preview.id}/access`;
     expect(await (await json(previewPath, "GET")).json()).toMatchObject({
-      groups: ["reviewers"],
+      groups: ["finance", "reviewers"],
       inheritedFrom: app.id,
       canManage: false,
-      revision: 2,
+      revision: 4,
     });
-    expect((await json(previewPath, "PATCH", { groups: [], revision: 2 })).status).toBe(403);
-    expect((await json(path, "PATCH", { groups: ["qa"], revision: 2 })).status).toBe(200);
-    expect(await (await json(previewPath, "GET")).json()).toMatchObject({
-      groups: ["qa"],
-      revision: 3,
-    });
+    expect((await json(previewPath, "PATCH", { allAuthenticated: true, revision: 4 })).status).toBe(
+      403,
+    );
+    expect((await grant("qa", 4)).status).toBe(200);
     expect(await (await json(path, "GET")).json()).toMatchObject({
-      groups: ["qa"],
-      previews: [{ appId: preview.id, groups: ["qa"] }],
+      groups: ["finance", "qa", "reviewers"],
+      previews: [{ appId: preview.id, groups: ["finance", "qa", "reviewers"] }],
     });
-
     expect((await json(`/apps/${app.id}`, "DELETE")).status).toBe(200);
     expect(await (await json(previewPath, "GET")).json()).toMatchObject({
-      groups: ["qa"],
+      groups: ["finance", "qa", "reviewers"],
       inheritedFrom: app.id,
-      revision: 3,
+      revision: 5,
     });
-    expect((await json(previewPath, "PATCH", { groups: [], revision: 3 })).status).toBe(403);
-
-    for (const target of [app, preview]) {
-      const token = crypto.randomUUID();
-
-      const [deletion] = await environment.database.db
-        .update(jobs)
-        .set({
-          state: "running",
-          agentId,
-          leaseToken: token,
-          leaseUntil: new Date(Date.now() + 90000),
-        })
-        .where(sql`${jobs.appId} = ${target.id} and ${jobs.kind} = 'delete'`)
-        .returning();
-
-      if (!deletion) throw new Error("Missing deletion job");
-      expect(
-        (
-          await json(
-            `/agent/jobs/${deletion.id}/complete`,
-            "POST",
-            {
-              leaseToken: token,
-              outcome: "succeeded",
-              message: "Fixture removed",
-            },
-            agentHeaders,
-          )
-        ).status,
-      ).toBe(200);
-      expect((await json(`/apps/${target.id}`, "GET")).status).toBe(404);
-
-      if (target.id === app.id) {
-        expect(await (await json(previewPath, "GET")).json()).toMatchObject({
-          groups: ["qa"],
-          inheritedFrom: app.id,
-          revision: 3,
-        });
-        expect((await json(previewPath, "PATCH", { groups: [], revision: 3 })).status).toBe(403);
-      }
-    }
+    expect((await json(previewPath, "PATCH", { allAuthenticated: true, revision: 5 })).status).toBe(
+      403,
+    );
   });
 
   it("fences old agents, tracks confirmed revisions and reconciles access edits during first deploy and rollback", async () => {
@@ -2591,7 +2726,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
 
     const claim = async () =>
       contract.job.parse(
-        await (await json("/agent/jobs/claim", "POST", { accessRules: 1 }, agentHeaders)).json(),
+        await (await json("/agent/jobs/claim", "POST", { accessRules: 2 }, agentHeaders)).json(),
       );
 
     const complete = (
@@ -2612,47 +2747,47 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       );
 
     const first = await claim();
-    expect(first.access).toEqual({ revision: 0, groups: [] });
-    expect((await json(path, "PATCH", { groups: ["finance"], revision: 0 })).status).toBe(200);
-    expect((await complete(first, 0)).status).toBe(200);
+    expect(first.access).toMatchObject({ revision: 1, allAuthenticated: false });
+    expect((await json(path, "PATCH", { allAuthenticated: true, revision: 1 })).status).toBe(200);
+    expect((await complete(first, 1)).status).toBe(200);
     expect(await (await json(path, "GET")).json()).toMatchObject({
       state: "pending",
-      revision: 1,
-      appliedRevision: 0,
+      revision: 2,
+      appliedRevision: 1,
     });
     expect((await json("/agent/jobs/claim", "POST", {}, agentHeaders)).status).toBe(409);
     const restricted = await claim();
     expect(restricted).toMatchObject({
       kind: "configure",
       deploymentId: deployment.id,
-      access: { revision: 1, groups: ["finance"] },
+      access: { revision: 2, allAuthenticated: true },
     });
     expect((await complete(restricted, undefined)).status).toBe(409);
-    expect((await complete(restricted, 0)).status).toBe(409);
-    expect((await complete(restricted, 1)).status).toBe(200);
+    expect((await complete(restricted, 1)).status).toBe(409);
+    expect((await complete(restricted, 2)).status).toBe(200);
     expect(await (await json(path, "GET")).json()).toMatchObject({
       state: "active",
-      appliedRevision: 1,
+      appliedRevision: 2,
     });
-    expect((await json(path, "PATCH", { groups: ["operations"], revision: 1 })).status).toBe(200);
+    expect((await json(path, "PATCH", { allAuthenticated: false, revision: 2 })).status).toBe(200);
     const outdated = await claim();
-    expect((await json(path, "PATCH", { groups: ["audit"], revision: 2 })).status).toBe(200);
-    expect((await complete(outdated, 2, "failed")).status).toBe(200);
+    expect((await json(path, "PATCH", { allAuthenticated: true, revision: 3 })).status).toBe(200);
+    expect((await complete(outdated, 3, "failed")).status).toBe(200);
     expect(await (await json(path, "GET")).json()).toMatchObject({
       state: "pending",
-      appliedRevision: 1,
+      appliedRevision: 2,
       error: null,
     });
     const current = await claim();
-    expect(current.access).toEqual({ revision: 3, groups: ["audit"] });
-    expect((await complete(current, 3, "failed")).status).toBe(200);
+    expect(current.access).toMatchObject({ revision: 4, allAuthenticated: true });
+    expect((await complete(current, 4, "failed")).status).toBe(200);
     expect(await (await json(path, "GET")).json()).toMatchObject({
       state: "failed",
-      appliedRevision: 1,
+      appliedRevision: 2,
     });
-    expect((await json(path, "PATCH", { groups: ["audit"], revision: 3 })).status).toBe(200);
+    expect((await json(path, "PATCH", { allAuthenticated: true, revision: 4 })).status).toBe(200);
     const retry = await claim();
-    expect((await complete(retry, 3)).status).toBe(200);
+    expect((await complete(retry, 4)).status).toBe(200);
     expect(
       (
         await json(
@@ -2665,20 +2800,23 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       ).status,
     ).toBe(200);
     const rollback = await claim();
-    expect(rollback).toMatchObject({ kind: "deploy", access: { revision: 3, groups: ["audit"] } });
-    expect((await complete(rollback, 3)).status).toBe(200);
-    expect((await json(path, "PATCH", { groups: [], revision: 3 })).status).toBe(200);
+    expect(rollback).toMatchObject({
+      kind: "deploy",
+      access: { revision: 4, allAuthenticated: true },
+    });
+    expect((await complete(rollback, 4)).status).toBe(200);
+    expect((await json(path, "PATCH", { allAuthenticated: false, revision: 4 })).status).toBe(200);
     const unrestricted = await claim();
-    expect(unrestricted.access).toEqual({ revision: 4, groups: [] });
-    expect((await complete(unrestricted, 4)).status).toBe(200);
+    expect(unrestricted.access).toMatchObject({ revision: 5, allAuthenticated: false });
+    expect((await complete(unrestricted, 5)).status).toBe(200);
     expect(await (await json(path, "GET")).json()).toMatchObject({
       state: "active",
       groups: [],
-      appliedRevision: 4,
+      appliedRevision: 5,
     });
   });
 
-  it("exposes catalog discovery without management access and restricts publication to owners or administrators", async () => {
+  it("exposes catalog discovery without management access and restricts publication to app admins or installation administrators", async () => {
     const app = await createApp("catalog-api");
     const path = `/apps/${app.id}/catalog`;
     expect((await json("/catalog", "GET", undefined, new Headers())).status).toBe(401);
@@ -2708,9 +2846,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       }),
     ]);
     expect((await json(`/apps/${app.id}`, "GET", undefined, outsiderHeaders)).status).toBe(404);
-    expect(await (await json(`/apps/${app.id}/creators/${outsiderId}`, "PUT", {})).json()).toEqual({
-      granted: true,
-    });
+    expect((await grantRole(app.id)).status).toBe(200);
     expect((await json(path, "PUT", { listed: false }, outsiderHeaders)).status).toBe(403);
     expect(await (await json(path, "PUT", { listed: false })).json()).toEqual({ listed: false });
     expect(await (await json("/catalog", "GET", undefined, outsiderHeaders)).json()).toEqual([]);

@@ -41,11 +41,14 @@ export const managementProviders = (configuration: Configuration): GenericOAuthC
       clientSecret: identity.management.clientSecret,
       discoveryUrl: `${providerIssuer(provider)}/.well-known/openid-configuration`,
       requireIdTokenVerification: true,
-      scopes: ["openid", "profile", "email"],
+      scopes:
+        provider.type === "entra"
+          ? ["openid", "profile", "email", "User.Read"]
+          : ["openid", "profile", "email"],
       accountSubject: ({ profile }) =>
         provider.type === "entra"
           ? z.object({ oid: z.uuid(), tid: z.literal(provider.tenantId) }).parse(profile).oid
-          : z.object({ sub: z.string().min(1) }).parse(profile).sub,
+          : z.string().min(1).parse(profile[provider.subjectClaim]),
     },
   ];
 };

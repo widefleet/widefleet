@@ -44,21 +44,33 @@
 
   let workflowAppId = $state<string | null>(null);
 
+  let sharingAppId = $state<string | null>(null);
+
+  const sharingVisible = $derived(activeTab === "access" && route.accessScope === "management");
+
   // Keep the visited workflow editor mounted so tab changes preserve drafts and polling.
   $effect(() => {
     if (activeTab === "workflows") workflowAppId = route.appId;
+
+    if (sharingVisible) sharingAppId = route.appId;
   });
 
   // Tab navigation unmounts the editors, but must preserve their drafts and pending requests.
   let audienceDraft = $state<AccessDraft | undefined>(
     untrack(() => {
       const fields = changeAppAccess.for(route.appId).fields;
-      const groups = fields.groups.value();
+      const allAuthenticated = fields.allAuthenticated.value();
       const revision = fields.revision.value();
 
-      return groups === undefined || revision === undefined
+      // Unchecked checkboxes are absent from native submissions. Keep their
+      // original revision after rejection instead of silently accepting a retry.
+      return revision === undefined
         ? undefined
-        : { appId: route.appId, groups, revision: Number(revision) };
+        : {
+            appId: route.appId,
+            allAuthenticated: allAuthenticated ?? false,
+            revision: Number(revision),
+          };
     }),
   );
 
@@ -283,7 +295,7 @@
             : "Available after the first successful deployment."}
         </p>
       </section>
-      {#if data.app.state !== "deleting" && !data.app.parentId}<section
+      {#if data.app.state !== "deleting" && !data.app.parentId && data.roles.actions.includes("deploy")}<section
           class="rounded-xl border p-5 sm:p-6"
         >
           <h2 class="mb-2 flex items-center gap-2 text-sm font-semibold">
@@ -315,19 +327,25 @@
     <Button
       href={`/apps/${data.app.id}?tab=access&scope=management`}
       variant={route.accessScope === "management" ? "secondary" : "ghost"}
-      aria-current={route.accessScope === "management" ? "page" : undefined}
-      >Management access</Button
+      aria-current={route.accessScope === "management" ? "page" : undefined}>App roles</Button
     >
   </nav>
   {#if route.accessScope === "app"}<AppAudience
       appId={data.app.id}
       initialSaved={route.accessSaved}
       bind:draft={audienceDraft}
-    />{:else}<AppSharing {data} search={route.search} initialSaved={route.saved} />{/if}
+    />{/if}
 {:else if activeTab === "settings" && data.app.state !== "deleting"}<AppSettings
     {data}
     search={route.search}
   />{/if}
+{#if data.app.state !== "deleting" && (sharingVisible || sharingAppId === route.appId)}
+  {#key route.appId}
+    <div hidden={!sharingVisible}>
+      <AppSharing {data} search={route.search} initialSaved={route.saved} />
+    </div>
+  {/key}
+{/if}
 {#if data.app.state !== "deleting" && (activeTab === "workflows" || workflowAppId === route.appId)}
   {#key route.appId}
     <div hidden={activeTab !== "workflows"}>

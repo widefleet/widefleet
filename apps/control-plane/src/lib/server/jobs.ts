@@ -141,7 +141,7 @@ export const createJobService = (
             .for("update")
         : [];
 
-      if (app && app.accessRevision > 0 && !accessRules && candidate.job.kind !== "delete")
+      if (app && !accessRules && candidate.job.kind !== "delete")
         return Result.err(
           new InvalidOperation({
             code: "CONFLICT",
@@ -169,6 +169,9 @@ export const createJobService = (
         ? contract.appAccessSnapshot.parse({
             revision: app.accessRevision,
             groups: app.accessGroups,
+            users: app.accessUsers,
+            provider: app.accessProvider,
+            allAuthenticated: app.allAuthenticated,
           })
         : null;
 
@@ -563,7 +566,7 @@ export const createJobService = (
           const snapshot = contract.appAccessSnapshot.parse(lease.access);
 
           if (result.outcome === "succeeded" && lease.deploymentId) {
-            if (snapshot.revision > 0 && result.accessRevision !== snapshot.revision)
+            if (result.accessRevision !== snapshot.revision)
               return yield* new InvalidOperation({
                 code: "CONFLICT",
                 message: "The agent must confirm the active access revision",

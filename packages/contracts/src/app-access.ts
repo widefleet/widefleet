@@ -26,10 +26,13 @@ export const appAccessGroups = z
 export const appAccessSnapshot = z.strictObject({
   revision: z.number().int().nonnegative(),
   groups: appAccessGroups,
+  users: appAccessGroups,
+  provider: z.string().max(512),
+  allAuthenticated: z.boolean(),
 });
 
 export const appAccessChange = z.strictObject({
-  groups: appAccessGroups,
+  allAuthenticated: z.boolean(),
   revision: z.number().int().nonnegative(),
 });
 

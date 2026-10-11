@@ -62,7 +62,7 @@ export const createUploadService = (
   start: (principal: Principal, appId: string, manifest: z.infer<typeof contract.assetManifest>) =>
     transact(database, (transaction) =>
       Result.gen(async function* () {
-        const record = yield* Result.await(managedApp(transaction, principal, appId));
+        const record = yield* Result.await(managedApp(transaction, principal, appId, "deploy"));
 
         if (record.state === "deleting")
           return yield* new InvalidOperation({ code: "CONFLICT", message: "App is being deleted" });
@@ -97,7 +97,7 @@ export const createUploadService = (
   ) =>
     transact(database, (transaction) =>
       Result.gen(async function* () {
-        const record = yield* Result.await(managedApp(transaction, principal, appId));
+        const record = yield* Result.await(managedApp(transaction, principal, appId, "deploy"));
 
         if (record.state === "deleting")
           return yield* new InvalidOperation({ code: "CONFLICT", message: "App is being deleted" });
@@ -139,7 +139,7 @@ export const createUploadService = (
   ) =>
     transact(database, (transaction) =>
       Result.gen(async function* () {
-        const record = yield* Result.await(managedApp(transaction, principal, appId));
+        const record = yield* Result.await(managedApp(transaction, principal, appId, "deploy"));
 
         if (record.state === "deleting")
           return yield* new InvalidOperation({ code: "CONFLICT", message: "App is being deleted" });

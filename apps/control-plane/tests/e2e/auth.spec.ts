@@ -4,9 +4,15 @@ import { EventEmitter, once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import { app, artifact } from "@platform/contracts";
+import { app, artifact, appRoleState } from "@platform/contracts";
 import { member } from "../../src/lib/server/auth-schema.ts";
-import { agents, appGrants, apps, artifacts, deployments } from "../../src/lib/server/schema.ts";
+import {
+  agents,
+  appRoleAssignments,
+  apps,
+  artifacts,
+  deployments,
+} from "../../src/lib/server/schema.ts";
 import { apiResource, cliClientId } from "../../src/lib/server/auth-options.ts";
 import { createTestEnvironment } from "../environment.ts";
 
@@ -391,16 +397,17 @@ test("manages organization roles and app access by name while members create the
     const appPath = new URL(page.url()).pathname;
     expect((await memberContext.request.get(appPath)).status()).toBe(404);
     await page.getByRole("link", { name: "Access", exact: true }).click();
-    await page.getByRole("link", { name: "Management access", exact: true }).click();
+    await page.getByRole("link", { name: "App roles", exact: true }).click();
     await page.getByLabel("Find a member by name or email").fill("member-ui@");
     await page.getByRole("button", { name: "Find member" }).click();
-    await page.getByRole("button", { name: "Grant access" }).click();
-    await expect(page.locator("#access").getByRole("status")).toHaveText("App access saved.");
+    await page.getByLabel("Role for Member Example").selectOption("developer");
+    await page.getByRole("button", { name: "Grant role to Member Example" }).click();
+    await expect(page.locator("#access").getByRole("status")).toHaveText("Role changes saved.");
     await memberPage.goto(appPath);
     await expect(memberPage.getByRole("heading", { level: 1 })).toHaveText("Team Notes");
-    await expect(memberPage.getByRole("button", { name: "Grant access" })).toHaveCount(0);
-    await page.getByRole("button", { name: "Revoke access" }).click();
-    await expect(page.locator("#access").getByRole("status")).toHaveText("App access saved.");
+    await expect(memberPage.getByRole("button", { name: /^Grant role/ })).toHaveCount(0);
+    await page.getByRole("button", { name: "Revoke role" }).click();
+    await expect(page.locator("#access").getByRole("status")).toHaveText("Role changes saved.");
     expect((await memberContext.request.get(appPath)).status()).toBe(404);
   } finally {
     await memberContext.close();
@@ -641,11 +648,9 @@ test.describe("member forms without JavaScript", () => {
     ).toEqual([{ role: "admin" }]);
   });
 
-  test("preserves app access search after grants, revokes and rejected submissions", async ({
-    page,
-    context,
-  }) => {
+  test("preserves role search and rejected native form submissions", async ({ page, context }) => {
     const person = environment.users.createUser({
+      id: `native-${"a".repeat(249)}`,
       name: "Native Grant User",
       email: "native-grant@example.test",
     });
@@ -662,15 +667,16 @@ test.describe("member forms without JavaScript", () => {
     const record = app.parse(await created.json());
     const path = `/apps/${record.id}?q=native-grant`;
     await page.goto(path);
-    await page.getByRole("button", { name: "Grant access" }).click();
-    await expect(page.locator("#access").getByRole("status")).toHaveText("App access saved.");
+    await page.getByLabel("Role for Native Grant User").selectOption("developer");
+    await page.getByRole("button", { name: "Grant role to Native Grant User" }).click();
+    await expect(page.locator("#access").getByRole("status")).toHaveText("Role changes saved.");
     expect(new URL(page.url()).searchParams.get("q")).toBe("native-grant");
 
     const revoke = page.locator("form").filter({
-      has: page.getByRole("button", { name: "Revoke access" }),
+      has: page.getByRole("button", { name: "Revoke role" }),
     });
 
-    await revoke.locator(`input[value="${person.id}"]`).evaluate((input: HTMLInputElement) => {
+    await revoke.locator('input[name^="assignmentId/"]').evaluate((input: HTMLInputElement) => {
       input.value = "";
     });
     await revoke.getByRole("button").click();
@@ -679,21 +685,20 @@ test.describe("member forms without JavaScript", () => {
     await expect(page.getByLabel("Find a member by name or email")).toHaveValue("native-grant");
     expect(
       await environment.database.db
-        .select({ userId: appGrants.userId })
-        .from(appGrants)
-        .where(eq(appGrants.appId, record.id)),
-    ).toEqual([{ userId: person.id }]);
-
+        .select({ subject: appRoleAssignments.subject, role: appRoleAssignments.role })
+        .from(appRoleAssignments)
+        .where(eq(appRoleAssignments.appId, record.id)),
+    ).toEqual(expect.arrayContaining([{ subject: person.id, role: "developer" }]));
     await page.goto(path);
-    await page.getByRole("button", { name: "Revoke access" }).click();
-    await expect(page.locator("#access").getByRole("status")).toHaveText("App access saved.");
+    await page.getByRole("button", { name: "Revoke role" }).click();
+    await expect(page.locator("#access").getByRole("status")).toHaveText("Role changes saved.");
     expect(new URL(page.url()).searchParams.get("q")).toBe("native-grant");
 
     const grant = page.locator("form").filter({
-      has: page.getByRole("button", { name: "Grant access" }),
+      has: page.getByRole("button", { name: "Grant role to Native Grant User" }),
     });
 
-    await grant.locator(`input[value="${person.id}"]`).evaluate((input: HTMLInputElement) => {
+    await grant.locator('input[name^="subject/"]').evaluate((input: HTMLInputElement) => {
       input.value = "missing-user";
     });
     await grant.getByRole("button").click();
@@ -702,8 +707,38 @@ test.describe("member forms without JavaScript", () => {
     await expect(page.getByLabel("Find a member by name or email")).toHaveValue("native-grant");
     expect(new URL(page.url()).searchParams.get("q")).toBe("native-grant");
     expect(
-      await environment.database.db.select().from(appGrants).where(eq(appGrants.appId, record.id)),
-    ).toEqual([]);
+      await environment.database.db
+        .select()
+        .from(appRoleAssignments)
+        .where(eq(appRoleAssignments.appId, record.id)),
+    ).toHaveLength(1);
+
+    await page.goto(path);
+    await page.getByLabel("Role for Native Grant User").selectOption("admin");
+    await page.getByRole("button", { name: "Grant role to Native Grant User" }).click();
+    await expect(page.locator("#access").getByRole("status")).toHaveText("Role changes saved.");
+
+    const shared = appRoleState.parse(
+      await (await context.request.get(`/api/v1/apps/${record.id}/roles`)).json(),
+    );
+
+    const previousAdmin = shared.assignments.find(
+      ({ principal }) => principal.subject !== person.id,
+    );
+
+    if (!previousAdmin) throw new Error("Missing previous admin");
+    await page
+      .locator("form")
+      .filter({ has: page.locator(`input[value="${previousAdmin.id}"]`) })
+      .getByRole("button", { name: "Revoke role" })
+      .click();
+    await expect(page.getByRole("button", { name: "Revoke role" })).toHaveCount(0);
+    expect(
+      await environment.database.db
+        .select({ role: appRoleAssignments.role, subject: appRoleAssignments.subject })
+        .from(appRoleAssignments)
+        .where(eq(appRoleAssignments.appId, record.id)),
+    ).toEqual([{ role: "admin", subject: person.id }]);
   });
 });
 
@@ -954,6 +989,123 @@ test("remote endpoints recheck sessions, roles, input and request origin", async
 });
 
 for (const javaScriptEnabled of [true, false]) {
+  test(`preserves role drafts through polling and rejection with JavaScript ${javaScriptEnabled}`, async ({
+    browser,
+  }) => {
+    const session = await environment.users.login({ userId: environment.owner.id });
+
+    const context = await browser.newContext({
+      baseURL: environment.configuration.PLATFORM_URL,
+      extraHTTPHeaders: { "x-forwarded-proto": "http" },
+      javaScriptEnabled,
+    });
+
+    try {
+      await context.addCookies(
+        session.cookies.map((cookie) => ({
+          ...cookie,
+          domain: "localhost",
+          sameSite: "Lax",
+          secure: false,
+        })),
+      );
+
+      const created = await context.request.post("/api/v1/apps", {
+        headers: { origin: environment.configuration.PLATFORM_URL },
+        data: {
+          slug: `role-draft-${javaScriptEnabled ? "js" : "html"}`,
+          displayName: "Role draft fixture",
+        },
+      });
+
+      expect(created.ok()).toBe(true);
+      const record = app.parse(await created.json());
+
+      const state = appRoleState.parse(
+        await (await context.request.get(`/api/v1/apps/${record.id}/roles`)).json(),
+      );
+
+      const recipient = crypto.randomUUID();
+      const competingAdmin = crypto.randomUUID();
+      const page = await context.newPage();
+      await page.goto(`/apps/${record.id}?tab=access&scope=management`, {
+        waitUntil: "networkidle",
+      });
+
+      const editor = page.locator("details").filter({
+        has: page.locator("summary", { hasText: /^Assign a role by person or group ID$/ }),
+      });
+
+      await editor.locator("summary").click();
+      await editor.getByLabel("Stable ID").fill(recipient);
+
+      const competing = await context.request.post(`/api/v1/apps/${record.id}/roles`, {
+        headers: { origin: environment.configuration.PLATFORM_URL },
+        data: {
+          revision: state.revision,
+          role: "admin",
+          principal: { type: "group", provider: state.provider, subject: competingAdmin },
+        },
+      });
+
+      expect(competing.status()).toBe(200);
+
+      if (javaScriptEnabled) {
+        await expect(page.getByText(competingAdmin, { exact: true })).toBeVisible({
+          timeout: 12_000,
+        });
+        await page.getByRole("link", { name: "Overview", exact: true }).click();
+        await page.getByRole("link", { name: "Access", exact: true }).click();
+        await page.getByRole("link", { name: "App roles", exact: true }).click();
+      }
+
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await expect(editor.getByLabel("Stable ID")).toHaveValue(recipient);
+        await expect(editor.locator('input[name^="n:revision/"]')).toHaveValue(
+          String(state.revision),
+        );
+        await editor.getByRole("button", { name: "Grant role", exact: true }).click();
+        await expect(editor.getByRole("alert")).toContainText("Permissions have changed");
+      }
+
+      const unchanged = appRoleState.parse(
+        await (await context.request.get(`/api/v1/apps/${record.id}/roles`)).json(),
+      );
+
+      expect(unchanged.assignments).toContainEqual(
+        expect.objectContaining({
+          role: "admin",
+          principal: { type: "group", provider: state.provider, subject: competingAdmin },
+        }),
+      );
+      expect(unchanged.assignments.some(({ principal }) => principal.subject === recipient)).toBe(
+        false,
+      );
+      await page
+        .getByRole("link", { name: "Discard drafts and reload roles", exact: true })
+        .click();
+      await editor.locator("summary").click();
+      await editor.getByLabel("Stable ID").fill(recipient);
+      await editor.getByRole("button", { name: "Grant role", exact: true }).click();
+      await expect(page.locator("#access").getByRole("status").first()).toHaveText(
+        "Role changes saved.",
+      );
+
+      const granted = appRoleState.parse(
+        await (await context.request.get(`/api/v1/apps/${record.id}/roles`)).json(),
+      );
+
+      expect(granted.assignments).toContainEqual(
+        expect.objectContaining({
+          role: "user",
+          principal: { type: "group", provider: state.provider, subject: recipient },
+        }),
+      );
+    } finally {
+      await context.close();
+    }
+  });
+
   test(`edits app and inherited preview access with JavaScript ${javaScriptEnabled}`, async ({
     browser,
   }) => {
@@ -1006,14 +1158,16 @@ for (const javaScriptEnabled of [true, false]) {
         );
 
       await page.goto(`/apps/${parent.id}?tab=access&scope=app`, { waitUntil: "domcontentloaded" });
-      await page.getByLabel("Allowed groups for this app", { exact: true }).fill("finance");
+      await page
+        .getByLabel("Allow everyone signed in through company SSO", { exact: true })
+        .check();
       hydration.emit("ready");
 
       // Finish loading the held client scripts after editing the server-rendered form.
       if (javaScriptEnabled) await page.waitForLoadState("networkidle");
-      await expect(page.getByLabel("Allowed groups for this app", { exact: true })).toHaveValue(
-        "finance",
-      );
+      await expect(
+        page.getByLabel("Allow everyone signed in through company SSO", { exact: true }),
+      ).toBeChecked();
 
       const submission = new EventEmitter();
       const resume = once(submission, "resume");
@@ -1033,7 +1187,7 @@ for (const javaScriptEnabled of [true, false]) {
       if (javaScriptEnabled) {
         try {
           await expect(
-            page.getByLabel("Allowed groups for this app", { exact: true }),
+            page.getByLabel("Allow everyone signed in through company SSO", { exact: true }),
           ).toBeDisabled();
           await expect(page.getByRole("button", { name: "Saving …", exact: true })).toBeDisabled();
         } finally {
@@ -1045,12 +1199,13 @@ for (const javaScriptEnabled of [true, false]) {
         .poll(async () => {
           const response = await context.request.get(`/api/v1/apps/${parent.id}/access`);
 
-          return z.object({ groups: z.array(z.string()) }).parse(await response.json()).groups;
+          return z.object({ allAuthenticated: z.boolean() }).parse(await response.json())
+            .allAuthenticated;
         })
-        .toEqual(["finance"]);
-      await expect(page.getByLabel("Allowed groups for this app", { exact: true })).toHaveValue(
-        "finance",
-      );
+        .toBe(true);
+      await expect(
+        page.getByLabel("Allow everyone signed in through company SSO", { exact: true }),
+      ).toBeChecked();
       await expect(page.getByRole("button", { name: "Save app rules", exact: true })).toBeEnabled();
 
       await expect(page.getByLabel("Allowed groups for all previews")).toHaveCount(0);
@@ -1072,32 +1227,36 @@ for (const javaScriptEnabled of [true, false]) {
           "This preview automatically inherits the original app's access rules. You cannot set separate rules.",
         ),
       ).toBeVisible();
-      await expect(page.getByText("Allowed groups: finance", { exact: true })).toBeVisible();
+      await expect(
+        page.getByText("Everyone signed in through company SSO can use this app.", { exact: true }),
+      ).toBeVisible();
       await expect(page.getByRole("button", { name: "Save app rules", exact: true })).toHaveCount(
         0,
       );
       // This phase edits the hydrated form; the first visit covers pre-hydration input.
       await page.goto(`/apps/${parent.id}?tab=access&scope=app`, { waitUntil: "networkidle" });
-      await page.getByLabel("Allowed groups for this app", { exact: true }).fill("unsaved-group");
+      await page
+        .getByLabel("Allow everyone signed in through company SSO", { exact: true })
+        .uncheck();
 
       const competing = await context.request.patch(`/api/v1/apps/${parent.id}/access`, {
         headers: { origin: environment.configuration.PLATFORM_URL },
-        data: { groups: ["qa"], revision: 1 },
+        data: { allAuthenticated: false, revision: 2 },
       });
 
       expect(competing.status()).toBe(200);
 
       if (javaScriptEnabled) {
-        await page.getByRole("link", { name: "Management access", exact: true }).click();
+        await page.getByRole("link", { name: "App roles", exact: true }).click();
         await page.getByRole("link", { name: "App usage", exact: true }).click();
-        await expect(page.getByLabel("Allowed groups for this app", { exact: true })).toHaveValue(
-          "unsaved-group",
-        );
+        await expect(
+          page.getByLabel("Allow everyone signed in through company SSO", { exact: true }),
+        ).not.toBeChecked();
         await page.getByRole("link", { name: "Overview", exact: true }).click();
         await page.getByRole("link", { name: "Access", exact: true }).click();
-        await expect(page.getByLabel("Allowed groups for this app", { exact: true })).toHaveValue(
-          "unsaved-group",
-        );
+        await expect(
+          page.getByLabel("Allow everyone signed in through company SSO", { exact: true }),
+        ).not.toBeChecked();
 
         const refreshed = page.waitForResponse((response) =>
           response.url().includes("/getAppAccess"),
@@ -1115,30 +1274,33 @@ for (const javaScriptEnabled of [true, false]) {
 
         await page.getByRole("button", { name: "Save app rules", exact: true }).click();
         await submitted;
-        await expect(page.getByRole("alert")).toContainText("Access rules have changed");
-        await expect(page.getByLabel("Allowed groups for this app", { exact: true })).toHaveValue(
-          "unsaved-group",
-        );
+        await expect(page.getByRole("alert")).toContainText("Permissions have changed");
+        await expect(
+          page.getByLabel("Allow everyone signed in through company SSO", { exact: true }),
+        ).not.toBeChecked();
         const response = await context.request.get(`/api/v1/apps/${parent.id}/access`);
-        expect(await response.json()).toMatchObject({ groups: ["qa"], revision: 2 });
+        expect(await response.json()).toMatchObject({ allAuthenticated: false, revision: 3 });
       }
 
       await page.getByRole("link", { name: "Discard draft and reload rules", exact: true }).click();
-      await expect(page.getByLabel("Allowed groups for this app", { exact: true })).toHaveValue(
-        "qa",
-      );
-      await page.getByLabel("Allowed groups for this app", { exact: true }).fill("");
+      await expect(
+        page.getByLabel("Allow everyone signed in through company SSO", { exact: true }),
+      ).not.toBeChecked();
+      await page
+        .getByLabel("Allow everyone signed in through company SSO", { exact: true })
+        .check();
       await page.getByRole("button", { name: "Save app rules", exact: true }).click();
       await expect
         .poll(async () => {
           const response = await context.request.get(`/api/v1/apps/${preview.id}/access`);
 
-          return z.object({ groups: z.array(z.string()) }).parse(await response.json()).groups;
+          return z.object({ allAuthenticated: z.boolean() }).parse(await response.json())
+            .allAuthenticated;
         })
-        .toEqual([]);
+        .toBe(true);
       await page.goto(`/apps/${preview.id}?tab=access&scope=app`);
       await expect(
-        page.getByText("Allowed groups: All signed-in users", { exact: true }),
+        page.getByText("Everyone signed in through company SSO can use this app.", { exact: true }),
       ).toBeVisible();
       expect(pageErrors).toEqual([]);
     } finally {
@@ -1190,10 +1352,10 @@ test.describe("workspace experience", () => {
       page.getByRole("heading", { name: "Ready for your first deployment." }),
     ).toBeVisible();
     await page.getByRole("link", { name: "Access", exact: true }).click();
-    await page.getByRole("link", { name: "Management access", exact: true }).click();
+    await page.getByRole("link", { name: "App roles", exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`/apps/${record.id}\\?tab=access&scope=management$`));
     await page.reload();
-    await expect(page.getByRole("heading", { name: "Manage access" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "App roles" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Access", exact: true })).toHaveAttribute(
       "aria-current",
       "page",

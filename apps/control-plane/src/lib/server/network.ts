@@ -35,18 +35,10 @@ export const createNetworkService = (database: Database) => ({
     }),
   change: (principal: Principal, appId: string, input: z.infer<typeof contract.networkChange>) =>
     transact(database, async (transaction) => {
-      const access = await managedApp(transaction, principal, appId);
+      const access = await managedApp(transaction, principal, appId, "network");
 
       if (access.isErr()) return access;
       const app = access.value;
-
-      if (!principal.admin && app.ownerId !== principal.id)
-        return Result.err(
-          new InvalidOperation({
-            code: "FORBIDDEN",
-            message: "Only the owner or an administrator can change network permissions",
-          }),
-        );
 
       if (app.state === "deleting")
         return Result.err(

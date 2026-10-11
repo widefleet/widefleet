@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { authBundle } from "../src/lib/server/auth-bundle.ts";
+import { startAppAuthorizer } from "./app-authorizer.ts";
 import { readOptionalFile, writePrivateFile } from "../src/lib/server/installation-files.ts";
 import { ssoFailureReason } from "./sso-diagnostics.ts";
 
@@ -28,6 +29,16 @@ let stopped = false;
 let child: ChildProcess | null = null;
 
 let active: Bundle | null = null;
+
+const authorizer = startAppAuthorizer(() => {
+  const proxy = z
+    .object({
+      providers: z.array(z.object({ oidcConfig: z.object({ issuerURL: z.string() }) })).length(1),
+    })
+    .safeParse(active?.proxy);
+
+  return proxy.success ? (proxy.data.providers[0]?.oidcConfig.issuerURL ?? null) : null;
+});
 
 let attempted = "";
 
@@ -293,5 +304,6 @@ try {
     await delay(1000);
   }
 } finally {
+  authorizer.close();
   await stop();
 }

@@ -127,7 +127,7 @@ const handle = async (
   }
 };
 
-createServer((request, response) => {
+createServer({ maxHeaderSize: 512 * 1024 }, (request, response) => {
   void handle(request, response).catch((error: Error) => {
     console.error(error.message);
     response.writeHead(500).end("Fixture failed");
@@ -151,7 +151,7 @@ if (process.env["GROUP_OVERAGE"] === "1") {
 
       const page = Number(url.searchParams.get("page") ?? "0");
 
-      const groups = Array.from({ length: 205 }, (_, index) => ({
+      const groups = Array.from({ length: 1000 }, (_, index) => ({
         id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
       }));
 
@@ -161,7 +161,7 @@ if (process.env["GROUP_OVERAGE"] === "1") {
         value: groups.slice(page * 100, (page + 1) * 100),
       };
 
-      if (page < 2)
+      if ((page + 1) * 100 < groups.length)
         result["@odata.nextLink"] =
           `https://graph.microsoft.com/v1.0/me/transitiveMemberOf?page=${page + 1}`;
       response.end(JSON.stringify(result));

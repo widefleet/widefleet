@@ -160,7 +160,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1" && process.platform !== "win
         agents: createAgentService(database),
         jobs: createJobService(database, storage, "local-integration-test-encryption-key-only"),
         network: createNetworkService(database),
-        appAccess: createAppAccessService(database),
+        appAccess: createAppAccessService(database, environment.configuration),
         workflows: createWorkflowService(database),
         migrations: createMigrationService(database, storage),
         connectors: createConnectorService(

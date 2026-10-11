@@ -113,6 +113,13 @@
       "when": 1792089600000,
       "tag": "0015_app_workflows",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1792176000000,
+      "tag": "0016_app_roles",
+      "breakpoints": true
     }
   ]
 }

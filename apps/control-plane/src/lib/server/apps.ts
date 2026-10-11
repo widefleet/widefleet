@@ -1,43 +1,28 @@
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
-import { and, desc, eq, exists, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import type { z } from "zod";
 import type { Configuration } from "./config.ts";
 import type { Database } from "./database.ts";
-import { member, user } from "./auth-schema.ts";
-import { installationOrganizationId } from "../organization.ts";
-import { findMembers } from "./member-directory.ts";
 import { InvalidOperation } from "./errors.ts";
 import type { Principal } from "./identity.ts";
-import { appGrants, apps, artifacts, deploymentEvents, deployments, jobs } from "./schema.ts";
+import {
+  appRoleAssignments,
+  apps,
+  artifacts,
+  deploymentEvents,
+  deployments,
+  jobs,
+} from "./schema.ts";
 import { transact, type Transaction } from "./transactions.ts";
 import { defaultFleet } from "./fleets.ts";
 
-export const appVisibility = (database: Database | Transaction, principal: Principal) =>
-  principal.admin
-    ? sql`true`
-    : or(
-        eq(apps.ownerId, principal.id),
-        exists(
-          database
-            .select({ id: appGrants.appId })
-            .from(appGrants)
-            .where(and(eq(appGrants.appId, apps.id), eq(appGrants.userId, principal.id))),
-        ),
-      );
+import { appVisibility, managedApp, personalPrincipal } from "./app-permissions.ts";
+import { lockAppProvider } from "./app-provider.ts";
 
-export const managedApp = async (transaction: Transaction, principal: Principal, appId: string) => {
-  const [record] = await transaction
-    .select()
-    .from(apps)
-    .where(and(eq(apps.id, appId), appVisibility(transaction, principal)))
-    .for("update");
+export { appVisibility, managedApp } from "./app-permissions.ts";
 
-  if (!record)
-    return Result.err(new InvalidOperation({ code: "NOT_FOUND", message: "App not found" }));
-
-  return Result.ok(record);
-};
+import { providerIssuer } from "./company-identity.ts";
 
 // The caller holds the root app lock. All tree mutations lock descendants from parent
 // to child, including access inheritance and removal of a legacy preview subtree.
@@ -178,6 +163,7 @@ const provisionApp = (
   mode: "create" | "resolve",
 ) =>
   transact(database, async (transaction) => {
+    await lockAppProvider(transaction, configuration);
     await transaction.execute(
       sql`select pg_advisory_xact_lock(hashtextextended(${input.slug}, 0))`,
     );
@@ -215,7 +201,17 @@ const provisionApp = (
     const fleet = await defaultFleet(transaction);
     let hostname = `${input.slug}.${configuration.APP_DOMAIN}`;
     let accessGroups: string[] = [];
-    let accessRevision = 0;
+    let accessRevision = 1;
+    let accessUsers: string[] = [];
+
+    let accessProvider = configuration.IDENTITY
+      ? providerIssuer(configuration.IDENTITY.provider)
+      : "";
+
+    let allAuthenticated = false;
+    const creator = personalPrincipal(principal);
+
+    if (creator.provider === accessProvider) accessUsers = [creator.subject];
 
     if (input.previewName !== undefined && input.parentId === null)
       return Result.err(
@@ -226,7 +222,7 @@ const provisionApp = (
       );
 
     if (input.parentId !== null) {
-      const parent = await managedApp(transaction, principal, input.parentId);
+      const parent = await managedApp(transaction, principal, input.parentId, "deploy");
 
       if (parent.isErr()) return parent;
 
@@ -244,6 +240,9 @@ const provisionApp = (
         );
       accessGroups = contract.appAccessGroups.parse(parent.value.accessGroups);
       accessRevision = parent.value.accessRevision;
+      accessUsers = contract.appAccessGroups.parse(parent.value.accessUsers);
+      accessProvider = parent.value.accessProvider;
+      allAuthenticated = parent.value.allAuthenticated;
 
       if (input.previewName !== undefined) {
         if (
@@ -279,7 +278,9 @@ const provisionApp = (
         accessGroups,
         accessRevision,
         fleetId: fleet.id,
-        ownerId: principal.id,
+        accessUsers,
+        accessProvider,
+        allAuthenticated,
         hostname,
       })
       .onConflictDoNothing()
@@ -292,6 +293,14 @@ const provisionApp = (
           message: "This app name or preview hostname is already in use",
         }),
       );
+
+    if (input.parentId === null)
+      await transaction.insert(appRoleAssignments).values({
+        id: crypto.randomUUID(),
+        appId: record.id,
+        ...creator,
+        role: "admin",
+      });
 
     return Result.ok(presentApp(record, configuration));
   });
@@ -321,18 +330,10 @@ export const createAppService = (database: Database, configuration: Configuratio
     }),
   setCatalogListing: (principal: Principal, appId: string, listed: boolean) =>
     transact(database, async (transaction) => {
-      const access = await managedApp(transaction, principal, appId);
+      const access = await managedApp(transaction, principal, appId, "catalog");
 
       if (access.isErr()) return access;
       const record = access.value;
-
-      if (!principal.admin && record.ownerId !== principal.id)
-        return Result.err(
-          new InvalidOperation({
-            code: "FORBIDDEN",
-            message: "Only owners and admins can change catalog visibility.",
-          }),
-        );
 
       if (
         listed &&
@@ -394,7 +395,7 @@ export const createAppService = (database: Database, configuration: Configuratio
     }),
   events: (principal: Principal, appId: string, deploymentId: string) =>
     transact(database, async (transaction) => {
-      const access = await managedApp(transaction, principal, appId);
+      const access = await managedApp(transaction, principal, appId, "logs");
 
       if (access.isErr()) return access;
 
@@ -423,7 +424,7 @@ export const createAppService = (database: Database, configuration: Configuratio
     }),
   rollback: (principal: Principal, appId: string, artifactId: string, requestId: string) =>
     transact(database, async (transaction) => {
-      const access = await managedApp(transaction, principal, appId);
+      const access = await managedApp(transaction, principal, appId, "rollback");
 
       if (access.isErr()) return access;
 
@@ -446,102 +447,12 @@ export const createAppService = (database: Database, configuration: Configuratio
     }),
   remove: (principal: Principal, appId: string) =>
     transact(database, async (transaction) => {
-      const access = await managedApp(transaction, principal, appId);
+      const access = await managedApp(transaction, principal, appId, "delete");
 
       if (access.isErr()) return access;
 
       await enqueueAppRemoval(transaction, access.value);
 
       return Result.ok({ accepted: true });
-    }),
-  access: (principal: Principal, appId: string, search: string) =>
-    transact(database, async (transaction) => {
-      const access = await managedApp(transaction, principal, appId);
-
-      if (access.isErr()) return access;
-
-      const canManage = principal.admin || access.value.ownerId === principal.id;
-
-      const [owner] = await transaction
-        .select({ name: user.name, email: user.email })
-        .from(user)
-        .where(eq(user.id, access.value.ownerId));
-
-      const grants = await transaction
-        .select({ userId: user.id, name: user.name, email: user.email })
-        .from(appGrants)
-        .innerJoin(user, eq(user.id, appGrants.userId))
-        .where(eq(appGrants.appId, appId));
-
-      const candidates = canManage && search ? await findMembers(transaction, search) : [];
-
-      return Result.ok({
-        canManage,
-        owner: owner ?? null,
-        grants,
-        candidates: candidates
-          .slice(0, 50)
-          .filter(
-            (person) =>
-              person.userId !== access.value.ownerId &&
-              !grants.some((grant) => grant.userId === person.userId),
-          ),
-        hasMore: candidates.length > 50,
-      });
-    }),
-  grant: (principal: Principal, appId: string, userId: string) =>
-    transact(database, async (transaction) => {
-      const access = await managedApp(transaction, principal, appId);
-
-      if (access.isErr()) return access;
-
-      if (!principal.admin && access.value.ownerId !== principal.id)
-        return Result.err(
-          new InvalidOperation({
-            code: "FORBIDDEN",
-            message: "Only the owner or an administrator can change app permissions",
-          }),
-        );
-
-      const [person] = await transaction
-        .select({ id: user.id })
-        .from(user)
-        .innerJoin(
-          member,
-          and(eq(member.userId, user.id), eq(member.organizationId, installationOrganizationId)),
-        )
-        .where(eq(user.id, userId));
-
-      if (!person)
-        return Result.err(
-          new InvalidOperation({
-            code: "NOT_FOUND",
-            message: "An active company user is required",
-          }),
-        );
-
-      await transaction.insert(appGrants).values({ appId, userId }).onConflictDoNothing();
-
-      return Result.ok({ granted: true });
-    }),
-  revoke: (principal: Principal, appId: string, userId: string) =>
-    transact(database, async (transaction) => {
-      const access = await managedApp(transaction, principal, appId);
-
-      if (access.isErr()) return access;
-
-      if (!principal.admin && access.value.ownerId !== principal.id)
-        return Result.err(
-          new InvalidOperation({
-            code: "FORBIDDEN",
-            message: "Only the owner or an administrator can change app permissions",
-          }),
-        );
-
-      await transaction
-        .delete(appGrants)
-        .where(and(eq(appGrants.appId, appId), eq(appGrants.userId, userId)));
-
-      return Result.ok({ revoked: true });
     }),
 });

@@ -3,7 +3,10 @@ import { and, eq } from "drizzle-orm";
 import { createLocalJWKSet, jwtVerify } from "jose";
 import { z } from "zod";
 import { apiResource } from "./auth-options.ts";
-import { member, user } from "./auth-schema.ts";
+import { account, member, user } from "./auth-schema.ts";
+import { readCompanyClaims } from "./company-claims.ts";
+import { readCompanyGroups } from "./company-groups.ts";
+import { companyAccountProvider } from "./company-identity.ts";
 import {
   installationOrganizationId,
   organizationRole,
@@ -25,8 +28,11 @@ export const createIdentityService = (
   auth: Authentication,
   database: Database,
   configuration: Configuration,
+  request: typeof fetch = fetch,
 ) => {
-  const resolveUser = (userId: string) =>
+  const memberships = new Map<string, { expiresAt: number; groups: Promise<string[]> }>();
+
+  const resolveUser = (userId: string, recovery = false) =>
     Result.gen(async function* () {
       const [record] = yield* Result.await(
         Result.tryPromise({
@@ -67,6 +73,78 @@ export const createIdentityService = (
           message: "An active organization membership is required",
         });
 
+      const company = yield* Result.await(
+        Result.tryPromise({
+          try: async () => {
+            // Recovery uses the local session and current installation role without an IdP dependency.
+            if (!configuration.IDENTITY || recovery) return undefined;
+
+            const [linked] = await database
+              .select()
+              .from(account)
+              .where(
+                and(
+                  eq(account.userId, record.id),
+                  eq(account.providerId, companyAccountProvider(configuration.IDENTITY)),
+                ),
+              );
+
+            const claims = linked
+              ? readCompanyClaims(configuration.IDENTITY.provider, linked)
+              : undefined;
+
+            if (!claims || !linked || !claims.overage || claims.groupsExpired) return claims;
+
+            for (const [key, cached] of memberships)
+              if (cached.expiresAt <= Date.now()) memberships.delete(key);
+
+            const key = JSON.stringify([linked.id, linked.idToken]);
+            let cached = memberships.get(key);
+
+            if (!cached) {
+              if (memberships.size >= 100) {
+                const oldest = memberships.keys().next().value;
+
+                if (oldest) memberships.delete(oldest);
+              }
+
+              cached = {
+                expiresAt: claims.expiresAt,
+                groups: (async () => {
+                  const token = await auth.api.getAccessToken({
+                    body: { accountId: linked.id, userId: record.id },
+                  });
+
+                  return readCompanyGroups(
+                    z.string().min(1).parse(token.accessToken),
+                    claims.subject,
+                    request,
+                  );
+                })(),
+              };
+              // Share in-flight work as well as completed results for this verified token.
+              memberships.set(key, cached);
+            }
+
+            let current;
+
+            try {
+              current = await cached.groups;
+            } catch (cause) {
+              if (memberships.get(key) === cached) memberships.delete(key);
+              throw cause;
+            }
+
+            if (claims.expiresAt <= Date.now())
+              return { ...claims, groups: [], groupsExpired: true };
+
+            return { ...claims, groups: current };
+          },
+          catch: (cause) =>
+            new DatabaseUnavailable({ message: "Could not read company identity", cause }),
+        }),
+      );
+
       return Result.ok({
         id: record.id,
         name: record.name,
@@ -74,6 +152,7 @@ export const createIdentityService = (
         role: role.data,
         admin: organizationRoles[role.data].authorize({ agent: ["manage"] }).success,
         creator: organizationRoles[role.data].authorize({ app: ["create"] }).success,
+        company,
       });
     });
 
@@ -149,7 +228,7 @@ export const createIdentityService = (
         });
       }
 
-      return resolveUser(session.user.id);
+      return resolveUser(session.user.id, session.session.recovery);
     });
 
   return { authenticate };

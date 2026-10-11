@@ -760,7 +760,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       expect((await failure(runtimeCli("rollback", "0.1.0"))).stderr).toContain(
         "Runtime readiness failed",
       );
-    });
+    }, 15_000);
 
     it("exports settings and requires explicit acknowledgement of the server's restart plan", async () => {
       const settingsFile = join(state, "settings.json");

@@ -16,6 +16,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { oauthClient } from "../../src/lib/server/auth-schema.ts";
 import { apiResource } from "../../src/lib/server/auth-options.ts";
+import { providerIssuer } from "../../src/lib/server/company-identity.ts";
 import { createTestEnvironment } from "../environment.ts";
 
 const execute = promisify(execFile);
@@ -26,6 +27,8 @@ describe.runIf(process.env["RUN_IMAGE_TESTS"] === "1")("release container images
     const state = await mkdtemp(join(tmpdir(), "widefleet-image-test-"));
     const suffix = crypto.randomUUID();
     const name = `platform-image-test-${suffix}`;
+    const authName = `${name}-auth`;
+    const edgeName = `${name}-edge`;
     const artifactBucket = `image-artifacts-${suffix}`;
     const fleetBucket = `image-fleets-${suffix}`;
     const databaseUrl = new URL(environment.environment.DATABASE_URL);
@@ -102,6 +105,37 @@ describe.runIf(process.env["RUN_IMAGE_TESTS"] === "1")("release container images
       expect(configuration).toHaveProperty("proxy.providers.file.directory", "/config/routes");
       expect(configuration).not.toHaveProperty("proxy.certificatesResolvers");
 
+      // New apps are protected from their first deployment. Exercise the real
+      // route activation check with the packaged authorizer and an anonymous SSO fixture.
+      await execute("docker", [
+        "run",
+        "--detach",
+        "--name",
+        authName,
+        "--network=bridge",
+        "--env",
+        `FIXTURE_ISSUER=${providerIssuer(environment.configuration.IDENTITY.provider)}`,
+        image,
+        "node",
+        "--input-type=module",
+        "--eval",
+        'import { createServer } from "node:http"; import { startAppAuthorizer } from "./tools/app-authorizer.ts"; createServer((_request, response) => response.writeHead(401).end()).listen(4180, "127.0.0.1"); startAppAuthorizer(() => process.env.FIXTURE_ISSUER ?? null);',
+      ]);
+      await execute("docker", [
+        "run",
+        "--detach",
+        "--name",
+        edgeName,
+        "--network=bridge",
+        "--volume",
+        `${state}/config/routes:/routes:ro`,
+        "traefik:v3.7.13@sha256:24841fe2de7304c149343d877d2923b4c8800a38ba015dea9174c23b20e344a0",
+        "--entrypoints.websecure.address=:8443",
+        "--providers.file.directory=/routes",
+        "--providers.file.watch=true",
+        "--providers.providersThrottleDuration=100ms",
+      ]);
+
       // Only this fixture's randomly named database is reset.
       await environment.database.db.execute(
         sql`DROP SCHEMA public CASCADE; DROP SCHEMA drizzle CASCADE; CREATE SCHEMA public`,
@@ -134,6 +168,19 @@ describe.runIf(process.env["RUN_IMAGE_TESTS"] === "1")("release container images
           (await s3.send(new HeadBucketCommand({ Bucket: bucket }))).$metadata.httpStatusCode,
         ).toBe(200);
       }
+
+      // Reinstall the fixture identity after testing initialization from an empty schema.
+      const { provider, management } = environment.configuration.IDENTITY;
+
+      const client = {
+        clientId: management.clientId,
+        secret: { type: "value" as const, value: management.clientSecret },
+      };
+
+      await environment.settings.initialize({
+        externallyManaged: false,
+        identity: { provider, management: client, apps: client, directory: null },
+      });
 
       await execute("docker", [
         "run",
@@ -278,7 +325,9 @@ describe.runIf(process.env["RUN_IMAGE_TESTS"] === "1")("release container images
         DOCKER_HOST: "unix:///var/run/docker.sock",
         PLATFORM_AGENT_STATE: "/state",
         PLATFORM_AGENT_HOST_STATE: state,
-        PLATFORM_ROUTING_DIRECTORY: "/state/routes",
+        PLATFORM_ROUTING_DIRECTORY: "/state/config/routes",
+        PLATFORM_PROXY_URL: `https://${edgeName}:8443`,
+        PLATFORM_APP_AUTH_URL: `http://${authName}:4181/`,
         PLATFORM_RUNTIME_IMAGE: runtimeImage,
         CELLD_BINARY: "/usr/local/bin/celld",
         FLEET_S3_ENDPOINT: "http://rustfs:9000",
@@ -286,7 +335,7 @@ describe.runIf(process.env["RUN_IMAGE_TESTS"] === "1")("release container images
         FLEET_S3_BUCKET: fleetBucket,
         FLEET_S3_ACCESS_KEY_ID: environment.environment.S3_ACCESS_KEY_ID,
         FLEET_S3_SECRET_ACCESS_KEY: environment.environment.S3_SECRET_ACCESS_KEY,
-        PLATFORM_TRUSTED_CONTAINERS: "internal-app-platform-test-rustfs-1",
+        PLATFORM_TRUSTED_CONTAINERS: `internal-app-platform-test-rustfs-1,${authName},${edgeName}`,
       };
 
       const agent = () =>
@@ -320,6 +369,12 @@ describe.runIf(process.env["RUN_IMAGE_TESTS"] === "1")("release container images
       expect(history).toEqual([
         expect.objectContaining({ id: deployment.id, status: "succeeded" }),
       ]);
+      expect(await request(`/apps/${app.id}/access`, "GET")).toMatchObject({
+        revision: 1,
+        appliedRevision: 1,
+        state: "active",
+        allAuthenticated: false,
+      });
 
       const worker = await execute("docker", [
         "exec",
@@ -358,13 +413,18 @@ describe.runIf(process.env["RUN_IMAGE_TESTS"] === "1")("release container images
       if (fleetId) {
         const appName = `platform-fleet-${fleetId}`;
         await execute("docker", ["rm", "--force", appName]).catch(() => undefined);
-        await execute("docker", [
-          "network",
-          "disconnect",
-          appName,
-          "internal-app-platform-test-rustfs-1",
-        ]).catch(() => undefined);
+
+        for (const trusted of ["internal-app-platform-test-rustfs-1", authName, edgeName]) {
+          await execute("docker", ["network", "disconnect", appName, trusted]).catch(
+            () => undefined,
+          );
+        }
+
         await execute("docker", ["network", "rm", appName]).catch(() => undefined);
+      }
+
+      for (const container of [authName, edgeName]) {
+        await execute("docker", ["rm", "--force", container]).catch(() => undefined);
       }
 
       if (running) await execute("docker", ["rm", "--force", name]);

@@ -19,5 +19,5 @@ COPY LICENSE /usr/share/licenses/widefleet/LICENSE
 COPY infra/oauth2-proxy/options.cfg /config/options.cfg
 RUN mkdir -p /auth /runtime && chown node:node /auth /runtime && chmod 700 /auth /runtime
 USER node
-EXPOSE 4180
+EXPOSE 4180 4181
 ENTRYPOINT ["node", "/supervisor.mjs"]

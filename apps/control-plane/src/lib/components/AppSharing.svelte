@@ -1,140 +1,265 @@
 <script lang="ts">
-  import { getAppDetails, grantAccess, revokeAccess } from "#lib/apps.remote";
+  import type { RemoteFormFields } from "$app/server";
+  import { grantAppRole, revokeAppRole } from "#lib/app-roles.remote";
+  import { searchAccessGroups } from "#lib/app-access.remote";
+  import type { getAppDetails } from "#lib/apps.remote";
   import FormIssues from "#shadcn/FormIssues.svelte";
   import { Button } from "#shadcn/components/ui/button/index.js";
   import { Input } from "#shadcn/components/ui/input/index.js";
-  import { Label } from "#shadcn/components/ui/label/index.js";
-  import { Badge } from "#shadcn/components/ui/badge/index.js";
-  import UserPlus from "@lucide/svelte/icons/user-plus";
-  import Search from "@lucide/svelte/icons/search";
-  import ShieldCheck from "@lucide/svelte/icons/shield-check";
+  import { NativeSelect } from "#shadcn/components/ui/native-select/index.js";
   import Feedback from "./Feedback.svelte";
 
   let {
-    data,
+    data: details,
     search,
     initialSaved,
-  }: { data: Awaited<ReturnType<typeof getAppDetails>>; search: string; initialSaved: boolean } =
-    $props();
+  }: {
+    data: Awaited<ReturnType<typeof getAppDetails>>;
+    search: string;
+    initialSaved: boolean;
+  } = $props();
 
   let saved = $derived(initialSaved);
+
+  const appId = $derived(details.app.id);
+
+  const data = $derived(details.roles);
+
+  const candidates = $derived(details.candidates);
+
+  const grant = $derived(grantAppRole.for(appId));
+
+  const directory = $derived(searchAccessGroups.for(appId));
+
+  let selectedProvider = $state<string | undefined>();
+
+  const provider = $derived(selectedProvider ?? data.provider);
+
+  let revisions = $state<Record<string, number>>({});
+
+  type RevisionFields = Pick<RemoteFormFields<{ revision: number }>, "revision" | "allIssues">;
+
+  function draftRevision(key: string, fields: RevisionFields) {
+    // Rejected native submissions retain the serialized hidden field value.
+    return Number(
+      revisions[key] ??
+        (fields.allIssues()?.length ? fields.revision.value() : undefined) ??
+        data.revision,
+    );
+  }
+
+  function beginDraft(key: string, fields: RevisionFields) {
+    revisions[key] ??= draftRevision(key, fields);
+  }
+
+  const labels = { user: "User", developer: "Developer", admin: "App admin" };
+
+  const editable = $derived(data.inheritedFrom === null && data.actions.includes("roles"));
+
+  function choose(person: { type: "user" | "group"; provider: string; subject: string }) {
+    beginDraft("grant", grant.fields);
+    grant.fields.type.set(person.type);
+    selectedProvider = person.provider;
+    grant.fields.subject.set(person.subject);
+  }
 </script>
 
-<section id="access" aria-labelledby="access-heading" class="space-y-6">
-  <div>
-    <h2 id="access-heading" class="text-base font-semibold">Manage access</h2>
-    <p class="text-muted-foreground mt-2 max-w-2xl text-sm leading-6">
-      Members with access can deploy this app, restore previous versions and delete the app. Owners
-      and admins can change access permissions.
-    </p>
-  </div>
-  <div class="bg-muted/40 flex items-start gap-3 rounded-lg border p-4 text-xs leading-5">
-    <ShieldCheck class="text-muted-foreground mt-0.5 size-4 shrink-0" />
-    <p>
-      Manage <strong class="font-medium">management access</strong> here. Access to the published
-      app is controlled by its
-      <a href={`/apps/${data.app.id}?tab=access&scope=app`} class="underline underline-offset-4"
-        >app usage rules</a
-      >. Workspace owners and admins have access to all apps.
-    </p>
-  </div>
-  {#if saved}<Feedback kind="success">App access saved.</Feedback>{/if}
-  <ul class="divide-y rounded-xl border" aria-label="Members with access">
-    {#if data.access.owner}<li class="flex items-center justify-between gap-4 p-4">
-        <div class="min-w-0">
-          <p class="truncate text-sm font-medium">{data.access.owner.name}</p>
-          <p class="text-muted-foreground mt-1 truncate text-xs">{data.access.owner.email}</p>
+<section id="access" aria-labelledby="roles-heading" class="max-w-3xl space-y-6">
+  <h2 id="roles-heading" class="text-base font-semibold">App roles</h2>
+  {#if saved}<Feedback kind="success">Role changes saved.</Feedback>{/if}
+  <p class="text-muted-foreground text-sm leading-6">
+    Every role includes app usage. Developers can deploy, read logs, manage workflows, restore
+    versions and run database migrations. App admins also manage roles, network permissions, catalog
+    visibility and deletion. To hand over an app, add another admin before removing the previous
+    admin role.
+  </p>
+  {#if data.inheritedFrom}<p>
+      App roles are inherited from the <a
+        href={`/apps/${data.inheritedFrom}?tab=access&scope=management`}>original app</a
+      >.
+    </p>{/if}
+  <ul class="divide-y rounded-xl border">
+    {#each data.assignments as assignment (assignment.id)}
+      <li class="flex flex-wrap items-start justify-between gap-4 p-4">
+        <div>
+          <strong>{labels[assignment.role]}</strong> · {assignment.principal.type === "group"
+            ? "Group"
+            : "Person"}
+          <p><code class="text-xs break-all">{assignment.principal.subject}</code></p>
+          <p class="text-muted-foreground text-xs break-all">{assignment.principal.provider}</p>
         </div>
-        <Badge variant="secondary">Owner</Badge>
-      </li>{/if}
-    {#each data.access.grants as person (person.userId)}
-      {@const revoke = revokeAccess.for(`${data.app.id}:${person.userId}`)}
-      <li class="flex flex-wrap items-center justify-between gap-3 p-4">
-        <div class="min-w-0">
-          <p class="truncate text-sm font-medium">{person.name}</p>
-          <p class="text-muted-foreground mt-1 truncate text-xs">{person.email}</p>
-        </div>
-        {#if data.access.canManage}<form
+        {#if editable && (assignment.role !== "admin" || data.assignments.filter((entry) => entry.role === "admin").length > 1)}
+          {@const revoke = revokeAppRole.for(assignment.id)}
+          <form
+            class="space-y-3"
+            onfocusin={() => beginDraft(assignment.id, revoke.fields)}
             {...revoke.enhance(async ({ submit }) => {
               saved = false;
               saved = await submit();
+              if (saved) delete revisions[assignment.id];
             })}
-            class="space-y-2"
           >
-            <input {...revoke.fields.appId.as("hidden", data.app.id)} /><input
-              {...revoke.fields.search.as("hidden", search)}
-            /><input {...revoke.fields.userId.as("hidden", person.userId)} /><FormIssues
-              issues={revoke.fields.allIssues()}
-            /><Button type="submit" variant="outline" size="sm" disabled={revoke.pending > 0}
-              >{revoke.pending ? "Revoking access …" : "Revoke access"}</Button
+            <input {...revoke.fields.appId.as("hidden", appId)} /><input
+              {...revoke.fields.assignmentId.as("hidden", assignment.id)}
+            />
+            <input
+              {...revoke.fields.revision.as("hidden", draftRevision(assignment.id, revoke.fields))}
+            /><input {...revoke.fields.search.as("hidden", search)} />
+            <FormIssues issues={revoke.fields.allIssues()} /><Button
+              type="submit"
+              variant="outline"
+              disabled={revoke.pending > 0}>Revoke role</Button
             >
-          </form>{/if}
+          </form>
+        {/if}
       </li>
     {/each}
-    {#if data.access.grants.length === 0}<li class="text-muted-foreground p-4 text-xs">
-        No additional members have access yet.
-      </li>{/if}
   </ul>
-  {#if data.access.canManage}
-    <div class="border-t pt-6">
-      <h3 class="mb-4 flex items-center gap-2 text-sm font-medium">
-        <UserPlus class="size-4" />Add member
-      </h3>
-      <form method="GET" action="#access" class="max-w-lg space-y-2">
-        <input type="hidden" name="tab" value="access" /><input
-          type="hidden"
-          name="scope"
-          value="management"
-        /><Label for="access-search">Find a member by name or email</Label>
-        <div class="flex gap-2">
-          <Input
-            id="access-search"
-            type="search"
-            name="q"
-            value={search}
-            maxlength={200}
-            required
-            placeholder="Name or email …"
-          /><Button type="submit" variant="outline"
-            ><Search /><span class="sr-only sm:not-sr-only">Find member</span></Button
-          >
-        </div>
-      </form>
-    </div>
-    {#if search && data.access.candidates.length === 0}<p class="text-muted-foreground text-sm">
-        No additional members found. Members with access are listed above.
-      </p>{/if}
-    {#if data.access.candidates.length > 0}<ul
-        class="divide-y rounded-xl border"
-        aria-label="Search results"
+  {#if editable}
+    <a
+      href={`/apps/${appId}?${new URLSearchParams({ tab: "access", scope: "management", q: search })}`}
+      data-sveltekit-reload
+      class="text-muted-foreground text-xs hover:underline">Discard drafts and reload roles</a
+    >
+    <form method="GET" action="#access" class="space-y-3">
+      <input type="hidden" name="tab" value="access" /><input
+        type="hidden"
+        name="scope"
+        value="management"
+      /><label class="grid gap-2 text-sm font-medium" for="member-search"
+        >Find a member by name or email</label
+      ><Input id="member-search" name="q" value={search} maxlength={200} required /><Button
+        type="submit"
+        variant="outline">Find member</Button
       >
-        {#each data.access.candidates as person (person.id)}
-          {@const grant = grantAccess.for(`${data.app.id}:${person.userId}`)}
-          <li class="flex flex-wrap items-center justify-between gap-3 p-4">
-            <div class="min-w-0">
-              <p class="truncate text-sm font-medium">{person.name}</p>
-              <p class="text-muted-foreground mt-1 truncate text-xs">{person.email}</p>
-            </div>
-            <form
-              {...grant.enhance(async ({ submit }) => {
-                saved = false;
-                saved = await submit();
-              })}
-              class="space-y-2"
+    </form>
+    {#if search && !candidates.length}<p>No members found.</p>{/if}
+    <ul class="divide-y rounded-xl border">
+      {#each candidates as person (`${person.principal.provider}:${person.principal.subject}`)}
+        {@const memberKey = `${appId}:member:${person.principal.provider}:${person.principal.subject}`}
+        {@const memberGrant = grantAppRole.for(memberKey)}
+        <li class="flex flex-wrap items-start justify-between gap-4 p-4">
+          <div>
+            <strong>{person.name}</strong>
+            <p>{person.email}</p>
+          </div>
+          <form
+            class="space-y-3"
+            onfocusin={() => beginDraft(`grant:${memberKey}`, memberGrant.fields)}
+            {...memberGrant.enhance(async ({ submit }) => {
+              saved = false;
+              saved = await submit();
+              if (saved) delete revisions[`grant:${memberKey}`];
+            })}
+          >
+            <input {...memberGrant.fields.appId.as("hidden", appId)} /><input
+              {...memberGrant.fields.revision.as(
+                "hidden",
+                draftRevision(`grant:${memberKey}`, memberGrant.fields),
+              )}
+            /><input {...memberGrant.fields.search.as("hidden", search)} />
+            <input {...memberGrant.fields.type.as("hidden", "user")} /><input
+              {...memberGrant.fields.provider.as("hidden", person.principal.provider)}
+            /><input {...memberGrant.fields.subject.as("hidden", person.principal.subject)} />
+            <label class="grid gap-2 text-sm font-medium"
+              >Role for {person.name}<NativeSelect {...memberGrant.fields.role.as("select")}
+                ><option value="user">User</option><option value="developer">Developer</option
+                ><option value="admin">App admin</option></NativeSelect
+              ></label
             >
-              <input {...grant.fields.appId.as("hidden", data.app.id)} /><input
-                {...grant.fields.search.as("hidden", search)}
-              /><input {...grant.fields.userId.as("hidden", person.userId)} /><FormIssues
-                issues={grant.fields.allIssues()}
-              /><Button type="submit" size="sm" disabled={grant.pending > 0}
-                >{grant.pending ? "Granting access …" : "Grant access"}</Button
+            <FormIssues issues={memberGrant.fields.allIssues()} /><Button
+              type="submit"
+              disabled={memberGrant.pending > 0}>Grant role to {person.name}</Button
+            >
+          </form>
+        </li>
+      {/each}
+    </ul>
+    <details
+      class="space-y-4 rounded-lg border p-4"
+      open={Boolean(directory.fields.allIssues()?.length || directory.result)}
+    >
+      <summary class="text-sm font-medium">Search the company directory for groups</summary>
+      <form class="space-y-3" {...directory}>
+        <input {...directory.fields.appId.as("hidden", appId)} /><label
+          class="grid gap-2 text-sm font-medium"
+          for="group-search">Group name</label
+        ><Input id="group-search" {...directory.fields.query.as("search")} required /><FormIssues
+          issues={directory.fields.allIssues()}
+        /><Button type="submit" variant="outline" disabled={directory.pending > 0}
+          >Search groups</Button
+        >
+      </form>
+      {#if directory.result}<ul class="divide-y rounded-xl border">
+          {#each directory.result.groups as group (group.id)}<li
+              class="flex flex-wrap items-start justify-between gap-4 p-4"
+            >
+              <div>
+                <strong>{group.name}</strong>
+                <p><code class="text-xs break-all">{group.id}</code></p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                onclick={() =>
+                  choose({ type: "group", provider: data.provider, subject: group.id })}
+                >Select group</Button
               >
-            </form>
-          </li>
-        {/each}
-      </ul>{/if}
-    {#if data.access.hasMore}<p class="text-muted-foreground text-xs">
-        More results are available. Refine your search.
-      </p>{/if}
+            </li>{/each}
+        </ul>{/if}
+    </details>
+    <details
+      class="space-y-4 rounded-lg border p-4"
+      open={Boolean(grant.fields.subject.value() || grant.fields.allIssues()?.length)}
+    >
+      <summary class="text-sm font-medium">Assign a role by person or group ID</summary>
+      <form
+        class="space-y-3"
+        onfocusin={() => beginDraft("grant", grant.fields)}
+        {...grant.enhance(async ({ submit }) => {
+          saved = false;
+          saved = await submit();
+          if (saved) delete revisions["grant"];
+        })}
+      >
+        <input {...grant.fields.appId.as("hidden", appId)} /><input
+          {...grant.fields.revision.as("hidden", draftRevision("grant", grant.fields))}
+        /><input {...grant.fields.search.as("hidden", search)} /><input
+          {...grant.fields.provider.as("hidden", provider)}
+        />
+        <label class="grid gap-2 text-sm font-medium" for="principal-type">Recipient</label
+        ><NativeSelect
+          id="principal-type"
+          {...grant.fields.type.as("select")}
+          onchange={() => {
+            selectedProvider = undefined;
+            grant.fields.subject.set("");
+          }}
+          ><option value="group">SSO group</option><option value="user">Person</option
+          ></NativeSelect
+        >
+        <label class="grid gap-2 text-sm font-medium" for="principal-subject">Stable ID</label
+        ><Input
+          id="principal-subject"
+          {...grant.fields.subject.as("text")}
+          required
+          maxlength={256}
+        />
+        <label class="grid gap-2 text-sm font-medium" for="app-role">Role</label><NativeSelect
+          id="app-role"
+          {...grant.fields.role.as("select")}
+          ><option value="user">User</option><option value="developer">Developer</option><option
+            value="admin">App admin</option
+          ></NativeSelect
+        >
+        <FormIssues issues={grant.fields.allIssues()} /><Button
+          type="submit"
+          disabled={grant.pending > 0}>Grant role</Button
+        >
+        {#if grant.result?.saved}<p role="status">
+            Role saved. App usage changes take effect when the gateway activates the rules.
+          </p>{/if}
+      </form>
+    </details>
   {/if}
 </section>

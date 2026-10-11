@@ -28,7 +28,12 @@ if (
 
 const command = process.argv[2];
 
-const stateSchema = z.object({ agentId: z.uuid(), agentToken: z.string(), appId: z.uuid() });
+const stateSchema = z.object({
+  agentId: z.uuid(),
+  agentToken: z.string(),
+  appId: z.uuid(),
+  adminAssignmentId: z.uuid().optional(),
+});
 
 const stateFile = "/data/demo.json";
 
@@ -155,10 +160,15 @@ if (command === "agent") {
 
     const api = async (
       path: string,
-      body?: { name: string } | z.infer<typeof contract.createAppInput>,
+      body?:
+        | { name: string }
+        | z.infer<typeof contract.createAppInput>
+        | z.infer<typeof contract.appRoleGrant>
+        | { revision: number },
+      method: "POST" | "DELETE" = "POST",
     ) => {
       const response = await fetch(`${configuration.PLATFORM_URL}/api/v1${path}`, {
-        method: body ? "POST" : "GET",
+        method: body ? method : "GET",
         headers: {
           authorization: `Bearer ${token}`,
           origin: configuration.PLATFORM_URL,
@@ -181,9 +191,9 @@ if (command === "agent") {
       });
 
       let registration;
+      const previous = current ? stateSchema.parse(JSON.parse(current)) : null;
 
-      if (current) {
-        const previous = stateSchema.parse(JSON.parse(current));
+      if (previous) {
         const registered = z.array(contract.agent).parse(await api("/agents"));
 
         if (!registered.some((entry) => entry.id === previous.agentId && entry.enabled))
@@ -209,9 +219,63 @@ if (command === "agent") {
           }),
         );
 
-      await writeFile(stateFile, JSON.stringify({ ...registration, appId: demo.id }), {
-        mode: 0o600,
-      });
+      const administrator = identities.find((identity) => identity.userId === "local-admin");
+
+      if (!administrator) throw new Error("Local administrator has no company identity");
+      let roles = contract.appRoleState.parse(await api(`/apps/${demo.id}/roles`));
+      const provider = `${authority}/${tenant}/v2.0`;
+      const principal = { type: "user" as const, provider, subject: administrator.accountId };
+
+      const isCurrent = (assignment: z.infer<typeof contract.appRoleAssignment>) =>
+        assignment.role === "admin" &&
+        assignment.principal.type === principal.type &&
+        assignment.principal.provider === principal.provider &&
+        assignment.principal.subject === principal.subject;
+
+      // The emulator recreates object IDs on restart. Add the current admin before
+      // removing obsolete seeded admins so the demo never loses its last admin.
+      if (!roles.assignments.some(isCurrent))
+        roles = contract.appRoleState.parse(
+          await api(
+            `/apps/${demo.id}/roles`,
+            {
+              revision: roles.revision,
+              principal,
+              role: "admin",
+            },
+            "POST",
+          ),
+        );
+
+      for (const assignment of roles.assignments.filter(
+        (entry) =>
+          entry.role === "admin" &&
+          !isCurrent(entry) &&
+          (entry.id === previous?.adminAssignmentId ||
+            (entry.principal.type === "user" &&
+              entry.principal.provider === "widefleet" &&
+              entry.principal.subject === "local-admin")),
+      ))
+        roles = contract.appRoleState.parse(
+          await api(
+            `/apps/${demo.id}/roles/${assignment.id}`,
+            {
+              revision: roles.revision,
+            },
+            "DELETE",
+          ),
+        );
+
+      const seededAdmin = roles.assignments.find(isCurrent);
+
+      if (!seededAdmin) throw new Error("Local app administrator was not assigned");
+      await writeFile(
+        stateFile,
+        JSON.stringify({ ...registration, appId: demo.id, adminAssignmentId: seededAdmin.id }),
+        {
+          mode: 0o600,
+        },
+      );
       console.info("Local administrator, agent and example app are ready");
     } else if (command === "deploy") {
       const state = await readState();
