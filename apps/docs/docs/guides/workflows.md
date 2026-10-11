@@ -159,7 +159,9 @@ For HTTP management, send the same selector to `POST /api/v1/apps/{appId}/workfl
 }
 ```
 
-The selected step and subsequent steps in execution history run again, including later steps in parallel branches. Earlier completed results are reused. Restart keeps the original parameters and pinned app code; deploying a fix does not change the code of this instance. Repeated external writes must tolerate repetition. Buffered, unconsumed events are cleared on restart; restarting an event wait requires a fresh event. A restarted `sleep` waits its duration again, while a restarted `sleepUntil` still requires a future deadline.
+The selected step and subsequent steps in execution history run again, including later steps in parallel branches. Earlier completed results are reused. Restart keeps the original instance input and pinned app code; deploying a fix does not change the code of this instance. Repeated external writes must tolerate repetition. Buffered, unconsumed events are cleared on restart; restarting an event wait requires a fresh event.
+
+Step options are evaluated again on selective restart. A restarted `sleep` waits its duration again. For `sleepUntil`, an expression such as `Date.now() + 60000` produces a new future deadline. A fixed deadline returned by an earlier retained step remains unchanged and fails if it has expired. Ordinary recovery after a runtime crash retains the already scheduled options and deadlines.
 
 If the target is missing, the request fails without resetting the instance. Check the exact name, type and occurrence against the path that ran; a step in an unvisited branch cannot be selected. After restart, use `status` to observe the new run. Delete the instance with `widefleet workflows delete process example-restart-1` when its retained results are no longer needed.
 
