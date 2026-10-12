@@ -48,15 +48,52 @@ jobs:
   build-native:
     name: Build and test macOS and Windows CLI
     needs: prepare
+    cache-mode: read
     uses: ./.github/workflows/cli-platforms.yaml
     with:
       ref: ${{ needs.prepare.outputs.revision }}
       platforms: '["darwin-arm64", "darwin-x64", "win32-x64-msvc"]'
 
-  build:
-    name: Build and test Linux CLI
+  build-binaries:
+    name: Compile shared Linux release binaries
     needs: prepare
     runs-on: ubuntu-24.04
+    cache-mode: read
+    env:
+      RELEASE_CARGO_CACHE: ${{ runner.temp }}/release-cargo
+      RELEASE_BINARIES: ${{ runner.temp }}/release-binaries
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.revision }}
+          persist-credentials: false
+      - uses: docker/setup-docker-action@2bf61fb9464cc67f0cbdeabed6aa0380accd1c70 # v5
+        with:
+          version: v29.8.1
+      - name: Restore the release Cargo cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ${{ env.RELEASE_CARGO_CACHE }}
+          key: release-cargo-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('infra/agent/Dockerfile', 'tools/build-release-binaries.sh', 'rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}-${{ hashFiles('crates/**') }}
+          restore-keys: |
+            release-cargo-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('infra/agent/Dockerfile', 'tools/build-release-binaries.sh', 'rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}-
+            release-cargo-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('infra/agent/Dockerfile', 'tools/build-release-binaries.sh', 'rust-toolchain.toml') }}-
+      - name: Compile the agent and CLI in the pinned release toolchain
+        run: bash tools/build-release-binaries.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-binaries
+          path: ${{ env.RELEASE_BINARIES }}/release-binaries.tar
+          if-no-files-found: error
+          retention-days: 3
+          overwrite: true
+
+  build:
+    name: Build and test Linux CLI
+    needs: [prepare, build-binaries]
+    runs-on: ubuntu-24.04
+    env:
+      RELEASE_BINARIES: ${{ runner.temp }}/release-binaries
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -72,14 +109,17 @@ jobs:
       - uses: docker/setup-docker-action@2bf61fb9464cc67f0cbdeabed6aa0380accd1c70 # v5
         with:
           version: v29.8.1
-      - name: Check source and build the release executables
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-binaries
+          path: ${{ env.RELEASE_BINARIES }}
+      - name: Verify the shared Linux release binaries
+        run: bash tools/load-release-binaries.sh
+      - name: Check source and package the release executables
         run: |
           npm install --global pnpm@12.4.2
           pnpm install --frozen-lockfile
           pnpm check
-          export RELEASE_CARGO_CACHE="$RUNNER_TEMP/release-cargo"
-          export RELEASE_BINARIES="$RUNNER_TEMP/release-binaries"
-          bash tools/build-release-binaries.sh
           pnpm package:cli --binary "$RELEASE_BINARIES/source/target/release/widefleet" --output "$RUNNER_TEMP/cli"
           mkdir -p target/debug
           cp "$RELEASE_BINARIES/source/target/release/"{widefleet,platform-agent} target/debug/
@@ -115,12 +155,13 @@ jobs:
         run: docker compose -f infra/test/compose.yaml down --volumes
 
   build-images:
-    needs: prepare
+    needs: [prepare, build-binaries]
     cache-mode: read
     uses: ./.github/workflows/build-release-images.yaml
     with:
       ref: ${{ needs.prepare.outputs.revision }}
       recover-existing: true
+      binaries-artifact: release-binaries
 
   publish-images:
     needs: [prepare, build, build-native, build-images]

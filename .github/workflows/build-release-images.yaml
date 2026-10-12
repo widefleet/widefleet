@@ -12,6 +12,10 @@ on:
       require-existing:
         type: boolean
         default: false
+      binaries-artifact:
+        description: Linux binaries built from ref in this workflow run
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -139,7 +143,7 @@ jobs:
             type=gha,scope=check-runtime-v1
           cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'type=gha,scope=release-runtime-v1,mode=max' || '' }}
       - name: Restore the release Cargo cache
-        if: matrix.component == 'agent' && steps.missing.outputs.component == '0' && steps.missing.outputs.cached-cargo == 'true'
+        if: matrix.component == 'agent' && steps.missing.outputs.component == '0' && steps.missing.outputs.cached-cargo == 'true' && inputs.binaries-artifact == ''
         id: cargo-cache
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
@@ -149,8 +153,17 @@ jobs:
             release-cargo-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('infra/agent/Dockerfile', 'tools/build-release-binaries.sh', 'rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}-
             release-cargo-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('infra/agent/Dockerfile', 'tools/build-release-binaries.sh', 'rust-toolchain.toml') }}-
       - name: Compile the agent and CLI in the pinned release toolchain
-        if: matrix.component == 'agent' && steps.missing.outputs.component == '0' && steps.missing.outputs.cached-cargo == 'true'
+        if: matrix.component == 'agent' && steps.missing.outputs.component == '0' && steps.missing.outputs.cached-cargo == 'true' && inputs.binaries-artifact == ''
         run: bash "$RELEASE_TOOLS"/build-release-binaries.sh
+      - name: Download the shared Linux release binaries
+        if: matrix.component == 'agent' && steps.missing.outputs.component == '0' && steps.missing.outputs.cached-cargo == 'true' && inputs.binaries-artifact != ''
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ inputs.binaries-artifact }}
+          path: ${{ env.RELEASE_BINARIES }}
+      - name: Verify Linux release binaries
+        if: matrix.component == 'agent' && steps.missing.outputs.component == '0' && steps.missing.outputs.cached-cargo == 'true'
+        run: bash "$RELEASE_TOOLS"/load-release-binaries.sh
       - name: Build the component image
         if: steps.missing.outputs.component == '0'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -178,7 +191,7 @@ jobs:
             type=gha,scope=check-${{ matrix.component }}-v1
           cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && format('type=gha,scope=release-{0}-v1,mode=max', matrix.component) || '' }}
       - name: Save the release Cargo cache
-        if: matrix.component == 'agent' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cargo-cache.outputs.cache-hit != 'true' && steps.missing.outputs.component == '0' && steps.missing.outputs.cached-cargo == 'true'
+        if: matrix.component == 'agent' && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cargo-cache.outputs.cache-hit != 'true' && steps.missing.outputs.component == '0' && steps.missing.outputs.cached-cargo == 'true' && inputs.binaries-artifact == ''
         uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ${{ env.RELEASE_CARGO_CACHE }}

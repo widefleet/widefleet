@@ -4,7 +4,8 @@ set -euo pipefail
 directory=${CLI_RELEASE_DIRECTORY:?}
 version=${VERSION:?}
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-packages=(widefleet-linux-x64-gnu widefleet-darwin-arm64 widefleet-darwin-x64 widefleet-win32-x64-msvc widefleet)
+native_packages=(widefleet-linux-x64-gnu widefleet-darwin-arm64 widefleet-darwin-x64 widefleet-win32-x64-msvc)
+packages=("${native_packages[@]}" widefleet)
 
 # Check every tested artifact and immutable version before publishing anything.
 for package in "${packages[@]}"; do
@@ -58,16 +59,32 @@ jq -e --arg version "$version" '
   }
 ' "$directory/widefleet.manifest.json"
 
-# The launcher becomes available only after every exact-version native dependency.
-# A retry can reuse existing packages only when their tested bytes match.
-for package in "${packages[@]}"; do
+publish_package() {
+  local package=$1
   if [[ "$(cat "$directory/$package.state")" == missing ]]; then
     npm publish "$directory/$package-$version.tgz" \
       --registry=https://registry.npmjs.org --access=public --provenance --ignore-scripts
   fi
   bash "$(dirname "${BASH_SOURCE[0]}")/wait-for-npm-package.sh" \
     "$package" "$version" "$(cat "$directory/$package.integrity")"
+}
+
+# Upload and check independent native packages concurrently. Join every worker,
+# including failures, before the launcher can reference these exact-version bytes.
+pids=()
+for package in "${native_packages[@]}"; do
+  publish_package "$package" &
+  pids+=("$!")
 done
+failed=false
+for index in "${!pids[@]}"; do
+  if ! wait "${pids[$index]}"; then
+    echo "Native package publication failed: ${native_packages[$index]}@$version" >&2
+    failed=true
+  fi
+done
+[[ "$failed" == false ]] || exit 1
+publish_package widefleet
 
 export PNPM_HOME="$directory/registry-install"
 export PATH="$PNPM_HOME/bin:$PATH"

@@ -28,3 +28,11 @@ docker run --rm --platform linux/amd64 --user "$user" \
   '
 install -m 755 "$cache/target/release/platform-agent" "$cache/target/release/widefleet" \
   "$binaries/source/target/release/"
+
+# Tar retains executable permissions when transported through Actions artifacts.
+git rev-parse HEAD > "$binaries/revision"
+(
+  cd "$binaries"
+  sha256sum source/target/release/platform-agent source/target/release/widefleet > SHA256SUMS
+  tar -cf release-binaries.tar revision SHA256SUMS source
+)

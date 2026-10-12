@@ -103,6 +103,16 @@ if [[ -f "$FIXTURE/$name.$kind.count" ]]; then count=$(cat "$FIXTURE/$name.$kind
 count=$((count + 1))
 printf '%s' "$count" > "$FIXTURE/$name.$kind.count"
 printf 'check %s %s\\n' "$name" "$kind" >> "$FIXTURE/events.log"
+if [[ "\${CONCURRENT_NATIVE:-false}" == true && "$name" != widefleet && "$kind" == full ]]; then
+  touch "$FIXTURE/$name.waiting"
+  for native in widefleet-linux-x64-gnu widefleet-darwin-arm64 widefleet-darwin-x64 widefleet-win32-x64-msvc; do
+    for attempt in {1..100}; do
+      if [[ -f "$FIXTURE/$native.waiting" ]]; then break; fi
+      /bin/sleep 0.01
+    done
+    test -f "$FIXTURE/$native.waiting"
+  done
+fi
 if [[ "$name" == widefleet-linux-x64-gnu ]]; then
   if [[ "$kind" == full ]]; then
     if [[ -n "\${AVAILABILITY_HTTP_STATUS:-}" ]]; then printf '%s' "$AVAILABILITY_HTTP_STATUS"; exit; fi
@@ -142,6 +152,7 @@ case "$1" in
     name=\${name%-0.3.0.tgz}
     printf 'publish %s\\n' "$name" >> "$FIXTURE/events.log"
     test "\${PUBLISH_FAIL:-false}" != true
+    test "\${PUBLISH_FAIL_PACKAGE:-}" != "$name"
     ;;
   *) exit 1 ;;
 esac
@@ -179,21 +190,25 @@ fi
   return { directory, run };
 };
 
-it("publishes every native package before the launcher with public access and provenance", async () => {
+it("publishes and checks native packages concurrently before the launcher with provenance", async () => {
   const { directory, run } = await fixture();
 
   try {
-    await run();
-    expect(
-      (await readFile(join(directory, "npm.log"), "utf8"))
-        .split("\n")
-        .filter((line) => line.startsWith("publish ")),
-    ).toEqual(
-      packages.map(
-        (name) =>
-          `publish ${directory}/${name}-0.3.0.tgz --registry=https://registry.npmjs.org --access=public --provenance --ignore-scripts`,
-      ),
+    await run({ CONCURRENT_NATIVE: "true" });
+
+    const publications = (await readFile(join(directory, "npm.log"), "utf8"))
+      .split("\n")
+      .filter((line) => line.startsWith("publish "));
+
+    expect(publications.toSorted()).toEqual(
+      packages
+        .map(
+          (name) =>
+            `publish ${directory}/${name}-0.3.0.tgz --registry=https://registry.npmjs.org --access=public --provenance --ignore-scripts`,
+        )
+        .toSorted(),
     );
+    expect(publications.at(-1)).toContain(`/widefleet-0.3.0.tgz `);
     expect(await readFile(join(directory, "summary"), "utf8")).toContain(
       "Verified widefleet@0.3.0",
     );
@@ -224,8 +239,8 @@ it("finishes a partial publication without replacing existing native packages", 
       .filter((line) => line.startsWith("publish "));
 
     expect(publications).toHaveLength(3);
-    expect(publications[0]).toContain("widefleet-darwin-x64-0.3.0.tgz");
-    expect(publications[1]).toContain("widefleet-win32-x64-msvc-0.3.0.tgz");
+    expect(publications.slice(0, 2).toSorted()[0]).toContain("widefleet-darwin-x64-0.3.0.tgz");
+    expect(publications.slice(0, 2).toSorted()[1]).toContain("widefleet-win32-x64-msvc-0.3.0.tgz");
     expect(publications[2]).toContain("widefleet-0.3.0.tgz");
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -287,8 +302,8 @@ it("waits for metadata and tarballs before publishing the launcher without repea
     await run({ REGISTRY_404_POLLS: "2", INSTALL_METADATA_POLLS: "2", TARBALL_404_POLLS: "2" });
     const events = (await readFile(join(directory, "events.log"), "utf8")).trim().split("\n");
 
-    expect(events.filter((event) => event.startsWith("publish "))).toEqual(
-      packages.map((name) => `publish ${name}`),
+    expect(events.filter((event) => event.startsWith("publish ")).toSorted()).toEqual(
+      packages.map((name) => `publish ${name}`).toSorted(),
     );
 
     for (const name of packages.slice(0, -1)) {
@@ -337,9 +352,12 @@ it("times out without republishing or publishing a launcher with unavailable dep
     );
     const events = (await readFile(join(directory, "events.log"), "utf8")).trim().split("\n");
 
-    expect(events.filter((event) => event.startsWith("publish "))).toEqual([
-      "publish widefleet-linux-x64-gnu",
-    ]);
+    expect(events.filter((event) => event.startsWith("publish ")).toSorted()).toEqual(
+      packages
+        .slice(0, -1)
+        .map((name) => `publish ${name}`)
+        .toSorted(),
+    );
     expect(events).not.toContain("install");
     await expect(readFile(join(directory, "summary"))).rejects.toThrow();
   } finally {
@@ -361,9 +379,12 @@ it.each([
     await expect(readFile(join(directory, "sleep.log"))).rejects.toThrow();
     const events = (await readFile(join(directory, "events.log"), "utf8")).trim().split("\n");
 
-    expect(events.filter((event) => event.startsWith("publish "))).toEqual([
-      "publish widefleet-linux-x64-gnu",
-    ]);
+    expect(events.filter((event) => event.startsWith("publish ")).toSorted()).toEqual(
+      packages
+        .slice(0, -1)
+        .map((name) => `publish ${name}`)
+        .toSorted(),
+    );
     expect(events).not.toContain("install");
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -375,10 +396,40 @@ it("stops on a publication failure instead of waiting or retrying the upload", a
 
   try {
     await expect(run({ PUBLISH_FAIL: "true" })).rejects.toThrow();
-    expect((await readFile(join(directory, "events.log"), "utf8")).trim()).toBe(
-      "publish widefleet-linux-x64-gnu",
+    expect(
+      (await readFile(join(directory, "events.log"), "utf8")).trim().split("\n").toSorted(),
+    ).toEqual(
+      packages
+        .slice(0, -1)
+        .map((name) => `publish ${name}`)
+        .toSorted(),
     );
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+it.each(packages.slice(0, -1))(
+  "blocks the launcher if %s fails while other workers finish",
+  async (name) => {
+    const { directory, run } = await fixture();
+
+    try {
+      await expect(run({ PUBLISH_FAIL_PACKAGE: name })).rejects.toThrow(
+        `Native package publication failed: ${name}@0.3.0`,
+      );
+      const events = (await readFile(join(directory, "events.log"), "utf8")).trim().split("\n");
+
+      expect(events.filter((event) => event === `publish ${name}`)).toHaveLength(1);
+      expect(events).not.toContain(`check ${name} full`);
+      expect(events).not.toContain("publish widefleet");
+      expect(events).not.toContain("install");
+
+      for (const native of packages.slice(0, -1)) {
+        if (native !== name) expect(events).toContain(`available ${native}`);
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
