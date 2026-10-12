@@ -109,11 +109,19 @@ jobs:
           RUN_CLI_NATIVE_AUTH: ${{ runner.os != 'Linux' && '1' || '0' }}
           RUN_CLI_NATIVE_DNS: ${{ runner.os != 'Linux' && '1' || '0' }}
         run: pnpm exec vitest run apps/control-plane/tests/cli.test.ts apps/control-plane/tests/network-cli.test.ts apps/control-plane/tests/access-cli.test.ts apps/control-plane/tests/connector-cli.test.ts apps/control-plane/tests/workflows-cli.test.ts apps/control-plane/tests/auth-cli.test.ts apps/control-plane/tests/configuration-cli.test.ts apps/control-plane/tests/discovery-cli.test.ts apps/control-plane/tests/auth-native-cli.test.ts apps/control-plane/tests/reporting-cli.test.ts
-      - name: Verify pnpm installation and the generated app
+      - name: Select the minimum supported Node.js version for app development
+        if: ${{ !cancelled() && (steps.cli-commands.outcome == 'success' || steps.cli-commands.outcome == 'failure') }}
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22.18.0
+          package-manager-cache: false
+      - name: Verify packages with the minimum supported Node.js and pnpm versions
         if: ${{ !cancelled() && (steps.cli-commands.outcome == 'success' || steps.cli-commands.outcome == 'failure') }}
         env:
           RUN_CLI_PACKAGE_TESTS: "1"
-        run: pnpm test:cli-package
+        run: |
+          npm install --prefix "$RUNNER_TEMP/app-toolchain" --no-package-lock --ignore-scripts pnpm@10.26.0
+          npm_execpath="$RUNNER_TEMP/app-toolchain/node_modules/pnpm/bin/pnpm.cjs" node node_modules/vitest/vitest.mjs run apps/control-plane/tests/cli-package.test.ts
       - name: Keep the tested native release artifacts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

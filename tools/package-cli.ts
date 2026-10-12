@@ -105,7 +105,7 @@ for (const [name, target] of [
 
   await writeFile(
     join(template, "pnpm-workspace.yaml"),
-    "packages: []\nstrictPeerDependencies: true\nallowBuilds:\n  esbuild: true\n  workerd: true\n",
+    "packages: []\nstrictPeerDependencies: true\nstrictDepBuilds: true\nallowBuilds:\n  esbuild: true\n  workerd: true\n",
   );
 
   // Verify each independent lockfile without resolving new versions during packaging.
@@ -183,7 +183,7 @@ await build({
   bundle: true,
   platform: "node",
   format: "esm",
-  target: "node26",
+  target: "node22.18",
 });
 
 await chmod(join(launcherPackage, "bin/widefleet.mjs"), 0o755);
@@ -202,7 +202,7 @@ await writeFile(
       license: "MIT",
       type: "module",
       bin: { widefleet: "./bin/widefleet.mjs" },
-      engines: { node: ">=26" },
+      engines: { node: ">=22.18.0" },
       os: ["linux", "darwin", "win32"],
       cpu: ["x64", "arm64"],
       files: ["bin", "README.md", "LICENSE"],

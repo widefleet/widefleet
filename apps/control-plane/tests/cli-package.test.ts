@@ -98,11 +98,13 @@ describe.runIf(process.env["RUN_CLI_PACKAGE_TESTS"] === "1")(
 
       await mkdir(join(pnpmHome, "bin"), { recursive: true });
       await writeFile(join(directory, "npmrc"), "\n");
+      await writeFile(join(directory, "package.json"), JSON.stringify({ private: true }));
       environment = {
         ...process.env,
         PNPM_HOME: pnpmHome,
-        PATH: `${join(pnpmHome, "bin")}${delimiter}${searchPath}`,
+        PATH: `${pnpmHome}${delimiter}${join(pnpmHome, "bin")}${delimiter}${searchPath}`,
         NPM_CONFIG_USERCONFIG: join(directory, "npmrc"),
+        NPM_CONFIG_ENGINE_STRICT: "true",
         CI: "true",
         WIDEFLEET_TELEMETRY_DISABLED: "1",
         WRANGLER_SEND_METRICS: "false",
