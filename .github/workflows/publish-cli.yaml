@@ -247,6 +247,11 @@ jobs:
     name: Sync Docker Hub overviews
     needs: [prepare, release]
     runs-on: ubuntu-24.04
+    concurrency:
+      group: dockerhub-overviews
+      cancel-in-progress: false
+      # An older retry must not cancel a newer release's pending sync.
+      queue: max
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -254,6 +259,7 @@ jobs:
           persist-credentials: false
       - name: Publish the repository overviews
         env:
+          GH_TOKEN: ${{ github.token }}
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: bash tools/sync-dockerhub-overviews.sh

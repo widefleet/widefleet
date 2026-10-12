@@ -29,6 +29,21 @@ const fixture = async () => {
     JSON.stringify({ access_token: "synthetic-bearer-token" }),
   );
   await writeFile(
+    join(directory, "releases.json"),
+    JSON.stringify([{ tag_name: "v0.3.2", draft: false, prerelease: false }]),
+  );
+  await writeFile(
+    join(directory, "gh"),
+    `#!/bin/bash
+set -euo pipefail
+test "$*" = 'api --paginate repos/widefleet/widefleet/releases?per_page=100'
+cat "$FIXTURE/releases.json"
+# A later page can fail after earlier pages have been returned.
+test "\${FAIL_RELEASE_LOOKUP:-false}" != true
+`,
+    { mode: 0o755 },
+  );
+  await writeFile(
     join(directory, "curl"),
     `#!/bin/bash
 set -euo pipefail
@@ -74,6 +89,8 @@ cp "$payload" "$FIXTURE/remote/$component.json"
         PATH: `${directory}:${process.env["PATH"] ?? "/usr/bin:/bin"}`,
         TMPDIR: join(directory, "temporary"),
         FIXTURE: directory,
+        GITHUB_REPOSITORY: "widefleet/widefleet",
+        RELEASE_TAG: "v0.3.2",
         DOCKERHUB_USERNAME: "synthetic-user",
         DOCKERHUB_TOKEN: "synthetic-access-token",
         ...environment,
@@ -175,6 +192,79 @@ it("reports a failed update and can safely retry a partial sync", async () => {
       components.map((component) => `${component}.json`).sort(),
     );
     expect(await readdir(join(directory, "temporary"))).toEqual([]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("skips an older retry without overwriting newer overviews", async () => {
+  const { directory, run } = await fixture();
+
+  try {
+    await run();
+    await rm(join(directory, "requests.log"));
+    await writeFile(join(directory, ".github/dockerhub/sso.md"), "Outdated description");
+    const published = await readFile(join(directory, "remote/sso.json"), "utf8");
+    const result = await run({ RELEASE_TAG: "v0.3.1" });
+
+    expect(result.stdout).toContain("Skipping Docker Hub overviews for v0.3.1");
+    expect(await readFile(join(directory, "remote/sso.json"), "utf8")).toBe(published);
+    await expect(readFile(join(directory, "requests.log"))).rejects.toThrow();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("compares stable platform versions numerically across release pages", async () => {
+  const { directory, run } = await fixture();
+
+  try {
+    await writeFile(
+      join(directory, "releases.json"),
+      [
+        [
+          { tag_name: "v0.3.2", draft: false, prerelease: false },
+          { tag_name: "runtime-v99.0.0", draft: false, prerelease: false },
+          { tag_name: "v0.3.9", draft: false, prerelease: false },
+        ],
+        [
+          { tag_name: "v99.0.0", draft: true, prerelease: false },
+          { tag_name: "v98.0.0", draft: false, prerelease: true },
+          { tag_name: "v97.0.0-beta.1", draft: false, prerelease: false },
+          { tag_name: "v0.3.10", draft: false, prerelease: false },
+        ],
+      ]
+        .map((page) => JSON.stringify(page))
+        .join("\n"),
+    );
+    expect((await run()).stdout).toContain("latest published version is v0.3.10");
+    await expect(readFile(join(directory, "requests.log"))).rejects.toThrow();
+    await run({ RELEASE_TAG: "v0.3.10" });
+    expect(await readdir(join(directory, "remote"))).toHaveLength(4);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("does not contact Docker Hub when the release lookup fails", async () => {
+  const { directory, run } = await fixture();
+
+  try {
+    await expect(run({ FAIL_RELEASE_LOOKUP: "true" })).rejects.toThrow();
+    await expect(readFile(join(directory, "requests.log"))).rejects.toThrow();
+    expect(await readdir(join(directory, "remote"))).toEqual([]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("rejects an empty list of published platform releases", async () => {
+  const { directory, run } = await fixture();
+
+  try {
+    await writeFile(join(directory, "releases.json"), "[]");
+    await expect(run()).rejects.toThrow("No published stable platform release found");
+    await expect(readFile(join(directory, "requests.log"))).rejects.toThrow();
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

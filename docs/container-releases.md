@@ -22,7 +22,7 @@ Add these GitHub Actions secrets to `widefleet/widefleet`:
 
 Keep tokens in GitHub Actions secrets. Docker Hub credentials are provided only to publishing jobs after tests pass. The same identity must be able to edit the repository overviews. See [Docker access tokens](https://docs.docker.com/security/access-tokens/).
 
-After the GitHub Release is published, the workflow syncs the four [Docker Hub overviews](../.github/dockerhub/) from the release commit. Edit those files to update the public descriptions; manual edits on Docker Hub are replaced at the next release. If the sync fails, use **Re-run failed jobs** to retry it without republishing release artifacts.
+After the GitHub Release is published, the workflow syncs the four [Docker Hub overviews](../.github/dockerhub/) from the release commit. Edit those files to update the public descriptions; manual edits on Docker Hub are replaced at the next release. If the sync fails, use **Re-run failed jobs** to retry it without republishing release artifacts. Syncs run one at a time and skip releases below the highest published stable platform version.
 
 ## Publish a version
 
