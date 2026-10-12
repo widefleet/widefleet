@@ -13,9 +13,19 @@ Start with the [README quickstart](../README.md#try-it-locally), including its p
 ./dev deploy           # Rebuild and publish changes in starters/sveltekit
 ./dev logs
 ./dev down             # Stop the stack and app containers; keep data
-./dev up               # Resume and redeploy the example; keep notes and photos
+./dev up               # Resume the release demo; keep its deployment, notes and photos
 ./dev reset --yes      # Permanently remove all local demo apps and data
 ```
+
+Fresh demos use pinned platform release images. The local tooling image installs the demo's JavaScript dependencies, and the first startup builds and deploys Team Notes. Later starts retain its active deployment; use `./dev deploy` to rebuild the example after editing it.
+
+To work on Widefleet itself, choose source builds when creating a fresh demo:
+
+```sh
+./dev up --build
+```
+
+The demo remembers this choice. In source mode, `./dev up` rebuilds the platform images and redeploys the example. Demos created before release-image support also retain source mode, so their databases are not silently downgraded. Switching modes requires `./dev reset --yes`, which deletes all demo data; then run `./dev up` for release images or `./dev up --build` for source builds.
 
 This isolated demo uses synthetic identities and local-only credentials. Its CLI wrapper obtains a five-minute test-admin token from the local installation, so a desktop keyring is not needed for the walkthrough. Browser logins still use the real OIDC integrations. Native `widefleet login` remains available when testing the OS credential store. The emulator recreates its identities at startup; the demo reconciles its two fixture accounts while retaining application data.
 
