@@ -19,7 +19,7 @@ jobs:
       matrix:
         # Each suite owns its services and fixed test ports on a separate runner.
         # Keep Rust and runtime tests together to reuse the CLI and agent binaries.
-        suite: [source, integration, packaged-sso, rust-runtime]
+        suite: [source, integration, packaged-sso, rust-runtime, local-demo]
     env:
       PLATFORM_USAGE_REPORTING: "false"
       PLATFORM_CRASH_REPORTING: "false"
@@ -49,7 +49,7 @@ jobs:
           npm install --global pnpm@12.4.2
           pnpm install --frozen-lockfile
       - name: Install browser
-        if: matrix.suite == 'integration' || matrix.suite == 'rust-runtime'
+        if: matrix.suite == 'integration' || matrix.suite == 'rust-runtime' || matrix.suite == 'local-demo'
         run: pnpm exec playwright install --with-deps chromium
       - name: Check source
         if: matrix.suite == 'source'
@@ -64,8 +64,20 @@ jobs:
         if: matrix.suite == 'integration' || matrix.suite == 'rust-runtime'
         run: pnpm --filter @platform/control-plane build
       - name: Start disposable services
-        if: matrix.suite != 'source'
+        if: matrix.suite != 'source' && matrix.suite != 'local-demo'
         run: docker compose -f infra/test/compose.yaml up -d --wait
+      - name: Try the released platform and resume the local demo
+        if: matrix.suite == 'local-demo'
+        run: |
+          pnpm --filter @platform/control-plane exec svelte-kit sync
+          ./dev up
+          RUN_LOCAL_TESTS=1 pnpm exec vitest run apps/control-plane/tests/local/quickstart.test.ts
+          ./dev cli history "$(./dev app-id)" > "$RUNNER_TEMP/local-demo-history.json"
+          ./dev down
+          ./dev up
+          ./dev cli history "$(./dev app-id)" > "$RUNNER_TEMP/local-demo-resumed-history.json"
+          cmp "$RUNNER_TEMP/local-demo-history.json" "$RUNNER_TEMP/local-demo-resumed-history.json"
+          RUN_LOCAL_TESTS=1 LOCAL_EXPECT_EXISTING_DATA=1 pnpm exec vitest run apps/control-plane/tests/local/quickstart.test.ts
       - name: Install the pinned app runtime
         if: matrix.suite == 'integration' || matrix.suite == 'rust-runtime'
         run: bash tools/install-celld.sh
@@ -177,5 +189,8 @@ jobs:
             target
           key: ${{ steps.cargo-cache.outputs.cache-primary-key }}
       - name: Stop disposable services
-        if: always() && matrix.suite != 'source'
+        if: always() && matrix.suite != 'source' && matrix.suite != 'local-demo'
         run: docker compose -f infra/test/compose.yaml down --volumes
+      - name: Remove the disposable local demo
+        if: always() && matrix.suite == 'local-demo'
+        run: ./dev reset --yes

@@ -2,7 +2,40 @@
 set -euo pipefail
 project_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 cd "$project_root"
+usage() { echo 'Usage: ./dev [up [--build]|deploy|cli <arguments>|app-id|logs|down|reset --yes]'; }
+case "${1:-up}" in
+  up) [[ $# -le 2 && ( -z "${2:-}" || "${2:-}" == --build ) ]] || { usage >&2; exit 1; } ;;
+  cli) ;;
+  reset) [[ $# == 2 && "$2" == --yes ]] || { echo 'This deletes all local demo apps and data. Repeat with ./dev reset --yes.' >&2; exit 1; } ;;
+  deploy|app-id|logs|down) [[ $# == 1 ]] || { usage >&2; exit 1; } ;;
+  --help|-h) usage; exit 0 ;;
+  *) usage >&2; exit 1 ;;
+esac
 export WIDEFLEET_LOCAL_DATA="$project_root/.local/demo"
+mode=release
+if [[ -f "$WIDEFLEET_LOCAL_DATA/image-mode" ]]; then
+  mode="$(cat "$WIDEFLEET_LOCAL_DATA/image-mode")"
+elif [[ -d "$WIDEFLEET_LOCAL_DATA/platform" ]]; then
+  # Existing demos used source builds. Never downgrade their database implicitly.
+  mode=source
+fi
+[[ "$mode" == release || "$mode" == source ]] || { echo 'Invalid local demo image mode.' >&2; exit 1; }
+if [[ "${1:-up}" == up && "${2:-}" == --build ]]; then
+  if [[ "$mode" == release && -f "$WIDEFLEET_LOCAL_DATA/image-mode" ]]; then
+    echo 'This demo uses release images. Run ./dev reset --yes before switching to source builds.' >&2
+    exit 1
+  fi
+  mode=source
+fi
+if [[ "$mode" == source ]]; then
+  export PLATFORM_RUNTIME_IMAGE=widefleet-local-runtime:source
+  export PLATFORM_AGENT_IMAGE=widefleet-local-agent:source
+  export PLATFORM_CONTROL_PLANE_IMAGE=widefleet-local-control-plane:source
+else
+  set -a
+  source "$project_root/infra/local/images.env"
+  set +a
+fi
 docker_endpoint="${DOCKER_HOST:-$(docker context inspect --format '{{.Endpoints.docker.Host}}')}"
 if [[ "$docker_endpoint" != unix://* ]]; then
   echo 'The local demo needs a local Docker Unix socket; remote Docker contexts are unsupported.' >&2
@@ -42,6 +75,7 @@ case "${1:-up}" in
       exit 1
     fi
     mkdir -p "$WIDEFLEET_LOCAL_DATA"
+    printf '%s\n' "$mode" > "$WIDEFLEET_LOCAL_DATA/image-mode"
     # Rebuilding a tag can discard its old image index on containerd-backed Docker,
     # even while a fleet uses it. Keep that immutable image available for probes.
     for container in "${local_fleets[@]}"; do
@@ -52,8 +86,18 @@ case "${1:-up}" in
         docker image tag "$runtime_image" "widefleet-local-runtime:${runtime_image#sha256:}"
       fi
     done
-    docker build -f infra/runtime/Dockerfile -t app-platform-runtime:0.1.0 .
-    docker build -f infra/agent/Dockerfile -t app-platform-agent:0.1.0 .
+    if [[ "$mode" == source ]]; then
+      echo 'Building the local demo from source.'
+      docker build -f infra/runtime/Dockerfile -t "$PLATFORM_RUNTIME_IMAGE" .
+      docker build --build-arg "RUNTIME_IMAGE=$PLATFORM_RUNTIME_IMAGE" -f infra/agent/Dockerfile -t "$PLATFORM_AGENT_IMAGE" .
+      docker build -f infra/control-plane/Dockerfile -t "$PLATFORM_CONTROL_PLANE_IMAGE" .
+    else
+      echo 'Using pinned release images; building only the local demo tooling.'
+      # Fleet containers use the runtime directly, outside Compose and the tools image.
+      if ! docker image inspect "$PLATFORM_RUNTIME_IMAGE" >/dev/null 2>&1; then
+        docker pull "$PLATFORM_RUNTIME_IMAGE"
+      fi
+    fi
     "${compose[@]}" build tools
     "${compose[@]}" run --rm -T --no-deps configure
     "${compose[@]}" up -d --wait postgres storage proxy identity clickhouse otel-collector
@@ -70,7 +114,7 @@ case "${1:-up}" in
         docker start "$container" >/dev/null
       fi
     done
-    local_tool deploy
+    if [[ "$mode" == source ]]; then local_tool deploy; else local_tool deploy-if-needed; fi
     echo 'Management: http://localhost:25450 (choose admin@example.test)'
     echo 'App: https://team-notes.apps.localhost:25453'
     echo 'App SSO: https://auth.apps.localhost:25453/oauth2/sign_in'
@@ -93,7 +137,6 @@ case "${1:-up}" in
     echo 'Local demo stopped; data retained. Run ./dev up to resume.'
     ;;
   reset)
-    [[ "${2:-}" == --yes ]] || { echo 'This deletes all local demo apps and data. Repeat with ./dev reset --yes.' >&2; exit 1; }
     "${compose[@]}" stop agent
     stop_apps
     for container in "${local_fleets[@]}"; do
@@ -110,5 +153,4 @@ case "${1:-up}" in
     fi
     echo 'Local demo data removed.'
     ;;
-  *) echo 'Usage: ./dev [up|deploy|cli <arguments>|app-id|logs|down|reset --yes]' >&2; exit 1 ;;
 esac
