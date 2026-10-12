@@ -100,17 +100,24 @@ case "${1:-up}" in
     "${compose[@]}" up -d --wait control-plane
     local_tool seed
     "${compose[@]}" up -d --force-recreate oauth2-proxy
-    "${compose[@]}" up -d agent
+    runtime_image="$(docker image inspect "$PLATFORM_RUNTIME_IMAGE" --format '{{.Id}}')"
     deployment=deploy-if-needed
     for container in "${local_fleets[@]}"; do
       if docker container inspect "$container" >/dev/null 2>&1; then
         owner="$(docker inspect "$container" --format '{{index .Config.Labels "app-platform.fleet-id"}}')"
         [[ "$container" == "platform-fleet-$owner" ]] || { echo 'Unexpected container ownership.' >&2; exit 1; }
-        docker start "$container" >/dev/null
+        if [[ "$(docker inspect "$container" --format '{{.Image}}')" == "$runtime_image" ]]; then
+          docker start "$container" >/dev/null
+        else
+          docker stop --time 30 "$container" >/dev/null
+          docker rm "$container" >/dev/null
+          deployment=restore
+        fi
       else
         deployment=restore
       fi
     done
+    "${compose[@]}" up -d agent
     if [[ "${2:-}" == --build ]]; then deployment=deploy; fi
     local_tool "$deployment"
     echo 'Management: http://localhost:25450 (choose admin@example.test)'

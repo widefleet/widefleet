@@ -17,7 +17,7 @@ Start with the [README quickstart](../README.md#try-it-locally), including its p
 ./dev reset --yes      # Permanently remove all local demo apps and data
 ```
 
-`./dev up` checks the latest published release on every start and selects its matching platform images and CLI. The local tooling image installs the demo's JavaScript dependencies, and the first startup builds and deploys Team Notes. Later starts retain its active deployment; a missing app container is restored from the deployed artifact. Use `./dev deploy` to rebuild the example after editing it.
+`./dev up` checks the latest published release on every start and selects its matching platform images and CLI. The local tooling image installs the demo's JavaScript dependencies, and the first startup builds and deploys Team Notes. Later starts retain its active deployment. If the runtime image changes or the app container is missing, the container is restored from the deployed artifact without rebuilding the app. Use `./dev deploy` to rebuild the example after editing it.
 
 To test changes to Widefleet itself, build from the current checkout:
 

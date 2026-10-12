@@ -73,10 +73,13 @@ jobs:
           ./dev up
           RUN_LOCAL_TESTS=1 pnpm exec vitest run apps/control-plane/tests/local/quickstart.test.ts
           ./dev cli history "$(./dev app-id)" > "$RUNNER_TEMP/local-demo-history.json"
+          image=$(docker image inspect widefleet-local-tools:0.1.0 --format '{{index .Config.Labels "widefleet.local.runtime"}}')
           ./dev down
           ./dev up
           ./dev cli history "$(./dev app-id)" > "$RUNNER_TEMP/local-demo-resumed-history.json"
-          cmp "$RUNNER_TEMP/local-demo-history.json" "$RUNNER_TEMP/local-demo-resumed-history.json"
+          if [[ "$image" == "$(docker image inspect widefleet-local-tools:0.1.0 --format '{{index .Config.Labels "widefleet.local.runtime"}}')" ]]; then
+            cmp "$RUNNER_TEMP/local-demo-history.json" "$RUNNER_TEMP/local-demo-resumed-history.json"
+          fi
           RUN_LOCAL_TESTS=1 LOCAL_EXPECT_EXISTING_DATA=1 pnpm exec vitest run apps/control-plane/tests/local/quickstart.test.ts
           ./dev cli apps > "$RUNNER_TEMP/local-demo-apps.json"
           fleet=$(node --input-type=module -e 'import {readFileSync} from "node:fs"; console.log(JSON.parse(readFileSync(process.argv[1], "utf8")).find(app => app.slug === "team-notes").fleetId)' "$RUNNER_TEMP/local-demo-apps.json")

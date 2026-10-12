@@ -38,7 +38,9 @@ case "$1 $2" in
   'inspect platform-fleet-'*)
     if [[ "\${!#}" == *app-platform.fleet-id* ]]; then echo '${fleet}'; else echo sha256:old; fi ;;
   'image inspect')
-    if [[ "$3" == widefleet-local-tools:0.1.0 ]]; then echo "$images"; else exit "$LOCAL_TEST_RUNTIME_MISSING"; fi ;;
+    if [[ "$3" == widefleet-local-tools:0.1.0 ]]; then echo "$images"
+    elif [[ "\${!#}" == '{{.Id}}' ]]; then echo "$LOCAL_TEST_RUNTIME_ID"
+    else exit "$LOCAL_TEST_RUNTIME_MISSING"; fi ;;
   'info --format') echo linux/x86_64 ;;
   pull*) exit "$LOCAL_TEST_PULL_FAILURE" ;;
 esac
@@ -58,6 +60,7 @@ esac
         LOCAL_TEST_VERSION: "1.2.3",
         LOCAL_TEST_LATEST_FAILURE: "0",
         LOCAL_TEST_RUNTIME_MISSING: "0",
+        LOCAL_TEST_RUNTIME_ID: "sha256:old",
         LOCAL_TEST_PULL_FAILURE: "0",
         LOCAL_TEST_FLEET_EXISTS: "0",
         LOCAL_TEST_VERSION_FAILURE: "0",
@@ -189,6 +192,28 @@ it.each([false, true])(
     }
   },
 );
+
+it("replaces an outdated runtime before starting the agent and restores the saved app", async () => {
+  const { directory, state, log, run } = await fixture();
+
+  try {
+    await mkdir(join(state, "agent", fleet), { recursive: true });
+    await writeFile(join(state, "agent", fleet, "data"), "retained");
+    await run(["up"], { LOCAL_TEST_FLEET_EXISTS: "1", LOCAL_TEST_RUNTIME_ID: "sha256:new" });
+    const commands = await log();
+
+    expect(commands).toContain(`stop\t--time\t30\tplatform-fleet-${fleet}`);
+    expect(commands).toContain(`rm\tplatform-fleet-${fleet}`);
+    expect(commands.indexOf(`rm\tplatform-fleet-${fleet}`)).toBeLessThan(
+      commands.indexOf("up\t-d\tagent\t"),
+    );
+    expect(commands).toContain("local/control.ts\trestore\t");
+    expect(commands).not.toContain(`start\tplatform-fleet-${fleet}`);
+    expect(await readFile(join(state, "agent", fleet, "data"), "utf8")).toBe("retained");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 it.each([["up", "--unknown"], ["deploy", "--build"], ["reset"]])(
   "rejects invalid arguments before contacting Docker: %j",
