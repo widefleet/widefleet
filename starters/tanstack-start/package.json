@@ -1,0 +1,46 @@
+{
+  "name": "@platform/starter-tanstack-start",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "types": "node tools/types.ts",
+    "build": "node tools/build.ts",
+    "typecheck": "pnpm types && tsc --noEmit",
+    "lint": "oxlint --type-aware --deny-warnings .",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check .",
+    "check": "pnpm typecheck && pnpm format:check && pnpm lint"
+  },
+  "dependencies": {
+    "@tanstack/react-router": "1.170.42",
+    "@tanstack/react-start": "1.168.61",
+    "better-result": "3.0.1",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "1.62.0",
+    "@oxlint/plugins": "1.86.0",
+    "@tanstack/router-generator": "1.167.41",
+    "@tsconfig/strictest": "2.0.8",
+    "@types/node": "26.6.4",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "crossws": "0.4.15",
+    "oxfmt": "0.71.0",
+    "oxlint": "1.86.0",
+    "oxlint-tsgolint": "7.0.2003",
+    "typescript": "6.0.3",
+    "vite": "8.3.2",
+    "wrangler": "4.147.0"
+  },
+  "engines": {
+    "node": ">=26"
+  },
+  "packageManager": "pnpm@12.4.2"
+}

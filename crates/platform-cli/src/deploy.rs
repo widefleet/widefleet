@@ -375,17 +375,7 @@ async fn publish(
         source_maps.insert(generated, name.clone());
         map_uploads.insert(name, bytes);
     }
-    // SvelteKit embeds this exact version in both its browser and server bundles.
-    let version_path = assets_root.join("_app/version.json");
-    let build_id = if version_path.exists() {
-        #[derive(Deserialize)]
-        struct Version {
-            version: String,
-        }
-        serde_json::from_slice::<Version>(&std::fs::read(version_path)?)?.version
-    } else {
-        Uuid::new_v4().to_string()
-    };
+    let build_id = build_version(&assets_root)?;
     let app = match target {
         Target::Preview(preview) => preview.resolve(api, credentials).await?,
         Target::App(Some(app)) => app,
@@ -763,9 +753,56 @@ async fn poll_deployment(
     }
 }
 
+fn build_version(assets_root: &Path) -> Result<String> {
+    // Keep the browser's embedded version across deployments, including old tabs.
+    // Existing SvelteKit projects use the framework's original version manifest.
+    for name in ["_widefleet/version.json", "_app/version.json"] {
+        let path = assets_root.join(name);
+        let bytes = match std::fs::read(path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.into()),
+        };
+        #[derive(Deserialize)]
+        struct Version {
+            version: String,
+        }
+        let version = serde_json::from_slice::<Version>(&bytes)?.version;
+        if version.is_empty() || version.len() > 128 {
+            return Err(Error::invalid(
+                "Build version must contain 1–128 bytes".into(),
+            ));
+        }
+        return Ok(version);
+    }
+    Ok(Uuid::new_v4().to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn build_versions_preserve_framework_metadata_and_reject_invalid_manifests() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path();
+        assert!(Uuid::parse_str(&build_version(root)?).is_ok());
+        std::fs::create_dir(root.join("_app"))?;
+        std::fs::write(
+            root.join("_app/version.json"),
+            br#"{"version":"svelte-build"}"#,
+        )?;
+        assert_eq!(build_version(root)?, "svelte-build");
+        std::fs::create_dir(root.join("_widefleet"))?;
+        let manifest = root.join("_widefleet/version.json");
+        std::fs::write(&manifest, br#"{"version":"react-build"}"#)?;
+        assert_eq!(build_version(root)?, "react-build");
+        for invalid in ["broken", r#"{"version":""}"#, r#"{"version":123}"#] {
+            std::fs::write(&manifest, invalid)?;
+            assert!(build_version(root).is_err());
+        }
+        Ok(())
+    }
 
     #[test]
     fn asset_inventory_uses_url_paths_and_deduplicates_by_hash() -> Result<()> {

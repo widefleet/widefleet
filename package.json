@@ -21,6 +21,7 @@
     "@playwright/test": "1.63.0",
     "@tsconfig/strictest": "2.0.8",
     "@types/node": "26.6.4",
+    "crossws": "0.4.15",
     "esbuild": "0.28.2",
     "oxfmt": "0.71.0",
     "oxlint": "1.86.0",

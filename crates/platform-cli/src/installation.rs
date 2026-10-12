@@ -7,6 +7,28 @@ use std::{
 };
 use tokio::process::Command;
 
+#[derive(Clone, Copy, clap::ValueEnum)]
+pub enum Template {
+    Sveltekit,
+    TanstackStart,
+}
+
+impl Template {
+    fn directory(self) -> &'static str {
+        match self {
+            Self::Sveltekit => "starter",
+            Self::TanstackStart => "starters/tanstack-start",
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Sveltekit => "SvelteKit",
+            Self::TanstackStart => "TanStack Start",
+        }
+    }
+}
+
 #[derive(Deserialize)]
 struct Release {
     format: u32,
@@ -137,9 +159,12 @@ fn write_project(template: &Path, directory: &Path) -> Result<()> {
     copy_directory(template, directory)
 }
 
-pub fn initialize(directory: &Path) -> Result<()> {
+pub fn initialize(directory: &Path, template: Template) -> Result<()> {
     let installation = load()?;
-    write_project(&installation.directory.join("starter"), directory)?;
+    write_project(
+        &installation.directory.join(template.directory()),
+        directory,
+    )?;
     let name = project_name(directory);
     let config = directory.join("wrangler.jsonc");
     let mut source = fs::read_to_string(&config)?;
@@ -154,7 +179,11 @@ pub fn initialize(directory: &Path) -> Result<()> {
         .ok_or_else(|| Error::invalid("Starter configuration must declare a name".into()))?;
     source.replace_range(range.start..range.end, &serde_json::to_string(&name)?);
     fs::write(config, source)?;
-    println!("Created SvelteKit project at {}", directory.display());
+    println!(
+        "Created {} project at {}",
+        template.name(),
+        directory.display()
+    );
     println!("App name: {name} (editable in wrangler.jsonc)");
     println!(
         "In that directory, run pnpm install --frozen-lockfile, then pnpm check. Run widefleet login to connect your company, then widefleet deploy."

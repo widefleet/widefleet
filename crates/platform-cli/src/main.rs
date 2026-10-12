@@ -53,9 +53,11 @@ enum Command {
     Config(configuration::Options),
     /// Show or change local usage and crash reporting. No login is required.
     Telemetry(reporting::Options),
-    /// Create an independent SvelteKit project. No platform login is required.
+    /// Create an independent app project. No platform login is required.
     Init {
         directory: PathBuf,
+        #[arg(long, value_enum, default_value = "sveltekit")]
+        template: installation::Template,
     },
     Login(auth::LoginOptions),
     Logout,
@@ -147,8 +149,12 @@ async fn run(args: Arguments) -> Result<()> {
     if let Command::Telemetry(options) = args.command {
         return reporting::command(options);
     }
-    if let Command::Init { directory } = &args.command {
-        return installation::initialize(directory);
+    if let Command::Init {
+        directory,
+        template,
+    } = &args.command
+    {
+        return installation::initialize(directory, *template);
     }
     let domain = match &args.command {
         Command::Login(options) => options.discovery.domain(),

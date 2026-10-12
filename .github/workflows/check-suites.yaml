@@ -75,6 +75,9 @@ jobs:
       - name: Test services and identity boundaries
         if: matrix.suite == 'integration'
         run: pnpm exec vitest run
+      - name: Test starter apps and error capture on the native runtime
+        if: matrix.suite == 'integration'
+        run: RUN_CAPTURE_TESTS=1 pnpm exec vitest run apps/control-plane/tests/runtime/error-capture.test.ts apps/control-plane/tests/runtime/tanstack-start.test.ts
       - name: Test SSO proxies and Compose configurations
         if: matrix.suite == 'integration'
         run: RUN_EDGE_TESTS=1 RUN_INSTALLATION_TESTS=1 RUN_ENTRA_TESTS=1 pnpm exec vitest run --no-file-parallelism apps/control-plane/tests/edge apps/control-plane/tests/installation

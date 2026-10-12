@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmod, copyFile, cp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, copyFile, cp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, promisify } from "node:util";
@@ -73,36 +73,44 @@ await writeFile(
   JSON.stringify({ format: 1, version, esbuild_version: esbuildVersion }, null, 2) + "\n",
 );
 
-const template = join(release, "starter");
+for (const [name, target] of [
+  ["sveltekit", "starter"],
+  ["tanstack-start", "starters/tanstack-start"],
+] as const) {
+  const source = join(root, "starters", name);
+  const template = join(release, target);
 
-await mkdir(template);
+  await mkdir(template, { recursive: true });
 
-for (const file of [
-  "src",
-  "tools",
-  "package.json",
-  "pnpm-lock.yaml",
-  "tsconfig.json",
-  "vite.config.ts",
-  "wrangler.jsonc",
-  "README.md",
-  "AGENTS.md",
-  "LICENSE",
-])
-  await cp(join(root, "starters/sveltekit", file), join(template, file), { recursive: true });
+  for (const file of [
+    "src",
+    "tools",
+    "package.json",
+    "pnpm-lock.yaml",
+    "tsconfig.json",
+    "vite.config.ts",
+    "wrangler.jsonc",
+    "AGENTS.md",
+    "LICENSE",
+  ])
+    await cp(join(source, file), join(template, file), { recursive: true });
 
-for (const file of [".gitattributes", ".gitignore", ".oxlintrc.json", ".oxfmtrc.json"])
-  await copyFile(join(root, file), join(template, file));
+  if ((await readdir(source)).includes("README.md"))
+    await copyFile(join(source, "README.md"), join(template, "README.md"));
 
-await cp(join(root, "tools/oxlint"), join(template, "tools/oxlint"), { recursive: true });
+  for (const file of [".gitattributes", ".gitignore", ".oxlintrc.json", ".oxfmtrc.json"])
+    await copyFile(join(root, file), join(template, file));
 
-await writeFile(
-  join(template, "pnpm-workspace.yaml"),
-  "packages: []\nstrictPeerDependencies: true\nallowBuilds:\n  esbuild: true\n  workerd: true\n",
-);
+  await cp(join(root, "tools/oxlint"), join(template, "tools/oxlint"), { recursive: true });
 
-// Verify the committed independent lockfile without resolving new versions during packaging.
-await runPnpm(["install", "--lockfile-only", "--frozen-lockfile", "--ignore-scripts"], template);
+  await writeFile(
+    join(template, "pnpm-workspace.yaml"),
+    "packages: []\nstrictPeerDependencies: true\nallowBuilds:\n  esbuild: true\n  workerd: true\n",
+  );
+
+  // Verify each independent lockfile without resolving new versions during packaging.
+  await runPnpm(["install", "--lockfile-only", "--frozen-lockfile", "--ignore-scripts"], template);
+}
 
 await mkdir(join(release, "licenses"));
 
@@ -148,6 +156,7 @@ const metadata = {
     bundlerName,
     "release.json",
     "starter",
+    "starters",
     "licenses",
     "README.md",
     "LICENSE",
