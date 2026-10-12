@@ -1,6 +1,7 @@
 ---
 title: Installation
 description: Set up the Widefleet CLI and create an app for an existing installation.
+lastModified: 2026-10-12
 ---
 
 Use the Widefleet CLI to create and deploy apps from your own machine. You need

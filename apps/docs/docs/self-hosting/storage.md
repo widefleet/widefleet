@@ -1,6 +1,7 @@
 ---
 title: Storage backends
 description: Configure artifact and fleet storage, credentials and existing data.
+lastModified: 2026-10-12
 ---
 
 The control plane and deployment agent support S3-compatible storage, Azure Blob Storage and Google Cloud Storage. S3 remains the default when the provider variables are omitted. The default Compose installation uses RustFS. Maintained [Compose service selections](/self-hosting/external-services) connect the same installation to existing external S3, Azure Blob or GCS resources. See [initialization and existing data](#initialization-and-existing-data) when changing storage.

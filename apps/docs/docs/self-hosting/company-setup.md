@@ -1,6 +1,7 @@
 ---
 title: Company setup
 description: Configure employees' agents and computers so they do not need to know the platform URL.
+lastModified: 2026-10-12
 ---
 
 Employees should be able to run `widefleet login` without knowing the management

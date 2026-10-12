@@ -1,6 +1,7 @@
 ---
 title: External services and HTTPS
 description: Configure external PostgreSQL, object storage and automatic HTTPS.
+lastModified: 2026-10-12
 ---
 
 Connect Widefleet to existing cloud services using the same maintained Compose configuration as the local PostgreSQL/RustFS installation. Provision the host, cloud databases, object stores, IAM and permanent DNS records before following this guide. Use Linux x86-64, the supported Docker baseline from [operations](/self-hosting/installation), and Docker Compose 2.20.0 or newer.

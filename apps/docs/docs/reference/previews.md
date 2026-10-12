@@ -1,6 +1,7 @@
 ---
 title: Previews
 description: Preview names, flags, isolation, DNS and cleanup.
+lastModified: 2026-10-12
 ---
 
 Run these commands from an existing app project:

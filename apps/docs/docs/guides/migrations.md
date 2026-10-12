@@ -1,6 +1,7 @@
 ---
 title: Database migrations
 description: Apply D1 schema migrations explicitly and recover from failures.
+lastModified: 2026-10-12
 ---
 
 Widefleet runs SQL migrations through explicit CLI commands. Write SQL yourself or generate it with an ORM such as Drizzle. `widefleet deploy` does not apply migrations.

@@ -1,6 +1,7 @@
 ---
 title: Runtime logs
 description: Enable app telemetry and query errors with private source maps.
+lastModified: 2026-10-12
 ---
 
 For opt-out product analytics and Widefleet crash reports sent to the Widefleet team, see [installation reporting](/self-hosting/installation-reporting). The runtime logs described here remain in the operator's infrastructure.

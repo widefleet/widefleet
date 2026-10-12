@@ -1,6 +1,7 @@
 ---
 title: CLI authentication
 description: Credential stores, headless sessions, token renewal and external credentials.
+lastModified: 2026-10-12
 ---
 
 Use `widefleet login` to approve a device code in your browser. Login uses configured or saved platform details, or asks for your work email/domain to discover them. See [CLI configuration](/reference/cli-configuration). The default scopes are `platform:read platform:write`; select additional scopes explicitly when needed. Credentials use Keychain on macOS, Credential Manager on Windows, or Secret Service on Linux. The store must be available and unlocked; Linux also requires a session D-Bus.

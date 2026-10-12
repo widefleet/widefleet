@@ -1,6 +1,7 @@
 ---
 title: App development
 description: Develop an independent app with identity, storage and platform integrations.
+lastModified: 2026-10-10
 ---
 
 The generated SvelteKit starter is an independent project with no workspace dependencies. Start it with `pnpm dev`; local development uses a synthetic identity. Production requests use the verified SSO identity exposed as `locals.user`. App SSO strips request cookies and response `Set-Cookie` headers, so apps cannot use their own server-side cookie sessions.

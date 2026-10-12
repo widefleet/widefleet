@@ -9,6 +9,8 @@ root discovery aliases. Keep those responsibilities together here.
   belong in the repository-root `docs/`. Split mixed pages; link instead of copying.
 - Keep user journeys inside the website. When moving a page, update its incoming
   links, navigation and any packaging inputs; validate and build the docs.
+- When changing a page's content, update its `lastModified` frontmatter date
+  (`YYYY-MM-DD`). Leave the date unchanged for formatting-only edits.
 
 - `wrangler.jsonc` routes the six reserved prefixes on `widefleet.com` to the
   docs Worker. Keep the hostname exact and other website paths outside these routes.

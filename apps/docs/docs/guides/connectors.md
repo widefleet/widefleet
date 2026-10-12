@@ -1,6 +1,7 @@
 ---
 title: IT connectors
 description: Deploy integrations, manage secrets and grant apps native RPC bindings.
+lastModified: 2026-10-12
 ---
 
 IT can deploy a Worker from its own repository with `widefleet connector deploy`. Apps receive a native service binding and call its methods directly, for example `env.ERP.listCustomers()`. Connector code runs as a regular Worker in the shared fleet, with its own declared resources. It is independent of the Widefleet runtime and Rust agent releases.

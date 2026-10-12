@@ -1,6 +1,7 @@
 ---
 title: CLI configuration
 description: Inspect, change and distribute the platform URL used by the Widefleet CLI.
+lastModified: 2026-10-12
 ---
 
 Company discovery and saved configuration require CLI 0.3.2 or newer. Check

@@ -1,6 +1,7 @@
 ---
 title: Application runtime
 description: Runtime versions, activation, recovery, storage and supported app APIs.
+lastModified: 2026-10-12
 ---
 
 One default celld fleet runs the installation's apps and previews as separate Dynamic Workers. The installer manages one node. Fleet identity is stored in PostgreSQL and remains unchanged when an executor is registered, disabled or replaced. A replacement executor reuses the same Docker host, persistent node state, routing directory and fleet storage.

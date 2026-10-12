@@ -1,6 +1,7 @@
 ---
 title: Network permissions
 description: Allow external destinations and understand backend and browser enforcement.
+lastModified: 2026-10-12
 ---
 
 New apps start with no external destinations allowed. The trusted runtime checks backend requests; browser responses carry a platform-controlled Content Security Policy (CSP). D1, R2, KV, Queues and static asset bindings continue to work without granting a network origin.

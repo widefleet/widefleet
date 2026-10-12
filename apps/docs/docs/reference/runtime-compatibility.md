@@ -1,6 +1,7 @@
 ---
 title: Runtime compatibility
 description: Supported runtime integrations and verified differences from Cloudflare.
+lastModified: 2026-10-12
 ---
 
 Widefleet currently uses celld **0.6.2**. Dynamic Worker and deployment tests exercise the new

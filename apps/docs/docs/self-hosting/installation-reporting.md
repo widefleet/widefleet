@@ -1,6 +1,7 @@
 ---
 title: Installation reporting
 description: Control usage reporting and understand the data sent to Widefleet.
+lastModified: 2026-10-12
 ---
 
 Widefleet shares product usage, configuration metadata and sanitized error reports with the Widefleet team through the existing `widefleet` PostHog project in the EU. Reporting is enabled initially and has two independent opt-outs. This is separate from [application runtime logs](/self-hosting/runtime-logs), which stay in the operator's infrastructure.

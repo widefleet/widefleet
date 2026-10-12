@@ -1,6 +1,7 @@
 ---
 title: API and uploads
 description: Authentication, app publication and the Worker upload contract.
+lastModified: 2026-10-12
 ---
 
 Authenticated clients can fetch `/api/v1/openapi.json`. The document covers management operations, agent jobs, binary assets and multipart Workers.

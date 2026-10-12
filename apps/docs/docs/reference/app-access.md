@@ -1,6 +1,7 @@
 ---
 title: App access
 description: Group rules, permissions, activation and the app access API.
+lastModified: 2026-10-12
 ---
 
 Open an app in management and choose **Access → App access** to select which company
