@@ -25,6 +25,8 @@ To inspect an app in the UI, open its **Connections** tab. The view connects the
 
 Resources come from the active deployment, including database, object storage, key-value storage, queue, workflow and static asset bindings. A failed or pending deployment does not replace this list. Variable values and connector secrets are not included.
 
+D1 bindings show the database name and the selected database ID. The ID comes from `database_id` in the deployment configuration, falling back to `database_name` when no ID is set. In CLI and API JSON, `target` retains the name and `databaseId` identifies the selected database, so databases with the same name remain distinguishable.
+
 Connector changes have a separate activation state:
 
 | State   | Meaning and next step                                                                                 |
