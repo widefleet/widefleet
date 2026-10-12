@@ -21,10 +21,13 @@ pub struct Options {
 }
 
 #[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct Resource {
     binding: String,
     r#type: String,
     target: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    database_id: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -67,6 +70,9 @@ pub async fn run(api: &Api, credentials: &auth::Credentials, options: Options) -
             "  {} → {} ({})",
             resource.binding, resource.target, resource.r#type
         );
+        if let Some(database_id) = &resource.database_id {
+            println!("    Database ID: {database_id}");
+        }
     }
     if connections.deployment_id.is_none() {
         println!("  No active deployment");

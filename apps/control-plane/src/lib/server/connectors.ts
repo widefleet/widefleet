@@ -153,7 +153,14 @@ export const createConnectorService = (
             case "plain_text":
               return [];
             case "d1":
-              return [{ binding: binding.name, type: binding.type, target: binding.database_name }];
+              return [
+                {
+                  binding: binding.name,
+                  type: binding.type,
+                  target: binding.database_name,
+                  databaseId: binding.database_id ?? binding.database_name,
+                },
+              ];
             case "r2_bucket":
               return [{ binding: binding.name, type: binding.type, target: binding.bucket_name }];
             case "kv_namespace":

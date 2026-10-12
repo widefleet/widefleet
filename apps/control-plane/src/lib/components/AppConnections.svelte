@@ -247,6 +247,12 @@
                         <dt class="text-muted-foreground mb-1">Target</dt>
                         <dd class="wrap-anywhere">{resource.target}</dd>
                       </div>
+                      {#if resource.databaseId}
+                        <div>
+                          <dt class="text-muted-foreground mb-1">Database ID</dt>
+                          <dd class="font-mono wrap-anywhere">{resource.databaseId}</dd>
+                        </div>
+                      {/if}
                       <div>
                         <dt class="text-muted-foreground mb-1">Use in code</dt>
                         <dd class="font-mono wrap-anywhere">env.{resource.binding}</dd>

@@ -385,6 +385,7 @@ export const appResource = z.strictObject({
   binding: bindingName,
   type: z.enum(["d1", "r2_bucket", "kv_namespace", "queue", "workflow", "assets"]),
   target: z.string(),
+  databaseId: z.string().optional(),
 });
 
 export const appConnections = z.strictObject({

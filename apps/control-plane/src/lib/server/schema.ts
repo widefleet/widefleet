@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
@@ -180,7 +181,16 @@ export const jobs = pgTable(
     finishedAt: timestamp("finished_at", { withTimezone: true }),
     result: jsonb(),
   },
-  (table) => [index("job_fleet_state_idx").on(table.fleetId, table.state, table.sequence)],
+  (table) => [
+    index("job_fleet_state_idx").on(table.fleetId, table.state, table.sequence),
+    index("job_app_capability_snapshot_idx").on(
+      table.appId,
+      table.deploymentId,
+      table.state,
+      sql`(${table.capabilities}->>'revision')`,
+      table.sequence.desc(),
+    ),
+  ],
 );
 
 export const deploymentEvents = pgTable("deployment_event", {

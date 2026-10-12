@@ -161,7 +161,7 @@ test("shows connector discovery and serving app connections to a member", async 
         compatibility_date: "2026-10-01",
         assets: { upload_session: crypto.randomUUID() },
         bindings: [
-          { type: "d1", name: "DB", database_name: "inventory" },
+          { type: "d1", name: "DB", database_name: "inventory", database_id: "inventory-v2" },
           { type: "r2_bucket", name: "FILES", bucket_name: "uploads" },
           { type: "plain_text", name: "INTERNAL_VALUE", text: "synthetic-value-not-for-display" },
         ],
@@ -196,6 +196,9 @@ test("shows connector discovery and serving app connections to a member", async 
   await expect(page.getByText("CustomerReader", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Database DB Active" }).click();
   await expect(page.getByText("env.DB", { exact: true })).toBeVisible();
+  await expect(page.getByText("inventory", { exact: true })).toBeVisible();
+  await expect(page.getByText("Database ID", { exact: true })).toBeVisible();
+  await expect(page.getByText("inventory-v2", { exact: true })).toBeVisible();
   await expect(page.getByText("synthetic-value-not-for-display")).toHaveCount(0);
   await page.setViewportSize({ width: 1440, height: 1100 });
   await page.screenshot({

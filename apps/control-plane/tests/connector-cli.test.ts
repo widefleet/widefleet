@@ -62,7 +62,10 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
           response.end(
             JSON.stringify({
               deploymentId: app.activeDeploymentId,
-              resources: [{ binding: "DB", type: "d1", target: "inventory" }],
+              resources: [
+                { binding: "DB", type: "d1", target: "inventory", databaseId: "inventory-v2" },
+                { binding: "FILES", type: "r2_bucket", target: "uploads" },
+              ],
               connectors: {
                 grants: {},
                 revision: 2,
@@ -165,7 +168,10 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         { name: "pending", entrypoints: [] },
       ]);
       expect(JSON.parse((await command("connections")).stdout)).toMatchObject({
-        resources: [{ binding: "DB", type: "d1", target: "inventory" }],
+        resources: [
+          { binding: "DB", type: "d1", target: "inventory", databaseId: "inventory-v2" },
+          { binding: "FILES", type: "r2_bucket", target: "uploads" },
+        ],
         connectors: { grants: {}, state: "failed" },
         activeConnectors: { ERP: { connector: "erp" } },
       });

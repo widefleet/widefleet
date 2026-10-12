@@ -1,5 +1,5 @@
 import * as contract from "@platform/contracts";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { z } from "zod";
 import { createAppService } from "../src/lib/server/apps.ts";
@@ -166,7 +166,7 @@ describe("Connector discovery and app connections", () => {
     const result = (await service.connections(creator, app.id)).unwrap();
     expect(result.deploymentId).toBe(active);
     expect(result.resources).toEqual([
-      { binding: "DB", type: "d1", target: "inventory" },
+      { binding: "DB", type: "d1", target: "inventory", databaseId: "inventory" },
       { binding: "FILES", type: "r2_bucket", target: "uploads" },
       { binding: "CACHE", type: "kv_namespace", target: "inventory-cache" },
       { binding: "EVENTS", type: "queue", target: "events" },
@@ -175,6 +175,20 @@ describe("Connector discovery and app connections", () => {
     ]);
     expect(JSON.stringify(result)).not.toContain("synthetic-sensitive-value");
     expect(result.activeConnectors).toEqual({});
+  });
+
+  it("distinguishes D1 databases with the same name using the selected identifier", async () => {
+    for (const databaseId of ["inventory-v1", "inventory-v2"]) {
+      await deploy([
+        { type: "d1", name: "DB", database_name: "inventory", database_id: databaseId },
+      ]);
+      expect((await service.connections(creator, app.id)).unwrap().resources).toContainEqual({
+        binding: "DB",
+        type: "d1",
+        target: "inventory",
+        databaseId,
+      });
+    }
   });
 
   it.each([null, "Synthetic activation failure"])(
@@ -249,5 +263,74 @@ describe("Connector discovery and app connections", () => {
       })
       .where(eq(apps.id, app.id));
     expect((await service.connections(creator, app.id)).unwrap().activeConnectors).toBeNull();
+  });
+
+  it("finds the serving snapshot without scanning newer jobs from other apps", async () => {
+    const deploymentId = await deploy([]);
+    const active = { ERP: { connector: "erp", entrypoint: "default" } };
+
+    const other = (
+      await appService.create(creator, { slug: "other", displayName: "Other", parentId: null })
+    ).unwrap();
+
+    await environment.database.db.insert(jobs).values({
+      id: crypto.randomUUID(),
+      appId: app.id,
+      fleetId: app.fleetId,
+      deploymentId,
+      kind: "deploy",
+      state: "succeeded",
+      capabilities: { revision: 1, grants: active },
+    });
+    await environment.database.db.execute(sql`
+      INSERT INTO job (id, app_id, fleet_id, kind, state, capabilities)
+      SELECT gen_random_uuid(), ${other.id}::uuid, ${app.fleetId}::uuid, 'configure', 'succeeded',
+        jsonb_build_object('revision', history.revision, 'grants', '{}'::jsonb)
+      FROM generate_series(1, 10000) AS history(revision)
+    `);
+    await environment.database.db.execute(sql`
+      INSERT INTO job (id, app_id, fleet_id, deployment_id, kind, state, capabilities)
+      SELECT gen_random_uuid(), ${app.id}::uuid, ${app.fleetId}::uuid, ${deploymentId}::uuid,
+        'configure', 'failed', jsonb_build_object('revision', 2, 'grants', '{}'::jsonb)
+      FROM generate_series(1, 2000)
+    `);
+    await environment.database.db
+      .update(apps)
+      .set({
+        capabilities: {},
+        capabilityRevision: 2,
+        appliedCapabilityRevision: 1,
+        capabilityError: "Synthetic activation failure",
+      })
+      .where(eq(apps.id, app.id));
+    await environment.database.db.execute(sql`ANALYZE job`);
+    expect((await service.connections(creator, app.id)).unwrap().activeConnectors).toEqual(active);
+
+    const explained = await environment.database.db.execute(sql`
+      EXPLAIN (ANALYZE, FORMAT JSON)
+      SELECT capabilities FROM job
+      WHERE app_id = ${app.id} AND deployment_id = ${deploymentId} AND state = ${"succeeded"}
+        AND capabilities->>'revision' = ${"1"}
+      ORDER BY sequence DESC LIMIT 1
+    `);
+
+    expect(explained.rows).toMatchObject([
+      {
+        "QUERY PLAN": [
+          {
+            Plan: {
+              "Node Type": "Limit",
+              Plans: [
+                {
+                  "Node Type": "Index Scan",
+                  "Index Name": "job_app_capability_snapshot_idx",
+                  "Actual Rows": 1,
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ]);
   });
 });
