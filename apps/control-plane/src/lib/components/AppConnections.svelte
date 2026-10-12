@@ -167,7 +167,11 @@
           </div>
           {#if names.length === 0}
             <div class="px-4 py-6">
-              <p class="text-sm">No connectors connected</p>
+              <p class="text-sm">
+                {connections.activeConnectors === null
+                  ? "No saved connector bindings"
+                  : "No connectors connected"}
+              </p>
               <p class="text-muted-foreground mt-2 text-xs leading-5">
                 Browse the catalog and ask an administrator to connect an integration.
               </p>

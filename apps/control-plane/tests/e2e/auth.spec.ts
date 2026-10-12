@@ -243,6 +243,12 @@ test("shows connector discovery and serving app connections to a member", async 
   await expect(page.getByText("Currently active", { exact: true })).toBeVisible();
   await expect(page.getByText("erp · CustomerReader", { exact: true })).toBeVisible();
   await expect(page.getByRole("alert")).toContainText("Synthetic activation failure");
+  await environment.database.db.delete(jobs).where(eq(jobs.appId, record.id));
+  await page.goto(path);
+  await expect(page.getByText("No saved connector bindings", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("The active connector bindings could not be confirmed.", { exact: false }),
+  ).toBeVisible();
   expect((await context.request.get("/api/v1/connectors")).status()).toBe(403);
   expect(
     (
