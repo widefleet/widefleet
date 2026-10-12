@@ -12,6 +12,7 @@ case "${1:-up}" in
   *) usage >&2; exit 1 ;;
 esac
 export WIDEFLEET_LOCAL_DATA="$project_root/.local/demo"
+node_image=node:26.8.2-bookworm-slim@sha256:cd9f682fa2885cd1056e830424764158570061c59736a1da836bc3d73df095ae
 docker_endpoint="${DOCKER_HOST:-$(docker context inspect --format '{{.Endpoints.docker.Host}}')}"
 if [[ "$docker_endpoint" != unix://* ]]; then
   echo 'The local demo needs a local Docker Unix socket; remote Docker contexts are unsupported.' >&2
@@ -58,7 +59,7 @@ case "${1:-up}" in
     else
       echo 'Checking the latest published Widefleet release.'
       images="$(docker run --rm --mount "type=bind,source=$project_root/apps/control-plane/local/release.ts,target=/local-release.ts,readonly" \
-        node:26.8.2-bookworm-slim@sha256:cd9f682fa2885cd1056e830424764158570061c59736a1da836bc3d73df095ae \
+        "$node_image" \
         node /local-release.ts)"
       read -r PLATFORM_RUNTIME_IMAGE PLATFORM_AGENT_IMAGE PLATFORM_CONTROL_PLANE_IMAGE PLATFORM_RELEASE_VERSION <<< "$images"
       export PLATFORM_RUNTIME_IMAGE PLATFORM_AGENT_IMAGE PLATFORM_CONTROL_PLANE_IMAGE PLATFORM_RELEASE_VERSION
@@ -157,7 +158,7 @@ case "${1:-up}" in
     done
     if [[ -d "$WIDEFLEET_LOCAL_DATA" ]]; then
       docker run --rm --mount "type=bind,source=$WIDEFLEET_LOCAL_DATA,target=/data" \
-        widefleet-local-tools:0.1.0 node --input-type=module --eval \
+        "$node_image" node --input-type=module --eval \
         'import {readdir,rm} from "node:fs/promises"; for(const name of await readdir("/data")) await rm("/data/"+name,{recursive:true,force:true});'
     fi
     echo 'Local demo data removed.'

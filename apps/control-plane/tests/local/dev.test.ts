@@ -152,6 +152,8 @@ it("keeps the current tooling and running platform when database compatibility f
     expect(await log()).not.toContain("tag\twidefleet-local-tools:build\t");
     expect(await log()).not.toContain("stop\tagent\tcontrol-plane\t");
     expect(await log()).not.toContain("tools/initialize.ts\t");
+    await run(["reset", "--yes"]);
+    expect(await log()).not.toContain("widefleet-local-tools:0.1.0");
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
