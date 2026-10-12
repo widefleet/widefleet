@@ -1,7 +1,7 @@
 ---
 title: App development
 description: Develop an independent app with identity, storage and platform integrations.
-lastModified: 2026-10-10
+lastModified: 2026-10-12
 ---
 
 Start with an [installed CLI and a generated app](/getting-started/installation). SvelteKit is the default; the [CLI template option](/reference/cli#create-a-project) also supports TanStack Start for React. Both starters are independent projects with no workspace dependencies and include D1 notes, private R2 photos and platform error reporting.
