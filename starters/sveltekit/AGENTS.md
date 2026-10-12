@@ -1,22 +1,8 @@
-## Philosophy
-
-This codebase will outlive you. Every shortcut becomes someone else's burden. Every hack compounds into technical debt that slows the whole team down.
-You are not just writing code. You are shaping the future of this project. The patterns you establish will be copied. The corners you cut will be cut again.
-Fight entropy. Leave the codebase better than you found it.
-Prefer correctness and predictable behavior over short-term convenience.
-Preserve runtime behavior during lint, typing, and test-structure changes.
-Use public package exports; never cross package boundaries with relative imports.
-Extract shared logic only for genuinely shared behavior. Avoid generic abstractions for one-off duplication.
-Public PRs, commits, generated files, and documentation contain no private names, internal context, customer-derived data, or AI attribution.
-Inferred types over annotations. any is the enemy.
-
 ## Development
 
 Read README.md for the app contract and CLI commands. Keep this project independent of the Widefleet source repository.
 Use the installed `widefleet` CLI for app creation, deployment, history and rollback. Run `pnpm check` before deploying.
 Use `locals.user` for the authenticated company identity. Never trust identity headers outside the platform's private ingress.
-Keep credentials out of source control. Confirm the target platform and app before a production deployment or destructive operation.
-Discuss new dependencies and lasting architectural changes with the maintainer before implementing them.
 
 ## Connect to Widefleet
 

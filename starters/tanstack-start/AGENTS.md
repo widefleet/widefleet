@@ -1,16 +1,12 @@
 ## Development
 
-Keep this project independent of the Widefleet source repository. Use public package exports and inferred types; do not introduce `any` or suppress diagnostics.
 Use the installed `widefleet` CLI for deployment, previews, history and rollback. Run `pnpm check` before deploying.
-Ask for explicit approval before modifying production systems or data. Never send email or chat messages.
-Discuss new dependencies and lasting architectural changes with the maintainer before implementing them.
-Keep credentials, private names and customer data out of source control and public documentation.
 
 ## Platform integration
 
 Use `context.user` in server functions and server routes for the verified company identity. Preserve authentication in `src/server.ts`; identity headers are trustworthy only on the platform's private ingress.
 Keep CSRF protection in `src/start.ts`. Apps do not have their own cookie sessions.
-Declare resources in `wrangler.jsonc`; keep deployment changes in versioned configuration and deploy through Widefleet.
+Declare resources in `wrangler.jsonc` and deploy through Widefleet.
 The Vite configuration selects the source entry for local development and builds the Worker declared by Wrangler. Keep the browser assets separate from server output.
 Run `pnpm types` after adding routes or changing bindings. Do not edit `.platform` generated files.
 
