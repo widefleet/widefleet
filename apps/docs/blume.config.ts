@@ -36,6 +36,7 @@ const config = defineConfig({
     sidebar: { display: "group" },
   },
   feedback: false,
+  lastModified: "git",
   // Crawler policy is managed at the public origin's /robots.txt.
   seo: { robots: false },
   footer: {

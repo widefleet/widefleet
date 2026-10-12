@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "DOCS_POSTHOG_KEY= DOCS_WEBSITE_URL=${DOCS_WEBSITE_URL:-http://localhost:5178} blume dev --host 127.0.0.1 --port 4321",
-    "build": "blume build",
+    "build": "node scripts/prepare-git-history.ts && blume build",
     "preview": "pnpm run prepare:deploy && wrangler dev --ip 127.0.0.1 --port 4321",
     "deploy": "pnpm run prepare:deploy && wrangler deploy",
     "deploy:preview": "pnpm run prepare:deploy && wrangler preview",
