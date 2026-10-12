@@ -11,11 +11,13 @@ import {
   appGrants,
   apps,
   artifacts,
+  connectors,
   deployments,
   jobs,
 } from "../../src/lib/server/schema.ts";
 import { apiResource, cliClientId } from "../../src/lib/server/auth-options.ts";
 import { createTestEnvironment } from "../environment.ts";
+import { connectorReference } from "../../src/lib/server/connectors.ts";
 
 let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
 
@@ -72,6 +74,185 @@ test.afterAll(async () => {
   }
 
   await environment?.close();
+});
+
+test("shows connector discovery and serving app connections to a member", async ({
+  page,
+  context,
+  request,
+}) => {
+  expect((await request.get("/api/v1/connector-catalog")).status()).toBe(401);
+  await page.goto("/connectors");
+  await expect(page).toHaveURL(/\/sign-in\?next=/);
+
+  const person = environment.users.createUser({
+    name: "App Creator",
+    email: "connections@example.test",
+  });
+
+  await environment.users.saveUser(person);
+  await environment.linkMicrosoftUser(person.id);
+  const session = await environment.users.login({ userId: person.id });
+  await context.addCookies(
+    session.cookies.map((cookie) => ({
+      ...cookie,
+      domain: "localhost",
+      sameSite: "Lax",
+      secure: false,
+    })),
+  );
+
+  const created = await context.request.post("/api/v1/apps", {
+    headers: { origin: environment.configuration.PLATFORM_URL },
+    data: { slug: "inventory-connections", displayName: "Inventory" },
+  });
+
+  expect(created.ok()).toBe(true);
+  const record = app.parse(await created.json());
+  const path = `/apps/${record.id}?tab=connections`;
+  await page.goto(path);
+  await expect(page.getByText("No connectors connected", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Resources appear after the first successful deployment."),
+  ).toBeVisible();
+  await page.getByRole("link", { name: "Browse connectors" }).click();
+  await expect(page.getByRole("heading", { name: "No connectors yet" })).toBeVisible();
+
+  const reference = connectorReference.parse({
+    name: "erp",
+    checksum: "a".repeat(64),
+    entrypoints: ["default", "CustomerReader"],
+    classes: [],
+    secrets: { API_KEY: "synthetic-ciphertext" },
+  });
+
+  await environment.database.db.insert(connectors).values([
+    {
+      name: "erp",
+      fleetId: record.fleetId,
+      jobId: crypto.randomUUID(),
+      package: reference,
+      appliedPackage: reference,
+    },
+    {
+      name: "warehouse",
+      fleetId: record.fleetId,
+      jobId: crypto.randomUUID(),
+      package: { ...reference, name: "warehouse" },
+    },
+  ]);
+  const grants = { ERP: { connector: "erp", entrypoint: "CustomerReader" } };
+  await environment.database.db
+    .update(apps)
+    .set({ capabilities: grants, capabilityRevision: 1 })
+    .where(eq(apps.id, record.id));
+  await page.goto(path);
+  await expect(page.getByRole("button", { name: "ERP erp Saved" })).toBeVisible();
+  await expect(page.getByText("Connector bindings are saved.", { exact: false })).toBeVisible();
+
+  const artifactId = crypto.randomUUID();
+  const deploymentId = crypto.randomUUID();
+  await environment.database.db.insert(artifacts).values(
+    artifact.parse({
+      id: artifactId,
+      appId: record.id,
+      metadata: {
+        main_module: "worker.js",
+        compatibility_date: "2026-10-01",
+        assets: { upload_session: crypto.randomUUID() },
+        bindings: [
+          { type: "d1", name: "DB", database_name: "inventory" },
+          { type: "r2_bucket", name: "FILES", bucket_name: "uploads" },
+          { type: "plain_text", name: "INTERNAL_VALUE", text: "synthetic-value-not-for-display" },
+        ],
+      },
+      manifest: {},
+      modules: [{ name: "worker.js", type: "esm", sha256: "0".repeat(64), size: 0 }],
+    }),
+  );
+  await environment.database.db.insert(deployments).values({
+    id: deploymentId,
+    appId: record.id,
+    artifactId,
+    requestId: crypto.randomUUID(),
+    status: "succeeded",
+    finishedAt: new Date(),
+  });
+  await environment.database.db.insert(jobs).values({
+    id: crypto.randomUUID(),
+    appId: record.id,
+    fleetId: record.fleetId,
+    deploymentId,
+    kind: "deploy",
+    state: "succeeded",
+    capabilities: { revision: 1, grants },
+  });
+  await environment.database.db
+    .update(apps)
+    .set({ activeDeploymentId: deploymentId, state: "active", appliedCapabilityRevision: 1 })
+    .where(eq(apps.id, record.id));
+  await page.goto(path);
+  await page.getByRole("button", { name: "ERP erp Active" }).click();
+  await expect(page.getByText("CustomerReader", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Database DB Active" }).click();
+  await expect(page.getByText("env.DB", { exact: true })).toBeVisible();
+  await expect(page.getByText("synthetic-value-not-for-display")).toHaveCount(0);
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  await page.screenshot({
+    path: "../../.local/connections-desktop.png",
+    fullPage: true,
+    animations: "disabled",
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  );
+  await page.screenshot({
+    path: "../../.local/connections-mobile.png",
+    fullPage: true,
+    animations: "disabled",
+  });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.getByRole("link", { name: "Browse connectors" }).click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Connectors");
+  await expect(page.getByRole("button", { name: "erp Connected Available" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "warehouse Not ready" })).toBeVisible();
+  await page.getByRole("button", { name: "erp Connected Available" }).click();
+  await expect(page.getByText("CustomerReader", { exact: true })).toBeVisible();
+  await expect(page.getByText("API_KEY", { exact: true })).toHaveCount(0);
+  await page.screenshot({
+    path: "../../.local/connector-catalog.png",
+    fullPage: true,
+    animations: "disabled",
+  });
+  await page.getByRole("textbox", { name: "Search connectors" }).fill("missing");
+  await expect(page.getByText("No connectors match your search.")).toBeVisible();
+  await page.getByRole("textbox", { name: "Search connectors" }).fill("erp");
+  await expect(page.getByRole("button", { name: "warehouse Not ready" })).toHaveCount(0);
+
+  await environment.database.db
+    .update(apps)
+    .set({
+      capabilities: {},
+      capabilityRevision: 2,
+      capabilityError: "Synthetic activation failure",
+    })
+    .where(eq(apps.id, record.id));
+  await page.goto(path);
+  await page.getByRole("button", { name: "ERP erp Removal failed" }).click();
+  await expect(page.getByText("Currently active", { exact: true })).toBeVisible();
+  await expect(page.getByText("erp · CustomerReader", { exact: true })).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText("Synthetic activation failure");
+  expect((await context.request.get("/api/v1/connectors")).status()).toBe(403);
+  expect(
+    (
+      await context.request.put(`/api/v1/apps/${record.id}/bindings/OTHER`, {
+        headers: { origin: environment.configuration.PLATFORM_URL },
+        data: { connector: "erp" },
+      })
+    ).status(),
+  ).toBe(403);
+  await environment.database.db.delete(connectors);
 });
 
 test("preserves SvelteKit form protection and accepts the CLI with an explicit Origin", async ({

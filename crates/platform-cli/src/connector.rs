@@ -27,6 +27,8 @@ pub struct Options {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Browse connectors and entrypoints available for administrator assignment.
+    Catalog,
     /// Bundle and deploy the connector in the current project.
     Deploy {
         #[arg(long, default_value = "wrangler.jsonc")]
@@ -117,7 +119,7 @@ struct Status {
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct Bindings {
+pub(crate) struct Bindings {
     revision: u64,
     grants: std::collections::BTreeMap<String, CapabilityGrant>,
     applied_revision: Option<u64>,
@@ -167,7 +169,7 @@ fn show(status: &Status, json_output: bool) -> Result<()> {
     Ok(())
 }
 
-fn show_bindings(state: &Bindings, json_output: bool) -> Result<()> {
+pub(crate) fn show_bindings(state: &Bindings, json_output: bool) -> Result<()> {
     if json_output {
         return crate::print_json(state);
     }
@@ -411,6 +413,30 @@ async fn secret_command(
 pub async fn run(api: &Api, credentials: &auth::Credentials, options: Options) -> Result<()> {
     let json_output = options.json || !std::io::stdout().is_terminal();
     match options.command {
+        Command::Catalog => {
+            #[derive(Deserialize, Serialize)]
+            struct Entry {
+                name: String,
+                entrypoints: Vec<String>,
+            }
+            let entries: Vec<Entry> = get(api, credentials, "/connector-catalog").await?;
+            if json_output {
+                crate::print_json(&entries)
+            } else {
+                if entries.is_empty() {
+                    println!("No connectors available");
+                }
+                for entry in entries {
+                    let availability = if entry.entrypoints.is_empty() {
+                        "not ready".into()
+                    } else {
+                        entry.entrypoints.join(", ")
+                    };
+                    println!("{}: {availability}", entry.name);
+                }
+                Ok(())
+            }
+        }
         Command::Deploy { config, no_wait } => {
             let package = package(&config).await?;
             eprintln!(

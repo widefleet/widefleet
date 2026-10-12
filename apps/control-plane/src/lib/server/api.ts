@@ -166,6 +166,17 @@ export const createApi = (runtime: Runtime) => {
 
         return { accepted: true };
       }),
+    connectorCatalog: read
+      .route({ method: "GET", path: "/connector-catalog" })
+      .output(z.array(contract.connectorCatalogEntry))
+      .handler(async () => unwrap(await runtime.connectors.catalog())),
+    appConnections: read
+      .route({ method: "GET", path: "/apps/{appId}/connections" })
+      .input(contract.appPath)
+      .output(contract.appConnections)
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.connectors.connections(context.principal, input.appId)),
+      ),
     connectors: read
       .route({ method: "GET", path: "/connectors" })
       .output(z.array(contract.connectorStatus))

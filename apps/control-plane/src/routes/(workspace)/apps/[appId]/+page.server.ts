@@ -25,7 +25,7 @@ export const load: PageServerLoad = async ({ request, params, url, setHeaders })
       .catch("app")
       .parse(url.searchParams.get("scope") ?? (url.searchParams.has("q") ? "management" : "app")),
     tab: z
-      .enum(["overview", "deployments", "workflows", "access", "settings"])
+      .enum(["overview", "deployments", "connections", "workflows", "access", "settings"])
       .catch("overview")
       .parse(
         url.searchParams.get("tab") ??

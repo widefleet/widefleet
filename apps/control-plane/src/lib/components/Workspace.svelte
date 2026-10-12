@@ -5,6 +5,7 @@
   import { mode, setMode } from "mode-watcher";
   import Layers2 from "@lucide/svelte/icons/layers-2";
   import LayoutGrid from "@lucide/svelte/icons/layout-grid";
+  import Plug from "@lucide/svelte/icons/plug";
   import Users from "@lucide/svelte/icons/users";
   import Settings2 from "@lucide/svelte/icons/settings-2";
   import Server from "@lucide/svelte/icons/server";
@@ -39,6 +40,7 @@
   const navigation = [
     { href: "/", label: "All apps", icon: Layers2 },
     { href: "/catalog", label: "App catalog", icon: LayoutGrid },
+    { href: "/connectors", label: "Connectors", icon: Plug },
     { href: "/members", label: "Members", icon: Users },
     { href: "/agents", label: "Deployment agents", icon: Server },
     { href: "/settings", label: "Settings", icon: Settings2 },
@@ -89,8 +91,8 @@
 {#snippet navigationLinks()}
   <nav aria-label="Main navigation" class="space-y-1">
     {#each navigation as item, index (item.href)}
-      {#if index < 2 || principal.admin}
-        {#if index === 2}<p
+      {#if index < 3 || principal.admin}
+        {#if index === 3}<p
             class="text-muted-foreground px-3 pt-7 pb-2 text-[11px] font-medium tracking-wider uppercase"
           >
             Administration

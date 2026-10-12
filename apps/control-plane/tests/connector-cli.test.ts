@@ -51,7 +51,29 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         response.setHeader("content-type", "application/json");
 
         if (request.url === "/api/v1/apps/by-name/inventory") response.end(JSON.stringify(app));
-        else if (request.url?.startsWith(`/api/v1/apps/${app.id}/bindings`)) {
+        else if (request.url === "/api/v1/connector-catalog") {
+          response.end(
+            JSON.stringify([
+              { name: "erp", entrypoints: ["default"] },
+              { name: "pending", entrypoints: [] },
+            ]),
+          );
+        } else if (request.url === `/api/v1/apps/${app.id}/connections`) {
+          response.end(
+            JSON.stringify({
+              deploymentId: app.activeDeploymentId,
+              resources: [{ binding: "DB", type: "d1", target: "inventory" }],
+              connectors: {
+                grants: {},
+                revision: 2,
+                appliedRevision: 1,
+                state: "failed",
+                error: "Synthetic activation failure",
+              },
+              activeConnectors: { ERP: { connector: "erp", entrypoint: "default" } },
+            }),
+          );
+        } else if (request.url?.startsWith(`/api/v1/apps/${app.id}/bindings`)) {
           if (rejected && request.method !== "GET")
             response
               .writeHead(403)
@@ -118,7 +140,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       await rm(directory, { recursive: true, force: true });
     });
 
-    const cli = (...args: string[]) =>
+    const command = (...args: string[]) =>
       execute(
         process.env["CLI_BINARY"] ??
           fileURLToPath(
@@ -127,13 +149,35 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
               import.meta.url,
             ),
           ),
-        ["connector", ...args],
+        args,
         {
           cwd: directory,
           timeout: 10000,
           env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: "normal-credential" },
         },
       );
+
+    const cli = (...args: string[]) => command("connector", ...args);
+
+    it("browses the catalog and reads serving app resources without mutations", async () => {
+      expect(JSON.parse((await cli("catalog")).stdout)).toEqual([
+        { name: "erp", entrypoints: ["default"] },
+        { name: "pending", entrypoints: [] },
+      ]);
+      expect(JSON.parse((await command("connections")).stdout)).toMatchObject({
+        resources: [{ binding: "DB", type: "d1", target: "inventory" }],
+        connectors: { grants: {}, state: "failed" },
+        activeConnectors: { ERP: { connector: "erp" } },
+      });
+      expect(requests.map((request) => `${request.method} ${request.path}`)).toEqual([
+        "GET /api/v1/connector-catalog",
+        "GET /api/v1/apps/by-name/inventory",
+        `GET /api/v1/apps/${app.id}/connections`,
+      ]);
+      expect(
+        requests.every((request) => request.authorization === "Bearer normal-credential"),
+      ).toBe(true);
+    });
 
     it("reads secret files verbatim, lists names, deletes and reports activation failures", async () => {
       const value = "synthetic-secret\nwith-trailing-newline\n";

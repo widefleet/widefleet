@@ -2,6 +2,8 @@
   import { onMount, untrack } from "svelte";
   import { page } from "$app/state";
   import { getAppDetails } from "#lib/apps.remote";
+  import { getAppConnections } from "#lib/connectors.remote";
+  import AppConnections from "#shadcn/components/AppConnections.svelte";
   import { changeAppAccess } from "#lib/app-access.remote";
   import { Button } from "#shadcn/components/ui/button/index.js";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
@@ -87,6 +89,7 @@
   const tabs = [
     { id: "overview", label: "Overview" },
     { id: "deployments", label: "Deployments" },
+    { id: "connections", label: "Connections" },
     { id: "workflows", label: "Workflows" },
     { id: "access", label: "Access" },
     { id: "settings", label: "App settings" },
@@ -98,6 +101,8 @@
 
     try {
       await details.refresh();
+
+      if (activeTab === "connections") await getAppConnections({ appId: route.appId }).refresh();
     } catch {
       // The query exposes the failure without replacing the last confirmed result.
     } finally {
@@ -305,6 +310,8 @@
     rollbackPending={rollbackRequests[route.appId]?.pending ?? false}
     {submitRollback}
   />
+{:else if activeTab === "connections"}
+  <AppConnections app={data.app} />
 {:else if activeTab === "access" && data.app.state !== "deleting"}
   <nav aria-label="Access sections" class="mb-7 flex flex-wrap gap-2">
     <Button

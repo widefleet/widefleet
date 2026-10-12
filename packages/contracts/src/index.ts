@@ -358,6 +358,11 @@ export const connectorStatus = z.strictObject({
   entrypoints: z.array(bindingName),
 });
 
+export const connectorCatalogEntry = z.strictObject({
+  name: appSlug,
+  entrypoints: z.array(bindingName),
+});
+
 export const capabilityGrant = z.strictObject({
   connector: appSlug,
   entrypoint: bindingName.default("default"),
@@ -374,6 +379,19 @@ export const capabilityState = capabilitySnapshot.extend({
   appliedRevision: z.number().int().nonnegative().nullable(),
   state: z.enum(["saved", "pending", "active", "failed"]),
   error: z.string().nullable(),
+});
+
+export const appResource = z.strictObject({
+  binding: bindingName,
+  type: z.enum(["d1", "r2_bucket", "kv_namespace", "queue", "workflow", "assets"]),
+  target: z.string(),
+});
+
+export const appConnections = z.strictObject({
+  deploymentId: identifier.nullable(),
+  resources: z.array(appResource),
+  connectors: capabilityState,
+  activeConnectors: capabilityGrants.nullable(),
 });
 
 export const capabilityPath = appPath.extend({

@@ -3,6 +3,7 @@ mod apps;
 mod auth;
 mod catalog;
 mod configuration;
+mod connections;
 mod connector;
 mod deploy;
 mod discovery;
@@ -84,6 +85,8 @@ enum Command {
     Access(access::Options),
     /// Deploy IT connectors and manage native RPC bindings.
     Connector(connector::Options),
+    /// Show app connectors and resources from the active deployment.
+    Connections(connections::Options),
     /// Create an application; use --parent for an isolated preview.
     Create {
         slug: String,
@@ -218,6 +221,7 @@ async fn run(args: Arguments) -> Result<()> {
         Command::Network(options) => network::run(&api, &credentials, options).await,
         Command::Access(options) => access::run(&api, &credentials, options).await,
         Command::Connector(options) => connector::run(&api, &credentials, options).await,
+        Command::Connections(options) => connections::run(&api, &credentials, options).await,
         Command::Runtime(options) => runtime::run(&api, &credentials, &token, options).await,
         Command::Settings(options) => settings::run(&api, &token, options).await,
         Command::Groups(options) => groups::run(&api, &token, options).await,
@@ -376,6 +380,7 @@ async fn main() {
         Command::Network(_) => "network",
         Command::Access(_) => "access",
         Command::Connector(_) => "connector",
+        Command::Connections(_) => "connections",
         Command::Create { .. } => "create",
         Command::Deploy { .. } => "deploy",
         Command::Preview(_) => "preview",

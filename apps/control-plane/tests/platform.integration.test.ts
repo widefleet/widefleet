@@ -1996,6 +1996,10 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     );
 
     expect(
+      await (await json("/connector-catalog", "GET", undefined, outsiderHeaders)).json(),
+    ).toContainEqual({ name: release.name, entrypoints: [] });
+
+    expect(
       (
         await json(path, "PUT", {
           ...release,
@@ -2018,6 +2022,14 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     expect(repeated.jobId).toBe(submitted.jobId);
     const app = await createApp("connector-api");
     const bindingPath = `/apps/${app.id}/bindings`;
+    expect(
+      (await json(`/apps/${app.id}/connections`, "GET", undefined, outsiderHeaders)).status,
+    ).toBe(404);
+    expect(await (await json(`/apps/${app.id}/connections`, "GET")).json()).toMatchObject({
+      deploymentId: null,
+      resources: [],
+      activeConnectors: {},
+    });
     expect((await json(`${bindingPath}/ERP`, "PUT", { connector: release.name })).status).toBe(409);
 
     expect(
@@ -2061,6 +2073,9 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       state: "succeeded",
       appliedChecksum: submitted.checksum,
     });
+    expect(
+      await (await json("/connector-catalog", "GET", undefined, outsiderHeaders)).json(),
+    ).toContainEqual({ name: release.name, entrypoints: ["Customers", "default"] });
     expect(
       (await json(`${bindingPath}/ERP`, "PUT", { connector: release.name }, outsiderHeaders))
         .status,
