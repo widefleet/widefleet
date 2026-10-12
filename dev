@@ -12,30 +12,6 @@ case "${1:-up}" in
   *) usage >&2; exit 1 ;;
 esac
 export WIDEFLEET_LOCAL_DATA="$project_root/.local/demo"
-mode=release
-if [[ -f "$WIDEFLEET_LOCAL_DATA/image-mode" ]]; then
-  mode="$(cat "$WIDEFLEET_LOCAL_DATA/image-mode")"
-elif [[ -d "$WIDEFLEET_LOCAL_DATA/platform" ]]; then
-  # Existing demos used source builds. Never downgrade their database implicitly.
-  mode=source
-fi
-[[ "$mode" == release || "$mode" == source ]] || { echo 'Invalid local demo image mode.' >&2; exit 1; }
-if [[ "${1:-up}" == up && "${2:-}" == --build ]]; then
-  if [[ "$mode" == release && -f "$WIDEFLEET_LOCAL_DATA/image-mode" ]]; then
-    echo 'This demo uses release images. Run ./dev reset --yes before switching to source builds.' >&2
-    exit 1
-  fi
-  mode=source
-fi
-if [[ "$mode" == source ]]; then
-  export PLATFORM_RUNTIME_IMAGE=widefleet-local-runtime:source
-  export PLATFORM_AGENT_IMAGE=widefleet-local-agent:source
-  export PLATFORM_CONTROL_PLANE_IMAGE=widefleet-local-control-plane:source
-else
-  set -a
-  source "$project_root/infra/local/images.env"
-  set +a
-fi
 docker_endpoint="${DOCKER_HOST:-$(docker context inspect --format '{{.Endpoints.docker.Host}}')}"
 if [[ "$docker_endpoint" != unix://* ]]; then
   echo 'The local demo needs a local Docker Unix socket; remote Docker contexts are unsupported.' >&2
@@ -74,8 +50,19 @@ case "${1:-up}" in
       echo 'The pinned celld MVP requires a Linux x86-64 Docker engine.' >&2
       exit 1
     fi
-    mkdir -p "$WIDEFLEET_LOCAL_DATA"
-    printf '%s\n' "$mode" > "$WIDEFLEET_LOCAL_DATA/image-mode"
+    if [[ "${2:-}" == --build ]]; then
+      export PLATFORM_RUNTIME_IMAGE=widefleet-local-runtime:source
+      export PLATFORM_AGENT_IMAGE=widefleet-local-agent:source
+      export PLATFORM_CONTROL_PLANE_IMAGE=widefleet-local-control-plane:source
+      export PLATFORM_RELEASE_VERSION=
+    else
+      echo 'Checking the latest published Widefleet release.'
+      images="$(docker run --rm --mount "type=bind,source=$project_root/apps/control-plane/local/release.ts,target=/local-release.ts,readonly" \
+        node:26.8.2-bookworm-slim@sha256:cd9f682fa2885cd1056e830424764158570061c59736a1da836bc3d73df095ae \
+        node /local-release.ts)"
+      read -r PLATFORM_RUNTIME_IMAGE PLATFORM_AGENT_IMAGE PLATFORM_CONTROL_PLANE_IMAGE PLATFORM_RELEASE_VERSION <<< "$images"
+      export PLATFORM_RUNTIME_IMAGE PLATFORM_AGENT_IMAGE PLATFORM_CONTROL_PLANE_IMAGE PLATFORM_RELEASE_VERSION
+    fi
     # Rebuilding a tag can discard its old image index on containerd-backed Docker,
     # even while a fleet uses it. Keep that immutable image available for probes.
     for container in "${local_fleets[@]}"; do
@@ -86,19 +73,26 @@ case "${1:-up}" in
         docker image tag "$runtime_image" "widefleet-local-runtime:${runtime_image#sha256:}"
       fi
     done
-    if [[ "$mode" == source ]]; then
+    if [[ "${2:-}" == --build ]]; then
       echo 'Building the local demo from source.'
       docker build -f infra/runtime/Dockerfile -t "$PLATFORM_RUNTIME_IMAGE" .
       docker build --build-arg "RUNTIME_IMAGE=$PLATFORM_RUNTIME_IMAGE" -f infra/agent/Dockerfile -t "$PLATFORM_AGENT_IMAGE" .
       docker build -f infra/control-plane/Dockerfile -t "$PLATFORM_CONTROL_PLANE_IMAGE" .
     else
-      echo 'Using pinned release images; building only the local demo tooling.'
+      echo "Using Widefleet $PLATFORM_RELEASE_VERSION; building only the local demo tooling."
       # Fleet containers use the runtime directly, outside Compose and the tools image.
       if ! docker image inspect "$PLATFORM_RUNTIME_IMAGE" >/dev/null 2>&1; then
         docker pull "$PLATFORM_RUNTIME_IMAGE"
       fi
     fi
+    export WIDEFLEET_LOCAL_IMAGE=widefleet-local-tools:build
     "${compose[@]}" build tools
+    mkdir -p "$WIDEFLEET_LOCAL_DATA"
+    "${compose[@]}" up -d --wait postgres
+    "${compose[@]}" run --rm -T --no-deps configure node local/check-version.ts
+    docker image tag "$WIDEFLEET_LOCAL_IMAGE" widefleet-local-tools:0.1.0
+    unset WIDEFLEET_LOCAL_IMAGE
+    "${compose[@]}" stop agent control-plane
     "${compose[@]}" run --rm -T --no-deps configure
     "${compose[@]}" up -d --wait postgres storage proxy identity clickhouse otel-collector
     "${compose[@]}" run --rm -T --no-deps tools node --env-file=/data/identity.env tools/initialize.ts
@@ -107,20 +101,28 @@ case "${1:-up}" in
     local_tool seed
     "${compose[@]}" up -d --force-recreate oauth2-proxy
     "${compose[@]}" up -d agent
+    deployment=deploy-if-needed
     for container in "${local_fleets[@]}"; do
       if docker container inspect "$container" >/dev/null 2>&1; then
         owner="$(docker inspect "$container" --format '{{index .Config.Labels "app-platform.fleet-id"}}')"
         [[ "$container" == "platform-fleet-$owner" ]] || { echo 'Unexpected container ownership.' >&2; exit 1; }
         docker start "$container" >/dev/null
+      else
+        deployment=restore
       fi
     done
-    if [[ "$mode" == source ]]; then local_tool deploy; else local_tool deploy-if-needed; fi
+    if [[ "${2:-}" == --build ]]; then deployment=deploy; fi
+    local_tool "$deployment"
     echo 'Management: http://localhost:25450 (choose admin@example.test)'
     echo 'App: https://team-notes.apps.localhost:25453'
     echo 'App SSO: https://auth.apps.localhost:25453/oauth2/sign_in'
     echo 'The two local HTTPS hosts use a self-signed development certificate.'
     ;;
   deploy)
+    images="$(docker image inspect widefleet-local-tools:0.1.0 --format '{{index .Config.Labels "widefleet.local.runtime"}} {{index .Config.Labels "widefleet.local.agent"}} {{index .Config.Labels "widefleet.local.control-plane"}} {{index .Config.Labels "widefleet.local.release"}}')"
+    read -r PLATFORM_RUNTIME_IMAGE PLATFORM_AGENT_IMAGE PLATFORM_CONTROL_PLANE_IMAGE PLATFORM_RELEASE_VERSION <<< "$images"
+    [[ -n "$PLATFORM_RUNTIME_IMAGE" && -n "$PLATFORM_AGENT_IMAGE" && -n "$PLATFORM_CONTROL_PLANE_IMAGE" ]] || { echo 'Run ./dev up before deploying the example app.' >&2; exit 1; }
+    export PLATFORM_RUNTIME_IMAGE PLATFORM_AGENT_IMAGE PLATFORM_CONTROL_PLANE_IMAGE PLATFORM_RELEASE_VERSION
     "${compose[@]}" build tools
     local_tool deploy
     ;;

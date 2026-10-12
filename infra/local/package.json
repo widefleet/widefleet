@@ -1,0 +1,10 @@
+{
+  "name": "@platform/local-demo",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "emulate": "0.12.1"
+  }
+}

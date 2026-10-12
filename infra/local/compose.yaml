@@ -1,14 +1,15 @@
 name: widefleet-local
 
 x-local: &local
-  image: widefleet-local-tools:0.1.0
+  image: ${WIDEFLEET_LOCAL_IMAGE:-widefleet-local-tools:0.1.0}
   build:
     context: ../..
     dockerfile: infra/local/Dockerfile
     args:
-      CONTROL_PLANE_IMAGE: ${PLATFORM_CONTROL_PLANE_IMAGE:?Run ./dev}
-      AGENT_IMAGE: ${PLATFORM_AGENT_IMAGE:?Run ./dev}
-      RUNTIME_IMAGE: ${PLATFORM_RUNTIME_IMAGE:?Run ./dev}
+      CONTROL_PLANE_IMAGE: ${PLATFORM_CONTROL_PLANE_IMAGE:-widefleet-local-control-plane:source}
+      AGENT_IMAGE: ${PLATFORM_AGENT_IMAGE:-widefleet-local-agent:source}
+      RUNTIME_IMAGE: ${PLATFORM_RUNTIME_IMAGE:-widefleet-local-runtime:source}
+      RELEASE_VERSION: ${PLATFORM_RELEASE_VERSION:-}
   environment: &environment
     WIDEFLEET_LOCAL_DEMO: "1"
     DATABASE_URL: postgres://widefleet:local-demo-only@postgres:5432/widefleet_local
@@ -132,7 +133,6 @@ services:
       PLATFORM_AGENT_HOST_STATE: ${WIDEFLEET_LOCAL_DATA}/agent
       PLATFORM_ROUTING_DIRECTORY: /data/routes
       CELLD_BINARY: /usr/local/bin/celld
-      PLATFORM_RUNTIME_IMAGE: ${PLATFORM_RUNTIME_IMAGE:?Run ./dev}
       FLEET_S3_ENDPOINT: http://storage:9000
       FLEET_RUNTIME_S3_ENDPOINT: http://widefleet-local-storage:9000
       FLEET_S3_REGION: us-east-1

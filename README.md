@@ -37,7 +37,7 @@ cd widefleet
 ./dev up
 ```
 
-The first start downloads pinned platform release images and builds the local demo tooling and sample app. Rust and management builds are not required. Later starts reuse cached images and the deployed sample app.
+Each start checks for the latest published Widefleet release and uses its matching platform images and CLI. Only the demo tooling and sample app are built locally. Cached images and the deployed sample app are reused; no Rust or management build is needed.
 
 1. Open **http://localhost:25450**, choose **Sign in with Microsoft** and select **admin@example.test** in the local identity provider.
 2. Open **Team Notes** from management and sign in with the same account.

@@ -57,6 +57,4 @@ env PLATFORM_CONTROL_PLANE_IMAGE=widefleet-control-plane:test \
 docker compose -f infra/test/compose.yaml down
 ```
 
-These tests use local services and synthetic fixtures. For a fresh local demo built from source, use `./dev up --build`; the default `./dev up` uses released platform images. Neither mode needs registry credentials. See [local development](development.md#local-demo) for mode selection and retained data.
-
-The demo pins its platform images in [`infra/local/images.env`](../infra/local/images.env). After a release, update all three digests together from its published image manifest and run the local-demo checks before merging the new pins. Keep the demo helpers compatible with that release; its packaged server code and migrations supply the initialization behavior.
+These tests use local services and synthetic fixtures. `./dev up` reads the latest published release's image manifest; `./dev up --build` builds from the current checkout. Neither needs registry credentials. See [local development](development.md#local-demo) for startup and retained data.

@@ -1,5 +1,6 @@
 packages:
   - apps/*
+  - infra/local
   - packages/*
   - starters/*
 

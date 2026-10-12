@@ -78,6 +78,11 @@ jobs:
           ./dev cli history "$(./dev app-id)" > "$RUNNER_TEMP/local-demo-resumed-history.json"
           cmp "$RUNNER_TEMP/local-demo-history.json" "$RUNNER_TEMP/local-demo-resumed-history.json"
           RUN_LOCAL_TESTS=1 LOCAL_EXPECT_EXISTING_DATA=1 pnpm exec vitest run apps/control-plane/tests/local/quickstart.test.ts
+          ./dev cli apps > "$RUNNER_TEMP/local-demo-apps.json"
+          fleet=$(node --input-type=module -e 'import {readFileSync} from "node:fs"; console.log(JSON.parse(readFileSync(process.argv[1], "utf8")).find(app => app.slug === "team-notes").fleetId)' "$RUNNER_TEMP/local-demo-apps.json")
+          docker rm -f "platform-fleet-$fleet"
+          ./dev up
+          RUN_LOCAL_TESTS=1 LOCAL_EXPECT_EXISTING_DATA=1 pnpm exec vitest run apps/control-plane/tests/local/quickstart.test.ts
       - name: Install the pinned app runtime
         if: matrix.suite == 'integration' || matrix.suite == 'rust-runtime'
         run: bash tools/install-celld.sh

@@ -213,15 +213,24 @@ if (command === "agent") {
         mode: 0o600,
       });
       console.info("Local administrator, agent and example app are ready");
-    } else if (command === "deploy" || command === "deploy-if-needed") {
+    } else if (command === "deploy" || command === "deploy-if-needed" || command === "restore") {
       const state = await readState();
 
-      const deployed =
-        command === "deploy-if-needed" &&
-        contract.app.parse(await api(`/apps/${state.appId}`)).activeDeploymentId !== null;
+      const active = contract.app.parse(await api(`/apps/${state.appId}`)).activeDeploymentId;
 
-      if (deployed) console.info("The example app is already deployed; retaining its deployment");
-      else await run("widefleet", ["deploy", state.appId], token);
+      if (command === "deploy" || !active) {
+        await run("widefleet", ["deploy", state.appId], token);
+      } else if (command === "restore") {
+        const history = z
+          .array(contract.deployment)
+          .parse(await api(`/apps/${state.appId}/deployments`));
+
+        const deployment = history.find((entry) => entry.id === active);
+
+        if (!deployment)
+          throw new Error("The active example deployment is missing from its history");
+        await run("widefleet", ["rollback", state.appId, deployment.artifactId], token);
+      } else console.info("The example app is already deployed; retaining its deployment");
     } else if (command === "cli") {
       await run("widefleet", process.argv.slice(3), token);
     } else if (command === "app-id") {
