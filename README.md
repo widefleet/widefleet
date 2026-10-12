@@ -51,7 +51,7 @@ The demo uses synthetic identities and local-only credentials. See [local develo
 
 ## Deploy your first app
 
-For an existing Widefleet installation, [install the CLI](https://widefleet.com/docs/getting-started/installation), Node.js 22.18 or newer and pnpm 10.26 or newer. Create your app outside the platform checkout:
+For an existing Widefleet installation, [install the CLI](https://widefleet.com/docs/getting-started/installation), Node.js 22.18 or newer and pnpm 10.34.5 or newer. Create your app outside the platform checkout:
 
 ```sh
 widefleet init my-app
