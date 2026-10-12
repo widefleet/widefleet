@@ -158,6 +158,14 @@ describe.runIf(process.env["RUN_CLI_PACKAGE_TESTS"] === "1")(
           expect(await readFile(join(project, "pnpm-lock.yaml"), "utf8")).toContain(
             "lockfileVersion:",
           );
+
+          const { packageManager } = z
+            .object({ packageManager: z.string().startsWith("pnpm@") })
+            .parse(JSON.parse(await readFile(join(project, "package.json"), "utf8")));
+
+          expect((await runPnpm(["--version"], project, environment)).stdout.trim()).toBe(
+            packageManager.slice("pnpm@".length),
+          );
           await runPnpm(["install", "--frozen-lockfile"], project, environment);
           await runPnpm(["check"], project, environment);
           await runPnpm(["build"], project, environment);

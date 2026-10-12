@@ -115,7 +115,7 @@ jobs:
         with:
           node-version: 22.18.0
           package-manager-cache: false
-      - name: Verify packages with the minimum supported Node.js and pnpm versions
+      - name: Verify the pinned package manager from the minimum bootstrap versions
         if: ${{ !cancelled() && (steps.cli-commands.outcome == 'success' || steps.cli-commands.outcome == 'failure') }}
         env:
           RUN_CLI_PACKAGE_TESTS: "1"
