@@ -20,7 +20,7 @@ _The management workspace with synthetic example apps._
 
 ## What you can do
 
-- **Build with your own tools.** Start with an independent SvelteKit project, edit it with your coding agent and deploy through the [CLI](https://widefleet.com/docs/getting-started/installation).
+- **Build with your own tools.** Start with SvelteKit by default or choose TanStack Start for React, edit the independent project with your coding agent and deploy through the [CLI](https://widefleet.com/docs/getting-started/installation).
 - **Give colleagues access.** Use company SSO, manage [app access groups](https://widefleet.com/docs/reference/app-access) and make apps discoverable in the shared catalog.
 - **Keep app data together.** Declare databases, file storage and key-value bindings. [Runtime and storage](https://widefleet.com/docs/reference/runtime).
 - **Control system access.** Grant specific external destinations through [network permissions](https://widefleet.com/docs/guides/network) and expose IT-managed services through [connectors](https://widefleet.com/docs/guides/connectors).

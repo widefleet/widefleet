@@ -36,24 +36,24 @@ and discovery behavior, or [company setup](/self-hosting/company-setup) to confi
 `APP_UUID`, `DEPLOYMENT_UUID` and `ARTIFACT_UUID` below are placeholders. Find app
 IDs with `widefleet apps` and deployment IDs and artifact IDs with `widefleet history APP_UUID`.
 
-| Command                                     | Purpose                                                              |
-| ------------------------------------------- | -------------------------------------------------------------------- |
-| `widefleet init DIRECTORY`                  | Create an independent SvelteKit project; no login required.          |
-| `widefleet apps`                            | List apps you can manage.                                            |
-| `widefleet deploy [APP_UUID]`               | Build and deploy; normally selects the configured app name.          |
-| `widefleet preview --name review`           | Build and deploy an isolated preview of an existing app.             |
-| `widefleet history APP_UUID`                | Read deployment history as JSON.                                     |
-| `widefleet events APP_UUID DEPLOYMENT_UUID` | Read deployment events.                                              |
-| `widefleet rollback APP_UUID ARTIFACT_UUID` | Activate a retained code artifact.                                   |
-| `widefleet logs --level error --since 1h`   | Query app runtime errors; `--follow` keeps polling.                  |
-| `widefleet migrations list DB` / `apply DB` | Inspect or explicitly apply SQL migrations to a deployed D1 binding. |
-| `widefleet access`                          | Inspect app usage rules; `set` changes the group list.               |
-| `widefleet network`                         | Inspect external destinations; `allow` and `deny` change grants.     |
-| `widefleet connector bindings`              | Inspect IT-managed connector bindings.                               |
-| `widefleet connector catalog`               | Browse connector names and available entrypoints.                    |
-| `widefleet connections`                     | Inspect desired and active connectors and deployed app resources.    |
-| `widefleet catalog list`                    | List published app launch URLs.                                      |
-| `widefleet delete APP_UUID --yes`           | Request removal of an app and all its previews.                      |
+| Command                                          | Purpose                                                              |
+| ------------------------------------------------ | -------------------------------------------------------------------- |
+| `widefleet init DIRECTORY [--template TEMPLATE]` | Create an independent app; defaults to SvelteKit. No login required. |
+| `widefleet apps`                                 | List apps you can manage.                                            |
+| `widefleet deploy [APP_UUID]`                    | Build and deploy; normally selects the configured app name.          |
+| `widefleet preview --name review`                | Build and deploy an isolated preview of an existing app.             |
+| `widefleet history APP_UUID`                     | Read deployment history as JSON.                                     |
+| `widefleet events APP_UUID DEPLOYMENT_UUID`      | Read deployment events.                                              |
+| `widefleet rollback APP_UUID ARTIFACT_UUID`      | Activate a retained code artifact.                                   |
+| `widefleet logs --level error --since 1h`        | Query app runtime errors; `--follow` keeps polling.                  |
+| `widefleet migrations list DB` / `apply DB`      | Inspect or explicitly apply SQL migrations to a deployed D1 binding. |
+| `widefleet access`                               | Inspect app usage rules; `set` changes the group list.               |
+| `widefleet network`                              | Inspect external destinations; `allow` and `deny` change grants.     |
+| `widefleet connector bindings`                   | Inspect IT-managed connector bindings.                               |
+| `widefleet connector catalog`                    | Browse connector names and available entrypoints.                    |
+| `widefleet connections`                          | Inspect desired and active connectors and deployed app resources.    |
+| `widefleet catalog list`                         | List published app launch URLs.                                      |
+| `widefleet delete APP_UUID --yes`                | Request removal of an app and all its previews.                      |
 
 The target is the selected platform URL plus `name` in `wrangler.jsonc`. The first deploy creates that app; subsequent deploys update it after checking the user's app permissions. A changed name selects a different app. The server assigns the host, and existing apps keep their host and data.
 Logs, access, network, connections and migrations also use project context; history, events and
@@ -61,6 +61,30 @@ rollback require IDs. Each command's help lists its selection options.
 
 See [connector discovery and app connections](/guides/connectors#find-connectors-and-inspect-your-app)
 for permissions, activation states and app selection.
+
+## Create a project
+
+Use CLI 0.3.3 or newer for the TanStack Start template and the Node.js 22.18
+minimum. Check the installed version with `widefleet --version`.
+
+```sh
+widefleet init my-app
+widefleet init my-react-app --template tanstack-start
+```
+
+`--template` accepts `sveltekit` and `tanstack-start`. Omitting the option is
+equivalent to `--template sveltekit`. The CLI includes both templates, so project
+creation needs no platform login or template download. Dependency installation
+still requires the package registry or a populated local package cache.
+
+`DIRECTORY` must not exist. The CLI derives the app name in `wrangler.jsonc` from
+the directory name; review it before deploying. An unknown template exits with an
+error and does not create a project. If the installed CLI rejects `--template`,
+check `widefleet --version` and upgrade to CLI 0.3.3 or newer.
+
+Inside either project, run `pnpm install --frozen-lockfile`, `pnpm check`, then
+`pnpm dev`. Follow [app development](/guides/app-development) for identity,
+bindings and the next deployment.
 
 ## Deployment flags and output
 

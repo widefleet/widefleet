@@ -22,7 +22,7 @@ If pnpm reports that its global bin directory is missing from PATH, run `pnpm se
 
 To update, rerun the install command. To uninstall, run `pnpm remove --global widefleet`. pnpm owns the complete installation directory; keep its package contents together.
 
-The CLI includes its native executable, bundler and SvelteKit starter. App
+The CLI includes its native executable, bundler and app starters. App
 developers do not need Docker or a checkout of the platform repository when
 connecting to an existing installation.
 
@@ -34,6 +34,9 @@ cd my-app
 pnpm install --frozen-lockfile
 pnpm dev
 ```
+
+This creates the default SvelteKit project. For React, see the
+[TanStack Start template and release requirements](/reference/cli#create-a-project).
 
 The starter includes a notes app, a D1 database, private R2 file storage and a
 server-side identity helper. Local development uses a synthetic user. Open the

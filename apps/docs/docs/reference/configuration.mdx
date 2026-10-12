@@ -21,6 +21,11 @@ The SvelteKit starter builds the Worker and assets at the paths shown here:
 }
 ```
 
+The TanStack Start starter uses `build/server/index.js` as `main` and the same
+`build/public` asset directory. Its Vite configuration selects `src/server.ts`
+as the source entry during development and build. Keep the generated Wrangler
+configuration pointed at the built entry for `widefleet deploy`.
+
 The included notes app also needs its generated `DB` and `FILES` bindings. Keep
 those declarations while using that example; the minimal configuration above is
 for app code that does not use storage.
@@ -52,7 +57,7 @@ platform URL to select the installation; see [CLI configuration](/reference/cli-
 Resources are scoped to each app or preview. Keep resource identifiers stable to
 preserve access to existing data. Native data remains after a declaration is removed.
 For Cron, Queue or Workflow handlers, export them from a custom entry module
-alongside the generated SvelteKit HTTP handler.
+alongside the generated starter's HTTP handler.
 
 ## Database migrations
 

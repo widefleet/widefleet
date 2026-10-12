@@ -4,7 +4,26 @@ description: Develop an independent app with identity, storage and platform inte
 lastModified: 2026-10-10
 ---
 
-The generated SvelteKit starter is an independent project with no workspace dependencies. Start it with `pnpm dev`; local development uses a synthetic identity. Production requests use the verified SSO identity exposed as `locals.user`. App SSO strips request cookies and response `Set-Cookie` headers, so apps cannot use their own server-side cookie sessions.
+Start with an [installed CLI and a generated app](/getting-started/installation). SvelteKit is the default; the [CLI template option](/reference/cli#create-a-project) also supports TanStack Start for React. Both starters are independent projects with no workspace dependencies and include D1 notes, private R2 photos and platform error reporting.
+
+Run `pnpm dev` for local development with a synthetic identity. Deployed requests receive the verified company identity:
+
+| Starter        | Identity in server code                                      |
+| -------------- | ------------------------------------------------------------ |
+| SvelteKit      | `locals.user` in server loads, actions and handlers          |
+| TanStack Start | `context.user` in server functions and server route handlers |
+
+For example, a TanStack Start server function can return the current user:
+
+```ts
+import { createServerFn } from "@tanstack/react-start";
+
+export const getCurrentUser = createServerFn().handler(({ context }) => context.user);
+```
+
+Preserve the generated authentication and error hooks. In TanStack Start, keep the CSRF middleware in `src/start.ts`; the verified identity comes from `src/server.ts`. App SSO strips request cookies and response `Set-Cookie` headers, so apps cannot use their own server-side cookie sessions.
+
+Run `pnpm check` before deployment. In TanStack Start, `pnpm types` regenerates route and Worker binding types after adding routes or changing configuration. Use `pnpm build` for production builds so browser and Worker errors share the deployment's build version; do not invoke Vite's build directly. JavaScript must be enabled to submit the TanStack example's note form.
 
 Declare resources in `wrangler.jsonc`; deploys preserve resource IDs and names inside the app's fleet. Use `widefleet migrations list DB` and `widefleet migrations apply DB` for explicit app-schema migrations. See [D1 migrations](/guides/migrations) for SQL files and Drizzle configuration. Code rollback does not restore older database or file contents.
 
