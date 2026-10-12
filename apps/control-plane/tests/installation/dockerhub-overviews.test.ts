@@ -69,10 +69,10 @@ done
 test "$method" = PATCH
 test "$(cat "$header")" = 'Authorization: Bearer synthetic-bearer-token'
 case "$url" in
-  https://hub.docker.com/v2/repositories/widefleet/runtime|\
-https://hub.docker.com/v2/repositories/widefleet/agent|\
-https://hub.docker.com/v2/repositories/widefleet/control-plane|\
-https://hub.docker.com/v2/repositories/widefleet/sso) ;;
+  https://hub.docker.com/v2/namespaces/widefleet/repositories/runtime|\
+https://hub.docker.com/v2/namespaces/widefleet/repositories/agent|\
+https://hub.docker.com/v2/namespaces/widefleet/repositories/control-plane|\
+https://hub.docker.com/v2/namespaces/widefleet/repositories/sso) ;;
   *) exit 1 ;;
 esac
 component=\${url##*/}

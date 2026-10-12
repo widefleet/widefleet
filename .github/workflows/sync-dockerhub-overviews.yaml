@@ -1,0 +1,52 @@
+name: Sync released Docker Hub overviews
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published stable platform release to synchronize
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+cache-mode: none
+
+concurrency:
+  group: dockerhub-overviews
+  cancel-in-progress: false
+  queue: max
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  RELEASE_TAG: ${{ inputs.tag }}
+
+jobs:
+  sync:
+    if: github.repository == 'widefleet/widefleet' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select overviews from the published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [[ "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json tagName,isDraft,isPrerelease \
+            | jq -e --arg tag "$RELEASE_TAG" '.tagName == $tag and .isDraft == false and .isPrerelease == false'
+          for component in runtime agent control-plane sso; do
+            git show "$RELEASE_TAG:.github/dockerhub/$component.md" > ".github/dockerhub/$component.md"
+          done
+      - name: Publish the repository overviews
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: bash tools/sync-dockerhub-overviews.sh

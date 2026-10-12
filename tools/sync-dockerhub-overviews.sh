@@ -42,6 +42,6 @@ for component in runtime agent control-plane sso; do
   curl --fail --silent --show-error --retry 3 --connect-timeout 15 --max-time 60 \
     --request PATCH --header "@$temporary/authorization" \
     --json "@$temporary/$component.json" --output /dev/null \
-    "https://hub.docker.com/v2/repositories/widefleet/$component"
+    "https://hub.docker.com/v2/namespaces/widefleet/repositories/$component"
   printf 'Updated Docker Hub overview: widefleet/%s\n' "$component"
 done
