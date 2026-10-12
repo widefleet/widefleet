@@ -8,6 +8,9 @@ IT can deploy a Worker from its own repository with `widefleet connector deploy`
 
 ## Find connectors and inspect your app
 
+Use CLI and control-plane version 0.3.3 or newer for connector discovery and app
+connection views.
+
 Sign in to Widefleet and open **Connectors** to browse the integrations offered by your organization. Members can search connector names and expand a connector to see its available entrypoints. **Available** means an administrator can assign an entrypoint; it does not grant your app access. **Not ready** means activation must complete before the connector can be assigned.
 
 From the CLI:
