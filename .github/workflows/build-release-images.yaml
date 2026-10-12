@@ -134,6 +134,8 @@ jobs:
           tags: docker.io/widefleet/runtime:${{ env.VERSION }}
           build-args: SOURCE_DATE_EPOCH=${{ env.SOURCE_DATE_EPOCH }}
           labels: |
+            org.opencontainers.image.url=https://widefleet.com
+            org.opencontainers.image.documentation=https://widefleet.com/docs
             org.opencontainers.image.source=https://github.com/widefleet/widefleet
             org.opencontainers.image.revision=${{ env.REVISION }}
             org.opencontainers.image.version=${{ env.VERSION }}
@@ -182,6 +184,8 @@ jobs:
           # ordinary local build while using the cached, matching Debian binaries.
           build-contexts: ${{ matrix.component == 'agent' && steps.missing.outputs.cached-cargo == 'true' && format('build={0}', env.RELEASE_BINARIES) || '' }}
           labels: |
+            org.opencontainers.image.url=https://widefleet.com
+            org.opencontainers.image.documentation=https://widefleet.com/docs
             org.opencontainers.image.source=https://github.com/widefleet/widefleet
             org.opencontainers.image.revision=${{ env.REVISION }}
             org.opencontainers.image.version=${{ env.VERSION }}

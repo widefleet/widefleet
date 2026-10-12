@@ -20,7 +20,9 @@ Add these GitHub Actions secrets to `widefleet/widefleet`:
 - `DOCKERHUB_USERNAME`: the Docker Hub login identity that can publish to all four repositories.
 - `DOCKERHUB_TOKEN`: that identity's Docker Hub access token with read/write access to the repositories.
 
-Keep tokens in GitHub Actions secrets. Docker Hub credentials are provided only to the publishing job after tests pass. See [Docker access tokens](https://docs.docker.com/security/access-tokens/).
+Keep tokens in GitHub Actions secrets. Docker Hub credentials are provided only to publishing jobs after tests pass. The same identity must be able to edit the repository overviews. See [Docker access tokens](https://docs.docker.com/security/access-tokens/).
+
+After the GitHub Release is published, the workflow syncs the four [Docker Hub overviews](../.github/dockerhub/) from the release commit. Edit those files to update the public descriptions; manual edits on Docker Hub are replaced at the next release. If the sync fails, use **Re-run failed jobs** to retry it without republishing release artifacts.
 
 ## Publish a version
 

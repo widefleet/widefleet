@@ -242,3 +242,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash tools/publish-github-release.sh
+
+  publish-overviews:
+    name: Sync Docker Hub overviews
+    needs: [prepare, release]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.revision }}
+          persist-credentials: false
+      - name: Publish the repository overviews
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: bash tools/sync-dockerhub-overviews.sh
