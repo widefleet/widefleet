@@ -115,13 +115,15 @@ describe.runIf(process.env["RUN_CLI_PACKAGE_TESTS"] === "1")(
         if (key !== "PATH" && key.toUpperCase() === "PATH") delete environment[key];
     });
 
+    // Removing the isolated pnpm store and native toolchain can exceed the
+    // default hook timeout on Windows, even after each app has been removed.
     afterAll(async () => {
       await registry?.close();
       await new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve())),
       );
       await rm(directory, { recursive: true, force: true });
-    });
+    }, 60_000);
 
     it("installs only the matching native package without scripts and builds an independent starter", async () => {
       await runPnpm(
