@@ -41,12 +41,13 @@ Most code changes do not need an internal documentation change. Read the relevan
 
 ## Documentation pull requests and releases
 
-- Keep documentation for unreleased product behavior in separate PRs from implementation. Standalone corrections and improvements for released behavior target `main` and can merge without a software release.
-- Prepare public documentation for unreleased product behavior alongside the feature in a separate draft PR. Link the implementation and docs PRs in both descriptions, and record which unreleased changes block publication.
-- During development, base the docs PR on the feature branch so its diff contains only documentation changes. Do not merge it into the feature branch.
-- After the feature is squash-merged, rebase only the docs commits onto `main` and verify the diff contains only documentation changes.
-- Keep release-dependent docs in draft until a published release includes all documented changes and the required artifacts are available. A feature merge, tag or draft release alone does not unblock publication.
-- After every release, review open docs PRs against the released code and artifacts. Update examples and version references, validate the docs, and merge eligible PRs through the normal review and production-approval process. Leave PRs for unreleased changes in draft.
+- Keep implementation and accompanying documentation in the same PR by default. Split docs only when users following the documented installation or workflow must wait for a separate release or deployment after merge.
+- Repository scripts, contributor procedures, CI/build configuration and quickstarts using already-published artifacts ship with the merged source. Document those changes in the implementation PR; new source changes alone do not create a release dependency.
+- Before splitting, identify the specific unavailable CLI/package version, container image or deployed capability required by the documented steps. If there is no concrete missing dependency, do not create a separate docs PR or release gate. Otherwise, prepare a separate draft docs PR alongside the feature and name the dependency in both PR descriptions.
+- For a separate docs PR, base it on the feature branch so its diff contains only documentation changes; do not merge it into the feature branch. After the feature is squash-merged, rebase only the docs commits onto `main` and verify the diff contains only documentation changes.
+- Keep docs with release or deployment dependencies in draft until all named dependencies are available to the intended users. Required releases must be published with their artifacts available; required deployments must be live. A merge, tag or draft release alone does not satisfy a missing dependency.
+- Standalone corrections and improvements for already-available behavior target `main` and can merge without a software release.
+- After every release, review open release-dependent docs PRs against the released code and artifacts. Update examples and version references, validate the docs, and merge eligible PRs through the normal review and production-approval process. Leave only PRs with outstanding dependencies in draft.
 
 ## Control-plane UI
 
