@@ -59,10 +59,11 @@ jobs:
     needs: prepare
     runs-on: ubuntu-24.04
     cache-mode: read
-    env:
-      RELEASE_CARGO_CACHE: ${{ runner.temp }}/release-cargo
-      RELEASE_BINARIES: ${{ runner.temp }}/release-binaries
     steps:
+      - name: Set release build directories
+        run: |
+          echo "RELEASE_CARGO_CACHE=$RUNNER_TEMP/release-cargo" >> "$GITHUB_ENV"
+          echo "RELEASE_BINARIES=$RUNNER_TEMP/release-binaries" >> "$GITHUB_ENV"
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ needs.prepare.outputs.revision }}
@@ -92,8 +93,6 @@ jobs:
     name: Build and test Linux CLI
     needs: [prepare, build-binaries]
     runs-on: ubuntu-24.04
-    env:
-      RELEASE_BINARIES: ${{ runner.temp }}/release-binaries
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -101,7 +100,9 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Validate the release source
-        run: bash tools/check-release.sh
+        run: |
+          bash tools/check-release.sh
+          echo "RELEASE_BINARIES=$RUNNER_TEMP/release-binaries" >> "$GITHUB_ENV"
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 26.8.2
