@@ -700,6 +700,20 @@ test("submits a selective Workflow restart and waits for the agent's confirmatio
   });
 
   if (!job) throw new Error("Missing Workflow request");
+  const dialogs: string[] = [];
+  page.on("dialog", (dialog) => {
+    dialogs.push(dialog.type());
+    void dialog.dismiss();
+  });
+  await page.getByRole("link", { name: "Connections", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Connections", exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "Workflows", exact: true }).click();
+  await expect(page.getByText(job.id, { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Processing request …", exact: true }),
+  ).toBeDisabled();
+  await page.getByRole("link", { name: "Connections", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Connections", exact: true })).toBeVisible();
   await environment.database.db
     .update(jobs)
     .set({
@@ -708,11 +722,26 @@ test("submits a selective Workflow restart and waits for the agent's confirmatio
         leaseToken: crypto.randomUUID(),
         outcome: "succeeded",
         message: "Restarted",
-        workflow: null,
+        workflow: { restarted: "run-1" },
       },
     })
     .where(eq(jobs.id, job.id));
+  await page.getByRole("link", { name: "Workflows", exact: true }).click();
   await expect(page.getByText("Request completed.", { exact: true })).toBeVisible();
+  await expect(page.getByText(job.id, { exact: true })).toBeVisible();
+  await expect(page.locator("#workflows pre")).toContainText('"restarted": "run-1"');
+  await expect(page.getByRole("button", { name: "Run action", exact: true })).toBeEnabled();
+  await page.getByRole("link", { name: "Connections", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Connections", exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "Workflows", exact: true }).click();
+  await expect(page.locator("#workflows pre")).toContainText('"restarted": "run-1"');
+  expect(dialogs).toEqual([]);
+  expect(
+    await environment.database.db
+      .select({ id: jobs.id })
+      .from(jobs)
+      .where(and(eq(jobs.appId, record.id), eq(jobs.kind, "workflows"))),
+  ).toEqual([{ id: job.id }]);
   await page.getByLabel("Action", { exact: true }).selectOption("restart");
   await expect(page.getByLabel("Step name", { exact: true })).toHaveCount(0);
   await expect(
@@ -1531,13 +1560,15 @@ for (const javaScriptEnabled of [true, false]) {
         const dialog = page.waitForEvent("dialog");
 
         const navigation = page
-          .getByRole("link", { name: "Discard draft and reload rules", exact: true })
+          .getByRole("link", { name: "Management access", exact: true })
           .click();
 
         const confirmation = await dialog;
         expect(confirmation.type()).toBe("confirm");
         await confirmation.accept();
         await navigation;
+        await expect(page.getByRole("heading", { name: "Manage access" })).toBeVisible();
+        await page.getByRole("link", { name: "App usage", exact: true }).click();
       } else {
         await page
           .getByRole("link", { name: "Discard draft and reload rules", exact: true })
@@ -1548,24 +1579,7 @@ for (const javaScriptEnabled of [true, false]) {
         "qa",
       );
 
-      if (javaScriptEnabled) {
-        await page
-          .getByLabel("Allowed groups for this app", { exact: true })
-          .fill("discarded-group");
-        const dialog = page.waitForEvent("dialog");
-
-        const navigation = page
-          .getByRole("link", { name: "Management access", exact: true })
-          .click();
-
-        await (await dialog).accept();
-        await navigation;
-        await expect(page.getByRole("heading", { name: "Manage access" })).toBeVisible();
-        await page.getByRole("link", { name: "App usage", exact: true }).click();
-        await expect(page.getByLabel("Allowed groups for this app", { exact: true })).toHaveValue(
-          "qa",
-        );
-      }
+      await expect(page.locator('input[name^="n:revision/"]')).toHaveValue("2");
 
       await page.getByLabel("Allowed groups for this app", { exact: true }).fill("");
       await page.getByRole("button", { name: "Save app rules", exact: true }).click();

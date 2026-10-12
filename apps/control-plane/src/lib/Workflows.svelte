@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { onDestroy, untrack } from "svelte";
-  import { workflowOperation, workflowRequest } from "@platform/contracts";
+  import { onMount, untrack } from "svelte";
+  import { workflowRequest } from "@platform/contracts";
   import { z } from "zod";
   import { getWorkflows, getWorkflowOperation, manageWorkflow } from "#lib/workflows.remote";
   import { warnBeforeLeaving } from "#lib/unsaved-changes";
+  import { getAppContext } from "#lib/app-context";
   import { Button } from "#shadcn/components/ui/button/index.js";
   import { Input } from "#shadcn/components/ui/input/index.js";
   import { Label } from "#shadcn/components/ui/label/index.js";
@@ -12,6 +13,8 @@
   import Feedback from "#shadcn/components/Feedback.svelte";
 
   let { appId }: { appId: string } = $props();
+
+  const app = getAppContext();
 
   const definitions = $derived(await getWorkflows({ appId }));
 
@@ -51,29 +54,67 @@
 
   warnBeforeLeaving(() => draft !== submitted);
 
-  let busy = $state(false);
+  let submitting = $state(false);
 
   let message = $state("");
 
-  let operation = $state<z.infer<typeof workflowOperation> | null>(null);
+  const operation = $derived(app.workflowOperations[appId]);
+
+  const busy = $derived(
+    submitting || operation?.state === "queued" || operation?.state === "running",
+  );
 
   let requestId = $state<string | null>(null);
 
   let fingerprint = "";
 
-  let disposed = false;
+  onMount(() => {
+    let disposed = false;
+    let refreshing = false;
 
-  onDestroy(() => {
-    disposed = true;
+    const refresh = async () => {
+      const current = operation;
+      const currentAppId = appId;
+
+      if (refreshing || !current || (current.state !== "queued" && current.state !== "running"))
+        return;
+      refreshing = true;
+
+      try {
+        const query = getWorkflowOperation({ appId: currentAppId, jobId: current.id });
+        await query.refresh();
+        const updated = await query;
+
+        if (!disposed) {
+          app.rememberWorkflowOperation(currentAppId, updated);
+          message = "";
+        }
+      } catch (error) {
+        if (!disposed)
+          message =
+            error instanceof Error ? error.message : "Could not refresh the workflow request.";
+      } finally {
+        refreshing = false;
+      }
+    };
+
+    // Resume tracking an accepted request when returning to this section.
+    void refresh();
+    const timer = setInterval(() => void refresh(), 1000);
+
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+    };
   });
 
   const submit = async (event: SubmitEvent) => {
     event.preventDefault();
 
     if (busy) return;
-    busy = true;
+    submitting = true;
     message = "";
-    operation = null;
+    const currentAppId = appId;
 
     try {
       const name = workflow || definitions[0]?.workflow_name;
@@ -107,24 +148,15 @@
         fingerprint = next;
       }
 
-      operation = await manageWorkflow({ appId, requestId, request });
+      const accepted = await manageWorkflow({ appId: currentAppId, requestId, request });
+      app.rememberWorkflowOperation(currentAppId, accepted);
       // The operation is now accepted; leaving the page does not cancel it.
       submitted = draft;
-
-      while (!disposed && (operation.state === "queued" || operation.state === "running")) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-
-        if (disposed) break;
-        const query = getWorkflowOperation({ appId, jobId: operation.id });
-        await query.refresh();
-        operation = await query;
-      }
-
-      if (operation.state === "succeeded" || operation.state === "failed") requestId = null;
+      requestId = null;
     } catch (error) {
       message = error instanceof Error ? error.message : "The workflow request failed.";
     } finally {
-      busy = false;
+      submitting = false;
     }
   };
 </script>

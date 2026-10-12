@@ -2,6 +2,7 @@
   import { page } from "$app/state";
   import { getAppDetails } from "#lib/apps.remote";
   import { getAppConnections } from "#lib/connectors.remote";
+  import type { manageWorkflow } from "#lib/workflows.remote";
   import { Button } from "#shadcn/components/ui/button/index.js";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import ArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
@@ -21,6 +22,8 @@
   let refreshing = $state(false);
 
   const rollbackRequests = $state<Record<string, { requestId: string; pending: boolean }>>({});
+
+  const workflowOperations = $state<Record<string, Awaited<ReturnType<typeof manageWorkflow>>>>({});
 
   const submitRollback = async ({ submit }: { submit: () => Promise<boolean> }) => {
     rollbackRequests[route.appId] ??= {
@@ -86,6 +89,10 @@
     },
     get rollbackPending() {
       return rollbackRequests[route.appId]?.pending ?? false;
+    },
+    workflowOperations,
+    rememberWorkflowOperation(appId, operation) {
+      workflowOperations[appId] = operation;
     },
     submitRollback,
   });
