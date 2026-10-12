@@ -514,9 +514,16 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
     it("recomputes branches and checkpoints after a selective restart with active asynchronous work", async () => {
       const id = await create("restart-branch");
       expect(await status(id, "complete")).toMatchObject({ output: [1, 99] });
+      const firstRun = labels(id);
+      expect(firstRun[0]).toBe("first");
+      expect(firstRun.filter((label) => label !== "other")).toEqual(["first", "choose", "old"]);
+      expect(firstRun).toHaveLength(4);
       await call("restart", id, { options: JSON.stringify({ from: { name: "choose" } }) });
       expect(await status(id, "complete")).toMatchObject({ output: [2, 99] });
-      expect(labels(id)).toEqual(["first", "choose", "old", "other", "choose", "new", "other"]);
+      // The independent branch can finish before or after the selected branch.
+      const restarted = labels(id).slice(firstRun.length);
+      expect(restarted.filter((label) => label !== "other")).toEqual(["choose", "new"]);
+      expect(restarted).toHaveLength(3);
     });
 
     it("retains only earlier parallel steps when restarting a repeated name", async () => {
