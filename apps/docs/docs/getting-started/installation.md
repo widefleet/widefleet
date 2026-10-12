@@ -11,7 +11,7 @@ access to a Widefleet installation; if you do not have one yet, start with the
 ## Install the CLI
 
 The CLI supports Linux x64 with glibc, macOS on Apple Silicon and Intel,
-and Windows x64. Install Node.js 26 and pnpm 12.4.2 for app development.
+and Windows x64. Install Node.js 22.18 or newer and pnpm 10.26 or newer for app development.
 
 ```sh
 pnpm add --global widefleet

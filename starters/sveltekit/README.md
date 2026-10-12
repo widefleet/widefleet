@@ -1,6 +1,6 @@
 # SvelteKit app on Widefleet
 
-This is an independent app project. It needs Node.js 26, pnpm 12.4.2 and an installed Widefleet CLI release. Docker and the Widefleet source repository are not required on the developer machine.
+This is an independent app project. It needs Node.js 22.18 or newer, pnpm 10.26 or newer and an installed Widefleet CLI release. Docker and the Widefleet source repository are not required on the developer machine.
 
 ```sh
 pnpm install --frozen-lockfile
