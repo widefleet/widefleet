@@ -148,39 +148,45 @@ describe.runIf(process.env["RUN_CLI_PACKAGE_TESTS"] === "1")(
 
       for (const template of ["sveltekit", "tanstack-start"]) {
         const project = join(directory, `${template} app with spaces`);
-        await run("init", project, ...(template === "sveltekit" ? [] : ["--template", template]));
-        expect(await readFile(join(project, ".gitattributes"), "utf8")).toContain("eol=lf");
-        expect(await readFile(join(project, ".gitignore"), "utf8")).toContain("node_modules/");
-        expect(await readFile(join(project, "pnpm-lock.yaml"), "utf8")).toContain(
-          "lockfileVersion:",
-        );
-        await runPnpm(["install", "--frozen-lockfile"], project, environment);
-        await runPnpm(["check"], project, environment);
-        await runPnpm(["build"], project, environment);
-        await runPnpm(["typecheck"], project, environment);
-        expect(
-          await readFile(
-            join(project, template === "sveltekit" ? "build/worker.js" : "build/server/index.js"),
-            "utf8",
-          ),
-        ).toBeTruthy();
 
-        const deployment = await runPnpm(
-          ["exec", "widefleet", "deploy", appId, "--skip-build", "--no-wait", "--json"],
-          project,
-          {
-            ...environment,
-            PLATFORM_URL: origin,
-            PLATFORM_ACCESS_TOKEN: "synthetic-package-token",
-          },
-        );
+        try {
+          await run("init", project, ...(template === "sveltekit" ? [] : ["--template", template]));
+          expect(await readFile(join(project, ".gitattributes"), "utf8")).toContain("eol=lf");
+          expect(await readFile(join(project, ".gitignore"), "utf8")).toContain("node_modules/");
+          expect(await readFile(join(project, "pnpm-lock.yaml"), "utf8")).toContain(
+            "lockfileVersion:",
+          );
+          await runPnpm(["install", "--frozen-lockfile"], project, environment);
+          await runPnpm(["check"], project, environment);
+          await runPnpm(["build"], project, environment);
+          await runPnpm(["typecheck"], project, environment);
+          expect(
+            await readFile(
+              join(project, template === "sveltekit" ? "build/worker.js" : "build/server/index.js"),
+              "utf8",
+            ),
+          ).toBeTruthy();
 
-        expect(JSON.parse(deployment.stdout)).toMatchObject({
-          appId,
-          status: "queued",
-          url: "https://fixture.example.test",
-        });
-        expect(uploads).toBe(template === "sveltekit" ? 1 : 2);
+          const deployment = await runPnpm(
+            ["exec", "widefleet", "deploy", appId, "--skip-build", "--no-wait", "--json"],
+            project,
+            {
+              ...environment,
+              PLATFORM_URL: origin,
+              PLATFORM_ACCESS_TOKEN: "synthetic-package-token",
+            },
+          );
+
+          expect(JSON.parse(deployment.stdout)).toMatchObject({
+            appId,
+            status: "queued",
+            url: "https://fixture.example.test",
+          });
+          expect(uploads).toBe(template === "sveltekit" ? 1 : 2);
+        } finally {
+          // Remove each dependency tree here; deleting both can exceed the Windows hook timeout.
+          await rm(project, { recursive: true, force: true });
+        }
       }
 
       await expect(
