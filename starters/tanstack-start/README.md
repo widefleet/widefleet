@@ -1,8 +1,10 @@
 # TanStack Start app on Widefleet
 
 This independent React app uses TanStack Start, D1 notes and private R2 photos.
-You need Node.js 22.18 or newer, pnpm 10.26 or newer and the Widefleet CLI release that generated this
-project. Docker and the Widefleet source repository are not required.
+You need Node.js 22.18 or newer, an existing pnpm 10.26 or newer installation,
+and the Widefleet CLI release that generated this project. With pnpm's default
+version management, the project automatically downloads and uses its pinned pnpm
+12.4.2. Docker and the Widefleet source repository are not required.
 
 ```sh
 pnpm install --frozen-lockfile
