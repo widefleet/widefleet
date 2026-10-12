@@ -1,10 +1,42 @@
 ---
 title: IT connectors
-description: Deploy integrations, manage secrets and grant apps native RPC bindings.
+description: Find integrations, inspect app connections and manage native RPC bindings.
 lastModified: 2026-10-12
 ---
 
 IT can deploy a Worker from its own repository with `widefleet connector deploy`. Apps receive a native service binding and call its methods directly, for example `env.ERP.listCustomers()`. Connector code runs as a regular Worker in the shared fleet, with its own declared resources. It is independent of the Widefleet runtime and Rust agent releases.
+
+## Find connectors and inspect your app
+
+The connector catalog and app connection views in this section are unreleased and are not included in `0.3.2`. They require matching CLI and control-plane builds containing this feature.
+
+Sign in to Widefleet and open **Connectors** to browse the integrations offered by your organization. Members can search connector names and expand a connector to see its available entrypoints. **Available** means an administrator can assign an entrypoint; it does not grant your app access. **Not ready** means activation must complete before the connector can be assigned.
+
+From the CLI:
+
+```sh
+widefleet connector catalog
+widefleet connections --app inventory
+```
+
+In an app project with `name` in `wrangler.jsonc`, run `widefleet connections` without `--app`. Use `--config PATH` for another project configuration and `--json` for structured output. Redirected stdout also uses JSON. These commands need `platform:read`, included in ordinary `widefleet login`.
+
+To inspect an app in the UI, open its **Connections** tab. The view connects the app's domain to the app, then shows its connector bindings and resources. Expand a binding for its target, entrypoint where applicable, and name in code, such as `env.ERP`. **Browse connectors** opens the catalog with the app's existing connections indicated. App owners, administrators and app collaborators can inspect connections; catalog visibility alone does not grant app management access.
+
+Resources come from the active deployment, including database, object storage, key-value storage, queue, workflow and static asset bindings. A failed or pending deployment does not replace this list. Variable values and connector secrets are not included.
+
+Connector changes have a separate activation state:
+
+| State   | Meaning and next step                                                                                 |
+| ------- | ----------------------------------------------------------------------------------------------------- |
+| Saved   | The binding is configured before the app's first deployment. Deploy the app to activate it.           |
+| Pending | Activation is queued or running. Previously active bindings remain in use. Refresh to check progress. |
+| Active  | The binding is active for the app. Use its binding name in code.                                      |
+| Failed  | The change did not activate. Inspect the error and ask an administrator to retry the binding change.  |
+
+A pending or failed removal remains visible with its currently active connector. If the serving bindings cannot be confirmed, the view says so rather than treating saved bindings as active. In CLI JSON, `connectors` contains the desired bindings and activation state; `activeConnectors` contains the confirmed serving bindings, or `null` when unavailable. `resources` contains the active deployment's resources and `deploymentId` identifies that deployment.
+
+After choosing a connector, ask an administrator to [give the app its binding](#give-an-app-its-binding). The connector author supplies the corresponding TypeScript interface or package.
 
 ## Deploy from a project
 
@@ -131,14 +163,16 @@ Use matching CLI, control-plane and agent releases. Connector support is include
 
 The OpenAPI document includes connector artifact schemas and normal OAuth authentication:
 
-| Operation                               | Endpoint                                                                                              |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| List / inspect connector deployments    | `GET /api/v1/connectors`, `GET /api/v1/connectors/{name}`                                             |
-| List secret names and activation status | `GET /api/v1/connectors/{name}/secrets`                                                               |
-| Set / delete a connector secret         | `PUT /api/v1/connectors/{name}/secrets/{secret}` with `{ "value": "..." }`, `DELETE` at the same path |
-| Upload and deploy the bundled project   | `PUT /api/v1/connectors/{name}`                                                                       |
-| Read app bindings and activation state  | `GET /api/v1/apps/{appId}/bindings`                                                                   |
-| Set one binding                         | `PUT /api/v1/apps/{appId}/bindings/{binding}` with `{ "connector": "erp", "entrypoint": "default" }`  |
-| Remove one binding                      | `DELETE /api/v1/apps/{appId}/bindings/{binding}`                                                      |
+| Operation                                                     | Endpoint                                                                                              |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Browse connector names and grantable entrypoints              | `GET /api/v1/connector-catalog`                                                                       |
+| Inspect app resources and desired / active connector bindings | `GET /api/v1/apps/{appId}/connections`                                                                |
+| List / inspect connector deployments                          | `GET /api/v1/connectors`, `GET /api/v1/connectors/{name}`                                             |
+| List secret names and activation status                       | `GET /api/v1/connectors/{name}/secrets`                                                               |
+| Set / delete a connector secret                               | `PUT /api/v1/connectors/{name}/secrets/{secret}` with `{ "value": "..." }`, `DELETE` at the same path |
+| Upload and deploy the bundled project                         | `PUT /api/v1/connectors/{name}`                                                                       |
+| Read app bindings and activation state                        | `GET /api/v1/apps/{appId}/bindings`                                                                   |
+| Set one binding                                               | `PUT /api/v1/apps/{appId}/bindings/{binding}` with `{ "connector": "erp", "entrypoint": "default" }`  |
+| Remove one binding                                            | `DELETE /api/v1/apps/{appId}/bindings/{binding}`                                                      |
 
-Binding updates are atomic and do not require a caller-supplied revision. Connector deployment, listing and grant changes require administrator access. App collaborators can read their app's bindings. CLI users select names and project context; IDs remain API identifiers.
+Binding updates are atomic and do not require a caller-supplied revision. Connector deployment, administrative status listing and grant changes require administrator access. Members can browse the connector catalog; app collaborators can read their app's connections and bindings. CLI users select names and project context; IDs remain API identifiers.
