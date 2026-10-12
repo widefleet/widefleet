@@ -1,10 +1,7 @@
-<script module lang="ts">
-  export type AccessDraft = { appId: string; groups: string; revision: number };
-</script>
-
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { changeAppAccess, getAppAccess, searchAccessGroups } from "#lib/app-access.remote";
+  import { warnBeforeLeaving } from "#lib/unsaved-changes";
   import FormIssues from "#shadcn/FormIssues.svelte";
   import { Button } from "#shadcn/components/ui/button/index.js";
   import { Input } from "#shadcn/components/ui/input/index.js";
@@ -16,11 +13,7 @@
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import Search from "@lucide/svelte/icons/search";
 
-  let {
-    appId,
-    initialSaved = false,
-    draft = $bindable(),
-  }: { appId: string; initialSaved?: boolean; draft: AccessDraft | undefined } = $props();
+  let { appId, initialSaved = false }: { appId: string; initialSaved?: boolean } = $props();
 
   const access = $derived(getAppAccess({ appId }));
 
@@ -35,7 +28,18 @@
 
   const editor = $derived(changeAppAccess.for(appId));
 
-  const currentDraft = $derived(draft?.appId === appId ? draft : undefined);
+  let draft = $state<{ groups: string; revision: number; original: string } | undefined>(
+    untrack(() => {
+      const groups = editor.fields.groups.value();
+      const revision = editor.fields.revision.value();
+
+      return groups === undefined || revision === undefined
+        ? undefined
+        : { groups, revision: Number(revision), original: data.groups.join("\n") };
+    }),
+  );
+
+  warnBeforeLeaving(() => draft !== undefined && draft.groups !== draft.original);
 
   const status = {
     saved: "Saved · applies from the first deployment",
@@ -72,11 +76,15 @@
   });
 
   function editGroups(groups: string) {
-    draft = { appId, groups, revision: currentDraft?.revision ?? data.revision };
+    draft = {
+      groups,
+      revision: draft?.revision ?? data.revision,
+      original: draft?.original ?? data.groups.join("\n"),
+    };
   }
 
   function selectGroup(group: string) {
-    const current = currentDraft?.groups ?? data.groups.join("\n");
+    const current = draft?.groups ?? data.groups.join("\n");
 
     const groups = current
       .split(/\r?\n/)
@@ -108,7 +116,7 @@
       >{status[data.state]}</Badge
     >
     <Button
-      href={`/apps/${appId}?tab=access&scope=app`}
+      href={`/apps/${appId}/access`}
       variant="ghost"
       size="sm"
       data-sveltekit-reload
@@ -140,10 +148,8 @@
         This preview automatically inherits the original app's access rules. You cannot set separate
         rules.
       </p>
-      <Button
-        href={`/apps/${data.inheritedFrom}?tab=access&scope=app`}
-        variant="outline"
-        class="mt-4">Original app rules</Button
+      <Button href={`/apps/${data.inheritedFrom}/access`} variant="outline" class="mt-4"
+        >Original app rules</Button
       >
     </div>
   {/if}
@@ -153,20 +159,20 @@
       {@const groupsField = editor.fields.groups.as("text")}
       <form
         {...editor.enhance(async ({ submit }) => {
-          const submittedDraft = currentDraft;
-          if ((await submit()) && currentDraft === submittedDraft) draft = undefined;
+          const submittedDraft = draft;
+          if ((await submit()) && draft === submittedDraft) draft = undefined;
         })}
         class="space-y-4 rounded-xl border p-5 sm:p-6"
       >
         <input {...editor.fields.appId.as("hidden", appId)} />
-        <input {...editor.fields.revision.as("hidden", currentDraft?.revision ?? data.revision)} />
+        <input {...editor.fields.revision.as("hidden", draft?.revision ?? data.revision)} />
         <div class="space-y-2">
           <Label for="groups-app">Allowed groups for this app</Label>
           <Textarea
             id="groups-app"
             name={groupsField.name}
             aria-invalid={groupsField["aria-invalid"]}
-            bind:value={() => currentDraft?.groups ?? data.groups.join("\n"), editGroups}
+            bind:value={() => draft?.groups ?? data.groups.join("\n"), editGroups}
             disabled={editor.pending > 0}
             rows={4}
             aria-describedby="groups-help"
@@ -183,7 +189,7 @@
             >{editor.pending ? "Saving …" : "Save app rules"}</Button
           >
           <a
-            href={`/apps/${appId}?tab=access&scope=app`}
+            href={`/apps/${appId}/access`}
             data-sveltekit-reload
             class="text-muted-foreground text-xs hover:underline">Discard draft and reload rules</a
           >
@@ -255,7 +261,7 @@
         {#each data.previews as preview (preview.appId)}<li class="py-4">
             <div class="flex flex-wrap items-center justify-between gap-3">
               <a
-                href={`/apps/${preview.appId}?tab=access&scope=app`}
+                href={`/apps/${preview.appId}/access`}
                 class="text-sm font-medium wrap-anywhere hover:underline">{preview.hostname}</a
               ><Badge variant="secondary">{status[preview.state]}</Badge>
             </div>

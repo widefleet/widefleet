@@ -83,7 +83,7 @@
 
 <svelte:head><title>Connectors · Widefleet</title></svelte:head>
 {#if data.app}
-  <Button href={`/apps/${data.app.id}?tab=connections`} variant="ghost" size="sm" class="mb-5 -ml-3"
+  <Button href={`/apps/${data.app.id}/connections`} variant="ghost" size="sm" class="mb-5 -ml-3"
     ><ArrowLeft />{data.app.displayName}</Button
   >
 {/if}

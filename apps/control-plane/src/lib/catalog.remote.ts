@@ -23,10 +23,7 @@ export const setCatalogListing = form(
     await getCatalog().refresh();
 
     if (!getRequestEvent().isRemoteRequest)
-      redirect(
-        303,
-        `/apps/${appId}?${new URLSearchParams({ tab: "settings", q: search })}#catalog`,
-      );
+      redirect(303, `/apps/${appId}/settings?${new URLSearchParams({ q: search })}#catalog`);
 
     return { saved: true };
   },

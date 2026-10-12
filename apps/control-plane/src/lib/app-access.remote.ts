@@ -31,7 +31,7 @@ export const changeAppAccess = form(
     await getAppAccess({ appId }).refresh();
 
     if (!getRequestEvent().isRemoteRequest)
-      redirect(303, `/apps/${appId}?tab=access&scope=app&accessSaved=1#app-access`);
+      redirect(303, `/apps/${appId}/access?accessSaved=1#app-access`);
 
     return { saved: true };
   },

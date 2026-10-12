@@ -33,7 +33,7 @@
     <p>
       Manage <strong class="font-medium">management access</strong> here. Access to the published
       app is controlled by its
-      <a href={`/apps/${data.app.id}?tab=access&scope=app`} class="underline underline-offset-4"
+      <a href={`/apps/${data.app.id}/access`} class="underline underline-offset-4"
         >app usage rules</a
       >. Workspace owners and admins have access to all apps.
     </p>
@@ -81,11 +81,7 @@
         <UserPlus class="size-4" />Add member
       </h3>
       <form method="GET" action="#access" class="max-w-lg space-y-2">
-        <input type="hidden" name="tab" value="access" /><input
-          type="hidden"
-          name="scope"
-          value="management"
-        /><Label for="access-search">Find a member by name or email</Label>
+        <Label for="access-search">Find a member by name or email</Label>
         <div class="flex gap-2">
           <Input
             id="access-search"

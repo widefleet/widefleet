@@ -76,6 +76,11 @@ test.afterAll(async () => {
   await environment?.close();
 });
 
+test.afterEach(async ({ browserName }, info) => {
+  if (info.status !== info.expectedStatus)
+    await info.attach(`${browserName}-server-log`, { body: logs, contentType: "text/plain" });
+});
+
 test("shows connector discovery and serving app connections to a member", async ({
   page,
   context,
@@ -109,7 +114,7 @@ test("shows connector discovery and serving app connections to a member", async 
 
   expect(created.ok()).toBe(true);
   const record = app.parse(await created.json());
-  const path = `/apps/${record.id}?tab=connections`;
+  const path = `/apps/${record.id}/connections`;
   await page.goto(path);
   await expect(page.getByText("No connectors connected", { exact: true })).toBeVisible();
   await expect(
@@ -587,6 +592,16 @@ test("manages organization roles and app access by name while members create the
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Team Notes");
     const appPath = new URL(page.url()).pathname;
     expect((await memberContext.request.get(appPath)).status()).toBe(404);
+
+    for (const section of [
+      "deployments",
+      "connections",
+      "workflows",
+      "access",
+      "access/management",
+      "settings",
+    ])
+      expect((await memberContext.request.get(`${appPath}/${section}`)).status()).toBe(404);
     await page.getByRole("link", { name: "Access", exact: true }).click();
     await page.getByRole("link", { name: "Management access", exact: true }).click();
     await page.getByLabel("Find a member by name or email").fill("member-ui@");
@@ -598,6 +613,8 @@ test("manages organization roles and app access by name while members create the
     await expect(memberPage.getByRole("button", { name: "Grant access" })).toHaveCount(0);
     await page.getByRole("button", { name: "Revoke access" }).click();
     await expect(page.locator("#access").getByRole("status")).toHaveText("App access saved.");
+    await memberPage.getByRole("link", { name: "Connections", exact: true }).click();
+    await expect(memberPage.getByRole("heading", { name: "Nothing here yet." })).toBeVisible();
     expect((await memberContext.request.get(appPath)).status()).toBe(404);
   } finally {
     await memberContext.close();
@@ -655,7 +672,7 @@ test("submits a selective Workflow restart and waits for the agent's confirmatio
     .update(apps)
     .set({ state: "active", activeDeploymentId: deploymentId })
     .where(eq(apps.id, record.id));
-  await page.goto(`/apps/${record.id}?tab=workflows`, { waitUntil: "networkidle" });
+  await page.goto(`/apps/${record.id}/workflows`, { waitUntil: "networkidle" });
   await page.getByLabel("Action", { exact: true }).selectOption("restartFrom");
   await page.getByLabel("Instance ID", { exact: true }).fill("run-1");
   await page.getByLabel("Step name", { exact: true }).fill("approval");
@@ -701,6 +718,95 @@ test("submits a selective Workflow restart and waits for the agent's confirmatio
   await expect(
     page.getByText("Previously completed steps will run again.", { exact: true }),
   ).toBeVisible();
+});
+
+test("confirms discarded workflow drafts on section, history and document navigation", async ({
+  page,
+  context,
+}) => {
+  const session = await environment.users.login({ userId: environment.owner.id });
+  await context.addCookies(
+    session.cookies.map((cookie) => ({
+      ...cookie,
+      domain: "localhost",
+      sameSite: "Lax",
+      secure: false,
+    })),
+  );
+
+  const created = await context.request.post("/api/v1/apps", {
+    headers: { origin: environment.configuration.PLATFORM_URL },
+    data: { slug: "navigation-drafts", displayName: "Navigation drafts" },
+  });
+
+  expect(created.ok()).toBe(true);
+  const record = app.parse(await created.json());
+  await page.goto(`/apps/${record.id}`, { waitUntil: "networkidle" });
+  await page.getByRole("link", { name: "Workflows", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/apps/${record.id}/workflows$`));
+  await page.getByLabel("Action", { exact: true }).selectOption("create");
+  await page.getByLabel("Parameters (JSON)").fill('{"draft":true}');
+
+  for (const navigate of [
+    async () => {
+      await page.getByRole("link", { name: "Connections", exact: true }).click();
+    },
+    async () => {
+      await page.getByRole("main").getByRole("link", { name: "All apps", exact: true }).click();
+    },
+    async () => {
+      await page.goBack();
+    },
+  ]) {
+    const dialog = page.waitForEvent("dialog");
+    const navigation = navigate();
+    const confirmation = await dialog;
+    expect(confirmation.type()).toBe("confirm");
+    expect(confirmation.message()).toContain("unsaved changes");
+    await confirmation.dismiss();
+    await navigation;
+    await expect(page).toHaveURL(new RegExp(`/apps/${record.id}/workflows$`));
+    await expect(page.getByLabel("Parameters (JSON)")).toHaveValue('{"draft":true}');
+  }
+
+  // Browser reload and closure use the browser's own confirmation.
+  const reloadDialog = page.waitForEvent("dialog");
+  const reload = page.evaluate(() => window.location.reload());
+  const reloadConfirmation = await reloadDialog;
+  expect(reloadConfirmation.type()).toBe("beforeunload");
+  await reloadConfirmation.dismiss();
+  await reload;
+  await expect(page.getByLabel("Parameters (JSON)")).toHaveValue('{"draft":true}');
+  const closeDialog = page.waitForEvent("dialog");
+  await page.close({ runBeforeUnload: true });
+  const closeConfirmation = await closeDialog;
+  expect(closeConfirmation.type()).toBe("beforeunload");
+  await closeConfirmation.dismiss();
+  expect(page.isClosed()).toBe(false);
+
+  const discardDialog = page.waitForEvent("dialog");
+  const leave = page.goBack();
+  await (await discardDialog).accept();
+  await leave;
+  await expect(page).toHaveURL(new RegExp(`/apps/${record.id}$`));
+  await expect(
+    page.getByRole("heading", { name: "Ready for your first deployment." }),
+  ).toBeVisible();
+  await page.goForward();
+  await expect(page.getByLabel("Action", { exact: true })).toHaveValue("list");
+  await page.getByLabel("Action", { exact: true }).selectOption("create");
+  await expect(page.getByLabel("Parameters (JSON)")).toHaveValue("{}");
+  await page.getByLabel("Action", { exact: true }).selectOption("list");
+
+  // Reverting the edits restores clean navigation; no confirmation is needed.
+  const dialogs: string[] = [];
+  page.on("dialog", (dialog) => {
+    dialogs.push(dialog.type());
+    void dialog.dismiss();
+  });
+  await page.getByRole("link", { name: "Connections", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Connections", exact: true })).toBeVisible();
+  expect(dialogs).toEqual([]);
 });
 
 test("refreshes queued rollbacks and distinguishes pending requests from accepted jobs", async ({
@@ -751,7 +857,7 @@ test("refreshes queued rollbacks and distinguishes pending requests from accepte
     });
   }
 
-  await page.goto(`/apps/${record.id}?tab=deployments`);
+  await page.goto(`/apps/${record.id}/deployments`);
   const rollback = page.getByRole("button", { name: "Restore version", exact: true });
   const requestId = await page.locator('input[name^="requestId/"]').first().inputValue();
   let release: (() => void) | undefined;
@@ -956,7 +1062,7 @@ test.describe("member forms without JavaScript", () => {
 
     expect(created.ok()).toBe(true);
     const record = app.parse(await created.json());
-    const path = `/apps/${record.id}?q=native-grant`;
+    const path = `/apps/${record.id}/access/management?q=native-grant`;
     await page.goto(path);
     await page.getByRole("button", { name: "Grant access" }).click();
     await expect(page.locator("#access").getByRole("status")).toHaveText("App access saved.");
@@ -1085,7 +1191,7 @@ for (const javaScriptEnabled of [true, false]) {
         await expect(readerPage.getByRole("heading", { level: 1 })).toHaveText("App catalog");
         await expect(readerPage.getByRole("link", { name: record.displayName })).toHaveCount(0);
 
-        await page.goto(`/apps/${record.id}?tab=settings`);
+        await page.goto(`/apps/${record.id}/settings`);
 
         const publish = page.getByRole("button", {
           name: "Publish to catalog",
@@ -1301,7 +1407,7 @@ for (const javaScriptEnabled of [true, false]) {
           { times: 1 },
         );
 
-      await page.goto(`/apps/${parent.id}?tab=access&scope=app`, { waitUntil: "domcontentloaded" });
+      await page.goto(`/apps/${parent.id}/access`, { waitUntil: "domcontentloaded" });
       await page.getByLabel("Allowed groups for this app", { exact: true }).fill("finance");
       hydration.emit("ready");
 
@@ -1362,7 +1468,7 @@ for (const javaScriptEnabled of [true, false]) {
       });
 
       const preview = app.parse(await previewResponse.json());
-      await page.goto(`/apps/${preview.id}?tab=access&scope=app`);
+      await page.goto(`/apps/${preview.id}/access`);
       await expect(
         page.getByText(
           "This preview automatically inherits the original app's access rules. You cannot set separate rules.",
@@ -1373,7 +1479,7 @@ for (const javaScriptEnabled of [true, false]) {
         0,
       );
       // This phase edits the hydrated form; the first visit covers pre-hydration input.
-      await page.goto(`/apps/${parent.id}?tab=access&scope=app`, { waitUntil: "networkidle" });
+      await page.goto(`/apps/${parent.id}/access`, { waitUntil: "networkidle" });
       await page.getByLabel("Allowed groups for this app", { exact: true }).fill("unsaved-group");
 
       const competing = await context.request.patch(`/api/v1/apps/${parent.id}/access`, {
@@ -1384,16 +1490,18 @@ for (const javaScriptEnabled of [true, false]) {
       expect(competing.status()).toBe(200);
 
       if (javaScriptEnabled) {
-        await page.getByRole("link", { name: "Management access", exact: true }).click();
-        await page.getByRole("link", { name: "App usage", exact: true }).click();
-        await expect(page.getByLabel("Allowed groups for this app", { exact: true })).toHaveValue(
-          "unsaved-group",
-        );
-        await page.getByRole("link", { name: "Overview", exact: true }).click();
-        await page.getByRole("link", { name: "Access", exact: true }).click();
-        await expect(page.getByLabel("Allowed groups for this app", { exact: true })).toHaveValue(
-          "unsaved-group",
-        );
+        for (const name of ["Management access", "Overview"]) {
+          const dialog = page.waitForEvent("dialog");
+          const navigation = page.getByRole("link", { name, exact: true }).click();
+          const confirmation = await dialog;
+          expect(confirmation.type()).toBe("confirm");
+          await confirmation.dismiss();
+          await navigation;
+          await expect(page).toHaveURL(new RegExp(`/apps/${parent.id}/access$`));
+          await expect(page.getByLabel("Allowed groups for this app", { exact: true })).toHaveValue(
+            "unsaved-group",
+          );
+        }
 
         const refreshed = page.waitForResponse((response) =>
           response.url().includes("/getAppAccess"),
@@ -1419,10 +1527,46 @@ for (const javaScriptEnabled of [true, false]) {
         expect(await response.json()).toMatchObject({ groups: ["qa"], revision: 2 });
       }
 
-      await page.getByRole("link", { name: "Discard draft and reload rules", exact: true }).click();
+      if (javaScriptEnabled) {
+        const dialog = page.waitForEvent("dialog");
+
+        const navigation = page
+          .getByRole("link", { name: "Discard draft and reload rules", exact: true })
+          .click();
+
+        const confirmation = await dialog;
+        expect(confirmation.type()).toBe("confirm");
+        await confirmation.accept();
+        await navigation;
+      } else {
+        await page
+          .getByRole("link", { name: "Discard draft and reload rules", exact: true })
+          .click();
+      }
+
       await expect(page.getByLabel("Allowed groups for this app", { exact: true })).toHaveValue(
         "qa",
       );
+
+      if (javaScriptEnabled) {
+        await page
+          .getByLabel("Allowed groups for this app", { exact: true })
+          .fill("discarded-group");
+        const dialog = page.waitForEvent("dialog");
+
+        const navigation = page
+          .getByRole("link", { name: "Management access", exact: true })
+          .click();
+
+        await (await dialog).accept();
+        await navigation;
+        await expect(page.getByRole("heading", { name: "Manage access" })).toBeVisible();
+        await page.getByRole("link", { name: "App usage", exact: true }).click();
+        await expect(page.getByLabel("Allowed groups for this app", { exact: true })).toHaveValue(
+          "qa",
+        );
+      }
+
       await page.getByLabel("Allowed groups for this app", { exact: true }).fill("");
       await page.getByRole("button", { name: "Save app rules", exact: true }).click();
       await expect
@@ -1432,7 +1576,7 @@ for (const javaScriptEnabled of [true, false]) {
           return z.object({ groups: z.array(z.string()) }).parse(await response.json()).groups;
         })
         .toEqual([]);
-      await page.goto(`/apps/${preview.id}?tab=access&scope=app`);
+      await page.goto(`/apps/${preview.id}/access`);
       await expect(
         page.getByText("Allowed groups: All signed-in users", { exact: true }),
       ).toBeVisible();
@@ -1487,7 +1631,7 @@ test.describe("workspace experience", () => {
     ).toBeVisible();
     await page.getByRole("link", { name: "Access", exact: true }).click();
     await page.getByRole("link", { name: "Management access", exact: true }).click();
-    await expect(page).toHaveURL(new RegExp(`/apps/${record.id}\\?tab=access&scope=management$`));
+    await expect(page).toHaveURL(new RegExp(`/apps/${record.id}/access/management$`));
     await page.reload();
     await expect(page.getByRole("heading", { name: "Manage access" })).toBeVisible();
     await expect(page.getByRole("link", { name: "Access", exact: true })).toHaveAttribute(
@@ -1596,7 +1740,7 @@ test.describe("workspace experience", () => {
       requestId: crypto.randomUUID(),
       status: "running",
     });
-    await page.goto(`/apps/${record.id}?tab=deployments`);
+    await page.goto(`/apps/${record.id}/deployments`);
     await expect(page.getByText("Deploying", { exact: true })).toBeVisible();
     await environment.database.db
       .update(deployments)

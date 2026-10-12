@@ -60,7 +60,7 @@ const refreshAccess = async (appId: string, search: string) => {
   if (!getRequestEvent().isRemoteRequest)
     redirect(
       303,
-      `/apps/${appId}?${new URLSearchParams({ tab: "access", scope: "management", q: search, saved: "1" })}#access`,
+      `/apps/${appId}/access/management?${new URLSearchParams({ q: search, saved: "1" })}#access`,
     );
 
   return { saved: true };
@@ -87,7 +87,7 @@ export const rollbackApp = form(
     formValue(await runtime.apps.rollback(principal, appId, artifactId, requestId));
     await getAppDetails({ appId, search }).refresh();
 
-    if (!getRequestEvent().isRemoteRequest) redirect(303, `/apps/${appId}?tab=deployments`);
+    if (!getRequestEvent().isRemoteRequest) redirect(303, `/apps/${appId}/deployments`);
 
     return { accepted: true };
   },

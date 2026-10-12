@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  import { onDestroy, untrack } from "svelte";
   import { workflowOperation, workflowRequest } from "@platform/contracts";
   import { z } from "zod";
   import { getWorkflows, getWorkflowOperation, manageWorkflow } from "#lib/workflows.remote";
+  import { warnBeforeLeaving } from "#lib/unsaved-changes";
   import { Button } from "#shadcn/components/ui/button/index.js";
   import { Input } from "#shadcn/components/ui/input/index.js";
   import { Label } from "#shadcn/components/ui/label/index.js";
@@ -31,6 +32,24 @@
   let stepCount = $state(1);
 
   let stepType = $state("do");
+
+  const draft = $derived(
+    JSON.stringify({
+      workflow,
+      action,
+      id,
+      payload,
+      eventType,
+      cursor,
+      stepName,
+      stepCount,
+      stepType,
+    }),
+  );
+
+  let submitted = $state(untrack(() => draft));
+
+  warnBeforeLeaving(() => draft !== submitted);
 
   let busy = $state(false);
 
@@ -89,6 +108,8 @@
       }
 
       operation = await manageWorkflow({ appId, requestId, request });
+      // The operation is now accepted; leaving the page does not cancel it.
+      submitted = draft;
 
       while (!disposed && (operation.state === "queued" || operation.state === "running")) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
