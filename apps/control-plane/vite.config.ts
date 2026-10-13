@@ -10,19 +10,22 @@ const release = z
   .object({ version: z.string() })
   .parse(JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")));
 
-export default defineConfig(({ mode }) => ({
-  define: { "process.env.WIDEFLEET_BUILD_VERSION": JSON.stringify(release.version) },
-  build: { sourcemap: "hidden" },
-  plugins: [
-    tailwindcss(),
-    sveltekit({
-      adapter: mode === "cloudflare" ? cloudflare({ config: "wrangler.jsonc" }) : adapter(),
-      outDir: mode === "cloudflare" ? ".svelte-kit/cloudflare" : ".svelte-kit",
-      files: {
-        hooks: { server: mode === "cloudflare" ? "src/hooks.cloudflare" : "src/hooks.server" },
-      },
-      experimental: { remoteFunctions: true },
-      compilerOptions: { experimental: { async: true } },
-    }),
-  ],
-}));
+export const controlPlaneConfig = (target: "node" | "cloudflare") =>
+  defineConfig({
+    define: { "process.env.WIDEFLEET_BUILD_VERSION": JSON.stringify(release.version) },
+    build: { sourcemap: "hidden" },
+    plugins: [
+      tailwindcss(),
+      sveltekit({
+        adapter: target === "cloudflare" ? cloudflare({ config: "wrangler.jsonc" }) : adapter(),
+        outDir: target === "cloudflare" ? ".svelte-kit/cloudflare" : ".svelte-kit",
+        files: {
+          hooks: { server: target === "cloudflare" ? "src/hooks.cloudflare" : "src/hooks.server" },
+        },
+        experimental: { remoteFunctions: true },
+        compilerOptions: { experimental: { async: true } },
+      }),
+    ],
+  });
+
+export default controlPlaneConfig("node");
