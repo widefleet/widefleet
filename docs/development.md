@@ -70,6 +70,20 @@ Finish image builds before browser tests, and run browser, runtime and edge suit
 
 With `./dev up` running, `RUN_LOCAL_TESTS=1 pnpm exec vitest run apps/control-plane/tests/local/quickstart.test.ts` checks the demo through both browser logins and leaves a synthetic note and photo in the example app.
 
+### Cloudflare control plane
+
+After starting the disposable services and installing Chromium from the local verification steps, build the Worker target and run its tests:
+
+```sh
+pnpm --filter @platform/control-plane build:cloudflare
+WRANGLER_SEND_METRICS=false pnpm --filter @platform/control-plane exec wrangler deploy --dry-run --outdir dist/cloudflare/bundle
+WRANGLER_SEND_METRICS=false RUN_CLOUDFLARE_TESTS=1 pnpm exec vitest run apps/control-plane/tests/cloudflare
+```
+
+These tests run the built SvelteKit Worker in local workerd with disposable PostgreSQL databases and native local R2 bindings. They cover browser login and remote forms, CLI device authorization, concurrent management requests, immutable uploads, R2 cleanup and explicit initialization. They do not contact a Cloudflare account or verify Hyperdrive's remote connection pooling and query-cache configuration. Run them separately from the Node browser suite because both use the local OIDC provider port.
+
+The checked-in Wrangler configuration contains installation placeholders. For the operator procedure and current support boundary, see [Cloudflare control plane](https://widefleet.com/docs/self-hosting/cloudflare-control-plane).
+
 ### Workflows
 
 After the integration setup above has installed celld, run the Workflow adapter checks with synthetic data:

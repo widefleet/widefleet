@@ -8,6 +8,7 @@ export default defineMeta({
     "installation",
     "company-setup",
     "external-services",
+    "cloudflare-control-plane",
     "storage",
     "runtime-logs",
     "installation-reporting",
