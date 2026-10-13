@@ -6,6 +6,7 @@
     "local",
     "tests",
     "vite.config.ts",
+    "vite.cloudflare.config.ts",
     "drizzle.config.ts",
     "playwright.config.ts"
   ]

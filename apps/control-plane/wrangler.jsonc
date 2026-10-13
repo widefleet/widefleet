@@ -1,0 +1,26 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "widefleet-control-plane",
+  "main": "dist/cloudflare/worker.js",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "assets": { "directory": "dist/cloudflare/public", "binding": "ASSETS" },
+  "observability": { "enabled": true },
+  "vars": {
+    "PLATFORM_URL": "https://platform.example.com",
+    "APP_DOMAIN": "apps.example.com",
+    "PLATFORM_USAGE_REPORTING": "false",
+    "PLATFORM_CRASH_REPORTING": "false",
+  },
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      // Bind an installation-specific Hyperdrive configuration with query caching disabled.
+      "id": "00000000000000000000000000000000",
+      "localConnectionString": "postgres://platform_test:local-test-only@127.0.0.1:25432/platform_test",
+    },
+  ],
+  "r2_buckets": [{ "binding": "ARTIFACTS", "bucket_name": "widefleet-artifacts" }],
+}

@@ -1,42 +1,5 @@
-import { initializeRuntime } from "./runtime-initialization.ts";
-import { createReporting } from "./reporting.ts";
-import { createRuntime } from "./runtime-services.ts";
-import { createStorage } from "./storage.ts";
+import { getRequestEvent } from "$app/server";
 
 export type { Runtime } from "./runtime-services.ts";
 
-const startRuntime = async () => {
-  const { configuration, database, settings, encryptionKey } = await initializeRuntime();
-  const storage = createStorage(configuration);
-
-  const reporting = createReporting(
-    configuration,
-    database.db,
-    fetch,
-    async () => (await settings.resolve()).identity,
-  );
-
-  reporting.start();
-  process.once("uncaughtException", (error) => {
-    console.error("Control plane stopped after an uncaught exception", error);
-    reporting.exception(error);
-    void reporting.close().finally(() => process.exit(1));
-  });
-
-  process.once("sveltekit:shutdown", () => {
-    void reporting
-      .close()
-      .then(() => database.close())
-      .catch((cause: unknown) => console.error("Database shutdown failed", cause));
-  });
-
-  return createRuntime({ configuration, database, settings, storage, reporting, encryptionKey });
-};
-
-let runtime: ReturnType<typeof startRuntime> | undefined;
-
-export const getRuntime = async () => {
-  runtime ??= startRuntime();
-
-  return (await runtime)();
-};
+export const getRuntime = () => getRequestEvent().locals.runtime();

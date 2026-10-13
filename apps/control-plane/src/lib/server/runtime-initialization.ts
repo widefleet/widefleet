@@ -1,3 +1,4 @@
+import { createAppSignIn } from "./app-sign-in-node.ts";
 import { bootstrapConfiguration } from "@platform/contracts";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { resolve } from "node:path";
@@ -41,7 +42,7 @@ export const initializeRuntime = async (
       configuration,
       database.db,
       keys.encryption,
-      keys.cookie,
+      createAppSignIn(configuration, keys.cookie),
     );
 
     const state = await readInstallation(database.db);

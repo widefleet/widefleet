@@ -1,3 +1,4 @@
+import { createAppSignIn } from "../src/lib/server/app-sign-in-node.ts";
 import { createReporting } from "../src/lib/server/reporting.ts";
 import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { testUtils } from "better-auth/plugins";
@@ -153,7 +154,7 @@ export const createTestEnvironment = async (
     configuration,
     database.db,
     environment.PLATFORM_ENCRYPTION_KEY,
-    Buffer.alloc(32, 1).toString("base64url"),
+    createAppSignIn(configuration, Buffer.alloc(32, 1).toString("base64url")),
   );
 
   await settings.initialize({

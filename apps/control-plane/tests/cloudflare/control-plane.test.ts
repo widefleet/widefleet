@@ -1,0 +1,310 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import type { Unstable_DevWorker } from "wrangler";
+import {
+  chromium,
+  expect as browserExpect,
+  request,
+  type APIRequestContext,
+} from "@playwright/test";
+import * as contract from "@platform/contracts";
+import { z } from "zod";
+import { apiResource, cliClientId } from "../../src/lib/server/auth-options.ts";
+import { hashAsset } from "../../src/lib/server/asset-hash.ts";
+import { eq } from "drizzle-orm";
+import { installation } from "../../src/lib/server/schema.ts";
+import { installationId, readInstallation } from "../../src/lib/server/installation-store.ts";
+import { createTestEnvironment } from "../environment.ts";
+
+describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control plane", () => {
+  let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
+  let directory: string;
+  let worker: Unstable_DevWorker;
+  let administrator: APIRequestContext;
+  const origin = "http://127.0.0.1:25460";
+
+  beforeAll(async () => {
+    environment = await createTestEnvironment(origin, "oidc");
+    directory = await mkdtemp(join(tmpdir(), "widefleet-cloudflare-"));
+    const { unstable_dev, unstable_readConfig } = await import("wrangler");
+
+    const configuration = z
+      .object({
+        main: z.string(),
+        compatibility_date: z.string(),
+        compatibility_flags: z.array(z.string()),
+      })
+      .parse(
+        unstable_readConfig({
+          config: fileURLToPath(new URL("../../wrangler.jsonc", import.meta.url)),
+        }),
+      );
+
+    const path = join(directory, "wrangler.json");
+    await writeFile(
+      path,
+      JSON.stringify({
+        name: "widefleet-control-plane-test",
+        main: configuration.main,
+        compatibility_date: configuration.compatibility_date,
+        compatibility_flags: configuration.compatibility_flags,
+        assets: {
+          directory: fileURLToPath(new URL("../../dist/cloudflare/public", import.meta.url)),
+          binding: "ASSETS",
+        },
+        vars: environment.environment,
+        hyperdrive: [
+          {
+            binding: "HYPERDRIVE",
+            id: "00000000000000000000000000000000",
+            localConnectionString: environment.environment.DATABASE_URL,
+          },
+        ],
+        r2_buckets: [{ binding: "ARTIFACTS", bucket_name: "artifacts" }],
+      }),
+    );
+    worker = await unstable_dev(configuration.main, {
+      config: path,
+      local: true,
+      persist: false,
+      ip: "127.0.0.1",
+      port: 25460,
+      inspectorPort: 0,
+      logLevel: "error",
+      experimental: { disableExperimentalWarning: true, disableDevRegistry: true, watch: false },
+    });
+    administrator = await request.newContext({ baseURL: origin, extraHTTPHeaders: { origin } });
+
+    const signedIn = await administrator.post("/api/auth/sign-in/email", {
+      data: { email: environment.owner.email, password: "local-test-password-only" },
+    });
+
+    expect(await signedIn.json()).toMatchObject({ user: { id: environment.owner.id } });
+    expect(signedIn.status()).toBe(200);
+  }, 60_000);
+
+  afterAll(async () => {
+    await administrator?.dispose();
+    await worker?.stop();
+    await environment?.close();
+
+    if (directory) await rm(directory, { recursive: true, force: true });
+  });
+
+  it("serves management requests from workerd through the local Hyperdrive binding", async () => {
+    const response = await fetch(`${origin}/healthz`);
+    expect(await response.text()).toContain('"status":"ok"');
+    expect(response.status).toBe(200);
+  });
+
+  it("keeps sessions and PostgreSQL connections scoped correctly across concurrent requests", async () => {
+    const responses = await Promise.all(
+      Array.from({ length: 8 }, () => administrator.get("/api/v1/me")),
+    );
+
+    for (const response of responses) {
+      expect(response.status()).toBe(200);
+      expect(await response.json()).toMatchObject({ id: environment.owner.id });
+    }
+
+    expect((await fetch(`${origin}/api/v1/me`)).status).toBe(401);
+
+    const rejected = await administrator.post("/api/v1/apps", {
+      headers: { origin: "https://untrusted.example.test" },
+      data: { slug: "untrusted", displayName: "Untrusted" },
+    });
+
+    expect(rejected.status()).toBe(403);
+  });
+
+  it("persists device authorization and token refresh across independent Worker requests", async () => {
+    const started = await administrator.post("/api/auth/device/code", {
+      form: {
+        client_id: cliClientId,
+        scope: "openid offline_access platform:read platform:write",
+        resource: apiResource(environment.configuration),
+      },
+    });
+
+    expect(started.status()).toBe(200);
+
+    const device = z
+      .object({ user_code: z.string(), device_code: z.string() })
+      .parse(await started.json());
+
+    expect(
+      (await administrator.get(`/api/auth/device?user_code=${device.user_code}`)).status(),
+    ).toBe(200);
+    expect(
+      (
+        await administrator.post("/api/auth/device/approve", {
+          data: { userCode: device.user_code },
+        })
+      ).status(),
+    ).toBe(200);
+
+    const exchange = await administrator.post("/api/auth/oauth2/token", {
+      form: {
+        client_id: cliClientId,
+        grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+        device_code: device.device_code,
+      },
+    });
+
+    expect(exchange.status()).toBe(200);
+
+    const tokens = z
+      .object({ access_token: z.string(), refresh_token: z.string() })
+      .parse(await exchange.json());
+
+    const me = await fetch(`${origin}/api/v1/me`, {
+      headers: { authorization: `Bearer ${tokens.access_token}` },
+    });
+
+    expect(me.status).toBe(200);
+    expect(await me.json()).toMatchObject({ id: environment.owner.id });
+
+    const refresh = await administrator.post("/api/auth/oauth2/token", {
+      form: {
+        client_id: cliClientId,
+        grant_type: "refresh_token",
+        refresh_token: tokens.refresh_token,
+      },
+    });
+
+    expect(refresh.status()).toBe(200);
+    const renewed = z.object({ refresh_token: z.string() }).parse(await refresh.json());
+    expect(renewed.refresh_token).not.toBe(tokens.refresh_token);
+  });
+
+  it("validates asset hashes, deduplicates R2 uploads, and saves the bundled runtime without filesystem access", async () => {
+    const created = await administrator.post("/api/v1/apps", {
+      data: { slug: "cloudflare-upload", displayName: "Cloudflare Upload" },
+    });
+
+    expect(created.status()).toBe(200);
+    const app = contract.app.parse(await created.json());
+    const bytes = Buffer.from("Worker asset fixture");
+    const hash = hashAsset("/index.html", bytes);
+    const manifest = { "/index.html": { hash, size: bytes.byteLength } };
+
+    const start = async () => {
+      const response = await administrator.post(`/api/v1/apps/${app.id}/assets-upload-session`, {
+        data: { manifest },
+      });
+
+      expect(response.status()).toBe(200);
+
+      return contract.uploadSession.parse(await response.json());
+    };
+
+    const session = await start();
+    expect(session.missing).toEqual([hash]);
+    const path = `/api/v1/apps/${app.id}/assets/${session.id}/${hash}`;
+    expect(
+      (
+        await administrator.put(path, {
+          data: Buffer.from("invalid"),
+          headers: { "content-type": "application/octet-stream" },
+        })
+      ).status(),
+    ).toBe(400);
+    expect(
+      (
+        await administrator.put(path, {
+          data: bytes,
+          headers: { "content-type": "application/octet-stream" },
+        })
+      ).status(),
+    ).toBe(200);
+    expect((await start()).missing).toEqual([]);
+    const idempotencyKey = crypto.randomUUID();
+
+    const publish = () =>
+      administrator.put(`/api/v1/apps/${app.id}/worker`, {
+        headers: { "idempotency-key": idempotencyKey },
+        multipart: {
+          metadata: JSON.stringify({
+            main_module: "worker.js",
+            compatibility_date: "2026-10-01",
+            assets: { upload_session: session.id },
+          }),
+          "worker.js": {
+            name: "worker.js",
+            mimeType: "application/javascript+module",
+            buffer: Buffer.from("export default { fetch() { return new Response('ok'); } };"),
+          },
+        },
+      });
+
+    const first = await publish();
+    expect(first.status()).toBe(200);
+    const deployment = contract.deployment.parse(await first.json());
+    expect(deployment.status).toBe("queued");
+    const retry = await publish();
+    expect(retry.status()).toBe(200);
+    expect(contract.deployment.parse(await retry.json()).id).toBe(deployment.id);
+  }, 15_000);
+
+  it("completes OIDC login, submits a management form, and signs out in a browser", async () => {
+    const browser = await chromium.launch();
+
+    try {
+      const page = await browser.newPage();
+      await page.goto(`${origin}/sign-in`);
+      await page.getByRole("button", { name: "Sign in with Company SSO" }).click();
+      await page.getByRole("button", { name: /sso@example.test/ }).click();
+      await browserExpect(
+        page.getByRole("heading", { name: "Your apps", exact: true }),
+      ).toBeVisible();
+      await browserExpect(page.getByText("SSO Test User", { exact: true })).toBeVisible();
+      await page.getByRole("link", { name: "Create app", exact: true }).click();
+      await page.getByLabel("App name", { exact: true }).fill("Worker Browser App");
+      await page.getByLabel("URL slug").fill("worker-browser-app");
+      await page.getByRole("button", { name: "Create app", exact: true }).click();
+      await browserExpect(page.getByRole("heading", { level: 1 })).toHaveText("Worker Browser App");
+      await page.reload();
+      await browserExpect(page.getByRole("heading", { level: 1 })).toHaveText("Worker Browser App");
+      await page.getByRole("button", { name: /^Account:/ }).click();
+      await page.getByRole("menuitem", { name: "Sign out" }).click();
+      await browserExpect(page).toHaveURL(/\/sign-in$/);
+    } finally {
+      await browser.close();
+    }
+  }, 30_000);
+
+  it("rejects public setup while the installation has no owner", async () => {
+    const database = environment.database.db;
+    await database
+      .update(installation)
+      .set({ ownerId: null })
+      .where(eq(installation.id, installationId));
+
+    try {
+      expect((await fetch(`${origin}/setup`)).status).toBe(503);
+
+      const setup = await fetch(`${origin}/api/v1/setup`, {
+        method: "POST",
+        headers: { origin, "content-type": "application/json" },
+        body: JSON.stringify({
+          name: "Uninvited Owner",
+          email: "uninvited@example.test",
+          password: "local-test-only-password",
+        }),
+      });
+
+      expect(setup.status).toBe(503);
+      expect((await readInstallation(database)).ownerId).toBeNull();
+    } finally {
+      await database
+        .update(installation)
+        .set({ ownerId: environment.owner.id })
+        .where(eq(installation.id, installationId));
+    }
+
+    expect((await administrator.get("/api/v1/me")).status()).toBe(200);
+  });
+});
