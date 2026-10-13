@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { readConfiguration } from "../src/lib/server/config.ts";
-import { initializeRuntime } from "../src/lib/server/runtime.ts";
+import { initializeRuntime } from "../src/lib/server/runtime-initialization.ts";
 
 const runtime = await initializeRuntime(
   readConfiguration(),

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { initializeRuntime } from "../src/lib/server/runtime.ts";
+import { initializeRuntime } from "../src/lib/server/runtime-initialization.ts";
 import { fileURLToPath } from "node:url";
 import { eq } from "drizzle-orm";
 import { copyFile, open, readFile, rm, writeFile } from "node:fs/promises";

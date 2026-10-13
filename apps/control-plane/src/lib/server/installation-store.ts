@@ -1,13 +1,11 @@
-import { bootstrapConfiguration, installationSettings, setupOwner } from "@platform/contracts";
+import { installationSettings, setupOwner } from "@platform/contracts";
 import { hashPassword } from "better-auth/crypto";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { installationOrganizationId } from "../organization.ts";
 import { account, member, user } from "./auth-schema.ts";
-import type { Configuration } from "./config.ts";
 import type { Database, DatabaseExecutor } from "./database.ts";
 import { InvalidOperation } from "./errors.ts";
-import { readOptionalFile } from "./installation-files.ts";
 import { installation } from "./schema.ts";
 
 export const installationId = "widefleet";
@@ -96,13 +94,4 @@ export const createInstallationOwner = async (
 
     return { id: userId, name: owner.name, email: owner.email.toLowerCase() };
   });
-};
-
-export const readBootstrap = async (configuration: Configuration) => {
-  if (!configuration.PLATFORM_BOOTSTRAP_FILE) return null;
-  const source = await readOptionalFile(configuration.PLATFORM_BOOTSTRAP_FILE);
-
-  if (source === null) throw new Error("The configured bootstrap file could not be read");
-
-  return bootstrapConfiguration.parse(JSON.parse(source));
 };
