@@ -1,8 +1,15 @@
 name: widefleet-local
 
 x-local: &local
-  image: widefleet-local-tools:0.1.0
-  build: { context: ../.., dockerfile: infra/local/Dockerfile }
+  image: ${WIDEFLEET_LOCAL_IMAGE:-widefleet-local-tools:0.1.0}
+  build:
+    context: ../..
+    dockerfile: infra/local/Dockerfile
+    args:
+      CONTROL_PLANE_IMAGE: ${PLATFORM_CONTROL_PLANE_IMAGE:-widefleet-local-control-plane:source}
+      AGENT_IMAGE: ${PLATFORM_AGENT_IMAGE:-widefleet-local-agent:source}
+      RUNTIME_IMAGE: ${PLATFORM_RUNTIME_IMAGE:-widefleet-local-runtime:source}
+      RELEASE_VERSION: ${PLATFORM_RELEASE_VERSION:-}
   environment: &environment
     WIDEFLEET_LOCAL_DEMO: "1"
     DATABASE_URL: postgres://widefleet:local-demo-only@postgres:5432/widefleet_local

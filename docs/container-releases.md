@@ -57,4 +57,4 @@ env PLATFORM_CONTROL_PLANE_IMAGE=widefleet-control-plane:test \
 docker compose -f infra/test/compose.yaml down
 ```
 
-These tests use local services and synthetic fixtures. The local demo builds its own images with `./dev up` and needs no registry credentials.
+These tests use local services and synthetic fixtures. `./dev up` reads the latest published release's image manifest; `./dev up --build` builds from the current checkout. Neither needs registry credentials. See [local development](development.md#local-demo) for startup and retained data.

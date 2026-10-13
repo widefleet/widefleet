@@ -13,9 +13,21 @@ Start with the [README quickstart](../README.md#try-it-locally), including its p
 ./dev deploy           # Rebuild and publish changes in starters/sveltekit
 ./dev logs
 ./dev down             # Stop the stack and app containers; keep data
-./dev up               # Resume and redeploy the example; keep notes and photos
+./dev up               # Use the latest release; keep the deployed app, notes and photos
 ./dev reset --yes      # Permanently remove all local demo apps and data
 ```
+
+`./dev up` checks the latest published release on every start and selects its matching platform images and CLI. The local tooling image installs the demo's JavaScript dependencies, and the first startup builds and deploys Team Notes. Later starts retain its active deployment. If the runtime image changes or the app container is missing, the container is restored from the deployed artifact without rebuilding the app. Use `./dev deploy` to rebuild the example after editing it.
+
+To test changes to Widefleet itself, build from the current checkout:
+
+```sh
+./dev up --build
+```
+
+`--build` applies to that invocation and redeploys the example. A subsequent `./dev up` uses the latest release again, retaining demo data. If the database contains migrations absent from the selected version, startup stops before initialization; continue with `./dev up --build` from the matching checkout or wait for its release.
+
+If the latest release or its artifacts cannot be downloaded, startup fails without falling back to compiling the platform. Restore the internet connection and retry. Stopping or resetting the demo does not require a release lookup.
 
 This isolated demo uses synthetic identities and local-only credentials. Its CLI wrapper obtains a five-minute test-admin token from the local installation, so a desktop keyring is not needed for the walkthrough. Browser logins still use the real OIDC integrations. Native `widefleet login` remains available when testing the OS credential store. The emulator recreates its identities at startup; the demo reconciles its two fixture accounts while retaining application data.
 

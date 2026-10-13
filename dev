@@ -2,7 +2,17 @@
 set -euo pipefail
 project_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 cd "$project_root"
+usage() { echo 'Usage: ./dev [up [--build]|deploy|cli <arguments>|app-id|logs|down|reset --yes]'; }
+case "${1:-up}" in
+  up) [[ $# -le 2 && ( -z "${2:-}" || "${2:-}" == --build ) ]] || { usage >&2; exit 1; } ;;
+  cli) ;;
+  reset) [[ $# == 2 && "$2" == --yes ]] || { echo 'This deletes all local demo apps and data. Repeat with ./dev reset --yes.' >&2; exit 1; } ;;
+  deploy|app-id|logs|down) [[ $# == 1 ]] || { usage >&2; exit 1; } ;;
+  --help|-h) usage; exit 0 ;;
+  *) usage >&2; exit 1 ;;
+esac
 export WIDEFLEET_LOCAL_DATA="$project_root/.local/demo"
+node_image=node:26.8.2-bookworm-slim@sha256:cd9f682fa2885cd1056e830424764158570061c59736a1da836bc3d73df095ae
 docker_endpoint="${DOCKER_HOST:-$(docker context inspect --format '{{.Endpoints.docker.Host}}')}"
 if [[ "$docker_endpoint" != unix://* ]]; then
   echo 'The local demo needs a local Docker Unix socket; remote Docker contexts are unsupported.' >&2
@@ -41,7 +51,19 @@ case "${1:-up}" in
       echo 'The pinned celld MVP requires a Linux x86-64 Docker engine.' >&2
       exit 1
     fi
-    mkdir -p "$WIDEFLEET_LOCAL_DATA"
+    if [[ "${2:-}" == --build ]]; then
+      export PLATFORM_RUNTIME_IMAGE=widefleet-local-runtime:source
+      export PLATFORM_AGENT_IMAGE=widefleet-local-agent:source
+      export PLATFORM_CONTROL_PLANE_IMAGE=widefleet-local-control-plane:source
+      export PLATFORM_RELEASE_VERSION=
+    else
+      echo 'Checking the latest published Widefleet release.'
+      images="$(docker run --rm --mount "type=bind,source=$project_root/apps/control-plane/local/release.ts,target=/local-release.ts,readonly" \
+        "$node_image" \
+        node /local-release.ts)"
+      read -r PLATFORM_RUNTIME_IMAGE PLATFORM_AGENT_IMAGE PLATFORM_CONTROL_PLANE_IMAGE PLATFORM_RELEASE_VERSION <<< "$images"
+      export PLATFORM_RUNTIME_IMAGE PLATFORM_AGENT_IMAGE PLATFORM_CONTROL_PLANE_IMAGE PLATFORM_RELEASE_VERSION
+    fi
     # Rebuilding a tag can discard its old image index on containerd-backed Docker,
     # even while a fleet uses it. Keep that immutable image available for probes.
     for container in "${local_fleets[@]}"; do
@@ -52,9 +74,26 @@ case "${1:-up}" in
         docker image tag "$runtime_image" "widefleet-local-runtime:${runtime_image#sha256:}"
       fi
     done
-    docker build -f infra/runtime/Dockerfile -t app-platform-runtime:0.1.0 .
-    docker build -f infra/agent/Dockerfile -t app-platform-agent:0.1.0 .
+    if [[ "${2:-}" == --build ]]; then
+      echo 'Building the local demo from source.'
+      docker build -f infra/runtime/Dockerfile -t "$PLATFORM_RUNTIME_IMAGE" .
+      docker build --build-arg "RUNTIME_IMAGE=$PLATFORM_RUNTIME_IMAGE" -f infra/agent/Dockerfile -t "$PLATFORM_AGENT_IMAGE" .
+      docker build -f infra/control-plane/Dockerfile -t "$PLATFORM_CONTROL_PLANE_IMAGE" .
+    else
+      echo "Using Widefleet $PLATFORM_RELEASE_VERSION; building only the local demo tooling."
+      # Fleet containers use the runtime directly, outside Compose and the tools image.
+      if ! docker image inspect "$PLATFORM_RUNTIME_IMAGE" >/dev/null 2>&1; then
+        docker pull "$PLATFORM_RUNTIME_IMAGE"
+      fi
+    fi
+    export WIDEFLEET_LOCAL_IMAGE=widefleet-local-tools:build
     "${compose[@]}" build tools
+    mkdir -p "$WIDEFLEET_LOCAL_DATA"
+    "${compose[@]}" up -d --wait postgres
+    "${compose[@]}" run --rm -T --no-deps configure node local/check-version.ts
+    docker image tag "$WIDEFLEET_LOCAL_IMAGE" widefleet-local-tools:0.1.0
+    unset WIDEFLEET_LOCAL_IMAGE
+    "${compose[@]}" stop agent control-plane
     "${compose[@]}" run --rm -T --no-deps configure
     "${compose[@]}" up -d --wait postgres storage proxy identity clickhouse otel-collector
     "${compose[@]}" run --rm -T --no-deps tools node --env-file=/data/identity.env tools/initialize.ts
@@ -62,21 +101,36 @@ case "${1:-up}" in
     "${compose[@]}" up -d --wait control-plane
     local_tool seed
     "${compose[@]}" up -d --force-recreate oauth2-proxy
-    "${compose[@]}" up -d agent
+    runtime_image="$(docker image inspect "$PLATFORM_RUNTIME_IMAGE" --format '{{.Id}}')"
+    deployment=deploy-if-needed
     for container in "${local_fleets[@]}"; do
       if docker container inspect "$container" >/dev/null 2>&1; then
         owner="$(docker inspect "$container" --format '{{index .Config.Labels "app-platform.fleet-id"}}')"
         [[ "$container" == "platform-fleet-$owner" ]] || { echo 'Unexpected container ownership.' >&2; exit 1; }
-        docker start "$container" >/dev/null
+        if [[ "$(docker inspect "$container" --format '{{.Image}}')" == "$runtime_image" ]]; then
+          docker start "$container" >/dev/null
+        else
+          docker stop --time 30 "$container" >/dev/null
+          docker rm "$container" >/dev/null
+          deployment=restore
+        fi
+      else
+        deployment=restore
       fi
     done
-    local_tool deploy
+    "${compose[@]}" up -d agent
+    if [[ "${2:-}" == --build ]]; then deployment=deploy; fi
+    local_tool "$deployment"
     echo 'Management: http://localhost:25450 (choose admin@example.test)'
     echo 'App: https://team-notes.apps.localhost:25453'
     echo 'App SSO: https://auth.apps.localhost:25453/oauth2/sign_in'
     echo 'The two local HTTPS hosts use a self-signed development certificate.'
     ;;
   deploy)
+    images="$(docker image inspect widefleet-local-tools:0.1.0 --format '{{index .Config.Labels "widefleet.local.runtime"}} {{index .Config.Labels "widefleet.local.agent"}} {{index .Config.Labels "widefleet.local.control-plane"}} {{index .Config.Labels "widefleet.local.release"}}')"
+    read -r PLATFORM_RUNTIME_IMAGE PLATFORM_AGENT_IMAGE PLATFORM_CONTROL_PLANE_IMAGE PLATFORM_RELEASE_VERSION <<< "$images"
+    [[ -n "$PLATFORM_RUNTIME_IMAGE" && -n "$PLATFORM_AGENT_IMAGE" && -n "$PLATFORM_CONTROL_PLANE_IMAGE" ]] || { echo 'Run ./dev up before deploying the example app.' >&2; exit 1; }
+    export PLATFORM_RUNTIME_IMAGE PLATFORM_AGENT_IMAGE PLATFORM_CONTROL_PLANE_IMAGE PLATFORM_RELEASE_VERSION
     "${compose[@]}" build tools
     local_tool deploy
     ;;
@@ -93,7 +147,6 @@ case "${1:-up}" in
     echo 'Local demo stopped; data retained. Run ./dev up to resume.'
     ;;
   reset)
-    [[ "${2:-}" == --yes ]] || { echo 'This deletes all local demo apps and data. Repeat with ./dev reset --yes.' >&2; exit 1; }
     "${compose[@]}" stop agent
     stop_apps
     for container in "${local_fleets[@]}"; do
@@ -105,10 +158,9 @@ case "${1:-up}" in
     done
     if [[ -d "$WIDEFLEET_LOCAL_DATA" ]]; then
       docker run --rm --mount "type=bind,source=$WIDEFLEET_LOCAL_DATA,target=/data" \
-        widefleet-local-tools:0.1.0 node --input-type=module --eval \
+        "$node_image" node --input-type=module --eval \
         'import {readdir,rm} from "node:fs/promises"; for(const name of await readdir("/data")) await rm("/data/"+name,{recursive:true,force:true});'
     fi
     echo 'Local demo data removed.'
     ;;
-  *) echo 'Usage: ./dev [up|deploy|cli <arguments>|app-id|logs|down|reset --yes]' >&2; exit 1 ;;
 esac

@@ -41,8 +41,8 @@ Most code changes do not need an internal documentation change. Read the relevan
 
 ## Documentation pull requests and releases
 
-- Keep documentation for unreleased product behavior in separate PRs from implementation. Standalone corrections and improvements for released behavior target `main` and can merge without a software release.
-- Prepare public documentation for unreleased product behavior alongside the feature in a separate draft PR. Link the implementation and docs PRs in both descriptions, and record which unreleased changes block publication.
+- Keep documentation requiring unpublished package or image versions in separate PRs from implementation. Standalone corrections and improvements for released behavior target `main` and can merge without a software release.
+- Prepare public documentation requiring unpublished package or image versions alongside the feature in a separate draft PR. Link the implementation and docs PRs in both descriptions, and record which unreleased changes block publication.
 - During development, base the docs PR on the feature branch so its diff contains only documentation changes. Do not merge it into the feature branch.
 - After the feature is squash-merged, rebase only the docs commits onto `main` and verify the diff contains only documentation changes.
 - Keep release-dependent docs in draft until a published release includes all documented changes and the required artifacts are available. A feature merge, tag or draft release alone does not unblock publication.
