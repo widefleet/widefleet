@@ -2,7 +2,6 @@
   import type { Snippet } from "svelte";
   import { page } from "$app/state";
   import { afterNavigate } from "$app/navigation";
-  import { mode, setMode } from "mode-watcher";
   import Layers2 from "@lucide/svelte/icons/layers-2";
   import LayoutGrid from "@lucide/svelte/icons/layout-grid";
   import Plug from "@lucide/svelte/icons/plug";
@@ -12,8 +11,6 @@
   import Terminal from "@lucide/svelte/icons/terminal";
   import ChevronsUpDown from "@lucide/svelte/icons/chevrons-up-down";
   import LogOut from "@lucide/svelte/icons/log-out";
-  import Sun from "@lucide/svelte/icons/sun";
-  import Moon from "@lucide/svelte/icons/moon";
   import Menu from "@lucide/svelte/icons/menu";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import type { Principal } from "#server/identity";
@@ -149,9 +146,6 @@
           <DropdownMenu.Content side="top" align="start" class="w-56">
             <DropdownMenu.Group
               ><DropdownMenu.Label class="truncate">{principal.email}</DropdownMenu.Label
-              ><DropdownMenu.Item
-                onclick={() => setMode(mode.current === "dark" ? "light" : "dark")}
-                >{#if mode.current === "dark"}<Sun />Light appearance{:else}<Moon />Dark appearance{/if}</DropdownMenu.Item
               ></DropdownMenu.Group
             >
             <DropdownMenu.Separator /><DropdownMenu.Item disabled={signingOut} onclick={signOut}
@@ -183,11 +177,6 @@
           <div class="mt-3 space-y-1 border-t pt-3">
             <Button href="/device" variant="ghost" class="w-full justify-start"
               ><Terminal />Connect CLI</Button
-            ><Button
-              variant="ghost"
-              class="w-full justify-start"
-              onclick={() => setMode(mode.current === "dark" ? "light" : "dark")}
-              ><Sun />Toggle appearance</Button
             ><Button
               variant="ghost"
               class="w-full justify-start"

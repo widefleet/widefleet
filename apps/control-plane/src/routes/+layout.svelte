@@ -10,5 +10,5 @@
   let { children }: { children: Snippet } = $props();
 </script>
 
-<ModeWatcher defaultMode="light" />
+<ModeWatcher defaultMode="system" />
 {@render children()}
