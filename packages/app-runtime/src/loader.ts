@@ -19,7 +19,7 @@ export { Assets } from "./assets.ts";
 
 export { Gateway } from "./egress.ts";
 
-export { AppWorkflow, WorkflowSessions } from "./workflow-host.ts";
+export { AppWorkflow, WorkflowSessions, CloudflareWorkflowSessions } from "./workflow-host.ts";
 
 export {
   WorkflowBinding,
@@ -47,7 +47,7 @@ const run = async <T>(
   try {
     return await operation(worker);
   } catch (cause) {
-    worker.dispose();
+    worker.dispose?.();
     throw cause;
   }
 };
@@ -134,7 +134,7 @@ export default {
         try {
           await worker.getEntrypoint<WorkflowRunner>("WorkflowRunner").ready();
         } finally {
-          worker.dispose();
+          worker.dispose?.();
         }
       }
 

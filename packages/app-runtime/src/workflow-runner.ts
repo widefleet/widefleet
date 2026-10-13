@@ -2,6 +2,7 @@ import { NonRetryableError } from "cloudflare:workflows";
 import { z } from "zod";
 import { workflowRestartFrom, workflowStepName } from "@platform/contracts";
 import {
+  RpcTarget,
   WorkerEntrypoint,
   WorkflowEntrypoint,
   type WorkflowSleepDuration,
@@ -171,6 +172,7 @@ export const workflowSteps = {
 };
 
 export class WorkflowRunner extends WorkerEntrypoint<Record<string, WorkflowValue>> {
+  #session = new WorkflowSession();
   ready() {
     if (!(ApplicationWorkflow.prototype instanceof WorkflowEntrypoint))
       throw new Error("Workflow classes must extend WorkflowEntrypoint");
@@ -198,6 +200,25 @@ export class WorkflowRunner extends WorkerEntrypoint<Record<string, WorkflowValu
 
     return true;
   }
+  open(event: AppEvent) {
+    this.begin(event);
+
+    // The returned target retains this call's I/O context while later calls
+    // resolve the app's step promises and continue its run method.
+    return this.#session;
+  }
+  advance(results: Reply[], replay?: ReplayCommand[]) {
+    return this.#session.advance(results, replay);
+  }
+  next() {
+    return this.#session.next();
+  }
+  execute(id: string, context: StepContext) {
+    return this.#session.execute(id, context);
+  }
+}
+
+export class WorkflowSession extends RpcTarget {
   advance(results: Reply[], replay?: ReplayCommand[]) {
     return delivering(async () => {
       for (const result of results) {

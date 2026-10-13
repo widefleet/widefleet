@@ -72,7 +72,7 @@ jobs:
       - name: Start disposable services
         if: matrix.suite != 'source'
         run: docker compose -f infra/test/compose.yaml up -d --wait
-      - name: Test management in workerd with PostgreSQL and R2
+      - name: Test management and app execution in workerd
         if: matrix.suite == 'cloudflare'
         run: RUN_CLOUDFLARE_TESTS=1 pnpm exec vitest run apps/control-plane/tests/cloudflare
       - name: Install the pinned app runtime
