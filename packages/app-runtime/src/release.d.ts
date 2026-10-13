@@ -4,9 +4,11 @@ declare const WIDEFLEET_EVENTS_SOURCE: string;
 
 declare const WIDEFLEET_RUNTIME_VERSION: string;
 
-// celld's explicit release operation; Cloudflare's types do not expose it.
+// celld exposes explicit isolate release; workerd manages that lifetime itself.
 interface WorkerStub {
-  dispose(): void;
+  dispose?(): void;
 }
 
 declare const WIDEFLEET_WORKFLOW_SOURCE: string;
+
+declare const WIDEFLEET_CLOUDFLARE_WORKFLOW_SOURCE: string;

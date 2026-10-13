@@ -18,6 +18,7 @@ env:
   PLATFORM_USAGE_REPORTING: "false"
   PLATFORM_CRASH_REPORTING: "false"
   WIDEFLEET_TELEMETRY_DISABLED: "1"
+  WRANGLER_SEND_METRICS: "false"
 
 jobs:
   publish:
@@ -46,6 +47,8 @@ jobs:
         run: |
           bash tools/install-celld.sh
           RUN_DYNAMIC_TESTS=1 pnpm exec vitest run apps/control-plane/tests/runtime/dynamic.test.ts
+      - name: Verify app execution in workerd
+        run: RUN_CLOUDFLARE_TESTS=1 pnpm exec vitest run apps/control-plane/tests/cloudflare/runtime.test.ts
       - name: Publish the tested artifact without replacing existing versions
         env:
           GH_TOKEN: ${{ github.token }}

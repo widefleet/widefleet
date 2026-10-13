@@ -5,7 +5,7 @@ import {
   type WorkflowEvent,
   type WorkflowStep,
 } from "cloudflare:workers";
-import { readApp } from "./catalog.ts";
+import { workflowApp } from "./workflow-app.ts";
 import { workerCode } from "./worker.ts";
 import type { ParentEnvironment } from "./types.ts";
 import type { WorkflowRunner } from "./workflow-runner.ts";
@@ -46,7 +46,7 @@ class Session extends RpcTarget {
     return result.error ? { error: result.error } : { value: result.value };
   }
   close() {
-    this.#worker.dispose();
+    this.#worker.dispose?.();
   }
   [Symbol.dispose]() {
     this.close();
@@ -55,22 +55,7 @@ class Session extends RpcTarget {
 
 export class WorkflowSessions extends WorkerEntrypoint<ParentEnvironment> {
   async open(start: Start) {
-    const current = await readApp(this.env, `hosts/${start.hostname}.json`);
-    const pinned = await readApp(this.env, `versions/${start.appId}/${start.version}.json`);
-
-    if (!current || current.appId !== start.appId || !pinned || pinned.appId !== start.appId)
-      throw new Error("Workflow app is no longer published");
-
-    const app = {
-      ...pinned,
-      network: current.network,
-      telemetry: current.telemetry,
-      capabilities: Object.fromEntries(
-        Object.entries(pinned.capabilities).filter(
-          ([name, native]) => current.capabilities[name] === native,
-        ),
-      ),
-    };
+    const app = await workflowApp(start, this.env);
 
     // A fresh isolate per replay keeps app globals and callbacks instance-local.
     return new Session(
@@ -79,7 +64,11 @@ export class WorkflowSessions extends WorkerEntrypoint<ParentEnvironment> {
   }
 }
 
-export class AppWorkflow extends WorkflowEntrypoint<ParentEnvironment, Start> {
+type CelldWorkflowEnvironment = ParentEnvironment & {
+  WIDEFLEET_WORKFLOW_SESSIONS: Service<WorkflowSessions>;
+};
+
+export class AppWorkflow extends WorkflowEntrypoint<CelldWorkflowEnvironment, Start> {
   override async run(event: WorkflowEvent<Start>, step: WorkflowStep) {
     const start = event.payload;
     let runner: Rpc.Stub<Session> | undefined;

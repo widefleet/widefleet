@@ -46,6 +46,9 @@ const compile = async (entry: string, define: Record<string, string>) => {
 const source = await compile("loader", {
   WIDEFLEET_BINDINGS_SOURCE: JSON.stringify(await compile("bindings", {})),
   WIDEFLEET_WORKFLOW_SOURCE: JSON.stringify(await compile("workflow-runner", {})),
+  WIDEFLEET_CLOUDFLARE_WORKFLOW_SOURCE: JSON.stringify(
+    await compile("workflow-cloudflare-runner", {}),
+  ),
   WIDEFLEET_EVENTS_SOURCE: JSON.stringify(await compile("events", {})),
   WIDEFLEET_RUNTIME_VERSION: JSON.stringify(version),
 });

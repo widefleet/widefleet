@@ -45,6 +45,11 @@ const patches = z
 // Blume belongs to documentation and is absent from the server dependency graph.
 delete patches[`blume@${docs.dependencies.blume}`];
 
+// Miniflare is used by Wrangler during development, not by the packaged server.
+for (const name of Object.keys(patches)) {
+  if (name.startsWith("miniflare@")) delete patches[name];
+}
+
 await execute("pnpm", [
   "config",
   "--location",

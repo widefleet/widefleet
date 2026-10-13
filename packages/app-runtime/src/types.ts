@@ -15,7 +15,6 @@ export type NativeBindings = {
 };
 
 export type ParentEnvironment = {
-  WIDEFLEET_WORKFLOW_SESSIONS: Service<import("./workflow-host.ts").WorkflowSessions>;
   WIDEFLEET_WORKFLOW_CATALOG: DurableObjectNamespace<
     import("./workflow-catalog.ts").WorkflowCatalog
   >;

@@ -21,6 +21,8 @@ export { Gateway } from "./egress.ts";
 
 export { AppWorkflow, WorkflowSessions } from "./workflow-host.ts";
 
+export { CloudflareAppWorkflow, CloudflareWorkflowCatalog } from "./workflow-cloudflare.ts";
+
 export {
   WorkflowBinding,
   WorkflowCatalog as WidefleetWorkflowCatalog,
@@ -47,7 +49,7 @@ const run = async <T>(
   try {
     return await operation(worker);
   } catch (cause) {
-    worker.dispose();
+    worker.dispose?.();
     throw cause;
   }
 };
@@ -134,7 +136,7 @@ export default {
         try {
           await worker.getEntrypoint<WorkflowRunner>("WorkflowRunner").ready();
         } finally {
-          worker.dispose();
+          worker.dispose?.();
         }
       }
 
