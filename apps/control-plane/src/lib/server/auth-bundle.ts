@@ -1,3 +1,4 @@
+import { appCallbackUrl } from "./app-sign-in.ts";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { z } from "zod";
@@ -5,6 +6,8 @@ import { activationStatus, identitySettingsInput } from "@platform/contracts";
 import { appSsoConfiguration } from "../../../tools/edge-configuration.ts";
 import type { Configuration } from "./config.ts";
 import { readOptionalFile, writePrivateFile } from "./installation-files.ts";
+
+export { appCallbackUrl } from "./app-sign-in.ts";
 
 export const authBundle = z.strictObject({
   revision: z.string(),
@@ -14,9 +17,6 @@ export const authBundle = z.strictObject({
   redirectUrl: z.url(),
   domain: z.string().min(1),
 });
-
-export const appCallbackUrl = (configuration: Configuration) =>
-  `https://auth.${configuration.APP_DOMAIN}${configuration.APP_HTTPS_PORT === 443 ? "" : `:${configuration.APP_HTTPS_PORT}`}/oauth2/callback`;
 
 export const buildAuthBundle = (
   configuration: Configuration,

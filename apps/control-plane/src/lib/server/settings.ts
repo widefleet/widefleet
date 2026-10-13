@@ -6,14 +6,7 @@ import {
 } from "@platform/contracts";
 import { eq, inArray, notInArray, sql } from "drizzle-orm";
 import { z } from "zod";
-import { appSsoConfiguration } from "../../../tools/edge-configuration.ts";
-import {
-  appCallbackUrl,
-  buildAuthBundle,
-  publishAuthBundle,
-  readActivation,
-  readActiveAuthBundle,
-} from "./auth-bundle.ts";
+import { appCallbackUrl, type AppSignIn } from "./app-sign-in.ts";
 import { companyAccountProvider, companyIdentity } from "./company-identity.ts";
 import { companyLoginRevision, type Authentication } from "./auth.ts";
 import type { Configuration } from "./config.ts";
@@ -37,7 +30,7 @@ export const createSettingsService = (
   configuration: Configuration,
   database: Database,
   encryptionKey: string,
-  cookieSecret: string,
+  appSignIn: AppSignIn | null,
 ) => {
   const secrets = createInstallationSecrets(database, encryptionKey);
 
@@ -87,15 +80,13 @@ export const createSettingsService = (
         }
 
         try {
-          const bundle = buildAuthBundle(
-            configuration,
-            identity,
-            await snapshotSecrets.resolve(identity.apps.secret),
-            cookieSecret,
-          );
-
-          await publishAuthBundle(configuration, bundle, force);
-          revision = bundle.revision;
+          revision = appSignIn
+            ? await appSignIn.publish(
+                identity,
+                await snapshotSecrets.resolve(identity.apps.secret),
+                force,
+              )
+            : "";
         } catch (cause) {
           errors.push(
             cause instanceof InvalidOperation ? cause.message : "App sign-in could not be prepared",
@@ -128,7 +119,14 @@ export const createSettingsService = (
 
   const inspect = async (force = false) => {
     const resolved = await resolve(force);
-    const current = await readActivation(configuration);
+
+    const current = appSignIn
+      ? await appSignIn.status()
+      : {
+          revision: "",
+          state: "waiting" as const,
+          message: "App sign-in is not connected to this installation.",
+        };
 
     const activation =
       resolved.revision && current.revision !== resolved.revision
@@ -147,7 +145,7 @@ export const createSettingsService = (
       managementCallbackUrl: identity
         ? `${configuration.PLATFORM_URL}/api/auth/callback/${companyAccountProvider(identity)}`
         : null,
-      appCallbackUrl: appCallbackUrl(configuration),
+      appCallbackUrl: appSignIn?.callbackUrl ?? appCallbackUrl(configuration),
       activation,
       error: resolved.error,
     };
@@ -170,25 +168,13 @@ export const createSettingsService = (
       if (next.identity.directory) await secrets.resolve(next.identity.directory.secret);
     }
 
-    const active = await readActiveAuthBundle(configuration);
-
-    const nextProxy = next.identity
-      ? appSsoConfiguration(
-          next.identity.provider,
-          next.identity.apps.clientId,
-          "/runtime/client-secret",
-        )
-      : null;
-
-    const restartRequired =
-      active !== null && JSON.stringify(active.proxy) !== JSON.stringify(nextProxy);
-
-    return {
-      restartRequired,
-      message: restartRequired
-        ? "This change restarts the sign-in service. Requests to published apps may fail temporarily, including for signed-in users."
-        : "This change can be applied without restarting the sign-in service.",
-    };
+    return appSignIn
+      ? appSignIn.plan(next.identity)
+      : {
+          restartRequired: false,
+          message:
+            "Management sign-in will be updated. App sign-in is not connected to this installation.",
+        };
   };
 
   const save = async (input: z.infer<typeof settingsInput>) => {

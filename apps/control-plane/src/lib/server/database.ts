@@ -3,10 +3,10 @@ import pg from "pg";
 import type { Configuration } from "./config.ts";
 import * as schema from "./schema.ts";
 
-export const createDatabase = (configuration: Configuration) => {
+export const createDatabase = (configuration: Configuration, max = 10) => {
   const pool = new pg.Pool({
     connectionString: configuration.DATABASE_URL,
-    max: 10,
+    max,
     connectionTimeoutMillis: 10_000,
     idleTimeoutMillis: 30_000,
     statement_timeout: 30_000,

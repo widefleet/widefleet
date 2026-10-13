@@ -19,11 +19,12 @@ jobs:
       matrix:
         # Each suite owns its services and fixed test ports on a separate runner.
         # Keep Rust and runtime tests together to reuse the CLI and agent binaries.
-        suite: [source, integration, packaged-sso, rust-runtime]
+        suite: [source, integration, cloudflare, packaged-sso, rust-runtime]
     env:
       PLATFORM_USAGE_REPORTING: "false"
       PLATFORM_CRASH_REPORTING: "false"
       WIDEFLEET_TELEMETRY_DISABLED: "1"
+      WRANGLER_SEND_METRICS: "false"
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -49,7 +50,7 @@ jobs:
           npm install --global pnpm@12.4.2
           pnpm install --frozen-lockfile
       - name: Install browser
-        if: matrix.suite == 'integration' || matrix.suite == 'rust-runtime'
+        if: matrix.suite == 'integration' || matrix.suite == 'rust-runtime' || matrix.suite == 'cloudflare'
         run: pnpm exec playwright install --with-deps chromium
       - name: Check source
         if: matrix.suite == 'source'
@@ -63,9 +64,17 @@ jobs:
       - name: Build the control plane and app runtime
         if: matrix.suite == 'integration' || matrix.suite == 'rust-runtime'
         run: pnpm --filter @platform/control-plane build
+      - name: Build and bundle the Cloudflare control plane
+        if: matrix.suite == 'cloudflare'
+        run: |
+          pnpm --filter @platform/control-plane build:cloudflare
+          pnpm --filter @platform/control-plane exec wrangler deploy --dry-run --outdir dist/cloudflare/bundle
       - name: Start disposable services
         if: matrix.suite != 'source'
         run: docker compose -f infra/test/compose.yaml up -d --wait
+      - name: Test management in workerd with PostgreSQL and R2
+        if: matrix.suite == 'cloudflare'
+        run: RUN_CLOUDFLARE_TESTS=1 pnpm exec vitest run apps/control-plane/tests/cloudflare
       - name: Install the pinned app runtime
         if: matrix.suite == 'integration' || matrix.suite == 'rust-runtime'
         run: bash tools/install-celld.sh

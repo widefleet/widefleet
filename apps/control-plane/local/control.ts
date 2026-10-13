@@ -1,3 +1,4 @@
+import { createAppSignIn } from "../src/lib/server/app-sign-in-node.ts";
 import * as contract from "@platform/contracts";
 import { eq } from "drizzle-orm";
 import { spawn } from "node:child_process";
@@ -120,7 +121,7 @@ if (command === "agent") {
         configuration,
         database.db,
         keys.encryption,
-        keys.cookie,
+        createAppSignIn(configuration, keys.cookie),
       );
 
       await settings.initialize({

@@ -2,7 +2,6 @@ import * as contract from "@platform/contracts";
 import { Result } from "better-result";
 import { desc, eq } from "drizzle-orm";
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
 import { z } from "zod";
 import type { Database } from "./database.ts";
 import { InvalidOperation, StorageUnavailable } from "./errors.ts";
@@ -82,11 +81,11 @@ export const ensureFleetRuntime = async (
 
   if (fleet.runtime) return runtimeReference.parse(fleet.runtime);
 
-  const release = contract.runtimeRelease.parse(
-    JSON.parse(
-      await readFile(new URL(import.meta.resolve("@platform/app-runtime/release")), "utf8"),
-    ),
-  );
+  const { default: bundled } = await import("@platform/app-runtime/release", {
+    with: { type: "json" },
+  });
+
+  const release = contract.runtimeRelease.parse(bundled);
 
   const reference = await saveRuntime(transaction, storage, release);
   await transaction.update(fleets).set({ runtime: reference }).where(eq(fleets.id, fleet.id));
