@@ -1685,11 +1685,12 @@ test.describe("workspace experience", () => {
       .toBe(true);
   });
 
-  test("supports keyboard navigation, saved appearance, and copying an exact deployment command", async ({
+  test("supports keyboard navigation, system appearance, and copying an exact deployment command", async ({
     page,
     context,
   }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.emulateMedia({ colorScheme: "light" });
 
     const response = await context.request.post("/api/v1/apps", {
       headers: { origin: environment.configuration.PLATFORM_URL },
@@ -1706,13 +1707,16 @@ test.describe("workspace experience", () => {
     const accountMenu = page.getByRole("button", { name: /^Account:/ });
     await accountMenu.press("Enter");
     await expect(page.getByRole("menu")).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: /appearance/i })).toHaveCount(0);
     await page.keyboard.press("Escape");
     await expect(accountMenu).toBeFocused();
-    await accountMenu.click();
-    await page.getByRole("menuitem", { name: "Dark appearance", exact: true }).click();
+    await expect(page.locator("html")).not.toHaveClass(/dark/);
+    await page.emulateMedia({ colorScheme: "dark" });
     await expect(page.locator("html")).toHaveClass(/dark/);
     await page.reload();
     await expect(page.locator("html")).toHaveClass(/dark/);
+    await page.emulateMedia({ colorScheme: "light" });
+    await expect(page.locator("html")).not.toHaveClass(/dark/);
     await page.goto(`/apps/${record.id}`);
     await page.getByRole("button", { name: "Copy deployment command", exact: true }).click();
     await expect
