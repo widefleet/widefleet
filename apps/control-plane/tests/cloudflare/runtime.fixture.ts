@@ -1,9 +1,60 @@
 export const appSource = `
 import { env as importedEnv, WorkflowEntrypoint } from 'cloudflare:workers';
 import { connect } from 'cloudflare:sockets';
+import { NonRetryableError } from 'cloudflare:workflows';
 
 export class ExampleWorkflow extends WorkflowEntrypoint {
   async run(event, step) {
+    const mode = event.payload.mode;
+    const record = async (label, context) => {
+      await this.env.DB.exec('CREATE TABLE IF NOT EXISTS workflow_attempts (id TEXT, label TEXT, attempt INTEGER)');
+      await this.env.DB.prepare('INSERT INTO workflow_attempts VALUES (?, ?, ?)').bind(event.instanceId, label, context.attempt).run();
+      return context;
+    };
+    if (mode === 'fatal' || mode === 'caught') {
+      try {
+        return await step.do('failure', { retries: { limit: 2, delay: 10 } }, async context => {
+          await record('failure', context);
+          throw new NonRetryableError('permanent fixture', 'ApplicationFailure');
+        });
+      } catch (error) {
+        if (mode === 'fatal') throw error;
+        await this.env.KV.put('caught:' + event.instanceId, JSON.stringify({ name: error.name, message: error.message, permanent: error instanceof NonRetryableError }));
+        await step.waitForEvent('continue', { type: 'continue', timeout: '5 minutes' });
+        return { name: error.name, message: error.message, permanent: error instanceof NonRetryableError };
+      }
+    }
+    if (mode === 'retry') {
+      return step.do('retry', { retries: { limit: 2, delay: 10 } }, async context => {
+        await record('retry', context);
+        if (context.attempt < 3) throw new Error('temporary fixture');
+        return { step: context.step, attempt: context.attempt };
+      });
+    }
+    if (mode === 'parallel') {
+      return Promise.all([
+        ...[1, 2].map(value => step.do('same', async context => {
+          await record('same', context);
+          return { value, step: context.step };
+        })),
+        step.waitForEvent('continue', { type: 'continue', timeout: '5 minutes' }),
+      ]);
+    }
+    if (mode === 'sleep') {
+      await step.sleep('nap', 1);
+      const deadline = await step.do('deadline', async () => new Date(Date.now() + 20));
+      await step.sleepUntil('until', deadline);
+      return step.do('awake', context => record('awake', context));
+    }
+    if (mode === 'nested') return step.do('outer', () => step.do('inner', async () => 'invalid'));
+    if (mode === 'permissions') {
+      await step.waitForEvent('continue', { type: 'continue', timeout: '5 minutes' });
+      return step.do('inspect', async () => ({ connector: !!this.env.CONNECTOR, secret: this.env.PRIVATE_ROOT_SECRET ?? null }));
+    }
+    if (mode === 'restart') {
+      await step.do('first', context => record('first', context));
+      return step.do('second', context => record('second', context));
+    }
     const value = await step.do('prepare', async () => {
       await this.env.DB.exec('CREATE TABLE IF NOT EXISTS workflow_steps (id TEXT PRIMARY KEY)');
       await this.env.DB.prepare('INSERT INTO workflow_steps VALUES (?)').bind(event.instanceId).run();
@@ -53,15 +104,24 @@ export default {
     if (url.pathname === '/cron') return Response.json(await env.KV.get('cron'));
     if (url.pathname === '/workflow') {
       const id = url.searchParams.get('id');
-      if (request.method === 'POST') return Response.json({ id: (await env.WORKFLOW.create({ id, params: { value: 20 } })).id });
+      if (request.method === 'POST') return Response.json({ id: (await env.WORKFLOW.create({ id, params: { value: 20, mode: url.searchParams.get('mode') } })).id });
       const instance = await env.WORKFLOW.get(id);
       if (request.method === 'PUT') {
-        await instance.sendEvent({ type: 'continue', payload: { add: 21 } });
+        const action = url.searchParams.get('action');
+        if (action === 'pause') await instance.pause();
+        else if (action === 'resume') await instance.resume();
+        else if (action === 'restart') await instance.restart({ from: { name: 'second', type: 'do', count: 1 } });
+        else await instance.sendEvent({ type: 'continue', payload: { add: 21 } });
         return Response.json({ ok: true });
       }
       return Response.json(await instance.status());
     }
     if (url.pathname === '/workflow/steps') return Response.json((await env.DB.prepare('SELECT id FROM workflow_steps ORDER BY id').all()).results);
+    if (url.pathname === '/workflow/error') return Response.json(await env.KV.get('caught:' + url.searchParams.get('id'), 'json'));
+    if (url.pathname === '/workflow/attempts') {
+      await env.DB.exec('CREATE TABLE IF NOT EXISTS workflow_attempts (id TEXT, label TEXT, attempt INTEGER)');
+      return Response.json((await env.DB.prepare('SELECT label, attempt FROM workflow_attempts WHERE id = ? ORDER BY rowid').bind(url.searchParams.get('id')).all()).results);
+    }
     return env.ASSETS.fetch(request);
   },
   async scheduled(controller, env, ctx) { ctx.waitUntil(env.KV.put('cron', controller.cron)); },

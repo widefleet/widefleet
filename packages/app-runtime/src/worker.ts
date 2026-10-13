@@ -6,6 +6,7 @@ export const workerCode = async (
   environment: ParentEnvironment,
   context: ExecutionContext,
   workflow?: string,
+  workflowSource = WIDEFLEET_WORKFLOW_SOURCE,
 ) => {
   const bindings = new Map<string, string | Fetcher>([
     ["WIDEFLEET_DEPLOYMENT_ID", app.deploymentId],
@@ -115,7 +116,7 @@ export const workerCode = async (
       "__widefleet_workflow.js",
       `export {${declaration.class_name} as default} from ${JSON.stringify(`./${app.metadata.main_module}`)};`,
     );
-    modules.set("__widefleet_workflow_runner.js", WIDEFLEET_WORKFLOW_SOURCE);
+    modules.set("__widefleet_workflow_runner.js", workflowSource);
     modules.set(
       "__widefleet_bootstrap.js",
       "import * as workers from 'cloudflare:workers'; import './__widefleet_bindings.js'; export {WorkflowRunner} from './__widefleet_workflow_runner.js';",

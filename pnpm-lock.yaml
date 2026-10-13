@@ -165,6 +165,7 @@ settings:
 patchedDependencies:
   '@better-auth/oauth-provider@1.7.7': f8820f4f992e2ddeaf073ce9c85bac4d8cc04a12f515043b6ef2981df704d020
   blume@2.1.1: 2c0ac8744c28a89c517113155d46a029e40470a816a9d26331d8ea4e056e49f2
+  miniflare@5.20261001.0-alpha: b601431c0f5e96f477b3f229c854670d63b5d1de087ed28c4e29d943ce6a230f
 
 importers:
 
@@ -11828,7 +11829,7 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  miniflare@5.20261001.0-alpha(@types/node@22.18.0):
+  miniflare@5.20261001.0-alpha(patch_hash=b601431c0f5e96f477b3f229c854670d63b5d1de087ed28c4e29d943ce6a230f)(@types/node@22.18.0):
     dependencies:
       '@cspotcode/source-map-support': 0.8.1
       sharp: 0.35.4(@types/node@22.18.0)
@@ -11841,7 +11842,7 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  miniflare@5.20261001.0-alpha(@types/node@22.20.5):
+  miniflare@5.20261001.0-alpha(patch_hash=b601431c0f5e96f477b3f229c854670d63b5d1de087ed28c4e29d943ce6a230f)(@types/node@22.20.5):
     dependencies:
       '@cspotcode/source-map-support': 0.8.1
       sharp: 0.35.4(@types/node@22.20.5)
@@ -11854,7 +11855,7 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  miniflare@5.20261001.0-alpha(@types/node@26.6.4):
+  miniflare@5.20261001.0-alpha(patch_hash=b601431c0f5e96f477b3f229c854670d63b5d1de087ed28c4e29d943ce6a230f)(@types/node@26.6.4):
     dependencies:
       '@cspotcode/source-map-support': 0.8.1
       sharp: 0.35.4(@types/node@26.6.4)
@@ -13295,7 +13296,7 @@ snapshots:
       '@cloudflare/unenv-preset': 2.16.2(unenv@2.0.0-rc.24)(workerd@1.20261001.1)
       blake3-wasm: 2.1.5
       esbuild: 0.28.1
-      miniflare: 5.20261001.0-alpha(@types/node@22.18.0)
+      miniflare: 5.20261001.0-alpha(patch_hash=b601431c0f5e96f477b3f229c854670d63b5d1de087ed28c4e29d943ce6a230f)(@types/node@22.18.0)
       path-to-regexp: 6.3.0
       unenv: 2.0.0-rc.24
       workerd: 1.20261001.1
@@ -13313,7 +13314,7 @@ snapshots:
       '@cloudflare/unenv-preset': 2.16.2(unenv@2.0.0-rc.24)(workerd@1.20261001.1)
       blake3-wasm: 2.1.5
       esbuild: 0.28.1
-      miniflare: 5.20261001.0-alpha(@types/node@22.20.5)
+      miniflare: 5.20261001.0-alpha(patch_hash=b601431c0f5e96f477b3f229c854670d63b5d1de087ed28c4e29d943ce6a230f)(@types/node@22.20.5)
       path-to-regexp: 6.3.0
       unenv: 2.0.0-rc.24
       workerd: 1.20261001.1
@@ -13331,7 +13332,7 @@ snapshots:
       '@cloudflare/unenv-preset': 2.16.2(unenv@2.0.0-rc.24)(workerd@1.20261001.1)
       blake3-wasm: 2.1.5
       esbuild: 0.28.1
-      miniflare: 5.20261001.0-alpha(@types/node@26.6.4)
+      miniflare: 5.20261001.0-alpha(patch_hash=b601431c0f5e96f477b3f229c854670d63b5d1de087ed28c4e29d943ce6a230f)(@types/node@26.6.4)
       path-to-regexp: 6.3.0
       unenv: 2.0.0-rc.24
       workerd: 1.20261001.1

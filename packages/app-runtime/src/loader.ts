@@ -19,7 +19,9 @@ export { Assets } from "./assets.ts";
 
 export { Gateway } from "./egress.ts";
 
-export { AppWorkflow, WorkflowSessions, CloudflareWorkflowSessions } from "./workflow-host.ts";
+export { AppWorkflow, WorkflowSessions } from "./workflow-host.ts";
+
+export { CloudflareAppWorkflow, CloudflareWorkflowCatalog } from "./workflow-cloudflare.ts";
 
 export {
   WorkflowBinding,

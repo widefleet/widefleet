@@ -5,10 +5,10 @@ import {
   type WorkflowEvent,
   type WorkflowStep,
 } from "cloudflare:workers";
-import { readApp } from "./catalog.ts";
+import { workflowApp } from "./workflow-app.ts";
 import { workerCode } from "./worker.ts";
 import type { ParentEnvironment } from "./types.ts";
-import type { WorkflowRunner, WorkflowSession } from "./workflow-runner.ts";
+import type { WorkflowRunner } from "./workflow-runner.ts";
 import {
   fault,
   restore,
@@ -24,14 +24,13 @@ import {
 class Session extends RpcTarget {
   #worker;
   #runner;
-  #closed = false;
-  constructor(
-    worker: WorkerStub,
-    runner: Pick<Rpc.Stub<WorkflowSession>, "advance" | "next" | "execute"> & Partial<Disposable>,
-  ) {
+  constructor(worker: WorkerStub) {
     super();
     this.#worker = worker;
-    this.#runner = runner;
+    this.#runner = worker.getEntrypoint<WorkflowRunner>("WorkflowRunner");
+  }
+  begin(event: AppEvent) {
+    return this.#runner.begin(event);
   }
   async advance(results: Reply[], replay?: ReplayCommand[]) {
     const turn = await this.#runner.advance(results, replay);
@@ -47,84 +46,29 @@ class Session extends RpcTarget {
     return result.error ? { error: result.error } : { value: result.value };
   }
   close() {
-    if (this.#closed) return;
-    this.#closed = true;
-
-    try {
-      this.#runner[Symbol.dispose]?.();
-    } finally {
-      this.#worker.dispose?.();
-    }
+    this.#worker.dispose?.();
   }
   [Symbol.dispose]() {
     this.close();
   }
 }
 
-const loadWorkflow = async (
-  start: Start,
-  environment: ParentEnvironment,
-  context: ExecutionContext,
-) => {
-  const current = await readApp(environment, `hosts/${start.hostname}.json`);
-  const pinned = await readApp(environment, `versions/${start.appId}/${start.version}.json`);
+export class WorkflowSessions extends WorkerEntrypoint<ParentEnvironment> {
+  async open(start: Start) {
+    const app = await workflowApp(start, this.env);
 
-  if (!current || current.appId !== start.appId || !pinned || pinned.appId !== start.appId)
-    throw new Error("Workflow app is no longer published");
+    // A fresh isolate per replay keeps app globals and callbacks instance-local.
+    return new Session(
+      this.env.WIDEFLEET_LOADER.load(await workerCode(app, this.env, this.ctx, start.workflow)),
+    );
+  }
+}
 
-  const app = {
-    ...pinned,
-    network: current.network,
-    telemetry: current.telemetry,
-    capabilities: Object.fromEntries(
-      Object.entries(pinned.capabilities).filter(
-        ([name, native]) => current.capabilities[name] === native,
-      ),
-    ),
-  };
-
-  // A fresh isolate per replay keeps app globals and callbacks instance-local.
-  return environment.WIDEFLEET_LOADER.load(
-    await workerCode(app, environment, context, start.workflow),
-  );
+type CelldWorkflowEnvironment = ParentEnvironment & {
+  WIDEFLEET_WORKFLOW_SESSIONS: Service<WorkflowSessions>;
 };
 
-export class WorkflowSessions extends WorkerEntrypoint<ParentEnvironment> {
-  async open(start: Start, event: AppEvent) {
-    const worker = await loadWorkflow(start, this.env, this.ctx);
-    const runner = worker.getEntrypoint<WorkflowRunner>("WorkflowRunner");
-
-    try {
-      await runner.begin(event);
-
-      return new Session(worker, runner);
-    } catch (cause) {
-      worker.dispose?.();
-      throw cause;
-    }
-  }
-}
-
-// celld 0.6.2 only transfers cloneable values over Dynamic Worker RPC. Bind
-// this entrypoint on Cloudflare, where a returned target retains the child's
-// I/O context instead of using independent entrypoint calls for every turn.
-export class CloudflareWorkflowSessions extends WorkerEntrypoint<ParentEnvironment> {
-  async open(start: Start, event: AppEvent) {
-    const worker = await loadWorkflow(start, this.env, this.ctx);
-
-    try {
-      return new Session(
-        worker,
-        await worker.getEntrypoint<WorkflowRunner>("WorkflowRunner").open(event),
-      );
-    } catch (cause) {
-      worker.dispose?.();
-      throw cause;
-    }
-  }
-}
-
-export class AppWorkflow extends WorkflowEntrypoint<ParentEnvironment, Start> {
+export class AppWorkflow extends WorkflowEntrypoint<CelldWorkflowEnvironment, Start> {
   override async run(event: WorkflowEvent<Start>, step: WorkflowStep) {
     const start = event.payload;
     let runner: Rpc.Stub<Session> | undefined;
@@ -144,7 +88,8 @@ export class AppWorkflow extends WorkflowEntrypoint<ParentEnvironment, Start> {
     const ensure = async () => {
       synchronization = synchronization.then(async () => {
         if (!runner) {
-          runner = await this.env.WIDEFLEET_WORKFLOW_SESSIONS.open(start, {
+          runner = await this.env.WIDEFLEET_WORKFLOW_SESSIONS.open(start);
+          await runner.begin({
             payload: start.params,
             timestamp: event.timestamp,
             instanceId: start.id,
@@ -314,11 +259,7 @@ export class AppWorkflow extends WorkflowEntrypoint<ParentEnvironment, Start> {
         }
       }
     } finally {
-      try {
-        await runner?.close();
-      } finally {
-        runner?.[Symbol.dispose]();
-      }
+      await runner?.close();
     }
   }
 }

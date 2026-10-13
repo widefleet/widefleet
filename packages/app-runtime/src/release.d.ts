@@ -10,3 +10,5 @@ interface WorkerStub {
 }
 
 declare const WIDEFLEET_WORKFLOW_SOURCE: string;
+
+declare const WIDEFLEET_CLOUDFLARE_WORKFLOW_SOURCE: string;

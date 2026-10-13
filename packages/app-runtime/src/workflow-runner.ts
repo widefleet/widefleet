@@ -2,7 +2,6 @@ import { NonRetryableError } from "cloudflare:workflows";
 import { z } from "zod";
 import { workflowRestartFrom, workflowStepName } from "@platform/contracts";
 import {
-  RpcTarget,
   WorkerEntrypoint,
   WorkflowEntrypoint,
   type WorkflowSleepDuration,
@@ -10,6 +9,7 @@ import {
   type WorkflowStepRollbackOptions,
 } from "cloudflare:workers";
 import { activity, insideStep } from "./workflow-activity.ts";
+import { stepCallback, stepConfig } from "./workflow-step-config.ts";
 import ApplicationWorkflow from "widefleet:workflow";
 import {
   fault,
@@ -23,28 +23,6 @@ import {
   type StepConfig,
   type StepContext,
 } from "./workflow-protocol.ts";
-
-const stepConfiguration = z.strictObject({
-  retries: z
-    .strictObject({
-      limit: z.number().int().min(0).max(10000),
-      delay: z.union([
-        z.number().nonnegative(),
-        z.custom<import("cloudflare:workers").WorkflowDelayDuration>(
-          (value) => z.string().safeParse(value).success,
-        ),
-      ]),
-      backoff: z.enum(["constant", "linear", "exponential"]).optional(),
-    })
-    .optional(),
-  timeout: z
-    .union([
-      z.number().nonnegative(),
-      z.custom<WorkflowTimeoutDuration>((value) => z.string().safeParse(value).success),
-    ])
-    .optional(),
-  sensitive: z.literal("output").optional(),
-});
 
 type Callback = (context: StepContext) => Promise<WorkflowValue>;
 
@@ -127,30 +105,14 @@ export const workflowSteps = {
     callback?: Callback,
     rollback?: WorkflowStepRollbackOptions<WorkflowValue>,
   ) {
-    const functionConfig = z
-      .function({ input: [z.custom<StepContext>()], output: z.promise(z.custom<WorkflowValue>()) })
-      .safeParse(config);
+    const functionConfig = stepCallback.safeParse(config);
 
     if (rollback !== undefined || (functionConfig.success && callback !== undefined))
       throw new Error("Workflow rollback is not supported by celld");
     const invoke = functionConfig.success ? functionConfig.data : callback;
 
     if (!invoke) throw new Error("A step callback is required");
-    const options: StepConfig = {};
-
-    if (!functionConfig.success) {
-      const parsed = stepConfiguration.parse(config);
-
-      if (parsed.timeout !== undefined) options.timeout = parsed.timeout;
-
-      if (parsed.sensitive !== undefined) options.sensitive = parsed.sensitive;
-
-      if (parsed.retries) {
-        options.retries = { limit: parsed.retries.limit, delay: parsed.retries.delay };
-
-        if (parsed.retries.backoff) options.retries.backoff = parsed.retries.backoff;
-      }
-    }
+    const options = functionConfig.success ? {} : stepConfig(config);
 
     const entry = identity(name, "do");
     callbacks.set(entry.id, invoke);
@@ -172,7 +134,6 @@ export const workflowSteps = {
 };
 
 export class WorkflowRunner extends WorkerEntrypoint<Record<string, WorkflowValue>> {
-  #session = new WorkflowSession();
   ready() {
     if (!(ApplicationWorkflow.prototype instanceof WorkflowEntrypoint))
       throw new Error("Workflow classes must extend WorkflowEntrypoint");
@@ -200,25 +161,6 @@ export class WorkflowRunner extends WorkerEntrypoint<Record<string, WorkflowValu
 
     return true;
   }
-  open(event: AppEvent) {
-    this.begin(event);
-
-    // The returned target retains this call's I/O context while later calls
-    // resolve the app's step promises and continue its run method.
-    return this.#session;
-  }
-  advance(results: Reply[], replay?: ReplayCommand[]) {
-    return this.#session.advance(results, replay);
-  }
-  next() {
-    return this.#session.next();
-  }
-  execute(id: string, context: StepContext) {
-    return this.#session.execute(id, context);
-  }
-}
-
-export class WorkflowSession extends RpcTarget {
   advance(results: Reply[], replay?: ReplayCommand[]) {
     return delivering(async () => {
       for (const result of results) {

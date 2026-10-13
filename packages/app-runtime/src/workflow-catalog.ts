@@ -5,6 +5,7 @@ import {
   workflowName,
   workflowRequest,
   workflowRestartOptions,
+  workflowRestartFrom,
 } from "@platform/contracts";
 import { z } from "zod";
 import { readApp } from "./catalog.ts";
@@ -51,6 +52,13 @@ export const workflowCatalog = (environment: ParentEnvironment, appId: string) =
   );
 
 export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
+  protected async restartTarget(from: z.infer<typeof workflowRestartFrom>) {
+    // celld's adapter prepares each operation in a separate native checkpoint.
+    return workflowRestartFrom.parse({ name: await nativeStepName(stepId(from)), type: "do" });
+  }
+  protected status(instance: WorkflowInstance) {
+    return instance.status();
+  }
   private async active(scope: WorkflowScope) {
     scopeSchema.parse(scope);
 
@@ -227,7 +235,7 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
 
     switch (action) {
       case "status":
-        return instance.status();
+        return this.status(instance);
       case "sendEvent":
         await instance.sendEvent(
           z.strictObject({ type: workflowEventType, payload: z.unknown() }).parse(input),
@@ -244,10 +252,8 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
 
         if (from) {
           try {
-            // Each logical operation starts with a native do checkpoint that
-            // captures its parameters before the operation itself is scheduled.
             await instance.restart({
-              from: { name: await nativeStepName(stepId(from)), type: "do" },
+              from: await this.restartTarget(from),
             });
           } catch (cause) {
             if (cause instanceof Error && cause.message.includes("restart() could not find"))

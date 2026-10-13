@@ -1,0 +1,16 @@
+diff --git a/dist/src/workers/workflows/binding.worker.js b/dist/src/workers/workflows/binding.worker.js
+index 10d57caf4257c13e1292912c292b55366ea2df19..0d1dfda0af779e1d991ee5228185fe59ef97cedb 100644
+--- a/dist/src/workers/workflows/binding.worker.js
++++ b/dist/src/workers/workflows/binding.worker.js
+@@ -2614,7 +2614,10 @@ var defaultConfig = {
+             rollbackFn,
+             stepContext: forwardStepContext(),
+             rollbackConfig
+-          }), error;
++          }), await this.#state.storage.put({
++            [errorKey]: error,
++            [stepStateKey]: stepState
++          }), await this.#engine.timeoutHandler.release(this.#engine), error;
+         }
+         await this.#state.storage.put(stepStateKey, stepState);
+         let willRetry = stepState.attemptedCount <= config.retries.limit, priorityQueueHash = `${cacheKey}-${stepState.attemptedCount}`, retryDelayMs, delayFailure;

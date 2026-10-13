@@ -16,6 +16,9 @@ peerDependencyRules:
 patchedDependencies:
   "@better-auth/oauth-provider@1.7.7": patches/@better-auth__oauth-provider@1.7.7.patch
   blume@2.1.1: patches/blume@2.1.1.patch
+  # Persist terminal workflow step failures and release their running-step count
+  # so local pause/resume and replay match the native workflow contract.
+  miniflare@5.20261001.0-alpha: patches/miniflare@5.20261001.0-alpha.patch
 
 allowBuilds:
   esbuild: true
