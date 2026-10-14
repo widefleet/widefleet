@@ -1,22 +1,29 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { connectorSecretValue } from "@platform/contracts";
 import {
   connectorMigrations,
   connectorServiceBinding,
   connectorUpload,
   validateHostedConnector,
-  validateHostedSecret,
 } from "../src/lib/server/cloudflare-connector-package.ts";
 import { connectorFixture } from "./cloudflare-connector.fixture.ts";
 
 describe("Hosted connector packages", () => {
-  it("limits secrets by UTF-8 bytes while retaining the self-hosted limit", () => {
-    expect(() => validateHostedSecret("x".repeat(5000))).not.toThrow();
-    expect(() => validateHostedSecret("é".repeat(2500))).not.toThrow();
-    expect(() => validateHostedSecret("é".repeat(2501))).toThrow("5000 UTF-8 bytes");
-    expect(() => validateHostedSecret("x".repeat(5001))).toThrow();
-    expect(connectorSecretValue.safeParse("x".repeat(65536)).success).toBe(true);
+  it("checks the shared secret limit before uploading native bindings", () => {
+    const upload = (value: string) =>
+      connectorUpload(
+        "operation",
+        "connector-worker",
+        connectorFixture(),
+        [],
+        { API_KEY: value },
+        null,
+      );
+
+    expect(() => upload("é".repeat(2500))).not.toThrow();
+    expect(() => upload("é".repeat(2501))).toThrow("5000 UTF-8 bytes");
+    expect(() => upload("x".repeat(5001))).toThrow("5000 UTF-8 bytes");
+    expect(() => upload("")).toThrow();
   });
   it("uploads original code, native secrets, and a private service entrypoint together", async () => {
     const release = connectorFixture();

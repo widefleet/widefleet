@@ -1,6 +1,6 @@
 import * as contract from "@platform/contracts";
 import { z } from "zod";
-import { StorageUnavailable } from "./errors.ts";
+import { InvalidOperation, StorageUnavailable } from "./errors.ts";
 import { loadPackage } from "./package-storage.ts";
 import type { ArtifactStorage } from "./storage.ts";
 
@@ -13,6 +13,16 @@ export const connectorReference = z.strictObject({
   secrets: z.record(contract.connectorSecretName, z.string().min(1)).default({}),
   secretRevision: z.number().int().nonnegative().default(0),
 });
+
+export const validateConnectorSecret = (value: string) => {
+  const result = contract.connectorSecretValue.safeParse(value);
+
+  if (!result.success)
+    throw new InvalidOperation({
+      code: "BAD_REQUEST",
+      message: result.error.issues[0]?.message ?? "Invalid connector secret value",
+    });
+};
 
 export const loadConnector = async (
   storage: ArtifactStorage,

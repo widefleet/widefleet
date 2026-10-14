@@ -338,13 +338,17 @@ export const connectorSecretName = bindingName.refine(
 
 export const connectorSecretPath = z.strictObject({ name: appSlug, secret: connectorSecretName });
 
+export const connectorSecretMaxBytes = 5_000;
+
+const connectorSecretSizeMessage = "Secret value must contain at most 5 KB (5000 UTF-8 bytes)";
+
 export const connectorSecretValue = z
   .string()
   .min(1)
-  .max(65536)
+  .max(connectorSecretMaxBytes, connectorSecretSizeMessage)
   .refine(
-    (value) => new TextEncoder().encode(value).byteLength <= 65536,
-    "Secret value must contain at most 65536 UTF-8 bytes",
+    (value) => new TextEncoder().encode(value).byteLength <= connectorSecretMaxBytes,
+    connectorSecretSizeMessage,
   );
 
 export const connectorStatus = z.strictObject({

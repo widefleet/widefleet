@@ -6,8 +6,9 @@ import {
   type createCloudflareProvisioner,
 } from "./cloudflare-provisioning.ts";
 import { verifyModules } from "./package-storage.ts";
+import { validateConnectorSecret } from "./connector-package.ts";
 
-export const hostedSecretBytes = 5_000;
+const hostedVariableBytes = 5_000;
 
 const wrapperName = "__widefleet_connector__.mjs";
 
@@ -20,14 +21,6 @@ export const connectorServiceBinding = (fleetId: string, name: string, entrypoin
   service: connectorWorkerName(fleetId, name),
   entrypoint: entrypoint === "default" ? "WIDEFLEET_CONNECTOR" : entrypoint,
 });
-
-export const validateHostedSecret = (value: string) => {
-  if (new TextEncoder().encode(value).byteLength > hostedSecretBytes)
-    throw new InvalidOperation({
-      code: "BAD_REQUEST",
-      message: "Hosted connector secrets must contain at most 5 KB (5000 UTF-8 bytes)",
-    });
-};
 
 export const validateHostedConnector = (
   release: z.infer<typeof contract.connectorPackage>,
@@ -49,7 +42,7 @@ export const validateHostedConnector = (
     });
 
   for (const value of Object.values(configuration.vars))
-    if (new TextEncoder().encode(value).byteLength > hostedSecretBytes)
+    if (new TextEncoder().encode(value).byteLength > hostedVariableBytes)
       throw new InvalidOperation({
         code: "BAD_REQUEST",
         message: "Hosted connector variables must contain at most 5 KB (5000 UTF-8 bytes)",
@@ -167,7 +160,7 @@ export const connectorUpload = (
 ) => {
   validateHostedConnector(release, Object.keys(secrets));
 
-  for (const secret of Object.values(secrets)) validateHostedSecret(secret);
+  for (const secret of Object.values(secrets)) validateConnectorSecret(secret);
   const form = new FormData();
   form.set(
     "metadata",

@@ -1,5 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { assetManifest, assetPath, workerMetadata } from "./index.ts";
+import {
+  assetManifest,
+  assetPath,
+  connectorSecretValue,
+  runtimePackages,
+  workerMetadata,
+} from "./index.ts";
+
+describe("connector secret contracts", () => {
+  it.each([
+    { label: "empty", value: "", accepted: false },
+    { label: "5000 ASCII bytes", value: "x".repeat(5000), accepted: true },
+    { label: "5001 ASCII bytes", value: "x".repeat(5001), accepted: false },
+    { label: "5000 UTF-8 bytes", value: "é".repeat(2500), accepted: true },
+    { label: "5002 UTF-8 bytes", value: "é".repeat(2501), accepted: false },
+    { label: "previous 64 KiB limit", value: "x".repeat(65536), accepted: false },
+  ])("applies the same limit to input and runtime packages: $label", ({ value, accepted }) => {
+    expect(connectorSecretValue.safeParse(value).success).toBe(accepted);
+    expect(
+      runtimePackages.shape.connectorSecrets.safeParse({ erp: { API_KEY: value } }).success,
+    ).toBe(accepted);
+  });
+});
 
 describe("deployment contracts", () => {
   it.each([

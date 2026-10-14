@@ -16,7 +16,7 @@ import { InvalidOperation } from "./errors.ts";
 import { encryptSecret } from "./secret-encryption.ts";
 import { defaultFleet, lockFleet, requireAgentExecution } from "./fleets.ts";
 import type { Principal } from "./identity.ts";
-import { connectorReference } from "./connector-package.ts";
+import { connectorReference, validateConnectorSecret } from "./connector-package.ts";
 import { artifacts, connectors, deployments, jobs } from "./schema.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import { transact, type Transaction } from "./transactions.ts";
@@ -150,6 +150,8 @@ export const createConnectorService = (
       ? execution.connectors.setSecret(principal, name, secret, value)
       : transact(database, async (transaction) => {
           administrator(principal);
+
+          if (value !== null) validateConnectorSecret(value);
           const target = await defaultFleet(transaction);
           await lockFleet(transaction, target.id);
           await requireAgentExecution(transaction, target.id, "Connectors");

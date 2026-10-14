@@ -222,9 +222,33 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       );
       await writeFile(file, "");
       await expect(cli("secret", "put", "erp", "API_KEY", "--file", file)).rejects.toThrow(
-        "1–65536",
+        "1–5000",
       );
     }, 15000);
+
+    it("limits secret files and stdin to 5000 UTF-8 bytes before sending a request", async () => {
+      const file = join(directory, "bounded-secret.txt");
+
+      for (const value of ["x".repeat(5000), "é".repeat(2500)]) {
+        await writeFile(file, value);
+        await cli("secret", "put", "erp", "API_KEY", "--file", file, "--no-wait");
+        expect(JSON.parse(requests.at(-1)?.body ?? "")).toEqual({ value });
+        const piped = cli("secret", "put", "erp", "API_KEY", "--no-wait");
+        piped.child.stdin?.end(value);
+        await piped;
+        expect(JSON.parse(requests.at(-1)?.body ?? "")).toEqual({ value });
+
+        const before = requests.length;
+        await writeFile(file, value + "é");
+        await expect(
+          cli("secret", "put", "erp", "API_KEY", "--file", file, "--no-wait"),
+        ).rejects.toThrow("1–5000 UTF-8 bytes");
+        const oversized = cli("secret", "put", "erp", "API_KEY", "--no-wait");
+        oversized.child.stdin?.end(value + "é");
+        await expect(oversized).rejects.toThrow("1–5000 UTF-8 bytes");
+        expect(requests).toHaveLength(before);
+      }
+    });
 
     it("uses project context, direct binding names and the ordinary credential, then waits for activation", async () => {
       expect(JSON.parse((await cli("bind", "erp", "--as", "ERP")).stdout)).toMatchObject({

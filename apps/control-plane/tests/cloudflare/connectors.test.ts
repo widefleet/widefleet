@@ -357,13 +357,13 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
         { kind: "secret", name: release.name, secret: "API_KEY", value: "é".repeat(2501) },
         400,
       ),
-    ).toEqual({ error: "Hosted connector secrets must contain at most 5 KB (5000 UTF-8 bytes)" });
+    ).toEqual({ error: "Secret value must contain at most 5 KB (5000 UTF-8 bytes)" });
     expect(await environment.database.db.select().from(cloudflareOperations)).toHaveLength(
       before.length,
     );
   });
   it("rotates and removes native secrets without retaining plaintext in history", async () => {
-    for (const secret of ["first-synthetic-secret", "second-synthetic-secret", null]) {
+    for (const secret of ["é".repeat(2500), "second-synthetic-secret", null]) {
       const result = contract.connectorStatus.parse(
         await command({ kind: "secret", name: release.name, secret: "API_KEY", value: secret }),
       );

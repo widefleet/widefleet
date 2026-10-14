@@ -305,13 +305,13 @@ async fn change_binding(
 }
 
 fn secret_value(file: Option<PathBuf>) -> Result<String> {
-    const LIMIT: u64 = 65536;
-    let mut value = String::new();
+    const LIMIT: u64 = 5000;
+    let mut value = Vec::new();
     match file {
         Some(path) => {
             std::fs::File::open(path)?
                 .take(LIMIT + 1)
-                .read_to_string(&mut value)?;
+                .read_to_end(&mut value)?;
         }
         None => {
             let stdin = std::io::stdin();
@@ -320,15 +320,15 @@ fn secret_value(file: Option<PathBuf>) -> Result<String> {
                     "Provide the secret through redirected stdin or --file PATH".into(),
                 ));
             }
-            stdin.lock().take(LIMIT + 1).read_to_string(&mut value)?;
+            stdin.lock().take(LIMIT + 1).read_to_end(&mut value)?;
         }
     }
     if value.is_empty() || value.len() > LIMIT as usize {
         return Err(Error::invalid(
-            "Secret value must contain 1–65536 UTF-8 bytes".into(),
+            "Secret value must contain 1–5000 UTF-8 bytes".into(),
         ));
     }
-    Ok(value)
+    String::from_utf8(value).map_err(|_| Error::invalid("Secret value must be valid UTF-8".into()))
 }
 
 async fn wait_for_connector(

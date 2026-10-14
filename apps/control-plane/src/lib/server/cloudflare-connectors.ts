@@ -4,10 +4,10 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
 import { administrator, connectorStatus, prepareConnector } from "./connector-changes.ts";
-import { connectorReference, loadConnector } from "./connector-package.ts";
+import { connectorReference, loadConnector, validateConnectorSecret } from "./connector-package.ts";
 import { acceptCloudflareWorkflow } from "./cloudflare-admission.ts";
 import { connectorCommand, deploymentWorkflowCommand } from "./cloudflare-connector-command.ts";
-import { validateHostedConnector, validateHostedSecret } from "./cloudflare-connector-package.ts";
+import { validateHostedConnector } from "./cloudflare-connector-package.ts";
 import type { CloudflareBindings } from "./cloudflare-config.ts";
 import type { Database } from "./database.ts";
 import type { HostedExecution } from "./deployment-execution.ts";
@@ -242,10 +242,7 @@ export const createCloudflareConnectors = (
         administrator(principal);
         contract.connectorSecretName.parse(secret);
 
-        if (value !== null) {
-          contract.connectorSecretValue.parse(value);
-          validateHostedSecret(value);
-        }
+        if (value !== null) validateConnectorSecret(value);
 
         const fleet = await lockFleet(transaction, (await defaultFleet(transaction)).id);
 

@@ -2171,8 +2171,8 @@ describe("Platform API with PostgreSQL and RustFS", () => {
   it("preserves encrypted connector snapshots across login settings updates and failed activation", async () => {
     const path = "/connectors/erp-api";
     const secretPath = `${path}/secrets/API_KEY`;
-    const firstValue = "synthetic-connector-secret-one";
-    const secondValue = "synthetic-connector-secret-two";
+    const firstValue = "é".repeat(2500);
+    const secondValue = "x".repeat(5000);
 
     const claim = async () =>
       contract.job.parse(await (await json("/agent/jobs/claim", "POST", {}, agentHeaders)).json());
@@ -2227,7 +2227,8 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     expect((await json(`${path}/secrets/__proto__`, "PUT", { value: firstValue })).status).toBe(
       400,
     );
-    expect((await json(secretPath, "PUT", { value: "é".repeat(32769) })).status).toBe(400);
+    expect((await json(secretPath, "PUT", { value: "é".repeat(2501) })).status).toBe(400);
+    expect((await json(secretPath, "PUT", { value: "x".repeat(5001) })).status).toBe(400);
 
     const loginSecrets = await environment.database.db.select().from(installationSecrets);
 
