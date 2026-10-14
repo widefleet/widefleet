@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { deploymentActor } from "./deployment-execution.ts";
+import { deploymentActor, hostedDeploymentId } from "./deployment-execution.ts";
 
 export const cloudflareRemovalCommand = z.object({
   kind: z.literal("remove"),
@@ -10,3 +10,6 @@ export const cloudflareRemovalCommand = z.object({
 });
 
 export const removalTarget = z.object({ id: z.uuid(), hostname: z.string() });
+
+export const cloudflareRemovalId = (appId: string, actorId: string) =>
+  hostedDeploymentId(appId, JSON.stringify(["remove-app", actorId]));

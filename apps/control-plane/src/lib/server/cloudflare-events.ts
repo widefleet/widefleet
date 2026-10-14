@@ -149,11 +149,15 @@ export const createCloudflareEvents = (
       for (const name of app.queues) {
         const nativeName = cloudflareResourceName(appId, "queue", name);
 
-        const native = app.deleted
-          ? await provisioner.findQueue(nativeName)
-          : await provisioner.ensureQueue(nativeName);
+        // Deployment provisioning creates queues before activation. Subscription
+        // reconciliation must never recreate a resource from an old registry snapshot.
+        const native = await provisioner.findQueue(nativeName);
 
-        if (!native) continue;
+        if (!native) {
+          if (app.deleted) continue;
+          throw new Error("The provisioned app queue is missing");
+        }
+
         const path = `/queues/${encodeURIComponent(native.queue_id)}/consumers`;
         let consumerId: string | null = null;
         await updateCloudflareSubscription(

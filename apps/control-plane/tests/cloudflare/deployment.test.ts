@@ -21,10 +21,13 @@ import {
   deploymentSource,
   seedDeployment,
 } from "../cloudflare-deployment.fixture.ts";
-import { hostedDeploymentId } from "../../src/lib/server/deployment-execution.ts";
+import { cloudflareRemovalId } from "../../src/lib/server/cloudflare-removal-command.ts";
+import { user } from "../../src/lib/server/auth-schema.ts";
 import { initializeCloudflareFleet } from "../../src/lib/server/fleets.ts";
 import {
   apps,
+  appGrants,
+  cloudflareResourceCreations,
   artifacts,
   connectors,
   cloudflareOperations,
@@ -61,6 +64,9 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
     const deletedResources: string[] = [];
     let failedObjectDelete = false;
     let deniedBucket = "";
+    let heldDatabaseName = "";
+    let finishDatabaseCreation: (() => void) | undefined;
+    let databaseCreates = 0;
     const namespaces = new Map<string, string>();
 
     const queues = new Map<
@@ -128,8 +134,19 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
 
             if (!databases.has(name) || createdDatabases.has(name))
               throw new Error("Unexpected D1 creation");
-            createdDatabases.add(name);
-            ok({ name, uuid: databases.get(name) ?? "" });
+            databaseCreates++;
+
+            if (name === heldDatabaseName) {
+              finishDatabaseCreation = () => {
+                createdDatabases.add(name);
+              };
+
+              response.statusCode = 503;
+              response.end();
+            } else {
+              createdDatabases.add(name);
+              ok({ name, uuid: databases.get(name) ?? "" });
+            }
           }
         } else if (url.pathname.includes("/d1/database/") && request.method === "DELETE") {
           const id = url.pathname.split("/").at(-1);
@@ -1883,11 +1900,15 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
     const remove = (appId: string, options: { actor?: string; unavailable?: boolean } = {}) =>
       worker.fetch("http://fixture/remove", {
         method: "POST",
-        body: JSON.stringify({ appId, id: hostedDeploymentId(appId, "remove-app"), ...options }),
+        body: JSON.stringify({
+          appId,
+          id: cloudflareRemovalId(appId, options.actor ?? "fixture-owner"),
+          ...options,
+        }),
       });
 
     const removed = async (appId: string) => {
-      const id = hostedDeploymentId(appId, "remove-app");
+      const id = cloudflareRemovalId(appId, "fixture-owner");
       await expect
         .poll(
           async () => {
@@ -1914,9 +1935,110 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         .where(eq(apps.id, entry.appId));
 
       expect(record?.state).toBe("created");
-      expect(await operation(hostedDeploymentId(entry.appId, "remove-app"))).toBeUndefined();
+      expect(await operation(cloudflareRemovalId(entry.appId, "fixture-owner"))).toBeUndefined();
       expect(await environment.database.db.select().from(jobs)).toHaveLength(0);
     });
+
+    it("lets the owner delete after a failed admission from a now-revoked grantee", async () => {
+      const entry = await seedDeployment(environment.database.db, { bindings: [] });
+      const grantee = "removal-grantee";
+      await environment.database.db
+        .insert(user)
+        .values({ id: grantee, name: "Removal fixture", email: "removal-grantee@example.test" });
+      await environment.database.db
+        .insert(appGrants)
+        .values({ appId: entry.appId, userId: grantee });
+      expect((await remove(entry.appId, { actor: grantee, unavailable: true })).status).toBe(400);
+      await environment.database.db.delete(appGrants).where(eq(appGrants.appId, entry.appId));
+      expect((await remove(entry.appId, { actor: grantee })).status).toBe(400);
+      expect((await remove(entry.appId)).status).toBe(200);
+      await removed(entry.appId);
+    }, 60000);
+
+    it("keeps removal pending until a timed-out resource creation is confirmed, including after restart", async () => {
+      const entry = await seedDeployment(environment.database.db, {
+        bindings: [{ type: "d1", name: "DB", database_name: "late" }],
+      });
+
+      heldDatabaseName = resourceName(entry.appId, "d1", "late");
+      databases.set(heldDatabaseName, crypto.randomUUID());
+      await seed(entry);
+
+      const before = databaseCreates;
+      await dispatch(entry, "fast-retries");
+      await expect.poll(() => nativeStatus(entry.command.id), { timeout: 30000 }).toBe("errored");
+      expect(databaseCreates - before).toBe(1);
+      expect(
+        await environment.database.db
+          .select()
+          .from(cloudflareResourceCreations)
+          .where(eq(cloudflareResourceCreations.appId, entry.appId)),
+      ).toHaveLength(1);
+      await worker.stop();
+      worker = await start();
+      expect((await remove(entry.appId)).status).toBe(200);
+      const id = cloudflareRemovalId(entry.appId, "fixture-owner");
+      await expect
+        .poll(
+          async () => {
+            const response = await worker.fetch(`http://fixture/workflow?app-operation&id=${id}`);
+
+            return z.object({ status: z.string() }).parse(await response.json()).status;
+          },
+          { timeout: 30000 },
+        )
+        .toBe("errored");
+
+      const [record] = await environment.database.db
+        .select()
+        .from(apps)
+        .where(eq(apps.id, entry.appId));
+
+      expect(record?.state).toBe("deleting");
+      expect(databaseCreates - before).toBe(1);
+
+      if (!finishDatabaseCreation) throw new Error("Missing delayed CREATE");
+
+      finishDatabaseCreation();
+      heldDatabaseName = "";
+      await worker.fetch(`http://fixture/workflow?app-operation&id=${id}&action=restart`, {
+        method: "POST",
+      });
+      await removed(entry.appId);
+      expect(createdDatabases.has(resourceName(entry.appId, "d1", "late"))).toBe(false);
+      expect(
+        await environment.database.db
+          .select()
+          .from(cloudflareResourceCreations)
+          .where(eq(cloudflareResourceCreations.appId, entry.appId)),
+      ).toHaveLength(0);
+    }, 90000);
+
+    it("cleans historical resources beyond the first metadata page", async () => {
+      const entry = await seedDeployment(environment.database.db, { bindings: [] });
+      const historical = resourceName(entry.appId, "r2", "historical-files");
+      buckets.add(historical);
+
+      for (let page = 0; page < 3; page++) {
+        await environment.database.db.insert(artifacts).values(
+          Array.from({ length: 100 }, (_, index) => ({
+            ...entry.artifact,
+            id: `ffffffff-ffff-4fff-8fff-${String(page * 100 + index).padStart(12, "0")}`,
+            metadata: {
+              ...entry.artifact.metadata,
+              bindings:
+                page === 2
+                  ? [{ type: "r2_bucket", name: "OLD", bucket_name: "historical-files" }]
+                  : [],
+            },
+          })),
+        );
+      }
+
+      expect((await remove(entry.appId)).status).toBe(200);
+      await removed(entry.appId);
+      expect(buckets.has(historical)).toBe(false);
+    }, 60000);
 
     it("removes an undeployed app and its nested previews, including stored uploads", async () => {
       const root = await seedDeployment(environment.database.db, { bindings: [] });
@@ -2062,7 +2184,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
     it("resumes a failed removal only after an explicit native restart without recreating resources", async () => {
       deniedBucket = resourceName(delayed.appId, "r2", "files");
       expect((await remove(delayed.appId)).status).toBe(200);
-      const id = hostedDeploymentId(delayed.appId, "remove-app");
+      const id = cloudflareRemovalId(delayed.appId, "fixture-owner");
       await expect
         .poll(
           async () => {

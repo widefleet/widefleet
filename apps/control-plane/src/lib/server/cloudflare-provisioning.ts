@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
 import type * as contract from "@platform/contracts";
+import type {
+  CloudflareResourceCreator,
+  CloudflareResourceKind,
+} from "./cloudflare-resource-creations.ts";
 import { z } from "zod";
 
 const envelope = z.object({ success: z.boolean(), result: z.unknown().optional() });
@@ -57,6 +61,7 @@ export class CloudflareApiError extends Error {
 export const createCloudflareProvisioner = (
   configuration: { accountId: string; token: string; runtimeName: string },
   transport: typeof fetch = fetch,
+  trackCreation?: CloudflareResourceCreator,
 ) => {
   const root = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(configuration.accountId)}`;
 
@@ -100,45 +105,74 @@ export const createCloudflareProvisioner = (
     }
   };
 
-  const ensureDatabase = async (name: string) => {
-    const existing = await findDatabase(name);
+  const ensure = async <T>(
+    appId: string | undefined,
+    kind: CloudflareResourceKind,
+    name: string,
+    read: () => Promise<T | null>,
+    create: () => Promise<T>,
+  ) => {
+    if (appId && trackCreation) return trackCreation(appId, kind, name, read, create);
 
-    if (existing) return existing;
-
-    const created = database.parse(
-      await request("/d1/database", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name }),
-      }),
-    );
-
-    if (created.name !== name) throw new Error("Cloudflare returned an unexpected database");
-
-    return created.uuid;
+    return (await read()) ?? create();
   };
 
-  const ensureBucket = async (name: string) => {
+  const ensureDatabase = (name: string, appId?: string) =>
+    ensure(
+      appId,
+      "d1",
+      name,
+      () => findDatabase(name),
+      async () => {
+        const created = database.parse(
+          await request("/d1/database", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ name }),
+          }),
+        );
+
+        if (created.name !== name) throw new Error("Cloudflare returned an unexpected database");
+
+        return created.uuid;
+      },
+    );
+
+  const findBucket = async (name: string) => {
     try {
       const existing = bucket.parse(await request(`/r2/buckets/${encodeURIComponent(name)}`));
 
       if (existing.name !== name) throw new Error("Cloudflare returned an unexpected bucket");
+
+      return existing.name;
     } catch (error) {
-      if (!(error instanceof CloudflareApiError) || error.status !== 404) throw error;
-
-      const created = bucket.parse(
-        await request("/r2/buckets", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ name }),
-        }),
-      );
-
-      if (created.name !== name) throw new Error("Cloudflare returned an unexpected bucket");
+      if (error instanceof CloudflareApiError && error.status === 404) return null;
+      throw error;
     }
   };
 
-  const ensureNamespace = async (title: string) => {
+  const ensureBucket = (name: string, appId?: string) =>
+    ensure(
+      appId,
+      "r2",
+      name,
+      () => findBucket(name),
+      async () => {
+        const created = bucket.parse(
+          await request("/r2/buckets", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ name }),
+          }),
+        );
+
+        if (created.name !== name) throw new Error("Cloudflare returned an unexpected bucket");
+
+        return created.name;
+      },
+    );
+
+  const findNamespace = async (title: string) => {
     for (let page = 1; ; page++) {
       const found = z
         .array(namespace)
@@ -148,25 +182,35 @@ export const createCloudflareProvisioner = (
 
       if (existing) return existing.id;
 
-      if (found.length < 100) break;
+      if (found.length < 100) return null;
     }
-
-    const created = namespace.parse(
-      await request("/storage/kv/namespaces", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title }),
-      }),
-    );
-
-    if (created.title !== title) throw new Error("Cloudflare returned an unexpected namespace");
-
-    return created.id;
   };
+
+  const ensureNamespace = (title: string, appId?: string) =>
+    ensure(
+      appId,
+      "kv",
+      title,
+      () => findNamespace(title),
+      async () => {
+        const created = namespace.parse(
+          await request("/storage/kv/namespaces", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ title }),
+          }),
+        );
+
+        if (created.title !== title) throw new Error("Cloudflare returned an unexpected namespace");
+
+        return created.id;
+      },
+    );
 
   const findQueue = async (name: string) => {
     for (let page = 1; ; page++) {
       const found = z.array(queue).parse(await request(`/queues?page=${page}&per_page=100`));
+
       const existing = found.find((entry) => entry.queue_name === name);
 
       if (existing) return existing;
@@ -175,25 +219,40 @@ export const createCloudflareProvisioner = (
     }
   };
 
-  const ensureQueue = async (name: string) => {
-    const existing = await findQueue(name);
+  const ensureQueue = (name: string, appId?: string) =>
+    ensure(
+      appId,
+      "queue",
+      name,
+      () => findQueue(name),
+      async () => {
+        const created = queue.parse(
+          await request("/queues", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ queue_name: name }),
+          }),
+        );
 
-    if (existing) return existing;
+        if (created.queue_name !== name) throw new Error("Cloudflare returned an unexpected queue");
 
-    const created = queue.parse(
-      await request("/queues", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ queue_name: name }),
-      }),
+        return created;
+      },
     );
 
-    if (created.queue_name !== name) throw new Error("Cloudflare returned an unexpected queue");
-
-    return created;
-  };
-
   return {
+    findResource: async (kind: CloudflareResourceKind, name: string) => {
+      switch (kind) {
+        case "d1":
+          return (await findDatabase(name)) !== null;
+        case "r2":
+          return (await findBucket(name)) !== null;
+        case "kv":
+          return (await findNamespace(name)) !== null;
+        case "queue":
+          return (await findQueue(name)) !== null;
+      }
+    },
     findDatabase,
     findQueue,
     ensureDatabase,
@@ -256,27 +315,30 @@ export const createCloudflareProvisioner = (
         if (resources.some((resource) => resource.name === native)) continue;
 
         if (binding.type === "d1") {
-          resources.push({ type: "d1", name: native, id: await ensureDatabase(name) });
+          resources.push({ type: "d1", name: native, id: await ensureDatabase(name, app.appId) });
         } else if (binding.type === "r2_bucket") {
-          await ensureBucket(name);
+          await ensureBucket(name, app.appId);
           resources.push({ type: "r2_bucket", name: native, bucket_name: name });
         } else if (binding.type === "kv_namespace") {
           resources.push({
             type: "kv_namespace",
             name: native,
-            namespace_id: await ensureNamespace(name),
+            namespace_id: await ensureNamespace(name, app.appId),
           });
         } else {
-          await ensureQueue(name);
+          await ensureQueue(name, app.appId);
           resources.push({ type: "queue", name: native, queue_name: name });
         }
       }
 
       for (const consumer of app.metadata.queue_consumers) {
-        await ensureQueue(cloudflareResourceName(app.appId, "queue", consumer.queue));
+        await ensureQueue(cloudflareResourceName(app.appId, "queue", consumer.queue), app.appId);
 
         if (consumer.dead_letter_queue)
-          await ensureQueue(cloudflareResourceName(app.appId, "queue", consumer.dead_letter_queue));
+          await ensureQueue(
+            cloudflareResourceName(app.appId, "queue", consumer.dead_letter_queue),
+            app.appId,
+          );
       }
 
       return { nativeBindings, resources };

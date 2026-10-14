@@ -1,6 +1,6 @@
 import type { CloudflareWorkersModule } from "@cloudflare/workers-types";
 import * as contract from "@platform/contracts";
-import { eq } from "drizzle-orm";
+import { and, eq, gt } from "drizzle-orm";
 import { z } from "zod";
 import type { CloudflareBindings } from "./cloudflare-config.ts";
 import { withCloudflareDatabase } from "./cloudflare-database.ts";
@@ -12,6 +12,7 @@ import { updateCloudflareBindings } from "./cloudflare-binding-updates.ts";
 import { createCloudflareEvents } from "./cloudflare-events.ts";
 import { retryable } from "./cloudflare-deployment.ts";
 import { apps, artifacts, cloudflareOperations } from "./schema.ts";
+import { settleCloudflareResourceCreations } from "./cloudflare-resource-creations.ts";
 import { InvalidOperation } from "./errors.ts";
 
 export const createCloudflareRemover = (bindings: CloudflareBindings, transport = fetch) => {
@@ -119,17 +120,32 @@ export const createCloudflareRemover = (bindings: CloudflareBindings, transport 
       return z.object({ result: z.object({ done: z.boolean() }) }).parse(await response.json())
         .result.done;
     },
+    settleCreations: (appId: string) =>
+      withCloudflareDatabase(bindings, ({ db }) =>
+        settleCloudflareResourceCreations(db, appId, provisioner),
+      ),
     inventory: (appId: string) =>
       withCloudflareDatabase(bindings, async ({ db }) => {
-        const records = await db
-          .select({ metadata: artifacts.metadata })
-          .from(artifacts)
-          .where(eq(artifacts.appId, appId));
+        const resources = new Map<string, ReturnType<typeof removalResources>[number]>();
+        let after: string | undefined;
 
-        return removalResources(
-          appId,
-          records.map((record) => contract.workerMetadata.parse(record.metadata)),
-        );
+        for (;;) {
+          const records = await db
+            .select({ id: artifacts.id, metadata: artifacts.metadata })
+            .from(artifacts)
+            .where(and(eq(artifacts.appId, appId), after ? gt(artifacts.id, after) : undefined))
+            .orderBy(artifacts.id)
+            .limit(100);
+
+          for (const record of records)
+            for (const resource of removalResources(appId, [
+              contract.workerMetadata.parse(record.metadata),
+            ]))
+              resources.set(resource.name, resource);
+
+          if (records.length < 100) return [...resources.values()];
+          after = records.at(-1)?.id;
+        }
       }),
     detach: (names: string[]) =>
       withCloudflareDatabase(bindings, ({ db }) =>
@@ -218,6 +234,10 @@ export const executeCloudflareRemoval = async (
 
         if (done) break;
       }
+
+      await step.do(`settle-creations-${target.id}`, options, () =>
+        retryable(() => runner.settleCreations(target.id)),
+      );
 
       const resources = await step.do(`inventory-${target.id}`, options, () =>
         retryable(() => runner.inventory(target.id)),

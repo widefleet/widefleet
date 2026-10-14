@@ -8,10 +8,13 @@ import { transact } from "./transactions.ts";
 import type { Database } from "./database.ts";
 import type { Principal } from "./identity.ts";
 import type { CloudflareBindings } from "./cloudflare-config.ts";
-import { cloudflareRemovalCommand, removalTarget } from "./cloudflare-removal-command.ts";
+import {
+  cloudflareRemovalCommand,
+  cloudflareRemovalId,
+  removalTarget,
+} from "./cloudflare-removal-command.ts";
 import { cloudflareAppOperation } from "./cloudflare-app-operation-command.ts";
 import { acceptCloudflareWorkflow } from "./cloudflare-admission.ts";
-import { hostedDeploymentId } from "./deployment-execution.ts";
 import { DatabaseUnavailable, InvalidOperation, StorageUnavailable } from "./errors.ts";
 
 export const registerCloudflareRemoval = (
@@ -116,7 +119,7 @@ export const createCloudflareRemoval =
         const workflow = bindings.APP_OPERATIONS;
 
         if (!workflow) throw new Error("App operation Workflow binding is missing");
-        const id = hostedDeploymentId(appId, "remove-app");
+        const id = cloudflareRemovalId(appId, principal.id);
         const previous = await bindings.ARTIFACTS.get(`apps/${appId}/commands/${id}.json`);
 
         const requested = previous
@@ -129,7 +132,7 @@ export const createCloudflareRemoval =
               createdAt: new Date().toISOString(),
             };
 
-        if (requested.id !== id || requested.appId !== appId)
+        if (requested.id !== id || requested.appId !== appId || requested.actor.id !== principal.id)
           throw new Error("Invalid removal command");
 
         const command = cloudflareRemovalCommand.parse(
@@ -143,12 +146,26 @@ export const createCloudflareRemoval =
 
         const registered = await registerCloudflareRemoval(database, command);
 
-        // The accepted Workflow may have completed before the API materializes its history.
-        if (
-          registered.isErr() &&
-          !(registered.error instanceof InvalidOperation && registered.error.code === "NOT_FOUND")
-        )
-          throw registered.error;
+        // Authorization failures also use NOT_FOUND. Only a physically absent
+        // app proves that the accepted Workflow completed before this request.
+        if (registered.isErr()) {
+          if (
+            !(registered.error instanceof InvalidOperation) ||
+            registered.error.code !== "NOT_FOUND"
+          )
+            throw registered.error;
+
+          const [remaining] = await database
+            .select({ id: apps.id })
+            .from(apps)
+            .where(eq(apps.id, appId));
+
+          if (remaining)
+            throw new InvalidOperation({
+              code: "CONFLICT",
+              message: "The removal requester no longer has access to this app",
+            });
+        }
 
         return { accepted: true };
       },
