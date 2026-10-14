@@ -36,6 +36,11 @@ export const runtimeReleases = pgTable("runtime_release", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const cloudflareRuntimeBindings = pgTable("cloudflare_runtime_bindings", {
+  scope: text().primaryKey(),
+  pending: jsonb(),
+});
+
 export const connectors = pgTable(
   "connector",
   {

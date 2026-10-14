@@ -13,9 +13,13 @@ import {
   validateCloudflareArtifact,
 } from "./cloudflare-operations.ts";
 import { CloudflareApiError, createCloudflareProvisioner } from "./cloudflare-provisioning.ts";
+import {
+  CloudflareBindingUpdatePending,
+  pendingCloudflareBindingMessage,
+  updateCloudflareBindings,
+} from "./cloudflare-binding-updates.ts";
 import { deploymentCommand, hostedDeploymentId } from "./deployment-execution.ts";
 import { InvalidOperation } from "./errors.ts";
-import { lockFleet } from "./fleets.ts";
 import { apps, artifacts, cloudflareOperations, deploymentEvents, deployments } from "./schema.ts";
 import { createR2Storage } from "./storage/r2.ts";
 import { transact } from "./transactions.ts";
@@ -109,24 +113,12 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
     provision: async (command: z.infer<typeof deploymentCommand>) => {
       if (command.kind !== "deploy") return {};
 
-      return provisioner.provision(await artifact(command.artifactId), (operation) =>
-        withCloudflareDatabase(bindings, async ({ db }) =>
-          value(
-            await transact(db, async (transaction) => {
-              const [app] = await transaction.select().from(apps).where(eq(apps.id, command.appId));
-
-              if (!app) throw new Error("Deployment app not found");
-
-              // Only the read/modify/write of shared Worker bindings needs this installation lock.
-              // Native Workflows still own scheduling, retries and all other execution steps.
-              await lockFleet(transaction, app.fleetId);
-              await operation();
-
-              return Result.ok(undefined);
-            }),
-          ),
-        ),
+      const prepared = await provisioner.provision(await artifact(command.artifactId));
+      await withCloudflareDatabase(bindings, ({ db }) =>
+        updateCloudflareBindings(db, provisioner, prepared.resources),
       );
+
+      return prepared.nativeBindings;
     },
     activate: async (
       command: z.infer<typeof deploymentCommand>,
@@ -316,13 +308,22 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
       withCloudflareDatabase(bindings, async ({ db }) =>
         value(
           await transact(db, async (transaction) => {
+            // Workflow step errors lose their custom type across durable execution.
+            // Keep the unresolved resource update visible in CLI/API/UI deployment history.
+            const pending =
+              error && command.kind === "deploy"
+                ? await pendingCloudflareBindingMessage(transaction, provisioner.scope)
+                : null;
+
+            const failure = pending ? `${error}. ${pending}` : error;
+
             const [record] = await transaction
               .update(cloudflareOperations)
-              .set({ finishedAt: new Date(), error })
+              .set({ finishedAt: new Date(), error: failure })
               .where(eq(cloudflareOperations.id, command.id))
               .returning();
 
-            if (!record || !error) return Result.ok(undefined);
+            if (!record || !failure) return Result.ok(undefined);
 
             if (command.kind === "deploy") {
               const [deployment] = await transaction
@@ -334,11 +335,11 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               if (deployment && deployment.status !== "succeeded") {
                 await transaction
                   .update(deployments)
-                  .set({ status: "failed", finishedAt: new Date(), message: error })
+                  .set({ status: "failed", finishedAt: new Date(), message: failure })
                   .where(eq(deployments.id, command.id));
                 await transaction
                   .insert(deploymentEvents)
-                  .values({ deploymentId: command.id, level: "error", message: error });
+                  .values({ deploymentId: command.id, level: "error", message: failure });
               }
             }
 
@@ -357,7 +358,7 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               )
                 await transaction
                   .update(apps)
-                  .set({ networkError: error })
+                  .set({ networkError: failure })
                   .where(eq(apps.id, app.id));
 
               if (
@@ -366,7 +367,7 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               )
                 await transaction
                   .update(apps)
-                  .set({ accessError: error })
+                  .set({ accessError: failure })
                   .where(eq(apps.id, app.id));
             }
 
@@ -383,7 +384,8 @@ const retryable = async <T>(operation: () => Promise<T>) => {
   } catch (error) {
     if (error instanceof InvalidOperation) throw new NonRetryableError(error.message);
 
-    if (error instanceof CloudflareApiError) throw new Error(error.message);
+    if (error instanceof CloudflareApiError || error instanceof CloudflareBindingUpdatePending)
+      throw new Error(error.message);
     throw new Error("Cloudflare deployment step failed");
   }
 };

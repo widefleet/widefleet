@@ -9,8 +9,23 @@ const database = z.object({ uuid: z.uuid(), name: z.string() });
 const bucket = z.object({ name: z.string() });
 
 const workerBindings = z.object({
-  bindings: z.array(z.object({ name: z.string(), type: z.string() })),
+  annotations: z.object({ "workers/tag": z.string().optional() }).optional(),
+  bindings: z.array(
+    z.object({
+      name: z.string(),
+      type: z.string(),
+      id: z.string().optional(),
+      database_id: z.string().optional(),
+      bucket_name: z.string().optional(),
+      jurisdiction: z.string().optional(),
+    }),
+  ),
 });
+
+export const cloudflareResource = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("d1"), name: z.string(), id: z.string() }),
+  z.object({ type: z.literal("r2_bucket"), name: z.string(), bucket_name: z.string() }),
+]);
 
 export class CloudflareApiError extends Error {
   constructor(readonly status: number) {
@@ -104,16 +119,36 @@ export const createCloudflareProvisioner = (
   };
 
   return {
-    provision: async (
-      app: Pick<z.infer<typeof contract.artifact>, "appId" | "metadata">,
-      updateBindings: (operation: () => Promise<void>) => Promise<void>,
+    scope: `${configuration.accountId}/${configuration.runtimeName}`,
+    readBindings: async () =>
+      workerBindings.parse(
+        await request(`/workers/scripts/${encodeURIComponent(configuration.runtimeName)}/settings`),
+      ),
+    writeBindings: async (
+      id: string,
+      retained: string[],
+      resources: z.infer<typeof cloudflareResource>[],
     ) => {
+      const settings = new FormData();
+      settings.set(
+        "settings",
+        JSON.stringify({
+          annotations: { "workers/tag": id },
+          bindings: [
+            // Inheritance preserves secrets, native bindings and retained app versions.
+            ...retained.map((name) => ({ name, type: "inherit" })),
+            ...resources,
+          ],
+        }),
+      );
+      await request(`/workers/scripts/${encodeURIComponent(configuration.runtimeName)}/settings`, {
+        method: "PATCH",
+        body: settings,
+      });
+    },
+    provision: async (app: Pick<z.infer<typeof contract.artifact>, "appId" | "metadata">) => {
       const nativeBindings: Record<string, string> = {};
-
-      const resources: (
-        | { type: "d1"; name: string; id: string }
-        | { type: "r2_bucket"; name: string; bucket_name: string }
-      )[] = [];
+      const resources: z.infer<typeof cloudflareResource>[] = [];
 
       for (const binding of app.metadata.bindings) {
         if (binding.type === "plain_text") continue;
@@ -143,28 +178,7 @@ export const createCloudflareProvisioner = (
         }
       }
 
-      if (resources.length)
-        await updateBindings(async () => {
-          const path = `/workers/scripts/${encodeURIComponent(configuration.runtimeName)}/settings`;
-          const current = workerBindings.parse(await request(path));
-          const replacements = new Set(resources.map((resource) => resource.name));
-          const settings = new FormData();
-          settings.set(
-            "settings",
-            JSON.stringify({
-              bindings: [
-                // Inheritance preserves secrets, native bindings and retained app versions.
-                ...current.bindings
-                  .filter((binding) => !replacements.has(binding.name))
-                  .map((binding) => ({ name: binding.name, type: "inherit" })),
-                ...resources,
-              ],
-            }),
-          );
-          await request(path, { method: "PATCH", body: settings });
-        });
-
-      return nativeBindings;
+      return { nativeBindings, resources };
     },
   };
 };

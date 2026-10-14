@@ -14,7 +14,13 @@ import release from "@platform/app-runtime/release" with { type: "json" };
 import { createTestEnvironment } from "../environment.ts";
 import { deploymentSource, seedDeployment } from "../cloudflare-deployment.fixture.ts";
 import { initializeCloudflareFleet } from "../../src/lib/server/fleets.ts";
-import { apps, cloudflareOperations, deployments, jobs } from "../../src/lib/server/schema.ts";
+import {
+  apps,
+  cloudflareOperations,
+  cloudflareRuntimeBindings,
+  deployments,
+  jobs,
+} from "../../src/lib/server/schema.ts";
 
 const resourceName = (appId: string, kind: string, name: string) =>
   `r${createHash("sha256").update(`${appId}/${kind}/${name}`).digest("hex").slice(0, 40)}`;
@@ -28,19 +34,32 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
     let first: Awaited<ReturnType<typeof seedDeployment>>;
     let preview: Awaited<ReturnType<typeof seedDeployment>>;
     let rejected: Awaited<ReturnType<typeof seedDeployment>>;
+    let delayed: Awaited<ReturnType<typeof seedDeployment>>;
+    let lostResponse: Awaited<ReturnType<typeof seedDeployment>>;
     const token = "local-deployment-runtime-token-never-deploy";
     const largeGroups = Array.from({ length: 100 }, (_, index) => `${index}-${"group".repeat(40)}`);
     const databases = new Map<string, string>();
     const createdDatabases = new Set<string>();
     const buckets = new Set<string>();
 
-    const settings = new Map([
+    const nativeBinding = z.object({
+      name: z.string(),
+      type: z.string(),
+      id: z.string().optional(),
+      bucket_name: z.string().optional(),
+    });
+
+    const settings = new Map<string, z.infer<typeof nativeBinding>>([
       ["WIDEFLEET_PACKAGES", { name: "WIDEFLEET_PACKAGES", type: "r2_bucket" }],
       ["WIDEFLEET_CONTROL_TOKEN", { name: "WIDEFLEET_CONTROL_TOKEN", type: "secret_text" }],
     ]);
 
     const updates: { name: string; type: string }[][] = [];
     let patches = 0;
+    let bindingRequests = 0;
+    let bindingMode = "normal";
+    let delayedBindingUpdate: (() => void) | undefined;
+    let bindingTag = "initial";
     let apiOrigin = "";
 
     const api = createServer((request, response) => {
@@ -50,7 +69,14 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
 
         for await (const chunk of request) body += String(chunk);
 
-        const ok = (result: z.infer<ReturnType<typeof z.json>>) => {
+        const ok = (
+          result:
+            | z.infer<ReturnType<typeof z.json>>
+            | {
+                bindings: z.infer<typeof nativeBinding>[];
+                annotations: Record<string, string>;
+              },
+        ) => {
           response.setHeader("content-type", "application/json");
           response.end(JSON.stringify({ success: true, result }));
         };
@@ -89,32 +115,54 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
               headers: { "content-type": request.headers["content-type"] ?? "" },
             }).formData();
 
-            const { bindings } = z
-              .object({ bindings: z.array(z.object({ name: z.string(), type: z.string() })) })
+            const { bindings, annotations } = z
+              .object({
+                bindings: z.array(nativeBinding),
+                annotations: z.object({ "workers/tag": z.uuid() }),
+              })
               .parse(JSON.parse(z.string().parse(multipart.get("settings"))));
 
-            const retained = new Map(
-              bindings.map((binding) => {
-                const inherited = binding.type === "inherit" ? settings.get(binding.name) : binding;
+            bindingRequests++;
 
-                if (!inherited) throw new Error("Unknown inherited binding");
+            const apply = () => {
+              const retained = new Map(
+                bindings.map((binding) => {
+                  const inherited =
+                    binding.type === "inherit" ? settings.get(binding.name) : binding;
 
-                return [binding.name, inherited] as const;
-              }),
-            );
+                  if (!inherited) throw new Error("Unknown inherited binding");
 
-            for (const name of settings.keys()) {
-              if (!retained.has(name)) throw new Error(`Existing binding removed: ${name}`);
+                  return [binding.name, inherited] as const;
+                }),
+              );
+
+              for (const name of settings.keys()) {
+                if (!retained.has(name)) throw new Error(`Existing binding removed: ${name}`);
+              }
+
+              settings.clear();
+
+              for (const [name, binding] of retained) settings.set(name, binding);
+              updates.push(bindings);
+              patches++;
+              bindingTag = annotations["workers/tag"];
+            };
+
+            const mode = bindingMode;
+            bindingMode = "normal";
+
+            if (mode === "delayed") delayedBindingUpdate = apply;
+            else apply();
+
+            if (mode !== "normal") {
+              response.statusCode = 503;
+              response.end();
+
+              return;
             }
-
-            settings.clear();
-
-            for (const [name, binding] of retained) settings.set(name, binding);
-            updates.push(bindings);
-            patches++;
           }
 
-          ok({ bindings: [...settings.values()] });
+          ok({ bindings: [...settings.values()], annotations: { "workers/tag": bindingTag } });
         } else throw new Error("Unexpected API request");
       };
 
@@ -225,8 +273,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       (await initializeCloudflareFleet(environment.database.db)).unwrap();
       first = await seedDeployment(environment.database.db);
       preview = await seedDeployment(environment.database.db, { groups: largeGroups });
+      delayed = await seedDeployment(environment.database.db);
+      lostResponse = await seedDeployment(environment.database.db);
 
-      for (const entry of [first, preview])
+      for (const entry of [first, preview, delayed, lostResponse])
         databases.set(resourceName(entry.appId, "d1", "data"), crypto.randomUUID());
       directory = await mkdtemp(join(tmpdir(), "widefleet-deployment-workerd-"));
       api.listen(0, "127.0.0.1");
@@ -353,7 +403,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           r2_buckets: [
             { binding: "ARTIFACTS", bucket_name: "artifacts" },
             { binding: "WIDEFLEET_PACKAGES", bucket_name: "artifacts" },
-            ...[first, preview].map((entry) => ({
+            ...[first, preview, delayed, lostResponse].map((entry) => ({
               binding: `B_${resourceName(entry.appId, "r2", "files")}`,
               bucket_name: resourceName(entry.appId, "r2", "files"),
             })),
@@ -368,6 +418,8 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       worker = await start();
       await seed(first);
       await seed(preview);
+      await seed(delayed);
+      await seed(lostResponse);
     }, 45_000);
     afterAll(async () => {
       await worker?.stop();
@@ -702,7 +754,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         method: "POST",
       });
       await completed(entry.command.id);
-      expect(patches).toBe(prepared + 1);
+      expect(patches).toBe(prepared);
       expect(createdDatabases.size).toBe(2);
       expect(buckets.size).toBe(2);
       expect(await (await worker.fetch(`https://${first.hostname}/`)).text()).toBe("third version");
@@ -748,5 +800,59 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       expect(record?.status).toBe("succeeded");
       expect(await host(first.hostname)).toEqual(active);
     }, 30_000);
+    it("retains an unconfirmed binding write after native failure and process restart", async () => {
+      const before = bindingRequests;
+      bindingMode = "delayed";
+      await dispatch(delayed, "fast-retries");
+      await expect
+        .poll(() => nativeStatus(delayed.command.id), { timeout: 30_000, interval: 100 })
+        .toBe("errored");
+      expect(bindingRequests).toBe(before + 1);
+      expect((await operation(delayed.command.id))?.error).toContain("resource update");
+
+      const [record] = await environment.database.db
+        .select()
+        .from(deployments)
+        .where(eq(deployments.id, delayed.command.id));
+
+      expect(record?.message).toContain("unconfirmed");
+      const [pending] = await environment.database.db.select().from(cloudflareRuntimeBindings);
+      expect(
+        z.object({ bindings: z.array(z.string()) }).parse(pending?.pending).bindings,
+      ).toContain(`B_${resourceName(delayed.appId, "d1", "data")}`);
+      expect(await host(delayed.hostname)).toBeNull();
+
+      const codeOnly = await seedDeployment(environment.database.db, { appId: first.appId });
+      await seed(codeOnly);
+      await dispatch(codeOnly);
+      await completed(codeOnly.command.id);
+      expect(bindingRequests).toBe(before + 1);
+      expect((await worker.fetch(`https://${first.hostname}/resources`)).status).toBe(200);
+      await worker.stop();
+      worker = await start();
+
+      if (!delayedBindingUpdate) throw new Error("Missing delayed settings write");
+      delayedBindingUpdate();
+      delayedBindingUpdate = undefined;
+      await worker.fetch(`http://fixture/workflow?id=${delayed.command.id}&action=restart`, {
+        method: "POST",
+      });
+      await completed(delayed.command.id);
+      expect(bindingRequests).toBe(before + 1);
+      expect((await worker.fetch(`https://${delayed.hostname}/resources`)).status).toBe(200);
+      const [reconciled] = await environment.database.db.select().from(cloudflareRuntimeBindings);
+      expect(reconciled?.pending).toBeNull();
+    }, 90_000);
+
+    it("automatically confirms an applied binding update after a lost acknowledgement", async () => {
+      const before = bindingRequests;
+      bindingMode = "lost-response";
+      await dispatch(lostResponse);
+      await completed(lostResponse.command.id);
+      expect(bindingRequests).toBe(before + 1);
+      expect((await worker.fetch(`https://${lostResponse.hostname}/resources`)).status).toBe(200);
+      const [record] = await environment.database.db.select().from(cloudflareRuntimeBindings);
+      expect(record?.pending).toBeNull();
+    }, 60_000);
   },
 );

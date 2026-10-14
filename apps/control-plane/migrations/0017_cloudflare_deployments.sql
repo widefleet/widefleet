@@ -13,3 +13,8 @@ CREATE TABLE "cloudflare_operation" (
   "finished_at" timestamp with time zone,
   "error" text
 );
+--> statement-breakpoint
+CREATE TABLE "cloudflare_runtime_bindings" (
+  "scope" text PRIMARY KEY NOT NULL,
+  "pending" jsonb
+);

@@ -3,8 +3,6 @@ import { workerMetadata } from "@platform/contracts";
 import { createCloudflareProvisioner } from "../src/lib/server/cloudflare-provisioning.ts";
 import { z } from "zod";
 
-const updateBindings = (operation: () => Promise<void>) => operation();
-
 const fixture = () => {
   const databases = new Map<string, string>();
   const buckets = new Set<string>();
@@ -102,11 +100,18 @@ describe("Cloudflare app provisioning", () => {
     const cloud = fixture();
     const deployment = app();
     cloud.loseNextResponse();
-    await expect(cloud.create().provision(deployment, updateBindings)).rejects.toThrow(
-      "Lost creation response",
+    await expect(cloud.create().provision(deployment)).rejects.toThrow("Lost creation response");
+    const prepared = await cloud.create().provision(deployment);
+    expect(await cloud.create().provision(deployment)).toEqual(prepared);
+    const bindings = prepared.nativeBindings;
+    const current = await cloud.create().readBindings();
+    const id = crypto.randomUUID();
+    await cloud.create().writeBindings(
+      id,
+      current.bindings.map((binding) => binding.name),
+      prepared.resources,
     );
-    const bindings = await cloud.create().provision(deployment, updateBindings);
-    expect(await cloud.create().provision(deployment, updateBindings)).toEqual(bindings);
+    expect(cloud.patches[0]).toMatchObject({ annotations: { "workers/tag": id } });
     expect(cloud.databases.size).toBe(1);
     expect(cloud.buckets.size).toBe(1);
     const patch = z.object({ bindings: z.array(z.unknown()) }).parse(cloud.patches.at(-1));
@@ -128,8 +133,8 @@ describe("Cloudflare app provisioning", () => {
     const cloud = fixture();
     const first = app();
     const second = { ...first, appId: crypto.randomUUID() };
-    expect(await cloud.create().provision(first, updateBindings)).not.toEqual(
-      await cloud.create().provision(second, updateBindings),
+    expect(await cloud.create().provision(first)).not.toEqual(
+      await cloud.create().provision(second),
     );
     expect(cloud.databases.size).toBe(2);
     expect(cloud.buckets.size).toBe(2);
@@ -158,7 +163,7 @@ describe("Cloudflare app provisioning", () => {
       },
     );
 
-    await expect(provisioner.provision(app(), updateBindings)).rejects.toThrow(
+    await expect(provisioner.provision(app())).rejects.toThrow(
       "Cloudflare provisioning request failed (HTTP 403)",
     );
     expect(requests).toBe(1);
