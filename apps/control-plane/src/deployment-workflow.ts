@@ -3,21 +3,23 @@ import { WorkflowEntrypoint } from "cloudflare:workers";
 import type { z } from "zod";
 import type { CloudflareBindings } from "./lib/server/cloudflare-config.ts";
 import { executeCloudflareDeployment } from "./lib/server/cloudflare-deployment.ts";
-import { deploymentCommand } from "./lib/server/deployment-execution.ts";
+import { deploymentWorkflowCommand } from "./lib/server/cloudflare-connector-command.ts";
+import { executeCloudflareConnector } from "./lib/server/cloudflare-connector-deployment.ts";
 
 export class DeploymentWorkflow extends WorkflowEntrypoint<
   CloudflareBindings,
-  z.infer<typeof deploymentCommand>
+  z.infer<typeof deploymentWorkflowCommand>
 > {
   override async run(
-    event: CloudflareWorkersModule.WorkflowEvent<z.infer<typeof deploymentCommand>>,
+    event: CloudflareWorkersModule.WorkflowEvent<z.infer<typeof deploymentWorkflowCommand>>,
     step: CloudflareWorkersModule.WorkflowStep,
   ) {
-    const command = deploymentCommand.parse(event.payload);
+    const command = deploymentWorkflowCommand.parse(event.payload);
 
     if (event.instanceId !== command.id)
       throw new Error("Deployment workflow identity does not match its command");
 
-    await executeCloudflareDeployment(this.env, command, step);
+    if (command.kind === "connector") await executeCloudflareConnector(this.env, command, step);
+    else await executeCloudflareDeployment(this.env, command, step);
   }
 }

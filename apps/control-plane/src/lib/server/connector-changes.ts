@@ -1,0 +1,332 @@
+import * as contract from "@platform/contracts";
+import { Result } from "better-result";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
+import { z } from "zod";
+import { isDeepStrictEqual } from "node:util";
+import { managedApp } from "./apps.ts";
+import { InvalidOperation } from "./errors.ts";
+import { lockFleet, requireAgentExecution } from "./fleets.ts";
+import type { Principal } from "./identity.ts";
+import { savePackage } from "./package-storage.ts";
+import { connectorReference, validateConnectorEnvironment } from "./connector-package.ts";
+import {
+  apps,
+  artifacts,
+  connectors,
+  deployments,
+  jobs,
+  cloudflareOperations,
+  type fleets,
+} from "./schema.ts";
+import type { ArtifactStorage } from "./storage.ts";
+import type { Transaction } from "./transactions.ts";
+
+export const administrator = (principal: Pick<Principal, "admin">) => {
+  if (!principal.admin)
+    throw new InvalidOperation({
+      code: "FORBIDDEN",
+      message: "Administrator permission is required",
+    });
+};
+
+export const connectorStatus = async (
+  transaction: Transaction,
+  record: typeof connectors.$inferSelect,
+) => {
+  const selected = connectorReference.parse(record.package);
+  const active = record.appliedPackage ? connectorReference.parse(record.appliedPackage) : null;
+  const [job] = await transaction.select().from(jobs).where(eq(jobs.id, record.jobId));
+
+  const [operation] = job
+    ? []
+    : await transaction
+        .select()
+        .from(cloudflareOperations)
+        .where(eq(cloudflareOperations.id, record.jobId));
+
+  if (!job && !operation) throw new Error("Connector deployment history is missing");
+  const result = z.object({ message: z.string() }).safeParse(job?.result);
+
+  const state =
+    job?.state ?? (operation?.finishedAt ? (operation.error ? "failed" : "succeeded") : "queued");
+
+  return contract.connectorStatus.parse({
+    name: record.name,
+    checksum: selected.checksum,
+    appliedChecksum: active?.checksum ?? null,
+    secretRevision: selected.secretRevision,
+    appliedSecretRevision: active?.secretRevision ?? null,
+    secrets: Object.keys(selected.secrets).sort(),
+    jobId: record.jobId,
+    state,
+    message: result.success ? result.data.message : (operation?.error ?? null),
+    entrypoints: selected.entrypoints,
+  });
+};
+
+export const checkCapabilityNames = (
+  metadata: z.infer<typeof contract.workerMetadata>,
+  grants: z.infer<typeof contract.capabilityGrants>,
+) => {
+  const names = new Set([
+    metadata.assets.binding,
+    ...metadata.bindings.map((binding) => binding.name),
+  ]);
+
+  if (Object.keys(grants).some((name) => name.startsWith("WIDEFLEET_") || names.has(name)))
+    throw new InvalidOperation({
+      code: "CONFLICT",
+      message: "Connector binding collides with an app resource or reserved platform binding",
+    });
+};
+
+export const bindingState = (app: typeof apps.$inferSelect) =>
+  contract.capabilityState.parse({
+    revision: app.capabilityRevision,
+    grants: app.capabilities,
+    appliedRevision: app.appliedCapabilityRevision,
+    error: app.capabilityError,
+    state: app.capabilityError
+      ? "failed"
+      : !app.activeDeploymentId
+        ? "saved"
+        : app.appliedCapabilityRevision === app.capabilityRevision
+          ? "active"
+          : "pending",
+  });
+
+export const prepareConnector = async (
+  transaction: Transaction,
+  storage: ArtifactStorage,
+  fleet: typeof fleets.$inferSelect,
+  release: z.infer<typeof contract.connectorPackage>,
+) => {
+  const inventory = await transaction
+    .select()
+    .from(connectors)
+    .where(eq(connectors.fleetId, fleet.id));
+
+  const existing = inventory.find((entry) => entry.name === release.name);
+  const previous = existing ? connectorReference.parse(existing.package) : null;
+  validateConnectorEnvironment(release.configuration, Object.keys(previous?.secrets ?? {}));
+
+  const classes = release.configuration.durable_objects.bindings.map(
+    (binding) => binding.class_name,
+  );
+
+  const otherClasses = inventory
+    .filter((entry) => entry.name !== release.name)
+    .flatMap((entry) =>
+      [entry.package, entry.appliedPackage].flatMap((reference) =>
+        reference ? connectorReference.parse(reference).classes : [],
+      ),
+    );
+
+  if (fleet.executor === "agent" && classes.some((name) => otherClasses.includes(name)))
+    throw new InvalidOperation({
+      code: "CONFLICT",
+      message: "celld requires Durable Object class names to be unique within the fleet",
+    });
+
+  const resourceNames = [
+    ...Object.keys(release.configuration.vars),
+    ...release.configuration.d1_databases.map((binding) => binding.binding),
+    ...release.configuration.r2_buckets.map((binding) => binding.binding),
+    ...release.configuration.kv_namespaces.map((binding) => binding.binding),
+    ...release.configuration.durable_objects.bindings.map((binding) => binding.name),
+  ];
+
+  if (
+    [...resourceNames, ...release.entrypoints, ...classes].some((name) =>
+      name.startsWith("WIDEFLEET_"),
+    )
+  )
+    throw new InvalidOperation({
+      code: "BAD_REQUEST",
+      message: "Platform connector names are reserved",
+    });
+
+  if (new Set(resourceNames).size !== resourceNames.length)
+    throw new InvalidOperation({
+      code: "BAD_REQUEST",
+      message: "Connector resource binding names must be unique",
+    });
+
+  const consumers = await transaction
+    .select({ capabilities: apps.capabilities, applied: apps.appliedCapabilities })
+    .from(apps)
+    .where(eq(apps.fleetId, fleet.id));
+
+  for (const consumer of consumers)
+    for (const grant of [
+      ...Object.values(contract.capabilityGrants.parse(consumer.capabilities)),
+      ...Object.values(
+        consumer.applied ? contract.capabilitySnapshot.parse(consumer.applied).grants : {},
+      ),
+    ])
+      if (grant.connector === release.name && !release.entrypoints.includes(grant.entrypoint))
+        throw new InvalidOperation({
+          code: "CONFLICT",
+          message: "Unbind existing app bindings before removing their connector entrypoint",
+        });
+
+  const removesEntrypoint = inventory.some(
+    (entry) =>
+      entry.name === release.name &&
+      [entry.package, entry.appliedPackage].some(
+        (value) =>
+          value &&
+          connectorReference
+            .parse(value)
+            .entrypoints.some((name) => !release.entrypoints.includes(name)),
+      ),
+  );
+
+  if (fleet.executor === "cloudflare" && removesEntrypoint) {
+    // An activation can publish grants before its SQL receipt commits. Keep those
+    // grants protected until a later confirmed revision proves their revocation.
+    const unconfirmed = await transaction
+      .select({ result: cloudflareOperations.result })
+      .from(cloudflareOperations)
+      .innerJoin(apps, eq(apps.id, cloudflareOperations.appId))
+      .where(
+        and(
+          eq(apps.fleetId, fleet.id),
+          sql`${cloudflareOperations.command}->>'kind' = 'capabilities'`,
+          sql`(${cloudflareOperations.result}->>'revision')::integer > COALESCE(${apps.appliedCapabilityRevision}, -1)`,
+        ),
+      );
+
+    for (const operation of unconfirmed)
+      for (const grant of Object.values(contract.capabilityState.parse(operation.result).grants))
+        if (grant.connector === release.name && !release.entrypoints.includes(grant.entrypoint))
+          throw new InvalidOperation({
+            code: "CONFLICT",
+            message:
+              "Confirm pending app binding changes before removing their connector entrypoint",
+          });
+  }
+
+  const checksum = await savePackage(storage, release);
+
+  const reference = connectorReference.parse({
+    secrets: previous?.secrets ?? {},
+    secretRevision: previous?.secretRevision ?? 0,
+    name: release.name,
+    checksum,
+    entrypoints: release.entrypoints,
+    classes: [...new Set(classes)],
+  });
+
+  return { reference, existing };
+};
+
+export const validateCapabilityChange = async (
+  transaction: Transaction,
+  principal: Pick<Principal, "id" | "admin">,
+  appId: string,
+  name: string,
+  grant: z.infer<typeof contract.capabilityGrant> | null,
+  enqueue: boolean,
+) => {
+  administrator(principal);
+
+  const [target] = await transaction
+    .select({ fleetId: apps.fleetId })
+    .from(apps)
+    .where(eq(apps.id, appId));
+
+  if (!target) throw new InvalidOperation({ code: "NOT_FOUND", message: "App not found" });
+  // Match claim/deploy lock order, so concurrent connector updates and grants agree.
+  await lockFleet(transaction, target.fleetId);
+
+  if (enqueue) await requireAgentExecution(transaction, target.fleetId, "Connectors");
+  const access = await managedApp(transaction, principal, appId);
+
+  if (access.isErr()) return access;
+  const app = access.value;
+
+  if (app.state === "deleting")
+    throw new InvalidOperation({ code: "CONFLICT", message: "App is being deleted" });
+  const grants = contract.capabilityGrants.parse(app.capabilities);
+
+  if (grant) {
+    const [record] = await transaction
+      .select()
+      .from(connectors)
+      .where(and(eq(connectors.fleetId, app.fleetId), eq(connectors.name, grant.connector)));
+
+    // Failed or pending replacement code must not become a new capability.
+    const active = record?.appliedPackage ? connectorReference.parse(record.appliedPackage) : null;
+
+    if (
+      !active?.entrypoints.includes(grant.entrypoint) ||
+      !record ||
+      !connectorReference.parse(record.package).entrypoints.includes(grant.entrypoint)
+    )
+      throw new InvalidOperation({
+        code: "CONFLICT",
+        message: "Deploy the connector entrypoint successfully before binding it",
+      });
+    grants[name] = grant;
+  } else delete grants[name];
+
+  const candidates = await transaction
+    .select({ metadata: artifacts.metadata })
+    .from(deployments)
+    .innerJoin(artifacts, eq(artifacts.id, deployments.artifactId))
+    .where(
+      and(
+        eq(deployments.appId, app.id),
+        or(
+          inArray(deployments.status, ["queued", "running"]),
+          app.activeDeploymentId ? eq(deployments.id, app.activeDeploymentId) : undefined,
+        ),
+      ),
+    );
+
+  for (const candidate of candidates)
+    checkCapabilityNames(contract.workerMetadata.parse(candidate.metadata), grants);
+
+  return Result.ok({ app, grants });
+};
+
+export const applyCapabilityChange = async (
+  transaction: Transaction,
+  principal: Pick<Principal, "id" | "admin">,
+  appId: string,
+  name: string,
+  grant: z.infer<typeof contract.capabilityGrant> | null,
+  enqueue: boolean,
+) => {
+  const valid = await validateCapabilityChange(transaction, principal, appId, name, grant, enqueue);
+
+  if (valid.isErr()) return valid;
+  const { app, grants } = valid.value;
+
+  if (isDeepStrictEqual(grants, app.capabilities) && !app.capabilityError)
+    return Result.ok(bindingState(app));
+  const changed = !isDeepStrictEqual(grants, app.capabilities);
+
+  const [updated] = await transaction
+    .update(apps)
+    .set({
+      capabilities: grants,
+      capabilityRevision: app.capabilityRevision + Number(changed),
+      capabilityError: null,
+    })
+    .where(eq(apps.id, app.id))
+    .returning();
+
+  if (!updated) throw new Error("Binding update returned no row");
+
+  if (enqueue)
+    await transaction.insert(jobs).values({
+      id: crypto.randomUUID(),
+      appId: app.id,
+      fleetId: app.fleetId,
+      kind: "configure",
+    });
+
+  return Result.ok(bindingState(updated));
+};

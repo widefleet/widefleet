@@ -1,10 +1,12 @@
+import { resolveCloudflareCapabilities } from "./cloudflare-capabilities.ts";
+import { checkCapabilityNames } from "./connector-changes.ts";
 import { CloudflareSubscriptionPending } from "./cloudflare-subscription-updates.ts";
 import { createCloudflareEvents } from "./cloudflare-events.ts";
 import { NonRetryableError } from "cloudflare:workflows";
 import type { CloudflareWorkersModule } from "@cloudflare/workers-types";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { createArtifactStorage } from "./artifact-storage.ts";
 import type { CloudflareBindings } from "./cloudflare-config.ts";
@@ -169,7 +171,39 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
                   code: "CONFLICT",
                   message: "A newer deployment has already been activated",
                 });
-            } else if (!serving) return Result.ok(undefined);
+            } else if (!serving) {
+              if (command.kind === "capabilities") {
+                const [publication] = await transaction
+                  .select({ id: cloudflareOperations.id })
+                  .from(cloudflareOperations)
+                  .where(
+                    and(
+                      eq(cloudflareOperations.appId, app.id),
+                      sql`${cloudflareOperations.command}->>'kind' = 'deploy'`,
+                      // Older history without the marker cannot prove that no PUT started.
+                      sql`${cloudflareOperations.targets}->0->>'publicationStarted' IS DISTINCT FROM 'false'`,
+                    ),
+                  )
+                  .limit(1);
+
+                // The app lock excludes a new publication attempt while confirming
+                // saved changes. Failed readiness/provisioning cannot expose old grants.
+                if (!publication)
+                  await transaction
+                    .update(apps)
+                    .set({
+                      appliedCapabilityRevision: app.capabilityRevision,
+                      appliedCapabilities: {
+                        revision: app.capabilityRevision,
+                        grants: contract.capabilityGrants.parse(app.capabilities),
+                      },
+                      capabilityError: null,
+                    })
+                    .where(eq(apps.id, app.id));
+              }
+
+              return Result.ok(undefined);
+            }
 
             const artifactId = command.kind === "deploy" ? command.artifactId : serving?.id;
 
@@ -194,11 +228,23 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               grants: app.capabilities,
             });
 
-            if (Object.keys(capabilities.grants).length)
-              throw new InvalidOperation({
-                code: "BAD_REQUEST",
-                message: "Cloudflare connector deployment is not available yet",
-              });
+            checkCapabilityNames(
+              contract.workerMetadata.parse(record.metadata),
+              capabilities.grants,
+            );
+
+            // Entrypoint removal waits for confirmed revocation. The app lock is
+            // sufficient here; unrelated apps can activate concurrently.
+            const resolved = await resolveCloudflareCapabilities(
+              transaction,
+              app.fleetId,
+              capabilities.grants,
+            );
+
+            if (resolved.bindings.length)
+              await withCloudflareDatabase(bindings, ({ db: resources }) =>
+                updateCloudflareBindings(resources, provisioner, resolved.bindings),
+              );
 
             const selected = {
               id: record.id,
@@ -209,6 +255,7 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               hostname: app.hostname,
               deploymentId: command.kind === "deploy" ? command.id : serving?.deploymentId,
               network,
+              capabilities: resolved.capabilities,
               capabilityRevision: capabilities.revision,
               nativeBindings: command.kind === "deploy" ? nativeBindings : serving?.nativeBindings,
             };
@@ -289,6 +336,29 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               currentBody !== body ||
               current?.customMetadata?.["widefleet_access"] !== customMetadata.widefleet_access
             ) {
+              if (command.kind === "deploy" && !current)
+                await withCloudflareDatabase(bindings, async ({ db: history }) => {
+                  const [operation] = await history
+                    .select()
+                    .from(cloudflareOperations)
+                    .where(eq(cloudflareOperations.id, command.id));
+
+                  if (!operation) throw new Error("Deployment operation history is missing");
+                  // Commit before PUT, independently of the activation transaction. A
+                  // timed-out first publication may still arrive after this lock is released.
+                  await history
+                    .update(cloudflareOperations)
+                    .set({
+                      targets: z
+                        .array(operationTarget)
+                        .parse(operation.targets)
+                        .map((entry) =>
+                          entry.appId === app.id ? { ...entry, publicationStarted: true } : entry,
+                        ),
+                    })
+                    .where(eq(cloudflareOperations.id, command.id));
+                });
+
               // CAS also protects against a timed-out PUT arriving after this SQL lock was released.
               const activated = await bindings.ARTIFACTS.put(hostKey, body, {
                 onlyIf: current ? { etagMatches: current.etag } : { etagDoesNotMatch: "*" },
@@ -318,6 +388,7 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
                 networkError: null,
                 appliedAccessRevision: access.revision,
                 accessError: null,
+                appliedCapabilities: capabilities,
                 appliedCapabilityRevision: capabilities.revision,
                 capabilityError: null,
               })
@@ -401,6 +472,15 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
                   .where(eq(apps.id, app.id));
 
               if (
+                target.capabilityRevision === app.capabilityRevision &&
+                app.appliedCapabilityRevision !== target.capabilityRevision
+              )
+                await transaction
+                  .update(apps)
+                  .set({ capabilityError: failure })
+                  .where(eq(apps.id, app.id));
+
+              if (
                 target.accessRevision === app.accessRevision &&
                 app.appliedAccessRevision !== target.accessRevision
               )
@@ -417,7 +497,7 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
   };
 };
 
-const retryable = async <T>(operation: () => Promise<T>) => {
+export const retryable = async <T>(operation: () => Promise<T>) => {
   try {
     return await operation();
   } catch (error) {

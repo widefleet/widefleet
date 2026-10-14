@@ -282,10 +282,32 @@ export const runtimeRelease = z.strictObject({
     .min(1),
 });
 
+const connectorValueMaxBytes = 5_000;
+
+export const connectorEnvironmentMaxBindings = 128;
+
+const connectorVariableSizeMessage =
+  "Connector variables must contain at most 5 KB (5000 UTF-8 bytes)";
+
 export const connectorConfiguration = z.strictObject({
   compatibility_date: z.iso.date(),
   compatibility_flags: workerMetadata.shape.compatibility_flags,
-  vars: z.record(bindingName, z.string()).default({}),
+  vars: z
+    .record(
+      bindingName,
+      z
+        .string()
+        .max(connectorValueMaxBytes, connectorVariableSizeMessage)
+        .refine(
+          (value) => new TextEncoder().encode(value).byteLength <= connectorValueMaxBytes,
+          connectorVariableSizeMessage,
+        ),
+    )
+    .refine(
+      (vars) => Object.keys(vars).length <= connectorEnvironmentMaxBindings,
+      "Connectors support at most 128 variables and secrets combined",
+    )
+    .default({}),
   d1_databases: z
     .array(
       z.strictObject({
@@ -338,13 +360,15 @@ export const connectorSecretName = bindingName.refine(
 
 export const connectorSecretPath = z.strictObject({ name: appSlug, secret: connectorSecretName });
 
+const connectorSecretSizeMessage = "Secret value must contain at most 5 KB (5000 UTF-8 bytes)";
+
 export const connectorSecretValue = z
   .string()
   .min(1)
-  .max(65536)
+  .max(connectorValueMaxBytes, connectorSecretSizeMessage)
   .refine(
-    (value) => new TextEncoder().encode(value).byteLength <= 65536,
-    "Secret value must contain at most 65536 UTF-8 bytes",
+    (value) => new TextEncoder().encode(value).byteLength <= connectorValueMaxBytes,
+    connectorSecretSizeMessage,
   );
 
 export const connectorStatus = z.strictObject({

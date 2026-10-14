@@ -134,6 +134,13 @@
       "when": 1792348800000,
       "tag": "0018_cloudflare_subscriptions",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1792435200000,
+      "tag": "0019_cloudflare_connectors",
+      "breakpoints": true
     }
   ]
 }

@@ -27,11 +27,19 @@ const workerBindings = z.object({
       jurisdiction: z.string().optional(),
       namespace_id: z.string().optional(),
       queue_name: z.string().optional(),
+      service: z.string().optional(),
+      entrypoint: z.string().optional(),
     }),
   ),
 });
 
 export const cloudflareResource = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("service"),
+    name: z.string(),
+    service: z.string(),
+    entrypoint: z.string(),
+  }),
   z.object({ type: z.literal("d1"), name: z.string(), id: z.string() }),
   z.object({ type: z.literal("r2_bucket"), name: z.string(), bucket_name: z.string() }),
   z.object({ type: z.literal("kv_namespace"), name: z.string(), namespace_id: z.string() }),
@@ -186,6 +194,9 @@ export const createCloudflareProvisioner = (
 
   return {
     findDatabase,
+    ensureDatabase,
+    ensureBucket,
+    ensureNamespace,
     ensureQueue,
     request,
     scope: `${configuration.accountId}/${configuration.runtimeName}`,

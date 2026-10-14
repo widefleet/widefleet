@@ -5,14 +5,15 @@ import { InvalidOperation } from "./errors.ts";
 
 // Both deployment and management operations bind retries to one immutable input.
 export const acceptCloudflareWorkflow = async <
-  T extends { id: string; appId: string; createdAt: string },
+  T extends { id: string; createdAt: string } & ({ appId: string } | { fleetId: string }),
 >(
   storage: R2Bucket,
   workflow: Pick<Workflow<T>, "create" | "get">,
   input: T,
   commandSchema: z.ZodType<T>,
 ) => {
-  const key = `apps/${input.appId}/commands/${input.id}.json`;
+  const scope = "appId" in input ? `apps/${input.appId}` : `fleets/${input.fleetId}`;
+  const key = `${scope}/commands/${input.id}.json`;
 
   const written = await storage.put(key, JSON.stringify(input), {
     onlyIf: { etagDoesNotMatch: "*" },

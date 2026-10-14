@@ -1,3 +1,8 @@
+import { Result } from "better-result";
+import { connectorFixture } from "./cloudflare-connector.fixture.ts";
+import { prepareConnector } from "../src/lib/server/connector-changes.ts";
+import { connectorReference } from "../src/lib/server/connector-package.ts";
+import { transact } from "../src/lib/server/transactions.ts";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { createTestEnvironment } from "./environment.ts";
@@ -9,6 +14,7 @@ import { initializeCloudflareFleet } from "../src/lib/server/fleets.ts";
 import {
   apps,
   agents,
+  connectors,
   cloudflareOperations,
   deployments,
   fleets,
@@ -171,5 +177,61 @@ describe("Cloudflare operation history", () => {
       .update(fleets)
       .set({ executor: "cloudflare" })
       .where(eq(fleets.id, entry.fleetId));
+  });
+  it("protects a published grant whose SQL activation receipt was lost", async () => {
+    const entry = await seedDeployment(environment.database.db);
+
+    const reference = connectorReference.parse({
+      name: "receipt-connector",
+      checksum: "b".repeat(64),
+      entrypoints: ["default", "Reader"],
+      classes: [],
+    });
+
+    await environment.database.db.insert(connectors).values({
+      fleetId: entry.fleetId,
+      name: reference.name,
+      package: reference,
+      appliedPackage: reference,
+      jobId: crypto.randomUUID(),
+    });
+
+    const command = deploymentCommand.parse({
+      kind: "capabilities",
+      id: crypto.randomUUID(),
+      appId: entry.appId,
+      actor: { id: "fixture-owner", admin: true },
+      name: "ERP",
+      grant: { connector: reference.name, entrypoint: "Reader" },
+      createdAt: new Date().toISOString(),
+    });
+
+    (await registerCloudflareOperation(environment.database.db, storage, command)).unwrap();
+    await environment.database.db
+      .update(apps)
+      .set({ capabilities: {}, capabilityRevision: 2 })
+      .where(eq(apps.id, entry.appId));
+    const replacement = connectorFixture(reference.name);
+    replacement.entrypoints = ["default"];
+
+    const prepare = () =>
+      transact(environment.database.db, async (transaction) => {
+        const [fleet] = await transaction.select().from(fleets).where(eq(fleets.id, entry.fleetId));
+
+        if (!fleet) throw new Error("Missing fixture fleet");
+
+        return Result.ok(await prepareConnector(transaction, storage, fleet, replacement));
+      });
+
+    const blocked = await prepare();
+    expect(blocked.isErr()).toBe(true);
+
+    if (blocked.isErr())
+      expect(blocked.error.message).toContain("Confirm pending app binding changes");
+    await environment.database.db
+      .update(apps)
+      .set({ appliedCapabilityRevision: 2, appliedCapabilities: { revision: 2, grants: {} } })
+      .where(eq(apps.id, entry.appId));
+    expect((await prepare()).isOk()).toBe(true);
   });
 });

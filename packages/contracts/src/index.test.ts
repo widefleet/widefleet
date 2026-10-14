@@ -1,5 +1,54 @@
 import { describe, expect, it } from "vitest";
-import { assetManifest, assetPath, workerMetadata } from "./index.ts";
+import {
+  assetManifest,
+  assetPath,
+  connectorConfiguration,
+  connectorSecretValue,
+  runtimePackages,
+  workerMetadata,
+} from "./index.ts";
+
+describe("connector secret contracts", () => {
+  it.each([
+    { label: "empty", value: "", accepted: false },
+    { label: "5000 ASCII bytes", value: "x".repeat(5000), accepted: true },
+    { label: "5001 ASCII bytes", value: "x".repeat(5001), accepted: false },
+    { label: "5000 UTF-8 bytes", value: "é".repeat(2500), accepted: true },
+    { label: "5002 UTF-8 bytes", value: "é".repeat(2501), accepted: false },
+    { label: "previous 64 KiB limit", value: "x".repeat(65536), accepted: false },
+  ])("applies the same limit to input and runtime packages: $label", ({ value, accepted }) => {
+    expect(connectorSecretValue.safeParse(value).success).toBe(accepted);
+    expect(
+      runtimePackages.shape.connectorSecrets.safeParse({ erp: { API_KEY: value } }).success,
+    ).toBe(accepted);
+  });
+});
+
+describe("connector variable contracts", () => {
+  it.each([
+    { label: "empty", value: "", accepted: true },
+    { label: "5000 ASCII bytes", value: "x".repeat(5000), accepted: true },
+    { label: "5001 ASCII bytes", value: "x".repeat(5001), accepted: false },
+    { label: "5000 UTF-8 bytes", value: "é".repeat(2500), accepted: true },
+    { label: "5002 UTF-8 bytes", value: "é".repeat(2501), accepted: false },
+  ])("validates variable values: $label", ({ value, accepted }) => {
+    expect(
+      connectorConfiguration.safeParse({ compatibility_date: "2026-10-01", vars: { LABEL: value } })
+        .success,
+    ).toBe(accepted);
+  });
+  it.each([
+    { count: 128, accepted: true },
+    { count: 129, accepted: false },
+  ])("validates $count variables before deployment", ({ count, accepted }) => {
+    expect(
+      connectorConfiguration.safeParse({
+        compatibility_date: "2026-10-01",
+        vars: Object.fromEntries(Array.from({ length: count }, (_, i) => [`VAR_${i}`, ""])),
+      }).success,
+    ).toBe(accepted);
+  });
+});
 
 describe("deployment contracts", () => {
   it.each([

@@ -26,6 +26,12 @@ export const deploymentCommand = z.discriminatedUnion("kind", [
     input: contract.networkChange,
   }),
   command.extend({
+    kind: z.literal("capabilities"),
+    actor: deploymentActor,
+    name: contract.connectorSecretName,
+    grant: contract.capabilityGrant.nullable(),
+  }),
+  command.extend({
     kind: z.literal("access"),
     actor: deploymentActor,
     input: contract.appAccessChange,
@@ -41,7 +47,32 @@ export const hostedDeploymentId = (appId: string, requestId: string) => {
   return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-8${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
 };
 
+type ConnectorResult<T> = Promise<
+  Result<T, DatabaseUnavailable | InvalidOperation | StorageUnavailable>
+>;
+
 export type HostedExecution = {
+  connectors: {
+    status: (
+      current: z.infer<typeof contract.connectorStatus>,
+    ) => Promise<z.infer<typeof contract.connectorStatus>>;
+    deploy: (
+      principal: Principal,
+      release: z.infer<typeof contract.connectorPackage>,
+    ) => ConnectorResult<z.infer<typeof contract.connectorStatus>>;
+    setSecret: (
+      principal: Principal,
+      name: string,
+      secret: string,
+      value: string | null,
+    ) => ConnectorResult<z.infer<typeof contract.connectorStatus>>;
+    bind: (
+      principal: Principal,
+      appId: string,
+      name: string,
+      grant: z.infer<typeof contract.capabilityGrant> | null,
+    ) => ConnectorResult<z.infer<typeof contract.capabilityState>>;
+  };
   operations: {
     migrate: (
       principal: Principal,

@@ -49,7 +49,7 @@ export const createRuntime = ({
     appAccess: createAppAccessService(database.db, execution),
     workflows: createWorkflowService(database.db, execution),
     migrations: createMigrationService(database.db, storage, execution),
-    connectors: createConnectorService(database.db, storage, encryptionKey),
+    connectors: createConnectorService(database.db, storage, encryptionKey, execution),
     releases: createRuntimeReleaseService(database.db, storage),
     uploads: createUploadService(database.db, storage, configuration, execution),
     telemetry: createTelemetry(database.db, storage, configuration),

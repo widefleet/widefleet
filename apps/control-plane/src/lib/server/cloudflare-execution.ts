@@ -1,3 +1,7 @@
+import { resolveCloudflareCapabilities } from "./cloudflare-capabilities.ts";
+import { createCloudflareConnectors } from "./cloudflare-connectors.ts";
+import { validateCapabilityChange } from "./connector-changes.ts";
+import { deploymentWorkflowCommand } from "./cloudflare-connector-command.ts";
 import { acceptCloudflareWorkflow } from "./cloudflare-admission.ts";
 import { createCloudflareAppOperations } from "./cloudflare-app-operations.ts";
 import * as contract from "@platform/contracts";
@@ -39,10 +43,12 @@ export const createCloudflareExecution = (
           bindings.ARTIFACTS,
           workflow,
           input,
-          deploymentCommand,
+          deploymentWorkflowCommand,
         );
 
-        return unwrap(await registerCloudflareOperation(database, storage, command));
+        return unwrap(
+          await registerCloudflareOperation(database, storage, deploymentCommand.parse(command)),
+        );
       },
       catch: (error) =>
         error instanceof InvalidOperation ||
@@ -56,6 +62,28 @@ export const createCloudflareExecution = (
     });
 
   return {
+    connectors: {
+      ...createCloudflareConnectors(bindings, database, storage),
+      bind: async (actor, appId, name, grant) => {
+        const valid = await transact(database, (transaction) =>
+          validateCapabilityChange(transaction, actor, appId, name, grant, false),
+        );
+
+        if (valid.isErr()) return valid;
+
+        const accepted = await admit({
+          kind: "capabilities",
+          id: crypto.randomUUID(),
+          appId,
+          name,
+          grant,
+          actor,
+          createdAt: new Date().toISOString(),
+        });
+
+        return accepted.map((record) => contract.capabilityState.parse(record.result));
+      },
+    },
     operations: createCloudflareAppOperations(bindings, database, storage),
     history: (records) =>
       Result.tryPromise({
@@ -116,11 +144,11 @@ export const createCloudflareExecution = (
           }),
         );
 
-        if (Object.keys(contract.capabilityGrants.parse(app.capabilities)).length)
-          throw new InvalidOperation({
-            code: "BAD_REQUEST",
-            message: "Cloudflare connector deployment is not available yet",
-          });
+        await resolveCloudflareCapabilities(
+          transaction,
+          app.fleetId,
+          contract.capabilityGrants.parse(app.capabilities),
+        );
 
         return Result.ok(undefined);
       });

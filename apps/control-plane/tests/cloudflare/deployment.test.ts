@@ -1,3 +1,6 @@
+import { connectorServiceBinding } from "../../src/lib/server/cloudflare-connector-package.ts";
+import { connectorReference } from "../../src/lib/server/connector-package.ts";
+import { connectorFixture } from "../cloudflare-connector.fixture.ts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import { createHash } from "node:crypto";
@@ -21,6 +24,7 @@ import {
 import { initializeCloudflareFleet } from "../../src/lib/server/fleets.ts";
 import {
   apps,
+  connectors,
   cloudflareOperations,
   cloudflareRuntimeBindings,
   deployments,
@@ -71,6 +75,8 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       bucket_name: z.string().optional(),
       namespace_id: z.string().optional(),
       queue_name: z.string().optional(),
+      service: z.string().optional(),
+      entrypoint: z.string().optional(),
     });
 
     const settings = new Map<string, z.infer<typeof nativeBinding>>([
@@ -385,6 +391,35 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         .toEqual({ done: true, status: "complete" });
     };
 
+    const bindConnector = async (
+      appId: string,
+      name: string,
+      grant: z.infer<typeof contract.capabilityGrant> | null,
+    ) => {
+      const response = await worker.fetch("http://fixture/start", {
+        method: "POST",
+        body: JSON.stringify({
+          kind: "capabilities",
+          appId,
+          name,
+          grant,
+          actor: { id: "fixture-owner", admin: true },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+
+      const [record] = await environment.database.db
+        .select()
+        .from(cloudflareOperations)
+        .where(eq(cloudflareOperations.appId, appId))
+        .orderBy(desc(cloudflareOperations.sequence))
+        .limit(1);
+
+      if (!record) throw new Error("Missing binding history");
+      await completed(record.id);
+    };
+
     beforeAll(async () => {
       environment = await createTestEnvironment();
       (await initializeCloudflareFleet(environment.database.db)).unwrap();
@@ -412,6 +447,12 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         join(directory, "fixture.ts"),
         `
       import runtime from './runtime.js';
+      import {WorkerEntrypoint} from 'cloudflare:workers';
+      export class WIDEFLEET_CONNECTOR extends WorkerEntrypoint { #value = 'default-connector'; read() { return this.#value; } }
+      export class Reader extends WorkerEntrypoint { read() { return 'named-connector'; } }
+      import {createConnectorService} from ${JSON.stringify(server + "connectors.ts")};
+      import {prepareConnector} from ${JSON.stringify(server + "connector-changes.ts")};
+      import {lockFleet} from ${JSON.stringify(server + "fleets.ts")};
       import { createCloudflareExecution } from ${JSON.stringify(server + "cloudflare-execution.ts")};
       import { withCloudflareDatabase } from ${JSON.stringify(server + "cloudflare-database.ts")};
       import { createArtifactStorage } from ${JSON.stringify(server + "artifact-storage.ts")};
@@ -431,6 +472,16 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       };
       export default { ...runtime, async fetch(request, env, ctx) {
         const url = new URL(request.url);
+        if (url.hostname === 'fixture' && url.pathname === '/prepare-connector') {
+          const input = await request.json();
+          try {
+            await withCloudflareDatabase(env, ({db}) => db.transaction(async transaction => {
+              const fleet = await lockFleet(transaction, input.fleetId);
+              await prepareConnector(transaction, createArtifactStorage(createR2Storage(env.ARTIFACTS)), fleet, input.release);
+            }));
+            return new Response(null, {status:204});
+          } catch(error) {return Response.json({error:error.message}, {status:400});}
+        }
         if (url.hostname === 'fixture' && url.pathname === '/seed') {
           const { artifact, source } = await request.json();
           await env.ARTIFACTS.put('apps/' + artifact.appId + '/modules/' + artifact.modules[0].sha256, source);
@@ -459,6 +510,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           };
           const result = await withCloudflareDatabase(env, async ({ db }) => {
             const executor = createCloudflareExecution({ ...env, DEPLOYMENTS: deploymentBinding }, db, createArtifactStorage(createR2Storage(env.ARTIFACTS)));
+            if (command.kind === 'capabilities') return executor.connectors.bind(command.actor, command.appId, command.name, command.grant);
             if (command.kind === 'access') return executor.access(command.actor, command.appId, command.input);
             if (command.kind === 'network') return executor.network(command.actor, command.appId, command.input);
             return executor.deploy({ id: command.id, appId: command.appId, artifactId: command.artifactId, createdAt: command.createdAt,
@@ -495,6 +547,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
             const executor = createCloudflareExecution(env, db, createArtifactStorage(createR2Storage(env.ARTIFACTS)));
             return createAppService(db, readCloudflareConfiguration(env), executor).history({ id: 'fixture-owner', admin: true }, url.searchParams.get('appId'));
           });
+          return Response.json(result.unwrap());
+        }
+        if (url.hostname === 'fixture' && url.pathname === '/connections') {
+          const result = await withCloudflareDatabase(env, async ({db}) => createConnectorService(db, createArtifactStorage(createR2Storage(env.ARTIFACTS)), env.PLATFORM_ENCRYPTION_KEY).connections({id:'fixture-owner', admin:true}, url.searchParams.get('appId')));
           return Response.json(result.unwrap());
         }
         if (url.hostname === 'fixture' && url.pathname === '/host') {
@@ -580,7 +636,18 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
               max_batch_timeout: 0,
             })),
           },
-          services: [{ binding: "APP_RUNTIME", service: "widefleet-deployment-test" }],
+          services: [
+            { binding: "APP_RUNTIME", service: "widefleet-deployment-test" },
+            ...["default", "Reader"].map((entrypoint) => {
+              const binding = connectorServiceBinding(first.fleetId, "app-connector", entrypoint);
+
+              return {
+                binding: binding.name,
+                service: "widefleet-deployment-test",
+                entrypoint: binding.entrypoint,
+              };
+            }),
+          ],
           worker_loaders: [{ binding: "WIDEFLEET_LOADER" }],
           r2_buckets: [
             { binding: "ARTIFACTS", bucket_name: "artifacts" },
@@ -617,6 +684,9 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       await Promise.all([dispatch(first), dispatch(preview)]);
       await completed(first.command.id);
       await completed(preview.command.id);
+      expect((await operation(first.command.id))?.targets).toEqual([
+        expect.objectContaining({ appId: first.appId, publicationStarted: true }),
+      ]);
       expect(await environment.database.db.select().from(jobs)).toHaveLength(0);
       expect(createdDatabases.size).toBe(2);
       expect(buckets.size).toBe(2);
@@ -767,7 +837,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       expect(await host(hostname)).toBeNull();
     });
 
-    it("rejects connector grants without publishing or provisioning them", async () => {
+    it("rejects grants to undeployed connector entrypoints without publishing them", async () => {
       const before = await host(first.hostname);
       const entry = await seedDeployment(environment.database.db, { appId: first.appId });
       await environment.database.db
@@ -1579,5 +1649,144 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       expect(schedules).toContainEqual({ cron: "50 * * * *" });
       expect(schedules).not.toContainEqual({ cron: "61 * * * *" });
     }, 30_000);
+    it("deploys approved connector RPC bindings and applies replacement and revocation through the same workflow", async () => {
+      const reference = connectorReference.parse({
+        name: "app-connector",
+        checksum: "a".repeat(64),
+        entrypoints: ["default", "Reader"],
+        classes: [],
+      });
+
+      await environment.database.db.insert(connectors).values({
+        fleetId: first.fleetId,
+        name: reference.name,
+        package: reference,
+        appliedPackage: reference,
+        jobId: crypto.randomUUID(),
+      });
+
+      const entry = await seedDeployment(environment.database.db, {
+        bindings: [],
+        source: `export default {async fetch(request, env) {return Response.json({value: env.ERP ? await env.ERP.read() : null, secret: env.WIDEFLEET_SECRET_API_KEY ?? null});}}`,
+      });
+
+      const bind = (grant: z.infer<typeof contract.capabilityGrant> | null) =>
+        bindConnector(entry.appId, "ERP", grant);
+
+      await bind({ connector: reference.name, entrypoint: "default" });
+      await seed(entry);
+      await dispatch(entry);
+      await completed(entry.command.id);
+      expect(await (await worker.fetch(`https://${entry.hostname}/`)).json()).toEqual({
+        value: "default-connector",
+        secret: null,
+      });
+      await bind({ connector: reference.name, entrypoint: "Reader" });
+      expect(await (await worker.fetch(`https://${entry.hostname}/`)).json()).toEqual({
+        value: "named-connector",
+        secret: null,
+      });
+      expect(
+        await (await worker.fetch(`http://fixture/connections?appId=${entry.appId}`)).json(),
+      ).toMatchObject({
+        connectors: { state: "active" },
+        activeConnectors: { ERP: { connector: reference.name, entrypoint: "Reader" } },
+      });
+      await bind(null);
+      expect(await (await worker.fetch(`https://${entry.hostname}/`)).json()).toEqual({
+        value: null,
+        secret: null,
+      });
+      expect(
+        await (await worker.fetch(`http://fixture/connections?appId=${entry.appId}`)).json(),
+      ).toMatchObject({ connectors: { state: "active" }, activeConnectors: {} });
+      expect(await environment.database.db.select().from(jobs)).toHaveLength(0);
+    }, 60_000);
+
+    it.each(["saved", "failed", "unconfirmed", "legacy"])(
+      "confirms saved revocations only without a possible publication: %s",
+      async (state) => {
+        const reference = connectorReference.parse({
+          name: `saved-${state}`,
+          checksum: "b".repeat(64),
+          entrypoints: ["default", "Reader"],
+          classes: [],
+        });
+
+        await environment.database.db.insert(connectors).values({
+          fleetId: first.fleetId,
+          name: reference.name,
+          package: reference,
+          appliedPackage: reference,
+          jobId: crypto.randomUUID(),
+        });
+
+        const entry = await seedDeployment(environment.database.db, {
+          bindings: [],
+          source: "export default { fetch: invalid syntax };",
+        });
+
+        await bindConnector(entry.appId, "ERP", {
+          connector: reference.name,
+          entrypoint: "Reader",
+        });
+        await bindConnector(entry.appId, "OTHER", {
+          connector: reference.name,
+          entrypoint: "default",
+        });
+
+        if (state !== "saved") {
+          await seed(entry);
+          await dispatch(entry, "fast-retries");
+          await expect
+            .poll(() => nativeStatus(entry.command.id), { timeout: 30_000 })
+            .toBe("errored");
+          const history = await operation(entry.command.id);
+          expect(history?.targets).toEqual([
+            expect.objectContaining({ publicationStarted: false }),
+          ]);
+
+          if (state === "unconfirmed" || state === "legacy") {
+            const targets = z.array(z.record(z.string(), z.json())).parse(history?.targets);
+
+            for (const target of targets) {
+              if (state === "legacy") delete target["publicationStarted"];
+              else target["publicationStarted"] = true;
+            }
+
+            await environment.database.db
+              .update(cloudflareOperations)
+              .set({ targets })
+              .where(eq(cloudflareOperations.id, entry.command.id));
+          }
+        }
+
+        await bindConnector(entry.appId, "ERP", null);
+        expect(await host(entry.hostname)).toBeNull();
+        const replacement = connectorFixture(reference.name);
+        replacement.entrypoints = ["default"];
+
+        const prepare = () =>
+          worker.fetch("http://fixture/prepare-connector", {
+            method: "POST",
+            body: JSON.stringify({ fleetId: entry.fleetId, release: replacement }),
+          });
+
+        const safe = state === "saved" || state === "failed";
+        const prepared = await prepare();
+        expect(prepared.status, await prepared.text()).toBe(safe ? 204 : 400);
+
+        await bindConnector(entry.appId, "OTHER", null);
+        expect((await prepare()).status).toBe(safe ? 204 : 400);
+
+        const [app] = await environment.database.db
+          .select()
+          .from(apps)
+          .where(eq(apps.id, entry.appId));
+
+        expect(app?.appliedCapabilityRevision).toBe(safe ? 4 : 2);
+      },
+      60_000,
+    );
   },
 );
