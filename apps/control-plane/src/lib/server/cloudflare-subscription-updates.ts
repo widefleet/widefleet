@@ -13,6 +13,10 @@ export class CloudflareSubscriptionPending extends Error {
   }
 }
 
+export const cloudflareSubscriptionRejected = (error: Error) =>
+  error instanceof CloudflareApiError &&
+  [400, 401, 403, 404, 413, 415, 422, 429].includes(error.status);
+
 // Subscription endpoints have no version annotation. A changed canonical value
 // observed after reservation confirms the one outstanding write. Never resend an
 // uncertain write or permit a later mutation before this confirmation.
@@ -76,10 +80,7 @@ export const updateCloudflareSubscription = async <T extends z.infer<ReturnType<
   try {
     await write(reservation.target);
   } catch (error) {
-    if (
-      error instanceof CloudflareApiError &&
-      [400, 401, 403, 404, 413, 415, 422, 429].includes(error.status)
-    ) {
+    if (error instanceof Error && cloudflareSubscriptionRejected(error)) {
       await clear();
       throw error;
     }

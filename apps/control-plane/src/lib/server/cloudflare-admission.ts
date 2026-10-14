@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import type { R2Bucket, Workflow } from "@cloudflare/workers-types";
 import type { z } from "zod";
 import { InvalidOperation } from "./errors.ts";
@@ -28,7 +29,7 @@ export const acceptCloudflareWorkflow = async <
     const { createdAt: _inputTime, ...requested } = input;
     const { createdAt: _storedTime, ...stored } = command;
 
-    if (JSON.stringify(requested) !== JSON.stringify(stored))
+    if (!isDeepStrictEqual(requested, stored))
       throw new InvalidOperation({
         code: "CONFLICT",
         message: "The request ID already refers to another operation",

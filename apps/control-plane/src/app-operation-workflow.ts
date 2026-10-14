@@ -167,8 +167,11 @@ export class AppOperationWorkflow extends WorkflowEntrypoint<
         });
 
         if (record.isErr()) {
-          if (record.error instanceof InvalidOperation)
+          if (record.error instanceof InvalidOperation) {
+            await finish(null, record.error.message);
             throw new NonRetryableError(record.error.message);
+          }
+
           throw record.error;
         }
       });
@@ -186,7 +189,17 @@ export class AppOperationWorkflow extends WorkflowEntrypoint<
         // Store results directly in history: app Workflow output must not be
         // serialized a second time into the management Workflow's step limit.
         // A lost checkpoint acknowledgement reuses this confirmed outcome.
-        if (!completed) await finish(await execute(), null);
+        if (!completed) {
+          try {
+            await finish(await execute(), null);
+          } catch (error) {
+            // These messages originate from validation or the authenticated
+            // runtime, never from raw Cloudflare provisioning responses.
+            if (error instanceof NonRetryableError || error instanceof InvalidOperation)
+              await finish(null, error.message);
+            throw error;
+          }
+        }
       });
     } catch (error) {
       await step.do("record-failure", options, () =>

@@ -1,3 +1,4 @@
+import { cloudflareAppOperation } from "./cloudflare-app-operation-command.ts";
 import type { HostedExecution } from "./deployment-execution.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
@@ -9,7 +10,7 @@ import { managedApp } from "./apps.ts";
 import type { Database } from "./database.ts";
 import { InvalidOperation } from "./errors.ts";
 import type { Principal } from "./identity.ts";
-import { artifacts, deployments, jobs } from "./schema.ts";
+import { artifacts, deployments, jobs, cloudflareOperations } from "./schema.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import { transact } from "./transactions.ts";
 
@@ -37,6 +38,8 @@ export const createMigrationService = (
     requestId: string,
     input: z.infer<typeof contract.migrationRequest>,
   ) => {
+    let accepted = false;
+
     const prepared = await transact(database, async (transaction) => {
       const access = await managedApp(transaction, principal, appId);
 
@@ -68,6 +71,40 @@ export const createMigrationService = (
           );
 
         return Result.ok(present(existing));
+      }
+
+      if (execution) {
+        const [history] = await transaction
+          .select()
+          .from(cloudflareOperations)
+          .where(eq(cloudflareOperations.id, requestId));
+
+        if (history) {
+          const command = cloudflareAppOperation.safeParse(history.command);
+
+          if (
+            !command.success ||
+            command.data.appId !== appId ||
+            command.data.kind !== "migrations" ||
+            command.data.migration.sha256 !== reference.sha256
+          )
+            return Result.err(
+              new InvalidOperation({
+                code: "CONFLICT",
+                message: "This request ID already refers to another operation",
+              }),
+            );
+          accepted = true;
+
+          return Result.ok(
+            contract.migrationOperation.parse({
+              id: requestId,
+              state: "queued",
+              message: null,
+              entries: null,
+            }),
+          );
+        }
       }
 
       if (app.state === "deleting")
@@ -149,6 +186,8 @@ export const createMigrationService = (
     });
 
     if (prepared.isErr() || !execution) return prepared;
+
+    if (accepted) return execution.operations.readMigration(principal, appId, requestId);
 
     return execution.operations.migrate(principal, appId, requestId, input);
   },

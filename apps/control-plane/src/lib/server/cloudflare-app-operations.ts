@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
 import { createHash } from "node:crypto";
@@ -58,7 +59,7 @@ export const registerCloudflareAppOperation = (
 
     const stored = existing ? cloudflareAppOperation.safeParse(existing.command) : null;
 
-    if (!existing || !stored?.success || JSON.stringify(stored.data) !== JSON.stringify(command))
+    if (!existing || !stored?.success || !isDeepStrictEqual(stored.data, command))
       throw new InvalidOperation({
         code: "CONFLICT",
         message: "The request ID already refers to another operation",
@@ -166,7 +167,7 @@ export const createCloudflareAppOperations = (
 
           const { createdAt: _requestedTime, ...requested } = command;
 
-          if (JSON.stringify(stored) !== JSON.stringify(requested))
+          if (!isDeepStrictEqual(stored, requested))
             throw new InvalidOperation({
               code: "CONFLICT",
               message: "The request ID already refers to another operation",

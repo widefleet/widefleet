@@ -6,7 +6,10 @@ import {
   cloudflareResourceName,
   type createCloudflareProvisioner,
 } from "./cloudflare-provisioning.ts";
-import { updateCloudflareSubscription } from "./cloudflare-subscription-updates.ts";
+import {
+  updateCloudflareSubscription,
+  cloudflareSubscriptionRejected,
+} from "./cloudflare-subscription-updates.ts";
 import { InvalidOperation } from "./errors.ts";
 
 const events = z.object({
@@ -18,7 +21,10 @@ const registration = z.object({
   hostname: z.string(),
   sequence: z.number(),
   published: events.nullable(),
-  pending: z.record(z.string(), z.object({ sequence: z.number(), events })),
+  pending: z.record(
+    z.string(),
+    z.object({ sequence: z.number(), events, activating: z.boolean() }),
+  ),
   queues: z.array(z.string()),
 });
 
@@ -254,13 +260,41 @@ export const createCloudflareEvents = (
         const staged = events.parse(app.metadata);
         apps[app.appId] = {
           ...current,
-          pending: { ...current.pending, [id]: { sequence, events: staged } },
+          pending: {
+            ...current.pending,
+            [id]: {
+              sequence,
+              events: staged,
+              activating: current.pending[id]?.activating ?? false,
+            },
+          },
           queues: [
             ...new Set([...current.queues, ...staged.queue_consumers.map((entry) => entry.queue)]),
           ].sort(),
         };
       });
-      await syncCrons();
+
+      try {
+        await syncCrons();
+      } catch (error) {
+        if (error instanceof Error && cloudflareSubscriptionRejected(error))
+          await change((apps) => {
+            const current = apps[app.appId];
+
+            // Only discard stages that have never attempted the host switch.
+            // An earlier attempt may have activated despite losing its response.
+            if (current?.pending[id] && !current.pending[id].activating) delete current.pending[id];
+          });
+        throw error;
+      }
+    },
+    async beginActivation(id: string, appId: string) {
+      await change((apps) => {
+        const staged = apps[appId]?.pending[id];
+
+        if (!staged) throw new Error("App event registration is not staged");
+        staged.activating = true;
+      });
     },
     async publish(app: z.infer<typeof contract.publishedApp>, sequence: number) {
       await change((apps) => {

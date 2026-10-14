@@ -41,6 +41,11 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
     let rejected: Awaited<ReturnType<typeof seedDeployment>>;
     let delayed: Awaited<ReturnType<typeof seedDeployment>>;
     let lostResponse: Awaited<ReturnType<typeof seedDeployment>>;
+
+    let appliedMigration:
+      | { id: string; request: z.infer<typeof contract.migrationRequest> }
+      | undefined;
+
     const token = "local-deployment-runtime-token-never-deploy";
     const largeGroups = Array.from({ length: 100 }, (_, index) => `${index}-${"group".repeat(40)}`);
     const databases = new Map<string, string>();
@@ -153,6 +158,14 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           if (request.method === "PUT") {
             const target = z.array(z.object({ cron: z.string() })).parse(JSON.parse(body));
             scheduleWrites++;
+
+            if (target.some((entry) => entry.cron === "61 * * * *")) {
+              response.statusCode = 400;
+              response.end();
+
+              return;
+            }
+
             const mode = scheduleMode;
             scheduleMode = "normal";
 
@@ -1037,7 +1050,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       entry: typeof first,
       kind: "migrations" | "workflows",
       request: z.infer<typeof contract.migrationRequest> | z.infer<typeof contract.workflowRequest>,
-      id = crypto.randomUUID(),
+      id: string = crypto.randomUUID(),
     ) => {
       const input = { appId: entry.appId, kind, request, id };
 
@@ -1093,6 +1106,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       });
 
       const id = crypto.randomUUID();
+      appliedMigration = { id, request: input };
       expect(await manage(first, "migrations", input, id)).toMatchObject({
         entries: [{ name: "1_create.sql", applied: true }],
       });
@@ -1247,14 +1261,22 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         action: "create",
         workflow: "example",
         id: "same-id",
-        params: { wait: true },
+        params: { wait: true, zz: 1, a: { longer: 1, b: 2 } },
       });
 
+      if (create.action !== "create") throw new Error("Fixture requires a create operation");
       const id = crypto.randomUUID();
       expect(await manage(first, "workflows", create, id)).toMatchObject({
         result: { id: "same-id" },
       });
-      expect(await manage(first, "workflows", create, id)).toMatchObject({
+      expect(
+        await manage(
+          first,
+          "workflows",
+          { ...create, params: { a: { b: 2, longer: 1 }, zz: 1, wait: true } },
+          id,
+        ),
+      ).toMatchObject({
         result: { id: "same-id" },
       });
       expect(await manage(preview, "workflows", create)).toMatchObject({
@@ -1269,7 +1291,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         action: "sendEvent",
         workflow: "example",
         id: "same-id",
-        event: { type: "continue", payload: null },
+        event: { type: "continue", payload: { zz: 1, a: { longer: 1, b: 2 } } },
       });
       await expect
         .poll(
@@ -1464,6 +1486,98 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       );
 
       expect(response.status, await response.clone().text()).toBe(204);
+    }, 30_000);
+    it("returns accepted migration history after the deployed D1 binding is removed", async () => {
+      if (!appliedMigration) throw new Error("Migration fixture missing");
+      expect(
+        await manage(first, "migrations", appliedMigration.request, appliedMigration.id),
+      ).toMatchObject({ entries: [{ name: "1_create.sql", applied: true }] });
+      await environment.database.db
+        .update(apps)
+        .set({ state: "deleting" })
+        .where(eq(apps.id, first.appId));
+
+      try {
+        expect(
+          await manage(first, "migrations", appliedMigration.request, appliedMigration.id),
+        ).toMatchObject({ state: "succeeded" });
+      } finally {
+        await environment.database.db
+          .update(apps)
+          .set({ state: "active" })
+          .where(eq(apps.id, first.appId));
+      }
+    }, 20_000);
+
+    it("preserves actionable Workflow validation errors in operation history", async () => {
+      const id = crypto.randomUUID();
+
+      const input = {
+        id,
+        appId: first.appId,
+        kind: "workflows",
+        request: { action: "status", workflow: "example", id: "missing-instance" },
+      };
+
+      expect(
+        (
+          await worker.fetch("http://fixture/operation", {
+            method: "POST",
+            body: JSON.stringify(input),
+          })
+        ).status,
+      ).toBe(200);
+      await expect
+        .poll(
+          async () => {
+            const response = await worker.fetch("http://fixture/operation", {
+              method: "POST",
+              body: JSON.stringify({ ...input, read: true }),
+            });
+
+            return contract.workflowOperation.parse(await response.json()).message;
+          },
+          { timeout: 15_000 },
+        )
+        .toContain("Workflow instance not found");
+    }, 20_000);
+
+    it("removes explicitly rejected cron stages so corrected and unrelated deployments can proceed", async () => {
+      const before = await host(lostResponse.hostname);
+
+      const rejected = await seedDeployment(environment.database.db, {
+        appId: lostResponse.appId,
+        crons: ["61 * * * *"],
+      });
+
+      await seed(rejected);
+      await dispatch(rejected, "fast-retries");
+      await expect
+        .poll(() => nativeStatus(rejected.command.id), { timeout: 15_000 })
+        .toBe("errored");
+      expect(await host(lostResponse.hostname)).toEqual(before);
+
+      const unrelated = await seedDeployment(environment.database.db, {
+        source: "export default {fetch(){return new Response('valid');},scheduled(){}};",
+        bindings: [],
+        crons: ["40 * * * *"],
+      });
+
+      await seed(unrelated);
+      await dispatch(unrelated);
+      await completed(unrelated.command.id);
+
+      const corrected = await seedDeployment(environment.database.db, {
+        appId: lostResponse.appId,
+        crons: ["50 * * * *"],
+      });
+
+      await seed(corrected);
+      await dispatch(corrected);
+      await completed(corrected.command.id);
+      expect(schedules).toContainEqual({ cron: "40 * * * *" });
+      expect(schedules).toContainEqual({ cron: "50 * * * *" });
+      expect(schedules).not.toContainEqual({ cron: "61 * * * *" });
     }, 30_000);
   },
 );

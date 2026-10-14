@@ -277,6 +277,14 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
                 ).stage(command.id, published, sequence),
               );
 
+            if (hasEvents)
+              await createCloudflareEvents(
+                bindings.ARTIFACTS,
+                db,
+                provisioner,
+                configuration.APP_RUNTIME_NAME,
+              ).beginActivation(command.id, app.id);
+
             if (
               currentBody !== body ||
               current?.customMetadata?.["widefleet_access"] !== customMetadata.widefleet_access
