@@ -98,38 +98,21 @@ export const createCloudflareConnectorDeployment = (
             const selected = connectorReference.parse(record.package);
             const release = await loadConnector(storage, selected);
 
-            if (record.appliedPackage) {
-              const previous = await loadConnector(
-                storage,
-                connectorReference.parse(record.appliedPackage),
-              );
-
-              const history = previous.configuration.migrations;
-
-              if (
-                !isDeepStrictEqual(
-                  history,
-                  release.configuration.migrations.slice(0, history.length),
-                )
-              )
-                throw new InvalidOperation({
-                  code: "CONFLICT",
-                  message: "Deployed connector migrations cannot be changed or removed",
-                });
-            }
-
             const workerName = connectorWorkerName(command.fleetId, selected.name);
             const path = `/workers/scripts/${encodeURIComponent(workerName)}`;
+            let deployedVersion: string | null = null;
 
             const readVersion = async () => {
               try {
                 const current = z
                   .object({
-                    annotations: z.object({ "workers/tag": z.string().optional() }).optional(),
+                    annotations: z.object({ "workers/tag": z.uuid() }),
                   })
                   .parse(await provisioner.request(`${path}/settings`));
 
-                return current.annotations?.["workers/tag"] ?? null;
+                deployedVersion = current.annotations["workers/tag"];
+
+                return deployedVersion;
               } catch (error) {
                 if (error instanceof CloudflareApiError && error.status === 404) return null;
                 throw error;
@@ -145,6 +128,39 @@ export const createCloudflareConnectorDeployment = (
                 z.string().nullable(),
                 readVersion,
                 async () => {
+                  if (deployedVersion) {
+                    // The native annotation identifies the live package even when its
+                    // upload acknowledgement or SQL activation receipt was lost.
+                    const [deployed] = await transaction
+                      .select()
+                      .from(cloudflareOperations)
+                      .where(
+                        and(
+                          eq(cloudflareOperations.id, deployedVersion),
+                          eq(cloudflareOperations.fleetId, command.fleetId),
+                        ),
+                      );
+
+                    const previous = connectorReference.parse(deployed?.result);
+
+                    if (previous.name !== selected.name)
+                      throw new Error("Deployed connector identity mismatch");
+
+                    const history = (await loadConnector(storage, previous)).configuration
+                      .migrations;
+
+                    if (
+                      !isDeepStrictEqual(
+                        history,
+                        release.configuration.migrations.slice(0, history.length),
+                      )
+                    )
+                      throw new InvalidOperation({
+                        code: "CONFLICT",
+                        message: "Deployed connector migrations cannot be changed or removed",
+                      });
+                  }
+
                   let migrationTag: string | null = null;
 
                   try {

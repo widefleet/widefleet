@@ -16,7 +16,7 @@ import {
   connectorWorkerName,
 } from "../../src/lib/server/cloudflare-connector-package.ts";
 import { initializeCloudflareFleet } from "../../src/lib/server/fleets.ts";
-import { cloudflareOperations, fleets, jobs } from "../../src/lib/server/schema.ts";
+import { cloudflareOperations, connectors, fleets, jobs } from "../../src/lib/server/schema.ts";
 
 const uploadMetadata = z.object({
   annotations: z.object({ "workers/tag": z.string() }),
@@ -548,6 +548,52 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
       text: "synthetic-BETA",
     });
   });
+
+  it.each(["missing-receipt", "pending-upload"])(
+    "validates live migration history after %s before sending another upload",
+    async (failure) => {
+      const initial = connectorFixture(`migration-${failure}`);
+
+      if (failure === "pending-upload") mode = "delayed";
+
+      const accepted = contract.connectorStatus.parse(
+        await command({ kind: "deploy", release: initial }),
+      );
+
+      await completed(accepted.jobId, failure === "pending-upload");
+
+      if (failure === "pending-upload") {
+        delayedUpload?.();
+        delayedUpload = undefined;
+      } else {
+        await environment.database.db
+          .update(connectors)
+          .set({ appliedPackage: null })
+          .where(eq(connectors.name, initial.name));
+      }
+
+      const before = uploads;
+      const rewritten = structuredClone(initial);
+      rewritten.configuration.migrations[0]?.new_sqlite_classes.push("AdditionalCounter");
+
+      const rejected = contract.connectorStatus.parse(
+        await command({ kind: "deploy", release: rewritten }),
+      );
+
+      await completed(rejected.jobId, true);
+      expect(uploads).toBe(before);
+
+      const recovered = contract.connectorStatus.parse(
+        await command({ kind: "deploy", release: initial }),
+      );
+
+      await completed(recovered.jobId);
+      expect(uploads).toBe(before + 1);
+      expect(
+        scripts.get(connectorWorkerName(fleetId, initial.name))?.metadata.migrations,
+      ).toBeUndefined();
+    },
+  );
 
   it("executes original RPC classes with private fields and persistent D1, R2, KV and Durable Objects", async () => {
     expect((await worker.fetch("http://fixture/public")).status).toBe(404);

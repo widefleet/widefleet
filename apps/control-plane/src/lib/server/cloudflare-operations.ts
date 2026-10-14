@@ -28,6 +28,7 @@ export const operationTarget = z.object({
   accessRevision: z.number().int().nonnegative(),
   networkRevision: z.number().int().nonnegative(),
   capabilityRevision: z.number().int().nonnegative().default(0),
+  publicationStarted: z.boolean().optional(),
 });
 
 // Called only after Workflows has durably accepted the command. The request can materialize
@@ -173,6 +174,7 @@ export const registerCloudflareOperation = (
           accessRevision: target.accessRevision,
           networkRevision: target.networkRevision,
           capabilityRevision: target.capabilityRevision,
+          publicationStarted: false,
         });
       }
 

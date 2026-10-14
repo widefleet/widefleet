@@ -6,7 +6,7 @@ import { NonRetryableError } from "cloudflare:workflows";
 import type { CloudflareWorkersModule } from "@cloudflare/workers-types";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { z } from "zod";
 import { createArtifactStorage } from "./artifact-storage.ts";
 import type { CloudflareBindings } from "./cloudflare-config.ts";
@@ -172,24 +172,31 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
                   message: "A newer deployment has already been activated",
                 });
             } else if (!serving) {
-              if (
-                command.kind === "capabilities" &&
-                !Object.keys(contract.capabilityGrants.parse(app.capabilities)).length
-              ) {
-                const [deployment] = await transaction
-                  .select({ id: deployments.id })
-                  .from(deployments)
-                  .where(eq(deployments.appId, app.id))
+              if (command.kind === "capabilities") {
+                const [publication] = await transaction
+                  .select({ id: cloudflareOperations.id })
+                  .from(cloudflareOperations)
+                  .where(
+                    and(
+                      eq(cloudflareOperations.appId, app.id),
+                      sql`${cloudflareOperations.command}->>'kind' = 'deploy'`,
+                      // Older history without the marker cannot prove that no PUT started.
+                      sql`${cloudflareOperations.targets}->0->>'publicationStarted' IS DISTINCT FROM 'false'`,
+                    ),
+                  )
                   .limit(1);
 
-                // With no deployment ever accepted, no delayed publication can still
-                // expose an earlier grant. Record that this saved grant was removed.
-                if (!deployment)
+                // The app lock excludes a new publication attempt while confirming
+                // saved changes. Failed readiness/provisioning cannot expose old grants.
+                if (!publication)
                   await transaction
                     .update(apps)
                     .set({
                       appliedCapabilityRevision: app.capabilityRevision,
-                      appliedCapabilities: { revision: app.capabilityRevision, grants: {} },
+                      appliedCapabilities: {
+                        revision: app.capabilityRevision,
+                        grants: contract.capabilityGrants.parse(app.capabilities),
+                      },
                       capabilityError: null,
                     })
                     .where(eq(apps.id, app.id));
@@ -329,6 +336,29 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               currentBody !== body ||
               current?.customMetadata?.["widefleet_access"] !== customMetadata.widefleet_access
             ) {
+              if (command.kind === "deploy" && !current)
+                await withCloudflareDatabase(bindings, async ({ db: history }) => {
+                  const [operation] = await history
+                    .select()
+                    .from(cloudflareOperations)
+                    .where(eq(cloudflareOperations.id, command.id));
+
+                  if (!operation) throw new Error("Deployment operation history is missing");
+                  // Commit before PUT, independently of the activation transaction. A
+                  // timed-out first publication may still arrive after this lock is released.
+                  await history
+                    .update(cloudflareOperations)
+                    .set({
+                      targets: z
+                        .array(operationTarget)
+                        .parse(operation.targets)
+                        .map((entry) =>
+                          entry.appId === app.id ? { ...entry, publicationStarted: true } : entry,
+                        ),
+                    })
+                    .where(eq(cloudflareOperations.id, command.id));
+                });
+
               // CAS also protects against a timed-out PUT arriving after this SQL lock was released.
               const activated = await bindings.ARTIFACTS.put(hostKey, body, {
                 onlyIf: current ? { etagMatches: current.etag } : { etagDoesNotMatch: "*" },
