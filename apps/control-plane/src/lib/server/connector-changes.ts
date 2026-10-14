@@ -8,7 +8,7 @@ import { InvalidOperation } from "./errors.ts";
 import { lockFleet, requireAgentExecution } from "./fleets.ts";
 import type { Principal } from "./identity.ts";
 import { savePackage } from "./package-storage.ts";
-import { connectorReference } from "./connector-package.ts";
+import { connectorReference, validateConnectorEnvironment } from "./connector-package.ts";
 import {
   apps,
   artifacts,
@@ -105,6 +105,10 @@ export const prepareConnector = async (
     .select()
     .from(connectors)
     .where(eq(connectors.fleetId, fleet.id));
+
+  const existing = inventory.find((entry) => entry.name === release.name);
+  const previous = existing ? connectorReference.parse(existing.package) : null;
+  validateConnectorEnvironment(release.configuration, Object.keys(previous?.secrets ?? {}));
 
   const classes = release.configuration.durable_objects.bindings.map(
     (binding) => binding.class_name,
@@ -204,9 +208,6 @@ export const prepareConnector = async (
   }
 
   const checksum = await savePackage(storage, release);
-
-  const existing = inventory.find((entry) => entry.name === release.name);
-  const previous = existing ? connectorReference.parse(existing.package) : null;
 
   const reference = connectorReference.parse({
     secrets: previous?.secrets ?? {},

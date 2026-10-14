@@ -6,9 +6,7 @@ import {
   type createCloudflareProvisioner,
 } from "./cloudflare-provisioning.ts";
 import { verifyModules } from "./package-storage.ts";
-import { validateConnectorSecret } from "./connector-package.ts";
-
-const hostedVariableBytes = 5_000;
+import { validateConnectorEnvironment, validateConnectorSecret } from "./connector-package.ts";
 
 const wrapperName = "__widefleet_connector__.mjs";
 
@@ -35,18 +33,7 @@ export const validateHostedConnector = (
       message: "Connector module name is reserved",
     });
 
-  if (Object.keys(configuration.vars).length + secretNames.length > 128)
-    throw new InvalidOperation({
-      code: "BAD_REQUEST",
-      message: "Hosted connectors support at most 128 variables and secrets combined",
-    });
-
-  for (const value of Object.values(configuration.vars))
-    if (new TextEncoder().encode(value).byteLength > hostedVariableBytes)
-      throw new InvalidOperation({
-        code: "BAD_REQUEST",
-        message: "Hosted connector variables must contain at most 5 KB (5000 UTF-8 bytes)",
-      });
+  validateConnectorEnvironment(configuration, secretNames);
   const tags = configuration.migrations.map((migration) => migration.tag);
   const classes = configuration.migrations.flatMap((migration) => migration.new_sqlite_classes);
 

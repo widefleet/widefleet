@@ -618,4 +618,104 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
     worker = await start();
     expect((await worker.fetch("http://fixture/secret?name=API_KEY")).status).toBe(400);
   }, 60_000);
+  it("enforces shared variable limits across deployments and native secret updates", async () => {
+    const vars = Object.fromEntries(Array.from({ length: 127 }, (_, i) => [`VAR_${i}`, ""]));
+    vars["VAR_0"] = "é".repeat(2500);
+
+    const initial = contract.connectorPackage.parse({
+      ...connectorFixture("environment-limits"),
+      configuration: { compatibility_date: "2026-10-01", vars },
+    });
+
+    const before = await environment.database.db.select().from(cloudflareOperations);
+
+    for (const value of ["x".repeat(5001), "é".repeat(2501)])
+      expect(
+        await command(
+          {
+            kind: "deploy",
+            release: {
+              ...initial,
+              configuration: { ...initial.configuration, vars: { LABEL: value } },
+            },
+          },
+          400,
+        ),
+      ).toEqual({ error: "Connector variables must contain at most 5 KB (5000 UTF-8 bytes)" });
+    await command(
+      {
+        kind: "deploy",
+        release: {
+          ...initial,
+          configuration: { ...initial.configuration, vars: { ...vars, EXTRA: "", OVERFLOW: "" } },
+        },
+      },
+      400,
+    );
+    expect(await environment.database.db.select().from(cloudflareOperations)).toHaveLength(
+      before.length,
+    );
+
+    const deployed = contract.connectorStatus.parse(
+      await command({ kind: "deploy", release: initial }),
+    );
+
+    await completed(deployed.jobId);
+
+    for (const value of ["synthetic", "rotated"]) {
+      const secret = contract.connectorStatus.parse(
+        await command({
+          kind: "secret",
+          name: initial.name,
+          secret: "API_KEY",
+          value,
+        }),
+      );
+
+      await completed(secret.jobId);
+    }
+
+    const maximum = {
+      ...initial,
+      configuration: { ...initial.configuration, vars: { ...vars, EXTRA: "x".repeat(5000) } },
+    };
+
+    const previous = await environment.database.db.select().from(cloudflareOperations);
+    await command({ kind: "deploy", release: maximum }, 400);
+    await command(
+      { kind: "secret", name: initial.name, secret: "OVERFLOW", value: "synthetic" },
+      400,
+    );
+    expect(await environment.database.db.select().from(cloudflareOperations)).toHaveLength(
+      previous.length,
+    );
+
+    const removed = contract.connectorStatus.parse(
+      await command({
+        kind: "secret",
+        name: initial.name,
+        secret: "API_KEY",
+        value: null,
+      }),
+    );
+
+    await completed(removed.jobId);
+
+    const updated = contract.connectorStatus.parse(
+      await command({ kind: "deploy", release: maximum }),
+    );
+
+    await completed(updated.jobId);
+    await command(
+      { kind: "secret", name: initial.name, secret: "API_KEY", value: "synthetic" },
+      400,
+    );
+    const uploaded = scripts.get(connectorWorkerName(fleetId, initial.name));
+    expect(
+      uploaded?.metadata.bindings.filter((binding) => binding.type === "plain_text"),
+    ).toHaveLength(128);
+    expect(uploaded?.metadata.bindings.some((binding) => binding.type === "secret_text")).toBe(
+      false,
+    );
+  });
 });

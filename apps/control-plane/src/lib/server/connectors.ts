@@ -16,7 +16,12 @@ import { InvalidOperation } from "./errors.ts";
 import { encryptSecret } from "./secret-encryption.ts";
 import { defaultFleet, lockFleet, requireAgentExecution } from "./fleets.ts";
 import type { Principal } from "./identity.ts";
-import { connectorReference, validateConnectorSecret } from "./connector-package.ts";
+import {
+  connectorReference,
+  loadConnector,
+  validateConnectorEnvironment,
+  validateConnectorSecret,
+} from "./connector-package.ts";
 import { artifacts, connectors, deployments, jobs } from "./schema.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import { transact, type Transaction } from "./transactions.ts";
@@ -171,6 +176,10 @@ export const createConnectorService = (
           } else {
             secrets.set(secret, await encryptSecret(encryptionKey, value));
           }
+
+          validateConnectorEnvironment((await loadConnector(storage, reference)).configuration, [
+            ...secrets.keys(),
+          ]);
 
           const next = {
             ...reference,

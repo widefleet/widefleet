@@ -24,6 +24,28 @@ export const validateConnectorSecret = (value: string) => {
     });
 };
 
+export const validateConnectorEnvironment = (
+  configuration: z.infer<typeof contract.connectorConfiguration>,
+  secretNames: string[],
+) => {
+  const variables = contract.connectorConfiguration.shape.vars.safeParse(configuration.vars);
+
+  if (!variables.success)
+    throw new InvalidOperation({
+      code: "BAD_REQUEST",
+      message: variables.error.issues[0]?.message ?? "Invalid connector variables",
+    });
+
+  if (
+    Object.keys(variables.data).length + secretNames.length >
+    contract.connectorEnvironmentMaxBindings
+  )
+    throw new InvalidOperation({
+      code: "BAD_REQUEST",
+      message: "Connectors support at most 128 variables and secrets combined",
+    });
+};
+
 export const loadConnector = async (
   storage: ArtifactStorage,
   reference: z.infer<typeof connectorReference>,

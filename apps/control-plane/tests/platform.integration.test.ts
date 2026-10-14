@@ -2739,4 +2739,78 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     expect(await (await json(path, "PUT", { listed: false })).json()).toEqual({ listed: false });
     expect(await (await json("/catalog", "GET", undefined, outsiderHeaders)).json()).toEqual([]);
   });
+  it("enforces shared variable sizes and the combined secret limit before creating agent jobs", async () => {
+    const source = "export default { fetch() { return new Response('fixture'); } }";
+    const vars = Object.fromEntries(Array.from({ length: 127 }, (_, i) => [`VAR_${i}`, ""]));
+    vars["VAR_0"] = "é".repeat(2500);
+
+    const release = contract.connectorPackage.parse({
+      protocol: 1,
+      name: "environment-limits",
+      main: "worker.js",
+      entrypoints: ["default"],
+      modules: [
+        { name: "worker.js", source, sha256: createHash("sha256").update(source).digest("hex") },
+      ],
+      configuration: { compatibility_date: "2026-10-01", vars },
+    });
+
+    const path = `/connectors/${release.name}`;
+    const before = await environment.database.db.select().from(jobs);
+
+    for (const value of ["x".repeat(5001), "é".repeat(2501)])
+      expect(
+        (
+          await json(path, "PUT", {
+            ...release,
+            configuration: { ...release.configuration, vars: { LABEL: value } },
+          })
+        ).status,
+      ).toBe(400);
+    expect(
+      (
+        await json(path, "PUT", {
+          ...release,
+          configuration: { ...release.configuration, vars: { ...vars, EXTRA: "", OVERFLOW: "" } },
+        })
+      ).status,
+    ).toBe(400);
+    expect(await environment.database.db.select().from(jobs)).toHaveLength(before.length);
+    expect((await json(path, "PUT", release)).status).toBe(200);
+
+    const attempts = await Promise.all(
+      ["FIRST", "SECOND"].map((name) =>
+        json(`${path}/secrets/${name}`, "PUT", { value: "synthetic" }),
+      ),
+    );
+
+    expect(attempts.map((response) => response.status).sort((left, right) => left - right)).toEqual(
+      [200, 400],
+    );
+    const accepted = attempts.find((response) => response.status === 200);
+    const secret = contract.connectorStatus.parse(await accepted?.json()).secrets[0];
+
+    if (!secret) throw new Error("Missing accepted secret");
+    const secretPath = `${path}/secrets/${secret}`;
+
+    const rotated = contract.connectorStatus.parse(
+      await (await json(secretPath, "PUT", { value: "rotated" })).json(),
+    );
+
+    const maximum = {
+      ...release,
+      configuration: { ...release.configuration, vars: { ...vars, EXTRA: "x".repeat(5000) } },
+    };
+
+    const previous = await environment.database.db.select().from(jobs);
+    expect((await json(path, "PUT", maximum)).status).toBe(400);
+    expect((await json(`${path}/secrets/OVERFLOW`, "PUT", { value: "synthetic" })).status).toBe(
+      400,
+    );
+    expect(await environment.database.db.select().from(jobs)).toHaveLength(previous.length);
+    expect(await (await json(path, "GET")).json()).toMatchObject({ jobId: rotated.jobId });
+    expect((await json(secretPath, "DELETE")).status).toBe(200);
+    expect((await json(path, "PUT", maximum)).status).toBe(200);
+    expect((await json(secretPath, "PUT", { value: "synthetic" })).status).toBe(400);
+  });
 });
