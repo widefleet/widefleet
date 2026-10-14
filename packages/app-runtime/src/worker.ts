@@ -133,16 +133,27 @@ export const workerCode = async (
     modules: Object.fromEntries(modules),
     env: Object.fromEntries(bindings),
     globalOutbound: context.exports.Gateway({ props: { origins: app.network.policy.backend } }),
-    tails: app.telemetry
-      ? [
-          context.exports.Telemetry({
-            props: {
-              ...app.telemetry,
-              deploymentId: app.deploymentId,
-              buildId: app.metadata.debug?.build_id ?? null,
-            },
-          }),
-        ]
-      : [],
+    tails:
+      environment["WIDEFLEET_LOGS"] === "cloudflare"
+        ? [
+            context.exports.CloudflareTelemetry({
+              props: {
+                appId: app.appId,
+                deploymentId: app.deploymentId,
+                buildId: app.metadata.debug?.build_id ?? null,
+              },
+            }),
+          ]
+        : app.telemetry
+          ? [
+              context.exports.Telemetry({
+                props: {
+                  ...app.telemetry,
+                  deploymentId: app.deploymentId,
+                  buildId: app.metadata.debug?.build_id ?? null,
+                },
+              }),
+            ]
+          : [],
   };
 };

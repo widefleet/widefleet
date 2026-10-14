@@ -68,6 +68,11 @@ export class ExampleWorkflow extends WorkflowEntrypoint {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname === '/logs') {
+      console.info('fixture plain log', { value: 42 });
+      console.error(JSON.stringify({ widefleet: 1, source: 'browser', kind: 'error', message: 'older browser', buildId: 'older-build' }));
+      return new Response('logged');
+    }
     if (url.pathname === '/env') return Response.json({ keys: Object.keys(env), imported: Object.keys(importedEnv) });
     if (url.pathname === '/throw') throw new Error('fixture application failure');
     if (url.pathname === '/connector') return Response.json(await env.CONNECTOR.add(20, 22));
@@ -139,6 +144,14 @@ import runtime from './runtime.js';
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { connect } from 'cloudflare:sockets';
 export * from './runtime.js';
+const logRecords = [];
+for (const level of ['log', 'debug', 'info', 'warn', 'error']) {
+  const originalLog = console[level];
+  console[level] = (...args) => {
+    if (args[0]?.widefleetLog === 1) logRecords.push(args[0]);
+    else originalLog(...args);
+  };
+}
 
 export class Connector extends WorkerEntrypoint {
   add(a, b) { return a + b; }
@@ -159,6 +172,7 @@ export default {
   ...runtime,
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    if (url.pathname === '/fixture/logs') return Response.json(logRecords);
     if (url.pathname === '/fixture/tcp') {
       const socket = connect(url.searchParams.get('address'));
       await socket.opened;

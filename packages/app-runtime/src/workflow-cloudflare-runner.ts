@@ -36,6 +36,16 @@ const value = async (operation: () => Promise<WorkflowResult>) => {
   return result.value;
 };
 
+const captureApp = <T>(operation: () => Promise<T>) =>
+  captureWorkflow(async () => {
+    try {
+      return await operation();
+    } catch (cause) {
+      if (!(cause instanceof NativeWorkflowError)) console.error(cause);
+      throw cause;
+    }
+  });
+
 export class WorkflowRunner extends WorkerEntrypoint<Record<string, WorkflowValue>> {
   ready() {
     if (!(ApplicationWorkflow.prototype instanceof WorkflowEntrypoint))
@@ -44,7 +54,7 @@ export class WorkflowRunner extends WorkerEntrypoint<Record<string, WorkflowValu
     return true;
   }
   run(event: AppEvent, native: Rpc.Stub<CloudflareWorkflowSteps>) {
-    return captureWorkflow(async () => {
+    return captureApp(async () => {
       this.ready();
 
       return new ApplicationWorkflow(this.ctx, this.env).run(event, {
@@ -64,7 +74,7 @@ export class WorkflowRunner extends WorkerEntrypoint<Record<string, WorkflowValu
 
           return value(() =>
             native.do(name, functionConfig.success ? {} : stepConfig(config), (context) =>
-              captureWorkflow(() => insideStep.run(true, () => invoke(context))),
+              captureApp(() => insideStep.run(true, () => invoke(context))),
             ),
           );
         },
