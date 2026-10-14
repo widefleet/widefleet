@@ -99,6 +99,7 @@ export const apps = pgTable(
     networkError: text("network_error"),
     capabilities: jsonb().notNull().default({}),
     capabilityRevision: integer("capability_revision").notNull().default(0),
+    appliedCapabilities: jsonb("applied_capabilities"),
     appliedCapabilityRevision: integer("applied_capability_revision"),
     capabilityError: text("capability_error"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -213,19 +214,27 @@ export const jobs = pgTable(
 
 // A projection of accepted Cloudflare operations. Workflows own scheduling and retries;
 // this history is never scanned or claimed to start work.
-export const cloudflareOperations = pgTable("cloudflare_operation", {
-  id: uuid().primaryKey(),
-  appId: uuid("app_id")
-    .notNull()
-    .references(() => apps.id, { onDelete: "cascade" }),
-  sequence: bigint({ mode: "number" }).generatedAlwaysAsIdentity().unique(),
-  command: jsonb().notNull(),
-  targets: jsonb().notNull(),
-  result: jsonb().notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
-  finishedAt: timestamp("finished_at", { withTimezone: true }),
-  error: text(),
-});
+export const cloudflareOperations = pgTable(
+  "cloudflare_operation",
+  {
+    id: uuid().primaryKey(),
+    appId: uuid("app_id").references(() => apps.id, { onDelete: "cascade" }),
+    fleetId: uuid("fleet_id").references(() => fleets.id, { onDelete: "cascade" }),
+    sequence: bigint({ mode: "number" }).generatedAlwaysAsIdentity().unique(),
+    command: jsonb().notNull(),
+    targets: jsonb().notNull(),
+    result: jsonb().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    error: text(),
+  },
+  (table) => [
+    check(
+      "cloudflare_operation_scope_check",
+      sql`num_nonnulls(${table.appId}, ${table.fleetId}) = 1`,
+    ),
+  ],
+);
 
 export const deploymentEvents = pgTable("deployment_event", {
   id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),

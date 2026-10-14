@@ -1,3 +1,6 @@
+import { resolveCloudflareCapabilities } from "./cloudflare-capabilities.ts";
+import { checkCapabilityNames } from "./connector-changes.ts";
+import { lockFleet } from "./fleets.ts";
 import { CloudflareSubscriptionPending } from "./cloudflare-subscription-updates.ts";
 import { createCloudflareEvents } from "./cloudflare-events.ts";
 import { NonRetryableError } from "cloudflare:workflows";
@@ -125,6 +128,13 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
       withCloudflareDatabase(bindings, async ({ db }) =>
         value(
           await transact(db, async (transaction) => {
+            const [scope] = await transaction
+              .select({ fleetId: apps.fleetId })
+              .from(apps)
+              .where(eq(apps.id, target.appId));
+
+            if (scope) await lockFleet(transaction, scope.fleetId);
+
             const [app] = await transaction
               .select()
               .from(apps)
@@ -169,7 +179,32 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
                   code: "CONFLICT",
                   message: "A newer deployment has already been activated",
                 });
-            } else if (!serving) return Result.ok(undefined);
+            } else if (!serving) {
+              if (
+                command.kind === "capabilities" &&
+                !Object.keys(contract.capabilityGrants.parse(app.capabilities)).length
+              ) {
+                const [deployment] = await transaction
+                  .select({ id: deployments.id })
+                  .from(deployments)
+                  .where(eq(deployments.appId, app.id))
+                  .limit(1);
+
+                // With no deployment ever accepted, no delayed publication can still
+                // expose an earlier grant. Record that this saved grant was removed.
+                if (!deployment)
+                  await transaction
+                    .update(apps)
+                    .set({
+                      appliedCapabilityRevision: app.capabilityRevision,
+                      appliedCapabilities: { revision: app.capabilityRevision, grants: {} },
+                      capabilityError: null,
+                    })
+                    .where(eq(apps.id, app.id));
+              }
+
+              return Result.ok(undefined);
+            }
 
             const artifactId = command.kind === "deploy" ? command.artifactId : serving?.id;
 
@@ -194,11 +229,21 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               grants: app.capabilities,
             });
 
-            if (Object.keys(capabilities.grants).length)
-              throw new InvalidOperation({
-                code: "BAD_REQUEST",
-                message: "Cloudflare connector deployment is not available yet",
-              });
+            checkCapabilityNames(
+              contract.workerMetadata.parse(record.metadata),
+              capabilities.grants,
+            );
+
+            const resolved = await resolveCloudflareCapabilities(
+              transaction,
+              app.fleetId,
+              capabilities.grants,
+            );
+
+            if (resolved.bindings.length)
+              await withCloudflareDatabase(bindings, ({ db: resources }) =>
+                updateCloudflareBindings(resources, provisioner, resolved.bindings),
+              );
 
             const selected = {
               id: record.id,
@@ -209,6 +254,7 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               hostname: app.hostname,
               deploymentId: command.kind === "deploy" ? command.id : serving?.deploymentId,
               network,
+              capabilities: resolved.capabilities,
               capabilityRevision: capabilities.revision,
               nativeBindings: command.kind === "deploy" ? nativeBindings : serving?.nativeBindings,
             };
@@ -318,6 +364,7 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
                 networkError: null,
                 appliedAccessRevision: access.revision,
                 accessError: null,
+                appliedCapabilities: capabilities,
                 appliedCapabilityRevision: capabilities.revision,
                 capabilityError: null,
               })
@@ -401,6 +448,15 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
                   .where(eq(apps.id, app.id));
 
               if (
+                target.capabilityRevision === app.capabilityRevision &&
+                app.appliedCapabilityRevision !== target.capabilityRevision
+              )
+                await transaction
+                  .update(apps)
+                  .set({ capabilityError: failure })
+                  .where(eq(apps.id, app.id));
+
+              if (
                 target.accessRevision === app.accessRevision &&
                 app.appliedAccessRevision !== target.accessRevision
               )
@@ -417,7 +473,7 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
   };
 };
 
-const retryable = async <T>(operation: () => Promise<T>) => {
+export const retryable = async <T>(operation: () => Promise<T>) => {
   try {
     return await operation();
   } catch (error) {

@@ -1,3 +1,5 @@
+import { connectorServiceBinding } from "../../src/lib/server/cloudflare-connector-package.ts";
+import { connectorReference } from "../../src/lib/server/connector-package.ts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import { createHash } from "node:crypto";
@@ -21,6 +23,7 @@ import {
 import { initializeCloudflareFleet } from "../../src/lib/server/fleets.ts";
 import {
   apps,
+  connectors,
   cloudflareOperations,
   cloudflareRuntimeBindings,
   deployments,
@@ -71,6 +74,8 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       bucket_name: z.string().optional(),
       namespace_id: z.string().optional(),
       queue_name: z.string().optional(),
+      service: z.string().optional(),
+      entrypoint: z.string().optional(),
     });
 
     const settings = new Map<string, z.infer<typeof nativeBinding>>([
@@ -412,6 +417,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         join(directory, "fixture.ts"),
         `
       import runtime from './runtime.js';
+      import {WorkerEntrypoint} from 'cloudflare:workers';
+      export class WIDEFLEET_CONNECTOR extends WorkerEntrypoint { #value = 'default-connector'; read() { return this.#value; } }
+      export class Reader extends WorkerEntrypoint { read() { return 'named-connector'; } }
+      import {createConnectorService} from ${JSON.stringify(server + "connectors.ts")};
       import { createCloudflareExecution } from ${JSON.stringify(server + "cloudflare-execution.ts")};
       import { withCloudflareDatabase } from ${JSON.stringify(server + "cloudflare-database.ts")};
       import { createArtifactStorage } from ${JSON.stringify(server + "artifact-storage.ts")};
@@ -459,6 +468,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           };
           const result = await withCloudflareDatabase(env, async ({ db }) => {
             const executor = createCloudflareExecution({ ...env, DEPLOYMENTS: deploymentBinding }, db, createArtifactStorage(createR2Storage(env.ARTIFACTS)));
+            if (command.kind === 'capabilities') return executor.connectors.bind(command.actor, command.appId, command.name, command.grant);
             if (command.kind === 'access') return executor.access(command.actor, command.appId, command.input);
             if (command.kind === 'network') return executor.network(command.actor, command.appId, command.input);
             return executor.deploy({ id: command.id, appId: command.appId, artifactId: command.artifactId, createdAt: command.createdAt,
@@ -495,6 +505,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
             const executor = createCloudflareExecution(env, db, createArtifactStorage(createR2Storage(env.ARTIFACTS)));
             return createAppService(db, readCloudflareConfiguration(env), executor).history({ id: 'fixture-owner', admin: true }, url.searchParams.get('appId'));
           });
+          return Response.json(result.unwrap());
+        }
+        if (url.hostname === 'fixture' && url.pathname === '/connections') {
+          const result = await withCloudflareDatabase(env, async ({db}) => createConnectorService(db, createArtifactStorage(createR2Storage(env.ARTIFACTS)), env.PLATFORM_ENCRYPTION_KEY).connections({id:'fixture-owner', admin:true}, url.searchParams.get('appId')));
           return Response.json(result.unwrap());
         }
         if (url.hostname === 'fixture' && url.pathname === '/host') {
@@ -580,7 +594,18 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
               max_batch_timeout: 0,
             })),
           },
-          services: [{ binding: "APP_RUNTIME", service: "widefleet-deployment-test" }],
+          services: [
+            { binding: "APP_RUNTIME", service: "widefleet-deployment-test" },
+            ...["default", "Reader"].map((entrypoint) => {
+              const binding = connectorServiceBinding(first.fleetId, "app-connector", entrypoint);
+
+              return {
+                binding: binding.name,
+                service: "widefleet-deployment-test",
+                entrypoint: binding.entrypoint,
+              };
+            }),
+          ],
           worker_loaders: [{ binding: "WIDEFLEET_LOADER" }],
           r2_buckets: [
             { binding: "ARTIFACTS", bucket_name: "artifacts" },
@@ -767,7 +792,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       expect(await host(hostname)).toBeNull();
     });
 
-    it("rejects connector grants without publishing or provisioning them", async () => {
+    it("rejects grants to undeployed connector entrypoints without publishing them", async () => {
       const before = await host(first.hostname);
       const entry = await seedDeployment(environment.database.db, { appId: first.appId });
       await environment.database.db
@@ -1579,5 +1604,80 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       expect(schedules).toContainEqual({ cron: "50 * * * *" });
       expect(schedules).not.toContainEqual({ cron: "61 * * * *" });
     }, 30_000);
+    it("deploys approved connector RPC bindings and applies replacement and revocation through the same workflow", async () => {
+      const reference = connectorReference.parse({
+        name: "app-connector",
+        checksum: "a".repeat(64),
+        entrypoints: ["default", "Reader"],
+        classes: [],
+      });
+
+      await environment.database.db.insert(connectors).values({
+        fleetId: first.fleetId,
+        name: reference.name,
+        package: reference,
+        appliedPackage: reference,
+        jobId: crypto.randomUUID(),
+      });
+
+      const entry = await seedDeployment(environment.database.db, {
+        bindings: [],
+        source: `export default {async fetch(request, env) {return Response.json({value: env.ERP ? await env.ERP.read() : null, secret: env.WIDEFLEET_SECRET_API_KEY ?? null});}}`,
+      });
+
+      const bind = async (grant: z.infer<typeof contract.capabilityGrant> | null) => {
+        const response = await worker.fetch("http://fixture/start", {
+          method: "POST",
+          body: JSON.stringify({
+            kind: "capabilities",
+            appId: entry.appId,
+            name: "ERP",
+            grant,
+            actor: { id: "fixture-owner", admin: true },
+          }),
+        });
+
+        expect(response.status).toBe(200);
+
+        const [operation] = await environment.database.db
+          .select()
+          .from(cloudflareOperations)
+          .where(eq(cloudflareOperations.appId, entry.appId))
+          .orderBy(desc(cloudflareOperations.sequence))
+          .limit(1);
+
+        if (!operation) throw new Error("Missing binding history");
+        await completed(operation.id);
+      };
+
+      await bind({ connector: reference.name, entrypoint: "default" });
+      await seed(entry);
+      await dispatch(entry);
+      await completed(entry.command.id);
+      expect(await (await worker.fetch(`https://${entry.hostname}/`)).json()).toEqual({
+        value: "default-connector",
+        secret: null,
+      });
+      await bind({ connector: reference.name, entrypoint: "Reader" });
+      expect(await (await worker.fetch(`https://${entry.hostname}/`)).json()).toEqual({
+        value: "named-connector",
+        secret: null,
+      });
+      expect(
+        await (await worker.fetch(`http://fixture/connections?appId=${entry.appId}`)).json(),
+      ).toMatchObject({
+        connectors: { state: "active" },
+        activeConnectors: { ERP: { connector: reference.name, entrypoint: "Reader" } },
+      });
+      await bind(null);
+      expect(await (await worker.fetch(`https://${entry.hostname}/`)).json()).toEqual({
+        value: null,
+        secret: null,
+      });
+      expect(
+        await (await worker.fetch(`http://fixture/connections?appId=${entry.appId}`)).json(),
+      ).toMatchObject({ connectors: { state: "active" }, activeConnectors: {} });
+      expect(await environment.database.db.select().from(jobs)).toHaveLength(0);
+    }, 60_000);
   },
 );

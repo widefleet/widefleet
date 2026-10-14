@@ -1,3 +1,5 @@
+import { applyCapabilityChange } from "./connector-changes.ts";
+import { lockFleet } from "./fleets.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
 import { and, eq } from "drizzle-orm";
@@ -25,6 +27,7 @@ export const operationTarget = z.object({
   runtime: runtimeReference,
   accessRevision: z.number().int().nonnegative(),
   networkRevision: z.number().int().nonnegative(),
+  capabilityRevision: z.number().int().nonnegative().default(0),
 });
 
 // Called only after Workflows has durably accepted the command. The request can materialize
@@ -36,6 +39,13 @@ export const registerCloudflareOperation = (
 ) =>
   transact(database, (transaction) =>
     Result.gen(async function* () {
+      const [scope] = await transaction
+        .select({ fleetId: apps.fleetId })
+        .from(apps)
+        .where(eq(apps.id, command.appId));
+
+      if (scope) await lockFleet(transaction, scope.fleetId);
+
       const [app] = await transaction
         .select()
         .from(apps)
@@ -68,7 +78,8 @@ export const registerCloudflareOperation = (
       let result:
         | z.infer<typeof contract.deployment>
         | z.infer<typeof contract.networkState>
-        | z.infer<typeof contract.appAccessState>;
+        | z.infer<typeof contract.appAccessState>
+        | z.infer<typeof contract.capabilityState>;
 
       if (command.kind === "deploy") {
         const [artifact] = await transaction
@@ -125,6 +136,17 @@ export const registerCloudflareOperation = (
         result = yield* Result.await(
           applyNetworkChange(transaction, command.actor, app.id, command.input, false),
         );
+      } else if (command.kind === "capabilities") {
+        result = yield* Result.await(
+          applyCapabilityChange(
+            transaction,
+            command.actor,
+            app.id,
+            command.name,
+            command.grant,
+            false,
+          ),
+        );
       } else {
         const access = yield* Result.await(
           applyAccessChange(transaction, command.actor, app.id, command.input, false),
@@ -145,17 +167,12 @@ export const registerCloudflareOperation = (
 
         if (!target) throw new Error("Deployment target disappeared while registering the command");
 
-        if (Object.keys(contract.capabilityGrants.parse(target.capabilities)).length)
-          return yield* new InvalidOperation({
-            code: "BAD_REQUEST",
-            message: "Cloudflare connector deployment is not available yet",
-          });
-
         targets.push({
           appId,
           runtime,
           accessRevision: target.accessRevision,
           networkRevision: target.networkRevision,
+          capabilityRevision: target.capabilityRevision,
         });
       }
 

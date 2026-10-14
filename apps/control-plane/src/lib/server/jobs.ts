@@ -20,7 +20,7 @@ import {
 } from "./schema.ts";
 import { ensureFleetRuntime, loadRuntime, runtimeReference } from "./runtime-releases.ts";
 import { decryptSecret } from "./secret-encryption.ts";
-import { connectorReference, loadConnector } from "./connectors.ts";
+import { connectorReference, loadConnector } from "./connector-package.ts";
 import { lockFleet } from "./fleets.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import { transact, type Transaction } from "./transactions.ts";
