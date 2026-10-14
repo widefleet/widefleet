@@ -30,6 +30,7 @@ export const createIdentityProvider = async () => {
     groups: ["accounting"],
     name: "Example User",
     graphFailure: "",
+    issuerSuffix: "",
   };
 
   const graphRequests: string[] = [];
@@ -37,7 +38,7 @@ export const createIdentityProvider = async () => {
   const server = createServer((request, response) => {
     const handle = async () => {
       const url = new URL(request.url ?? "/", origin);
-      const issuer = settings.entra ? `${origin}/${tenantId}/v2.0` : origin;
+      const issuer = settings.entra ? `${origin}/${tenantId}/v2.0` : origin + settings.issuerSuffix;
 
       response.setHeader("content-type", "application/json");
 
@@ -115,7 +116,15 @@ export const createIdentityProvider = async () => {
               }),
         })
           .setProtectedHeader({ alg: "RS256", kid: "test" })
-          .setIssuer(settings.failure === "issuer" ? "https://foreign.example.test" : issuer)
+          .setIssuer(
+            settings.failure === "issuer"
+              ? "https://foreign.example.test"
+              : settings.failure === "issuer-slash"
+                ? issuer.endsWith("/")
+                  ? issuer.slice(0, -1)
+                  : `${issuer}/`
+                : issuer,
+          )
           .setAudience(settings.failure === "audience" ? "other-app" : "app-login")
           .setSubject("pairwise-subject")
           .setIssuedAt()

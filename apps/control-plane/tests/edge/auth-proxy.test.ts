@@ -214,6 +214,7 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
       idp.settings.entra = false;
       idp.settings.groups = ["accounting"];
       idp.settings.graphFailure = "";
+      idp.settings.issuerSuffix = "";
       idp.graphRequests.length = 0;
       configuration.provider.issuer = idp.origin;
       await worker.stop();
@@ -254,20 +255,40 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
       ).toBe(200);
     });
 
-    it("accepts a configured issuer with a trailing slash", async () => {
-      configuration.provider.issuer = `${idp.origin}/`;
-      await worker.stop();
-      worker = await start();
-      const signedIn = await login();
+    it.each([
+      ["", ""],
+      ["", "/"],
+      ["/", ""],
+      ["/", "/"],
+    ])(
+      "accepts configured issuer suffix %j and published issuer suffix %j but rejects token mismatch",
+      async (configured, published) => {
+        configuration.provider.issuer = idp.origin + configured;
+        idp.settings.issuerSuffix = published;
+        await worker.stop();
+        worker = await start();
+        const signedIn = await login();
 
-      expect(
-        (
-          await request("https://ledger.apps.example.test", {
-            headers: { cookie: cookieHeader(signedIn.headers.getSetCookie()) },
-          })
-        ).status,
-      ).toBe(200);
-    });
+        expect(
+          (
+            await request("https://ledger.apps.example.test", {
+              headers: { cookie: cookieHeader(signedIn.headers.getSetCookie()) },
+            })
+          ).status,
+        ).toBe(200);
+
+        idp.settings.failure = "issuer-slash";
+        const flow = await begin();
+        const rejected = await request(flow.callback, { headers: { cookie: flow.cookies } });
+
+        expect(
+          rejected.headers
+            .getSetCookie()
+            .some((value) => value.includes(".session_data") && !value.includes("Max-Age=0")),
+        ).toBe(false);
+        expect(rejected.headers.get("location") ?? "").not.toContain("ledger.apps.example.test");
+      },
+    );
 
     it("keeps only verified identity headers and strips all app cookies and tokens", async () => {
       const result = await request(

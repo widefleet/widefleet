@@ -88,7 +88,11 @@ export const providerIdentity = async (
   // audience and nonce verification. This maps already verified claims.
   const claims = decodeJwt(idToken);
 
-  if (claims.iss !== issuer(provider) || claims["email_verified"] === false)
+  // Better Auth checks the exact published issuer. This additional comparison
+  // tolerates a trailing slash in the saved OIDC URL without changing that check.
+  const tokenIssuer = provider.type === "oidc" ? claims.iss?.replace(/\/$/, "") : claims.iss;
+
+  if (tokenIssuer !== issuer(provider) || claims["email_verified"] === false)
     throw new Error("The company identity is not trusted");
 
   const subject =
