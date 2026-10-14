@@ -18,14 +18,10 @@ import {
   jobReceipts,
   jobs,
 } from "./schema.ts";
-import {
-  ensureFleetRuntime,
-  loadRuntime,
-  lockFleet,
-  runtimeReference,
-} from "./runtime-releases.ts";
+import { ensureFleetRuntime, loadRuntime, runtimeReference } from "./runtime-releases.ts";
 import { decryptSecret } from "./secret-encryption.ts";
 import { connectorReference, loadConnector } from "./connectors.ts";
+import { lockFleet } from "./fleets.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import { transact, type Transaction } from "./transactions.ts";
 
@@ -94,6 +90,12 @@ export const createJobService = (
 
       if (!agent) throw new InvalidOperation({ code: "FORBIDDEN", message: "Agent is disabled" });
       const fleet = await lockFleet(transaction, agent.fleetId);
+
+      if (fleet.executor === "cloudflare")
+        throw new InvalidOperation({
+          code: "CONFLICT",
+          message: "Cloudflare execution does not accept agent job claims",
+        });
       const earlier = alias(jobs, "earlier_job");
 
       const [candidate] = await transaction

@@ -17,6 +17,7 @@ import type { createDatabase } from "./database.ts";
 import type { createReporting } from "./reporting.ts";
 import type { createSettingsService } from "./settings.ts";
 import type { ArtifactStorage } from "./storage.ts";
+import type { HostedExecution } from "./deployment-execution.ts";
 
 export const createRuntime = ({
   configuration,
@@ -25,6 +26,7 @@ export const createRuntime = ({
   storage,
   reporting,
   encryptionKey,
+  execution,
 }: {
   configuration: Configuration & { BETTER_AUTH_SECRET: string };
   database: ReturnType<typeof createDatabase>;
@@ -32,6 +34,7 @@ export const createRuntime = ({
   storage: ArtifactStorage;
   reporting: ReturnType<typeof createReporting>;
   encryptionKey: string;
+  execution?: HostedExecution;
 }) => {
   const services = {
     configuration,
@@ -39,16 +42,16 @@ export const createRuntime = ({
     settings,
     reporting,
     storage,
-    apps: createAppService(database.db, configuration),
+    apps: createAppService(database.db, configuration, execution),
     agents: createAgentService(database.db),
     jobs: createJobService(database.db, storage, encryptionKey, reporting.operation),
-    network: createNetworkService(database.db),
-    appAccess: createAppAccessService(database.db),
+    network: createNetworkService(database.db, execution),
+    appAccess: createAppAccessService(database.db, execution),
     workflows: createWorkflowService(database.db),
     migrations: createMigrationService(database.db, storage),
     connectors: createConnectorService(database.db, storage, encryptionKey),
     releases: createRuntimeReleaseService(database.db, storage),
-    uploads: createUploadService(database.db, storage, configuration),
+    uploads: createUploadService(database.db, storage, configuration, execution),
     telemetry: createTelemetry(database.db, storage, configuration),
   };
 

@@ -8,7 +8,7 @@ import { InvalidOperation } from "./errors.ts";
 import type { Principal } from "./identity.ts";
 import { agents } from "./schema.ts";
 import { transact } from "./transactions.ts";
-import { defaultFleet } from "./fleets.ts";
+import { defaultFleet, lockFleet } from "./fleets.ts";
 
 const presentAgent = (record: typeof agents.$inferSelect) =>
   contract.agent.parse({
@@ -43,7 +43,14 @@ export const createAgentService = (database: Database) => ({
           }),
         );
 
-      const fleet = await defaultFleet(transaction);
+      const fleet = await lockFleet(transaction, (await defaultFleet(transaction)).id);
+
+      if (fleet.executor !== "agent")
+        throw new InvalidOperation({
+          code: "CONFLICT",
+          message: "Cloudflare executes this installation's jobs without an agent",
+        });
+
       const token = `agent_${randomBytes(32).toString("base64url")}`;
 
       const [record] = await transaction

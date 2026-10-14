@@ -1,6 +1,7 @@
-import type { Hyperdrive, R2Bucket } from "@cloudflare/workers-types";
+import type { Fetcher, Hyperdrive, R2Bucket, Workflow } from "@cloudflare/workers-types";
 import { z } from "zod";
 import { runtimeConfigurationSchema } from "./config.ts";
+import type { deploymentCommand } from "./deployment-execution.ts";
 
 export interface CloudflareBindings {
   HYPERDRIVE: Hyperdrive;
@@ -9,6 +10,12 @@ export interface CloudflareBindings {
   APP_DOMAIN: string;
   BETTER_AUTH_SECRET: string;
   PLATFORM_ENCRYPTION_KEY: string;
+  DEPLOYMENTS?: Workflow<z.infer<typeof deploymentCommand>>;
+  APP_RUNTIME?: Fetcher;
+  CLOUDFLARE_ACCOUNT_ID?: string;
+  CLOUDFLARE_API_TOKEN?: string;
+  APP_RUNTIME_NAME?: string;
+  APP_RUNTIME_TOKEN?: string;
   PLATFORM_USAGE_REPORTING?: string;
   PLATFORM_CRASH_REPORTING?: string;
 }

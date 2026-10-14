@@ -1,0 +1,858 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
+import { createServer } from "node:http";
+import { once } from "node:events";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import type { Unstable_DevWorker } from "wrangler";
+import { and, desc, eq, sql } from "drizzle-orm";
+import { z } from "zod";
+import type * as contract from "@platform/contracts";
+import release from "@platform/app-runtime/release" with { type: "json" };
+import { createTestEnvironment } from "../environment.ts";
+import { deploymentSource, seedDeployment } from "../cloudflare-deployment.fixture.ts";
+import { initializeCloudflareFleet } from "../../src/lib/server/fleets.ts";
+import {
+  apps,
+  cloudflareOperations,
+  cloudflareRuntimeBindings,
+  deployments,
+  jobs,
+} from "../../src/lib/server/schema.ts";
+
+const resourceName = (appId: string, kind: string, name: string) =>
+  `r${createHash("sha256").update(`${appId}/${kind}/${name}`).digest("hex").slice(0, 40)}`;
+
+describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
+  "Hosted deployment workflow in workerd",
+  () => {
+    let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
+    let directory: string;
+    let worker: Unstable_DevWorker;
+    let first: Awaited<ReturnType<typeof seedDeployment>>;
+    let preview: Awaited<ReturnType<typeof seedDeployment>>;
+    let rejected: Awaited<ReturnType<typeof seedDeployment>>;
+    let delayed: Awaited<ReturnType<typeof seedDeployment>>;
+    let lostResponse: Awaited<ReturnType<typeof seedDeployment>>;
+    const token = "local-deployment-runtime-token-never-deploy";
+    const largeGroups = Array.from({ length: 100 }, (_, index) => `${index}-${"group".repeat(40)}`);
+    const databases = new Map<string, string>();
+    const createdDatabases = new Set<string>();
+    const buckets = new Set<string>();
+
+    const nativeBinding = z.object({
+      name: z.string(),
+      type: z.string(),
+      id: z.string().optional(),
+      bucket_name: z.string().optional(),
+    });
+
+    const settings = new Map<string, z.infer<typeof nativeBinding>>([
+      ["WIDEFLEET_PACKAGES", { name: "WIDEFLEET_PACKAGES", type: "r2_bucket" }],
+      ["WIDEFLEET_CONTROL_TOKEN", { name: "WIDEFLEET_CONTROL_TOKEN", type: "secret_text" }],
+    ]);
+
+    const updates: { name: string; type: string }[][] = [];
+    let patches = 0;
+    let bindingRequests = 0;
+    let bindingMode = "normal";
+    let delayedBindingUpdate: (() => void) | undefined;
+    let bindingTag = "initial";
+    let apiOrigin = "";
+
+    const api = createServer((request, response) => {
+      const handle = async () => {
+        const url = new URL(request.url ?? "/", apiOrigin);
+        let body = "";
+
+        for await (const chunk of request) body += String(chunk);
+
+        const ok = (
+          result:
+            | z.infer<ReturnType<typeof z.json>>
+            | {
+                bindings: z.infer<typeof nativeBinding>[];
+                annotations: Record<string, string>;
+              },
+        ) => {
+          response.setHeader("content-type", "application/json");
+          response.end(JSON.stringify({ success: true, result }));
+        };
+
+        if (request.headers.authorization !== "Bearer local-provisioning-token")
+          throw new Error("Incorrect API credential");
+
+        if (url.pathname.endsWith("/d1/database")) {
+          if (request.method === "GET") {
+            ok([...createdDatabases].map((name) => ({ name, uuid: databases.get(name) ?? "" })));
+          } else {
+            const { name } = z.object({ name: z.string() }).parse(JSON.parse(body));
+
+            if (!databases.has(name) || createdDatabases.has(name))
+              throw new Error("Unexpected D1 creation");
+            createdDatabases.add(name);
+            ok({ name, uuid: databases.get(name) ?? "" });
+          }
+        } else if (url.pathname.endsWith("/r2/buckets")) {
+          const { name } = z.object({ name: z.string() }).parse(JSON.parse(body));
+
+          if (buckets.has(name)) throw new Error("Duplicate R2 creation");
+          buckets.add(name);
+          ok({ name });
+        } else if (url.pathname.includes("/r2/buckets/")) {
+          const name = url.pathname.split("/").at(-1) ?? "";
+
+          if (buckets.has(name)) ok({ name });
+          else {
+            response.statusCode = 404;
+            response.end();
+          }
+        } else if (url.pathname.endsWith("/settings")) {
+          if (request.method === "PATCH") {
+            const multipart = await new Response(body, {
+              headers: { "content-type": request.headers["content-type"] ?? "" },
+            }).formData();
+
+            const { bindings, annotations } = z
+              .object({
+                bindings: z.array(nativeBinding),
+                annotations: z.object({ "workers/tag": z.uuid() }),
+              })
+              .parse(JSON.parse(z.string().parse(multipart.get("settings"))));
+
+            bindingRequests++;
+
+            const apply = () => {
+              const retained = new Map(
+                bindings.map((binding) => {
+                  const inherited =
+                    binding.type === "inherit" ? settings.get(binding.name) : binding;
+
+                  if (!inherited) throw new Error("Unknown inherited binding");
+
+                  return [binding.name, inherited] as const;
+                }),
+              );
+
+              for (const name of settings.keys()) {
+                if (!retained.has(name)) throw new Error(`Existing binding removed: ${name}`);
+              }
+
+              settings.clear();
+
+              for (const [name, binding] of retained) settings.set(name, binding);
+              updates.push(bindings);
+              patches++;
+              bindingTag = annotations["workers/tag"];
+            };
+
+            const mode = bindingMode;
+            bindingMode = "normal";
+
+            if (mode === "delayed") delayedBindingUpdate = apply;
+            else apply();
+
+            if (mode !== "normal") {
+              response.statusCode = 503;
+              response.end();
+
+              return;
+            }
+          }
+
+          ok({ bindings: [...settings.values()], annotations: { "workers/tag": bindingTag } });
+        } else throw new Error("Unexpected API request");
+      };
+
+      void handle().catch((error) => {
+        console.error(error);
+        response.statusCode = 500;
+        response.end();
+      });
+    });
+
+    const start = async () => {
+      const { unstable_dev } = await import("wrangler");
+
+      return unstable_dev(join(directory, "fixture.ts"), {
+        config: join(directory, "wrangler.json"),
+        local: true,
+        persist: true,
+        persistTo: join(directory, "state"),
+        ip: "127.0.0.1",
+        port: 0,
+        inspectorPort: 0,
+        logLevel: "error",
+        experimental: { disableExperimentalWarning: true, disableDevRegistry: true, watch: false },
+      });
+    };
+
+    const seed = async (entry: typeof first) => {
+      const response = await worker.fetch("http://fixture/seed", {
+        method: "POST",
+        body: JSON.stringify({ artifact: entry.artifact, source: entry.source }),
+      });
+
+      expect(response.status).toBe(204);
+    };
+
+    const submit = async (entry: typeof first, mode = "") => {
+      return worker.fetch(`http://fixture/start?mode=${mode}`, {
+        method: "POST",
+        body: JSON.stringify(entry.command),
+      });
+    };
+
+    const dispatch = async (entry: typeof first, mode = "") => {
+      expect((await submit(entry, mode)).status).toBe(200);
+    };
+
+    const configure = async (
+      appId: string,
+      kind: "access" | "network",
+      input: z.infer<typeof contract.appAccessChange> | z.infer<typeof contract.networkChange>,
+    ) => {
+      const response = await worker.fetch("http://fixture/start", {
+        method: "POST",
+        body: JSON.stringify({ kind, appId, actor: { id: "fixture-owner", admin: false }, input }),
+      });
+
+      expect(response.status).toBe(200);
+
+      const [record] = await environment.database.db
+        .select()
+        .from(cloudflareOperations)
+        .where(eq(cloudflareOperations.appId, appId))
+        .orderBy(desc(cloudflareOperations.sequence))
+        .limit(1);
+
+      if (!record) throw new Error("Missing configuration history");
+      await completed(record.id);
+    };
+
+    const host = async (hostname: string) => {
+      const response = await worker.fetch(`http://fixture/host?hostname=${hostname}`);
+
+      return z
+        .object({ body: z.unknown(), access: z.string().nullable() })
+        .nullable()
+        .parse(await response.json());
+    };
+
+    const operation = async (id: string) => {
+      const [record] = await environment.database.db
+        .select()
+        .from(cloudflareOperations)
+        .where(eq(cloudflareOperations.id, id));
+
+      return record;
+    };
+
+    const nativeStatus = async (id: string) => {
+      const response = await worker.fetch(`http://fixture/workflow?id=${id}`);
+
+      return z.object({ status: z.string() }).parse(await response.json()).status;
+    };
+
+    const completed = async (id: string) => {
+      await expect
+        .poll(
+          async () => ({
+            done: (await operation(id))?.finishedAt !== null,
+            status: await nativeStatus(id),
+          }),
+          { timeout: 90_000, interval: 100 },
+        )
+        .toEqual({ done: true, status: "complete" });
+    };
+
+    beforeAll(async () => {
+      environment = await createTestEnvironment();
+      (await initializeCloudflareFleet(environment.database.db)).unwrap();
+      first = await seedDeployment(environment.database.db);
+      preview = await seedDeployment(environment.database.db, { groups: largeGroups });
+      delayed = await seedDeployment(environment.database.db);
+      lostResponse = await seedDeployment(environment.database.db);
+
+      for (const entry of [first, preview, delayed, lostResponse])
+        databases.set(resourceName(entry.appId, "d1", "data"), crypto.randomUUID());
+      directory = await mkdtemp(join(tmpdir(), "widefleet-deployment-workerd-"));
+      api.listen(0, "127.0.0.1");
+      await once(api, "listening");
+      apiOrigin = `http://127.0.0.1:${z.object({ port: z.number() }).parse(api.address()).port}`;
+      await writeFile(join(directory, "runtime.js"), release.modules[0]?.source ?? "");
+      const workflow = fileURLToPath(new URL("../../src/deployment-workflow.ts", import.meta.url));
+
+      const server = fileURLToPath(new URL("../../src/lib/server/", import.meta.url));
+
+      await writeFile(
+        join(directory, "fixture.ts"),
+        `
+      import runtime from './runtime.js';
+      import { createCloudflareExecution } from ${JSON.stringify(server + "cloudflare-execution.ts")};
+      import { withCloudflareDatabase } from ${JSON.stringify(server + "cloudflare-database.ts")};
+      import { createArtifactStorage } from ${JSON.stringify(server + "artifact-storage.ts")};
+      import { createR2Storage } from ${JSON.stringify(server + "storage/r2.ts")};
+      import { createAppService } from ${JSON.stringify(server + "apps.ts")};
+      import { readCloudflareConfiguration } from ${JSON.stringify(server + "cloudflare-config.ts")};
+      export * from './runtime.js';
+      export { DeploymentWorkflow } from ${JSON.stringify(workflow)};
+      const nativeFetch = globalThis.fetch;
+      globalThis.fetch = (input, init) => {
+        const request = new Request(input, init);
+        const url = new URL(request.url);
+        return nativeFetch(url.origin === 'https://api.cloudflare.com' ? new Request(${JSON.stringify(apiOrigin)} + url.pathname + url.search, request) : request);
+      };
+      export default { async fetch(request, env, ctx) {
+        const url = new URL(request.url);
+        if (url.hostname === 'fixture' && url.pathname === '/seed') {
+          const { artifact, source } = await request.json();
+          await env.ARTIFACTS.put('apps/' + artifact.appId + '/modules/' + artifact.modules[0].sha256, source);
+          return new Response(null, { status: 204 });
+        }
+        if (url.hostname === 'fixture' && url.pathname === '/start') {
+          const command = await request.json();
+          // Miniflare's testing API skips backoff time, while every real step attempt still runs.
+          if (url.searchParams.get('mode') === 'fast-retries') {
+            const modifier = await env.DEPLOYMENTS.unsafeGetInstanceModifier(command.id);
+            try { await modifier.disableRetryDelays(); }
+            finally { modifier[Symbol.dispose]?.(); }
+          }
+          if (url.searchParams.get('mode') === 'accepted-only') {
+            await env.DEPLOYMENTS.create({ id: command.id, params: command });
+            return new Response(null, { status: 200 });
+          }
+          const deploymentBinding = {
+            async create(options) {
+              if (url.searchParams.get('mode') === 'unavailable') throw new Error('Fixture unavailable');
+              const instance = await env.DEPLOYMENTS.create(options);
+              if (url.searchParams.get('mode') === 'lost-response') throw new Error('Fixture lost response');
+              return instance;
+            },
+            get: (id) => env.DEPLOYMENTS.get(id),
+          };
+          const result = await withCloudflareDatabase(env, async ({ db }) => {
+            const executor = createCloudflareExecution({ ...env, DEPLOYMENTS: deploymentBinding }, db, createArtifactStorage(createR2Storage(env.ARTIFACTS)));
+            if (command.kind === 'access') return executor.access(command.actor, command.appId, command.input);
+            if (command.kind === 'network') return executor.network(command.actor, command.appId, command.input);
+            return executor.deploy({ id: command.id, appId: command.appId, artifactId: command.artifactId, createdAt: command.createdAt,
+              status: 'queued', finishedAt: null, message: null }, command.requestId, command.rollback);
+          });
+          return Response.json(result.isErr() ? { error: result.error.message } : result.value, { status: result.isErr() ? 400 : 200 });
+        }
+        if (url.hostname === 'fixture' && url.pathname === '/history') {
+          const result = await withCloudflareDatabase(env, async ({ db }) => {
+            const executor = createCloudflareExecution(env, db, createArtifactStorage(createR2Storage(env.ARTIFACTS)));
+            return createAppService(db, readCloudflareConfiguration(env), executor).history({ id: 'fixture-owner', admin: true }, url.searchParams.get('appId'));
+          });
+          return Response.json(result.unwrap());
+        }
+        if (url.hostname === 'fixture' && url.pathname === '/host') {
+          const obj = await env.ARTIFACTS.get('hosts/' + url.searchParams.get('hostname') + '.json');
+          const key = obj?.customMetadata?.widefleet_access;
+          const access = key ? await env.ARTIFACTS.get(key) : null;
+          return Response.json(obj ? { body: await obj.json(), access: access ? await access.text() : null } : null);
+        }
+        if (url.hostname === 'fixture' && url.pathname === '/workflow') {
+          const instance = await env.DEPLOYMENTS.get(url.searchParams.get('id'));
+          if (request.method === 'POST') {
+            if (url.searchParams.get('action') === 'pause') await instance.pause();
+            else if (url.searchParams.get('action') === 'restart') await instance.restart();
+            else await instance.resume();
+          }
+          return Response.json(await instance.status());
+        }
+        return runtime.fetch(request, env, ctx);
+      } };
+    `,
+      );
+      await writeFile(
+        join(directory, "wrangler.json"),
+        JSON.stringify({
+          name: "widefleet-deployment-test",
+          main: "fixture.ts",
+          compatibility_date: "2026-10-01",
+          compatibility_flags: ["nodejs_compat"],
+          vars: {
+            ...environment.environment,
+            CLOUDFLARE_ACCOUNT_ID: "0".repeat(32),
+            CLOUDFLARE_API_TOKEN: "local-provisioning-token",
+            APP_RUNTIME_NAME: "fixture-runtime",
+            APP_RUNTIME_TOKEN: token,
+            WIDEFLEET_CONTROL_TOKEN: token,
+            WIDEFLEET_CONFIGURATION: JSON.stringify({ crons: {}, queues: {} }),
+          },
+          hyperdrive: [
+            {
+              binding: "HYPERDRIVE",
+              id: "0".repeat(32),
+              localConnectionString: environment.environment.DATABASE_URL,
+            },
+          ],
+          workflows: [
+            {
+              binding: "DEPLOYMENTS",
+              name: "fixture-deployments",
+              class_name: "DeploymentWorkflow",
+            },
+          ],
+          services: [{ binding: "APP_RUNTIME", service: "widefleet-deployment-test" }],
+          worker_loaders: [{ binding: "WIDEFLEET_LOADER" }],
+          r2_buckets: [
+            { binding: "ARTIFACTS", bucket_name: "artifacts" },
+            { binding: "WIDEFLEET_PACKAGES", bucket_name: "artifacts" },
+            ...[first, preview, delayed, lostResponse].map((entry) => ({
+              binding: `B_${resourceName(entry.appId, "r2", "files")}`,
+              bucket_name: resourceName(entry.appId, "r2", "files"),
+            })),
+          ],
+          d1_databases: [...databases].map(([name, id]) => ({
+            binding: `B_${name}`,
+            database_name: name,
+            database_id: id,
+          })),
+        }),
+      );
+      worker = await start();
+      await seed(first);
+      await seed(preview);
+      await seed(delayed);
+      await seed(lostResponse);
+    }, 45_000);
+    afterAll(async () => {
+      await worker?.stop();
+      api.close();
+      await environment?.close();
+
+      if (directory) await rm(directory, { recursive: true, force: true });
+    });
+
+    it("provisions, verifies and activates apps with isolated native D1/R2 data", async () => {
+      await Promise.all([dispatch(first), dispatch(preview)]);
+      await completed(first.command.id);
+      await completed(preview.command.id);
+      expect(await environment.database.db.select().from(jobs)).toHaveLength(0);
+      expect(createdDatabases.size).toBe(2);
+      expect(buckets.size).toBe(2);
+      expect(patches).toBe(2);
+
+      expect(updates[1]?.filter((binding) => binding.type === "inherit")).toHaveLength(4);
+
+      for (const entry of [first, preview])
+        for (const kind of ["d1", "r2"])
+          expect(
+            settings.has(`B_${resourceName(entry.appId, kind, kind === "d1" ? "data" : "files")}`),
+          ).toBe(true);
+
+      expect(settings.size).toBe(6);
+      expect(await host(first.hostname)).toMatchObject({
+        body: { deploymentId: first.deploymentId },
+        access: JSON.stringify({ revision: 1, groups: ["engineering"] }),
+      });
+      expect((await host(preview.hostname))?.access).toBe(
+        JSON.stringify({ revision: 1, groups: largeGroups }),
+      );
+
+      const response = await worker.fetch(`https://${first.hostname}/resources`, {
+        method: "PUT",
+        body: "production fixture",
+      });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        rows: [{ value: "production fixture" }],
+        file: "production fixture",
+      });
+      const isolated = await worker.fetch(`https://${preview.hostname}/resources`);
+      expect(await isolated.json()).toEqual({ rows: [], file: null });
+    }, 100_000);
+
+    it("applies access rules to the app and its preview without replacing their code", async () => {
+      const original = (await host(first.hostname))?.body;
+      const originalPreview = (await host(preview.hostname))?.body;
+      await environment.database.db
+        .update(apps)
+        .set({ parentId: first.appId })
+        .where(eq(apps.id, preview.appId));
+      await configure(first.appId, "access", { revision: 1, groups: ["support"] });
+      expect((await host(first.hostname))?.body).toMatchObject({
+        deploymentId: z.object({ deploymentId: z.string() }).parse(original).deploymentId,
+      });
+      expect((await host(preview.hostname))?.body).toMatchObject({
+        deploymentId: z.object({ deploymentId: z.string() }).parse(originalPreview).deploymentId,
+      });
+
+      for (const entry of [first, preview])
+        expect((await host(entry.hostname))?.access).toBe(
+          JSON.stringify({ revision: 2, groups: ["support"] }),
+        );
+      expect(patches).toBe(2);
+      expect(await environment.database.db.select().from(jobs)).toHaveLength(0);
+    });
+
+    it("does not create SQL deployment history when Workflows refuses the command", async () => {
+      const entry = await seedDeployment(environment.database.db, { appId: first.appId });
+      await seed(entry);
+      expect((await submit(entry, "unavailable")).status).toBe(400);
+      expect(await operation(entry.command.id)).toBeUndefined();
+      expect(
+        await environment.database.db
+          .select()
+          .from(deployments)
+          .where(eq(deployments.id, entry.command.id)),
+      ).toHaveLength(0);
+      expect(await environment.database.db.select().from(jobs)).toHaveLength(0);
+    });
+
+    it("recovers a lost acceptance response and binds API retries to the original input", async () => {
+      const entry = await seedDeployment(environment.database.db, { appId: first.appId });
+      await seed(entry);
+      expect((await submit(entry, "lost-response")).status).toBe(200);
+      await completed(entry.command.id);
+      const before = patches;
+      await dispatch(entry);
+      expect(patches).toBe(before);
+      const different = await seedDeployment(environment.database.db, { appId: first.appId });
+      expect(
+        (
+          await submit({
+            ...different,
+            command: {
+              ...different.command,
+              id: entry.command.id,
+              requestId: entry.command.requestId,
+            },
+          })
+        ).status,
+      ).toBe(400);
+    });
+
+    it("records and completes an accepted command when the request never writes SQL history", async () => {
+      const entry = await seedDeployment(environment.database.db, { appId: preview.appId });
+      await seed(entry);
+      expect((await submit(entry, "accepted-only")).status).toBe(200);
+      await completed(entry.command.id);
+      expect((await host(entry.hostname))?.body).toMatchObject({ deploymentId: entry.command.id });
+      expect(await environment.database.db.select().from(jobs)).toHaveLength(0);
+    });
+
+    it("saves settings before the first deployment without reporting an installation failure", async () => {
+      const appId = crypto.randomUUID();
+      const id = crypto.randomUUID();
+      const hostname = `fixture-${appId}.example.test`;
+      await environment.database.db.insert(apps).values({
+        id: appId,
+        slug: `fixture-${appId}`,
+        displayName: "Unstarted fixture",
+        fleetId: first.fleetId,
+        ownerId: "fixture-owner",
+        hostname,
+        accessRevision: 1,
+        accessGroups: ["engineering"],
+        networkRevision: 1,
+      });
+
+      const command = {
+        id,
+        appId,
+        kind: "network",
+        actor: { id: "fixture-owner", admin: false },
+        input: { target: "backend", action: "allow", origins: ["https://example.com"] },
+        createdAt: new Date().toISOString(),
+      };
+
+      expect(
+        (
+          await worker.fetch("http://fixture/start?mode=accepted-only", {
+            method: "POST",
+            body: JSON.stringify(command),
+          })
+        ).status,
+      ).toBe(200);
+      await completed(id);
+      const [app] = await environment.database.db.select().from(apps).where(eq(apps.id, appId));
+      expect(app).toMatchObject({
+        activeDeploymentId: null,
+        appliedAccessRevision: null,
+        appliedNetworkRevision: null,
+        accessError: null,
+        networkError: null,
+      });
+      expect(await host(hostname)).toBeNull();
+    });
+
+    it("rejects unsupported capabilities without publishing or provisioning them", async () => {
+      const before = await host(first.hostname);
+
+      const entry = await seedDeployment(environment.database.db, {
+        appId: first.appId,
+        bindings: [{ type: "kv_namespace", name: "KV", id: "fixture" }],
+      });
+
+      await seed(entry);
+      expect((await submit(entry)).status).toBe(400);
+      expect(await host(first.hostname)).toEqual(before);
+    }, 100_000);
+
+    it("keeps the active version when the candidate cannot start", async () => {
+      const before = await host(first.hostname);
+
+      const entry = await seedDeployment(environment.database.db, {
+        appId: first.appId,
+        source: "export default { fetch: invalid syntax };",
+      });
+
+      rejected = entry;
+
+      await seed(entry);
+      await dispatch(entry, "fast-retries");
+      await expect
+        .poll(() => nativeStatus(entry.command.id), { timeout: 30_000, interval: 100 })
+        .toBe("errored");
+      expect((await operation(entry.command.id))?.error).toBeTruthy();
+      expect(await host(first.hostname)).toEqual(before);
+      expect(await (await worker.fetch(`https://${first.hostname}/`)).text()).toBe(
+        "deployed fixture",
+      );
+    }, 40_000);
+
+    it("recovers activation after a SQL failure and a workerd restart", async () => {
+      const entry = await seedDeployment(environment.database.db, {
+        appId: first.appId,
+        source: deploymentSource.replace("deployed fixture", "second version"),
+      });
+
+      await seed(entry);
+      await environment.database.db.execute(
+        sql.raw(
+          `CREATE FUNCTION fixture_reject_receipt() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.id = '${entry.command.id}' AND NEW.status = 'succeeded' THEN RAISE EXCEPTION 'fixture completion failure'; END IF; RETURN NEW; END $$`,
+        ),
+      );
+      await environment.database.db.execute(
+        sql`CREATE TRIGGER fixture_receipt BEFORE UPDATE ON deployment FOR EACH ROW EXECUTE FUNCTION fixture_reject_receipt()`,
+      );
+      await dispatch(entry);
+      await expect
+        .poll(async () => (await host(entry.hostname))?.body, { timeout: 30_000, interval: 100 })
+        .toMatchObject({ deploymentId: entry.deploymentId });
+      expect(await nativeStatus(entry.command.id)).not.toBe("complete");
+      await configure(first.appId, "network", {
+        target: "backend",
+        action: "allow",
+        origins: ["https://api.example.test"],
+      });
+      expect((await host(first.hostname))?.body).toMatchObject({
+        deploymentId: entry.command.id,
+        network: { revision: 1, policy: { backend: ["https://api.example.test"] } },
+      });
+      const workflowUrl = `http://fixture/workflow?id=${entry.command.id}`;
+      await worker.fetch(`${workflowUrl}&action=pause`, { method: "POST" });
+      await expect
+        .poll(async () => {
+          const response = await worker.fetch(workflowUrl);
+
+          return z.object({ status: z.string() }).parse(await response.json()).status;
+        })
+        .toBe("paused");
+
+      const [pausedDeployment] = await environment.database.db
+        .select()
+        .from(deployments)
+        .where(eq(deployments.id, entry.command.id));
+
+      expect(pausedDeployment?.status).toBe("running");
+      expect((await operation(entry.command.id))?.error).toBeNull();
+      await worker.stop();
+      await environment.database.db.execute(sql`DROP TRIGGER fixture_receipt ON deployment`);
+      worker = await start();
+      await worker.fetch(`${workflowUrl}&action=resume`, { method: "POST" });
+      await dispatch(entry);
+      await completed(entry.command.id);
+      expect(createdDatabases.size).toBe(2);
+      expect(buckets.size).toBe(2);
+
+      const [active] = await environment.database.db
+        .select()
+        .from(apps)
+        .where(eq(apps.id, first.appId));
+
+      expect(active?.activeDeploymentId).toBe(entry.deploymentId);
+      expect(active?.appliedNetworkRevision).toBe(1);
+      expect((await host(first.hostname))?.body).toMatchObject({
+        network: { revision: 1, policy: { backend: ["https://api.example.test"] } },
+      });
+      expect(await (await worker.fetch(`https://${first.hostname}/`)).text()).toBe(
+        "second version",
+      );
+
+      const [status] = await environment.database.db
+        .select()
+        .from(deployments)
+        .where(and(eq(deployments.id, entry.deploymentId), eq(deployments.status, "succeeded")));
+
+      expect(status).toBeDefined();
+    }, 100_000);
+
+    it("keeps other apps independent and restarts failed activation only on an explicit command", async () => {
+      const entry = await seedDeployment(environment.database.db, {
+        appId: first.appId,
+        source: deploymentSource.replace("deployed fixture", "third version"),
+      });
+
+      const next = await seedDeployment(environment.database.db, { appId: preview.appId });
+      await seed(entry);
+      await seed(next);
+      await environment.database.db.execute(sql`CREATE SEQUENCE fixture_failure_attempts`);
+      await environment.database.db.execute(
+        sql.raw(
+          `CREATE OR REPLACE FUNCTION fixture_reject_receipt() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.id = '${entry.command.id}' AND NEW.status = 'succeeded' THEN PERFORM nextval('fixture_failure_attempts'); RAISE EXCEPTION 'fixture completion failure'; END IF; RETURN NEW; END $$`,
+        ),
+      );
+      await environment.database.db.execute(
+        sql`CREATE TRIGGER fixture_receipt BEFORE UPDATE ON deployment FOR EACH ROW EXECUTE FUNCTION fixture_reject_receipt()`,
+      );
+      await dispatch(entry, "fast-retries");
+      await expect
+        .poll(
+          async () => {
+            const response = await worker.fetch(`http://fixture/workflow?id=${entry.command.id}`);
+
+            return z.object({ status: z.string() }).parse(await response.json()).status;
+          },
+          { timeout: 30_000, interval: 100 },
+        )
+        .toBe("errored");
+      expect((await operation(entry.command.id))?.error).toBeTruthy();
+
+      const attempts = await environment.database.db.execute(
+        sql`SELECT last_value FROM fixture_failure_attempts`,
+      );
+
+      expect(z.object({ last_value: z.coerce.number() }).parse(attempts.rows[0]).last_value).toBe(
+        6,
+      );
+      await environment.database.db
+        .update(deployments)
+        .set({ status: "running", finishedAt: null, message: null })
+        .where(eq(deployments.id, entry.command.id));
+      const history = await worker.fetch(`http://fixture/history?appId=${entry.appId}`);
+      expect(await history.json()).toContainEqual(
+        expect.objectContaining({ id: entry.command.id, status: "failed" }),
+      );
+      await dispatch(next);
+      await completed(next.command.id);
+      await dispatch(entry);
+      expect(await nativeStatus(entry.command.id)).toBe("errored");
+      expect((await host(entry.hostname))?.body).toMatchObject({
+        deploymentId: entry.deploymentId,
+      });
+      const prepared = patches;
+      await environment.database.db.execute(sql`DROP TRIGGER fixture_receipt ON deployment`);
+      await worker.fetch(`http://fixture/workflow?id=${entry.command.id}&action=restart`, {
+        method: "POST",
+      });
+      await completed(entry.command.id);
+      expect(patches).toBe(prepared);
+      expect(createdDatabases.size).toBe(2);
+      expect(buckets.size).toBe(2);
+      expect(await (await worker.fetch(`https://${first.hostname}/`)).text()).toBe("third version");
+    }, 40_000);
+    it("does not let an explicitly restarted older deployment overwrite newer code", async () => {
+      const before = await host(first.hostname);
+      await worker.fetch(`http://fixture/workflow?id=${rejected.command.id}&action=restart`, {
+        method: "POST",
+      });
+      await expect
+        .poll(() => nativeStatus(rejected.command.id), { timeout: 30_000, interval: 100 })
+        .toBe("errored");
+      expect(await host(first.hostname)).toEqual(before);
+      expect(await (await worker.fetch(`https://${first.hostname}/`)).text()).toBe("third version");
+    }, 40_000);
+    it("preserves a completed deployment when only its final history write needs recovery", async () => {
+      await dispatch(first);
+      await completed(first.command.id);
+
+      const newer = await seedDeployment(environment.database.db, {
+        appId: first.appId,
+        source: deploymentSource.replace("deployed fixture", "latest complete version"),
+      });
+
+      await seed(newer);
+      await dispatch(newer);
+      await completed(newer.command.id);
+      const active = await host(first.hostname);
+      await environment.database.db
+        .update(cloudflareOperations)
+        .set({ error: "Fixture lost completion" })
+        .where(eq(cloudflareOperations.id, first.command.id));
+      await worker.fetch(`http://fixture/workflow?id=${first.command.id}&action=restart`, {
+        method: "POST",
+      });
+      await completed(first.command.id);
+
+      const [record] = await environment.database.db
+        .select()
+        .from(deployments)
+        .where(eq(deployments.id, first.command.id));
+
+      expect(record?.status).toBe("succeeded");
+      expect(await host(first.hostname)).toEqual(active);
+    }, 30_000);
+    it("retains an unconfirmed binding write after native failure and process restart", async () => {
+      const before = bindingRequests;
+      bindingMode = "delayed";
+      await dispatch(delayed, "fast-retries");
+      await expect
+        .poll(() => nativeStatus(delayed.command.id), { timeout: 30_000, interval: 100 })
+        .toBe("errored");
+      expect(bindingRequests).toBe(before + 1);
+      expect((await operation(delayed.command.id))?.error).toContain("resource update");
+
+      const [record] = await environment.database.db
+        .select()
+        .from(deployments)
+        .where(eq(deployments.id, delayed.command.id));
+
+      expect(record?.message).toContain("unconfirmed");
+      const [pending] = await environment.database.db.select().from(cloudflareRuntimeBindings);
+      expect(
+        z.object({ bindings: z.array(z.string()) }).parse(pending?.pending).bindings,
+      ).toContain(`B_${resourceName(delayed.appId, "d1", "data")}`);
+      expect(await host(delayed.hostname)).toBeNull();
+
+      const codeOnly = await seedDeployment(environment.database.db, { appId: first.appId });
+      await seed(codeOnly);
+      await dispatch(codeOnly);
+      await completed(codeOnly.command.id);
+      expect(bindingRequests).toBe(before + 1);
+      expect((await worker.fetch(`https://${first.hostname}/resources`)).status).toBe(200);
+      await worker.stop();
+      worker = await start();
+
+      if (!delayedBindingUpdate) throw new Error("Missing delayed settings write");
+      delayedBindingUpdate();
+      delayedBindingUpdate = undefined;
+      await worker.fetch(`http://fixture/workflow?id=${delayed.command.id}&action=restart`, {
+        method: "POST",
+      });
+      await completed(delayed.command.id);
+      expect(bindingRequests).toBe(before + 1);
+      expect((await worker.fetch(`https://${delayed.hostname}/resources`)).status).toBe(200);
+      const [reconciled] = await environment.database.db.select().from(cloudflareRuntimeBindings);
+      expect(reconciled?.pending).toBeNull();
+    }, 90_000);
+
+    it("automatically confirms an applied binding update after a lost acknowledgement", async () => {
+      const before = bindingRequests;
+      bindingMode = "lost-response";
+      await dispatch(lostResponse);
+      await completed(lostResponse.command.id);
+      expect(bindingRequests).toBe(before + 1);
+      expect((await worker.fetch(`https://${lostResponse.hostname}/resources`)).status).toBe(200);
+      const [record] = await environment.database.db.select().from(cloudflareRuntimeBindings);
+      expect(record?.pending).toBeNull();
+    }, 60_000);
+  },
+);

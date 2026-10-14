@@ -11,9 +11,13 @@ import { InvalidOperation } from "./errors.ts";
 import type { Principal } from "./identity.ts";
 import { appGrants, apps, artifacts, deploymentEvents, deployments, jobs } from "./schema.ts";
 import { transact, type Transaction } from "./transactions.ts";
-import { defaultFleet } from "./fleets.ts";
+import { defaultFleet, requireAgentExecution } from "./fleets.ts";
+import { hostedDeploymentId, type HostedExecution } from "./deployment-execution.ts";
 
-export const appVisibility = (database: Database | Transaction, principal: Principal) =>
+export const appVisibility = (
+  database: Database | Transaction,
+  principal: Pick<Principal, "id" | "admin">,
+) =>
   principal.admin
     ? sql`true`
     : or(
@@ -26,7 +30,11 @@ export const appVisibility = (database: Database | Transaction, principal: Princ
         ),
       );
 
-export const managedApp = async (transaction: Transaction, principal: Principal, appId: string) => {
+export const managedApp = async (
+  transaction: Transaction,
+  principal: Pick<Principal, "id" | "admin">,
+  appId: string,
+) => {
   const [record] = await transaction
     .select()
     .from(apps)
@@ -128,6 +136,7 @@ export const enqueueDeployment = async (
   artifactId: string,
   requestId: string,
   rollback = false,
+  hosted = false,
 ) => {
   const [existing] = await transaction
     .select()
@@ -146,7 +155,20 @@ export const enqueueDeployment = async (
     return Result.ok(presentDeployment(existing));
   }
 
-  const deploymentId = crypto.randomUUID();
+  const deploymentId = hosted ? hostedDeploymentId(record.id, requestId) : crypto.randomUUID();
+
+  if (hosted)
+    return Result.ok(
+      contract.deployment.parse({
+        id: deploymentId,
+        appId: record.id,
+        artifactId,
+        status: "queued",
+        createdAt: new Date().toISOString(),
+        finishedAt: null,
+        message: null,
+      }),
+    );
 
   const [deployment] = await transaction
     .insert(deployments)
@@ -296,7 +318,11 @@ const provisionApp = (
     return Result.ok(presentApp(record, configuration));
   });
 
-export const createAppService = (database: Database, configuration: Configuration) => ({
+export const createAppService = (
+  database: Database,
+  configuration: Configuration,
+  execution?: HostedExecution,
+) => ({
   catalog: () =>
     transact(database, async (transaction) => {
       const records = await transaction
@@ -377,8 +403,8 @@ export const createAppService = (database: Database, configuration: Configuratio
       { slug, displayName: slug, parentId: null },
       "resolve",
     ),
-  history: (principal: Principal, appId: string) =>
-    transact(database, async (transaction) => {
+  history: async (principal: Principal, appId: string) => {
+    const history = await transact(database, async (transaction) => {
       const access = await managedApp(transaction, principal, appId);
 
       if (access.isErr()) return access;
@@ -391,7 +417,12 @@ export const createAppService = (database: Database, configuration: Configuratio
         .limit(100);
 
       return Result.ok(records.map(presentDeployment));
-    }),
+    });
+
+    if (history.isErr() || !execution) return history;
+
+    return execution.history(history.value);
+  },
   events: (principal: Principal, appId: string, deploymentId: string) =>
     transact(database, async (transaction) => {
       const access = await managedApp(transaction, principal, appId);
@@ -421,8 +452,8 @@ export const createAppService = (database: Database, configuration: Configuratio
         ),
       );
     }),
-  rollback: (principal: Principal, appId: string, artifactId: string, requestId: string) =>
-    transact(database, async (transaction) => {
+  rollback: async (principal: Principal, appId: string, artifactId: string, requestId: string) => {
+    const prepared = await transact(database, async (transaction) => {
       const access = await managedApp(transaction, principal, appId);
 
       if (access.isErr()) return access;
@@ -442,14 +473,27 @@ export const createAppService = (database: Database, configuration: Configuratio
           new InvalidOperation({ code: "NOT_FOUND", message: "Artifact not found in this app" }),
         );
 
-      return enqueueDeployment(transaction, access.value, artifactId, requestId, true);
-    }),
+      return enqueueDeployment(
+        transaction,
+        access.value,
+        artifactId,
+        requestId,
+        true,
+        Boolean(execution),
+      );
+    });
+
+    if (prepared.isErr() || !execution) return prepared;
+
+    return execution.deploy(prepared.value, requestId, true);
+  },
   remove: (principal: Principal, appId: string) =>
     transact(database, async (transaction) => {
       const access = await managedApp(transaction, principal, appId);
 
       if (access.isErr()) return access;
 
+      await requireAgentExecution(transaction, access.value.fleetId, "App removal");
       await enqueueAppRemoval(transaction, access.value);
 
       return Result.ok({ accepted: true });

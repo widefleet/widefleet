@@ -7,6 +7,7 @@ import { createReporting } from "./reporting.ts";
 import { createRuntime } from "./runtime-services.ts";
 import { createSettingsService } from "./settings.ts";
 import { createR2Storage } from "./storage/r2.ts";
+import { createCloudflareExecution } from "./cloudflare-execution.ts";
 
 export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
   const configuration = readCloudflareConfiguration(bindings);
@@ -27,11 +28,14 @@ export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
     async () => (await settings.resolve()).identity,
   );
 
+  const storage = createArtifactStorage(createR2Storage(bindings.ARTIFACTS));
+
   const resolve = createRuntime({
     configuration,
     database,
     settings,
-    storage: createArtifactStorage(createR2Storage(bindings.ARTIFACTS)),
+    storage,
+    execution: createCloudflareExecution(bindings, database.db, storage),
     reporting,
     encryptionKey: configuration.PLATFORM_ENCRYPTION_KEY,
   });

@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { Database } from "./database.ts";
 import { InvalidOperation, StorageUnavailable } from "./errors.ts";
-import { defaultFleet } from "./fleets.ts";
+import { defaultFleet, lockFleet, requireAgentExecution } from "./fleets.ts";
 import { loadPackage, savePackage, verifyModules } from "./package-storage.ts";
 import type { Principal } from "./identity.ts";
 import { fleets, jobs, runtimeReleases } from "./schema.ts";
@@ -58,18 +58,6 @@ export const loadRuntime = async (
     throw new StorageUnavailable({ message: "Runtime artifact version mismatch", cause: null });
 
   return { runtime };
-};
-
-export const lockFleet = async (transaction: Transaction, fleetId: string) => {
-  const [fleet] = await transaction
-    .select()
-    .from(fleets)
-    .where(eq(fleets.id, fleetId))
-    .for("no key update");
-
-  if (!fleet) throw new InvalidOperation({ code: "NOT_FOUND", message: "Fleet not found" });
-
-  return fleet;
 };
 
 export const ensureFleetRuntime = async (
@@ -134,6 +122,7 @@ export const createRuntimeReleaseService = (database: Database, storage: Artifac
       administrator(principal);
       const target = await defaultFleet(transaction);
       await lockFleet(transaction, target.id);
+      await requireAgentExecution(transaction, target.id, "Runtime updates");
       let reference;
 
       if ("modules" in input) {

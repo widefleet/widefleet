@@ -8,7 +8,17 @@
   "preview_urls": false,
   "assets": { "directory": "dist/cloudflare/public", "binding": "ASSETS" },
   "observability": { "enabled": true },
+  "workflows": [
+    {
+      "binding": "DEPLOYMENTS",
+      "name": "widefleet-deployments",
+      "class_name": "DeploymentWorkflow",
+    },
+  ],
+  "services": [{ "binding": "APP_RUNTIME", "service": "widefleet-app-runtime" }],
   "vars": {
+    "APP_RUNTIME_NAME": "widefleet-app-runtime",
+    "CLOUDFLARE_ACCOUNT_ID": "00000000000000000000000000000000",
     "PLATFORM_URL": "https://platform.example.com",
     "APP_DOMAIN": "apps.example.com",
     "PLATFORM_USAGE_REPORTING": "false",

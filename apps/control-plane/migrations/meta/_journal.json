@@ -120,6 +120,13 @@
       "when": 1792176000000,
       "tag": "0016_job_capability_snapshot_index",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1792262400000,
+      "tag": "0017_cloudflare_deployments",
+      "breakpoints": true
     }
   ]
 }

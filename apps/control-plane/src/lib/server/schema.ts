@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -14,18 +15,30 @@ import {
 } from "drizzle-orm/pg-core";
 import { user } from "./auth-schema.ts";
 
-export const fleets = pgTable("fleet", {
-  id: uuid().primaryKey().defaultRandom(),
-  name: text().notNull().unique(),
-  runtime: jsonb(),
-  appliedRuntime: jsonb("applied_runtime"),
-  runtimeJobId: uuid("runtime_job_id"),
-});
+export const fleets = pgTable(
+  "fleet",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    name: text().notNull().unique(),
+    executor: text({ enum: ["agent", "cloudflare"] })
+      .notNull()
+      .default("agent"),
+    runtime: jsonb(),
+    appliedRuntime: jsonb("applied_runtime"),
+    runtimeJobId: uuid("runtime_job_id"),
+  },
+  (table) => [check("fleet_executor_check", sql`${table.executor} IN ('agent', 'cloudflare')`)],
+);
 
 export const runtimeReleases = pgTable("runtime_release", {
   version: text().primaryKey(),
   checksum: text().notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const cloudflareRuntimeBindings = pgTable("cloudflare_runtime_bindings", {
+  scope: text().primaryKey(),
+  pending: jsonb(),
 });
 
 export const connectors = pgTable(
@@ -192,6 +205,22 @@ export const jobs = pgTable(
     ),
   ],
 );
+
+// A projection of accepted Cloudflare operations. Workflows own scheduling and retries;
+// this history is never scanned or claimed to start work.
+export const cloudflareOperations = pgTable("cloudflare_operation", {
+  id: uuid().primaryKey(),
+  appId: uuid("app_id")
+    .notNull()
+    .references(() => apps.id, { onDelete: "cascade" }),
+  sequence: bigint({ mode: "number" }).generatedAlwaysAsIdentity().unique(),
+  command: jsonb().notNull(),
+  targets: jsonb().notNull(),
+  result: jsonb().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+  error: text(),
+});
 
 export const deploymentEvents = pgTable("deployment_event", {
   id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),

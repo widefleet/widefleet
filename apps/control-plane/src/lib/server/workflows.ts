@@ -2,6 +2,7 @@ import * as contract from "@platform/contracts";
 import { Result } from "better-result";
 import { and, eq } from "drizzle-orm";
 import type { z } from "zod";
+import { requireAgentExecution } from "./fleets.ts";
 import { managedApp } from "./apps.ts";
 import type { Database } from "./database.ts";
 import { InvalidOperation } from "./errors.ts";
@@ -53,6 +54,7 @@ export const createWorkflowService = (database: Database) => ({
       const access = await managedApp(transaction, principal, appId);
 
       if (access.isErr()) return access;
+      await requireAgentExecution(transaction, access.value.fleetId, "App workflow operations");
       const request = contract.workflowRequest.parse(input);
       const [existing] = await transaction.select().from(jobs).where(eq(jobs.id, requestId));
 
