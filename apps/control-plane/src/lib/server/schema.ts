@@ -166,8 +166,6 @@ export const jobs = pgTable(
       .notNull()
       .references(() => fleets.id),
     agentId: uuid("agent_id").references(() => agents.id),
-    workflowId: uuid("workflow_id").unique(),
-    activationStartedAt: timestamp("activation_started_at", { withTimezone: true }),
     deploymentId: uuid("deployment_id").references(() => deployments.id),
     kind: text({
       enum: ["deploy", "runtime", "connector", "delete", "configure", "migrations", "workflows"],
@@ -203,6 +201,22 @@ export const jobs = pgTable(
   ],
 );
 
+// A projection of accepted Cloudflare operations. Workflows own scheduling and retries;
+// this history is never scanned or claimed to start work.
+export const cloudflareOperations = pgTable("cloudflare_operation", {
+  id: uuid().primaryKey(),
+  appId: uuid("app_id")
+    .notNull()
+    .references(() => apps.id, { onDelete: "cascade" }),
+  sequence: bigint({ mode: "number" }).generatedAlwaysAsIdentity().unique(),
+  command: jsonb().notNull(),
+  targets: jsonb().notNull(),
+  result: jsonb().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  finishedAt: timestamp("finished_at", { withTimezone: true }),
+  error: text(),
+});
+
 export const deploymentEvents = pgTable("deployment_event", {
   id: bigint({ mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
   deploymentId: uuid("deployment_id")
@@ -213,25 +227,14 @@ export const deploymentEvents = pgTable("deployment_event", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const jobReceipts = pgTable(
-  "job_receipt",
-  {
-    jobId: uuid("job_id").primaryKey(),
-    agentId: uuid("agent_id").references(() => agents.id),
-    leaseToken: uuid("lease_token"),
-    workflowId: uuid("workflow_id"),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => [
-    check(
-      "job_receipt_owner_check",
-      sql`
-  (${table.agentId} IS NOT NULL AND ${table.leaseToken} IS NOT NULL AND ${table.workflowId} IS NULL)
-  OR (${table.agentId} IS NULL AND ${table.leaseToken} IS NULL AND ${table.workflowId} IS NOT NULL)
-`,
-    ),
-  ],
-);
+export const jobReceipts = pgTable("job_receipt", {
+  jobId: uuid("job_id").primaryKey(),
+  agentId: uuid("agent_id")
+    .notNull()
+    .references(() => agents.id),
+  leaseToken: uuid("lease_token").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 export const installation = pgTable("installation", {
   id: text().primaryKey(),

@@ -7,7 +7,7 @@ import { managedApp } from "./apps.ts";
 import type { Database } from "./database.ts";
 import { InvalidOperation, StorageUnavailable } from "./errors.ts";
 import { encryptSecret } from "./secret-encryption.ts";
-import { defaultFleet, lockFleet } from "./fleets.ts";
+import { defaultFleet, lockFleet, requireAgentExecution } from "./fleets.ts";
 import type { Principal } from "./identity.ts";
 import { loadPackage, savePackage } from "./package-storage.ts";
 import { apps, artifacts, connectors, deployments, jobs } from "./schema.ts";
@@ -211,6 +211,7 @@ export const createConnectorService = (
       administrator(principal);
       const target = await defaultFleet(transaction);
       await lockFleet(transaction, target.id);
+      await requireAgentExecution(transaction, target.id, "Connectors");
 
       const [existing] = await transaction
         .select()
@@ -282,6 +283,7 @@ export const createConnectorService = (
       administrator(principal);
       const target = await defaultFleet(transaction);
       await lockFleet(transaction, target.id);
+      await requireAgentExecution(transaction, target.id, "Connectors");
 
       const inventory = await transaction
         .select()
@@ -405,6 +407,7 @@ export const createConnectorService = (
       if (!target) throw new InvalidOperation({ code: "NOT_FOUND", message: "App not found" });
       // Match claim/deploy lock order, so concurrent connector updates and grants agree.
       await lockFleet(transaction, target.fleetId);
+      await requireAgentExecution(transaction, target.fleetId, "Connectors");
       const access = await managedApp(transaction, principal, appId);
 
       if (access.isErr()) return access;

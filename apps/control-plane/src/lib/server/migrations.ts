@@ -3,6 +3,7 @@ import { Result } from "better-result";
 import { and, eq } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import type { z } from "zod";
+import { requireAgentExecution } from "./fleets.ts";
 import { managedApp } from "./apps.ts";
 import type { Database } from "./database.ts";
 import { InvalidOperation } from "./errors.ts";
@@ -36,6 +37,7 @@ export const createMigrationService = (database: Database, storage: ArtifactStor
 
       if (access.isErr()) return access;
       const app = access.value;
+      await requireAgentExecution(transaction, app.fleetId, "D1 migrations");
       // Parsing fixes object key order so equivalent requests produce the same artifact.
       const bytes = Buffer.from(JSON.stringify(contract.migrationRequest.parse(input)));
 

@@ -104,7 +104,10 @@ export const createCloudflareProvisioner = (
   };
 
   return {
-    provision: async (app: Pick<z.infer<typeof contract.artifact>, "appId" | "metadata">) => {
+    provision: async (
+      app: Pick<z.infer<typeof contract.artifact>, "appId" | "metadata">,
+      updateBindings: (operation: () => Promise<void>) => Promise<void>,
+    ) => {
       const nativeBindings: Record<string, string> = {};
 
       const resources: (
@@ -140,25 +143,26 @@ export const createCloudflareProvisioner = (
         }
       }
 
-      if (resources.length) {
-        const path = `/workers/scripts/${encodeURIComponent(configuration.runtimeName)}/settings`;
-        const current = workerBindings.parse(await request(path));
-        const replacements = new Set(resources.map((resource) => resource.name));
-        const settings = new FormData();
-        settings.set(
-          "settings",
-          JSON.stringify({
-            bindings: [
-              // Inheritance preserves secrets, native bindings and retained app versions.
-              ...current.bindings
-                .filter((binding) => !replacements.has(binding.name))
-                .map((binding) => ({ name: binding.name, type: "inherit" })),
-              ...resources,
-            ],
-          }),
-        );
-        await request(path, { method: "PATCH", body: settings });
-      }
+      if (resources.length)
+        await updateBindings(async () => {
+          const path = `/workers/scripts/${encodeURIComponent(configuration.runtimeName)}/settings`;
+          const current = workerBindings.parse(await request(path));
+          const replacements = new Set(resources.map((resource) => resource.name));
+          const settings = new FormData();
+          settings.set(
+            "settings",
+            JSON.stringify({
+              bindings: [
+                // Inheritance preserves secrets, native bindings and retained app versions.
+                ...current.bindings
+                  .filter((binding) => !replacements.has(binding.name))
+                  .map((binding) => ({ name: binding.name, type: "inherit" })),
+                ...resources,
+              ],
+            }),
+          );
+          await request(path, { method: "PATCH", body: settings });
+        });
 
       return nativeBindings;
     },

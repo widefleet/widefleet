@@ -11,6 +11,7 @@ import type { Configuration } from "./config.ts";
 import type { Database } from "./database.ts";
 import { InvalidOperation } from "./errors.ts";
 import type { Principal } from "./identity.ts";
+import type { HostedExecution } from "./deployment-execution.ts";
 import { artifacts, deployments, uploadSessions } from "./schema.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import { transact, type Transaction } from "./transactions.ts";
@@ -58,6 +59,7 @@ export const createUploadService = (
   database: Database,
   storage: ArtifactStorage,
   configuration: Configuration,
+  execution?: HostedExecution,
 ) => ({
   start: (principal: Principal, appId: string, manifest: z.infer<typeof contract.assetManifest>) =>
     transact(database, (transaction) =>
@@ -130,14 +132,14 @@ export const createUploadService = (
         return Result.ok({ uploaded: true });
       }),
     ),
-  publish: (
+  publish: async (
     principal: Principal,
     appId: string,
     metadata: z.infer<typeof contract.workerMetadata>,
     modules: WorkerModule[],
     requestId: string,
-  ) =>
-    transact(database, (transaction) =>
+  ) => {
+    const prepared = await transact(database, (transaction) =>
       Result.gen(async function* () {
         const record = yield* Result.await(managedApp(transaction, principal, appId));
 
@@ -273,7 +275,14 @@ export const createUploadService = (
             });
           }
 
-          return enqueueDeployment(transaction, record, artifactId, requestId);
+          return enqueueDeployment(
+            transaction,
+            record,
+            artifactId,
+            requestId,
+            false,
+            Boolean(execution),
+          );
         }
 
         for (const module of modules) {
@@ -295,7 +304,19 @@ export const createUploadService = (
           modules: storedModules,
         });
 
-        return enqueueDeployment(transaction, record, artifactId, requestId);
+        return enqueueDeployment(
+          transaction,
+          record,
+          artifactId,
+          requestId,
+          false,
+          Boolean(execution),
+        );
       }),
-    ),
+    );
+
+    if (prepared.isErr() || !execution) return prepared;
+
+    return execution.deploy(prepared.value, requestId);
+  },
 });

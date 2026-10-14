@@ -6,6 +6,7 @@ import { lockAppDescendants, managedApp } from "./apps.ts";
 import type { Database } from "./database.ts";
 import { InvalidOperation } from "./errors.ts";
 import type { Principal } from "./identity.ts";
+import type { HostedExecution } from "./deployment-execution.ts";
 import { apps, jobs } from "./schema.ts";
 import { transact, type Transaction } from "./transactions.ts";
 
@@ -35,7 +36,7 @@ const status = (app: typeof apps.$inferSelect) =>
 
 const present = async (
   transaction: Transaction,
-  principal: Principal,
+  principal: Pick<Principal, "id" | "admin">,
   app: typeof apps.$inferSelect,
 ) => {
   const previews = app.parentId
@@ -58,8 +59,100 @@ const present = async (
   });
 };
 
-export const createAppAccessService = (database: Database) => ({
-  read: (principal: Principal, appId: string) =>
+export const validateAccessChange = async (
+  transaction: Transaction,
+  principal: Pick<Principal, "id" | "admin">,
+  appId: string,
+  input: z.infer<typeof contract.appAccessChange>,
+) => {
+  const access = await managedApp(transaction, principal, appId);
+
+  if (access.isErr()) return access;
+  const app = access.value;
+
+  if (app.parentId !== null || (!principal.admin && app.ownerId !== principal.id))
+    return Result.err(
+      new InvalidOperation({
+        code: "FORBIDDEN",
+        message: "Only the original app's owner or an administrator can change its access rules",
+      }),
+    );
+
+  if (app.state === "deleting")
+    return Result.err(
+      new InvalidOperation({ code: "CONFLICT", message: "The app is being deleted" }),
+    );
+
+  if (input.revision !== app.accessRevision)
+    return Result.err(
+      new InvalidOperation({
+        code: "CONFLICT",
+        message: "Access rules have changed. Reload them before saving again.",
+      }),
+    );
+
+  return Result.ok(app);
+};
+
+export const applyAccessChange = async (
+  transaction: Transaction,
+  principal: Pick<Principal, "id" | "admin">,
+  appId: string,
+  input: z.infer<typeof contract.appAccessChange>,
+  enqueue = true,
+) => {
+  const access = await validateAccessChange(transaction, principal, appId, input);
+
+  if (access.isErr()) return access;
+  const app = access.value;
+  const groups = contract.appAccessGroups.parse(input.groups).sort();
+
+  const current = contract.appAccessGroups.parse(app.accessGroups).sort();
+
+  const changed = JSON.stringify(groups) !== JSON.stringify(current);
+  const revision = app.accessRevision + Number(changed);
+
+  const [updated] = await transaction
+    .update(apps)
+    .set({
+      accessGroups: groups,
+      accessRevision: revision,
+      accessError: null,
+    })
+    .where(eq(apps.id, app.id))
+    .returning();
+
+  if (!updated) throw new Error("Access update returned no app");
+
+  // Materialize inheritance atomically. Creation locks the parent before
+  // copying these values, so a concurrent preview cannot miss an update.
+  await lockAppDescendants(transaction, app.id);
+
+  const previews = await transaction
+    .update(apps)
+    .set({
+      accessGroups: groups,
+      accessRevision: revision,
+      accessError: null,
+    })
+    .where(and(descendants(app.id), ne(apps.state, "deleting")))
+    .returning();
+
+  for (const target of enqueue ? [updated, ...previews] : []) {
+    if (!changed && target.appliedAccessRevision === revision) continue;
+    await transaction.insert(jobs).values({
+      id: crypto.randomUUID(),
+      appId: target.id,
+      fleetId: target.fleetId,
+      kind: "configure",
+    });
+  }
+
+  return Result.ok(await present(transaction, principal, updated));
+};
+
+export const createAppAccessService = (database: Database, execution?: HostedExecution) => ({
+  read: (principal: Pick<Principal, "id" | "admin">, appId: string) =>
     transact(database, async (transaction) => {
       const access = await managedApp(transaction, principal, appId);
 
@@ -67,78 +160,14 @@ export const createAppAccessService = (database: Database) => ({
 
       return Result.ok(await present(transaction, principal, access.value));
     }),
-  change: (principal: Principal, appId: string, input: z.infer<typeof contract.appAccessChange>) =>
-    transact(database, async (transaction) => {
-      const access = await managedApp(transaction, principal, appId);
-
-      if (access.isErr()) return access;
-      const app = access.value;
-
-      if (app.parentId !== null || (!principal.admin && app.ownerId !== principal.id))
-        return Result.err(
-          new InvalidOperation({
-            code: "FORBIDDEN",
-            message:
-              "Only the original app's owner or an administrator can change its access rules",
-          }),
-        );
-
-      if (app.state === "deleting")
-        return Result.err(
-          new InvalidOperation({ code: "CONFLICT", message: "The app is being deleted" }),
-        );
-
-      if (input.revision !== app.accessRevision)
-        return Result.err(
-          new InvalidOperation({
-            code: "CONFLICT",
-            message: "Access rules have changed. Reload them before saving again.",
-          }),
-        );
-
-      const groups = contract.appAccessGroups.parse(input.groups).sort();
-
-      const current = contract.appAccessGroups.parse(app.accessGroups).sort();
-
-      const changed = JSON.stringify(groups) !== JSON.stringify(current);
-      const revision = app.accessRevision + Number(changed);
-
-      const [updated] = await transaction
-        .update(apps)
-        .set({
-          accessGroups: groups,
-          accessRevision: revision,
-          accessError: null,
-        })
-        .where(eq(apps.id, app.id))
-        .returning();
-
-      if (!updated) throw new Error("Access update returned no app");
-
-      // Materialize inheritance atomically. Creation locks the parent before
-      // copying these values, so a concurrent preview cannot miss an update.
-      await lockAppDescendants(transaction, app.id);
-
-      const previews = await transaction
-        .update(apps)
-        .set({
-          accessGroups: groups,
-          accessRevision: revision,
-          accessError: null,
-        })
-        .where(and(descendants(app.id), ne(apps.state, "deleting")))
-        .returning();
-
-      for (const target of [updated, ...previews]) {
-        if (!changed && target.appliedAccessRevision === revision) continue;
-        await transaction.insert(jobs).values({
-          id: crypto.randomUUID(),
-          appId: target.id,
-          fleetId: target.fleetId,
-          kind: "configure",
-        });
-      }
-
-      return Result.ok(await present(transaction, principal, updated));
-    }),
+  change: (
+    principal: Pick<Principal, "id" | "admin">,
+    appId: string,
+    input: z.infer<typeof contract.appAccessChange>,
+  ) =>
+    execution
+      ? execution.access(principal, appId, input)
+      : transact(database, (transaction) =>
+          applyAccessChange(transaction, principal, appId, input),
+        ),
 });

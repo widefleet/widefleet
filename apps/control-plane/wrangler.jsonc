@@ -15,7 +15,6 @@
       "class_name": "DeploymentWorkflow",
     },
   ],
-  "triggers": { "crons": ["* * * * *"] },
   "services": [{ "binding": "APP_RUNTIME", "service": "widefleet-app-runtime" }],
   "vars": {
     "APP_RUNTIME_NAME": "widefleet-app-runtime",

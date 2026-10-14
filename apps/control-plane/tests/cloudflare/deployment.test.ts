@@ -7,13 +7,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Unstable_DevWorker } from "wrangler";
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
+import type * as contract from "@platform/contracts";
 import release from "@platform/app-runtime/release" with { type: "json" };
 import { createTestEnvironment } from "../environment.ts";
 import { deploymentSource, seedDeployment } from "../cloudflare-deployment.fixture.ts";
 import { initializeCloudflareFleet } from "../../src/lib/server/fleets.ts";
-import { apps, deployments, jobs } from "../../src/lib/server/schema.ts";
+import { apps, cloudflareOperations, deployments, jobs } from "../../src/lib/server/schema.ts";
 
 const resourceName = (appId: string, kind: string, name: string) =>
   `r${createHash("sha256").update(`${appId}/${kind}/${name}`).digest("hex").slice(0, 40)}`;
@@ -26,6 +27,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
     let worker: Unstable_DevWorker;
     let first: Awaited<ReturnType<typeof seedDeployment>>;
     let preview: Awaited<ReturnType<typeof seedDeployment>>;
+    let rejected: Awaited<ReturnType<typeof seedDeployment>>;
     const token = "local-deployment-runtime-token-never-deploy";
     const largeGroups = Array.from({ length: 100 }, (_, index) => `${index}-${"group".repeat(40)}`);
     const databases = new Map<string, string>();
@@ -148,8 +150,38 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       expect(response.status).toBe(204);
     };
 
-    const dispatch = async () => {
-      expect((await worker.fetch("http://fixture/start", { method: "POST" })).status).toBe(204);
+    const submit = async (entry: typeof first, mode = "") => {
+      return worker.fetch(`http://fixture/start?mode=${mode}`, {
+        method: "POST",
+        body: JSON.stringify(entry.command),
+      });
+    };
+
+    const dispatch = async (entry: typeof first, mode = "") => {
+      expect((await submit(entry, mode)).status).toBe(200);
+    };
+
+    const configure = async (
+      appId: string,
+      kind: "access" | "network",
+      input: z.infer<typeof contract.appAccessChange> | z.infer<typeof contract.networkChange>,
+    ) => {
+      const response = await worker.fetch("http://fixture/start", {
+        method: "POST",
+        body: JSON.stringify({ kind, appId, actor: { id: "fixture-owner", admin: false }, input }),
+      });
+
+      expect(response.status).toBe(200);
+
+      const [record] = await environment.database.db
+        .select()
+        .from(cloudflareOperations)
+        .where(eq(cloudflareOperations.appId, appId))
+        .orderBy(desc(cloudflareOperations.sequence))
+        .limit(1);
+
+      if (!record) throw new Error("Missing configuration history");
+      await completed(record.id);
     };
 
     const host = async (hostname: string) => {
@@ -161,29 +193,31 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         .parse(await response.json());
     };
 
-    const jobState = async (id: string) => {
-      const [job] = await environment.database.db.select().from(jobs).where(eq(jobs.id, id));
+    const operation = async (id: string) => {
+      const [record] = await environment.database.db
+        .select()
+        .from(cloudflareOperations)
+        .where(eq(cloudflareOperations.id, id));
 
-      return job;
+      return record;
     };
 
-    const completed = async (id: string, state = "succeeded") => {
+    const nativeStatus = async (id: string) => {
+      const response = await worker.fetch(`http://fixture/workflow?id=${id}`);
+
+      return z.object({ status: z.string() }).parse(await response.json()).status;
+    };
+
+    const completed = async (id: string) => {
       await expect
         .poll(
-          async () => {
-            const response = await worker.fetch(`http://fixture/workflow?id=${id}`);
-
-            const workflow = z
-              .object({ status: z.string(), error: z.unknown().optional() })
-              .parse(await response.json());
-
-            if (workflow.status === "errored") throw new Error(JSON.stringify(workflow.error));
-
-            return { job: (await jobState(id))?.state, workflow: workflow.status };
-          },
+          async () => ({
+            done: (await operation(id))?.finishedAt !== null,
+            status: await nativeStatus(id),
+          }),
           { timeout: 90_000, interval: 100 },
         )
-        .toEqual({ job: state, workflow: "complete" });
+        .toEqual({ done: true, status: "complete" });
     };
 
     beforeAll(async () => {
@@ -201,15 +235,18 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       await writeFile(join(directory, "runtime.js"), release.modules[0]?.source ?? "");
       const workflow = fileURLToPath(new URL("../../src/deployment-workflow.ts", import.meta.url));
 
-      const dispatcher = fileURLToPath(
-        new URL("../../src/lib/server/cloudflare-deployment.ts", import.meta.url),
-      );
+      const server = fileURLToPath(new URL("../../src/lib/server/", import.meta.url));
 
       await writeFile(
         join(directory, "fixture.ts"),
         `
       import runtime from './runtime.js';
-      import { dispatchCloudflareDeployment } from ${JSON.stringify(dispatcher)};
+      import { createCloudflareExecution } from ${JSON.stringify(server + "cloudflare-execution.ts")};
+      import { withCloudflareDatabase } from ${JSON.stringify(server + "cloudflare-database.ts")};
+      import { createArtifactStorage } from ${JSON.stringify(server + "artifact-storage.ts")};
+      import { createR2Storage } from ${JSON.stringify(server + "storage/r2.ts")};
+      import { createAppService } from ${JSON.stringify(server + "apps.ts")};
+      import { readCloudflareConfiguration } from ${JSON.stringify(server + "cloudflare-config.ts")};
       export * from './runtime.js';
       export { DeploymentWorkflow } from ${JSON.stringify(workflow)};
       const nativeFetch = globalThis.fetch;
@@ -226,8 +263,41 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           return new Response(null, { status: 204 });
         }
         if (url.hostname === 'fixture' && url.pathname === '/start') {
-          await dispatchCloudflareDeployment(env);
-          return new Response(null, { status: 204 });
+          const command = await request.json();
+          // Miniflare's testing API skips backoff time, while every real step attempt still runs.
+          if (url.searchParams.get('mode') === 'fast-retries') {
+            const modifier = await env.DEPLOYMENTS.unsafeGetInstanceModifier(command.id);
+            try { await modifier.disableRetryDelays(); }
+            finally { modifier[Symbol.dispose]?.(); }
+          }
+          if (url.searchParams.get('mode') === 'accepted-only') {
+            await env.DEPLOYMENTS.create({ id: command.id, params: command });
+            return new Response(null, { status: 200 });
+          }
+          const deploymentBinding = {
+            async create(options) {
+              if (url.searchParams.get('mode') === 'unavailable') throw new Error('Fixture unavailable');
+              const instance = await env.DEPLOYMENTS.create(options);
+              if (url.searchParams.get('mode') === 'lost-response') throw new Error('Fixture lost response');
+              return instance;
+            },
+            get: (id) => env.DEPLOYMENTS.get(id),
+          };
+          const result = await withCloudflareDatabase(env, async ({ db }) => {
+            const executor = createCloudflareExecution({ ...env, DEPLOYMENTS: deploymentBinding }, db, createArtifactStorage(createR2Storage(env.ARTIFACTS)));
+            if (command.kind === 'access') return executor.access(command.actor, command.appId, command.input);
+            if (command.kind === 'network') return executor.network(command.actor, command.appId, command.input);
+            return executor.deploy({ id: command.id, appId: command.appId, artifactId: command.artifactId, createdAt: command.createdAt,
+              status: 'queued', finishedAt: null, message: null }, command.requestId, command.rollback);
+          });
+          return Response.json(result.isErr() ? { error: result.error.message } : result.value, { status: result.isErr() ? 400 : 200 });
+        }
+        if (url.hostname === 'fixture' && url.pathname === '/history') {
+          const result = await withCloudflareDatabase(env, async ({ db }) => {
+            const executor = createCloudflareExecution(env, db, createArtifactStorage(createR2Storage(env.ARTIFACTS)));
+            return createAppService(db, readCloudflareConfiguration(env), executor).history({ id: 'fixture-owner', admin: true }, url.searchParams.get('appId'));
+          });
+          return Response.json(result.unwrap());
         }
         if (url.hostname === 'fixture' && url.pathname === '/host') {
           const obj = await env.ARTIFACTS.get('hosts/' + url.searchParams.get('hostname') + '.json');
@@ -239,6 +309,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           const instance = await env.DEPLOYMENTS.get(url.searchParams.get('id'));
           if (request.method === 'POST') {
             if (url.searchParams.get('action') === 'pause') await instance.pause();
+            else if (url.searchParams.get('action') === 'restart') await instance.restart();
             else await instance.resume();
           }
           return Response.json(await instance.status());
@@ -307,22 +378,25 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
     });
 
     it("provisions, verifies and activates apps with isolated native D1/R2 data", async () => {
-      await dispatch();
-      await completed(first.jobId);
-      await completed(preview.jobId);
+      await Promise.all([dispatch(first), dispatch(preview)]);
+      await completed(first.command.id);
+      await completed(preview.command.id);
+      expect(await environment.database.db.select().from(jobs)).toHaveLength(0);
       expect(createdDatabases.size).toBe(2);
       expect(buckets.size).toBe(2);
       expect(patches).toBe(2);
 
-      for (const kind of ["d1", "r2"]) {
-        const name = `B_${resourceName(first.appId, kind, kind === "d1" ? "data" : "files")}`;
-        expect(updates[1]).toContainEqual({ name, type: "inherit" });
-        expect(settings.has(name)).toBe(true);
-      }
+      expect(updates[1]?.filter((binding) => binding.type === "inherit")).toHaveLength(4);
+
+      for (const entry of [first, preview])
+        for (const kind of ["d1", "r2"])
+          expect(
+            settings.has(`B_${resourceName(entry.appId, kind, kind === "d1" ? "data" : "files")}`),
+          ).toBe(true);
 
       expect(settings.size).toBe(6);
       expect(await host(first.hostname)).toMatchObject({
-        body: { deploymentId: first.deploymentId, version: first.jobId },
+        body: { deploymentId: first.deploymentId },
         access: JSON.stringify({ revision: 1, groups: ["engineering"] }),
       });
       expect((await host(preview.hostname))?.access).toBe(
@@ -343,6 +417,75 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       expect(await isolated.json()).toEqual({ rows: [], file: null });
     }, 100_000);
 
+    it("applies access rules to the app and its preview without replacing their code", async () => {
+      const original = (await host(first.hostname))?.body;
+      const originalPreview = (await host(preview.hostname))?.body;
+      await environment.database.db
+        .update(apps)
+        .set({ parentId: first.appId })
+        .where(eq(apps.id, preview.appId));
+      await configure(first.appId, "access", { revision: 1, groups: ["support"] });
+      expect((await host(first.hostname))?.body).toMatchObject({
+        deploymentId: z.object({ deploymentId: z.string() }).parse(original).deploymentId,
+      });
+      expect((await host(preview.hostname))?.body).toMatchObject({
+        deploymentId: z.object({ deploymentId: z.string() }).parse(originalPreview).deploymentId,
+      });
+
+      for (const entry of [first, preview])
+        expect((await host(entry.hostname))?.access).toBe(
+          JSON.stringify({ revision: 2, groups: ["support"] }),
+        );
+      expect(patches).toBe(2);
+      expect(await environment.database.db.select().from(jobs)).toHaveLength(0);
+    });
+
+    it("does not create SQL deployment history when Workflows refuses the command", async () => {
+      const entry = await seedDeployment(environment.database.db, { appId: first.appId });
+      await seed(entry);
+      expect((await submit(entry, "unavailable")).status).toBe(400);
+      expect(await operation(entry.command.id)).toBeUndefined();
+      expect(
+        await environment.database.db
+          .select()
+          .from(deployments)
+          .where(eq(deployments.id, entry.command.id)),
+      ).toHaveLength(0);
+      expect(await environment.database.db.select().from(jobs)).toHaveLength(0);
+    });
+
+    it("recovers a lost acceptance response and binds API retries to the original input", async () => {
+      const entry = await seedDeployment(environment.database.db, { appId: first.appId });
+      await seed(entry);
+      expect((await submit(entry, "lost-response")).status).toBe(200);
+      await completed(entry.command.id);
+      const before = patches;
+      await dispatch(entry);
+      expect(patches).toBe(before);
+      const different = await seedDeployment(environment.database.db, { appId: first.appId });
+      expect(
+        (
+          await submit({
+            ...different,
+            command: {
+              ...different.command,
+              id: entry.command.id,
+              requestId: entry.command.requestId,
+            },
+          })
+        ).status,
+      ).toBe(400);
+    });
+
+    it("records and completes an accepted command when the request never writes SQL history", async () => {
+      const entry = await seedDeployment(environment.database.db, { appId: preview.appId });
+      await seed(entry);
+      expect((await submit(entry, "accepted-only")).status).toBe(200);
+      await completed(entry.command.id);
+      expect((await host(entry.hostname))?.body).toMatchObject({ deploymentId: entry.command.id });
+      expect(await environment.database.db.select().from(jobs)).toHaveLength(0);
+    });
+
     it("saves settings before the first deployment without reporting an installation failure", async () => {
       const appId = crypto.randomUUID();
       const id = crypto.randomUUID();
@@ -358,10 +501,24 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         accessGroups: ["engineering"],
         networkRevision: 1,
       });
-      await environment.database.db
-        .insert(jobs)
-        .values({ id, appId, fleetId: first.fleetId, kind: "configure" });
-      await dispatch();
+
+      const command = {
+        id,
+        appId,
+        kind: "network",
+        actor: { id: "fixture-owner", admin: false },
+        input: { target: "backend", action: "allow", origins: ["https://example.com"] },
+        createdAt: new Date().toISOString(),
+      };
+
+      expect(
+        (
+          await worker.fetch("http://fixture/start?mode=accepted-only", {
+            method: "POST",
+            body: JSON.stringify(command),
+          })
+        ).status,
+      ).toBe(200);
       await completed(id);
       const [app] = await environment.database.db.select().from(apps).where(eq(apps.id, appId));
       expect(app).toMatchObject({
@@ -372,41 +529,42 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         networkError: null,
       });
       expect(await host(hostname)).toBeNull();
-      expect(patches).toBe(2);
     });
 
     it("rejects unsupported capabilities without publishing or provisioning them", async () => {
+      const before = await host(first.hostname);
+
       const entry = await seedDeployment(environment.database.db, {
         appId: first.appId,
         bindings: [{ type: "kv_namespace", name: "KV", id: "fixture" }],
       });
 
       await seed(entry);
-      await dispatch();
-      await completed(entry.jobId, "failed");
-      expect((await host(first.hostname))?.body).toMatchObject({
-        deploymentId: first.deploymentId,
-      });
-      expect(patches).toBe(2);
+      expect((await submit(entry)).status).toBe(400);
+      expect(await host(first.hostname)).toEqual(before);
     }, 100_000);
 
     it("keeps the active version when the candidate cannot start", async () => {
+      const before = await host(first.hostname);
+
       const entry = await seedDeployment(environment.database.db, {
         appId: first.appId,
         source: "export default { fetch: invalid syntax };",
       });
 
+      rejected = entry;
+
       await seed(entry);
-      await dispatch();
-      await completed(entry.jobId, "failed");
-      expect((await host(first.hostname))?.body).toMatchObject({
-        deploymentId: first.deploymentId,
-      });
+      await dispatch(entry, "fast-retries");
+      await expect
+        .poll(() => nativeStatus(entry.command.id), { timeout: 30_000, interval: 100 })
+        .toBe("errored");
+      expect((await operation(entry.command.id))?.error).toBeTruthy();
+      expect(await host(first.hostname)).toEqual(before);
       expect(await (await worker.fetch(`https://${first.hostname}/`)).text()).toBe(
         "deployed fixture",
       );
-      expect((await jobState(entry.jobId))?.activationStartedAt).toBeNull();
-    }, 100_000);
+    }, 40_000);
 
     it("recovers activation after a SQL failure and a workerd restart", async () => {
       const entry = await seedDeployment(environment.database.db, {
@@ -417,18 +575,27 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       await seed(entry);
       await environment.database.db.execute(
         sql.raw(
-          `CREATE FUNCTION fixture_reject_receipt() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.job_id = '${entry.jobId}' THEN RAISE EXCEPTION 'fixture completion failure'; END IF; RETURN NEW; END $$`,
+          `CREATE FUNCTION fixture_reject_receipt() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.id = '${entry.command.id}' AND NEW.status = 'succeeded' THEN RAISE EXCEPTION 'fixture completion failure'; END IF; RETURN NEW; END $$`,
         ),
       );
       await environment.database.db.execute(
-        sql`CREATE TRIGGER fixture_receipt BEFORE INSERT ON job_receipt FOR EACH ROW EXECUTE FUNCTION fixture_reject_receipt()`,
+        sql`CREATE TRIGGER fixture_receipt BEFORE UPDATE ON deployment FOR EACH ROW EXECUTE FUNCTION fixture_reject_receipt()`,
       );
-      await dispatch();
+      await dispatch(entry);
       await expect
         .poll(async () => (await host(entry.hostname))?.body, { timeout: 30_000, interval: 100 })
         .toMatchObject({ deploymentId: entry.deploymentId });
-      expect((await jobState(entry.jobId))?.state).toBe("running");
-      const workflowUrl = `http://fixture/workflow?id=${entry.jobId}`;
+      expect(await nativeStatus(entry.command.id)).not.toBe("complete");
+      await configure(first.appId, "network", {
+        target: "backend",
+        action: "allow",
+        origins: ["https://api.example.test"],
+      });
+      expect((await host(first.hostname))?.body).toMatchObject({
+        deploymentId: entry.command.id,
+        network: { revision: 1, policy: { backend: ["https://api.example.test"] } },
+      });
+      const workflowUrl = `http://fixture/workflow?id=${entry.command.id}`;
       await worker.fetch(`${workflowUrl}&action=pause`, { method: "POST" });
       await expect
         .poll(async () => {
@@ -437,12 +604,20 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           return z.object({ status: z.string() }).parse(await response.json()).status;
         })
         .toBe("paused");
+
+      const [pausedDeployment] = await environment.database.db
+        .select()
+        .from(deployments)
+        .where(eq(deployments.id, entry.command.id));
+
+      expect(pausedDeployment?.status).toBe("running");
+      expect((await operation(entry.command.id))?.error).toBeNull();
       await worker.stop();
-      await environment.database.db.execute(sql`DROP TRIGGER fixture_receipt ON job_receipt`);
+      await environment.database.db.execute(sql`DROP TRIGGER fixture_receipt ON deployment`);
       worker = await start();
       await worker.fetch(`${workflowUrl}&action=resume`, { method: "POST" });
-      await dispatch();
-      await completed(entry.jobId);
+      await dispatch(entry);
+      await completed(entry.command.id);
       expect(createdDatabases.size).toBe(2);
       expect(buckets.size).toBe(2);
 
@@ -452,6 +627,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         .where(eq(apps.id, first.appId));
 
       expect(active?.activeDeploymentId).toBe(entry.deploymentId);
+      expect(active?.appliedNetworkRevision).toBe(1);
+      expect((await host(first.hostname))?.body).toMatchObject({
+        network: { revision: 1, policy: { backend: ["https://api.example.test"] } },
+      });
       expect(await (await worker.fetch(`https://${first.hostname}/`)).text()).toBe(
         "second version",
       );
@@ -464,7 +643,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       expect(status).toBeDefined();
     }, 100_000);
 
-    it("restarts an errored activation and then dispatches the next queued job", async () => {
+    it("keeps other apps independent and restarts failed activation only on an explicit command", async () => {
       const entry = await seedDeployment(environment.database.db, {
         appId: first.appId,
         source: deploymentSource.replace("deployed fixture", "third version"),
@@ -473,40 +652,101 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       const next = await seedDeployment(environment.database.db, { appId: preview.appId });
       await seed(entry);
       await seed(next);
+      await environment.database.db.execute(sql`CREATE SEQUENCE fixture_failure_attempts`);
       await environment.database.db.execute(
         sql.raw(
-          `CREATE OR REPLACE FUNCTION fixture_reject_receipt() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.job_id = '${entry.jobId}' THEN RAISE EXCEPTION 'fixture completion failure'; END IF; RETURN NEW; END $$`,
+          `CREATE OR REPLACE FUNCTION fixture_reject_receipt() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.id = '${entry.command.id}' AND NEW.status = 'succeeded' THEN PERFORM nextval('fixture_failure_attempts'); RAISE EXCEPTION 'fixture completion failure'; END IF; RETURN NEW; END $$`,
         ),
       );
       await environment.database.db.execute(
-        sql`CREATE TRIGGER fixture_receipt BEFORE INSERT ON job_receipt FOR EACH ROW EXECUTE FUNCTION fixture_reject_receipt()`,
+        sql`CREATE TRIGGER fixture_receipt BEFORE UPDATE ON deployment FOR EACH ROW EXECUTE FUNCTION fixture_reject_receipt()`,
       );
-      await dispatch();
+      await dispatch(entry, "fast-retries");
       await expect
         .poll(
           async () => {
-            const response = await worker.fetch(`http://fixture/workflow?id=${entry.jobId}`);
+            const response = await worker.fetch(`http://fixture/workflow?id=${entry.command.id}`);
 
             return z.object({ status: z.string() }).parse(await response.json()).status;
           },
-          { timeout: 90_000, interval: 100 },
+          { timeout: 30_000, interval: 100 },
         )
         .toBe("errored");
-      expect(await jobState(entry.jobId)).toMatchObject({ state: "running" });
-      expect((await jobState(entry.jobId))?.activationStartedAt).not.toBeNull();
-      expect((await jobState(next.jobId))?.state).toBe("queued");
+      expect((await operation(entry.command.id))?.error).toBeTruthy();
+
+      const attempts = await environment.database.db.execute(
+        sql`SELECT last_value FROM fixture_failure_attempts`,
+      );
+
+      expect(z.object({ last_value: z.coerce.number() }).parse(attempts.rows[0]).last_value).toBe(
+        6,
+      );
+      await environment.database.db
+        .update(deployments)
+        .set({ status: "running", finishedAt: null, message: null })
+        .where(eq(deployments.id, entry.command.id));
+      const history = await worker.fetch(`http://fixture/history?appId=${entry.appId}`);
+      expect(await history.json()).toContainEqual(
+        expect.objectContaining({ id: entry.command.id, status: "failed" }),
+      );
+      await dispatch(next);
+      await completed(next.command.id);
+      await dispatch(entry);
+      expect(await nativeStatus(entry.command.id)).toBe("errored");
       expect((await host(entry.hostname))?.body).toMatchObject({
         deploymentId: entry.deploymentId,
       });
       const prepared = patches;
-      await environment.database.db.execute(sql`DROP TRIGGER fixture_receipt ON job_receipt`);
-      await dispatch();
-      await completed(entry.jobId);
-      await completed(next.jobId);
+      await environment.database.db.execute(sql`DROP TRIGGER fixture_receipt ON deployment`);
+      await worker.fetch(`http://fixture/workflow?id=${entry.command.id}&action=restart`, {
+        method: "POST",
+      });
+      await completed(entry.command.id);
       expect(patches).toBe(prepared + 1);
       expect(createdDatabases.size).toBe(2);
       expect(buckets.size).toBe(2);
       expect(await (await worker.fetch(`https://${first.hostname}/`)).text()).toBe("third version");
-    }, 100_000);
+    }, 40_000);
+    it("does not let an explicitly restarted older deployment overwrite newer code", async () => {
+      const before = await host(first.hostname);
+      await worker.fetch(`http://fixture/workflow?id=${rejected.command.id}&action=restart`, {
+        method: "POST",
+      });
+      await expect
+        .poll(() => nativeStatus(rejected.command.id), { timeout: 30_000, interval: 100 })
+        .toBe("errored");
+      expect(await host(first.hostname)).toEqual(before);
+      expect(await (await worker.fetch(`https://${first.hostname}/`)).text()).toBe("third version");
+    }, 40_000);
+    it("preserves a completed deployment when only its final history write needs recovery", async () => {
+      await dispatch(first);
+      await completed(first.command.id);
+
+      const newer = await seedDeployment(environment.database.db, {
+        appId: first.appId,
+        source: deploymentSource.replace("deployed fixture", "latest complete version"),
+      });
+
+      await seed(newer);
+      await dispatch(newer);
+      await completed(newer.command.id);
+      const active = await host(first.hostname);
+      await environment.database.db
+        .update(cloudflareOperations)
+        .set({ error: "Fixture lost completion" })
+        .where(eq(cloudflareOperations.id, first.command.id));
+      await worker.fetch(`http://fixture/workflow?id=${first.command.id}&action=restart`, {
+        method: "POST",
+      });
+      await completed(first.command.id);
+
+      const [record] = await environment.database.db
+        .select()
+        .from(deployments)
+        .where(eq(deployments.id, first.command.id));
+
+      expect(record?.status).toBe("succeeded");
+      expect(await host(first.hostname)).toEqual(active);
+    }, 30_000);
   },
 );

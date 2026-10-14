@@ -1,16 +1,22 @@
+import { NonRetryableError } from "cloudflare:workflows";
 import type { CloudflareWorkersModule } from "@cloudflare/workers-types";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { z } from "zod";
 import { createArtifactStorage } from "./artifact-storage.ts";
-import { readCloudflareConfiguration, type CloudflareBindings } from "./cloudflare-config.ts";
-import { createCloudflareJobService } from "./cloudflare-jobs.ts";
+import type { CloudflareBindings } from "./cloudflare-config.ts";
+import { withCloudflareDatabase } from "./cloudflare-database.ts";
+import {
+  operationTarget,
+  registerCloudflareOperation,
+  validateCloudflareArtifact,
+} from "./cloudflare-operations.ts";
 import { CloudflareApiError, createCloudflareProvisioner } from "./cloudflare-provisioning.ts";
-import { createDatabase } from "./database.ts";
+import { deploymentCommand, hostedDeploymentId } from "./deployment-execution.ts";
 import { InvalidOperation } from "./errors.ts";
-import { completeJob, ownedJob } from "./job-completion.ts";
-import { jobs } from "./schema.ts";
+import { lockFleet } from "./fleets.ts";
+import { apps, artifacts, cloudflareOperations, deploymentEvents, deployments } from "./schema.ts";
 import { createR2Storage } from "./storage/r2.ts";
 import { transact } from "./transactions.ts";
 
@@ -20,32 +26,6 @@ const deploymentConfiguration = z.object({
   APP_RUNTIME_NAME: z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/),
   APP_RUNTIME_TOKEN: z.string().min(32),
 });
-
-// Keep the immutable access reference with the host record so rules and code switch atomically.
-// The groups themselves can exceed R2's metadata limit and live in a separate immutable object.
-const accessMetadata = (appId: string, version: string) => ({
-  widefleet_access: `access/${appId}/${version}.json`,
-});
-
-const withDatabase = async <T>(
-  bindings: CloudflareBindings,
-  operation: (database: ReturnType<typeof createDatabase>) => Promise<T>,
-) => {
-  const database = createDatabase(readCloudflareConfiguration(bindings), 1);
-  const disconnected: Promise<void>[] = [];
-  // Pool.end() resolves before idle clients finish closing their sockets. A Workflow step
-  // must release those connections before retries consume more of Workers' connection slots.
-  database.db.$client.on("connect", (client) => {
-    disconnected.push(new Promise<void>((resolve) => client.once("end", resolve)));
-  });
-
-  try {
-    return await operation(database);
-  } finally {
-    await database.close();
-    await Promise.all(disconnected);
-  }
-};
 
 const value = <T, E>(result: Result<T, E>) => {
   if (result.isErr()) throw result.error;
@@ -70,71 +50,30 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
     transport,
   );
 
-  const readDeployment = (id: string) =>
-    withDatabase(bindings, async (database) =>
-      value(await createCloudflareJobService(database.db, storage).deployment(id)),
-    );
+  const artifact = async (id: string) =>
+    withCloudflareDatabase(bindings, async ({ db }) => {
+      const [record] = await db.select().from(artifacts).where(eq(artifacts.id, id));
 
-  const deployment = async (id: string) => {
-    const input = await readDeployment(id);
+      if (!record) throw new Error("Deployment artifact not found");
 
-    if (!input) throw new Error("This configuration has no active deployment");
+      const parsed = contract.artifact.parse({
+        id: record.id,
+        appId: record.appId,
+        metadata: record.metadata,
+        manifest: record.manifest,
+        modules: record.modules,
+      });
 
-    return input;
-  };
+      validateCloudflareArtifact(parsed);
 
-  const state = (id: string) =>
-    withDatabase(bindings, async (database) => {
-      const [job] = await database.db
-        .select({ state: jobs.state, activation: jobs.activationStartedAt })
-        .from(jobs)
-        .where(and(eq(jobs.id, id), eq(jobs.workflowId, id)));
-
-      return job;
+      return parsed;
     });
 
-  const stage = async (id: string, nativeBindings: Record<string, string>) => {
-    const input = await deployment(id);
-
-    const app = contract.publishedApp.parse({
-      id: input.id,
-      appId: input.appId,
-      metadata: input.metadata,
-      manifest: input.manifest,
-      modules: input.modules,
-      hostname: input.hostname,
-      version: input.version,
-      deploymentId: input.deploymentId,
-      network: input.network,
-      capabilityRevision: input.capabilityRevision,
-      nativeBindings,
-    });
-
-    const key = `versions/${app.appId}/${app.version}.json`;
-    const body = JSON.stringify(app);
-    const customMetadata = accessMetadata(app.appId, app.version);
-    const accessBody = JSON.stringify(input.access);
-
-    const accessWritten = await bindings.ARTIFACTS.put(
-      customMetadata.widefleet_access,
-      accessBody,
-      {
-        onlyIf: { etagDoesNotMatch: "*" },
-        httpMetadata: { contentType: "application/json" },
-      },
-    );
-
-    if (!accessWritten) {
-      const existing = await bindings.ARTIFACTS.get(customMetadata.widefleet_access);
-
-      if (!existing || (await existing.text()) !== accessBody)
-        throw new Error("The immutable access snapshot already contains different data");
-    }
-
+  const immutable = async (key: string, body: string, customMetadata?: Record<string, string>) => {
     const written = await bindings.ARTIFACTS.put(key, body, {
       onlyIf: { etagDoesNotMatch: "*" },
       httpMetadata: { contentType: "application/json" },
-      customMetadata,
+      customMetadata: customMetadata ?? {},
     });
 
     if (!written) {
@@ -143,184 +82,315 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
       if (
         !existing ||
         (await existing.text()) !== body ||
-        existing.customMetadata?.["widefleet_access"] !== customMetadata.widefleet_access
+        Object.entries(customMetadata ?? {}).some(
+          ([name, expected]) => existing.customMetadata?.[name] !== expected,
+        )
       )
-        throw new Error("The immutable deployment version already contains different data");
+        throw new Error("The immutable deployment snapshot contains different data");
     }
-  };
-
-  const verify = async (id: string) => {
-    const app = await deployment(id);
-
-    const response = await runtime.fetch(`https://${app.hostname}/.well-known/widefleet/ready`, {
-      headers: {
-        authorization: `Bearer ${configuration.APP_RUNTIME_TOKEN}`,
-        "x-widefleet-candidate": `${app.appId}/${id}`,
-      },
-      redirect: "manual",
-    });
-
-    if (!response.ok) {
-      await response.body?.cancel();
-      throw new Error(`App readiness check failed (HTTP ${response.status})`);
-    }
-
-    z.object({
-      deploymentId: z.literal(app.deploymentId),
-      version: z.literal(id),
-      networkRevision: z.literal(app.network.revision),
-      capabilityRevision: z.literal(app.capabilityRevision),
-      runtimeVersion: z.literal(app.runtime.version),
-    }).parse(await response.json());
-  };
-
-  const beginActivation = (id: string) =>
-    withDatabase(bindings, async (database) =>
-      value(
-        await transact(database.db, async (transaction) => {
-          const job = await ownedJob(transaction, id, { workflowId: id });
-
-          if (job.isErr()) return job;
-
-          await transaction
-            .update(jobs)
-            .set({ activationStartedAt: new Date() })
-            .where(eq(jobs.id, id));
-
-          return Result.ok(true);
-        }),
-      ),
-    );
-
-  const activate = async (id: string) => {
-    const current = await state(id);
-
-    if (!current || current.state !== "running") return;
-
-    if (!current.activation) throw new Error("Deployment has not passed its readiness check");
-
-    const input = await deployment(id);
-    const candidate = await bindings.ARTIFACTS.get(`versions/${input.appId}/${id}.json`);
-
-    if (!candidate) throw new Error("The prepared deployment version is missing");
-
-    const body = await candidate.text();
-    const app = contract.publishedApp.parse(JSON.parse(body));
-    const access = accessMetadata(input.appId, id);
-
-    if (
-      app.version !== id ||
-      app.hostname !== input.hostname ||
-      app.deploymentId !== input.deploymentId ||
-      candidate.customMetadata?.["widefleet_access"] !== access.widefleet_access
-    )
-      throw new Error("The prepared deployment does not match the job");
-
-    await withDatabase(bindings, async (database) =>
-      value(
-        await completeJob(
-          database.db,
-          storage,
-          { workflowId: id },
-          id,
-          {
-            outcome: "succeeded",
-            message: "Cloudflare activated the deployment",
-            accessRevision: input.access.revision,
-          },
-          undefined,
-          async () => {
-            const key = `hosts/${app.hostname}.json`;
-            const current = await bindings.ARTIFACTS.get(key);
-
-            if (
-              current &&
-              (await current.text()) === body &&
-              current.customMetadata?.["widefleet_access"] === access.widefleet_access
-            )
-              return;
-
-            // A timed-out older PUT must not overwrite a later activation if it arrives late.
-            const activated = await bindings.ARTIFACTS.put(key, body, {
-              onlyIf: current ? { etagMatches: current.etag } : { etagDoesNotMatch: "*" },
-              httpMetadata: { contentType: "application/json" },
-              customMetadata: access,
-            });
-
-            if (!activated) throw new Error("The active version changed during activation");
-          },
-        ),
-      ),
-    );
-  };
-
-  const fail = async (id: string, message: string) => {
-    const current = await state(id);
-
-    if (!current || current.state !== "running") return;
-
-    // Once activation starts, a lost R2/SQL response must be reconciled, never marked failed.
-    if (current.activation) throw new Error("Deployment activation must be reconciled");
-
-    await withDatabase(bindings, async (database) =>
-      value(
-        await completeJob(database.db, storage, { workflowId: id }, id, {
-          outcome: "failed",
-          message,
-        }),
-      ),
-    );
   };
 
   return {
-    state,
-    hasDeployment: async (id: string) => (await readDeployment(id)) !== null,
-    completeConfiguration: (id: string) =>
-      withDatabase(bindings, async (database) =>
+    register: (command: z.infer<typeof deploymentCommand>) =>
+      withCloudflareDatabase(bindings, async ({ db }) => {
+        const record = value(await registerCloudflareOperation(db, storage, command));
+
+        if (command.kind === "deploy" && (!record.finishedAt || record.error))
+          await db
+            .update(deployments)
+            .set({ status: "running", finishedAt: null, message: null })
+            .where(and(eq(deployments.id, command.id), ne(deployments.status, "succeeded")));
+
+        return {
+          sequence: record.sequence,
+          targets: z.array(operationTarget).parse(record.targets),
+        };
+      }),
+    provision: async (command: z.infer<typeof deploymentCommand>) => {
+      if (command.kind !== "deploy") return {};
+
+      return provisioner.provision(await artifact(command.artifactId), (operation) =>
+        withCloudflareDatabase(bindings, async ({ db }) =>
+          value(
+            await transact(db, async (transaction) => {
+              const [app] = await transaction.select().from(apps).where(eq(apps.id, command.appId));
+
+              if (!app) throw new Error("Deployment app not found");
+
+              // Only the read/modify/write of shared Worker bindings needs this installation lock.
+              // Native Workflows still own scheduling, retries and all other execution steps.
+              await lockFleet(transaction, app.fleetId);
+              await operation();
+
+              return Result.ok(undefined);
+            }),
+          ),
+        ),
+      );
+    },
+    activate: async (
+      command: z.infer<typeof deploymentCommand>,
+      target: z.infer<typeof operationTarget>,
+      sequence: number,
+      nativeBindings: Record<string, string>,
+    ) =>
+      withCloudflareDatabase(bindings, async ({ db }) =>
         value(
-          await completeJob(database.db, storage, { workflowId: id }, id, {
-            outcome: "succeeded",
-            message: "Configuration saved for the first deployment",
+          await transact(db, async (transaction) => {
+            const [app] = await transaction
+              .select()
+              .from(apps)
+              .where(eq(apps.id, target.appId))
+              .for("update");
+
+            if (!app || app.state === "deleting")
+              throw new InvalidOperation({
+                code: "CONFLICT",
+                message: "The app is no longer available for deployment",
+              });
+
+            const hostKey = `hosts/${app.hostname}.json`;
+            const current = await bindings.ARTIFACTS.get(hostKey);
+            const currentBody = current ? await current.text() : null;
+
+            const serving = currentBody
+              ? contract.publishedApp.parse(JSON.parse(currentBody))
+              : null;
+
+            const servingSequence = z.coerce
+              .number()
+              .int()
+              .nonnegative()
+              .parse(current?.customMetadata?.["widefleet_deployment_sequence"] ?? 0);
+
+            if (serving && serving.appId !== app.id)
+              throw new Error("The hostname belongs to another app");
+
+            // Settings follow the version actually being served, even after a lost SQL commit.
+            // An older deployment may retry, but must never replace newer code.
+            if (command.kind === "deploy") {
+              const [deployment] = await transaction
+                .select()
+                .from(deployments)
+                .where(eq(deployments.id, command.id));
+
+              if (deployment?.status === "succeeded") return Result.ok(undefined);
+
+              if (servingSequence > sequence)
+                throw new InvalidOperation({
+                  code: "CONFLICT",
+                  message: "A newer deployment has already been activated",
+                });
+            } else if (!serving) return Result.ok(undefined);
+
+            const artifactId = command.kind === "deploy" ? command.artifactId : serving?.id;
+
+            const [record] = artifactId
+              ? await transaction.select().from(artifacts).where(eq(artifacts.id, artifactId))
+              : [];
+
+            if (!record) throw new Error("Deployment artifact not found");
+
+            const access = contract.appAccessSnapshot.parse({
+              revision: app.accessRevision,
+              groups: app.accessGroups,
+            });
+
+            const network = contract.networkSnapshot.parse({
+              revision: app.networkRevision,
+              policy: app.networkPolicy,
+            });
+
+            const capabilities = contract.capabilitySnapshot.parse({
+              revision: app.capabilityRevision,
+              grants: app.capabilities,
+            });
+
+            if (Object.keys(capabilities.grants).length)
+              throw new InvalidOperation({
+                code: "BAD_REQUEST",
+                message: "Cloudflare connector deployment is not available yet",
+              });
+
+            const selected = {
+              id: record.id,
+              appId: app.id,
+              metadata: record.metadata,
+              manifest: record.manifest,
+              modules: record.modules,
+              hostname: app.hostname,
+              deploymentId: command.kind === "deploy" ? command.id : serving?.deploymentId,
+              network,
+              capabilityRevision: capabilities.revision,
+              nativeBindings: command.kind === "deploy" ? nativeBindings : serving?.nativeBindings,
+            };
+
+            const version = hostedDeploymentId(command.id, JSON.stringify({ ...selected, access }));
+            const published = contract.publishedApp.parse({ ...selected, version });
+            const body = JSON.stringify(published);
+
+            // Access groups can exceed R2's metadata limit; the immutable reference switches with code.
+            const customMetadata = {
+              widefleet_access: `access/${app.id}/${version}.json`,
+              widefleet_deployment_sequence: String(
+                command.kind === "deploy" ? sequence : servingSequence,
+              ),
+            };
+
+            await immutable(customMetadata.widefleet_access, JSON.stringify(access));
+            await immutable(`versions/${app.id}/${version}.json`, body, customMetadata);
+
+            const response = await runtime.fetch(
+              `https://${app.hostname}/.well-known/widefleet/ready`,
+              {
+                headers: {
+                  authorization: `Bearer ${configuration.APP_RUNTIME_TOKEN}`,
+                  "x-widefleet-candidate": `${app.id}/${version}`,
+                },
+                redirect: "manual",
+              },
+            );
+
+            if (!response.ok) {
+              await response.body?.cancel();
+              throw new Error(`App readiness check failed (HTTP ${response.status})`);
+            }
+
+            z.object({
+              deploymentId: z.literal(published.deploymentId),
+              version: z.literal(version),
+              networkRevision: z.literal(network.revision),
+              capabilityRevision: z.literal(capabilities.revision),
+              runtimeVersion: z.literal(target.runtime.version),
+            }).parse(await response.json());
+
+            if (
+              currentBody !== body ||
+              current?.customMetadata?.["widefleet_access"] !== customMetadata.widefleet_access
+            ) {
+              // CAS also protects against a timed-out PUT arriving after this SQL lock was released.
+              const activated = await bindings.ARTIFACTS.put(hostKey, body, {
+                onlyIf: current ? { etagMatches: current.etag } : { etagDoesNotMatch: "*" },
+                httpMetadata: { contentType: "application/json" },
+                customMetadata,
+              });
+
+              if (!activated) throw new Error("The active version changed during activation");
+            }
+
+            await transaction
+              .update(apps)
+              .set({
+                activeDeploymentId: published.deploymentId,
+                state: "active",
+                appliedNetworkRevision: network.revision,
+                networkError: null,
+                appliedAccessRevision: access.revision,
+                accessError: null,
+                appliedCapabilityRevision: capabilities.revision,
+                capabilityError: null,
+              })
+              .where(eq(apps.id, app.id));
+
+            if (command.kind === "deploy") {
+              await transaction
+                .update(deployments)
+                .set({
+                  status: "succeeded",
+                  finishedAt: new Date(),
+                  message: "Cloudflare activated the deployment",
+                })
+                .where(eq(deployments.id, command.id));
+              await transaction.insert(deploymentEvents).values({
+                deploymentId: command.id,
+                level: "info",
+                message: "Cloudflare activated the deployment",
+              });
+            }
+
+            return Result.ok(undefined);
           }),
         ),
       ),
-    provision: async (id: string) => provisioner.provision(await deployment(id)),
-    stage,
-    verify,
-    beginActivation,
-    activate,
-    fail,
+    finish: (command: z.infer<typeof deploymentCommand>, error: string | null) =>
+      withCloudflareDatabase(bindings, async ({ db }) =>
+        value(
+          await transact(db, async (transaction) => {
+            const [record] = await transaction
+              .update(cloudflareOperations)
+              .set({ finishedAt: new Date(), error })
+              .where(eq(cloudflareOperations.id, command.id))
+              .returning();
+
+            if (!record || !error) return Result.ok(undefined);
+
+            if (command.kind === "deploy") {
+              const [deployment] = await transaction
+                .select()
+                .from(deployments)
+                .where(eq(deployments.id, command.id))
+                .for("update");
+
+              if (deployment && deployment.status !== "succeeded") {
+                await transaction
+                  .update(deployments)
+                  .set({ status: "failed", finishedAt: new Date(), message: error })
+                  .where(eq(deployments.id, command.id));
+                await transaction
+                  .insert(deploymentEvents)
+                  .values({ deploymentId: command.id, level: "error", message: error });
+              }
+            }
+
+            for (const target of z.array(operationTarget).parse(record.targets)) {
+              const [app] = await transaction
+                .select()
+                .from(apps)
+                .where(eq(apps.id, target.appId))
+                .for("update");
+
+              if (!app) continue;
+
+              if (
+                target.networkRevision === app.networkRevision &&
+                app.appliedNetworkRevision !== target.networkRevision
+              )
+                await transaction
+                  .update(apps)
+                  .set({ networkError: error })
+                  .where(eq(apps.id, app.id));
+
+              if (
+                target.accessRevision === app.accessRevision &&
+                app.appliedAccessRevision !== target.accessRevision
+              )
+                await transaction
+                  .update(apps)
+                  .set({ accessError: error })
+                  .where(eq(apps.id, app.id));
+            }
+
+            return Result.ok(undefined);
+          }),
+        ),
+      ),
   };
 };
 
-export const dispatchCloudflareDeployment = async (bindings: CloudflareBindings) => {
-  const workflow = bindings.DEPLOYMENTS;
-
-  if (!workflow) return;
-
-  const job = await withDatabase(bindings, async (database) => {
-    const storage = createArtifactStorage(createR2Storage(bindings.ARTIFACTS));
-
-    return value(await createCloudflareJobService(database.db, storage).next());
-  });
-
-  if (!job) return;
-
+const retryable = async <T>(operation: () => Promise<T>) => {
   try {
-    await workflow.create({ id: job.id, params: { jobId: job.id } });
+    return await operation();
   } catch (error) {
-    // Creation may have succeeded before its response was lost, or another request dispatched it.
-    const instance = await workflow.get(job.id);
-    const status = await instance.status();
+    if (error instanceof InvalidOperation) throw new NonRetryableError(error.message);
 
-    if (status.status === "errored") await instance.restart();
-    else if (status.status === "unknown") throw error;
+    if (error instanceof CloudflareApiError) throw new Error(error.message);
+    throw new Error("Cloudflare deployment step failed");
   }
 };
 
 export const executeCloudflareDeployment = async (
   bindings: CloudflareBindings,
-  id: string,
+  command: z.infer<typeof deploymentCommand>,
   step: CloudflareWorkersModule.WorkflowStep,
   transport = fetch,
 ) => {
@@ -331,54 +401,32 @@ export const executeCloudflareDeployment = async (
     timeout: "2 minutes",
   } as const;
 
-  const initial = await step.do("execution-state", options, () => runner.state(id));
+  try {
+    const registration = await step.do("register-command", options, () =>
+      retryable(() => runner.register(command)),
+    );
 
-  if (!initial || initial.state !== "running") return;
+    const nativeBindings = await step.do("provision-resources", options, () =>
+      retryable(() => runner.provision(command)),
+    );
 
-  if (!initial.activation) {
-    try {
-      const validation = await step.do("validate-deployment", options, async () => {
-        try {
-          return { error: null, hasDeployment: await runner.hasDeployment(id) };
-        } catch (error) {
-          if (error instanceof InvalidOperation)
-            return { error: error.message, hasDeployment: false };
-          throw error;
-        }
-      });
-
-      if (validation.error) {
-        await step.do("reject-deployment", options, () =>
-          runner.fail(id, validation.error ?? "Invalid deployment"),
-        );
-
-        return;
-      }
-
-      if (!validation.hasDeployment) {
-        await step.do("save-configuration", options, () => runner.completeConfiguration(id));
-
-        return;
-      }
-
-      const nativeBindings = await step.do("provision-resources", options, () =>
-        runner.provision(id),
+    for (const target of registration.targets)
+      await step.do(`activate-${target.appId}`, options, () =>
+        retryable(() => runner.activate(command, target, registration.sequence, nativeBindings)),
       );
 
-      await step.do("stage-version", options, () => runner.stage(id, nativeBindings));
-      await step.do("verify-version", options, () => runner.verify(id));
-      await step.do("begin-activation", options, () => runner.beginActivation(id));
-    } catch (error) {
-      const message =
-        error instanceof InvalidOperation || error instanceof CloudflareApiError
-          ? error.message
-          : "Cloudflare could not prepare the deployment";
+    await step.do("record-completion", options, () =>
+      retryable(() => runner.finish(command, null)),
+    );
+  } catch (error) {
+    const message =
+      error instanceof InvalidOperation || error instanceof CloudflareApiError
+        ? error.message
+        : "Cloudflare could not complete the deployment";
 
-      await step.do("record-failure", options, () => runner.fail(id, message));
-
-      return;
-    }
+    await step.do("record-failure", options, () =>
+      retryable(() => runner.finish(command, message)),
+    );
+    throw error;
   }
-
-  await step.do("activate-version", options, () => runner.activate(id));
 };

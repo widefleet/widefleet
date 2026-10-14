@@ -3,6 +3,8 @@ import { workerMetadata } from "@platform/contracts";
 import { createCloudflareProvisioner } from "../src/lib/server/cloudflare-provisioning.ts";
 import { z } from "zod";
 
+const updateBindings = (operation: () => Promise<void>) => operation();
+
 const fixture = () => {
   const databases = new Map<string, string>();
   const buckets = new Set<string>();
@@ -100,9 +102,11 @@ describe("Cloudflare app provisioning", () => {
     const cloud = fixture();
     const deployment = app();
     cloud.loseNextResponse();
-    await expect(cloud.create().provision(deployment)).rejects.toThrow("Lost creation response");
-    const bindings = await cloud.create().provision(deployment);
-    expect(await cloud.create().provision(deployment)).toEqual(bindings);
+    await expect(cloud.create().provision(deployment, updateBindings)).rejects.toThrow(
+      "Lost creation response",
+    );
+    const bindings = await cloud.create().provision(deployment, updateBindings);
+    expect(await cloud.create().provision(deployment, updateBindings)).toEqual(bindings);
     expect(cloud.databases.size).toBe(1);
     expect(cloud.buckets.size).toBe(1);
     const patch = z.object({ bindings: z.array(z.unknown()) }).parse(cloud.patches.at(-1));
@@ -124,8 +128,8 @@ describe("Cloudflare app provisioning", () => {
     const cloud = fixture();
     const first = app();
     const second = { ...first, appId: crypto.randomUUID() };
-    expect(await cloud.create().provision(first)).not.toEqual(
-      await cloud.create().provision(second),
+    expect(await cloud.create().provision(first, updateBindings)).not.toEqual(
+      await cloud.create().provision(second, updateBindings),
     );
     expect(cloud.databases.size).toBe(2);
     expect(cloud.buckets.size).toBe(2);
@@ -154,7 +158,7 @@ describe("Cloudflare app provisioning", () => {
       },
     );
 
-    await expect(provisioner.provision(app())).rejects.toThrow(
+    await expect(provisioner.provision(app(), updateBindings)).rejects.toThrow(
       "Cloudflare provisioning request failed (HTTP 403)",
     );
     expect(requests).toBe(1);

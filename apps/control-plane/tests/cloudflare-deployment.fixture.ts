@@ -2,8 +2,9 @@ import { createHash } from "node:crypto";
 import * as contract from "@platform/contracts";
 import { eq } from "drizzle-orm";
 import type { z } from "zod";
+import { deploymentCommand } from "../src/lib/server/deployment-execution.ts";
 import type { Database } from "../src/lib/server/database.ts";
-import { apps, artifacts, deployments, fleets, jobs } from "../src/lib/server/schema.ts";
+import { apps, artifacts, fleets } from "../src/lib/server/schema.ts";
 
 export const deploymentSource = `export default { async fetch(request, env) {
   if (new URL(request.url).pathname === '/resources') {
@@ -73,14 +74,26 @@ export const seedDeployment = async (
   });
 
   await database.insert(artifacts).values(artifact);
-  const deploymentId = crypto.randomUUID();
-  const jobId = crypto.randomUUID();
-  await database
-    .insert(deployments)
-    .values({ id: deploymentId, appId, artifactId: artifact.id, requestId: jobId });
-  await database
-    .insert(jobs)
-    .values({ id: jobId, appId, fleetId: fleet.id, deploymentId, kind: "deploy" });
 
-  return { appId, hostname, artifact, jobId, deploymentId, fleetId: fleet.id, source };
+  const command = deploymentCommand.parse({
+    kind: "deploy",
+    id: crypto.randomUUID(),
+    appId,
+    artifactId: artifact.id,
+    requestId: crypto.randomUUID(),
+    rollback: false,
+    createdAt: new Date().toISOString(),
+  });
+
+  if (command.kind !== "deploy") throw new Error("Fixture requires a deploy command");
+
+  return {
+    appId,
+    hostname,
+    artifact,
+    command,
+    deploymentId: command.id,
+    fleetId: fleet.id,
+    source,
+  };
 };

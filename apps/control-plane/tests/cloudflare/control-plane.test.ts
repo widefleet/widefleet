@@ -17,6 +17,7 @@ import { hashAsset } from "../../src/lib/server/asset-hash.ts";
 import { eq } from "drizzle-orm";
 import { installation } from "../../src/lib/server/schema.ts";
 import { installationId, readInstallation } from "../../src/lib/server/installation-store.ts";
+import { initializeCloudflareFleet } from "../../src/lib/server/fleets.ts";
 import { createTestEnvironment } from "../environment.ts";
 
 describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control plane", () => {
@@ -28,6 +29,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
 
   beforeAll(async () => {
     environment = await createTestEnvironment(origin, "oidc");
+    (await initializeCloudflareFleet(environment.database.db)).unwrap();
     directory = await mkdtemp(join(tmpdir(), "widefleet-cloudflare-"));
     const { unstable_dev, unstable_readConfig } = await import("wrangler");
 
@@ -43,12 +45,24 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
         }),
       );
 
+    const entry = join(directory, "fixture.ts");
+    await writeFile(
+      entry,
+      `
+      import application from ${JSON.stringify(configuration.main)};
+      import { WorkflowEntrypoint } from 'cloudflare:workers';
+      export class AcceptedDeployment extends WorkflowEntrypoint {
+        async run(event, step) { await step.sleep('pending', '1 day'); }
+      }
+      export default application;
+    `,
+    );
     const path = join(directory, "wrangler.json");
     await writeFile(
       path,
       JSON.stringify({
         name: "widefleet-control-plane-test",
-        main: configuration.main,
+        main: entry,
         compatibility_date: configuration.compatibility_date,
         compatibility_flags: configuration.compatibility_flags,
         assets: {
@@ -56,6 +70,9 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
           binding: "ASSETS",
         },
         vars: environment.environment,
+        workflows: [
+          { binding: "DEPLOYMENTS", name: "fixture-deployments", class_name: "AcceptedDeployment" },
+        ],
         hyperdrive: [
           {
             binding: "HYPERDRIVE",
@@ -66,7 +83,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
         r2_buckets: [{ binding: "ARTIFACTS", bucket_name: "artifacts" }],
       }),
     );
-    worker = await unstable_dev(configuration.main, {
+    worker = await unstable_dev(entry, {
       config: path,
       local: true,
       persist: false,

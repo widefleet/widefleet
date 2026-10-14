@@ -7,8 +7,7 @@ await writeFile(
   "dist/cloudflare/worker.js",
   `
 import application from "./application.js";
-import { scheduled } from "../../src/deployment-workflow.ts";
 export { DeploymentWorkflow } from "../../src/deployment-workflow.ts";
-export default { ...application, scheduled };
+export default application;
 `,
 );

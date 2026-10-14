@@ -1,6 +1,5 @@
 import { env, waitUntil } from "cloudflare:workers";
 import type { Handle, HandleServerError } from "@sveltejs/kit/hooks";
-import { dispatchCloudflareDeployment } from "#server/cloudflare-deployment";
 import { createCloudflareRuntime } from "#server/runtime-cloudflare";
 
 export const handle: Handle = async ({ event, resolve }) => {
@@ -12,8 +11,6 @@ export const handle: Handle = async ({ event, resolve }) => {
     if (closed) return;
     closed = true;
     waitUntil(runtime.close());
-    // The job transaction has committed; a scheduled pass covers interrupted requests.
-    waitUntil(dispatchCloudflareDeployment(env));
   };
 
   try {

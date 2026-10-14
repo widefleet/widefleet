@@ -125,7 +125,7 @@
       "idx": 17,
       "version": "7",
       "when": 1792262400000,
-      "tag": "0017_cloudflare_jobs",
+      "tag": "0017_cloudflare_deployments",
       "breakpoints": true
     }
   ]

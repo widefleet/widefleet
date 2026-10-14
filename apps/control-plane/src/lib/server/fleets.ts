@@ -27,6 +27,20 @@ export const lockFleet = async (transaction: Transaction, fleetId: string) => {
   return fleet;
 };
 
+export const requireAgentExecution = async (
+  transaction: Transaction,
+  fleetId: string,
+  operation: string,
+) => {
+  const [fleet] = await transaction.select().from(fleets).where(eq(fleets.id, fleetId));
+
+  if (fleet?.executor === "cloudflare")
+    throw new InvalidOperation({
+      code: "BAD_REQUEST",
+      message: `${operation} is not available on Cloudflare yet`,
+    });
+};
+
 export const initializeCloudflareFleet = (database: Database) =>
   transact(database, async (transaction) => {
     const fleet = await lockFleet(transaction, (await defaultFleet(transaction)).id);

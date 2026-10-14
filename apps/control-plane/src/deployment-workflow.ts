@@ -1,35 +1,23 @@
-import type {
-  CloudflareWorkersModule,
-  ExecutionContext,
-  ScheduledController,
-} from "@cloudflare/workers-types";
+import type { CloudflareWorkersModule } from "@cloudflare/workers-types";
 import { WorkflowEntrypoint } from "cloudflare:workers";
-import { z } from "zod";
+import type { z } from "zod";
 import type { CloudflareBindings } from "./lib/server/cloudflare-config.ts";
-import {
-  dispatchCloudflareDeployment,
-  executeCloudflareDeployment,
-} from "./lib/server/cloudflare-deployment.ts";
+import { executeCloudflareDeployment } from "./lib/server/cloudflare-deployment.ts";
+import { deploymentCommand } from "./lib/server/deployment-execution.ts";
 
-export class DeploymentWorkflow extends WorkflowEntrypoint<CloudflareBindings, { jobId: string }> {
+export class DeploymentWorkflow extends WorkflowEntrypoint<
+  CloudflareBindings,
+  z.infer<typeof deploymentCommand>
+> {
   override async run(
-    event: CloudflareWorkersModule.WorkflowEvent<{ jobId: string }>,
+    event: CloudflareWorkersModule.WorkflowEvent<z.infer<typeof deploymentCommand>>,
     step: CloudflareWorkersModule.WorkflowStep,
   ) {
-    const id = z.uuid().parse(event.payload.jobId);
+    const command = deploymentCommand.parse(event.payload);
 
-    if (event.instanceId !== id)
-      throw new Error("Deployment workflow identity does not match its job");
+    if (event.instanceId !== command.id)
+      throw new Error("Deployment workflow identity does not match its command");
 
-    await executeCloudflareDeployment(this.env, id, step);
-    await step.do("dispatch-next-job", () => dispatchCloudflareDeployment(this.env));
+    await executeCloudflareDeployment(this.env, command, step);
   }
 }
-
-export const scheduled = (
-  _event: ScheduledController,
-  env: CloudflareBindings,
-  context: ExecutionContext,
-) => {
-  context.waitUntil(dispatchCloudflareDeployment(env));
-};
