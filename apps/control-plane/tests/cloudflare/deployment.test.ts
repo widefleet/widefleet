@@ -31,6 +31,13 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
     const databases = new Map<string, string>();
     const createdDatabases = new Set<string>();
     const buckets = new Set<string>();
+
+    const settings = new Map([
+      ["WIDEFLEET_PACKAGES", { name: "WIDEFLEET_PACKAGES", type: "r2_bucket" }],
+      ["WIDEFLEET_CONTROL_TOKEN", { name: "WIDEFLEET_CONTROL_TOKEN", type: "secret_text" }],
+    ]);
+
+    const updates: { name: string; type: string }[][] = [];
     let patches = 0;
     let apiOrigin = "";
 
@@ -75,13 +82,37 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
             response.end();
           }
         } else if (url.pathname.endsWith("/settings")) {
-          if (request.method === "PATCH") patches++;
-          ok({
-            bindings: [
-              { name: "WIDEFLEET_PACKAGES", type: "r2_bucket" },
-              { name: "WIDEFLEET_CONTROL_TOKEN", type: "secret_text" },
-            ],
-          });
+          if (request.method === "PATCH") {
+            const multipart = await new Response(body, {
+              headers: { "content-type": request.headers["content-type"] ?? "" },
+            }).formData();
+
+            const { bindings } = z
+              .object({ bindings: z.array(z.object({ name: z.string(), type: z.string() })) })
+              .parse(JSON.parse(z.string().parse(multipart.get("settings"))));
+
+            const retained = new Map(
+              bindings.map((binding) => {
+                const inherited = binding.type === "inherit" ? settings.get(binding.name) : binding;
+
+                if (!inherited) throw new Error("Unknown inherited binding");
+
+                return [binding.name, inherited] as const;
+              }),
+            );
+
+            for (const name of settings.keys()) {
+              if (!retained.has(name)) throw new Error(`Existing binding removed: ${name}`);
+            }
+
+            settings.clear();
+
+            for (const [name, binding] of retained) settings.set(name, binding);
+            updates.push(bindings);
+            patches++;
+          }
+
+          ok({ bindings: [...settings.values()] });
         } else throw new Error("Unexpected API request");
       };
 
@@ -148,11 +179,11 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
 
             if (workflow.status === "errored") throw new Error(JSON.stringify(workflow.error));
 
-            return (await jobState(id))?.state;
+            return { job: (await jobState(id))?.state, workflow: workflow.status };
           },
           { timeout: 90_000, interval: 100 },
         )
-        .toBe(state);
+        .toEqual({ job: state, workflow: "complete" });
     };
 
     beforeAll(async () => {
@@ -282,6 +313,14 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       expect(createdDatabases.size).toBe(2);
       expect(buckets.size).toBe(2);
       expect(patches).toBe(2);
+
+      for (const kind of ["d1", "r2"]) {
+        const name = `B_${resourceName(first.appId, kind, kind === "d1" ? "data" : "files")}`;
+        expect(updates[1]).toContainEqual({ name, type: "inherit" });
+        expect(settings.has(name)).toBe(true);
+      }
+
+      expect(settings.size).toBe(6);
       expect(await host(first.hostname)).toMatchObject({
         body: { deploymentId: first.deploymentId, version: first.jobId },
         access: JSON.stringify({ revision: 1, groups: ["engineering"] }),
@@ -303,6 +342,38 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       const isolated = await worker.fetch(`https://${preview.hostname}/resources`);
       expect(await isolated.json()).toEqual({ rows: [], file: null });
     }, 100_000);
+
+    it("saves settings before the first deployment without reporting an installation failure", async () => {
+      const appId = crypto.randomUUID();
+      const id = crypto.randomUUID();
+      const hostname = `fixture-${appId}.example.test`;
+      await environment.database.db.insert(apps).values({
+        id: appId,
+        slug: `fixture-${appId}`,
+        displayName: "Unstarted fixture",
+        fleetId: first.fleetId,
+        ownerId: "fixture-owner",
+        hostname,
+        accessRevision: 1,
+        accessGroups: ["engineering"],
+        networkRevision: 1,
+      });
+      await environment.database.db
+        .insert(jobs)
+        .values({ id, appId, fleetId: first.fleetId, kind: "configure" });
+      await dispatch();
+      await completed(id);
+      const [app] = await environment.database.db.select().from(apps).where(eq(apps.id, appId));
+      expect(app).toMatchObject({
+        activeDeploymentId: null,
+        appliedAccessRevision: null,
+        appliedNetworkRevision: null,
+        accessError: null,
+        networkError: null,
+      });
+      expect(await host(hostname)).toBeNull();
+      expect(patches).toBe(2);
+    });
 
     it("rejects unsupported capabilities without publishing or provisioning them", async () => {
       const entry = await seedDeployment(environment.database.db, {
@@ -391,6 +462,51 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         .where(and(eq(deployments.id, entry.deploymentId), eq(deployments.status, "succeeded")));
 
       expect(status).toBeDefined();
+    }, 100_000);
+
+    it("restarts an errored activation and then dispatches the next queued job", async () => {
+      const entry = await seedDeployment(environment.database.db, {
+        appId: first.appId,
+        source: deploymentSource.replace("deployed fixture", "third version"),
+      });
+
+      const next = await seedDeployment(environment.database.db, { appId: preview.appId });
+      await seed(entry);
+      await seed(next);
+      await environment.database.db.execute(
+        sql.raw(
+          `CREATE OR REPLACE FUNCTION fixture_reject_receipt() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.job_id = '${entry.jobId}' THEN RAISE EXCEPTION 'fixture completion failure'; END IF; RETURN NEW; END $$`,
+        ),
+      );
+      await environment.database.db.execute(
+        sql`CREATE TRIGGER fixture_receipt BEFORE INSERT ON job_receipt FOR EACH ROW EXECUTE FUNCTION fixture_reject_receipt()`,
+      );
+      await dispatch();
+      await expect
+        .poll(
+          async () => {
+            const response = await worker.fetch(`http://fixture/workflow?id=${entry.jobId}`);
+
+            return z.object({ status: z.string() }).parse(await response.json()).status;
+          },
+          { timeout: 90_000, interval: 100 },
+        )
+        .toBe("errored");
+      expect(await jobState(entry.jobId)).toMatchObject({ state: "running" });
+      expect((await jobState(entry.jobId))?.activationStartedAt).not.toBeNull();
+      expect((await jobState(next.jobId))?.state).toBe("queued");
+      expect((await host(entry.hostname))?.body).toMatchObject({
+        deploymentId: entry.deploymentId,
+      });
+      const prepared = patches;
+      await environment.database.db.execute(sql`DROP TRIGGER fixture_receipt ON job_receipt`);
+      await dispatch();
+      await completed(entry.jobId);
+      await completed(next.jobId);
+      expect(patches).toBe(prepared + 1);
+      expect(createdDatabases.size).toBe(2);
+      expect(buckets.size).toBe(2);
+      expect(await (await worker.fetch(`https://${first.hostname}/`)).text()).toBe("third version");
     }, 100_000);
   },
 );

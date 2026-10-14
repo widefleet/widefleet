@@ -60,8 +60,8 @@ describe("Cloudflare job ownership", () => {
       .set({ accessGroups: ["changed"], accessRevision: 2 })
       .where(eq(apps.id, first.appId));
     const recovered = (await service.deployment(first.jobId)).unwrap();
-    expect(recovered.access).toEqual({ groups: ["engineering"], revision: 1 });
-    expect(recovered.version).toBe(first.jobId);
+    expect(recovered?.access).toEqual({ groups: ["engineering"], revision: 1 });
+    expect(recovered?.version).toBe(first.jobId);
     const [job] = await environment.database.db.select().from(jobs).where(eq(jobs.id, first.jobId));
     expect(job).toMatchObject({ agentId: null, leaseToken: null, leaseUntil: null, attempt: 1 });
     expect((await service.deployment(second.jobId)).isErr()).toBe(true);

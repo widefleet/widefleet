@@ -32,11 +32,18 @@ const withDatabase = async <T>(
   operation: (database: ReturnType<typeof createDatabase>) => Promise<T>,
 ) => {
   const database = createDatabase(readCloudflareConfiguration(bindings), 1);
+  const disconnected: Promise<void>[] = [];
+  // Pool.end() resolves before idle clients finish closing their sockets. A Workflow step
+  // must release those connections before retries consume more of Workers' connection slots.
+  database.db.$client.on("connect", (client) => {
+    disconnected.push(new Promise<void>((resolve) => client.once("end", resolve)));
+  });
 
   try {
     return await operation(database);
   } finally {
     await database.close();
+    await Promise.all(disconnected);
   }
 };
 
@@ -63,10 +70,18 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
     transport,
   );
 
-  const deployment = (id: string) =>
+  const readDeployment = (id: string) =>
     withDatabase(bindings, async (database) =>
       value(await createCloudflareJobService(database.db, storage).deployment(id)),
     );
+
+  const deployment = async (id: string) => {
+    const input = await readDeployment(id);
+
+    if (!input) throw new Error("This configuration has no active deployment");
+
+    return input;
+  };
 
   const state = (id: string) =>
     withDatabase(bindings, async (database) => {
@@ -259,7 +274,16 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
 
   return {
     state,
-    deployment,
+    hasDeployment: async (id: string) => (await readDeployment(id)) !== null,
+    completeConfiguration: (id: string) =>
+      withDatabase(bindings, async (database) =>
+        value(
+          await completeJob(database.db, storage, { workflowId: id }, id, {
+            outcome: "succeeded",
+            message: "Configuration saved for the first deployment",
+          }),
+        ),
+      ),
     provision: async (id: string) => provisioner.provision(await deployment(id)),
     stage,
     verify,
@@ -315,11 +339,10 @@ export const executeCloudflareDeployment = async (
     try {
       const validation = await step.do("validate-deployment", options, async () => {
         try {
-          await runner.deployment(id);
-
-          return { error: null };
+          return { error: null, hasDeployment: await runner.hasDeployment(id) };
         } catch (error) {
-          if (error instanceof InvalidOperation) return { error: error.message };
+          if (error instanceof InvalidOperation)
+            return { error: error.message, hasDeployment: false };
           throw error;
         }
       });
@@ -328,6 +351,12 @@ export const executeCloudflareDeployment = async (
         await step.do("reject-deployment", options, () =>
           runner.fail(id, validation.error ?? "Invalid deployment"),
         );
+
+        return;
+      }
+
+      if (!validation.hasDeployment) {
+        await step.do("save-configuration", options, () => runner.completeConfiguration(id));
 
         return;
       }

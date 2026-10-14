@@ -87,6 +87,8 @@ export const createCloudflareJobService = (database: Database, storage: Artifact
           message: `Cloudflare execution for ${job.kind} jobs is not available yet`,
         });
 
+      if (job.kind === "configure" && job.appId && !job.deploymentId) return Result.ok(null);
+
       if (!job.appId || !job.deploymentId)
         throw new InvalidOperation({ code: "CONFLICT", message: "This job has no app deployment" });
 
