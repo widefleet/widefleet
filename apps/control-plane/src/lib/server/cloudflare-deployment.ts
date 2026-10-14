@@ -1,6 +1,5 @@
 import { resolveCloudflareCapabilities } from "./cloudflare-capabilities.ts";
 import { checkCapabilityNames } from "./connector-changes.ts";
-import { lockFleet } from "./fleets.ts";
 import { CloudflareSubscriptionPending } from "./cloudflare-subscription-updates.ts";
 import { createCloudflareEvents } from "./cloudflare-events.ts";
 import { NonRetryableError } from "cloudflare:workflows";
@@ -128,13 +127,6 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
       withCloudflareDatabase(bindings, async ({ db }) =>
         value(
           await transact(db, async (transaction) => {
-            const [scope] = await transaction
-              .select({ fleetId: apps.fleetId })
-              .from(apps)
-              .where(eq(apps.id, target.appId));
-
-            if (scope) await lockFleet(transaction, scope.fleetId);
-
             const [app] = await transaction
               .select()
               .from(apps)
@@ -234,6 +226,8 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               capabilities.grants,
             );
 
+            // Entrypoint removal waits for confirmed revocation. The app lock is
+            // sufficient here; unrelated apps can activate concurrently.
             const resolved = await resolveCloudflareCapabilities(
               transaction,
               app.fleetId,

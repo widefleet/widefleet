@@ -23,269 +23,263 @@ import { transact, type Transaction } from "./transactions.ts";
 
 export { checkCapabilityNames } from "./connector-changes.ts";
 
+const presentStatus = async (
+  transaction: Transaction,
+  record: typeof connectors.$inferSelect,
+  execution?: HostedExecution,
+) => {
+  const current = await connectorStatus(transaction, record);
+
+  return execution ? execution.connectors.status(current) : current;
+};
+
 export const createConnectorService = (
   database: Database,
   storage: ArtifactStorage,
   encryptionKey: string,
   execution?: HostedExecution,
-) => {
-  const presentStatus = async (
-    transaction: Transaction,
-    record: typeof connectors.$inferSelect,
-  ) => {
-    const current = await connectorStatus(transaction, record);
+) => ({
+  catalog: () =>
+    transact(database, async (transaction) => {
+      const fleet = await defaultFleet(transaction);
 
-    return execution ? execution.connectors.status(current) : current;
-  };
+      const records = await transaction
+        .select()
+        .from(connectors)
+        .where(eq(connectors.fleetId, fleet.id))
+        .orderBy(connectors.name);
 
-  return {
-    catalog: () =>
-      transact(database, async (transaction) => {
-        const fleet = await defaultFleet(transaction);
+      return Result.ok(
+        records.map((record) => {
+          const desired = connectorReference.parse(record.package);
 
-        const records = await transaction
-          .select()
-          .from(connectors)
-          .where(eq(connectors.fleetId, fleet.id))
-          .orderBy(connectors.name);
+          const active = record.appliedPackage
+            ? connectorReference.parse(record.appliedPackage)
+            : null;
 
-        return Result.ok(
-          records.map((record) => {
-            const desired = connectorReference.parse(record.package);
+          // Offer only entrypoints that the binding operation can currently grant.
+          return contract.connectorCatalogEntry.parse({
+            name: record.name,
+            entrypoints:
+              active?.entrypoints.filter((name) => desired.entrypoints.includes(name)) ?? [],
+          });
+        }),
+      );
+    }),
+  connections: (principal: Principal, appId: string) =>
+    transact(database, async (transaction) => {
+      const access = await managedApp(transaction, principal, appId);
 
-            const active = record.appliedPackage
-              ? connectorReference.parse(record.appliedPackage)
-              : null;
+      if (access.isErr()) return access;
+      const app = access.value;
 
-            // Offer only entrypoints that the binding operation can currently grant.
-            return contract.connectorCatalogEntry.parse({
-              name: record.name,
-              entrypoints:
-                active?.entrypoints.filter((name) => desired.entrypoints.includes(name)) ?? [],
-            });
-          }),
-        );
-      }),
-    connections: (principal: Principal, appId: string) =>
-      transact(database, async (transaction) => {
-        const access = await managedApp(transaction, principal, appId);
+      const [deployed] = app.activeDeploymentId
+        ? await transaction
+            .select({ metadata: artifacts.metadata })
+            .from(deployments)
+            .innerJoin(artifacts, eq(artifacts.id, deployments.artifactId))
+            .where(and(eq(deployments.appId, app.id), eq(deployments.id, app.activeDeploymentId)))
+        : [];
 
-        if (access.isErr()) return access;
-        const app = access.value;
+      const metadata = deployed ? contract.workerMetadata.parse(deployed.metadata) : null;
 
-        const [deployed] = app.activeDeploymentId
-          ? await transaction
-              .select({ metadata: artifacts.metadata })
-              .from(deployments)
-              .innerJoin(artifacts, eq(artifacts.id, deployments.artifactId))
-              .where(and(eq(deployments.appId, app.id), eq(deployments.id, app.activeDeploymentId)))
-          : [];
+      const resources =
+        metadata?.bindings.flatMap<z.infer<typeof contract.appResource>>((binding) => {
+          switch (binding.type) {
+            case "plain_text":
+              return [];
+            case "d1":
+              return [
+                {
+                  binding: binding.name,
+                  type: binding.type,
+                  target: binding.database_name,
+                  databaseId: binding.database_id ?? binding.database_name,
+                },
+              ];
+            case "r2_bucket":
+              return [{ binding: binding.name, type: binding.type, target: binding.bucket_name }];
+            case "kv_namespace":
+              return [{ binding: binding.name, type: binding.type, target: binding.id }];
+            case "queue":
+              return [{ binding: binding.name, type: binding.type, target: binding.queue }];
+            case "workflow":
+              return [{ binding: binding.name, type: binding.type, target: binding.workflow_name }];
+          }
+        }) ?? [];
 
-        const metadata = deployed ? contract.workerMetadata.parse(deployed.metadata) : null;
+      const desired = bindingState(app);
+      let active = app.activeDeploymentId ? null : contract.capabilityGrants.parse({});
 
-        const resources =
-          metadata?.bindings.flatMap<z.infer<typeof contract.appResource>>((binding) => {
-            switch (binding.type) {
-              case "plain_text":
-                return [];
-              case "d1":
-                return [
-                  {
-                    binding: binding.name,
-                    type: binding.type,
-                    target: binding.database_name,
-                    databaseId: binding.database_id ?? binding.database_name,
-                  },
-                ];
-              case "r2_bucket":
-                return [{ binding: binding.name, type: binding.type, target: binding.bucket_name }];
-              case "kv_namespace":
-                return [{ binding: binding.name, type: binding.type, target: binding.id }];
-              case "queue":
-                return [{ binding: binding.name, type: binding.type, target: binding.queue }];
-              case "workflow":
-                return [
-                  { binding: binding.name, type: binding.type, target: binding.workflow_name },
-                ];
-            }
-          }) ?? [];
+      if (app.activeDeploymentId && app.appliedCapabilityRevision === app.capabilityRevision) {
+        active = desired.grants;
+      } else if (app.activeDeploymentId && app.appliedCapabilities) {
+        active = contract.capabilitySnapshot.parse(app.appliedCapabilities).grants;
+      } else if (app.activeDeploymentId && app.appliedCapabilityRevision !== null) {
+        // Successful job snapshots retain the serving grants after a pending or failed edit.
+        const [applied] = await transaction
+          .select({ capabilities: jobs.capabilities })
+          .from(jobs)
+          .where(
+            and(
+              eq(jobs.appId, app.id),
+              eq(jobs.deploymentId, app.activeDeploymentId),
+              eq(jobs.state, "succeeded"),
+              sql`${jobs.capabilities}->>'revision' = ${String(app.appliedCapabilityRevision)}`,
+            ),
+          )
+          .orderBy(desc(jobs.sequence))
+          .limit(1);
 
-        const desired = bindingState(app);
-        let active = app.activeDeploymentId ? null : contract.capabilityGrants.parse({});
+        if (applied) active = contract.capabilitySnapshot.parse(applied.capabilities).grants;
+      }
 
-        if (app.activeDeploymentId && app.appliedCapabilityRevision === app.capabilityRevision) {
-          active = desired.grants;
-        } else if (app.activeDeploymentId && app.appliedCapabilities) {
-          active = contract.capabilitySnapshot.parse(app.appliedCapabilities).grants;
-        } else if (app.activeDeploymentId && app.appliedCapabilityRevision !== null) {
-          // Successful job snapshots retain the serving grants after a pending or failed edit.
-          const [applied] = await transaction
-            .select({ capabilities: jobs.capabilities })
-            .from(jobs)
-            .where(
-              and(
-                eq(jobs.appId, app.id),
-                eq(jobs.deploymentId, app.activeDeploymentId),
-                eq(jobs.state, "succeeded"),
-                sql`${jobs.capabilities}->>'revision' = ${String(app.appliedCapabilityRevision)}`,
-              ),
-            )
-            .orderBy(desc(jobs.sequence))
-            .limit(1);
+      return Result.ok(
+        contract.appConnections.parse({
+          deploymentId: app.activeDeploymentId,
+          resources: metadata
+            ? [...resources, { binding: metadata.assets.binding, type: "assets", target: app.slug }]
+            : resources,
+          connectors: desired,
+          activeConnectors: active,
+        }),
+      );
+    }),
+  setSecret: (principal: Principal, name: string, secret: string, value: string | null) =>
+    execution
+      ? execution.connectors.setSecret(principal, name, secret, value)
+      : transact(database, async (transaction) => {
+          administrator(principal);
+          const target = await defaultFleet(transaction);
+          await lockFleet(transaction, target.id);
+          await requireAgentExecution(transaction, target.id, "Connectors");
 
-          if (applied) active = contract.capabilitySnapshot.parse(applied.capabilities).grants;
-        }
+          const [existing] = await transaction
+            .select()
+            .from(connectors)
+            .where(and(eq(connectors.fleetId, target.id), eq(connectors.name, name)));
 
-        return Result.ok(
-          contract.appConnections.parse({
-            deploymentId: app.activeDeploymentId,
-            resources: metadata
-              ? [
-                  ...resources,
-                  { binding: metadata.assets.binding, type: "assets", target: app.slug },
-                ]
-              : resources,
-            connectors: desired,
-            activeConnectors: active,
-          }),
-        );
-      }),
-    setSecret: (principal: Principal, name: string, secret: string, value: string | null) =>
-      execution
-        ? execution.connectors.setSecret(principal, name, secret, value)
-        : transact(database, async (transaction) => {
-            administrator(principal);
-            const target = await defaultFleet(transaction);
-            await lockFleet(transaction, target.id);
-            await requireAgentExecution(transaction, target.id, "Connectors");
+          if (!existing)
+            throw new InvalidOperation({ code: "NOT_FOUND", message: "Connector not found" });
+          const reference = connectorReference.parse(existing.package);
+          const secrets = new Map(Object.entries(reference.secrets));
 
-            const [existing] = await transaction
-              .select()
-              .from(connectors)
-              .where(and(eq(connectors.fleetId, target.id), eq(connectors.name, name)));
+          if (value === null) {
+            secrets.delete(secret);
+          } else {
+            secrets.set(secret, await encryptSecret(encryptionKey, value));
+          }
 
-            if (!existing)
-              throw new InvalidOperation({ code: "NOT_FOUND", message: "Connector not found" });
-            const reference = connectorReference.parse(existing.package);
-            const secrets = new Map(Object.entries(reference.secrets));
+          const next = {
+            ...reference,
+            secrets: Object.fromEntries(secrets),
+            secretRevision: reference.secretRevision + 1,
+          };
 
-            if (value === null) {
-              secrets.delete(secret);
-            } else {
-              secrets.set(secret, await encryptSecret(encryptionKey, value));
-            }
+          const id = crypto.randomUUID();
+          await transaction
+            .insert(jobs)
+            .values({ id, fleetId: target.id, kind: "connector", connector: next });
 
-            const next = {
-              ...reference,
-              secrets: Object.fromEntries(secrets),
-              secretRevision: reference.secretRevision + 1,
-            };
+          const [record] = await transaction
+            .update(connectors)
+            .set({ package: next, jobId: id })
+            .where(and(eq(connectors.fleetId, target.id), eq(connectors.name, name)))
+            .returning();
 
-            const id = crypto.randomUUID();
-            await transaction
-              .insert(jobs)
-              .values({ id, fleetId: target.id, kind: "connector", connector: next });
+          if (!record) throw new Error("Connector secret update returned no row");
 
-            const [record] = await transaction
-              .update(connectors)
-              .set({ package: next, jobId: id })
-              .where(and(eq(connectors.fleetId, target.id), eq(connectors.name, name)))
-              .returning();
+          return Result.ok(await presentStatus(transaction, record, execution));
+        }),
+  list: (principal: Principal) =>
+    transact(database, async (transaction) => {
+      administrator(principal);
+      const fleet = await defaultFleet(transaction);
 
-            if (!record) throw new Error("Connector secret update returned no row");
+      const records = await transaction
+        .select()
+        .from(connectors)
+        .where(eq(connectors.fleetId, fleet.id))
+        .orderBy(connectors.name);
 
-            return Result.ok(await presentStatus(transaction, record));
-          }),
-    list: (principal: Principal) =>
-      transact(database, async (transaction) => {
-        administrator(principal);
-        const fleet = await defaultFleet(transaction);
+      return Result.ok(
+        await Promise.all(records.map((record) => presentStatus(transaction, record, execution))),
+      );
+    }),
+  read: (principal: Principal, name: string) =>
+    transact(database, async (transaction) => {
+      administrator(principal);
+      const fleet = await defaultFleet(transaction);
 
-        const records = await transaction
-          .select()
-          .from(connectors)
-          .where(eq(connectors.fleetId, fleet.id))
-          .orderBy(connectors.name);
+      const [record] = await transaction
+        .select()
+        .from(connectors)
+        .where(and(eq(connectors.fleetId, fleet.id), eq(connectors.name, name)));
 
-        return Result.ok(
-          await Promise.all(records.map((record) => presentStatus(transaction, record))),
-        );
-      }),
-    read: (principal: Principal, name: string) =>
-      transact(database, async (transaction) => {
-        administrator(principal);
-        const fleet = await defaultFleet(transaction);
+      if (!record)
+        throw new InvalidOperation({ code: "NOT_FOUND", message: "Connector not found" });
 
-        const [record] = await transaction
-          .select()
-          .from(connectors)
-          .where(and(eq(connectors.fleetId, fleet.id), eq(connectors.name, name)));
+      return Result.ok(await presentStatus(transaction, record, execution));
+    }),
+  deploy: (principal: Principal, release: z.infer<typeof contract.connectorPackage>) =>
+    execution
+      ? execution.connectors.deploy(principal, release)
+      : transact(database, async (transaction) => {
+          administrator(principal);
+          const target = await defaultFleet(transaction);
+          await lockFleet(transaction, target.id);
+          await requireAgentExecution(transaction, target.id, "Connectors");
 
-        if (!record)
-          throw new InvalidOperation({ code: "NOT_FOUND", message: "Connector not found" });
+          const { reference, existing } = await prepareConnector(
+            transaction,
+            storage,
+            target,
+            release,
+          );
 
-        return Result.ok(await presentStatus(transaction, record));
-      }),
-    deploy: (principal: Principal, release: z.infer<typeof contract.connectorPackage>) =>
-      execution
-        ? execution.connectors.deploy(principal, release)
-        : transact(database, async (transaction) => {
-            administrator(principal);
-            const target = await defaultFleet(transaction);
-            await lockFleet(transaction, target.id);
-            await requireAgentExecution(transaction, target.id, "Connectors");
+          const checksum = reference.checksum;
 
-            const { reference, existing } = await prepareConnector(
-              transaction,
-              storage,
-              target,
-              release,
-            );
+          if (existing && connectorReference.parse(existing.package).checksum === checksum) {
+            const current = await presentStatus(transaction, existing, execution);
 
-            const checksum = reference.checksum;
+            if (current.state !== "failed") return Result.ok(current);
+          }
 
-            if (existing && connectorReference.parse(existing.package).checksum === checksum) {
-              const current = await presentStatus(transaction, existing);
+          const id = crypto.randomUUID();
+          await transaction
+            .insert(jobs)
+            .values({ id, fleetId: target.id, kind: "connector", connector: reference });
 
-              if (current.state !== "failed") return Result.ok(current);
-            }
+          const [record] = await transaction
+            .insert(connectors)
+            .values({ fleetId: target.id, name: release.name, package: reference, jobId: id })
+            .onConflictDoUpdate({
+              target: [connectors.fleetId, connectors.name],
+              set: { package: reference, jobId: id },
+            })
+            .returning();
 
-            const id = crypto.randomUUID();
-            await transaction
-              .insert(jobs)
-              .values({ id, fleetId: target.id, kind: "connector", connector: reference });
+          if (!record) throw new Error("Connector publication returned no row");
 
-            const [record] = await transaction
-              .insert(connectors)
-              .values({ fleetId: target.id, name: release.name, package: reference, jobId: id })
-              .onConflictDoUpdate({
-                target: [connectors.fleetId, connectors.name],
-                set: { package: reference, jobId: id },
-              })
-              .returning();
+          return Result.ok(await presentStatus(transaction, record, execution));
+        }),
+  bindings: (principal: Principal, appId: string) =>
+    transact(database, async (transaction) => {
+      const access = await managedApp(transaction, principal, appId);
 
-            if (!record) throw new Error("Connector publication returned no row");
+      if (access.isErr()) return access;
 
-            return Result.ok(await presentStatus(transaction, record));
-          }),
-    bindings: (principal: Principal, appId: string) =>
-      transact(database, async (transaction) => {
-        const access = await managedApp(transaction, principal, appId);
-
-        if (access.isErr()) return access;
-
-        return Result.ok(bindingState(access.value));
-      }),
-    bind: (
-      principal: Principal,
-      appId: string,
-      name: string,
-      grant: z.infer<typeof contract.capabilityGrant> | null,
-    ) =>
-      execution
-        ? execution.connectors.bind(principal, appId, name, grant)
-        : transact(database, (transaction) =>
-            applyCapabilityChange(transaction, principal, appId, name, grant, true),
-          ),
-  };
-};
+      return Result.ok(bindingState(access.value));
+    }),
+  bind: (
+    principal: Principal,
+    appId: string,
+    name: string,
+    grant: z.infer<typeof contract.capabilityGrant> | null,
+  ) =>
+    execution
+      ? execution.connectors.bind(principal, appId, name, grant)
+      : transact(database, (transaction) =>
+          applyCapabilityChange(transaction, principal, appId, name, grant, true),
+        ),
+});
