@@ -1446,5 +1446,24 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         .toBe("errored");
       expect(await operation(first.command.id)).toEqual(before);
     }, 20_000);
+    it("delivers a shared cron to more than four distinct Dynamic Workers", async () => {
+      for (let index = 0; index < 6; index++) {
+        const entry = await seedDeployment(environment.database.db, {
+          source: "export default {fetch(){return new Response('cron fixture');},scheduled(){}};",
+          bindings: [],
+          crons: ["30 * * * *"],
+        });
+
+        await seed(entry);
+        await dispatch(entry);
+        await completed(entry.command.id);
+      }
+
+      const response = await worker.fetch(
+        "http://fixture/cron?cron=" + encodeURIComponent("30 * * * *"),
+      );
+
+      expect(response.status, await response.clone().text()).toBe(204);
+    }, 30_000);
   },
 );

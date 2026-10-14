@@ -36,12 +36,15 @@ const eventConfiguration = async (environment: ParentEnvironment) => {
     .union([appEventConfiguration, z.object({ source: z.literal("r2") })])
     .parse(JSON.parse(environment.WIDEFLEET_CONFIGURATION));
 
-  if (!("source" in configuration)) return configuration;
+  if (!("source" in configuration)) return { events: configuration, concurrency: null };
   const object = await environment.WIDEFLEET_PACKAGES.get("events/configuration.json");
 
-  return object
-    ? z.object({ configuration: appEventConfiguration }).parse(await object.json()).configuration
-    : { crons: {}, queues: {} };
+  return {
+    events: object
+      ? z.object({ configuration: appEventConfiguration }).parse(await object.json()).configuration
+      : { crons: {}, queues: {} },
+    concurrency: 4,
+  };
 };
 
 const load = (app: PublishedApp, environment: ParentEnvironment, context: ExecutionContext) =>
@@ -180,14 +183,16 @@ export default {
     environment: ParentEnvironment,
     context: ExecutionContext,
   ) {
-    const hosts = (await eventConfiguration(environment)).crons[controller.cron] ?? [];
+    const configuration = await eventConfiguration(environment);
+    const hosts = configuration.events.crons[controller.cron] ?? [];
+    const concurrency = configuration.concurrency ?? Math.max(hosts.length, 1);
 
     let failed = false;
 
     // Workers allow four distinct in-flight Dynamic Workers per request.
-    for (let offset = 0; offset < hosts.length; offset += 4) {
+    for (let offset = 0; offset < hosts.length; offset += concurrency) {
       const results = await Promise.allSettled(
-        hosts.slice(offset, offset + 4).map(async (host) => {
+        hosts.slice(offset, offset + concurrency).map(async (host) => {
           const app = await readApp(environment, `hosts/${host}.json`);
 
           if (!app || !app.metadata.crons.includes(controller.cron)) return;
@@ -213,7 +218,7 @@ export default {
     environment: ParentEnvironment,
     context: ExecutionContext,
   ) {
-    const target = (await eventConfiguration(environment)).queues[batch.queue];
+    const target = (await eventConfiguration(environment)).events.queues[batch.queue];
 
     if (!target) throw new Error("Queue has no application consumer");
     const app = await readApp(environment, `hosts/${target.hostname}.json`);
