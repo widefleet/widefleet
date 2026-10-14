@@ -508,6 +508,47 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
     );
   });
 
+  it("returns distinct accepted operations and preserves concurrent secret edits", async () => {
+    const results = await Promise.all(
+      ["ALPHA", "BETA"].map((secret) =>
+        command({ kind: "secret", name: release.name, secret, value: `synthetic-${secret}` }),
+      ),
+    );
+
+    const accepted = results.map((result) => contract.connectorStatus.parse(result));
+    expect(new Set(accepted.map((result) => result.jobId)).size).toBe(2);
+
+    const current = contract.connectorStatus.parse(
+      await command({ kind: "read", name: release.name }),
+    );
+
+    await completed(current.jobId);
+
+    for (const result of accepted)
+      await expect
+        .poll(
+          async () => {
+            const response = await worker.fetch(`http://fixture/status?id=${result.jobId}`);
+            const state = z.object({ status: z.string() }).parse(await response.json());
+
+            return state.status === "complete" || state.status === "errored";
+          },
+          { timeout: 30_000, interval: 100 },
+        )
+        .toBe(true);
+    const active = scripts.get(connectorWorkerName(fleetId, release.name))?.metadata.bindings;
+    expect(active).toContainEqual({
+      name: "WIDEFLEET_SECRET_ALPHA",
+      type: "secret_text",
+      text: "synthetic-ALPHA",
+    });
+    expect(active).toContainEqual({
+      name: "WIDEFLEET_SECRET_BETA",
+      type: "secret_text",
+      text: "synthetic-BETA",
+    });
+  });
+
   it("executes original RPC classes with private fields and persistent D1, R2, KV and Durable Objects", async () => {
     expect((await worker.fetch("http://fixture/public")).status).toBe(404);
     const first = await worker.fetch("http://fixture/native");

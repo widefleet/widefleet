@@ -157,7 +157,7 @@ export const createCloudflareConnectors = (
         );
 
         const parsed = connectorCommand.parse(accepted);
-        (await registerCloudflareConnector(database, storage, parsed)).unwrap();
+        const operation = (await registerCloudflareConnector(database, storage, parsed)).unwrap();
 
         return (
           await transact(database, async (transaction) => {
@@ -173,7 +173,15 @@ export const createCloudflareConnectors = (
 
             if (!record) throw new Error("The accepted connector deployment has no history");
 
-            return Result.ok(await connectorStatus(transaction, record));
+            // Another request may already have replaced the desired connector. Return
+            // the command this caller submitted, not that newer request's job identity.
+            return Result.ok(
+              await connectorStatus(transaction, {
+                ...record,
+                package: operation.result,
+                jobId: command.id,
+              }),
+            );
           })
         ).unwrap();
       },
