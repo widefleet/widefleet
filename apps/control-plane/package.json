@@ -23,7 +23,7 @@
     "build": "pnpm --filter @platform/app-runtime build && vite build && node tools/reporting-maps.ts",
     "start": "node build",
     "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-    "build:cloudflare": "pnpm --filter @platform/app-runtime build && vite build --config vite.cloudflare.config.ts && node tools/reporting-maps.ts cloudflare",
+    "build:cloudflare": "pnpm --filter @platform/app-runtime build && vite build --config vite.cloudflare.config.ts && node tools/cloudflare-entry.ts && node tools/reporting-maps.ts cloudflare",
     "dev:cloudflare": "vite --config vite.cloudflare.config.ts --host 127.0.0.1"
   },
   "dependencies": {

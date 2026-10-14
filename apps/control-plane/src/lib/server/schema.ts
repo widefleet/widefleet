@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -14,13 +15,20 @@ import {
 } from "drizzle-orm/pg-core";
 import { user } from "./auth-schema.ts";
 
-export const fleets = pgTable("fleet", {
-  id: uuid().primaryKey().defaultRandom(),
-  name: text().notNull().unique(),
-  runtime: jsonb(),
-  appliedRuntime: jsonb("applied_runtime"),
-  runtimeJobId: uuid("runtime_job_id"),
-});
+export const fleets = pgTable(
+  "fleet",
+  {
+    id: uuid().primaryKey().defaultRandom(),
+    name: text().notNull().unique(),
+    executor: text({ enum: ["agent", "cloudflare"] })
+      .notNull()
+      .default("agent"),
+    runtime: jsonb(),
+    appliedRuntime: jsonb("applied_runtime"),
+    runtimeJobId: uuid("runtime_job_id"),
+  },
+  (table) => [check("fleet_executor_check", sql`${table.executor} IN ('agent', 'cloudflare')`)],
+);
 
 export const runtimeReleases = pgTable("runtime_release", {
   version: text().primaryKey(),
@@ -158,6 +166,8 @@ export const jobs = pgTable(
       .notNull()
       .references(() => fleets.id),
     agentId: uuid("agent_id").references(() => agents.id),
+    workflowId: uuid("workflow_id").unique(),
+    activationStartedAt: timestamp("activation_started_at", { withTimezone: true }),
     deploymentId: uuid("deployment_id").references(() => deployments.id),
     kind: text({
       enum: ["deploy", "runtime", "connector", "delete", "configure", "migrations", "workflows"],
@@ -203,14 +213,25 @@ export const deploymentEvents = pgTable("deployment_event", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const jobReceipts = pgTable("job_receipt", {
-  jobId: uuid("job_id").primaryKey(),
-  agentId: uuid("agent_id")
-    .notNull()
-    .references(() => agents.id),
-  leaseToken: uuid("lease_token").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const jobReceipts = pgTable(
+  "job_receipt",
+  {
+    jobId: uuid("job_id").primaryKey(),
+    agentId: uuid("agent_id").references(() => agents.id),
+    leaseToken: uuid("lease_token"),
+    workflowId: uuid("workflow_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "job_receipt_owner_check",
+      sql`
+  (${table.agentId} IS NOT NULL AND ${table.leaseToken} IS NOT NULL AND ${table.workflowId} IS NULL)
+  OR (${table.agentId} IS NULL AND ${table.leaseToken} IS NULL AND ${table.workflowId} IS NOT NULL)
+`,
+    ),
+  ],
+);
 
 export const installation = pgTable("installation", {
   id: text().primaryKey(),
