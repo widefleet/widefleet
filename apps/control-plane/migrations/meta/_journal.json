@@ -127,6 +127,13 @@
       "when": 1792262400000,
       "tag": "0017_cloudflare_deployments",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1792348800000,
+      "tag": "0018_cloudflare_subscriptions",
+      "breakpoints": true
     }
   ]
 }

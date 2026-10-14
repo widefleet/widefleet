@@ -1,3 +1,5 @@
+export { appEventConfiguration } from "./app-events.ts";
+
 import { z } from "zod";
 import { appAccessSnapshot } from "./app-access.ts";
 import { networkSnapshot } from "./network.ts";

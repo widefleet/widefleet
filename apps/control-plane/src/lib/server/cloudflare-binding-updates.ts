@@ -72,7 +72,11 @@ export const updateCloudflareBindings = async (
         existing.type === resource.type &&
         (resource.type === "d1"
           ? (existing.database_id ?? existing.id) === resource.id
-          : existing.bucket_name === resource.bucket_name && !existing.jurisdiction);
+          : resource.type === "r2_bucket"
+            ? existing.bucket_name === resource.bucket_name && !existing.jurisdiction
+            : resource.type === "kv_namespace"
+              ? existing.namespace_id === resource.namespace_id && !existing.jurisdiction
+              : existing.queue_name === resource.queue_name);
 
       if (!matches)
         throw new InvalidOperation({

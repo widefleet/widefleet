@@ -1,3 +1,5 @@
+import { acceptCloudflareWorkflow } from "./cloudflare-admission.ts";
+import { createCloudflareAppOperations } from "./cloudflare-app-operations.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
 import { and, eq } from "drizzle-orm";
@@ -5,10 +7,7 @@ import { z } from "zod";
 import { validateAccessChange } from "./app-access.ts";
 import { presentDeployment } from "./apps.ts";
 import type { CloudflareBindings } from "./cloudflare-config.ts";
-import {
-  registerCloudflareOperation,
-  validateCloudflareArtifact,
-} from "./cloudflare-operations.ts";
+import { registerCloudflareOperation } from "./cloudflare-operations.ts";
 import type { Database } from "./database.ts";
 import { deploymentCommand, type HostedExecution } from "./deployment-execution.ts";
 import { DatabaseUnavailable, InvalidOperation, StorageUnavailable } from "./errors.ts";
@@ -36,42 +35,12 @@ export const createCloudflareExecution = (
 
         if (!workflow) throw new Error("The deployment Workflow binding is missing");
 
-        // This immutable input binds API retries to their original payload, even before
-        // the Workflow creates SQL history. Unsubmitted inputs never trigger execution.
-        const key = `apps/${input.appId}/commands/${input.id}.json`;
-
-        const written = await bindings.ARTIFACTS.put(key, JSON.stringify(input), {
-          onlyIf: { etagDoesNotMatch: "*" },
-          httpMetadata: { contentType: "application/json" },
-        });
-
-        let command = input;
-
-        if (!written) {
-          const existing = await bindings.ARTIFACTS.get(key);
-
-          if (!existing) throw new Error("The immutable deployment input is missing");
-
-          command = deploymentCommand.parse(await existing.json());
-          const { createdAt: _inputTime, ...requested } = input;
-          const { createdAt: _storedTime, ...stored } = command;
-
-          if (JSON.stringify(requested) !== JSON.stringify(stored))
-            throw new InvalidOperation({
-              code: "CONFLICT",
-              message: "The request ID already refers to another deployment command",
-            });
-        }
-
-        try {
-          await workflow.create({ id: command.id, params: command });
-        } catch (error) {
-          // The creation response can be lost. An existing instance confirms acceptance;
-          // resubmitting an API request never restarts or resets that instance.
-          const instance = await workflow.get(command.id);
-
-          if ((await instance.status()).status === "unknown") throw error;
-        }
+        const command = await acceptCloudflareWorkflow(
+          bindings.ARTIFACTS,
+          workflow,
+          input,
+          deploymentCommand,
+        );
 
         return unwrap(await registerCloudflareOperation(database, storage, command));
       },
@@ -87,6 +56,7 @@ export const createCloudflareExecution = (
     });
 
   return {
+    operations: createCloudflareAppOperations(bindings, database, storage),
     history: (records) =>
       Result.tryPromise({
         try: async () => {
@@ -136,7 +106,7 @@ export const createCloudflareExecution = (
             code: "NOT_FOUND",
             message: "Deployment artifact not found",
           });
-        validateCloudflareArtifact(
+        contract.artifact.parse(
           contract.artifact.parse({
             id: artifact.id,
             appId: artifact.appId,

@@ -10,6 +10,11 @@
   "observability": { "enabled": true },
   "workflows": [
     {
+      "binding": "APP_OPERATIONS",
+      "name": "widefleet-app-operations",
+      "class_name": "AppOperationWorkflow",
+    },
+    {
       "binding": "DEPLOYMENTS",
       "name": "widefleet-deployments",
       "class_name": "DeploymentWorkflow",

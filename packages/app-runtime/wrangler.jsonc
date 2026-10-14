@@ -1,0 +1,27 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "widefleet-app-runtime",
+  "main": "dist/loader.js",
+  "no_bundle": true,
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": { "enabled": true },
+  "worker_loaders": [{ "binding": "WIDEFLEET_LOADER" }],
+  "r2_buckets": [{ "binding": "WIDEFLEET_PACKAGES", "bucket_name": "widefleet-artifacts" }],
+  "vars": { "WIDEFLEET_CONFIGURATION": "{\"source\":\"r2\"}" },
+  "durable_objects": {
+    "bindings": [
+      { "name": "WIDEFLEET_WORKFLOW_CATALOG", "class_name": "CloudflareWorkflowCatalog" },
+    ],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["CloudflareWorkflowCatalog"] }],
+  "workflows": [
+    {
+      "binding": "WIDEFLEET_WORKFLOWS",
+      "name": "widefleet-app-workflows",
+      "class_name": "CloudflareAppWorkflow",
+    },
+  ],
+}

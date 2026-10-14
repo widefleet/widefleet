@@ -27,6 +27,8 @@ export const seedDeployment = async (
     source?: string;
     bindings?: z.infer<typeof contract.workerBinding>[];
     groups?: string[];
+    crons?: string[];
+    consumers?: z.infer<typeof contract.queueConsumer>[];
   } = {},
 ) => {
   const appId = options.appId ?? crypto.randomUUID();
@@ -57,6 +59,8 @@ export const seedDeployment = async (
       main_module: "app.js",
       compatibility_date: "2026-10-01",
       assets: { binding: "ASSETS", upload_session: crypto.randomUUID() },
+      crons: options.crons ?? [],
+      queue_consumers: options.consumers ?? [],
       bindings: options.bindings ?? [
         { type: "d1", name: "DB", database_name: "data" },
         { type: "r2_bucket", name: "FILES", bucket_name: "files" },
@@ -97,3 +101,26 @@ export const seedDeployment = async (
     source,
   };
 };
+
+export const capabilitiesSource = `
+import { WorkflowEntrypoint } from 'cloudflare:workers';
+export class ExampleWorkflow extends WorkflowEntrypoint {
+  async run(event, step) {
+    if (event.payload?.large) return step.do('large', () => String.fromCharCode(34).repeat(300000));
+    await step.do('record', () => this.env.KV.put('workflow:' + event.instanceId, 'prepared'));
+    if (event.payload?.wait) await step.waitForEvent('continue', {type:'continue', timeout:'5 minutes'});
+    return step.do('result', () => 42);
+  }
+}
+export default {
+  async fetch(request, env) {
+    const path = new URL(request.url).pathname;
+    if (path === '/kv' && request.method === 'PUT') await env.KV.put('value', await request.text());
+    if (path === '/queue' && request.method === 'POST') await env.JOBS.send({value:await request.text()});
+    return Response.json(await env.KV.get(path.slice(1) === 'kv' ? 'value' : path.slice(1)));
+  },
+  async scheduled(controller, env) { await env.KV.put('cron', controller.cron); },
+  async queue(batch, env) {
+    for (const message of batch.messages) { await env.KV.put('queue', batch.queue + ':' + message.body.value); message.ack(); }
+  }
+};`;

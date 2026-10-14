@@ -1,3 +1,5 @@
+import { cloudflareAppOperation } from "./cloudflare-app-operation-command.ts";
+import type { HostedExecution } from "./deployment-execution.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
 import { and, eq } from "drizzle-orm";
@@ -8,7 +10,7 @@ import { managedApp } from "./apps.ts";
 import type { Database } from "./database.ts";
 import { InvalidOperation } from "./errors.ts";
 import type { Principal } from "./identity.ts";
-import { artifacts, deployments, jobs } from "./schema.ts";
+import { artifacts, deployments, jobs, cloudflareOperations } from "./schema.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import { transact } from "./transactions.ts";
 
@@ -25,19 +27,26 @@ const present = (job: Pick<typeof jobs.$inferSelect, "id" | "state" | "result">)
   });
 };
 
-export const createMigrationService = (database: Database, storage: ArtifactStorage) => ({
-  create: (
+export const createMigrationService = (
+  database: Database,
+  storage: ArtifactStorage,
+  execution?: HostedExecution,
+) => ({
+  create: async (
     principal: Principal,
     appId: string,
     requestId: string,
     input: z.infer<typeof contract.migrationRequest>,
-  ) =>
-    transact(database, async (transaction) => {
+  ) => {
+    let accepted = false;
+
+    const prepared = await transact(database, async (transaction) => {
       const access = await managedApp(transaction, principal, appId);
 
       if (access.isErr()) return access;
       const app = access.value;
-      await requireAgentExecution(transaction, app.fleetId, "D1 migrations");
+
+      if (!execution) await requireAgentExecution(transaction, app.fleetId, "D1 migrations");
       // Parsing fixes object key order so equivalent requests produce the same artifact.
       const bytes = Buffer.from(JSON.stringify(contract.migrationRequest.parse(input)));
 
@@ -62,6 +71,40 @@ export const createMigrationService = (database: Database, storage: ArtifactStor
           );
 
         return Result.ok(present(existing));
+      }
+
+      if (execution) {
+        const [history] = await transaction
+          .select()
+          .from(cloudflareOperations)
+          .where(eq(cloudflareOperations.id, requestId));
+
+        if (history) {
+          const command = cloudflareAppOperation.safeParse(history.command);
+
+          if (
+            !command.success ||
+            command.data.appId !== appId ||
+            command.data.kind !== "migrations" ||
+            command.data.migration.sha256 !== reference.sha256
+          )
+            return Result.err(
+              new InvalidOperation({
+                code: "CONFLICT",
+                message: "This request ID already refers to another operation",
+              }),
+            );
+          accepted = true;
+
+          return Result.ok(
+            contract.migrationOperation.parse({
+              id: requestId,
+              state: "queued",
+              message: null,
+              entries: null,
+            }),
+          );
+        }
       }
 
       if (app.state === "deleting")
@@ -100,6 +143,16 @@ export const createMigrationService = (database: Database, storage: ArtifactStor
           }),
         );
 
+      if (execution)
+        return Result.ok(
+          contract.migrationOperation.parse({
+            id: requestId,
+            state: "queued",
+            message: null,
+            entries: null,
+          }),
+        );
+
       // As with app modules, finish immutable storage before committing the job reference.
       const stored = await storage.put(
         `apps/${appId}/migrations/${reference.sha256}`,
@@ -130,23 +183,32 @@ export const createMigrationService = (database: Database, storage: ArtifactStor
         );
 
       return Result.ok(present(created));
-    }),
+    });
+
+    if (prepared.isErr() || !execution) return prepared;
+
+    if (accepted) return execution.operations.readMigration(principal, appId, requestId);
+
+    return execution.operations.migrate(principal, appId, requestId, input);
+  },
   read: (principal: Principal, appId: string, jobId: string) =>
-    transact(database, async (transaction) => {
-      const access = await managedApp(transaction, principal, appId);
+    execution
+      ? execution.operations.readMigration(principal, appId, jobId)
+      : transact(database, async (transaction) => {
+          const access = await managedApp(transaction, principal, appId);
 
-      if (access.isErr()) return access;
+          if (access.isErr()) return access;
 
-      const [job] = await transaction
-        .select(operationColumns)
-        .from(jobs)
-        .where(and(eq(jobs.id, jobId), eq(jobs.appId, appId), eq(jobs.kind, "migrations")));
+          const [job] = await transaction
+            .select(operationColumns)
+            .from(jobs)
+            .where(and(eq(jobs.id, jobId), eq(jobs.appId, appId), eq(jobs.kind, "migrations")));
 
-      if (!job)
-        return Result.err(
-          new InvalidOperation({ code: "NOT_FOUND", message: "Migration operation not found" }),
-        );
+          if (!job)
+            return Result.err(
+              new InvalidOperation({ code: "NOT_FOUND", message: "Migration operation not found" }),
+            );
 
-      return Result.ok(present(job));
-    }),
+          return Result.ok(present(job));
+        }),
 });

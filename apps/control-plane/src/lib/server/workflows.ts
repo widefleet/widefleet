@@ -1,3 +1,6 @@
+import { isDeepStrictEqual } from "node:util";
+import { cloudflareAppOperation } from "./cloudflare-app-operation-command.ts";
+import type { HostedExecution } from "./deployment-execution.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
 import { and, eq } from "drizzle-orm";
@@ -7,7 +10,7 @@ import { managedApp } from "./apps.ts";
 import type { Database } from "./database.ts";
 import { InvalidOperation } from "./errors.ts";
 import type { Principal } from "./identity.ts";
-import { artifacts, deployments, jobs } from "./schema.ts";
+import { artifacts, deployments, jobs, cloudflareOperations } from "./schema.ts";
 import { transact } from "./transactions.ts";
 
 const present = (job: Pick<typeof jobs.$inferSelect, "id" | "state" | "result">) => {
@@ -21,7 +24,7 @@ const present = (job: Pick<typeof jobs.$inferSelect, "id" | "state" | "result">)
   });
 };
 
-export const createWorkflowService = (database: Database) => ({
+export const createWorkflowService = (database: Database, execution?: HostedExecution) => ({
   definitions: (principal: Principal, appId: string) =>
     transact(database, async (transaction) => {
       const access = await managedApp(transaction, principal, appId);
@@ -44,17 +47,21 @@ export const createWorkflowService = (database: Database) => ({
           : [],
       );
     }),
-  create: (
+  create: async (
     principal: Principal,
     appId: string,
     requestId: string,
     input: z.infer<typeof contract.workflowRequest>,
-  ) =>
-    transact(database, async (transaction) => {
+  ) => {
+    let accepted = false;
+
+    const prepared = await transact(database, async (transaction) => {
       const access = await managedApp(transaction, principal, appId);
 
       if (access.isErr()) return access;
-      await requireAgentExecution(transaction, access.value.fleetId, "App workflow operations");
+
+      if (!execution)
+        await requireAgentExecution(transaction, access.value.fleetId, "App workflow operations");
       const request = contract.workflowRequest.parse(input);
       const [existing] = await transaction.select().from(jobs).where(eq(jobs.id, requestId));
 
@@ -75,11 +82,55 @@ export const createWorkflowService = (database: Database) => ({
         return Result.ok(present(existing));
       }
 
+      if (execution) {
+        const [history] = await transaction
+          .select()
+          .from(cloudflareOperations)
+          .where(eq(cloudflareOperations.id, requestId));
+
+        if (history) {
+          const command = cloudflareAppOperation.safeParse(history.command);
+
+          if (
+            !command.success ||
+            command.data.appId !== appId ||
+            command.data.kind !== "workflows" ||
+            !isDeepStrictEqual(command.data.request, request)
+          )
+            return Result.err(
+              new InvalidOperation({
+                code: "CONFLICT",
+                message: "This request ID already refers to another operation",
+              }),
+            );
+          accepted = true;
+
+          return Result.ok(
+            contract.workflowOperation.parse({
+              id: requestId,
+              state: "queued",
+              message: null,
+              result: null,
+            }),
+          );
+        }
+      }
+
       if (access.value.state === "deleting" || !access.value.activeDeploymentId)
         return Result.err(
           new InvalidOperation({
             code: "CONFLICT",
             message: "The app must be published and not being deleted",
+          }),
+        );
+
+      if (execution)
+        return Result.ok(
+          contract.workflowOperation.parse({
+            id: requestId,
+            state: "queued",
+            message: null,
+            result: null,
           }),
         );
 
@@ -104,23 +155,32 @@ export const createWorkflowService = (database: Database) => ({
         );
 
       return Result.ok(present(created));
-    }),
+    });
+
+    if (prepared.isErr() || !execution) return prepared;
+
+    if (accepted) return execution.operations.readWorkflow(principal, appId, requestId);
+
+    return execution.operations.workflow(principal, appId, requestId, input);
+  },
   read: (principal: Principal, appId: string, jobId: string) =>
-    transact(database, async (transaction) => {
-      const access = await managedApp(transaction, principal, appId);
+    execution
+      ? execution.operations.readWorkflow(principal, appId, jobId)
+      : transact(database, async (transaction) => {
+          const access = await managedApp(transaction, principal, appId);
 
-      if (access.isErr()) return access;
+          if (access.isErr()) return access;
 
-      const [job] = await transaction
-        .select()
-        .from(jobs)
-        .where(and(eq(jobs.id, jobId), eq(jobs.appId, appId), eq(jobs.kind, "workflows")));
+          const [job] = await transaction
+            .select()
+            .from(jobs)
+            .where(and(eq(jobs.id, jobId), eq(jobs.appId, appId), eq(jobs.kind, "workflows")));
 
-      if (!job)
-        return Result.err(
-          new InvalidOperation({ code: "NOT_FOUND", message: "Workflow operation not found" }),
-        );
+          if (!job)
+            return Result.err(
+              new InvalidOperation({ code: "NOT_FOUND", message: "Workflow operation not found" }),
+            );
 
-      return Result.ok(present(job));
-    }),
+          return Result.ok(present(job));
+        }),
 });
