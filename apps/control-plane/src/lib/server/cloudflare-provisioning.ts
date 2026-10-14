@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type * as contract from "@platform/contracts";
 import { z } from "zod";
 
-const envelope = z.object({ success: z.boolean(), result: z.unknown() });
+const envelope = z.object({ success: z.boolean(), result: z.unknown().optional() });
 
 const database = z.object({ uuid: z.uuid(), name: z.string() });
 
@@ -76,6 +76,7 @@ export const createCloudflareProvisioner = (
       throw new CloudflareApiError(response.status);
     }
 
+    if (response.status === 204) return undefined;
     const body = envelope.parse(await response.json());
 
     if (!body.success) throw new CloudflareApiError(response.status);
@@ -194,6 +195,7 @@ export const createCloudflareProvisioner = (
 
   return {
     findDatabase,
+    findQueue,
     ensureDatabase,
     ensureBucket,
     ensureNamespace,

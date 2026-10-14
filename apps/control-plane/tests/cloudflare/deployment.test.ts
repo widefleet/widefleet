@@ -21,9 +21,11 @@ import {
   deploymentSource,
   seedDeployment,
 } from "../cloudflare-deployment.fixture.ts";
+import { hostedDeploymentId } from "../../src/lib/server/deployment-execution.ts";
 import { initializeCloudflareFleet } from "../../src/lib/server/fleets.ts";
 import {
   apps,
+  artifacts,
   connectors,
   cloudflareOperations,
   cloudflareRuntimeBindings,
@@ -55,6 +57,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
     const databases = new Map<string, string>();
     const createdDatabases = new Set<string>();
     const buckets = new Set<string>();
+    const bucketObjects = new Map<string, Set<string>>();
+    const deletedResources: string[] = [];
+    let failedObjectDelete = false;
+    let deniedBucket = "";
     const namespaces = new Map<string, string>();
 
     const queues = new Map<
@@ -125,6 +131,29 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
             createdDatabases.add(name);
             ok({ name, uuid: databases.get(name) ?? "" });
           }
+        } else if (url.pathname.includes("/d1/database/") && request.method === "DELETE") {
+          const id = url.pathname.split("/").at(-1);
+          const name = [...databases].find(([, value]) => value === id)?.[0];
+
+          if (name) {
+            createdDatabases.delete(name);
+            deletedResources.push(name);
+          }
+
+          ok(null);
+        } else if (
+          url.pathname.includes("/storage/kv/namespaces/") &&
+          request.method === "DELETE"
+        ) {
+          const id = url.pathname.split("/").at(-1);
+          const name = [...namespaces].find(([, value]) => value === id)?.[0];
+
+          if (name) {
+            namespaces.delete(name);
+            deletedResources.push(name);
+          }
+
+          ok(null);
         } else if (url.pathname.endsWith("/query")) {
           const id = url.pathname.split("/").at(-2) ?? "";
           let database = migrations.get(id);
@@ -208,7 +237,13 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
 
           if (request.method === "GET") ok(queue);
           else if (request.method === "DELETE") {
-            queue.consumers = [];
+            if (parts.includes("consumers")) queue.consumers = [];
+            else {
+              expect(queue.consumers).toHaveLength(0);
+              queues.delete(queue.queue_name);
+              deletedResources.push(queue.queue_name);
+            }
+
             ok(null);
           } else {
             const consumer = z.record(z.string(), z.json()).parse(JSON.parse(body));
@@ -225,13 +260,33 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           buckets.add(name);
           ok({ name });
         } else if (url.pathname.includes("/r2/buckets/")) {
-          const name = url.pathname.split("/").at(-1) ?? "";
+          const parts = url.pathname.split("/");
+          const name = parts[parts.indexOf("buckets") + 1] ?? "";
+          const objects = bucketObjects.get(name) ?? new Set<string>();
 
-          if (buckets.has(name)) ok({ name });
-          else {
+          if (name === deniedBucket) {
+            response.statusCode = 403;
+            response.end();
+          } else if (!buckets.has(name)) {
             response.statusCode = 404;
             response.end();
-          }
+          } else if (parts.includes("objects")) {
+            if (request.method === "GET") ok([...objects].slice(0, 100).map((key) => ({ key })));
+            else {
+              objects.delete(decodeURIComponent(parts.at(-1) ?? ""));
+
+              if (failedObjectDelete) {
+                failedObjectDelete = false;
+                response.statusCode = 503;
+                response.end();
+              } else ok(null);
+            }
+          } else if (request.method === "DELETE") {
+            expect(objects.size).toBe(0);
+            buckets.delete(name);
+            deletedResources.push(name);
+            ok(null);
+          } else ok({ name });
         } else if (url.pathname.endsWith("/settings")) {
           if (request.method === "PATCH") {
             const multipart = await new Response(body, {
@@ -259,9 +314,8 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
                 }),
               );
 
-              for (const name of settings.keys()) {
-                if (!retained.has(name)) throw new Error(`Existing binding removed: ${name}`);
-              }
+              for (const name of ["WIDEFLEET_PACKAGES", "WIDEFLEET_CONTROL_TOKEN"])
+                if (!retained.has(name)) throw new Error(`Shared binding removed: ${name}`);
 
               settings.clear();
 
@@ -453,6 +507,9 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       import {createConnectorService} from ${JSON.stringify(server + "connectors.ts")};
       import {prepareConnector} from ${JSON.stringify(server + "connector-changes.ts")};
       import {lockFleet} from ${JSON.stringify(server + "fleets.ts")};
+      import { createCloudflareDeployment } from ${JSON.stringify(server + "cloudflare-deployment.ts")};
+      import { createCloudflareEvents } from ${JSON.stringify(server + "cloudflare-events.ts")};
+      import { createCloudflareProvisioner } from ${JSON.stringify(server + "cloudflare-provisioning.ts")};
       import { createCloudflareExecution } from ${JSON.stringify(server + "cloudflare-execution.ts")};
       import { withCloudflareDatabase } from ${JSON.stringify(server + "cloudflare-database.ts")};
       import { createArtifactStorage } from ${JSON.stringify(server + "artifact-storage.ts")};
@@ -517,6 +574,40 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
               status: 'queued', finishedAt: null, message: null }, command.requestId, command.rollback);
           });
           return Response.json(result.isErr() ? { error: result.error.message } : result.value, { status: result.isErr() ? 400 : 200 });
+        }
+        if (url.hostname === 'fixture' && url.pathname === '/remove') {
+          const input = await request.json();
+          const modifier = await env.APP_OPERATIONS.unsafeGetInstanceModifier(input.id);
+          try { await modifier.disableRetryDelays(); } finally { modifier[Symbol.dispose]?.(); }
+          const operations = input.unavailable ? { create(){throw new Error('Unavailable');}, get(){throw new Error('Unavailable');} } : env.APP_OPERATIONS;
+          const result = await withCloudflareDatabase(env, async ({db}) => {
+            const execution = createCloudflareExecution({...env,APP_OPERATIONS:operations}, db, createArtifactStorage(createR2Storage(env.ARTIFACTS)));
+            return createAppService(db, readCloudflareConfiguration(env), execution).remove({id:input.actor ?? 'fixture-owner',admin:false}, input.appId);
+          });
+          return Response.json(result.isErr() ? {error:result.error.message} : result.value, {status:result.isErr()?400:200});
+        }
+        if (url.hostname === 'fixture' && url.pathname === '/storage') {
+          if (request.method === 'PUT') {
+            await env.ARTIFACTS.put(url.searchParams.get('key'), await request.text());
+            return new Response(null,{status:204});
+          }
+          return Response.json((await env.ARTIFACTS.list({prefix:url.searchParams.get('prefix') ?? ''})).objects.map(object=>object.key));
+        }
+        if (url.hostname === 'fixture' && url.pathname === '/stale-publication') {
+          const input = await request.json();
+          const written = await env.ARTIFACTS.put('hosts/'+input.hostname+'.json',JSON.stringify(input.app),{onlyIf:{etagDoesNotMatch:'*'}});
+          return Response.json({written:written!==null});
+        }
+        if (url.hostname === 'fixture' && url.pathname === '/stale-stage') {
+          const input = await request.json();
+          try {
+            await withCloudflareDatabase(env,({db})=>createCloudflareEvents(env.ARTIFACTS,db,createCloudflareProvisioner({accountId:env.CLOUDFLARE_ACCOUNT_ID,token:env.CLOUDFLARE_API_TOKEN,runtimeName:env.APP_RUNTIME_NAME}),env.APP_RUNTIME_NAME).stage(input.id,input.app,input.sequence));
+            return new Response(null,{status:204});
+          } catch {return new Response(null,{status:409});}
+        }
+        if (url.hostname === 'fixture' && url.pathname === '/stale-provision') {
+          try {await createCloudflareDeployment(env).provision(await request.json());return new Response(null,{status:204});}
+          catch {return new Response(null,{status:409});}
         }
         if (url.hostname === 'fixture' && url.pathname === '/raw-operation') {
           const command = await request.json();
@@ -1788,5 +1879,249 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       },
       60_000,
     );
+
+    const remove = (appId: string, options: { actor?: string; unavailable?: boolean } = {}) =>
+      worker.fetch("http://fixture/remove", {
+        method: "POST",
+        body: JSON.stringify({ appId, id: hostedDeploymentId(appId, "remove-app"), ...options }),
+      });
+
+    const removed = async (appId: string) => {
+      const id = hostedDeploymentId(appId, "remove-app");
+      await expect
+        .poll(
+          async () => {
+            const response = await worker.fetch(`http://fixture/workflow?app-operation&id=${id}`);
+
+            return z.object({ status: z.string() }).parse(await response.json()).status;
+          },
+          { timeout: 60000, interval: 100 },
+        )
+        .toBe("complete");
+      expect(
+        await environment.database.db.select().from(apps).where(eq(apps.id, appId)),
+      ).toHaveLength(0);
+    };
+
+    it("authorizes removal before admission and leaves an app active when native admission fails", async () => {
+      const entry = await seedDeployment(environment.database.db, { bindings: [] });
+      expect((await remove(entry.appId, { actor: "stranger" })).status).toBe(400);
+      expect((await remove(entry.appId, { unavailable: true })).status).toBe(400);
+
+      const [record] = await environment.database.db
+        .select()
+        .from(apps)
+        .where(eq(apps.id, entry.appId));
+
+      expect(record?.state).toBe("created");
+      expect(await operation(hostedDeploymentId(entry.appId, "remove-app"))).toBeUndefined();
+      expect(await environment.database.db.select().from(jobs)).toHaveLength(0);
+    });
+
+    it("removes an undeployed app and its nested previews, including stored uploads", async () => {
+      const root = await seedDeployment(environment.database.db, { bindings: [] });
+      const child = await seedDeployment(environment.database.db, { bindings: [] });
+      const grandchild = await seedDeployment(environment.database.db, { bindings: [] });
+      await environment.database.db
+        .update(apps)
+        .set({ parentId: root.appId })
+        .where(eq(apps.id, child.appId));
+      await environment.database.db
+        .update(apps)
+        .set({ parentId: child.appId })
+        .where(eq(apps.id, grandchild.appId));
+
+      for (const entry of [root, child, grandchild]) await seed(entry);
+      expect((await remove(root.appId)).status).toBe(200);
+      await removed(root.appId);
+
+      for (const entry of [root, child, grandchild]) {
+        expect(
+          await environment.database.db.select().from(apps).where(eq(apps.id, entry.appId)),
+        ).toHaveLength(0);
+        expect((await host(entry.hostname))?.body).toEqual({ deleted: true, appId: entry.appId });
+        const stored = await worker.fetch(`http://fixture/storage?prefix=apps/${entry.appId}/`);
+        expect(await stored.json()).toEqual([]);
+        expect((await worker.fetch(`https://${entry.hostname}/`)).status).toBe(404);
+      }
+    }, 60000);
+
+    it("deletes a deployed preview and its workflow, history and resources while preserving its parent", async () => {
+      const published = contract.publishedApp.parse((await host(preview.hostname))?.body);
+      await manage(preview, "workflows", {
+        action: "create",
+        workflow: "example",
+        id: "remove-running",
+        params: { wait: true },
+      });
+
+      const oldResources = [
+        ["d1", "data"],
+        ["r2", "files"],
+        ["kv", "cache"],
+        ["queue", "jobs"],
+        ["queue", "failed"],
+      ] as const;
+
+      const bucket = resourceName(preview.appId, "r2", "files");
+      bucketObjects.set(bucket, new Set(Array.from({ length: 105 }, (_, i) => `folder/${i}?file`)));
+      failedObjectDelete = true;
+
+      const parentVersion = await seedDeployment(environment.database.db, {
+        appId: first.appId,
+        bindings: [],
+      });
+
+      await seed(parentVersion);
+      await dispatch(parentVersion);
+      await completed(parentVersion.command.id);
+      const parentHost = await host(first.hostname);
+
+      const sharedBindings = [...settings.keys()].filter(
+        (name) =>
+          !oldResources.some(
+            ([kind, key]) => name === `B_${resourceName(preview.appId, kind, key)}`,
+          ),
+      );
+
+      const response = await remove(preview.appId);
+      expect(response.status, await response.text()).toBe(200);
+      await removed(preview.appId);
+      expect((await host(preview.hostname))?.body).toEqual({ deleted: true, appId: preview.appId });
+      expect(await host(first.hostname)).toEqual(parentHost);
+      expect((await worker.fetch(`https://${preview.hostname}/`)).status).toBe(404);
+      expect((await worker.fetch(`https://${first.hostname}/`)).status).toBe(200);
+
+      for (const [kind, key] of oldResources) {
+        const name = resourceName(preview.appId, kind, key);
+        expect(settings.has(`B_${name}`)).toBe(false);
+        expect(
+          createdDatabases.has(name) ||
+            buckets.has(name) ||
+            namespaces.has(name) ||
+            queues.has(name),
+        ).toBe(false);
+      }
+
+      for (const name of sharedBindings) expect(settings.has(name)).toBe(true);
+      expect(deletedResources).toContain(bucket);
+      expect(bucketObjects.get(bucket)?.size).toBe(0);
+      expect(
+        await environment.database.db
+          .select()
+          .from(artifacts)
+          .where(eq(artifacts.appId, preview.appId)),
+      ).toHaveLength(0);
+
+      for (const prefix of ["apps", "versions", "access", "workflow-versions"]) {
+        const response = await worker.fetch(
+          `http://fixture/storage?prefix=${prefix}/${preview.appId}/`,
+        );
+
+        expect(await response.json()).toEqual([]);
+      }
+
+      const catalog = await worker.fetch(
+        `https://${preview.hostname}/.well-known/widefleet/workflows`,
+        {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            appId: preview.appId,
+            hostname: preview.hostname,
+            requestId: crypto.randomUUID(),
+            request: { action: "list", workflow: "example" },
+          }),
+        },
+      );
+
+      expect(catalog.status).toBe(400);
+
+      const stale = await worker.fetch("http://fixture/stale-stage", {
+        method: "POST",
+        body: JSON.stringify({ app: published, id: crypto.randomUUID(), sequence: 99999 }),
+      });
+
+      expect(stale.status).toBe(409);
+
+      const provision = await worker.fetch("http://fixture/stale-provision", {
+        method: "POST",
+        body: JSON.stringify(preview.command),
+      });
+
+      expect(provision.status).toBe(409);
+
+      const publication = await worker.fetch("http://fixture/stale-publication", {
+        method: "POST",
+        body: JSON.stringify({ hostname: preview.hostname, app: published }),
+      });
+
+      expect(await publication.json()).toEqual({ written: false });
+    }, 60000);
+
+    it("resumes a failed removal only after an explicit native restart without recreating resources", async () => {
+      deniedBucket = resourceName(delayed.appId, "r2", "files");
+      expect((await remove(delayed.appId)).status).toBe(200);
+      const id = hostedDeploymentId(delayed.appId, "remove-app");
+      await expect
+        .poll(
+          async () => {
+            const response = await worker.fetch(`http://fixture/workflow?app-operation&id=${id}`);
+
+            return z.object({ status: z.string() }).parse(await response.json()).status;
+          },
+          { timeout: 30000 },
+        )
+        .toBe("errored");
+
+      const [record] = await environment.database.db
+        .select()
+        .from(apps)
+        .where(eq(apps.id, delayed.appId));
+
+      expect(record?.state).toBe("deleting");
+      expect((await operation(id))?.error).toBe("Cloudflare could not complete app removal");
+      expect((await worker.fetch(`https://${delayed.hostname}/`)).status).toBe(404);
+      deniedBucket = "";
+      expect((await remove(delayed.appId)).status).toBe(200);
+      const stopped = await worker.fetch(`http://fixture/workflow?app-operation&id=${id}`);
+      expect(z.object({ status: z.string() }).parse(await stopped.json()).status).toBe("errored");
+      await worker.fetch(`http://fixture/workflow?app-operation&id=${id}&action=restart`, {
+        method: "POST",
+      });
+      await removed(delayed.appId);
+      expect(buckets.has(resourceName(delayed.appId, "r2", "files"))).toBe(false);
+    }, 60000);
+
+    it("removes an undeployed replacement whose hostname still contains the previous app's deletion fence", async () => {
+      const replacement = await seedDeployment(environment.database.db, { bindings: [] });
+      await environment.database.db
+        .update(apps)
+        .set({ hostname: preview.hostname })
+        .where(eq(apps.id, replacement.appId));
+      expect((await remove(replacement.appId)).status).toBe(200);
+      await removed(replacement.appId);
+      expect((await host(preview.hostname))?.body).toEqual({
+        deleted: true,
+        appId: replacement.appId,
+      });
+    }, 60000);
+
+    it("allows a new app to claim a deleted hostname without reviving the old identity", async () => {
+      const replacement = await seedDeployment(environment.database.db, {
+        bindings: [],
+        source: "export default {fetch(){return new Response('replacement')}}",
+      });
+
+      await environment.database.db
+        .update(apps)
+        .set({ hostname: preview.hostname })
+        .where(eq(apps.id, replacement.appId));
+      await seed(replacement);
+      await dispatch(replacement);
+      await completed(replacement.command.id);
+      expect((await host(preview.hostname))?.body).toMatchObject({ appId: replacement.appId });
+      expect(await (await worker.fetch(`https://${preview.hostname}/`)).text()).toBe("replacement");
+    }, 60000);
   },
 );

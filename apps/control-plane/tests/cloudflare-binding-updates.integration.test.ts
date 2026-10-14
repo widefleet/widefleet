@@ -299,4 +299,38 @@ describe("Durable Cloudflare binding updates", () => {
     ).rejects.toMatchObject({ code: "CONFLICT" });
     expect(cloud.sent).toHaveLength(0);
   });
+  it("detaches only the selected resources and confirms a lost removal response before another mutation", async () => {
+    const api = fixture();
+    const provisioner = api.create();
+    await updateCloudflareBindings(environment.database.db, provisioner, [
+      resource("OWN"),
+      resource("OTHER"),
+    ]);
+    api.next("lost-response");
+    await expect(
+      updateCloudflareBindings(environment.database.db, provisioner, [], ["OWN"]),
+    ).rejects.toBeInstanceOf(CloudflareBindingUpdatePending);
+    expect(api.settings.has("OWN")).toBe(false);
+    await updateCloudflareBindings(environment.database.db, provisioner, [], ["OWN"]);
+    expect([...api.settings.keys()]).toEqual(["SECRET", "EXISTING", "OTHER"]);
+    expect(api.sent).toHaveLength(2);
+    expect(await state(provisioner.scope)).toBeNull();
+  });
+
+  it("does not treat an absent binding as removed while an older write can still add it", async () => {
+    const api = fixture();
+    const provisioner = api.create();
+    api.next("delayed");
+    await expect(
+      updateCloudflareBindings(environment.database.db, provisioner, [resource("OWN")]),
+    ).rejects.toBeInstanceOf(CloudflareBindingUpdatePending);
+    await expect(
+      updateCloudflareBindings(environment.database.db, provisioner, [], ["OWN"]),
+    ).rejects.toBeInstanceOf(CloudflareBindingUpdatePending);
+    expect(api.sent).toHaveLength(1);
+    api.release();
+    await updateCloudflareBindings(environment.database.db, provisioner, [], ["OWN"]);
+    expect([...api.settings.keys()]).toEqual(["SECRET", "EXISTING"]);
+    expect(api.sent).toHaveLength(2);
+  });
 });

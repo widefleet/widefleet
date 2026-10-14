@@ -42,8 +42,9 @@ export const updateCloudflareBindings = async (
   database: Database,
   provisioner: ReturnType<typeof createCloudflareProvisioner>,
   resources: z.infer<typeof cloudflareResource>[],
+  remove: string[] = [],
 ) => {
-  if (!resources.length) return;
+  if (!resources.length && !remove.length) return;
 
   const reservation = await database.transaction(async (transaction) => {
     await transaction
@@ -62,6 +63,8 @@ export const updateCloudflareBindings = async (
     const current = await provisioner.readBindings();
     const pending = state.pending === null ? null : pendingUpdate.parse(state.pending);
     const confirmed = pending !== null && current.annotations?.["workers/tag"] === pending.id;
+
+    const removed = current.bindings.filter((binding) => remove.includes(binding.name));
 
     const missing = resources.filter((resource) => {
       const existing = current.bindings.find((binding) => binding.name === resource.name);
@@ -93,6 +96,7 @@ export const updateCloudflareBindings = async (
     if (pending && !confirmed) {
       // Existing apps can still deploy when every binding survives the outstanding write.
       if (
+        !remove.length &&
         !missing.length &&
         resources.every((resource) => pending.bindings.includes(resource.name))
       )
@@ -101,7 +105,7 @@ export const updateCloudflareBindings = async (
       throw new CloudflareBindingUpdatePending(provisioner.scope, pending.id);
     }
 
-    if (!missing.length) {
+    if (!missing.length && !removed.length) {
       if (confirmed)
         await transaction
           .update(cloudflareRuntimeBindings)
@@ -112,7 +116,10 @@ export const updateCloudflareBindings = async (
     }
 
     const id = crypto.randomUUID();
-    const retained = current.bindings.map((binding) => binding.name);
+
+    const retained = current.bindings.flatMap((binding) =>
+      remove.includes(binding.name) ? [] : [binding.name],
+    );
 
     // Commit before sending exactly one PATCH. Native retries only read its marker.
     // Never expire this record: a timed-out caller does not cancel the remote write.

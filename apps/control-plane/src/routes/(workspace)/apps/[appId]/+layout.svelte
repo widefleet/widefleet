@@ -153,8 +153,7 @@
     >
   </div>{/if}
 {#if data.app.state === "deleting"}<Feedback
-    >This app and its published versions are being deleted. The deployment agent processes this
-    request.</Feedback
+    >This app and its previews are being deleted. Cleanup continues in the background.</Feedback
   >{/if}
 
 <!-- Children read the context, so wait for the current app's details during SSR too. -->
