@@ -27,20 +27,6 @@ export const operationTarget = z.object({
   networkRevision: z.number().int().nonnegative(),
 });
 
-export const validateCloudflareArtifact = (artifact: z.infer<typeof contract.artifact>) => {
-  if (
-    artifact.metadata.crons.length ||
-    artifact.metadata.queue_consumers.length ||
-    artifact.metadata.bindings.some(
-      (binding) => !["plain_text", "d1", "r2_bucket"].includes(binding.type),
-    )
-  )
-    throw new InvalidOperation({
-      code: "BAD_REQUEST",
-      message: "Cloudflare deployment currently supports plain-text, D1 and R2 bindings only",
-    });
-};
-
 // Called only after Workflows has durably accepted the command. The request can materialize
 // this history immediately; the Workflow repeats it safely if the request disconnects.
 export const registerCloudflareOperation = (
@@ -96,15 +82,13 @@ export const registerCloudflareOperation = (
             message: "Deployment artifact not found",
           });
 
-        validateCloudflareArtifact(
-          contract.artifact.parse({
-            id: artifact.id,
-            appId: artifact.appId,
-            metadata: artifact.metadata,
-            manifest: artifact.manifest,
-            modules: artifact.modules,
-          }),
-        );
+        contract.artifact.parse({
+          id: artifact.id,
+          appId: artifact.appId,
+          metadata: artifact.metadata,
+          manifest: artifact.manifest,
+          modules: artifact.modules,
+        });
         await transaction
           .insert(deployments)
           .values({

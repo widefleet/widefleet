@@ -1,3 +1,4 @@
+import { appEventConfiguration } from "@platform/contracts";
 import { publishedApp } from "@platform/contracts";
 import { z } from "zod";
 import { workflowJson } from "./workflow-json.ts";
@@ -30,10 +31,18 @@ export {
 
 export { Telemetry } from "./telemetry.ts";
 
-const configuration = z.object({
-  crons: z.record(z.string(), z.array(z.string())),
-  queues: z.record(z.string(), z.object({ hostname: z.string(), queue: z.string() })),
-});
+const eventConfiguration = async (environment: ParentEnvironment) => {
+  const configuration = z
+    .union([appEventConfiguration, z.object({ source: z.literal("r2") })])
+    .parse(JSON.parse(environment.WIDEFLEET_CONFIGURATION));
+
+  if (!("source" in configuration)) return configuration;
+  const object = await environment.WIDEFLEET_PACKAGES.get("events/configuration.json");
+
+  return object
+    ? z.object({ configuration: appEventConfiguration }).parse(await object.json()).configuration
+    : { crons: {}, queues: {} };
+};
 
 const load = (app: PublishedApp, environment: ParentEnvironment, context: ExecutionContext) =>
   environment.WIDEFLEET_LOADER.get(appKey(app), () => workerCode(app, environment, context));
@@ -171,37 +180,40 @@ export default {
     environment: ParentEnvironment,
     context: ExecutionContext,
   ) {
-    const hosts =
-      configuration.parse(JSON.parse(environment.WIDEFLEET_CONFIGURATION)).crons[controller.cron] ??
-      [];
+    const hosts = (await eventConfiguration(environment)).crons[controller.cron] ?? [];
 
-    const results = await Promise.allSettled(
-      hosts.map(async (host) => {
-        const app = await readApp(environment, `hosts/${host}.json`);
+    let failed = false;
 
-        if (!app || !app.metadata.crons.includes(controller.cron)) return;
+    // Workers allow four distinct in-flight Dynamic Workers per request.
+    for (let offset = 0; offset < hosts.length; offset += 4) {
+      const results = await Promise.allSettled(
+        hosts.slice(offset, offset + 4).map(async (host) => {
+          const app = await readApp(environment, `hosts/${host}.json`);
 
-        const result = await run(app, environment, context, (worker) =>
-          worker
-            .getEntrypoint<Events>("Events")
-            .runScheduled({ cron: controller.cron, scheduledTime: controller.scheduledTime }),
-        );
+          if (!app || !app.metadata.crons.includes(controller.cron)) return;
 
-        if (result.error && !result.noRetry) throw new Error(result.error);
-      }),
-    );
+          const result = await run(app, environment, context, (worker) =>
+            worker
+              .getEntrypoint<Events>("Events")
+              .runScheduled({ cron: controller.cron, scheduledTime: controller.scheduledTime }),
+          );
 
-    if (results.some((result) => result.status === "rejected"))
-      throw new Error("App cron delivery failed");
+          if (result.error && !result.noRetry) throw new Error(result.error);
+        }),
+      );
+
+      failed ||= results.some((result) => result.status === "rejected");
+    }
+
+    if (failed) throw new Error("App cron delivery failed");
   },
+
   async queue(
     batch: MessageBatch<Json | ArrayBuffer>,
     environment: ParentEnvironment,
     context: ExecutionContext,
   ) {
-    const target = configuration.parse(JSON.parse(environment.WIDEFLEET_CONFIGURATION)).queues[
-      batch.queue
-    ];
+    const target = (await eventConfiguration(environment)).queues[batch.queue];
 
     if (!target) throw new Error("Queue has no application consumer");
     const app = await readApp(environment, `hosts/${target.hostname}.json`);

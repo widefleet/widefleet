@@ -8,6 +8,7 @@ await writeFile(
   `
 import application from "./application.js";
 export { DeploymentWorkflow } from "../../src/deployment-workflow.ts";
+export { AppOperationWorkflow } from "../../src/app-operation-workflow.ts";
 export default application;
 `,
 );

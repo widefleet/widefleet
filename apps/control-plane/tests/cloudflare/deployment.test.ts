@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { DatabaseSync } from "node:sqlite";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { once } from "node:events";
@@ -9,10 +10,14 @@ import { fileURLToPath } from "node:url";
 import type { Unstable_DevWorker } from "wrangler";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
-import type * as contract from "@platform/contracts";
+import * as contract from "@platform/contracts";
 import release from "@platform/app-runtime/release" with { type: "json" };
 import { createTestEnvironment } from "../environment.ts";
-import { deploymentSource, seedDeployment } from "../cloudflare-deployment.fixture.ts";
+import {
+  capabilitiesSource,
+  deploymentSource,
+  seedDeployment,
+} from "../cloudflare-deployment.fixture.ts";
 import { initializeCloudflareFleet } from "../../src/lib/server/fleets.ts";
 import {
   apps,
@@ -41,12 +46,26 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
     const databases = new Map<string, string>();
     const createdDatabases = new Set<string>();
     const buckets = new Set<string>();
+    const namespaces = new Map<string, string>();
+
+    const queues = new Map<
+      string,
+      { queue_id: string; queue_name: string; consumers: z.infer<ReturnType<typeof z.json>>[] }
+    >();
+
+    const migrations = new Map<string, DatabaseSync>();
+    let schedules: { cron: string }[] = [];
+    let scheduleMode = "normal";
+    let scheduleWrites = 0;
+    let delayedSchedule: (() => void) | undefined;
 
     const nativeBinding = z.object({
       name: z.string(),
       type: z.string(),
       id: z.string().optional(),
       bucket_name: z.string().optional(),
+      namespace_id: z.string().optional(),
+      queue_name: z.string().optional(),
     });
 
     const settings = new Map<string, z.infer<typeof nativeBinding>>([
@@ -94,6 +113,91 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
               throw new Error("Unexpected D1 creation");
             createdDatabases.add(name);
             ok({ name, uuid: databases.get(name) ?? "" });
+          }
+        } else if (url.pathname.endsWith("/query")) {
+          const id = url.pathname.split("/").at(-2) ?? "";
+          let database = migrations.get(id);
+
+          if (!database) {
+            database = new DatabaseSync(":memory:");
+            migrations.set(id, database);
+          }
+
+          const { sql: query } = z.object({ sql: z.string() }).parse(JSON.parse(body));
+
+          if (query.startsWith("SELECT"))
+            ok([{ success: true, results: z.json().parse(database.prepare(query).all()) }]);
+          else {
+            database.exec("BEGIN");
+
+            try {
+              database.exec(query);
+              database.exec("COMMIT");
+            } catch (error) {
+              database.exec("ROLLBACK");
+              throw error;
+            }
+
+            ok([{ success: true, results: [] }]);
+          }
+        } else if (url.pathname.endsWith("/storage/kv/namespaces")) {
+          if (request.method === "GET") ok([...namespaces].map(([title, id]) => ({ title, id })));
+          else {
+            const { title } = z.object({ title: z.string() }).parse(JSON.parse(body));
+            const id = createHash("sha256").update(title).digest("hex").slice(0, 32);
+            expect(namespaces.has(title)).toBe(false);
+            namespaces.set(title, id);
+            ok({ title, id });
+          }
+        } else if (url.pathname.endsWith("/schedules")) {
+          if (request.method === "PUT") {
+            const target = z.array(z.object({ cron: z.string() })).parse(JSON.parse(body));
+            scheduleWrites++;
+            const mode = scheduleMode;
+            scheduleMode = "normal";
+
+            if (mode === "delayed")
+              delayedSchedule = () => {
+                schedules = target;
+              };
+            else schedules = target;
+
+            if (mode !== "normal") {
+              response.statusCode = 503;
+              response.end();
+
+              return;
+            }
+          }
+
+          ok({ schedules });
+        } else if (url.pathname.endsWith("/queues")) {
+          if (request.method === "GET") ok([...queues.values()]);
+          else {
+            const { queue_name } = z.object({ queue_name: z.string() }).parse(JSON.parse(body));
+            expect(queues.has(queue_name)).toBe(false);
+            const queue = { queue_name, queue_id: crypto.randomUUID(), consumers: [] };
+            queues.set(queue_name, queue);
+            ok(queue);
+          }
+        } else if (url.pathname.includes("/queues/")) {
+          const parts = url.pathname.split("/");
+          const id = parts[parts.indexOf("queues") + 1];
+          const queue = [...queues.values()].find((entry) => entry.queue_id === id);
+
+          if (!queue) throw new Error("Unknown queue");
+
+          if (request.method === "GET") ok(queue);
+          else if (request.method === "DELETE") {
+            queue.consumers = [];
+            ok(null);
+          } else {
+            const consumer = z.record(z.string(), z.json()).parse(JSON.parse(body));
+            const { script_name: script, ...options } = consumer;
+            queue.consumers = [
+              { ...options, script: z.string().parse(script), consumer_id: "fixture-consumer" },
+            ];
+            ok(queue.consumers[0] ?? null);
           }
         } else if (url.pathname.endsWith("/r2/buckets")) {
           const { name } = z.object({ name: z.string() }).parse(JSON.parse(body));
@@ -285,6 +389,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       await writeFile(join(directory, "runtime.js"), release.modules[0]?.source ?? "");
       const workflow = fileURLToPath(new URL("../../src/deployment-workflow.ts", import.meta.url));
 
+      const appOperation = fileURLToPath(
+        new URL("../../src/app-operation-workflow.ts", import.meta.url),
+      );
+
       const server = fileURLToPath(new URL("../../src/lib/server/", import.meta.url));
 
       await writeFile(
@@ -299,13 +407,16 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       import { readCloudflareConfiguration } from ${JSON.stringify(server + "cloudflare-config.ts")};
       export * from './runtime.js';
       export { DeploymentWorkflow } from ${JSON.stringify(workflow)};
+      export { AppOperationWorkflow } from ${JSON.stringify(appOperation)};
+      import { createMigrationService } from ${JSON.stringify(server + "migrations.ts")};
+      import { createWorkflowService } from ${JSON.stringify(server + "workflows.ts")};
       const nativeFetch = globalThis.fetch;
       globalThis.fetch = (input, init) => {
         const request = new Request(input, init);
         const url = new URL(request.url);
         return nativeFetch(url.origin === 'https://api.cloudflare.com' ? new Request(${JSON.stringify(apiOrigin)} + url.pathname + url.search, request) : request);
       };
-      export default { async fetch(request, env, ctx) {
+      export default { ...runtime, async fetch(request, env, ctx) {
         const url = new URL(request.url);
         if (url.hostname === 'fixture' && url.pathname === '/seed') {
           const { artifact, source } = await request.json();
@@ -342,6 +453,23 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           });
           return Response.json(result.isErr() ? { error: result.error.message } : result.value, { status: result.isErr() ? 400 : 200 });
         }
+        if (url.hostname === 'fixture' && url.pathname === '/operation') {
+          const input = await request.json();
+          const result = await withCloudflareDatabase(env, async ({db}) => {
+            const storage = createArtifactStorage(createR2Storage(env.ARTIFACTS));
+            const operations = input.expired ? { create(){throw new Error('Expired native operation must not be recreated');}, get(){throw new Error('Expired native operation must not be read');} } : env.APP_OPERATIONS;
+            const execution = createCloudflareExecution({...env,APP_OPERATIONS:operations}, db, storage);
+            const service = input.kind === 'migrations' ? createMigrationService(db, storage, execution) : createWorkflowService(db, execution);
+            const principal = { id: input.actor ?? 'fixture-owner', admin: false, creator: true, name: 'Fixture', email: 'fixture@example.test', role: 'creator' };
+            if (input.read) return service.read(principal, input.appId, input.id);
+            return service.create(principal, input.appId, input.id, input.request);
+          });
+          return Response.json(result.isErr() ? {error: result.error.message} : result.value, {status:result.isErr()?400:200});
+        }
+        if (url.hostname === 'fixture' && url.pathname === '/cron') {
+          await runtime.scheduled({cron:url.searchParams.get('cron'),scheduledTime:Date.now(), noRetry(){}}, env, ctx);
+          return new Response(null, {status:204});
+        }
         if (url.hostname === 'fixture' && url.pathname === '/history') {
           const result = await withCloudflareDatabase(env, async ({ db }) => {
             const executor = createCloudflareExecution(env, db, createArtifactStorage(createR2Storage(env.ARTIFACTS)));
@@ -356,7 +484,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           return Response.json(obj ? { body: await obj.json(), access: access ? await access.text() : null } : null);
         }
         if (url.hostname === 'fixture' && url.pathname === '/workflow') {
-          const instance = await env.DEPLOYMENTS.get(url.searchParams.get('id'));
+          const instance = await (url.searchParams.has('app-operation') ? env.APP_OPERATIONS : env.DEPLOYMENTS).get(url.searchParams.get('id'));
           if (request.method === 'POST') {
             if (url.searchParams.get('action') === 'pause') await instance.pause();
             else if (url.searchParams.get('action') === 'restart') await instance.restart();
@@ -382,7 +510,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
             APP_RUNTIME_NAME: "fixture-runtime",
             APP_RUNTIME_TOKEN: token,
             WIDEFLEET_CONTROL_TOKEN: token,
-            WIDEFLEET_CONFIGURATION: JSON.stringify({ crons: {}, queues: {} }),
+            WIDEFLEET_CONFIGURATION: JSON.stringify({ source: "r2" }),
           },
           hyperdrive: [
             {
@@ -397,7 +525,41 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
               name: "fixture-deployments",
               class_name: "DeploymentWorkflow",
             },
+            {
+              binding: "APP_OPERATIONS",
+              name: "fixture-app-operations",
+              class_name: "AppOperationWorkflow",
+            },
+            {
+              binding: "WIDEFLEET_WORKFLOWS",
+              name: "fixture-app-workflows",
+              class_name: "CloudflareAppWorkflow",
+            },
           ],
+          durable_objects: {
+            bindings: [
+              { name: "WIDEFLEET_WORKFLOW_CATALOG", class_name: "CloudflareWorkflowCatalog" },
+            ],
+          },
+          migrations: [{ tag: "v1", new_sqlite_classes: ["CloudflareWorkflowCatalog"] }],
+          kv_namespaces: [first, preview].map((entry) => ({
+            binding: `B_${resourceName(entry.appId, "kv", "cache")}`,
+            id: createHash("sha256")
+              .update(resourceName(entry.appId, "kv", "cache"))
+              .digest("hex")
+              .slice(0, 32),
+          })),
+          queues: {
+            producers: [first, preview].map((entry) => ({
+              binding: `B_${resourceName(entry.appId, "queue", "jobs")}`,
+              queue: resourceName(entry.appId, "queue", "jobs"),
+            })),
+            consumers: [first, preview].map((entry) => ({
+              queue: resourceName(entry.appId, "queue", "jobs"),
+              max_batch_size: 1,
+              max_batch_timeout: 0,
+            })),
+          },
           services: [{ binding: "APP_RUNTIME", service: "widefleet-deployment-test" }],
           worker_loaders: [{ binding: "WIDEFLEET_LOADER" }],
           r2_buckets: [
@@ -424,6 +586,8 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
     afterAll(async () => {
       await worker?.stop();
       api.close();
+
+      for (const database of migrations.values()) database.close();
       await environment?.close();
 
       if (directory) await rm(directory, { recursive: true, force: true });
@@ -583,18 +747,25 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       expect(await host(hostname)).toBeNull();
     });
 
-    it("rejects unsupported capabilities without publishing or provisioning them", async () => {
+    it("rejects connector grants without publishing or provisioning them", async () => {
       const before = await host(first.hostname);
+      const entry = await seedDeployment(environment.database.db, { appId: first.appId });
+      await environment.database.db
+        .update(apps)
+        .set({ capabilities: { CONNECTOR: { connector: "fixture", entrypoint: "default" } } })
+        .where(eq(apps.id, first.appId));
 
-      const entry = await seedDeployment(environment.database.db, {
-        appId: first.appId,
-        bindings: [{ type: "kv_namespace", name: "KV", id: "fixture" }],
-      });
-
-      await seed(entry);
-      expect((await submit(entry)).status).toBe(400);
-      expect(await host(first.hostname)).toEqual(before);
-    }, 100_000);
+      try {
+        await seed(entry);
+        expect((await submit(entry)).status).toBe(400);
+        expect(await host(first.hostname)).toEqual(before);
+      } finally {
+        await environment.database.db
+          .update(apps)
+          .set({ capabilities: {} })
+          .where(eq(apps.id, first.appId));
+      }
+    });
 
     it("keeps the active version when the candidate cannot start", async () => {
       const before = await host(first.hostname);
@@ -854,5 +1025,363 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       const [record] = await environment.database.db.select().from(cloudflareRuntimeBindings);
       expect(record?.pending).toBeNull();
     }, 60_000);
+
+    const manage = async (
+      entry: typeof first,
+      kind: "migrations" | "workflows",
+      request: z.infer<typeof contract.migrationRequest> | z.infer<typeof contract.workflowRequest>,
+      id = crypto.randomUUID(),
+    ) => {
+      const input = { appId: entry.appId, kind, request, id };
+
+      const submit = await worker.fetch("http://fixture/operation", {
+        method: "POST",
+        body: JSON.stringify(input),
+      });
+
+      expect(submit.status, await submit.clone().text()).toBe(200);
+
+      let result:
+        | z.infer<typeof contract.workflowOperation>
+        | z.infer<typeof contract.migrationOperation>
+        | undefined;
+
+      await expect
+        .poll(
+          async () => {
+            const response = await worker.fetch("http://fixture/operation", {
+              method: "POST",
+              body: JSON.stringify({ ...input, read: true }),
+            });
+
+            const body = await response.json();
+            result =
+              kind === "migrations"
+                ? contract.migrationOperation.parse(body)
+                : contract.workflowOperation.parse(body);
+
+            return result.state;
+          },
+          { timeout: 30_000, interval: 100 },
+        )
+        .toBe("succeeded");
+
+      if (!result) throw new Error("Missing operation result");
+
+      return result;
+    };
+
+    it("applies and lists D1 migrations through the existing management service with isolated preview history", async () => {
+      const input = contract.migrationRequest.parse({
+        action: "apply",
+        database: "DB",
+        databaseId: "data",
+        table: "d1_migrations",
+        files: [
+          {
+            name: "1_create.sql",
+            sql: "CREATE TABLE migrated(value TEXT); INSERT INTO migrated VALUES ('once');",
+          },
+        ],
+      });
+
+      const id = crypto.randomUUID();
+      expect(await manage(first, "migrations", input, id)).toMatchObject({
+        entries: [{ name: "1_create.sql", applied: true }],
+      });
+      expect(await manage(first, "migrations", input, id)).toMatchObject({
+        entries: [{ name: "1_create.sql", applied: true }],
+      });
+
+      const retained = await worker.fetch("http://fixture/operation", {
+        method: "POST",
+        body: JSON.stringify({
+          appId: first.appId,
+          kind: "migrations",
+          request: input,
+          id,
+          expired: true,
+        }),
+      });
+
+      expect(retained.status).toBe(200);
+      expect(await retained.json()).toMatchObject({
+        state: "succeeded",
+        entries: [{ name: "1_create.sql", applied: true }],
+      });
+
+      const listing = contract.migrationRequest.parse({
+        ...input,
+        action: "list",
+        files: [{ name: "1_create.sql" }],
+      });
+
+      expect(await manage(preview, "migrations", listing)).toMatchObject({
+        entries: [{ name: "1_create.sql", applied: false }],
+      });
+      const physicalId = databases.get(resourceName(first.appId, "d1", "data"));
+      expect(
+        migrations
+          .get(physicalId ?? "")
+          ?.prepare("SELECT count(*) AS count FROM migrated")
+          .get(),
+      ).toEqual({ count: 1 });
+
+      for (const changes of [
+        { actor: "stranger" },
+        { request: { ...input, databaseId: "foreign" } },
+        { appId: preview.appId, read: true },
+      ]) {
+        const denied = await worker.fetch("http://fixture/operation", {
+          method: "POST",
+          body: JSON.stringify({
+            kind: "migrations",
+            appId: first.appId,
+            id,
+            request: input,
+            ...changes,
+          }),
+        });
+
+        expect(denied.status).toBe(400);
+      }
+
+      expect(await environment.database.db.select().from(jobs)).toHaveLength(0);
+    }, 60_000);
+
+    const capabilityBindings = contract.workerMetadata.parse({
+      main_module: "app.js",
+      compatibility_date: "2026-10-01",
+      assets: { upload_session: crypto.randomUUID() },
+      bindings: [
+        { type: "kv_namespace", name: "KV", id: "cache" },
+        { type: "queue", name: "JOBS", queue: "jobs" },
+        {
+          type: "workflow",
+          name: "WORKFLOW",
+          workflow_name: "example",
+          class_name: "ExampleWorkflow",
+        },
+      ],
+    }).bindings;
+
+    const appJson = async (
+      entry: typeof first,
+      path: string,
+      init?: Parameters<Unstable_DevWorker["fetch"]>[1],
+    ) => {
+      const response = await worker.fetch(`https://${entry.hostname}${path}`, init);
+      expect(response.status, await response.clone().text()).toBe(200);
+
+      return z.json().parse(await response.json());
+    };
+
+    it("provisions KV, Queues, Cron and app Workflows together and isolates production from previews", async () => {
+      for (const entry of [first, preview]) {
+        const next = await seedDeployment(environment.database.db, {
+          appId: entry.appId,
+          source: capabilitiesSource,
+          bindings: capabilityBindings,
+          crons: ["*/5 * * * *"],
+          consumers: [
+            {
+              queue: "jobs",
+              max_batch_size: 1,
+              max_batch_timeout: 1,
+              max_retries: 2,
+              dead_letter_queue: "failed",
+            },
+          ],
+        });
+
+        await seed(next);
+        await dispatch(next);
+        await completed(next.command.id);
+      }
+
+      expect(namespaces.size).toBe(2);
+      expect(queues.size).toBe(4);
+      expect(schedules).toEqual([{ cron: "*/5 * * * *" }]);
+
+      for (const entry of [first, preview]) {
+        const queue = queues.get(resourceName(entry.appId, "queue", "jobs"));
+        expect(queue?.consumers).toMatchObject([
+          {
+            script: "fixture-runtime",
+            settings: { batch_size: 1, max_wait_time_ms: 1000, max_retries: 2 },
+            dead_letter_queue: resourceName(entry.appId, "queue", "failed"),
+          },
+        ]);
+        expect(settings.get(`B_${resourceName(entry.appId, "kv", "cache")}`)).toMatchObject({
+          type: "kv_namespace",
+        });
+        expect(settings.get(`B_${resourceName(entry.appId, "queue", "jobs")}`)).toMatchObject({
+          type: "queue",
+        });
+      }
+
+      await appJson(first, "/kv", { method: "PUT", body: "production" });
+      expect(await appJson(first, "/kv")).toBe("production");
+      expect(await appJson(preview, "/kv")).toBeNull();
+      await appJson(first, "/queue", { method: "POST", body: "message" });
+      await expect.poll(() => appJson(first, "/queue"), { timeout: 15_000 }).toBe("jobs:message");
+      expect(await appJson(preview, "/queue")).toBeNull();
+      expect(
+        (await worker.fetch("http://fixture/cron?cron=" + encodeURIComponent("*/5 * * * *")))
+          .status,
+      ).toBe(204);
+
+      for (const entry of [first, preview])
+        expect(await appJson(entry, "/cron")).toBe("*/5 * * * *");
+    }, 100_000);
+
+    it("manages native app Workflows through the existing service and preserves request identity", async () => {
+      const create = contract.workflowRequest.parse({
+        action: "create",
+        workflow: "example",
+        id: "same-id",
+        params: { wait: true },
+      });
+
+      const id = crypto.randomUUID();
+      expect(await manage(first, "workflows", create, id)).toMatchObject({
+        result: { id: "same-id" },
+      });
+      expect(await manage(first, "workflows", create, id)).toMatchObject({
+        result: { id: "same-id" },
+      });
+      expect(await manage(preview, "workflows", create)).toMatchObject({
+        result: { id: "same-id" },
+      });
+
+      for (const action of ["pause", "resume"] as const)
+        expect(
+          await manage(first, "workflows", { action, workflow: "example", id: "same-id" }),
+        ).toMatchObject({ result: null });
+      await manage(first, "workflows", {
+        action: "sendEvent",
+        workflow: "example",
+        id: "same-id",
+        event: { type: "continue", payload: null },
+      });
+      await expect
+        .poll(
+          async () =>
+            await manage(first, "workflows", {
+              action: "status",
+              workflow: "example",
+              id: "same-id",
+            }),
+          { timeout: 30_000 },
+        )
+        .toMatchObject({ result: { status: "complete", output: 42 } });
+      expect(
+        await manage(preview, "workflows", { action: "list", workflow: "example" }),
+      ).toMatchObject({ result: { instances: [{ id: "same-id" }] } });
+      await manage(preview, "workflows", {
+        action: "terminate",
+        workflow: "example",
+        id: "same-id",
+      });
+      await manage(preview, "workflows", { action: "delete", workflow: "example", id: "same-id" });
+      expect(
+        await manage(preview, "workflows", { action: "list", workflow: "example" }),
+      ).toMatchObject({ result: { instances: [] } });
+
+      const denied = await worker.fetch("http://fixture/operation", {
+        method: "POST",
+        body: JSON.stringify({
+          kind: "workflows",
+          appId: first.appId,
+          id,
+          request: { ...create, id: "different" },
+        }),
+      });
+
+      expect(denied.status).toBe(400);
+      expect(await environment.database.db.select().from(jobs)).toHaveLength(0);
+    }, 100_000);
+
+    it("updates and removes event subscriptions without changing another app", async () => {
+      const next = await seedDeployment(environment.database.db, {
+        appId: first.appId,
+        source: capabilitiesSource,
+        bindings: capabilityBindings,
+        crons: ["10 * * * *"],
+        consumers: [],
+      });
+
+      await seed(next);
+      await dispatch(next);
+      await completed(next.command.id);
+      expect(schedules).toEqual([{ cron: "*/5 * * * *" }, { cron: "10 * * * *" }]);
+      expect(queues.get(resourceName(first.appId, "queue", "jobs"))?.consumers).toEqual([]);
+      expect(queues.get(resourceName(preview.appId, "queue", "jobs"))?.consumers).toHaveLength(1);
+      await worker.fetch("http://fixture/cron?cron=" + encodeURIComponent("10 * * * *"));
+      expect(await appJson(first, "/cron")).toBe("10 * * * *");
+      await worker.fetch("http://fixture/cron?cron=" + encodeURIComponent("*/5 * * * *"));
+      expect(await appJson(first, "/cron")).toBe("10 * * * *");
+
+      const rollback = await seedDeployment(environment.database.db, {
+        appId: first.appId,
+        source: capabilitiesSource,
+        bindings: capabilityBindings,
+        crons: ["*/5 * * * *"],
+        consumers: [{ queue: "jobs" }],
+      });
+
+      await seed(rollback);
+      await dispatch(rollback);
+      await completed(rollback.command.id);
+      expect(schedules).toEqual([{ cron: "*/5 * * * *" }]);
+      expect(queues.get(resourceName(first.appId, "queue", "jobs"))?.consumers).toMatchObject([
+        { settings: { batch_size: 10, max_wait_time_ms: 5000 } },
+      ]);
+    }, 60_000);
+    it("recovers an unacknowledged schedule update without sending it twice", async () => {
+      const before = scheduleWrites;
+
+      const entry = await seedDeployment(environment.database.db, {
+        appId: first.appId,
+        source: capabilitiesSource,
+        bindings: capabilityBindings,
+        crons: ["10 * * * *"],
+        consumers: [{ queue: "jobs" }],
+      });
+
+      scheduleMode = "lost-response";
+      await seed(entry);
+      await dispatch(entry);
+      await completed(entry.command.id);
+      // Staging adds the new cron; publication removes the old app's cron only if no other app uses it.
+      expect(scheduleWrites - before).toBe(1);
+      expect(schedules).toEqual([{ cron: "*/5 * * * *" }, { cron: "10 * * * *" }]);
+    }, 30_000);
+
+    it("retains uncertain schedules until confirmed and removes staged routes on a later code-only deployment", async () => {
+      const before = scheduleWrites;
+
+      const entry = await seedDeployment(environment.database.db, {
+        appId: lostResponse.appId,
+        crons: ["20 * * * *"],
+      });
+
+      scheduleMode = "delayed";
+      await seed(entry);
+      await dispatch(entry, "fast-retries");
+      await expect.poll(() => nativeStatus(entry.command.id), { timeout: 30_000 }).toBe("errored");
+      expect((await operation(entry.command.id))?.error).toContain("unconfirmed");
+      expect(scheduleWrites).toBe(before + 1);
+
+      if (!delayedSchedule) throw new Error("Missing delayed schedule");
+      delayedSchedule();
+      delayedSchedule = undefined;
+      const codeOnly = await seedDeployment(environment.database.db, { appId: lostResponse.appId });
+      await seed(codeOnly);
+      await dispatch(codeOnly);
+      await completed(codeOnly.command.id);
+      expect(schedules).toEqual([{ cron: "*/5 * * * *" }, { cron: "10 * * * *" }]);
+      expect(scheduleWrites).toBe(before + 2);
+    }, 45_000);
   },
 );

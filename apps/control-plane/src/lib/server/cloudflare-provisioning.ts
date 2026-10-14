@@ -8,6 +8,13 @@ const database = z.object({ uuid: z.uuid(), name: z.string() });
 
 const bucket = z.object({ name: z.string() });
 
+const namespace = z.object({ id: z.string(), title: z.string() });
+
+const queue = z.object({ queue_id: z.string(), queue_name: z.string() });
+
+export const cloudflareResourceName = (appId: string, kind: string, name: string) =>
+  `r${createHash("sha256").update(`${appId}/${kind}/${name}`).digest("hex").slice(0, 40)}`;
+
 const workerBindings = z.object({
   annotations: z.object({ "workers/tag": z.string().optional() }).optional(),
   bindings: z.array(
@@ -18,6 +25,8 @@ const workerBindings = z.object({
       database_id: z.string().optional(),
       bucket_name: z.string().optional(),
       jurisdiction: z.string().optional(),
+      namespace_id: z.string().optional(),
+      queue_name: z.string().optional(),
     }),
   ),
 });
@@ -25,6 +34,8 @@ const workerBindings = z.object({
 export const cloudflareResource = z.discriminatedUnion("type", [
   z.object({ type: z.literal("d1"), name: z.string(), id: z.string() }),
   z.object({ type: z.literal("r2_bucket"), name: z.string(), bucket_name: z.string() }),
+  z.object({ type: z.literal("kv_namespace"), name: z.string(), namespace_id: z.string() }),
+  z.object({ type: z.literal("queue"), name: z.string(), queue_name: z.string() }),
 ]);
 
 export class CloudflareApiError extends Error {
@@ -118,7 +129,65 @@ export const createCloudflareProvisioner = (
     }
   };
 
+  const ensureNamespace = async (title: string) => {
+    for (let page = 1; ; page++) {
+      const found = z
+        .array(namespace)
+        .parse(await request(`/storage/kv/namespaces?page=${page}&per_page=100`));
+
+      const existing = found.find((entry) => entry.title === title);
+
+      if (existing) return existing.id;
+
+      if (found.length < 100) break;
+    }
+
+    const created = namespace.parse(
+      await request("/storage/kv/namespaces", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title }),
+      }),
+    );
+
+    if (created.title !== title) throw new Error("Cloudflare returned an unexpected namespace");
+
+    return created.id;
+  };
+
+  const findQueue = async (name: string) => {
+    for (let page = 1; ; page++) {
+      const found = z.array(queue).parse(await request(`/queues?page=${page}&per_page=100`));
+      const existing = found.find((entry) => entry.queue_name === name);
+
+      if (existing) return existing;
+
+      if (found.length < 100) return null;
+    }
+  };
+
+  const ensureQueue = async (name: string) => {
+    const existing = await findQueue(name);
+
+    if (existing) return existing;
+
+    const created = queue.parse(
+      await request("/queues", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ queue_name: name }),
+      }),
+    );
+
+    if (created.queue_name !== name) throw new Error("Cloudflare returned an unexpected queue");
+
+    return created;
+  };
+
   return {
+    findDatabase,
+    ensureQueue,
+    request,
     scope: `${configuration.accountId}/${configuration.runtimeName}`,
     readBindings: async () =>
       workerBindings.parse(
@@ -151,20 +220,23 @@ export const createCloudflareProvisioner = (
       const resources: z.infer<typeof cloudflareResource>[] = [];
 
       for (const binding of app.metadata.bindings) {
-        if (binding.type === "plain_text") continue;
+        if (binding.type === "plain_text" || binding.type === "workflow") continue;
 
-        if (binding.type !== "d1" && binding.type !== "r2_bucket")
-          throw new Error(`Cloudflare provisioning for ${binding.type} is not available yet`);
-
-        const kind = binding.type === "d1" ? "d1" : "r2";
+        const kind = { d1: "d1", r2_bucket: "r2", kv_namespace: "kv", queue: "queue" }[
+          binding.type
+        ];
 
         const logicalName =
           binding.type === "d1"
             ? (binding.database_id ?? binding.database_name)
-            : binding.bucket_name;
+            : binding.type === "r2_bucket"
+              ? binding.bucket_name
+              : binding.type === "kv_namespace"
+                ? binding.id
+                : binding.queue;
 
-        // App IDs isolate production and previews; names remain stable across job retries.
-        const name = `r${createHash("sha256").update(`${app.appId}/${kind}/${logicalName}`).digest("hex").slice(0, 40)}`;
+        // App IDs isolate production and previews; names remain stable across retries.
+        const name = cloudflareResourceName(app.appId, kind, logicalName);
         const native = `B_${name}`;
         nativeBindings[binding.name] = native;
 
@@ -172,10 +244,26 @@ export const createCloudflareProvisioner = (
 
         if (binding.type === "d1") {
           resources.push({ type: "d1", name: native, id: await ensureDatabase(name) });
-        } else {
+        } else if (binding.type === "r2_bucket") {
           await ensureBucket(name);
           resources.push({ type: "r2_bucket", name: native, bucket_name: name });
+        } else if (binding.type === "kv_namespace") {
+          resources.push({
+            type: "kv_namespace",
+            name: native,
+            namespace_id: await ensureNamespace(name),
+          });
+        } else {
+          await ensureQueue(name);
+          resources.push({ type: "queue", name: native, queue_name: name });
         }
+      }
+
+      for (const consumer of app.metadata.queue_consumers) {
+        await ensureQueue(cloudflareResourceName(app.appId, "queue", consumer.queue));
+
+        if (consumer.dead_letter_queue)
+          await ensureQueue(cloudflareResourceName(app.appId, "queue", consumer.dead_letter_queue));
       }
 
       return { nativeBindings, resources };

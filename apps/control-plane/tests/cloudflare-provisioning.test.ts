@@ -6,6 +6,8 @@ import { z } from "zod";
 const fixture = () => {
   const databases = new Map<string, string>();
   const buckets = new Set<string>();
+  const namespaces = new Map<string, string>();
+  const queues = new Map<string, string>();
   const patches: unknown[] = [];
   let loseResponse = false;
 
@@ -32,6 +34,38 @@ const fixture = () => {
       }
 
       return ok({ uuid, name });
+    }
+
+    if (url.pathname.endsWith("/storage/kv/namespaces")) {
+      if (request.method === "GET")
+        return ok([...namespaces].map(([title, id]) => ({ title, id })));
+      const { title } = z.object({ title: z.string() }).parse(await request.json());
+      expect(namespaces.has(title)).toBe(false);
+      const id = crypto.randomUUID();
+      namespaces.set(title, id);
+
+      if (loseResponse) {
+        loseResponse = false;
+        throw new Error("Lost creation response");
+      }
+
+      return ok({ title, id });
+    }
+
+    if (url.pathname.endsWith("/queues")) {
+      if (request.method === "GET")
+        return ok([...queues].map(([queue_name, queue_id]) => ({ queue_name, queue_id })));
+      const { queue_name } = z.object({ queue_name: z.string() }).parse(await request.json());
+      expect(queues.has(queue_name)).toBe(false);
+      const queue_id = crypto.randomUUID();
+      queues.set(queue_name, queue_id);
+
+      if (loseResponse) {
+        loseResponse = false;
+        throw new Error("Lost creation response");
+      }
+
+      return ok({ queue_name, queue_id });
     }
 
     if (url.pathname.endsWith("/r2/buckets")) {
@@ -75,6 +109,8 @@ const fixture = () => {
     create,
     databases,
     buckets,
+    namespaces,
+    queues,
     patches,
     loseNextResponse: () => {
       loseResponse = true;
@@ -138,6 +174,50 @@ describe("Cloudflare app provisioning", () => {
     );
     expect(cloud.databases.size).toBe(2);
     expect(cloud.buckets.size).toBe(2);
+  });
+
+  it.each(["kv", "queue"])(
+    "recovers a lost %s creation response and keeps preview resources separate",
+    async (kind) => {
+      const cloud = fixture();
+      const deployment = app();
+      deployment.metadata = workerMetadata.parse({
+        ...deployment.metadata,
+        bindings:
+          kind === "kv"
+            ? [{ type: "kv_namespace", name: "STORE", id: "cache" }]
+            : [{ type: "queue", name: "STORE", queue: "jobs" }],
+        queue_consumers: kind === "queue" ? [{ queue: "jobs", dead_letter_queue: "failed" }] : [],
+      });
+      cloud.loseNextResponse();
+      await expect(cloud.create().provision(deployment)).rejects.toThrow("Lost creation response");
+      const result = await cloud.create().provision(deployment);
+      expect(await cloud.create().provision(deployment)).toEqual(result);
+      expect(result.resources).toHaveLength(1);
+      const preview = await cloud.create().provision({ ...deployment, appId: crypto.randomUUID() });
+      expect(preview.nativeBindings).not.toEqual(result.nativeBindings);
+      expect(cloud.namespaces.size).toBe(kind === "kv" ? 2 : 0);
+      expect(cloud.queues.size).toBe(kind === "queue" ? 4 : 0);
+    },
+  );
+
+  it("creates consumer-only queues and shares duplicate producer references", async () => {
+    const cloud = fixture();
+    const deployment = app();
+    deployment.metadata = workerMetadata.parse({
+      ...deployment.metadata,
+      bindings: [
+        { type: "queue", name: "A", queue: "jobs" },
+        { type: "queue", name: "B", queue: "jobs" },
+        { type: "workflow", name: "FLOW", workflow_name: "flow", class_name: "Flow" },
+      ],
+      queue_consumers: [{ queue: "other", dead_letter_queue: "failed" }],
+    });
+    const result = await cloud.create().provision(deployment);
+    expect(result.nativeBindings["A"]).toBe(result.nativeBindings["B"]);
+    expect(result.resources).toHaveLength(1);
+    expect(result.nativeBindings).not.toHaveProperty("FLOW");
+    expect(cloud.queues.size).toBe(3);
   });
 
   it("redacts upstream credentials and does not treat failed lookups as missing resources", async () => {

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type { Result } from "better-result";
 import type { DatabaseUnavailable, InvalidOperation, StorageUnavailable } from "./errors.ts";
 import { z } from "zod";
+import type { Principal } from "./identity.ts";
 
 export const deploymentActor = z.object({ id: z.string().min(1), admin: z.boolean() });
 
@@ -41,6 +42,50 @@ export const hostedDeploymentId = (appId: string, requestId: string) => {
 };
 
 export type HostedExecution = {
+  operations: {
+    migrate: (
+      principal: Principal,
+      appId: string,
+      id: string,
+      input: z.infer<typeof contract.migrationRequest>,
+    ) => Promise<
+      Result<
+        z.infer<typeof contract.migrationOperation>,
+        DatabaseUnavailable | InvalidOperation | StorageUnavailable
+      >
+    >;
+    workflow: (
+      principal: Principal,
+      appId: string,
+      id: string,
+      input: z.infer<typeof contract.workflowRequest>,
+    ) => Promise<
+      Result<
+        z.infer<typeof contract.workflowOperation>,
+        DatabaseUnavailable | InvalidOperation | StorageUnavailable
+      >
+    >;
+    readMigration: (
+      principal: Principal,
+      appId: string,
+      id: string,
+    ) => Promise<
+      Result<
+        z.infer<typeof contract.migrationOperation>,
+        DatabaseUnavailable | InvalidOperation | StorageUnavailable
+      >
+    >;
+    readWorkflow: (
+      principal: Principal,
+      appId: string,
+      id: string,
+    ) => Promise<
+      Result<
+        z.infer<typeof contract.workflowOperation>,
+        DatabaseUnavailable | InvalidOperation | StorageUnavailable
+      >
+    >;
+  };
   history: (
     records: z.infer<typeof contract.deployment>[],
   ) => Promise<Result<z.infer<typeof contract.deployment>[], StorageUnavailable>>;

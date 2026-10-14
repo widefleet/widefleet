@@ -69,6 +69,7 @@ jobs:
         run: |
           pnpm --filter @platform/control-plane build:cloudflare
           pnpm --filter @platform/control-plane exec wrangler deploy --dry-run --outdir dist/cloudflare/bundle
+          pnpm --filter @platform/control-plane exec wrangler deploy --config ../../packages/app-runtime/wrangler.jsonc --dry-run --outdir ../../packages/app-runtime/dist/cloudflare-bundle
       - name: Start disposable services
         if: matrix.suite != 'source'
         run: docker compose -f infra/test/compose.yaml up -d --wait

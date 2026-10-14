@@ -1,3 +1,5 @@
+import { CloudflareSubscriptionPending } from "./cloudflare-subscription-updates.ts";
+import { createCloudflareEvents } from "./cloudflare-events.ts";
 import { NonRetryableError } from "cloudflare:workflows";
 import type { CloudflareWorkersModule } from "@cloudflare/workers-types";
 import * as contract from "@platform/contracts";
@@ -7,11 +9,7 @@ import { z } from "zod";
 import { createArtifactStorage } from "./artifact-storage.ts";
 import type { CloudflareBindings } from "./cloudflare-config.ts";
 import { withCloudflareDatabase } from "./cloudflare-database.ts";
-import {
-  operationTarget,
-  registerCloudflareOperation,
-  validateCloudflareArtifact,
-} from "./cloudflare-operations.ts";
+import { operationTarget, registerCloudflareOperation } from "./cloudflare-operations.ts";
 import { CloudflareApiError, createCloudflareProvisioner } from "./cloudflare-provisioning.ts";
 import {
   CloudflareBindingUpdatePending,
@@ -19,7 +17,7 @@ import {
   updateCloudflareBindings,
 } from "./cloudflare-binding-updates.ts";
 import { deploymentCommand, hostedDeploymentId } from "./deployment-execution.ts";
-import { InvalidOperation } from "./errors.ts";
+import { DatabaseUnavailable, InvalidOperation } from "./errors.ts";
 import { apps, artifacts, cloudflareOperations, deploymentEvents, deployments } from "./schema.ts";
 import { createR2Storage } from "./storage/r2.ts";
 import { transact } from "./transactions.ts";
@@ -67,8 +65,6 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
         manifest: record.manifest,
         modules: record.modules,
       });
-
-      validateCloudflareArtifact(parsed);
 
       return parsed;
     });
@@ -256,6 +252,31 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               runtimeVersion: z.literal(target.runtime.version),
             }).parse(await response.json());
 
+            const hasEvents =
+              command.kind === "deploy" &&
+              (published.metadata.crons.length ||
+                published.metadata.queue_consumers.length ||
+                serving?.metadata.crons.length ||
+                serving?.metadata.queue_consumers.length ||
+                (await createCloudflareEvents(
+                  bindings.ARTIFACTS,
+                  db,
+                  provisioner,
+                  configuration.APP_RUNTIME_NAME,
+                ).registered(app.id)));
+
+            // Subscription reservations must commit before their API write, independently
+            // of the app transaction. Cloudflare database scopes use a single connection.
+            if (hasEvents)
+              await withCloudflareDatabase(bindings, ({ db: subscriptions }) =>
+                createCloudflareEvents(
+                  bindings.ARTIFACTS,
+                  subscriptions,
+                  provisioner,
+                  configuration.APP_RUNTIME_NAME,
+                ).stage(command.id, published, sequence),
+              );
+
             if (
               currentBody !== body ||
               current?.customMetadata?.["widefleet_access"] !== customMetadata.widefleet_access
@@ -269,6 +290,16 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
 
               if (!activated) throw new Error("The active version changed during activation");
             }
+
+            if (hasEvents)
+              await withCloudflareDatabase(bindings, ({ db: subscriptions }) =>
+                createCloudflareEvents(
+                  bindings.ARTIFACTS,
+                  subscriptions,
+                  provisioner,
+                  configuration.APP_RUNTIME_NAME,
+                ).publish(published, sequence),
+              );
 
             await transaction
               .update(apps)
@@ -305,8 +336,8 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
         ),
       ),
     finish: (command: z.infer<typeof deploymentCommand>, error: string | null) =>
-      withCloudflareDatabase(bindings, async ({ db }) =>
-        value(
+      withCloudflareDatabase(bindings, async ({ db }) => {
+        return value(
           await transact(db, async (transaction) => {
             // Workflow step errors lose their custom type across durable execution.
             // Keep the unresolved resource update visible in CLI/API/UI deployment history.
@@ -373,8 +404,8 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
 
             return Result.ok(undefined);
           }),
-        ),
-      ),
+        );
+      }),
   };
 };
 
@@ -382,9 +413,19 @@ const retryable = async <T>(operation: () => Promise<T>) => {
   try {
     return await operation();
   } catch (error) {
+    if (
+      error instanceof DatabaseUnavailable &&
+      error.cause instanceof CloudflareSubscriptionPending
+    )
+      throw new Error(error.cause.message);
+
     if (error instanceof InvalidOperation) throw new NonRetryableError(error.message);
 
-    if (error instanceof CloudflareApiError || error instanceof CloudflareBindingUpdatePending)
+    if (
+      error instanceof CloudflareApiError ||
+      error instanceof CloudflareBindingUpdatePending ||
+      error instanceof CloudflareSubscriptionPending
+    )
       throw new Error(error.message);
     throw new Error("Cloudflare deployment step failed");
   }
@@ -422,7 +463,9 @@ export const executeCloudflareDeployment = async (
     );
   } catch (error) {
     const message =
-      error instanceof InvalidOperation || error instanceof CloudflareApiError
+      error instanceof InvalidOperation ||
+      error instanceof CloudflareApiError ||
+      (error instanceof Error && error.message.startsWith("Cloudflare subscription update "))
         ? error.message
         : "Cloudflare could not complete the deployment";
 
