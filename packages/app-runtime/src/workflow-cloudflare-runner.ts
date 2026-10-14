@@ -22,6 +22,8 @@ import {
 } from "./workflow-cloudflare-errors.ts";
 import type { CloudflareWorkflowSteps } from "./workflow-cloudflare.ts";
 
+const restoredStepErrors = new WeakSet<Error>();
+
 type Callback = (context: StepContext) => Promise<WorkflowValue>;
 
 const value = async (operation: () => Promise<WorkflowResult>) => {
@@ -30,7 +32,12 @@ const value = async (operation: () => Promise<WorkflowResult>) => {
 
   if (result.error) {
     const error = nativeWorkflowFault(result.error);
-    throw error === result.error ? new NativeWorkflowError(error) : restore(error);
+
+    if (error === result.error) throw new NativeWorkflowError(error);
+    const restored = restore(error);
+    restoredStepErrors.add(restored);
+
+    throw restored;
   }
 
   return result.value;
@@ -41,7 +48,11 @@ const captureApp = <T>(operation: () => Promise<T>) =>
     try {
       return await operation();
     } catch (cause) {
-      if (!(cause instanceof NativeWorkflowError)) console.error(cause);
+      if (
+        !(cause instanceof NativeWorkflowError) &&
+        !(cause instanceof Error && restoredStepErrors.has(cause))
+      )
+        console.error(cause);
       throw cause;
     }
   });

@@ -447,14 +447,14 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
       .poll(async () => {
         const records = z.array(cloudflareLog).parse(await json("/fixture/logs"));
 
-        return records.some(
+        return records.filter(
           (record) =>
             record.appId === app.appId &&
             record.record.level === "error" &&
             record.record.message.includes("permanent fixture"),
-        );
+        ).length;
       })
-      .toBe(true);
+      .toBe(1);
   }, 20_000);
 
   it("uses native retries and exposes the app step name and attempt", async () => {
