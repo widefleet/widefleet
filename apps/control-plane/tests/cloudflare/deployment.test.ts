@@ -453,6 +453,13 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           });
           return Response.json(result.isErr() ? { error: result.error.message } : result.value, { status: result.isErr() ? 400 : 200 });
         }
+        if (url.hostname === 'fixture' && url.pathname === '/raw-operation') {
+          const command = await request.json();
+          const modifier = await env.APP_OPERATIONS.unsafeGetInstanceModifier(command.id);
+          try { await modifier.disableRetryDelays(); } finally { modifier[Symbol.dispose]?.(); }
+          await env.APP_OPERATIONS.create({id:command.id,params:command});
+          return new Response(null,{status:204});
+        }
         if (url.hostname === 'fixture' && url.pathname === '/operation') {
           const input = await request.json();
           const result = await withCloudflareDatabase(env, async ({db}) => {
@@ -1351,7 +1358,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
 
       scheduleMode = "lost-response";
       await seed(entry);
-      await dispatch(entry);
+      await dispatch(entry, "fast-retries");
       await completed(entry.command.id);
       // Staging adds the new cron; publication removes the old app's cron only if no other app uses it.
       expect(scheduleWrites - before).toBe(1);
@@ -1383,5 +1390,61 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       expect(schedules).toEqual([{ cron: "*/5 * * * *" }, { cron: "10 * * * *" }]);
       expect(scheduleWrites).toBe(before + 2);
     }, 45_000);
+    it("returns large app Workflow outputs without re-encoding them into management checkpoints", async () => {
+      await manage(first, "workflows", {
+        action: "create",
+        workflow: "example",
+        id: "large-output",
+        params: { large: true },
+      });
+      await expect
+        .poll(
+          async () => {
+            const operation = await manage(first, "workflows", {
+              action: "status",
+              workflow: "example",
+              id: "large-output",
+            });
+
+            const result = contract.workflowOperation.parse(operation).result;
+
+            return z.object({ output: z.string().optional() }).parse(result).output?.length;
+          },
+          { timeout: 20_000 },
+        )
+        .toBe(300000);
+    }, 30_000);
+
+    it("does not overwrite another command's receipt when native operation registration rejects an ID collision", async () => {
+      const before = await operation(first.command.id);
+      expect(
+        (
+          await worker.fetch("http://fixture/raw-operation", {
+            method: "POST",
+            body: JSON.stringify({
+              id: first.command.id,
+              appId: preview.appId,
+              createdAt: new Date().toISOString(),
+              actor: { id: "fixture-owner", admin: false },
+              kind: "workflows",
+              request: { action: "list", workflow: "example" },
+            }),
+          })
+        ).status,
+      ).toBe(204);
+      await expect
+        .poll(
+          async () => {
+            const response = await worker.fetch(
+              `http://fixture/workflow?app-operation=1&id=${first.command.id}`,
+            );
+
+            return z.object({ status: z.string() }).parse(await response.json()).status;
+          },
+          { timeout: 15_000 },
+        )
+        .toBe("errored");
+      expect(await operation(first.command.id)).toEqual(before);
+    }, 20_000);
   },
 );

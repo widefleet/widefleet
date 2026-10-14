@@ -56,10 +56,9 @@ export const registerCloudflareAppOperation = (
           .where(eq(cloudflareOperations.id, command.id))
       )[0];
 
-    if (
-      !existing ||
-      JSON.stringify(cloudflareAppOperation.parse(existing.command)) !== JSON.stringify(command)
-    )
+    const stored = existing ? cloudflareAppOperation.safeParse(existing.command) : null;
+
+    if (!existing || !stored?.success || JSON.stringify(stored.data) !== JSON.stringify(command))
       throw new InvalidOperation({
         code: "CONFLICT",
         message: "The request ID already refers to another operation",
@@ -156,9 +155,14 @@ export const createCloudflareAppOperations = (
         if (previous?.finishedAt) {
           // Completed results outlive native Workflow retention. Retrying an API
           // request must not create a fresh management operation after expiry.
-          const { createdAt: _previousTime, ...stored } = cloudflareAppOperation.parse(
-            previous.command,
-          );
+          const parsed = cloudflareAppOperation.safeParse(previous.command);
+
+          if (!parsed.success)
+            throw new InvalidOperation({
+              code: "CONFLICT",
+              message: "The request ID already refers to another operation",
+            });
+          const { createdAt: _previousTime, ...stored } = parsed.data;
 
           const { createdAt: _requestedTime, ...requested } = command;
 

@@ -106,6 +106,7 @@ export const capabilitiesSource = `
 import { WorkflowEntrypoint } from 'cloudflare:workers';
 export class ExampleWorkflow extends WorkflowEntrypoint {
   async run(event, step) {
+    if (event.payload?.large) return step.do('large', () => String.fromCharCode(34).repeat(300000));
     await step.do('record', () => this.env.KV.put('workflow:' + event.instanceId, 'prepared'));
     if (event.payload?.wait) await step.waitForEvent('continue', {type:'continue', timeout:'5 minutes'});
     return step.do('result', () => 42);

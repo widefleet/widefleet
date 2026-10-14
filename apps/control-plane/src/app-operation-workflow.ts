@@ -2,7 +2,7 @@ import { WorkflowEntrypoint } from "cloudflare:workers";
 import { NonRetryableError } from "cloudflare:workflows";
 import type { CloudflareWorkersModule } from "@cloudflare/workers-types";
 import { createHash } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import * as contract from "@platform/contracts";
 import type { CloudflareBindings } from "./lib/server/cloudflare-config.ts";
@@ -41,15 +41,123 @@ export class AppOperationWorkflow extends WorkflowEntrypoint<
         await db
           .update(cloudflareOperations)
           .set({ result: { value: result }, error, finishedAt: new Date() })
-          .where(eq(cloudflareOperations.id, command.id));
+          .where(
+            and(
+              eq(cloudflareOperations.id, command.id),
+              eq(cloudflareOperations.appId, command.appId),
+              sql`${cloudflareOperations.command} = ${JSON.stringify(command)}::jsonb`,
+              error === null ? undefined : isNull(cloudflareOperations.finishedAt),
+            ),
+          );
       });
+
+    const execute = async () => {
+      const app = await withCloudflareDatabase(this.env, async ({ db }) => {
+        const [record] = await db.select().from(apps).where(eq(apps.id, command.appId));
+
+        if (!record || record.state === "deleting")
+          throw new NonRetryableError("App is not available");
+
+        return record;
+      });
+
+      const object = await this.env.ARTIFACTS.get(`hosts/${app.hostname}.json`);
+
+      if (!object) throw new NonRetryableError("App is not published");
+      const published = contract.publishedApp.parse(await object.json());
+
+      if (published.appId !== command.appId)
+        throw new NonRetryableError("Hostname belongs to another app");
+
+      if (command.kind === "workflows") {
+        if (!this.env.APP_RUNTIME || !this.env.APP_RUNTIME_TOKEN)
+          throw new Error("App runtime is not configured");
+
+        const response = await this.env.APP_RUNTIME.fetch(
+          `https://${app.hostname}/.well-known/widefleet/workflows`,
+          {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${this.env.APP_RUNTIME_TOKEN}`,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              appId: command.appId,
+              hostname: app.hostname,
+              requestId: command.id,
+              request: command.request,
+            }),
+            redirect: "manual",
+          },
+        );
+
+        if (!response.ok) {
+          const error = z.object({ error: z.string() }).parse(await response.json());
+
+          if (response.status >= 400 && response.status < 500)
+            throw new NonRetryableError(error.error);
+          throw new Error("App workflow operation failed");
+        }
+
+        return z.object({ result: z.json() }).parse(await response.json()).result;
+      }
+
+      const source = await this.env.ARTIFACTS.get(
+        `apps/${command.appId}/migrations/${command.migration.sha256}`,
+      );
+
+      if (!source) throw new NonRetryableError("Migration artifact is missing");
+      const bytes = await source.arrayBuffer();
+
+      if (
+        bytes.byteLength !== command.migration.size ||
+        createHash("sha256").update(new Uint8Array(bytes)).digest("hex") !==
+          command.migration.sha256
+      )
+        throw new NonRetryableError("Migration artifact checksum mismatch");
+      const input = contract.migrationRequest.parse(JSON.parse(new TextDecoder().decode(bytes)));
+
+      const binding = published.metadata.bindings.find(
+        (entry) => entry.name === input.database && entry.type === "d1",
+      );
+
+      if (
+        binding?.type !== "d1" ||
+        (binding.database_id ?? binding.database_name) !== input.databaseId
+      )
+        throw new NonRetryableError("The selected database does not match the deployed D1 binding");
+
+      const configuration = z
+        .object({
+          CLOUDFLARE_ACCOUNT_ID: z.string(),
+          CLOUDFLARE_API_TOKEN: z.string(),
+          APP_RUNTIME_NAME: z.string(),
+        })
+        .parse(this.env);
+
+      const provisioner = createCloudflareProvisioner({
+        accountId: configuration.CLOUDFLARE_ACCOUNT_ID,
+        token: configuration.CLOUDFLARE_API_TOKEN,
+        runtimeName: configuration.APP_RUNTIME_NAME,
+      });
+
+      const name = cloudflareResourceName(command.appId, "d1", input.databaseId);
+
+      if (published.nativeBindings[input.database] !== `B_${name}`)
+        throw new NonRetryableError("The deployed database binding is invalid");
+      const databaseId = await provisioner.findDatabase(name);
+
+      if (!databaseId) throw new NonRetryableError("The deployed database does not exist");
+
+      return runCloudflareMigrations(provisioner, databaseId, input);
+    };
 
     try {
       await step.do("register-operation", options, async () => {
         const record = await withCloudflareDatabase(this.env, async ({ db }) => {
           const registered = await registerCloudflareAppOperation(db, command);
 
-          if (registered.isOk())
+          if (registered.isOk() && registered.value.error !== null)
             await db
               .update(cloudflareOperations)
               .set({ finishedAt: null, error: null, result: { value: null } })
@@ -65,112 +173,21 @@ export class AppOperationWorkflow extends WorkflowEntrypoint<
         }
       });
 
-      const result = await step.do("execute-operation", options, async () => {
-        const app = await withCloudflareDatabase(this.env, async ({ db }) => {
-          const [record] = await db.select().from(apps).where(eq(apps.id, command.appId));
+      await step.do("execute-operation", options, async () => {
+        const completed = await withCloudflareDatabase(this.env, async ({ db }) => {
+          const [record] = await db
+            .select()
+            .from(cloudflareOperations)
+            .where(eq(cloudflareOperations.id, command.id));
 
-          if (!record || record.state === "deleting")
-            throw new NonRetryableError("App is not available");
-
-          return record;
+          return record?.finishedAt && record.error === null;
         });
 
-        const object = await this.env.ARTIFACTS.get(`hosts/${app.hostname}.json`);
-
-        if (!object) throw new NonRetryableError("App is not published");
-        const published = contract.publishedApp.parse(await object.json());
-
-        if (published.appId !== command.appId)
-          throw new NonRetryableError("Hostname belongs to another app");
-
-        if (command.kind === "workflows") {
-          if (!this.env.APP_RUNTIME || !this.env.APP_RUNTIME_TOKEN)
-            throw new Error("App runtime is not configured");
-
-          const response = await this.env.APP_RUNTIME.fetch(
-            `https://${app.hostname}/.well-known/widefleet/workflows`,
-            {
-              method: "POST",
-              headers: {
-                authorization: `Bearer ${this.env.APP_RUNTIME_TOKEN}`,
-                "content-type": "application/json",
-              },
-              body: JSON.stringify({
-                appId: command.appId,
-                hostname: app.hostname,
-                requestId: command.id,
-                request: command.request,
-              }),
-              redirect: "manual",
-            },
-          );
-
-          if (!response.ok) {
-            const error = z.object({ error: z.string() }).parse(await response.json());
-
-            if (response.status >= 400 && response.status < 500)
-              throw new NonRetryableError(error.error);
-            throw new Error("App workflow operation failed");
-          }
-
-          return JSON.stringify(z.object({ result: z.json() }).parse(await response.json()).result);
-        }
-
-        const source = await this.env.ARTIFACTS.get(
-          `apps/${command.appId}/migrations/${command.migration.sha256}`,
-        );
-
-        if (!source) throw new NonRetryableError("Migration artifact is missing");
-        const bytes = await source.arrayBuffer();
-
-        if (
-          bytes.byteLength !== command.migration.size ||
-          createHash("sha256").update(new Uint8Array(bytes)).digest("hex") !==
-            command.migration.sha256
-        )
-          throw new NonRetryableError("Migration artifact checksum mismatch");
-        const input = contract.migrationRequest.parse(JSON.parse(new TextDecoder().decode(bytes)));
-
-        const binding = published.metadata.bindings.find(
-          (entry) => entry.name === input.database && entry.type === "d1",
-        );
-
-        if (
-          binding?.type !== "d1" ||
-          (binding.database_id ?? binding.database_name) !== input.databaseId
-        )
-          throw new NonRetryableError(
-            "The selected database does not match the deployed D1 binding",
-          );
-
-        const configuration = z
-          .object({
-            CLOUDFLARE_ACCOUNT_ID: z.string(),
-            CLOUDFLARE_API_TOKEN: z.string(),
-            APP_RUNTIME_NAME: z.string(),
-          })
-          .parse(this.env);
-
-        const provisioner = createCloudflareProvisioner({
-          accountId: configuration.CLOUDFLARE_ACCOUNT_ID,
-          token: configuration.CLOUDFLARE_API_TOKEN,
-          runtimeName: configuration.APP_RUNTIME_NAME,
-        });
-
-        const name = cloudflareResourceName(command.appId, "d1", input.databaseId);
-
-        if (published.nativeBindings[input.database] !== `B_${name}`)
-          throw new NonRetryableError("The deployed database binding is invalid");
-        const databaseId = await provisioner.findDatabase(name);
-
-        if (!databaseId) throw new NonRetryableError("The deployed database does not exist");
-
-        return JSON.stringify(await runCloudflareMigrations(provisioner, databaseId, input));
+        // Store results directly in history: app Workflow output must not be
+        // serialized a second time into the management Workflow's step limit.
+        // A lost checkpoint acknowledgement reuses this confirmed outcome.
+        if (!completed) await finish(await execute(), null);
       });
-
-      await step.do("record-completion", options, () =>
-        finish(z.json().parse(JSON.parse(result)), null),
-      );
     } catch (error) {
       await step.do("record-failure", options, () =>
         finish(null, "Cloudflare could not complete the app operation"),
