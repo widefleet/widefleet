@@ -30,7 +30,9 @@ export const proxyIdentity = accessContext.extend({
 });
 
 export const issuer = (provider: z.infer<typeof companyProvider>) =>
-  provider.type === "entra" ? `${provider.authority}/${provider.tenantId}/v2.0` : provider.issuer;
+  provider.type === "entra"
+    ? `${provider.authority}/${provider.tenantId}/v2.0`
+    : provider.issuer.replace(/\/$/, "");
 
 const graphGroups = async (accessToken: string) => {
   const collected = new Set<string>();

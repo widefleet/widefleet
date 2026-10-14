@@ -78,7 +78,7 @@ export const createAuthentication = async (configuration: AuthConfiguration, log
                 providerId: "company",
                 clientId: configuration.clientId,
                 clientSecret: configuration.clientSecret,
-                discoveryUrl: `${issuer(configuration.provider).replace(/\/$/, "")}/.well-known/openid-configuration`,
+                discoveryUrl: `${issuer(configuration.provider)}/.well-known/openid-configuration`,
                 requireIdTokenVerification: true,
                 redirectURI: configuration.redirectUrl,
                 disableProviderLogout: true,

@@ -204,12 +204,20 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
         external: ["node:*"],
       });
       worker = await start();
+      sessionCookies = cookieHeader((await login()).headers.getSetCookie());
     }, 30_000);
 
-    beforeEach(() => {
+    beforeEach(async () => {
       idp.settings.failure = "";
       idp.settings.available = true;
       idp.settings.name = "Example User";
+      idp.settings.entra = false;
+      idp.settings.groups = ["accounting"];
+      idp.settings.graphFailure = "";
+      idp.graphRequests.length = 0;
+      configuration.provider.issuer = idp.origin;
+      await worker.stop();
+      worker = await start();
     });
     afterAll(async () => {
       await worker?.stop();
@@ -222,7 +230,6 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
       const result = await login();
       const cookies = result.headers.getSetCookie();
 
-      sessionCookies = cookieHeader(cookies);
       const session = cookies.filter((value) => value.includes(".session_"));
 
       expect(session.length).toBeGreaterThanOrEqual(2);
@@ -239,8 +246,26 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
 
       expect(cookies.some((value) => value.includes("account_data"))).toBe(false);
       expect(
-        (await request("https://ledger.apps.example.test", { headers: { cookie: sessionCookies } }))
-          .status,
+        (
+          await request("https://ledger.apps.example.test", {
+            headers: { cookie: cookieHeader(cookies) },
+          })
+        ).status,
+      ).toBe(200);
+    });
+
+    it("accepts a configured issuer with a trailing slash", async () => {
+      configuration.provider.issuer = `${idp.origin}/`;
+      await worker.stop();
+      worker = await start();
+      const signedIn = await login();
+
+      expect(
+        (
+          await request("https://ledger.apps.example.test", {
+            headers: { cookie: cookieHeader(signedIn.headers.getSetCookie()) },
+          })
+        ).status,
       ).toBe(200);
     });
 
@@ -600,7 +625,7 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
       ).toBe(false);
     });
 
-    it("resolves Entra overage groups through paginated Graph and carries them across restart", async () => {
+    const useEntra = async () => {
       await worker.stop();
       idp.settings.entra = true;
       idp.settings.groups = Array.from(
@@ -608,6 +633,10 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
         (_, index) => `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
       );
       worker = await start(true);
+    };
+
+    it("resolves Entra overage groups through paginated Graph and carries them across restart", async () => {
+      await useEntra();
       const result = await login("https://welcome.apps.example.test");
       const cookies = result.headers.getSetCookie();
 
@@ -633,6 +662,7 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
     it.each(["tenant", "graph-unavailable", "graph-redirect"])(
       "fails closed for invalid Entra identity or group lookup: %s",
       async (failure) => {
+        await useEntra();
         idp.settings.failure = failure === "tenant" ? failure : "";
         idp.settings.graphFailure = failure.replace("graph-", "");
         const flow = await begin("https://welcome.apps.example.test");
