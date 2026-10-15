@@ -135,6 +135,11 @@ export default {
 
     if (!app) return new Response("App is not published", { status: 404 });
 
+    const authenticatedApp = request.headers.get("x-widefleet-app-id");
+
+    if (authenticatedApp && authenticatedApp !== app.appId)
+      return new Response("App authorization is being updated", { status: 503 });
+
     if (url.pathname === "/.well-known/widefleet/ready") {
       await run(app, environment, context, (worker) =>
         worker.getEntrypoint<Events>("Events").ready(),

@@ -3,7 +3,6 @@ import { companyProvider, identitySettingsInput } from "@platform/contracts";
 import { configurationSchema } from "../src/lib/server/config.ts";
 import { managementProviders } from "../src/lib/server/auth-options.ts";
 import { companyAccountProvider, companyIdentity } from "../src/lib/server/company-identity.ts";
-import { appSsoConfiguration } from "../tools/edge-configuration.ts";
 import { installationSettings } from "./installation/settings.ts";
 
 const infrastructure = configurationSchema.parse({
@@ -29,11 +28,6 @@ describe("company identity settings", () => {
       clientId: "client",
       requireIdTokenVerification: true,
     });
-    expect(appSsoConfiguration(identity.provider, "apps", "/secret").providers[0]).toMatchObject({
-      provider: "entra-id",
-      scope: "openid profile email User.Read",
-      clientID: "apps",
-    });
   });
 
   it("uses generic OIDC for management and app sign-in, with issuer-scoped accounts", () => {
@@ -51,15 +45,6 @@ describe("company identity settings", () => {
       clientId: "client",
       discoveryUrl: "https://login.example.test/realm/company/.well-known/openid-configuration",
       requireIdTokenVerification: true,
-    });
-    const proxy = appSsoConfiguration(identity.provider, "apps", "/secret");
-    expect(proxy.providers[0]).toMatchObject({
-      provider: "oidc",
-      oidcConfig: { groupsClaim: "roles" },
-    });
-    expect(proxy.injectResponseHeaders).toContainEqual({
-      name: "X-Auth-Request-User",
-      values: [{ claimSource: { claim: "sub" } }],
     });
 
     const other = companyIdentity.parse({

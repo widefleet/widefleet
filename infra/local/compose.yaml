@@ -101,20 +101,20 @@ services:
       interval: 1s
       timeout: 3s
       retries: 30
-  oauth2-proxy:
-    image: quay.io/oauth2-proxy/oauth2-proxy:v7.15.5@sha256:8498b0d0ef0a7b29686414000a08aee467f02d0299c9ed1e006a8f33fc017916
+  auth-proxy:
+    <<: *local
     network_mode: service:proxy
-    command:
-      - --config=/config/options.cfg
-      - --alpha-config=/config/oauth2-proxy.json
-      - --cookie-domain=.apps.localhost
-      - --whitelist-domain=.apps.localhost:25453
-      - --redirect-url=https://auth.apps.localhost:25453/oauth2/callback
+    command: ["node", "tools/sso-supervisor.ts"]
     environment:
-      OAUTH2_PROXY_COOKIE_SECRET: bG9jYWwtZGVtby1vbmx5LW5vdC1mb3ItcmVhbC11c2U=
-    volumes:
-      - ${WIDEFLEET_LOCAL_DATA}:/config:ro
-      - ${WIDEFLEET_LOCAL_DATA}/client-secret:/run/secrets/app_entra_client_secret:ro
+      <<: *environment
+      PROXY_RUNTIME_DIRECTORY: /data/auth-runtime
+      AUTH_PROXY_WORKER: /workspace/packages/auth-proxy/dist/worker.js
+      CELLD_BUCKET: s3://local-fleets/auth-proxy
+      S3_ENDPOINT: http://storage:9000
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: local-demo
+      AWS_SECRET_ACCESS_KEY: local-demo-only
+    stop_grace_period: 45s
   agent:
     <<: *local
     network_mode: service:proxy
@@ -135,6 +135,7 @@ services:
       PLATFORM_TRUSTED_CONTAINERS: widefleet-local-proxy,widefleet-local-storage
       PLATFORM_PROXY_URL: https://widefleet-local-proxy:25453
       PLATFORM_APP_AUTH_URL: http://127.0.0.1:4180/
+      PLATFORM_AUTH_KEY_FILE: /data/platform/auth/control-token
       PLATFORM_RUNTIME_PLATFORM_URL: http://widefleet-local-proxy:25450
     volumes:
       - ${WIDEFLEET_LOCAL_DATA}:/data

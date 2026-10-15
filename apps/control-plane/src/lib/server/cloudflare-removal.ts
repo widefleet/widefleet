@@ -13,6 +13,7 @@ import { createCloudflareEvents } from "./cloudflare-events.ts";
 import { retryable } from "./cloudflare-deployment.ts";
 import { apps, artifacts, cloudflareOperations } from "./schema.ts";
 import { InvalidOperation } from "./errors.ts";
+import { removeAuthRoute } from "./cloudflare-auth-proxy.ts";
 
 export const createCloudflareRemover = (bindings: CloudflareBindings, transport = fetch) => {
   const configuration = z
@@ -65,7 +66,11 @@ export const createCloudflareRemover = (bindings: CloudflareBindings, transport 
           if (entry && !("deleted" in entry) && entry.appId !== target.id)
             throw new Error("Hostname belongs to another app");
 
-          if (entry && "deleted" in entry && entry.appId === target.id) return true;
+          if (entry && "deleted" in entry && entry.appId === target.id) {
+            await removeAuthRoute(bindings, target.hostname);
+
+            return true;
+          }
 
           // Keep this fence after cleanup. Removing the key would allow a delayed
           // first publication (If-None-Match: *) to resurrect the deleted app.
@@ -79,6 +84,7 @@ export const createCloudflareRemover = (bindings: CloudflareBindings, transport 
           );
 
           if (!written) throw new Error("App publication changed during removal");
+          await removeAuthRoute(bindings, target.hostname);
 
           return true;
         }),
@@ -250,7 +256,6 @@ export const executeCloudflareRemoval = async (
       for (const prefix of [
         `apps/${target.id}/`,
         `versions/${target.id}/`,
-        `access/${target.id}/`,
         `workflow-versions/${target.id}/`,
       ])
         for (let page = 0; ; page++) {

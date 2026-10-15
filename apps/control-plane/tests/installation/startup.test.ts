@@ -114,7 +114,7 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")("First container 
     };
 
     try {
-      await compose("up", "-d", "--wait", "control-plane", "oauth2-proxy", "proxy");
+      await compose("up", "-d", "--wait", "control-plane", "proxy");
       const first = await inspect();
       expect(first).toMatchObject({ setup: 200, form: true, mode: 0o600, authOwner: 1000 });
       const ca = await readFile(certificates.ca, "utf8");

@@ -61,7 +61,7 @@ case "${1:-up}" in
     "${compose[@]}" run --rm -T --no-deps tools node --env-file=/data/identity.env tools/initialize-storage.ts
     "${compose[@]}" up -d --wait control-plane
     local_tool seed
-    "${compose[@]}" up -d --force-recreate oauth2-proxy
+    "${compose[@]}" up -d --force-recreate auth-proxy
     "${compose[@]}" up -d agent
     for container in "${local_fleets[@]}"; do
       if docker container inspect "$container" >/dev/null 2>&1; then
@@ -73,7 +73,7 @@ case "${1:-up}" in
     local_tool deploy
     echo 'Management: http://localhost:25450 (choose admin@example.test)'
     echo 'App: https://team-notes.apps.localhost:25453'
-    echo 'App SSO: https://auth.apps.localhost:25453/oauth2/sign_in'
+    echo 'Sign in by opening the app.'
     echo 'The two local HTTPS hosts use a self-signed development certificate.'
     ;;
   deploy)

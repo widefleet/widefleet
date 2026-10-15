@@ -94,11 +94,14 @@ describe.runIf(process.env["RUN_IMAGE_TESTS"] === "1")("release container images
         "node",
         "--input-type=module",
         "--eval",
-        'import { readFile } from "node:fs/promises"; console.log(JSON.stringify({ middleware: JSON.parse(await readFile("/installation/config/routes/app-auth.yaml", "utf8")), proxy: JSON.parse(await readFile("/installation/config/traefik.json", "utf8")) }));',
+        'import { readFile } from "node:fs/promises"; console.log(JSON.stringify({ routes: JSON.parse(await readFile("/installation/config/routes/platform.yaml", "utf8")), proxy: JSON.parse(await readFile("/installation/config/traefik.json", "utf8")) }));',
       ]);
 
       const configuration = z.unknown().parse(JSON.parse(rendered.stdout));
-      expect(configuration).toHaveProperty("middleware.http.middlewares");
+      expect(configuration).toHaveProperty(
+        "routes.http.services.app-sso.loadBalancer.servers.0.url",
+        "http://auth-proxy:4180",
+      );
       expect(configuration).toHaveProperty("proxy.providers.file.directory", "/config/routes");
       expect(configuration).not.toHaveProperty("proxy.certificatesResolvers");
 

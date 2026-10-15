@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { z } from "zod";
 import { activationStatus, identitySettingsInput } from "@platform/contracts";
-import { appSsoConfiguration } from "../../../tools/edge-configuration.ts";
+import { authConfiguration } from "@platform/auth-proxy";
 import type { Configuration } from "./config.ts";
 import { readOptionalFile, writePrivateFile } from "./installation-files.ts";
 
@@ -11,11 +11,7 @@ export { appCallbackUrl } from "./app-sign-in.ts";
 
 export const authBundle = z.strictObject({
   revision: z.string(),
-  proxy: z.record(z.string(), z.unknown()),
-  clientSecret: z.string().min(1),
-  cookieSecret: z.string().min(1),
-  redirectUrl: z.url(),
-  domain: z.string().min(1),
+  configuration: authConfiguration,
 });
 
 export const buildAuthBundle = (
@@ -24,16 +20,17 @@ export const buildAuthBundle = (
   clientSecret: string,
   cookieSecret: string,
 ) => {
-  const content = {
-    proxy: appSsoConfiguration(identity.provider, identity.apps.clientId, "/runtime/client-secret"),
+  const content = authConfiguration.parse({
+    provider: identity.provider,
+    clientId: identity.apps.clientId,
     clientSecret,
     cookieSecret,
     redirectUrl: appCallbackUrl(configuration),
     domain: configuration.APP_DOMAIN,
-  };
+  });
 
   return {
-    ...content,
+    configuration: content,
     revision: createHash("sha256").update(JSON.stringify(content)).digest("hex"),
   };
 };
@@ -60,10 +57,4 @@ export const readActivation = async (configuration: Configuration) => {
     });
 
   return activationStatus.parse(JSON.parse(source));
-};
-
-export const readActiveAuthBundle = async (configuration: Configuration) => {
-  const source = await readOptionalFile(join(configuration.PLATFORM_AUTH_DIRECTORY, "active.json"));
-
-  return source === null ? null : authBundle.parse(JSON.parse(source));
 };

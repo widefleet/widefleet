@@ -5,9 +5,12 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./publication": "./src/publication.ts",
+    "./worker": "./src/worker.ts"
   },
   "scripts": {
+    "build": "node build.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

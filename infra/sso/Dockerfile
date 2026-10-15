@@ -7,16 +7,19 @@ COPY patches ./patches
 RUN pnpm fetch
 COPY . .
 RUN pnpm install --offline --frozen-lockfile \
+    && pnpm --filter @platform/auth-proxy build \
     && pnpm exec esbuild apps/control-plane/tools/sso-supervisor.ts --bundle --platform=node --format=esm --outfile=/supervisor.mjs
 
-FROM quay.io/oauth2-proxy/oauth2-proxy:v7.15.5@sha256:8498b0d0ef0a7b29686414000a08aee467f02d0299c9ed1e006a8f33fc017916 AS upstream
 FROM node:26.8.2-bookworm-slim@sha256:cd9f682fa2885cd1056e830424764158570061c59736a1da836bc3d73df095ae
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl gzip \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=upstream /bin/oauth2-proxy /bin/oauth2-proxy
+RUN curl --fail --location --proto '=https' https://github.com/denoland/celld/releases/download/v0.6.2/celld-x86_64-unknown-linux-gnu.gz \
+    | gzip -dc > /usr/local/bin/celld \
+    && echo '0c9ef440f566156176c3d538e4a3c4034f43775a5851f3ff862938533b5aceac  /usr/local/bin/celld' | sha256sum --check \
+    && chmod 755 /usr/local/bin/celld
 COPY --from=build /supervisor.mjs /supervisor.mjs
+COPY --from=build /source/packages/auth-proxy/dist/worker.js /worker.js
 COPY LICENSE /usr/share/licenses/widefleet/LICENSE
-COPY infra/oauth2-proxy/options.cfg /config/options.cfg
 RUN mkdir -p /auth /runtime && chown node:node /auth /runtime && chmod 700 /auth /runtime
 USER node
 EXPOSE 4180

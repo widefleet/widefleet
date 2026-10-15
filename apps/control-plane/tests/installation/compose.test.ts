@@ -81,7 +81,7 @@ describe.runIf(process.env["RUN_INSTALLATION_TESTS"] === "1")(
     it("starts without identity settings and separates shared proxy state from the database", async () => {
       const { services } = await render(["compose.base", "compose.azure"]);
       const control = serviceSchema.parse(services["control-plane"]);
-      const sso = serviceSchema.parse(services["oauth2-proxy"]);
+      const sso = serviceSchema.parse(services["auth-proxy"]);
       expect(configurationSchema.parse(control.environment).IDENTITY).toBeNull();
       expect(control.environment).not.toHaveProperty("ENTRA_CLIENT_SECRET");
       expect(sso.environment).not.toHaveProperty("DATABASE_URL");
@@ -132,7 +132,9 @@ describe.runIf(process.env["RUN_INSTALLATION_TESTS"] === "1")(
         expect(Boolean(services["storage"])).toBe(storage === "rustfs");
         expect(Boolean(control.depends_on["storage"])).toBe(storage === "rustfs");
         expect(agent.environment["PLATFORM_TRUSTED_CONTAINERS"]).toBe(
-          storage === "rustfs" ? "app-platform-proxy,app-platform-storage" : "app-platform-proxy",
+          storage === "rustfs"
+            ? "app-platform-proxy,app-platform-auth-proxy,app-platform-storage"
+            : "app-platform-proxy,app-platform-auth-proxy",
         );
         expect(configuration.TLS_MODE).toBe(tls);
         expect(agent.environment["TLS_MODE"] ?? "provided").toBe(tls);
@@ -201,7 +203,7 @@ describe.runIf(process.env["RUN_INSTALLATION_TESTS"] === "1")(
         },
       );
 
-      for (const name of ["control-plane", "agent"]) {
+      for (const name of ["control-plane", "agent", "auth-proxy"]) {
         const service = serviceSchema.parse(services[name]);
         expect(service.environment["AZURE_CLIENT_ID"]).toBe(installationSettings.ENTRA_CLIENT_ID);
         expect(service.environment["AZURE_STORAGE_ACCESS_KEY"] ?? undefined).toBeUndefined();

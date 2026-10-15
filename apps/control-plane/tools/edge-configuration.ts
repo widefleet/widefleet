@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { companyProvider, providerIssuer } from "../src/lib/server/company-identity.ts";
 
 const hostname = z.string().regex(/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/);
 
@@ -49,51 +48,6 @@ export const traefikConfiguration = (configuration: z.infer<typeof edgeInfrastru
         },
       },
     },
-  };
-};
-
-export const appSsoConfiguration = (
-  provider: z.infer<typeof companyProvider>,
-  clientId: string,
-  clientSecretFile: string,
-) => {
-  const subject = provider.type === "entra" ? "oid" : "sub";
-  const name = provider.type === "entra" ? "name" : provider.nameClaim;
-
-  return {
-    server: { bindAddress: "0.0.0.0:4180" },
-    upstreamConfig: {
-      upstreams: [{ id: "authenticated", path: "/", static: true, staticCode: 202 }],
-    },
-    providers: [
-      {
-        id: "company",
-        provider: provider.type === "entra" ? "entra-id" : "oidc",
-        name: provider.label,
-        clientID: clientId,
-        clientSecretFile,
-        scope:
-          provider.type === "entra" ? "openid profile email User.Read" : "openid profile email",
-        code_challenge_method: "S256",
-        skipClaimsFromProfileURL: true,
-        additionalClaims: [subject, name],
-        oidcConfig: {
-          issuerURL: providerIssuer(provider),
-          groupsClaim: provider.type === "entra" ? "groups" : provider.groupsClaim,
-          emailClaim: provider.type === "entra" ? "email" : provider.emailClaim,
-          insecureSkipNonce: false,
-          insecureSkipIssuerVerification: false,
-          insecureAllowUnverifiedEmail: false,
-        },
-      },
-    ],
-    injectRequestHeaders: [],
-    injectResponseHeaders: [
-      ["X-Auth-Request-User", subject],
-      ["X-Auth-Request-Preferred-Username", name],
-      ["X-Auth-Request-Email", "email"],
-      ["X-Auth-Request-Groups", "groups"],
-    ].map(([name, claim]) => ({ name, values: [{ claimSource: { claim } }] })),
   };
 };
 
@@ -147,7 +101,7 @@ export const edgeRoutes = (configuration: z.infer<typeof edgeInfrastructure>) =>
       },
       services: {
         management: { loadBalancer: { servers: [{ url: "http://control-plane:3000" }] } },
-        "app-sso": { loadBalancer: { servers: [{ url: "http://oauth2-proxy:4180" }] } },
+        "app-sso": { loadBalancer: { servers: [{ url: "http://auth-proxy:4180" }] } },
       },
     },
   };

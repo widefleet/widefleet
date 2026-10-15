@@ -24,6 +24,7 @@ import {
 import { cloudflareRemovalId } from "../../src/lib/server/cloudflare-removal-command.ts";
 import { user } from "../../src/lib/server/auth-schema.ts";
 import { initializeCloudflareFleet } from "../../src/lib/server/fleets.ts";
+import { createCloudflareAppSignIn } from "../../src/lib/server/app-sign-in-cloudflare.ts";
 import {
   apps,
   appGrants,
@@ -568,6 +569,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         join(directory, "fixture.ts"),
         `
       import runtime from './runtime.js';
+      import authProxy from ${JSON.stringify(fileURLToPath(import.meta.resolve("@platform/auth-proxy/worker")))};
       import {WorkerEntrypoint} from 'cloudflare:workers';
       export class WIDEFLEET_CONNECTOR extends WorkerEntrypoint { #value = 'default-connector'; read() { return this.#value; } }
       export class Reader extends WorkerEntrypoint { read() { return 'named-connector'; } }
@@ -597,6 +599,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       };
       export default { ...runtime, async fetch(request, env, ctx) {
         const url = new URL(request.url);
+        if (url.pathname.startsWith('/.well-known/widefleet/auth/')) return authProxy.fetch(request, env);
         if (url.pathname === '/.well-known/widefleet/runtime') {
           if (request.headers.get('authorization') !== 'Bearer ' + env.APP_RUNTIME_TOKEN) return new Response(null, {status:403});
           return nativeFetch(${JSON.stringify(apiOrigin)} + '/fixture-runtime-version', {headers:{authorization:'Bearer local-provisioning-token'}});
@@ -744,9 +747,8 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         }
         if (url.hostname === 'fixture' && url.pathname === '/host') {
           const obj = await env.ARTIFACTS.get('hosts/' + url.searchParams.get('hostname') + '.json');
-          const key = obj?.customMetadata?.widefleet_access;
-          const access = key ? await env.ARTIFACTS.get(key) : null;
-          return Response.json(obj ? { body: await obj.json(), access: access ? await access.text() : null } : null);
+          const route = await env.AUTH_CONFIG.get('apps/' + url.searchParams.get('hostname'), 'json');
+          return Response.json(obj ? { body: await obj.json(), access: route ? JSON.stringify(route.access) : null } : null);
         }
         if (url.hostname === 'fixture' && url.pathname === '/workflow') {
           const instance = await (url.searchParams.has('app-operation') ? env.APP_OPERATIONS : env.DEPLOYMENTS).get(url.searchParams.get('id'));
@@ -779,6 +781,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
             CLOUDFLARE_API_TOKEN: "local-provisioning-token",
             APP_RUNTIME_NAME: "fixture-runtime",
             APP_RUNTIME_TOKEN: token,
+            AUTH_PROXY_KEY: "local-deployment-auth-proxy-key-never-deploy",
             WIDEFLEET_CONTROL_TOKEN: token,
             WIDEFLEET_CONFIGURATION: JSON.stringify({ source: "r2" }),
           },
@@ -812,13 +815,16 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
             ],
           },
           migrations: [{ tag: "v1", new_sqlite_classes: ["CloudflareWorkflowCatalog"] }],
-          kv_namespaces: [first, preview].map((entry) => ({
-            binding: `B_${resourceName(entry.appId, "kv", "cache")}`,
-            id: createHash("sha256")
-              .update(resourceName(entry.appId, "kv", "cache"))
-              .digest("hex")
-              .slice(0, 32),
-          })),
+          kv_namespaces: [
+            { binding: "AUTH_CONFIG", id: "auth-config" },
+            ...[first, preview].map((entry) => ({
+              binding: `B_${resourceName(entry.appId, "kv", "cache")}`,
+              id: createHash("sha256")
+                .update(resourceName(entry.appId, "kv", "cache"))
+                .digest("hex")
+                .slice(0, 32),
+            })),
+          ],
           queues: {
             producers: [first, preview].map((entry) => ({
               binding: `B_${resourceName(entry.appId, "queue", "jobs")}`,
@@ -832,6 +838,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           },
           services: [
             { binding: "APP_RUNTIME", service: "widefleet-deployment-test" },
+            { binding: "AUTH_PROXY", service: "widefleet-deployment-test" },
             ...["default", "Reader"].map((entrypoint) => {
               const binding = connectorServiceBinding(first.fleetId, "app-connector", entrypoint);
 
@@ -872,6 +879,36 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       await environment?.close();
 
       if (directory) await rm(directory, { recursive: true, force: true });
+    });
+
+    it("publishes hosted sign-in configuration explicitly and keeps reads from replacing it", async () => {
+      const service = createCloudflareAppSignIn(environment.configuration, {
+        AUTH_PROXY: { fetch: (url, init) => worker.fetch(url, init) },
+        AUTH_PROXY_KEY: "local-deployment-auth-proxy-key-never-deploy",
+        APP_COOKIE_SECRET: Buffer.alloc(32, 1).toString("base64url"),
+      });
+
+      const client = {
+        clientId: "fixture-app-client",
+        secret: { type: "value", value: "fixture-client-secret" },
+      };
+
+      const identity = contract.identitySettingsInput.parse({
+        provider: { type: "oidc", issuer: "https://identity.example.test", label: "Fixture" },
+        management: client,
+        apps: client,
+      });
+
+      const original = await service.publish(identity, "fixture-client-secret", false);
+      expect(await service.status()).toMatchObject({ state: "waiting", revision: "" });
+      expect(await service.publish(identity, "fixture-client-secret", true)).toBe(original);
+      expect(await service.status()).toMatchObject({ state: "active", revision: original });
+
+      const rotated = await service.publish(identity, "rotated-client-secret", true);
+      expect(rotated).not.toBe(original);
+      expect(await service.publish(identity, "fixture-client-secret", false)).toBe(original);
+      expect(await service.status()).toMatchObject({ state: "active", revision: rotated });
+      expect(await service.plan(identity)).toMatchObject({ restartRequired: false });
     });
 
     it("provisions, verifies and activates apps with isolated native D1/R2 data", async () => {
@@ -916,6 +953,20 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       const isolated = await worker.fetch(`https://${preview.hostname}/resources`);
       expect(await isolated.json()).toEqual({ rows: [], file: null });
     }, 100_000);
+
+    it("rejects an auth route for a different app reusing the hostname", async () => {
+      const mismatched = await worker.fetch(`https://${first.hostname}/resources`, {
+        headers: { "x-widefleet-app-id": preview.appId },
+      });
+
+      expect(mismatched.status).toBe(503);
+
+      const matching = await worker.fetch(`https://${first.hostname}/resources`, {
+        headers: { "x-widefleet-app-id": first.appId },
+      });
+
+      expect(matching.status).toBe(200);
+    });
 
     it("applies access rules to the app and its preview without replacing their code", async () => {
       const original = (await host(first.hostname))?.body;

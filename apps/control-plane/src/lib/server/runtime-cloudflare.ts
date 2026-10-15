@@ -9,6 +9,7 @@ import { createSettingsService } from "./settings.ts";
 import { createR2Storage } from "./storage/r2.ts";
 import { createCloudflareLogs } from "./cloudflare-logs.ts";
 import { createCloudflareExecution } from "./cloudflare-execution.ts";
+import { createCloudflareAppSignIn } from "./app-sign-in-cloudflare.ts";
 
 export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
   const configuration = readCloudflareConfiguration(bindings);
@@ -19,7 +20,7 @@ export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
     configuration,
     database.db,
     configuration.PLATFORM_ENCRYPTION_KEY,
-    null,
+    createCloudflareAppSignIn(configuration, bindings),
   );
 
   const reporting = createReporting(

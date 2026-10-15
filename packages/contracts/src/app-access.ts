@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-// OAuth2 Proxy separates group IDs with commas. Never let one ID become several
-// alternatives, or disappear when it parses the generated restriction.
+// The internal identity header separates group IDs with commas. Keep each ID
+// unambiguous when the app reads its verified identity.
 export const appAccessGroup = z
   .string()
   .trim()

@@ -8,29 +8,39 @@ import { z } from "zod";
 const execute = promisify(execFile);
 
 // Node can strip workspace TypeScript, but not TypeScript copied into node_modules by deploy.
-const contractsDirectory = new URL("../../../packages/contracts/", import.meta.url);
+for (const name of ["contracts", "auth-proxy"]) {
+  const directory = new URL(`../../../packages/${name}/`, import.meta.url);
+  const manifestPath = new URL("package.json", directory);
 
-const contractsManifest = new URL("package.json", contractsDirectory);
+  const manifest = z
+    .object({ exports: z.record(z.string(), z.string()), files: z.array(z.string()).optional() })
+    .passthrough()
+    .parse(JSON.parse(await readFile(manifestPath, "utf8")));
 
-const contracts = z
-  .object({ exports: z.object({ ".": z.string() }), files: z.array(z.string()).optional() })
-  .passthrough()
-  .parse(JSON.parse(await readFile(contractsManifest, "utf8")));
+  const entryPoints = Object.fromEntries(
+    Object.entries(manifest.exports).map(([name, source]) => [
+      name === "." ? "index" : name.slice(2),
+      fileURLToPath(new URL(source, directory)),
+    ]),
+  );
 
-await build({
-  entryPoints: [fileURLToPath(new URL("src/index.ts", contractsDirectory))],
-  outfile: fileURLToPath(new URL("dist/index.js", contractsDirectory)),
-  bundle: true,
-  platform: "node",
-  format: "esm",
-  packages: "external",
-});
-
-contracts.exports["."] = "./dist/index.js";
-
-contracts.files = ["dist", "src"];
-
-await writeFile(contractsManifest, `${JSON.stringify(contracts, null, 2)}\n`);
+  await build({
+    entryPoints,
+    outdir: fileURLToPath(new URL("dist/", directory)),
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    packages: "external",
+  });
+  manifest.exports = Object.fromEntries(
+    Object.keys(manifest.exports).map((name) => [
+      name,
+      `./dist/${name === "." ? "index" : name.slice(2)}.js`,
+    ]),
+  );
+  manifest.files = ["dist", "src"];
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
 
 const docs = z
   .object({ dependencies: z.object({ blume: z.string() }) })

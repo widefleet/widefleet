@@ -30,12 +30,14 @@ services:
       timeout: 5s
       retries: 6
 
-  oauth2-proxy:
+  auth-proxy:
+    container_name: app-platform-auth-proxy
     image: ${PLATFORM_SSO_IMAGE:?Load the release images environment file}
     restart: unless-stopped
     volumes:
       - app-auth:/auth
-    networks: [edge]
+    networks: [management, edge]
+    stop_grace_period: 45s
 
   proxy:
     image: traefik:v3.7.13@sha256:24841fe2de7304c149343d877d2923b4c8800a38ba015dea9174c23b20e344a0
@@ -68,11 +70,12 @@ services:
       APP_DOMAIN: ${APP_DOMAIN:?Set APP_DOMAIN}
       CELLD_BINARY: /usr/local/bin/celld
       PLATFORM_RUNTIME_IMAGE: ${PLATFORM_RUNTIME_IMAGE:?Load the release images environment file}
-      PLATFORM_TRUSTED_CONTAINERS: app-platform-proxy
+      PLATFORM_TRUSTED_CONTAINERS: app-platform-proxy,app-platform-auth-proxy
     volumes:
       - ${DOCKER_SOCKET_FILE:?Set the Docker socket path}:/var/run/docker.sock
       - ${PLATFORM_DATA_DIRECTORY}/agent:/state
       - edge-config:/config
+      - app-auth:/auth:ro
     networks: [management]
     stop_grace_period: 45s
 

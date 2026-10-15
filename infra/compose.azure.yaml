@@ -6,6 +6,10 @@ x-azure: &azure
   AZURE_FEDERATED_TOKEN_FILE:
 
 services:
+  auth-proxy:
+    environment:
+      <<: *azure
+      CELLD_BUCKET: az://${FLEET_AZURE_CONTAINER}/auth-proxy
   control-plane:
     environment:
       <<: *azure

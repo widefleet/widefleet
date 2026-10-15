@@ -793,28 +793,13 @@ pub async fn check_candidate(
 
 pub async fn route(configuration: &Configuration, job: &Job) -> Result<()> {
     tokio::fs::create_dir_all(&configuration.routing_directory).await?;
-    let runtime = name(job);
     let name = format!("platform-app-{}", job.app_id()?);
     let tls = route_tls(configuration, job.hostname()?)?;
-    let auth = crate::access::middleware(configuration, job)?;
-    let marker = crate::access::marker(job)?;
-    let auth_name = format!("{name}-auth");
-    let revision_name = format!("{name}-access-revision");
-    let mut route = value!({ "http": {
-        "routers": { &name: { "rule": format!("Host(`{}`)", job.hostname()?), "entryPoints": ["websecure"], "tls": tls, "service": &name, "middlewares": ["clear-client-identity@file", format!("{revision_name}@file"), format!("{auth_name}@file"), "remove-app-credentials@file"] } },
-        "middlewares": {
-            &auth_name: auth,
-            &revision_name: { "headers": { "customResponseHeaders": { "X-Widefleet-Access-Revision": marker } } }
-        },
-        "services": { &name: { "loadBalancer": { "servers": [{ "url": format!("http://{runtime}:8080") }] } } },
+    let upstream = crate::access::origin(configuration)?;
+    let route = value!({ "http": {
+        "routers": { &name: { "rule": format!("Host(`{}`)", job.hostname()?), "entryPoints": ["websecure"], "tls": tls, "service": &name } },
+        "services": { &name: { "loadBalancer": { "servers": [{ "url": upstream.as_str() }] } } },
     } });
-    if job
-        .access
-        .as_ref()
-        .is_some_and(|access| access.revision == 0 && access.groups.is_empty())
-    {
-        route["http"]["routers"][&name]["middlewares"] = value!(["app-auth@file"]);
-    }
     let temporary = configuration.routing_directory.join(format!(".{name}.tmp"));
     // JSON is valid YAML; Traefik's file provider discovers .yaml, not .json.
     tokio::fs::write(&temporary, serde_json::to_vec_pretty(&route)?).await?;

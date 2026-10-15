@@ -119,6 +119,7 @@ async fn execute(
             }
         }
         docker::remove(configuration, job).await?;
+        access::remove(configuration, job).await?;
         let Some(packages) = fleet::detach(configuration, job).await? else {
             // An app can be deleted before any native fleet installation succeeds.
             return fleet::remove(configuration, job).await.map(|()| None);
@@ -194,6 +195,7 @@ async fn execute(
         // Confirm access before selecting new app code. A failed proxy probe
         // must not leave a newly serving deployment recorded as the old one.
         if prepared.app.is_some() {
+            access::publish(configuration, job).await?;
             docker::route(configuration, job).await?;
             access::verify(docker, configuration, job).await?;
         }

@@ -13,6 +13,9 @@ import {
 import { initializeCloudflareFleet } from "../src/lib/server/fleets.ts";
 import { initializeOrganization } from "../src/lib/server/organization.ts";
 import { createSettingsService } from "../src/lib/server/settings.ts";
+import { z } from "zod";
+import { createCloudflareAppSignIn } from "../src/lib/server/app-sign-in-cloudflare.ts";
+import { appCallbackUrl } from "../src/lib/server/app-sign-in.ts";
 
 const configuration = cloudflareConfigurationSchema.parse(process.env);
 
@@ -42,7 +45,18 @@ try {
         configuration,
         database.db,
         configuration.PLATFORM_ENCRYPTION_KEY,
-        null,
+        createCloudflareAppSignIn(configuration, {
+          ...z
+            .object({ AUTH_PROXY_KEY: z.string().min(32), APP_COOKIE_SECRET: z.string().min(1) })
+            .parse(process.env),
+          AUTH_PROXY: {
+            fetch: (url, init) =>
+              fetch(new URL(new URL(url).pathname, appCallbackUrl(configuration)), {
+                ...init,
+                redirect: "error",
+              }),
+          },
+        }),
       );
 
       await settings.initialize(bootstrap.settings);

@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 import { initializeRuntime } from "../src/lib/server/runtime-initialization.ts";
 import { fileURLToPath } from "node:url";
 import { eq } from "drizzle-orm";
-import { copyFile, open, readFile, rm, writeFile } from "node:fs/promises";
+import { open, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { installationSettings, settingsInput } from "@platform/contracts";
 import { createAuthentication, companyLoginRevision } from "../src/lib/server/auth.ts";
@@ -139,7 +139,7 @@ describe("Platform setup and managed settings", () => {
       ),
     );
 
-    expect(bundle.clientSecret).toBe("private-management-secret");
+    expect(bundle.configuration.clientSecret).toBe("private-management-secret");
     expect(await environment.database.db.select().from(installationSecrets)).toHaveLength(2);
   });
 
@@ -157,37 +157,29 @@ describe("Platform setup and managed settings", () => {
     await environment.settings.setExternalManagement(principal(), false);
   });
 
-  it("requires restart acknowledgement only for changes to proxy options", async () => {
+  it("applies client changes without restarting the auth proxy", async () => {
     const current = await input();
 
     if (!current.identity) throw new Error("Expected configured identity");
-    const directory = environment.configuration.PLATFORM_AUTH_DIRECTORY;
-    await copyFile(join(directory, "desired.json"), join(directory, "active.json"));
     current.identity.apps.secret = { type: "value", value: "rotated-app-secret" };
-    const original = structuredClone(current);
-    expect(await environment.settings.plan(principal(), current)).toMatchObject({
-      restartRequired: false,
-    });
     current.identity.apps.clientId = "replacement-app-client";
     expect(await environment.settings.plan(principal(), current)).toMatchObject({
-      restartRequired: true,
+      restartRequired: false,
     });
-    await expect(
-      environment.settings.update(principal(), { ...current, acknowledgeRestart: false }, true),
-    ).rejects.toMatchObject({ code: "CONFLICT" });
-    await environment.settings.update(principal(), { ...current, acknowledgeRestart: true }, true);
+    await environment.settings.update(principal(), { ...current, acknowledgeRestart: false }, true);
     expect((await input()).identity?.apps.clientId).toBe("replacement-app-client");
-    // Simulate a failed activation: the saved settings changed, but the active proxy did not.
-    expect(await environment.settings.plan(principal(), await input())).toMatchObject({
-      restartRequired: true,
-    });
-    expect(await environment.settings.plan(principal(), original)).toMatchObject({
-      restartRequired: false,
-    });
-    await copyFile(join(directory, "desired.json"), join(directory, "active.json"));
-    expect(await environment.settings.plan(principal(), await input())).toMatchObject({
-      restartRequired: false,
-    });
+
+    const bundle = authBundle.parse(
+      JSON.parse(
+        await readFile(
+          join(environment.configuration.PLATFORM_AUTH_DIRECTORY, "desired.json"),
+          "utf8",
+        ),
+      ),
+    );
+
+    expect(bundle.configuration.clientId).toBe("replacement-app-client");
+    expect(bundle.configuration.clientSecret).toBe("rotated-app-secret");
   });
 
   it("cannot overwrite a completed update with an older delayed publication", async () => {
@@ -229,8 +221,7 @@ describe("Platform setup and managed settings", () => {
         JSON.parse(await readFile(join(directory, "desired.json"), "utf8")),
       );
 
-      expect(bundle).toHaveProperty("proxy.providers.0.clientID", "latest-client");
-      await copyFile(join(directory, "desired.json"), join(directory, "active.json"));
+      expect(bundle).toHaveProperty("configuration.clientId", "latest-client");
     } finally {
       await writer.close();
       await older;

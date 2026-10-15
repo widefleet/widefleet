@@ -20,4 +20,4 @@ services:
       storage: { condition: service_started }
   agent:
     environment:
-      PLATFORM_TRUSTED_CONTAINERS: app-platform-proxy,app-platform-storage
+      PLATFORM_TRUSTED_CONTAINERS: app-platform-proxy,app-platform-auth-proxy,app-platform-storage

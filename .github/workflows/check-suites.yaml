@@ -67,6 +67,8 @@ jobs:
       - name: Build and bundle the Cloudflare control plane
         if: matrix.suite == 'cloudflare'
         run: |
+          pnpm --filter @platform/auth-proxy build
+          pnpm --filter @platform/control-plane exec wrangler deploy --config ../../packages/auth-proxy/wrangler.jsonc --dry-run --outdir ../../packages/auth-proxy/dist/cloudflare-bundle
           pnpm --filter @platform/control-plane build:cloudflare
           pnpm --filter @platform/control-plane exec wrangler deploy --dry-run --outdir dist/cloudflare/bundle
           pnpm --filter @platform/control-plane exec wrangler deploy --config ../../packages/app-runtime/wrangler.jsonc --dry-run --outdir ../../packages/app-runtime/dist/cloudflare-bundle
@@ -120,7 +122,7 @@ jobs:
           cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'type=gha,scope=check-sso-v1,mode=max' || '' }}
       - name: Test packaged SSO configuration
         if: matrix.suite == 'packaged-sso'
-        run: RUN_PACKAGED_EDGE_TESTS=1 pnpm exec vitest run apps/control-plane/tests/installation/packaged-edge.test.ts apps/control-plane/tests/installation/sso-supervisor.test.ts apps/control-plane/tests/installation/sso-tls.test.ts apps/control-plane/tests/installation/startup.test.ts
+        run: RUN_PACKAGED_EDGE_TESTS=1 pnpm exec vitest run apps/control-plane/tests/installation/packaged-edge.test.ts apps/control-plane/tests/installation/sso-supervisor.test.ts apps/control-plane/tests/installation/sso-tls.test.ts apps/control-plane/tests/installation/startup.test.ts apps/control-plane/tests/edge/sso.test.ts
       - name: Install Rust toolchain
         if: matrix.suite == 'rust-runtime'
         run: rustup toolchain install 1.99.0 --profile minimal --component clippy,rustfmt

@@ -1,4 +1,8 @@
 services:
+  auth-proxy:
+    environment:
+      CELLD_BUCKET: gs://${FLEET_GCS_BUCKET}/auth-proxy
+      GOOGLE_APPLICATION_CREDENTIALS:
   control-plane:
     environment:
       ARTIFACT_STORAGE_PROVIDER: gcs
