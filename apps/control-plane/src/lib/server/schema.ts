@@ -135,20 +135,6 @@ export const uploadSessions = pgTable(
   (table) => [index("upload_session_app_idx").on(table.appId)],
 );
 
-export const cloudflareResourceCreations = pgTable(
-  "cloudflare_resource_creation",
-  {
-    scope: text().primaryKey(),
-    id: uuid().notNull(),
-    appId: uuid("app_id")
-      .notNull()
-      .references(() => apps.id, { onDelete: "cascade" }),
-    kind: text({ enum: ["d1", "r2", "kv", "queue"] }).notNull(),
-    name: text().notNull(),
-  },
-  (table) => [index("cloudflare_resource_creation_app_idx").on(table.appId)],
-);
-
 export const artifacts = pgTable("artifact", {
   id: uuid().primaryKey(),
   appId: uuid("app_id")

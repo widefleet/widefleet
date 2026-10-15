@@ -12,7 +12,6 @@ import { updateCloudflareBindings } from "./cloudflare-binding-updates.ts";
 import { createCloudflareEvents } from "./cloudflare-events.ts";
 import { retryable } from "./cloudflare-deployment.ts";
 import { apps, artifacts, cloudflareOperations } from "./schema.ts";
-import { settleCloudflareResourceCreations } from "./cloudflare-resource-creations.ts";
 import { InvalidOperation } from "./errors.ts";
 
 export const createCloudflareRemover = (bindings: CloudflareBindings, transport = fetch) => {
@@ -120,10 +119,6 @@ export const createCloudflareRemover = (bindings: CloudflareBindings, transport 
       return z.object({ result: z.object({ done: z.boolean() }) }).parse(await response.json())
         .result.done;
     },
-    settleCreations: (appId: string) =>
-      withCloudflareDatabase(bindings, ({ db }) =>
-        settleCloudflareResourceCreations(db, appId, provisioner),
-      ),
     inventory: (appId: string) =>
       withCloudflareDatabase(bindings, async ({ db }) => {
         const resources = new Map<string, ReturnType<typeof removalResources>[number]>();
@@ -234,10 +229,6 @@ export const executeCloudflareRemoval = async (
 
         if (done) break;
       }
-
-      await step.do(`settle-creations-${target.id}`, options, () =>
-        retryable(() => runner.settleCreations(target.id)),
-      );
 
       const resources = await step.do(`inventory-${target.id}`, options, () =>
         retryable(() => runner.inventory(target.id)),

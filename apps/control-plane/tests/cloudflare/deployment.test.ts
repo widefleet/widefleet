@@ -27,7 +27,6 @@ import { initializeCloudflareFleet } from "../../src/lib/server/fleets.ts";
 import {
   apps,
   appGrants,
-  cloudflareResourceCreations,
   artifacts,
   connectors,
   cloudflareOperations,
@@ -1955,64 +1954,39 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       await removed(entry.appId);
     }, 60000);
 
-    it("keeps removal pending until a timed-out resource creation is confirmed, including after restart", async () => {
-      const entry = await seedDeployment(environment.database.db, {
-        bindings: [{ type: "d1", name: "DB", database_name: "late" }],
-      });
+    it.each(["absent", "created"])(
+      "removes an app after exhausted creation retries with its resource %s",
+      async (outcome) => {
+        const entry = await seedDeployment(environment.database.db, {
+          bindings: [{ type: "d1", name: "DB", database_name: "late" }],
+        });
 
-      heldDatabaseName = resourceName(entry.appId, "d1", "late");
-      databases.set(heldDatabaseName, crypto.randomUUID());
-      await seed(entry);
+        heldDatabaseName = resourceName(entry.appId, "d1", "late");
+        databases.set(heldDatabaseName, crypto.randomUUID());
+        await seed(entry);
 
-      const before = databaseCreates;
-      await dispatch(entry, "fast-retries");
-      await expect.poll(() => nativeStatus(entry.command.id), { timeout: 30000 }).toBe("errored");
-      expect(databaseCreates - before).toBe(1);
-      expect(
-        await environment.database.db
-          .select()
-          .from(cloudflareResourceCreations)
-          .where(eq(cloudflareResourceCreations.appId, entry.appId)),
-      ).toHaveLength(1);
-      await worker.stop();
-      worker = await start();
-      expect((await remove(entry.appId)).status).toBe(200);
-      const id = cloudflareRemovalId(entry.appId, "fixture-owner");
-      await expect
-        .poll(
-          async () => {
-            const response = await worker.fetch(`http://fixture/workflow?app-operation&id=${id}`);
+        const before = databaseCreates;
+        await dispatch(entry, "fast-retries");
+        await expect.poll(() => nativeStatus(entry.command.id), { timeout: 30000 }).toBe("errored");
+        expect(databaseCreates - before).toBe(6);
+        expect((await operation(entry.command.id))?.error).toBeTruthy();
 
-            return z.object({ status: z.string() }).parse(await response.json()).status;
-          },
-          { timeout: 30000 },
-        )
-        .toBe("errored");
+        if (outcome === "created") {
+          if (!finishDatabaseCreation) throw new Error("Missing delayed CREATE");
+          finishDatabaseCreation();
+        }
 
-      const [record] = await environment.database.db
-        .select()
-        .from(apps)
-        .where(eq(apps.id, entry.appId));
-
-      expect(record?.state).toBe("deleting");
-      expect(databaseCreates - before).toBe(1);
-
-      if (!finishDatabaseCreation) throw new Error("Missing delayed CREATE");
-
-      finishDatabaseCreation();
-      heldDatabaseName = "";
-      await worker.fetch(`http://fixture/workflow?app-operation&id=${id}&action=restart`, {
-        method: "POST",
-      });
-      await removed(entry.appId);
-      expect(createdDatabases.has(resourceName(entry.appId, "d1", "late"))).toBe(false);
-      expect(
-        await environment.database.db
-          .select()
-          .from(cloudflareResourceCreations)
-          .where(eq(cloudflareResourceCreations.appId, entry.appId)),
-      ).toHaveLength(0);
-    }, 90000);
+        heldDatabaseName = "";
+        finishDatabaseCreation = undefined;
+        await worker.stop();
+        worker = await start();
+        expect((await remove(entry.appId)).status).toBe(200);
+        await removed(entry.appId);
+        expect(databaseCreates - before).toBe(6);
+        expect(createdDatabases.has(resourceName(entry.appId, "d1", "late"))).toBe(false);
+      },
+      90000,
+    );
 
     it("cleans historical resources beyond the first metadata page", async () => {
       const entry = await seedDeployment(environment.database.db, { bindings: [] });

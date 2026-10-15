@@ -1,7 +1,3 @@
-import {
-  createCloudflareResourceCreator,
-  CloudflareResourceCreationPending,
-} from "./cloudflare-resource-creations.ts";
 import { resolveCloudflareCapabilities } from "./cloudflare-capabilities.ts";
 import { checkCapabilityNames } from "./connector-changes.ts";
 import { CloudflareSubscriptionPending } from "./cloudflare-subscription-updates.ts";
@@ -56,10 +52,6 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
       runtimeName: configuration.APP_RUNTIME_NAME,
     },
     transport,
-    (...args) =>
-      withCloudflareDatabase(bindings, ({ db }) =>
-        createCloudflareResourceCreator(db, configuration.CLOUDFLARE_ACCOUNT_ID)(...args),
-      ),
   );
 
   const artifact = async (id: string) =>
@@ -119,12 +111,10 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
     provision: async (command: z.infer<typeof deploymentCommand>) => {
       if (command.kind !== "deploy") return {};
 
-      const prepared = await provisioner.provision(await artifact(command.artifactId));
-
       return withCloudflareDatabase(bindings, ({ db }) =>
         db.transaction(async (transaction) => {
-          // Creations are durably tracked before their API calls. Only bind them
-          // while the app remains available; removal takes the same app lock.
+          // Serialize provisioning with removal admission. A resumed deployment
+          // must not start new resource creation once removal has been accepted.
           const [app] = await transaction
             .select()
             .from(apps)
@@ -136,6 +126,7 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               code: "CONFLICT",
               message: "The app is no longer available for deployment",
             });
+          const prepared = await provisioner.provision(await artifact(command.artifactId));
           await withCloudflareDatabase(bindings, ({ db: resources }) =>
             updateCloudflareBindings(resources, provisioner, prepared.resources),
           );
@@ -540,7 +531,6 @@ export const retryable = async <T>(operation: () => Promise<T>) => {
     if (
       error instanceof CloudflareApiError ||
       error instanceof CloudflareBindingUpdatePending ||
-      error instanceof CloudflareResourceCreationPending ||
       error instanceof CloudflareSubscriptionPending
     )
       throw new Error(error.message);
