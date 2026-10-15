@@ -26,9 +26,8 @@ import {
   cloudflareOperations,
   deploymentEvents,
   deployments,
-  fleets,
+  runtimeReleases,
 } from "./schema.ts";
-import { runtimeReference } from "./runtime-releases.ts";
 import { createR2Storage } from "./storage/r2.ts";
 import { transact } from "./transactions.ts";
 
@@ -318,23 +317,24 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               throw new Error(`App readiness check failed (HTTP ${response.status})`);
             }
 
-            const [fleet] = await transaction
-              .select()
-              .from(fleets)
-              .where(eq(fleets.id, app.fleetId));
+            const ready = z
+              .object({
+                deploymentId: z.literal(published.deploymentId),
+                version: z.literal(version),
+                networkRevision: z.literal(network.revision),
+                capabilityRevision: z.literal(capabilities.revision),
+                runtimeVersion: contract.runtimeVersion,
+              })
+              .parse(await response.json());
 
-            // A pending app deployment can span an independent runtime upgrade.
-            const activeRuntime = fleet?.appliedRuntime
-              ? runtimeReference.parse(fleet.appliedRuntime)
-              : target.runtime;
+            // Runtime upgrades are independent of app deployments. A successful code
+            // replacement can precede its SQL confirmation, so check the serving release.
+            const [installed] = await transaction
+              .select({ version: runtimeReleases.version })
+              .from(runtimeReleases)
+              .where(eq(runtimeReleases.version, ready.runtimeVersion));
 
-            z.object({
-              deploymentId: z.literal(published.deploymentId),
-              version: z.literal(version),
-              networkRevision: z.literal(network.revision),
-              capabilityRevision: z.literal(capabilities.revision),
-              runtimeVersion: z.literal(activeRuntime.version),
-            }).parse(await response.json());
+            if (!installed) throw new Error("The active runtime release is not installed");
 
             const hasEvents =
               command.kind === "deploy" &&

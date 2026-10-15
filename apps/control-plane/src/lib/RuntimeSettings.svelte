@@ -11,7 +11,12 @@
 
   const query = $derived(getRuntimeStatus());
 
-  const status = $derived(await query);
+  const status = $derived(
+    await query.catch((cause: unknown) => {
+      if (query.error && query.error.status >= 500 && query.current) return query.current;
+      throw cause;
+    }),
+  );
 
   const pending = $derived(["queued", "running"].includes(status.state));
 
@@ -22,6 +27,15 @@
   let busy = $state(false);
 
   let message = $state("");
+
+  const refresh = async () => {
+    try {
+      await query.refresh();
+      message = "";
+    } catch {
+      message = "Could not refresh runtime status. Check your connection and refresh.";
+    }
+  };
 
   const install = async () => {
     const file = files?.[0];
@@ -68,9 +82,7 @@
       refreshing = true;
 
       try {
-        await query.refresh();
-      } catch {
-        message = "Could not refresh runtime status. Check your connection and refresh.";
+        await refresh();
       } finally {
         refreshing = false;
       }
@@ -103,7 +115,7 @@
       >{status.message}</Feedback
     >{/if}
   {#if message}<Feedback kind="error">{message}</Feedback>{/if}
-  <Button variant="outline" size="sm" onclick={() => query.refresh()}>Refresh status</Button>
+  <Button variant="outline" size="sm" onclick={refresh}>Refresh status</Button>
   <div class="space-y-3 border-t pt-5">
     <Label for="runtime-release">Install a runtime release</Label>
     <p class="text-muted-foreground text-xs leading-6">

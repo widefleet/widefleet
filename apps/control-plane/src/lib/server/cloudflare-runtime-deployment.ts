@@ -102,6 +102,8 @@ export const executeCloudflareRuntime = async (
 
             // Cloudflare's content endpoint preserves settings and metadata, including
             // bindings added concurrently by app deployments and their confirmation tags.
+            // A timeout does not cancel the provider's write. This lock orders local
+            // attempts; it cannot fence a provider write that finishes after disconnect.
             try {
               await provisioner.request(
                 `/workers/scripts/${encodeURIComponent(configuration.APP_RUNTIME_NAME)}/content`,
@@ -132,7 +134,9 @@ export const executeCloudflareRuntime = async (
     await step.do("register-runtime", options, () =>
       retryable(() =>
         withCloudflareDatabase(bindings, async ({ db }) => {
-          (await registerCloudflareRuntime(db, storage, command)).unwrap();
+          const registered = await registerCloudflareRuntime(db, storage, command);
+
+          if (registered.isErr()) throw registered.error;
           await db
             .update(cloudflareOperations)
             .set({ finishedAt: null, error: null })

@@ -168,6 +168,13 @@ test("installs a runtime release and keeps activation pending until the executor
   await page.getByRole("button", { name: "Install and activate" }).click();
   await expect(page.getByText("Activating runtime 99.8.0 …")).toBeVisible();
   await expect(page.getByRole("button", { name: "Install and activate" })).toBeDisabled();
+  await page.route("**/_app/remote/*/getRuntimeStatus*", (route) => route.abort());
+  await page.getByRole("button", { name: "Refresh status", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Could not refresh runtime status");
+  await expect(page.getByText("Activating runtime 99.8.0 …")).toBeVisible();
+  await page.unroute("**/_app/remote/*/getRuntimeStatus*");
+  await page.getByRole("button", { name: "Refresh status", exact: true }).click();
+  await expect(page.getByRole("alert")).toHaveCount(0);
   const [fleet] = await environment.database.db.select().from(fleets);
 
   if (!fleet?.runtimeJobId) throw new Error("Runtime job was not queued");
@@ -209,6 +216,18 @@ test("installs a runtime release and keeps activation pending until the executor
   await environment.database.db
     .delete(runtimeReleases)
     .where(eq(runtimeReleases.version, release.version));
+  await page.route("**/_app/remote/*/getRuntimeStatus*", (route) =>
+    route.fulfill({
+      status: 403,
+      contentType: "application/json",
+      body: JSON.stringify({ type: "error", error: { message: "Access revoked" } }),
+    }),
+  );
+  await page.getByRole("button", { name: "Refresh status", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "You don't have access to this page." }),
+  ).toBeVisible();
+  await expect(page.getByText("Activating runtime 99.8.0 …")).toHaveCount(0);
 });
 
 test("shows connector discovery and serving app connections to a member", async ({

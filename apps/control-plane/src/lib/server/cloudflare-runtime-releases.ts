@@ -51,6 +51,13 @@ export const registerCloudflareRuntime = (
       return Result.ok(existing);
     }
 
+    // A delayed first registration must not replace a selection made since preparation.
+    if (fleet.runtimeJobId !== command.previousJobId)
+      throw new InvalidOperation({
+        code: "CONFLICT",
+        message: "A newer runtime update superseded this operation",
+      });
+
     const { runtime } = await loadRuntime(storage, command.runtime);
     validateCloudflareRuntime(runtime);
     await saveRuntime(transaction, storage, runtime);
@@ -82,36 +89,33 @@ export const createCloudflareRuntimeReleases = (
   storage: ArtifactStorage,
 ): HostedExecution["runtime"] => {
   const status = async (command?: z.infer<typeof cloudflareRuntimeCommand>) => {
-    const snapshot = (
-      await transact(database, async (transaction) => {
-        const fleet = await defaultFleet(transaction);
-        const id = command?.id ?? fleet.runtimeJobId;
+    const saved = await transact(database, async (transaction) => {
+      const fleet = await defaultFleet(transaction);
+      const id = command?.id ?? fleet.runtimeJobId;
 
-        const selected =
-          command?.runtime ?? (fleet.runtime ? runtimeReference.parse(fleet.runtime) : null);
+      const selected =
+        command?.runtime ?? (fleet.runtime ? runtimeReference.parse(fleet.runtime) : null);
 
-        const [operation] = id
-          ? await transaction
-              .select()
-              .from(cloudflareOperations)
-              .where(
-                and(eq(cloudflareOperations.id, id), eq(cloudflareOperations.fleetId, fleet.id)),
-              )
-          : [];
+      const [operation] = id
+        ? await transaction
+            .select()
+            .from(cloudflareOperations)
+            .where(and(eq(cloudflareOperations.id, id), eq(cloudflareOperations.fleetId, fleet.id)))
+        : [];
 
-        return Result.ok({
-          selected,
-          id,
-          operation,
-          versions: (
-            await transaction
-              .select()
-              .from(runtimeReleases)
-              .orderBy(desc(runtimeReleases.createdAt))
-          ).map((release) => release.version),
-        });
-      })
-    ).unwrap();
+      return Result.ok({
+        selected,
+        id,
+        operation,
+        versions: (
+          await transaction.select().from(runtimeReleases).orderBy(desc(runtimeReleases.createdAt))
+        ).map((release) => release.version),
+      });
+    });
+
+    if (saved.isErr()) throw saved.error;
+
+    const snapshot = saved.value;
 
     let state: z.infer<typeof contract.runtimeStatus>["state"] = snapshot.operation?.finishedAt
       ? snapshot.operation.error
@@ -168,35 +172,39 @@ export const createCloudflareRuntimeReleases = (
         try: async () => {
           administrator(principal);
 
-          const prepared = (
-            await transact(database, async (transaction) => {
-              const fleet = await lockFleet(transaction, (await defaultFleet(transaction)).id);
-              let reference;
+          const prepared = await transact(database, async (transaction) => {
+            const fleet = await lockFleet(transaction, (await defaultFleet(transaction)).id);
+            let reference;
 
-              if ("modules" in input) {
-                validateCloudflareRuntime(input);
-                reference = await saveRuntime(transaction, storage, input);
-              } else {
-                const [saved] = await transaction
-                  .select()
-                  .from(runtimeReleases)
-                  .where(eq(runtimeReleases.version, input.version));
+            if ("modules" in input) {
+              validateCloudflareRuntime(input);
+              reference = await saveRuntime(transaction, storage, input);
+            } else {
+              const [saved] = await transaction
+                .select()
+                .from(runtimeReleases)
+                .where(eq(runtimeReleases.version, input.version));
 
-                if (!saved)
-                  throw new InvalidOperation({
-                    code: "NOT_FOUND",
-                    message: "This runtime version has not been installed",
-                  });
-                reference = runtimeReference.parse({
-                  version: saved.version,
-                  checksum: saved.checksum,
+              if (!saved)
+                throw new InvalidOperation({
+                  code: "NOT_FOUND",
+                  message: "This runtime version has not been installed",
                 });
-                validateCloudflareRuntime((await loadRuntime(storage, reference)).runtime);
-              }
+              reference = runtimeReference.parse({
+                version: saved.version,
+                checksum: saved.checksum,
+              });
+              validateCloudflareRuntime((await loadRuntime(storage, reference)).runtime);
+            }
 
-              return Result.ok({ fleetId: fleet.id, runtime: reference });
-            })
-          ).unwrap();
+            return Result.ok({
+              fleetId: fleet.id,
+              previousJobId: fleet.runtimeJobId,
+              runtime: reference,
+            });
+          });
+
+          if (prepared.isErr()) throw prepared.error;
 
           const workflow = bindings.DEPLOYMENTS;
 
@@ -205,7 +213,7 @@ export const createCloudflareRuntimeReleases = (
           const command = cloudflareRuntimeCommand.parse({
             kind: "runtime",
             id: crypto.randomUUID(),
-            ...prepared,
+            ...prepared.value,
             actor: principal,
             createdAt: new Date().toISOString(),
             rollback: !("modules" in input),
@@ -217,7 +225,9 @@ export const createCloudflareRuntimeReleases = (
             command,
             deploymentWorkflowCommand,
           );
-          (await registerCloudflareRuntime(database, storage, command)).unwrap();
+          const registered = await registerCloudflareRuntime(database, storage, command);
+
+          if (registered.isErr()) throw registered.error;
 
           return status(command);
         },

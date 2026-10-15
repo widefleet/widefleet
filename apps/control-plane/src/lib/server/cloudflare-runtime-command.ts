@@ -6,6 +6,7 @@ export const cloudflareRuntimeCommand = z.object({
   kind: z.literal("runtime"),
   id: z.uuid(),
   fleetId: z.uuid(),
+  previousJobId: z.uuid().nullable(),
   createdAt: z.iso.datetime(),
   actor: deploymentActor,
   runtime: runtimeReference,
