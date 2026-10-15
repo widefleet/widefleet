@@ -636,4 +636,76 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
       await publish(app);
     }
   }, 55_000);
+
+  it("preserves app data and waiting workflows across runtime updates and rollbacks", async () => {
+    const original = runtimeRelease
+      .parse(release)
+      .modules.find((module) => module.name === release.main);
+
+    if (!original) throw new Error("Runtime entry module is missing");
+    const upgradedVersion = "99.0.0";
+
+    const upgraded = original.source.replaceAll(
+      `runtimeVersion: "${release.version}"`,
+      `runtimeVersion: "${upgradedVersion}"`,
+    );
+
+    expect(upgraded).not.toBe(original.source);
+
+    const snapshots = await Promise.all(
+      [hostname, previewHostname].map((host) =>
+        json("/resources", { method: "PUT", body: `before-runtime-update:${host}` }, host),
+      ),
+    );
+
+    try {
+      for (const [version, source] of [
+        [upgradedVersion, upgraded],
+        [release.version, original.source],
+      ] as const) {
+        const id = crypto.randomUUID();
+        const path = `/workflow?id=${id}`;
+        await json(path, { method: "POST" });
+        await expect
+          .poll(() => json("/workflow/steps"), { timeout: 15_000 })
+          .toContainEqual({ id });
+        await json(`${path}&action=pause`, { method: "PUT" });
+        await expect.poll(() => json(path)).toMatchObject({ status: "paused" });
+
+        await worker.stop();
+        await writeFile(join(directory, "runtime.js"), source);
+        worker = await start();
+
+        expect(
+          await json("/.well-known/widefleet/runtime", {
+            headers: { authorization: "Bearer local-test-only" },
+          }),
+        ).toEqual({ runtimeVersion: version });
+        expect(
+          await Promise.all(
+            [hostname, previewHostname].map((host) => json("/resources", undefined, host)),
+          ),
+        ).toEqual(snapshots);
+
+        for (const host of [hostname, previewHostname]) {
+          expect(await json("/connector", undefined, host)).toBe(42);
+          expect(await json("/.well-known/widefleet/ready", undefined, host)).toMatchObject({
+            runtimeVersion: version,
+          });
+        }
+
+        await json(path, { method: "PUT" });
+        await json(`${path}&action=resume`, { method: "PUT" });
+        await expect
+          .poll(() => json(path), { timeout: 15_000 })
+          .toMatchObject({ status: "complete", output: 42 });
+        const steps = z.array(z.object({ id: z.uuid() })).parse(await json("/workflow/steps"));
+        expect(steps.filter((entry) => entry.id === id)).toEqual([{ id }]);
+      }
+    } finally {
+      await worker.stop();
+      await writeFile(join(directory, "runtime.js"), original.source);
+      worker = await start();
+    }
+  }, 80_000);
 });

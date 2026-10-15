@@ -238,7 +238,7 @@ mod tests {
     async fn private_release_download_checks_integrity_and_does_not_forward_credentials_to_assets()
     -> Result<()> {
         for valid in [true, false] {
-            let release = value!({ "protocol": 1, "version": "0.1.0", "celld": "0.6.2", "main": "loader.js", "modules": [] }).to_string();
+            let release = value!({ "protocol": 1, "version": "0.1.0", "celld": "0.6.2", "cloudflare": 1, "main": "loader.js", "modules": [] }).to_string();
             let checksum = if valid {
                 sha256(release.as_bytes())
             } else {
@@ -302,7 +302,9 @@ mod tests {
             )
             .await;
             if valid {
-                assert_eq!(result?.version, "0.1.0");
+                let downloaded = result?;
+                assert_eq!(downloaded.version, "0.1.0");
+                assert_eq!(serde_json::to_value(&downloaded)?["cloudflare"], 1);
             } else {
                 assert!(
                     matches!(result, Err(error) if matches!(error.kind(), platform_core::ErrorKind::Invalid(message) if message.contains("checksum")))

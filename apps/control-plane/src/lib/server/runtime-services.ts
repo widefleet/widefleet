@@ -53,7 +53,7 @@ export const createRuntime = ({
     workflows: createWorkflowService(database.db, execution),
     migrations: createMigrationService(database.db, storage, execution),
     connectors: createConnectorService(database.db, storage, encryptionKey, execution),
-    releases: createRuntimeReleaseService(database.db, storage),
+    releases: createRuntimeReleaseService(database.db, storage, execution),
     uploads: createUploadService(database.db, storage, configuration, execution),
     telemetry: createTelemetry(database.db, storage, configuration, hostedLogs),
   };

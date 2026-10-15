@@ -20,7 +20,14 @@ import {
 } from "./cloudflare-binding-updates.ts";
 import { deploymentCommand, hostedDeploymentId } from "./deployment-execution.ts";
 import { DatabaseUnavailable, InvalidOperation } from "./errors.ts";
-import { apps, artifacts, cloudflareOperations, deploymentEvents, deployments } from "./schema.ts";
+import {
+  apps,
+  artifacts,
+  cloudflareOperations,
+  deploymentEvents,
+  deployments,
+  runtimeReleases,
+} from "./schema.ts";
 import { createR2Storage } from "./storage/r2.ts";
 import { transact } from "./transactions.ts";
 
@@ -310,13 +317,24 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               throw new Error(`App readiness check failed (HTTP ${response.status})`);
             }
 
-            z.object({
-              deploymentId: z.literal(published.deploymentId),
-              version: z.literal(version),
-              networkRevision: z.literal(network.revision),
-              capabilityRevision: z.literal(capabilities.revision),
-              runtimeVersion: z.literal(target.runtime.version),
-            }).parse(await response.json());
+            const ready = z
+              .object({
+                deploymentId: z.literal(published.deploymentId),
+                version: z.literal(version),
+                networkRevision: z.literal(network.revision),
+                capabilityRevision: z.literal(capabilities.revision),
+                runtimeVersion: contract.runtimeVersion,
+              })
+              .parse(await response.json());
+
+            // Runtime upgrades are independent of app deployments. A successful code
+            // replacement can precede its SQL confirmation, so check the serving release.
+            const [installed] = await transaction
+              .select({ version: runtimeReleases.version })
+              .from(runtimeReleases)
+              .where(eq(runtimeReleases.version, ready.runtimeVersion));
+
+            if (!installed) throw new Error("The active runtime release is not installed");
 
             const hasEvents =
               command.kind === "deploy" &&

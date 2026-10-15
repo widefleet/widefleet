@@ -33,6 +33,7 @@ import {
   cloudflareRuntimeBindings,
   deployments,
   jobs,
+  fleets,
 } from "../../src/lib/server/schema.ts";
 
 const resourceName = (appId: string, kind: string, name: string) =>
@@ -102,6 +103,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
     let delayedBindingUpdate: (() => void) | undefined;
     let bindingTag = "initial";
     let apiOrigin = "";
+    let runtimeVersion = release.version;
+    let runtimeUploadMode = "normal";
+    let runtimeUploads = 0;
+    let runtimeVersionUnavailable = false;
 
     const api = createServer((request, response) => {
       const handle = async () => {
@@ -125,7 +130,53 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         if (request.headers.authorization !== "Bearer local-provisioning-token")
           throw new Error("Incorrect API credential");
 
-        if (url.pathname.endsWith("/d1/database")) {
+        if (url.pathname === "/fixture-runtime-version") {
+          if (runtimeVersionUnavailable && !url.searchParams.has("readiness")) {
+            response.statusCode = 503;
+            response.end();
+
+            return;
+          }
+
+          response.setHeader("content-type", "application/json");
+          response.end(JSON.stringify({ runtimeVersion }));
+        } else if (url.pathname.endsWith("/workers/scripts/fixture-runtime/content")) {
+          expect(request.method).toBe("PUT");
+
+          const multipart = await new Response(body, {
+            headers: { "content-type": request.headers["content-type"] ?? "" },
+          }).formData();
+
+          expect(JSON.parse(z.string().parse(multipart.get("metadata")))).toEqual({
+            main_module: "loader.js",
+          });
+          expect([...multipart.keys()]).toEqual(["metadata", "loader.js"]);
+          const module = multipart.get("loader.js");
+
+          if (!(module instanceof File)) throw new Error("Missing runtime module");
+          expect(module.type).toBe("application/javascript+module");
+          const version = (await module.text()).match(/runtimeVersion: "([0-9.]+)"/)?.[1];
+
+          if (!version) throw new Error("Runtime module has no version");
+          runtimeUploads++;
+
+          if (runtimeUploadMode === "rejected") {
+            response.statusCode = 400;
+            response.end();
+
+            return;
+          }
+
+          runtimeVersion = version;
+
+          if (runtimeUploadMode === "unconfirmed") runtimeVersionUnavailable = true;
+
+          if (runtimeUploadMode === "lost-response") {
+            runtimeUploadMode = "normal";
+            response.statusCode = 503;
+            response.end();
+          } else ok({});
+        } else if (url.pathname.endsWith("/d1/database")) {
           if (request.method === "GET") {
             ok([...createdDatabases].map((name) => ({ name, uuid: databases.get(name) ?? "" })));
           } else {
@@ -531,6 +582,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       import { createArtifactStorage } from ${JSON.stringify(server + "artifact-storage.ts")};
       import { createR2Storage } from ${JSON.stringify(server + "storage/r2.ts")};
       import { createAppService } from ${JSON.stringify(server + "apps.ts")};
+      import { createRuntimeReleaseService } from ${JSON.stringify(server + "runtime-releases.ts")};
       import { readCloudflareConfiguration } from ${JSON.stringify(server + "cloudflare-config.ts")};
       export * from './runtime.js';
       export { DeploymentWorkflow } from ${JSON.stringify(workflow)};
@@ -545,6 +597,28 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       };
       export default { ...runtime, async fetch(request, env, ctx) {
         const url = new URL(request.url);
+        if (url.pathname === '/.well-known/widefleet/runtime') {
+          if (request.headers.get('authorization') !== 'Bearer ' + env.APP_RUNTIME_TOKEN) return new Response(null, {status:403});
+          return nativeFetch(${JSON.stringify(apiOrigin)} + '/fixture-runtime-version', {headers:{authorization:'Bearer local-provisioning-token'}});
+        }
+        if (url.hostname === 'fixture' && url.pathname === '/runtime') {
+          const input = request.method === 'GET' ? null : await request.json();
+          const result = await withCloudflareDatabase(env, ({db}) => {
+            const storage = createArtifactStorage(createR2Storage(env.ARTIFACTS));
+            const deployments = {
+              async create(options) {
+                const modifier = await env.DEPLOYMENTS.unsafeGetInstanceModifier(options.id);
+                try { await modifier.disableRetryDelays(); } finally { modifier[Symbol.dispose]?.(); }
+                return env.DEPLOYMENTS.create(options);
+              },
+              get: id => env.DEPLOYMENTS.get(id),
+            };
+            const service = createRuntimeReleaseService(db, storage, createCloudflareExecution({...env, DEPLOYMENTS:deployments}, db, storage));
+            const principal = {id:'fixture-owner',admin:!url.searchParams.has('nonadmin')};
+            return input === null ? service.read(principal) : 'modules' in input ? service.install(principal,input) : service.rollback(principal,input);
+          });
+          return Response.json(result.isErr() ? {error:result.error.message} : result.value, {status:result.isErr()?400:200});
+        }
         if (url.hostname === 'fixture' && url.pathname === '/prepare-connector') {
           const input = await request.json();
           try {
@@ -562,6 +636,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         }
         if (url.hostname === 'fixture' && url.pathname === '/start') {
           const command = await request.json();
+          if (url.searchParams.get('mode') === 'register-only') {
+            await createCloudflareDeployment(env).register(command);
+            return new Response(null, {status:200});
+          }
           // Miniflare's testing API skips backoff time, while every real step attempt still runs.
           if (url.searchParams.get('mode') === 'fast-retries') {
             const modifier = await env.DEPLOYMENTS.unsafeGetInstanceModifier(command.id);
@@ -679,7 +757,12 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           }
           return Response.json(await instance.status());
         }
-        return runtime.fetch(request, env, ctx);
+        const response = await runtime.fetch(request, env, ctx);
+        if (url.pathname === '/.well-known/widefleet/ready' && response.ok) {
+          const version = await nativeFetch(${JSON.stringify(apiOrigin)} + '/fixture-runtime-version?readiness', {headers:{authorization:'Bearer local-provisioning-token'}});
+          return Response.json({...await response.json(), ...await version.json()});
+        }
+        return response;
       } };
     `,
       );
@@ -2232,5 +2315,237 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       expect((await host(preview.hostname))?.body).toMatchObject({ appId: replacement.appId });
       expect(await (await worker.fetch(`https://${preview.hostname}/`)).text()).toBe("replacement");
     }, 60000);
+
+    const runtimeRelease = (version: string) =>
+      contract.runtimeRelease.parse({
+        ...release,
+        version,
+        modules: release.modules.map((module) => {
+          const source = module.source.replaceAll(
+            `runtimeVersion: "${release.version}"`,
+            `runtimeVersion: "${version}"`,
+          );
+
+          return { ...module, source, sha256: createHash("sha256").update(source).digest("hex") };
+        }),
+      });
+
+    const selectRuntime = async (
+      input: z.infer<typeof contract.runtimeRelease> | { version: string },
+    ) => {
+      const response = await worker.fetch("http://fixture/runtime", {
+        method: "POST",
+        body: JSON.stringify(input),
+      });
+
+      const body: unknown = await response.json();
+      expect(response.status, JSON.stringify(body)).toBe(200);
+
+      return contract.runtimeStatus.parse(body);
+    };
+
+    const runtimeStatus = async () =>
+      contract.runtimeStatus.parse(await (await worker.fetch("http://fixture/runtime")).json());
+
+    it("updates and rolls back runtime code without rewriting app bindings or subscriptions", async () => {
+      await selectRuntime(contract.runtimeRelease.parse(release));
+      await expect
+        .poll(runtimeStatus)
+        .toMatchObject({ activeVersion: release.version, state: "succeeded" });
+
+      const before = JSON.stringify({
+        bindings: [...settings],
+        schedules,
+        queues: [...queues],
+        bindingTag,
+      });
+
+      const next = runtimeRelease("99.1.0");
+      const selected = await selectRuntime(next);
+      expect(selected.desiredVersion).toBe(next.version);
+      expect(selected.jobId).not.toBeNull();
+      await expect
+        .poll(runtimeStatus)
+        .toMatchObject({ activeVersion: next.version, state: "succeeded" });
+      expect(
+        (await environment.database.db.select().from(fleets))[0]?.appliedRuntime,
+      ).toMatchObject({ version: next.version });
+      expect(
+        JSON.stringify({ bindings: [...settings], schedules, queues: [...queues], bindingTag }),
+      ).toBe(before);
+      expect(await environment.database.db.select().from(jobs)).toHaveLength(0);
+
+      await selectRuntime({ version: release.version });
+      await expect
+        .poll(runtimeStatus)
+        .toMatchObject({ activeVersion: release.version, state: "succeeded" });
+      expect(
+        JSON.stringify({ bindings: [...settings], schedules, queues: [...queues], bindingTag }),
+      ).toBe(before);
+      expect((await runtimeStatus()).versions).toContain(next.version);
+    }, 20000);
+
+    it("confirms a runtime upload with a lost response without uploading it again", async () => {
+      const before = runtimeUploads;
+      runtimeUploadMode = "lost-response";
+      await selectRuntime(runtimeRelease("99.2.0"));
+      await expect
+        .poll(runtimeStatus, { timeout: 15000 })
+        .toMatchObject({ activeVersion: "99.2.0", state: "succeeded" });
+      expect(runtimeUploads).toBe(before + 1);
+    }, 20000);
+
+    it("reports a rejected runtime update and permits an explicit retry", async () => {
+      const before = runtimeUploads;
+      runtimeUploadMode = "rejected";
+      const selected = await selectRuntime(runtimeRelease("99.3.0"));
+      await expect.poll(runtimeStatus).toMatchObject({
+        activeVersion: "99.2.0",
+        state: "failed",
+        message: "Cloudflare rejected the runtime update (HTTP 400)",
+      });
+      expect(runtimeUploads).toBe(before + 1);
+      runtimeUploadMode = "normal";
+      const retried = await selectRuntime({ version: "99.3.0" });
+      expect(retried.jobId).not.toBe(selected.jobId);
+      await expect
+        .poll(runtimeStatus)
+        .toMatchObject({ activeVersion: "99.3.0", state: "succeeded" });
+    }, 20000);
+
+    it("does not replay an already completed runtime update after a native restart", async () => {
+      const [previous] = await environment.database.db
+        .select()
+        .from(cloudflareOperations)
+        .where(
+          sql`${cloudflareOperations.command}->>'kind' = 'runtime' AND ${cloudflareOperations.command}->'runtime'->>'version' = '99.1.0'`,
+        );
+
+      if (!previous) throw new Error("Previous runtime update is missing");
+      const before = runtimeUploads;
+      await worker.fetch(`http://fixture/workflow?id=${previous.id}&action=restart`, {
+        method: "POST",
+      });
+      await expect.poll(() => nativeStatus(previous.id)).toBe("complete");
+      expect(runtimeVersion).toBe("99.3.0");
+      expect(runtimeUploads).toBe(before);
+    }, 20000);
+
+    it("rejects runtime changes by nonadministrators, incompatible releases and unavailable rollback versions", async () => {
+      const before = runtimeUploads;
+      expect((await worker.fetch("http://fixture/runtime?nonadmin")).status).toBe(400);
+
+      for (const [path, input] of [
+        ["/runtime?nonadmin", runtimeRelease("99.4.0")],
+        ["/runtime", { ...runtimeRelease("99.4.0"), cloudflare: undefined }],
+        ["/runtime", { version: "98.0.0" }],
+      ] as const) {
+        const response = await worker.fetch(`http://fixture${path}`, {
+          method: "POST",
+          body: JSON.stringify(input),
+        });
+
+        expect(response.status).toBe(400);
+      }
+
+      expect(runtimeUploads).toBe(before);
+      expect(await runtimeStatus()).toMatchObject({
+        desiredVersion: "99.3.0",
+        activeVersion: "99.3.0",
+        state: "succeeded",
+      });
+    });
+
+    it("uses the confirmed runtime for an app deployment accepted before a runtime rollback", async () => {
+      const entry = await seedDeployment(environment.database.db, { bindings: [] });
+      await seed(entry);
+      await dispatch(entry, "register-only");
+      expect((await operation(entry.command.id))?.targets).toMatchObject([
+        { runtime: { version: "99.3.0" } },
+      ]);
+      await selectRuntime({ version: release.version });
+      await expect
+        .poll(runtimeStatus)
+        .toMatchObject({ activeVersion: release.version, state: "succeeded" });
+      await dispatch(entry);
+      await completed(entry.command.id);
+      expect((await host(entry.hostname))?.body).toMatchObject({ deploymentId: entry.command.id });
+
+      const [failed] = await environment.database.db
+        .select()
+        .from(cloudflareOperations)
+        .where(
+          sql`${cloudflareOperations.command}->>'kind' = 'runtime' AND ${cloudflareOperations.error} IS NOT NULL`,
+        );
+
+      if (!failed) throw new Error("Failed runtime fixture is missing");
+      const before = runtimeUploads;
+      await worker.fetch(`http://fixture/workflow?id=${failed.id}&action=restart`, {
+        method: "POST",
+      });
+      await expect
+        .poll(async () => (await operation(failed.id))?.error)
+        .toBe("A newer runtime update superseded this operation");
+      expect(runtimeUploads).toBe(before);
+      expect(runtimeVersion).toBe(release.version);
+    }, 20000);
+
+    it("rejects a delayed first registration after a newer runtime update completes", async () => {
+      const [fleet] = await environment.database.db.select().from(fleets);
+
+      if (!fleet?.runtime) throw new Error("Runtime fixture is missing");
+
+      const delayed = {
+        kind: "runtime",
+        id: crypto.randomUUID(),
+        fleetId: fleet.id,
+        previousJobId: fleet.runtimeJobId,
+        runtime: fleet.runtime,
+        actor: { id: "fixture-owner", admin: true },
+        createdAt: new Date().toISOString(),
+        rollback: true,
+      };
+
+      const newer = await selectRuntime({ version: "99.3.0" });
+      await expect
+        .poll(runtimeStatus)
+        .toMatchObject({ activeVersion: "99.3.0", state: "succeeded" });
+      const before = runtimeUploads;
+      await worker.fetch("http://fixture/start?mode=accepted-only", {
+        method: "POST",
+        body: JSON.stringify(delayed),
+      });
+      await expect.poll(() => nativeStatus(delayed.id), { timeout: 15000 }).toBe("errored");
+      expect(await runtimeStatus()).toMatchObject({
+        jobId: newer.jobId,
+        activeVersion: "99.3.0",
+        state: "succeeded",
+      });
+      expect(runtimeUploads).toBe(before);
+    }, 20000);
+
+    it("deploys apps after runtime code changes but its confirmation fails", async () => {
+      runtimeUploadMode = "unconfirmed";
+
+      try {
+        await selectRuntime(runtimeRelease("99.5.0"));
+        await expect
+          .poll(runtimeStatus, { timeout: 15000 })
+          .toMatchObject({ state: "failed", activeVersion: null });
+      } finally {
+        runtimeVersionUnavailable = false;
+        runtimeUploadMode = "normal";
+      }
+
+      expect(await runtimeStatus()).toMatchObject({ state: "failed", activeVersion: "99.5.0" });
+      expect(
+        (await environment.database.db.select().from(fleets))[0]?.appliedRuntime,
+      ).toMatchObject({ version: "99.3.0" });
+      const entry = await seedDeployment(environment.database.db, { bindings: [] });
+      await seed(entry);
+      await dispatch(entry);
+      await completed(entry.command.id);
+      expect((await host(entry.hostname))?.body).toMatchObject({ deploymentId: entry.command.id });
+    }, 20000);
   },
 );

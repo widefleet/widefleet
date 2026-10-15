@@ -5,6 +5,7 @@ import type { CloudflareBindings } from "./lib/server/cloudflare-config.ts";
 import { executeCloudflareDeployment } from "./lib/server/cloudflare-deployment.ts";
 import { deploymentWorkflowCommand } from "./lib/server/cloudflare-connector-command.ts";
 import { executeCloudflareConnector } from "./lib/server/cloudflare-connector-deployment.ts";
+import { executeCloudflareRuntime } from "./lib/server/cloudflare-runtime-deployment.ts";
 
 export class DeploymentWorkflow extends WorkflowEntrypoint<
   CloudflareBindings,
@@ -19,7 +20,9 @@ export class DeploymentWorkflow extends WorkflowEntrypoint<
     if (event.instanceId !== command.id)
       throw new Error("Deployment workflow identity does not match its command");
 
-    if (command.kind === "connector") await executeCloudflareConnector(this.env, command, step);
+    if (command.kind === "runtime") await executeCloudflareRuntime(this.env, command, step);
+    else if (command.kind === "connector")
+      await executeCloudflareConnector(this.env, command, step);
     else await executeCloudflareDeployment(this.env, command, step);
   }
 }
