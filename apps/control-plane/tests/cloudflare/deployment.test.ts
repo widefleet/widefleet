@@ -607,6 +607,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
             await env.ARTIFACTS.put(url.searchParams.get('key'), await request.text());
             return new Response(null,{status:204});
           }
+          if (request.method === 'DELETE') {
+            await env.ARTIFACTS.delete(url.searchParams.get('key'));
+            return new Response(null,{status:204});
+          }
           return Response.json((await env.ARTIFACTS.list({prefix:url.searchParams.get('prefix') ?? ''})).objects.map(object=>object.key));
         }
         if (url.hostname === 'fixture' && url.pathname === '/stale-publication') {
@@ -2179,7 +2183,16 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       expect((await operation(id))?.error).toBe("Cloudflare could not complete app removal");
       expect((await worker.fetch(`https://${delayed.hostname}/`)).status).toBe(404);
       deniedBucket = "";
-      expect((await remove(delayed.appId)).status).toBe(200);
+      const commandKey = `apps/${delayed.appId}/commands/${id}.json`;
+      expect(
+        (await worker.fetch(`http://fixture/storage?key=${commandKey}`, { method: "DELETE" }))
+          .status,
+      ).toBe(204);
+      expect((await remove(delayed.appId, { unavailable: true })).status).toBe(200);
+
+      const commands = await worker.fetch(`http://fixture/storage?prefix=${commandKey}`);
+
+      expect(await commands.json()).toEqual([]);
       const stopped = await worker.fetch(`http://fixture/workflow?app-operation&id=${id}`);
       expect(z.object({ status: z.string() }).parse(await stopped.json()).status).toBe("errored");
       await worker.fetch(`http://fixture/workflow?app-operation&id=${id}&action=restart`, {

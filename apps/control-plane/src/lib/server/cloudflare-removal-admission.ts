@@ -94,8 +94,9 @@ export const createCloudflareRemoval =
   (bindings: CloudflareBindings, database: Database) => (principal: Principal, appId: string) =>
     Result.tryPromise({
       try: async () => {
-        // Authorization precedes both reading immutable inputs and native Workflow admission.
-        (
+        // Keep the existing app lock through admission so cleanup cannot finish
+        // before this request has written its command. Repeated DELETEs do no work.
+        const command = (
           await transact(database, async (transaction) => {
             const access = await managedApp(transaction, principal, appId);
 
@@ -112,37 +113,53 @@ export const createCloudflareRemoval =
                 message: "This installation does not use Cloudflare execution",
               });
 
-            return Result.ok(undefined);
+            if (access.value.state === "deleting") return Result.ok(null);
+
+            try {
+              const workflow = bindings.APP_OPERATIONS;
+
+              if (!workflow) throw new Error("App operation Workflow binding is missing");
+              const id = cloudflareRemovalId(appId, principal.id);
+              const previous = await bindings.ARTIFACTS.get(`apps/${appId}/commands/${id}.json`);
+
+              const requested = previous
+                ? cloudflareRemovalCommand.parse(await previous.json())
+                : {
+                    id,
+                    appId,
+                    kind: "remove" as const,
+                    actor: { id: principal.id, admin: principal.admin },
+                    createdAt: new Date().toISOString(),
+                  };
+
+              if (
+                requested.id !== id ||
+                requested.appId !== appId ||
+                requested.actor.id !== principal.id
+              )
+                throw new Error("Invalid removal command");
+
+              return Result.ok(
+                cloudflareRemovalCommand.parse(
+                  await acceptCloudflareWorkflow(
+                    bindings.ARTIFACTS,
+                    workflow,
+                    requested,
+                    cloudflareAppOperation,
+                  ),
+                ),
+              );
+            } catch (cause) {
+              if (cause instanceof InvalidOperation) throw cause;
+              throw new StorageUnavailable({
+                message: "Cloudflare could not accept app removal",
+                cause,
+              });
+            }
           })
         ).unwrap();
 
-        const workflow = bindings.APP_OPERATIONS;
-
-        if (!workflow) throw new Error("App operation Workflow binding is missing");
-        const id = cloudflareRemovalId(appId, principal.id);
-        const previous = await bindings.ARTIFACTS.get(`apps/${appId}/commands/${id}.json`);
-
-        const requested = previous
-          ? cloudflareRemovalCommand.parse(await previous.json())
-          : {
-              id,
-              appId,
-              kind: "remove" as const,
-              actor: { id: principal.id, admin: principal.admin },
-              createdAt: new Date().toISOString(),
-            };
-
-        if (requested.id !== id || requested.appId !== appId || requested.actor.id !== principal.id)
-          throw new Error("Invalid removal command");
-
-        const command = cloudflareRemovalCommand.parse(
-          await acceptCloudflareWorkflow(
-            bindings.ARTIFACTS,
-            workflow,
-            requested,
-            cloudflareAppOperation,
-          ),
-        );
+        if (!command) return { accepted: true };
 
         const registered = await registerCloudflareRemoval(database, command);
 
@@ -170,7 +187,9 @@ export const createCloudflareRemoval =
         return { accepted: true };
       },
       catch: (cause) =>
-        cause instanceof InvalidOperation || cause instanceof DatabaseUnavailable
+        cause instanceof InvalidOperation ||
+        cause instanceof DatabaseUnavailable ||
+        cause instanceof StorageUnavailable
           ? cause
           : new StorageUnavailable({ message: "Cloudflare could not accept app removal", cause }),
     });
