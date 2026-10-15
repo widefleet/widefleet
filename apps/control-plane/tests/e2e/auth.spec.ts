@@ -147,6 +147,20 @@ test("installs a runtime release and keeps activation pending until the executor
   await page.goto("/settings?section=runtime");
   await expect(page.getByRole("heading", { name: "App runtime", exact: true })).toBeVisible();
   await page.getByLabel("Install a runtime release").setInputFiles({
+    name: "invalid-release.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(
+      JSON.stringify({
+        ...release,
+        modules: release.modules.map((module) => ({ ...module, sha256: "0".repeat(64) })),
+      }),
+    ),
+  });
+  await page.getByRole("button", { name: "Install and activate" }).click();
+  await expect(
+    page.getByText("Invalid package modules or checksums", { exact: true }),
+  ).toBeVisible();
+  await page.getByLabel("Install a runtime release").setInputFiles({
     name: "release.json",
     mimeType: "application/json",
     buffer: Buffer.from(JSON.stringify(release)),

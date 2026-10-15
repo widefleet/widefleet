@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { isHttpError } from "@sveltejs/kit";
   import { runtimeRelease } from "@platform/contracts";
   import { getRuntimeStatus, installRuntime, rollbackRuntime } from "#lib/runtime-releases.remote";
   import { Button } from "#shadcn/components/ui/button/index.js";
@@ -32,7 +33,11 @@
     try {
       await installRuntime(runtimeRelease.parse(JSON.parse(await file.text())));
     } catch (cause) {
-      message = cause instanceof Error ? cause.message : "Could not install this runtime release.";
+      message = isHttpError(cause)
+        ? cause.body.message
+        : cause instanceof Error
+          ? cause.message
+          : "Could not install this runtime release.";
     } finally {
       busy = false;
     }
@@ -45,7 +50,11 @@
     try {
       await rollbackRuntime({ version });
     } catch (cause) {
-      message = cause instanceof Error ? cause.message : "Could not activate this runtime version.";
+      message = isHttpError(cause)
+        ? cause.body.message
+        : cause instanceof Error
+          ? cause.message
+          : "Could not activate this runtime version.";
     } finally {
       busy = false;
     }
