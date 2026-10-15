@@ -1,3 +1,4 @@
+import { createCloudflareRemoval } from "./cloudflare-removal-admission.ts";
 import { resolveCloudflareCapabilities } from "./cloudflare-capabilities.ts";
 import { createCloudflareConnectors } from "./cloudflare-connectors.ts";
 import { validateCapabilityChange } from "./connector-changes.ts";
@@ -62,6 +63,7 @@ export const createCloudflareExecution = (
     });
 
   return {
+    remove: createCloudflareRemoval(bindings, database),
     connectors: {
       ...createCloudflareConnectors(bindings, database, storage),
       bind: async (actor, appId, name, grant) => {

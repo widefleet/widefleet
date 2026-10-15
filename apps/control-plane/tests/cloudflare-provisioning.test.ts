@@ -10,6 +10,7 @@ const fixture = () => {
   const queues = new Map<string, string>();
   const patches: unknown[] = [];
   let loseResponse = false;
+  let failCreation = false;
 
   const transport: typeof fetch = async (input, init) => {
     const request = new Request(input, init);
@@ -19,6 +20,12 @@ const fixture = () => {
 
     const ok = (result: z.infer<ReturnType<typeof z.json>>) =>
       Response.json({ success: true, result });
+
+    if (request.method === "POST" && failCreation) {
+      failCreation = false;
+
+      return new Response(null, { status: 503 });
+    }
 
     if (url.pathname.endsWith("/d1/database")) {
       if (request.method === "GET")
@@ -73,6 +80,11 @@ const fixture = () => {
       expect(buckets.has(name)).toBe(false);
       buckets.add(name);
 
+      if (loseResponse) {
+        loseResponse = false;
+        throw new Error("Lost creation response");
+      }
+
       return ok({ name });
     }
 
@@ -115,6 +127,9 @@ const fixture = () => {
     loseNextResponse: () => {
       loseResponse = true;
     },
+    failNextCreation: () => {
+      failCreation = true;
+    },
   };
 };
 
@@ -132,6 +147,42 @@ const app = () => ({
 });
 
 describe("Cloudflare app provisioning", () => {
+  it.each([
+    { type: "d1", name: "RESOURCE", database_name: "data" },
+    { type: "r2_bucket", name: "RESOURCE", bucket_name: "files" },
+    { type: "kv_namespace", name: "RESOURCE", id: "cache" },
+    { type: "queue", name: "RESOURCE", queue: "jobs" },
+  ])("retries $type creation that failed without creating a resource", async (binding) => {
+    const cloud = fixture();
+    const deployment = app();
+    deployment.metadata = workerMetadata.parse({ ...deployment.metadata, bindings: [binding] });
+    cloud.failNextCreation();
+    await expect(cloud.create().provision(deployment)).rejects.toThrow("HTTP 503");
+    expect(
+      cloud.databases.size + cloud.buckets.size + cloud.namespaces.size + cloud.queues.size,
+    ).toBe(0);
+
+    const prepared = await cloud.create().provision(deployment);
+    expect(prepared.resources).toHaveLength(1);
+    expect(await cloud.create().provision(deployment)).toEqual(prepared);
+    expect(
+      cloud.databases.size + cloud.buckets.size + cloud.namespaces.size + cloud.queues.size,
+    ).toBe(1);
+  });
+
+  it("recovers a lost R2 bucket creation response", async () => {
+    const cloud = fixture();
+    const deployment = app();
+    deployment.metadata = workerMetadata.parse({
+      ...deployment.metadata,
+      bindings: [{ type: "r2_bucket", name: "FILES", bucket_name: "files" }],
+    });
+    cloud.loseNextResponse();
+    await expect(cloud.create().provision(deployment)).rejects.toThrow("Lost creation response");
+    expect((await cloud.create().provision(deployment)).resources).toHaveLength(1);
+    expect(cloud.buckets.size).toBe(1);
+  });
+
   it("recovers from a lost creation response without allocating a second resource", async () => {
     const cloud = fixture();
     const deployment = app();

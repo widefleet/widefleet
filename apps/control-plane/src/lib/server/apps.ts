@@ -487,8 +487,10 @@ export const createAppService = (
 
     return execution.deploy(prepared.value, requestId, true);
   },
-  remove: (principal: Principal, appId: string) =>
-    transact(database, async (transaction) => {
+  remove: (principal: Principal, appId: string) => {
+    if (execution) return execution.remove(principal, appId);
+
+    return transact(database, async (transaction) => {
       const access = await managedApp(transaction, principal, appId);
 
       if (access.isErr()) return access;
@@ -497,7 +499,8 @@ export const createAppService = (
       await enqueueAppRemoval(transaction, access.value);
 
       return Result.ok({ accepted: true });
-    }),
+    });
+  },
   access: (principal: Principal, appId: string, search: string) =>
     transact(database, async (transaction) => {
       const access = await managedApp(transaction, principal, appId);

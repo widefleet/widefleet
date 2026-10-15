@@ -111,12 +111,29 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
     provision: async (command: z.infer<typeof deploymentCommand>) => {
       if (command.kind !== "deploy") return {};
 
-      const prepared = await provisioner.provision(await artifact(command.artifactId));
-      await withCloudflareDatabase(bindings, ({ db }) =>
-        updateCloudflareBindings(db, provisioner, prepared.resources),
-      );
+      return withCloudflareDatabase(bindings, ({ db }) =>
+        db.transaction(async (transaction) => {
+          // Serialize provisioning with removal admission. A resumed deployment
+          // must not start new resource creation once removal has been accepted.
+          const [app] = await transaction
+            .select()
+            .from(apps)
+            .where(eq(apps.id, command.appId))
+            .for("update");
 
-      return prepared.nativeBindings;
+          if (!app || app.state === "deleting")
+            throw new InvalidOperation({
+              code: "CONFLICT",
+              message: "The app is no longer available for deployment",
+            });
+          const prepared = await provisioner.provision(await artifact(command.artifactId));
+          await withCloudflareDatabase(bindings, ({ db: resources }) =>
+            updateCloudflareBindings(resources, provisioner, prepared.resources),
+          );
+
+          return prepared.nativeBindings;
+        }),
+      );
     },
     activate: async (
       command: z.infer<typeof deploymentCommand>,
@@ -143,9 +160,11 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
             const current = await bindings.ARTIFACTS.get(hostKey);
             const currentBody = current ? await current.text() : null;
 
-            const serving = currentBody
-              ? contract.publishedApp.parse(JSON.parse(currentBody))
+            const entry = currentBody
+              ? contract.publishedHost.parse(JSON.parse(currentBody))
               : null;
+
+            const serving = entry && !("deleted" in entry) ? entry : null;
 
             const servingSequence = z.coerce
               .number()

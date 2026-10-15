@@ -52,6 +52,7 @@ type ConnectorResult<T> = Promise<
 >;
 
 export type HostedExecution = {
+  remove: (principal: Principal, appId: string) => ConnectorResult<{ accepted: boolean }>;
   connectors: {
     status: (
       current: z.infer<typeof contract.connectorStatus>,

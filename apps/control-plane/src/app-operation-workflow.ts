@@ -16,6 +16,7 @@ import {
 } from "./lib/server/cloudflare-provisioning.ts";
 import { runCloudflareMigrations } from "./lib/server/cloudflare-migrations.ts";
 import { apps } from "./lib/server/schema.ts";
+import { executeCloudflareRemoval } from "./lib/server/cloudflare-removal.ts";
 import { InvalidOperation } from "./lib/server/errors.ts";
 
 export class AppOperationWorkflow extends WorkflowEntrypoint<
@@ -30,6 +31,12 @@ export class AppOperationWorkflow extends WorkflowEntrypoint<
 
     if (event.instanceId !== command.id)
       throw new NonRetryableError("App operation identity does not match its command");
+
+    if (command.kind === "remove") {
+      await executeCloudflareRemoval(this.env, command, step);
+
+      return;
+    }
 
     const options = {
       retries: { limit: 5, delay: "2 seconds", backoff: "exponential" },

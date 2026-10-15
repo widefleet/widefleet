@@ -19,6 +19,7 @@ const events = z.object({
 
 const registration = z.object({
   hostname: z.string(),
+  deleted: z.boolean().default(false),
   sequence: z.number(),
   published: events.nullable(),
   pending: z.record(
@@ -56,6 +57,8 @@ const configuration = (apps: z.infer<typeof registry>["apps"]) => {
   const queues: Record<string, { hostname: string; queue: string }> = {};
 
   for (const [appId, app] of Object.entries(apps)) {
+    if (app.deleted) continue;
+
     const versions = [
       ...Object.values(app.pending).map((entry) => entry.events),
       ...(app.published ? [app.published] : []),
@@ -145,7 +148,16 @@ export const createCloudflareEvents = (
 
       for (const name of app.queues) {
         const nativeName = cloudflareResourceName(appId, "queue", name);
-        const native = await provisioner.ensureQueue(nativeName);
+
+        // Deployment provisioning creates queues before activation. Subscription
+        // reconciliation must never recreate a resource from an old registry snapshot.
+        const native = await provisioner.findQueue(nativeName);
+
+        if (!native) {
+          if (app.deleted) continue;
+          throw new Error("The provisioned app queue is missing");
+        }
+
         const path = `/queues/${encodeURIComponent(native.queue_id)}/consumers`;
         let consumerId: string | null = null;
         await updateCloudflareSubscription(
@@ -245,16 +257,35 @@ export const createCloudflareEvents = (
   };
 
   return {
+    async remove(appId: string, hostname: string) {
+      await change((apps) => {
+        const current = apps[appId];
+        apps[appId] = {
+          hostname,
+          sequence: current?.sequence ?? 0,
+          deleted: true,
+          published: null,
+          pending: {},
+          queues: current?.queues ?? [],
+        };
+      });
+      await syncCrons();
+      await syncQueues(appId);
+    },
     registered: async (appId: string) => (await read()).value.apps[appId] !== undefined,
     async stage(id: string, app: z.infer<typeof contract.publishedApp>, sequence: number) {
       await change((apps) => {
         const current = apps[app.appId] ?? {
+          deleted: false,
           hostname: app.hostname,
           sequence: 0,
           published: null,
           pending: {},
           queues: [],
         };
+
+        if (current.deleted)
+          throw new InvalidOperation({ code: "CONFLICT", message: "App is being deleted" });
 
         if (sequence < current.sequence) return;
         const staged = events.parse(app.metadata);
@@ -290,6 +321,8 @@ export const createCloudflareEvents = (
     },
     async beginActivation(id: string, appId: string) {
       await change((apps) => {
+        if (apps[appId]?.deleted)
+          throw new InvalidOperation({ code: "CONFLICT", message: "App is being deleted" });
         const staged = apps[appId]?.pending[id];
 
         if (!staged) throw new Error("App event registration is not staged");
@@ -301,6 +334,9 @@ export const createCloudflareEvents = (
         const current = apps[app.appId];
 
         if (!current) throw new Error("App events have not been staged");
+
+        if (current.deleted)
+          throw new InvalidOperation({ code: "CONFLICT", message: "App is being deleted" });
 
         // A failed activation can still have reached R2 after losing its response.
         // Retain staged routes until a confirmed newer activation fences it out.

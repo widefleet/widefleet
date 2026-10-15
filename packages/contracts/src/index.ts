@@ -460,6 +460,10 @@ export const publishedApp = artifact.extend({
   telemetry: z.strictObject({ url: z.url(), token: z.string() }).nullable().default(null),
 });
 
+export const deletedApp = z.strictObject({ deleted: z.literal(true), appId: identifier });
+
+export const publishedHost = z.union([publishedApp, deletedApp]);
+
 export const agent = z.strictObject({
   id: identifier,
   name: z.string(),
