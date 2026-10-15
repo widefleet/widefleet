@@ -50,7 +50,11 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
       entry,
       `
       import application from ${JSON.stringify(configuration.main)};
-      import { WorkflowEntrypoint } from 'cloudflare:workers';
+      import authProxy from ${JSON.stringify(fileURLToPath(import.meta.resolve("@platform/auth-proxy/worker")))};
+      import { WorkerEntrypoint, WorkflowEntrypoint } from 'cloudflare:workers';
+      export class AuthProxy extends WorkerEntrypoint {
+        fetch(request) { return authProxy.fetch(request, this.env); }
+      }
       export class AcceptedDeployment extends WorkflowEntrypoint {
         async run(event, step) { await step.sleep('pending', '1 day'); }
       }
@@ -69,7 +73,19 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
           directory: fileURLToPath(new URL("../../dist/cloudflare/public", import.meta.url)),
           binding: "ASSETS",
         },
-        vars: environment.environment,
+        vars: {
+          ...environment.environment,
+          AUTH_PROXY_KEY: "local-control-plane-auth-key-never-deploy",
+          APP_COOKIE_SECRET: Buffer.alloc(32, 1).toString("base64url"),
+        },
+        services: [
+          {
+            binding: "AUTH_PROXY",
+            service: "widefleet-control-plane-test",
+            entrypoint: "AuthProxy",
+          },
+        ],
+        kv_namespaces: [{ binding: "AUTH_CONFIG", id: "auth-config" }],
         workflows: [
           { binding: "DEPLOYMENTS", name: "fixture-deployments", class_name: "AcceptedDeployment" },
         ],
@@ -115,6 +131,30 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
     const response = await fetch(`${origin}/healthz`);
     expect(await response.text()).toContain('"status":"ok"');
     expect(response.status).toBe(200);
+  });
+
+  it("publishes saved app sign-in settings through the auth proxy service binding", async () => {
+    const response = await administrator.get("/api/v1/settings");
+    expect(response.status()).toBe(200);
+    const initial = contract.settingsView.parse(await response.json());
+    expect(initial.error).toBeNull();
+
+    const plan = await administrator.post("/api/v1/settings/plan", { data: initial.settings });
+    expect(plan.status()).toBe(200);
+    expect(await plan.json()).toMatchObject({ restartRequired: false });
+
+    const saved = await administrator.put("/api/v1/settings", { data: initial.settings });
+    expect(saved.status()).toBe(200);
+    const result = contract.settingsView.parse(await saved.json());
+    expect(result.error).toBeNull();
+    expect(result.activation).toMatchObject({
+      state: "active",
+      revision: initial.activation.revision,
+    });
+    expect(result.activation.message).toContain("KV propagation");
+    expect(await (await administrator.get("/api/v1/settings")).json()).toMatchObject({
+      activation: result.activation,
+    });
   });
 
   it("keeps sessions and PostgreSQL connections scoped correctly across concurrent requests", async () => {
