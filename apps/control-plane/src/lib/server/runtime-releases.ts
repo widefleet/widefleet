@@ -8,6 +8,7 @@ import { InvalidOperation, StorageUnavailable } from "./errors.ts";
 import { defaultFleet, lockFleet, requireAgentExecution } from "./fleets.ts";
 import { loadPackage, savePackage, verifyModules } from "./package-storage.ts";
 import type { Principal } from "./identity.ts";
+import type { HostedExecution } from "./deployment-execution.ts";
 import { fleets, jobs, runtimeReleases } from "./schema.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import { transact, type Transaction } from "./transactions.ts";
@@ -113,7 +114,11 @@ const status = async (transaction: Transaction) => {
   });
 };
 
-export const createRuntimeReleaseService = (database: Database, storage: ArtifactStorage) => {
+export const createRuntimeReleaseService = (
+  database: Database,
+  storage: ArtifactStorage,
+  execution?: HostedExecution,
+) => {
   const select = (
     principal: Principal,
     input: z.infer<typeof contract.runtimeRelease> | z.infer<typeof contract.runtimeUpdate>,
@@ -161,14 +166,16 @@ export const createRuntimeReleaseService = (database: Database, storage: Artifac
 
   return {
     read: (principal: Principal) =>
-      transact(database, async (transaction) => {
-        administrator(principal);
+      execution
+        ? execution.runtime.read(principal)
+        : transact(database, async (transaction) => {
+            administrator(principal);
 
-        return Result.ok(await status(transaction));
-      }),
+            return Result.ok(await status(transaction));
+          }),
     install: (principal: Principal, release: z.infer<typeof contract.runtimeRelease>) =>
-      select(principal, release),
+      execution ? execution.runtime.select(principal, release) : select(principal, release),
     rollback: (principal: Principal, input: z.infer<typeof contract.runtimeUpdate>) =>
-      select(principal, input),
+      execution ? execution.runtime.select(principal, input) : select(principal, input),
   };
 };

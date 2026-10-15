@@ -1,6 +1,7 @@
 import * as contract from "@platform/contracts";
 import { z } from "zod";
 import { deploymentActor, deploymentCommand } from "./deployment-execution.ts";
+import { cloudflareRuntimeCommand } from "./cloudflare-runtime-command.ts";
 
 export const connectorCommand = z.object({
   kind: z.literal("connector"),
@@ -19,4 +20,8 @@ export const connectorCommand = z.object({
   ]),
 });
 
-export const deploymentWorkflowCommand = z.union([deploymentCommand, connectorCommand]);
+export const deploymentWorkflowCommand = z.union([
+  deploymentCommand,
+  connectorCommand,
+  cloudflareRuntimeCommand,
+]);

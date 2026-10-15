@@ -20,7 +20,15 @@ import {
 } from "./cloudflare-binding-updates.ts";
 import { deploymentCommand, hostedDeploymentId } from "./deployment-execution.ts";
 import { DatabaseUnavailable, InvalidOperation } from "./errors.ts";
-import { apps, artifacts, cloudflareOperations, deploymentEvents, deployments } from "./schema.ts";
+import {
+  apps,
+  artifacts,
+  cloudflareOperations,
+  deploymentEvents,
+  deployments,
+  fleets,
+} from "./schema.ts";
+import { runtimeReference } from "./runtime-releases.ts";
 import { createR2Storage } from "./storage/r2.ts";
 import { transact } from "./transactions.ts";
 
@@ -310,12 +318,22 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               throw new Error(`App readiness check failed (HTTP ${response.status})`);
             }
 
+            const [fleet] = await transaction
+              .select()
+              .from(fleets)
+              .where(eq(fleets.id, app.fleetId));
+
+            // A pending app deployment can span an independent runtime upgrade.
+            const activeRuntime = fleet?.appliedRuntime
+              ? runtimeReference.parse(fleet.appliedRuntime)
+              : target.runtime;
+
             z.object({
               deploymentId: z.literal(published.deploymentId),
               version: z.literal(version),
               networkRevision: z.literal(network.revision),
               capabilityRevision: z.literal(capabilities.revision),
-              runtimeVersion: z.literal(target.runtime.version),
+              runtimeVersion: z.literal(activeRuntime.version),
             }).parse(await response.json());
 
             const hasEvents =

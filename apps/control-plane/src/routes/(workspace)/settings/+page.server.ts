@@ -11,7 +11,7 @@ export const load: PageServerLoad = async ({ request, setHeaders, url }) => {
   return {
     loginFailed: url.searchParams.has("error"),
     section: z
-      .enum(["identity", "reporting", "management"])
+      .enum(["identity", "reporting", "runtime", "management"])
       .catch("identity")
       .parse(url.searchParams.get("section")),
   };

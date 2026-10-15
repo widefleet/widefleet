@@ -13,6 +13,7 @@
     updateSettings,
   } from "#lib/settings.remote";
   import ReportingSettings from "#shadcn/ReportingSettings.svelte";
+  import RuntimeSettings from "#shadcn/RuntimeSettings.svelte";
   import SecretField from "#shadcn/SecretField.svelte";
   import { Button } from "#shadcn/components/ui/button/index.js";
   import { Input } from "#shadcn/components/ui/input/index.js";
@@ -99,6 +100,7 @@
   const sections = [
     { id: "identity", label: "Company sign-in" },
     { id: "reporting", label: "Privacy" },
+    { id: "runtime", label: "App runtime" },
     { id: "management", label: "Administration" },
   ];
 
@@ -323,6 +325,7 @@
   {#if view.error}<Feedback kind="error">{view.error}</Feedback>{/if}
   {#if saved}<Feedback kind="success">Settings saved.</Feedback>{/if}
   {#if route.section === "reporting"}<ReportingSettings initial={data.reporting} />
+  {:else if route.section === "runtime"}<RuntimeSettings />
   {:else if route.section === "management"}
     <section class="max-w-2xl rounded-xl border p-6">
       <h2 class="text-base font-semibold">Manage configuration</h2>

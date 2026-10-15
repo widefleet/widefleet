@@ -1,4 +1,5 @@
 import { createCloudflareRemoval } from "./cloudflare-removal-admission.ts";
+import { createCloudflareRuntimeReleases } from "./cloudflare-runtime-releases.ts";
 import { resolveCloudflareCapabilities } from "./cloudflare-capabilities.ts";
 import { createCloudflareConnectors } from "./cloudflare-connectors.ts";
 import { validateCapabilityChange } from "./connector-changes.ts";
@@ -63,6 +64,7 @@ export const createCloudflareExecution = (
     });
 
   return {
+    runtime: createCloudflareRuntimeReleases(bindings, database, storage),
     remove: createCloudflareRemoval(bindings, database),
     connectors: {
       ...createCloudflareConnectors(bindings, database, storage),

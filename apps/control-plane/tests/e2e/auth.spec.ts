@@ -2,8 +2,16 @@ import { expect, test } from "@playwright/test";
 import { spawn } from "node:child_process";
 import { EventEmitter, once } from "node:events";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
+import {
+  CreateBucketCommand,
+  DeleteBucketCommand,
+  DeleteObjectsCommand,
+  ListObjectsV2Command,
+  S3Client,
+} from "@aws-sdk/client-s3";
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { app, artifact } from "@platform/contracts";
 import { member } from "../../src/lib/server/auth-schema.ts";
 import {
@@ -14,6 +22,8 @@ import {
   connectors,
   deployments,
   jobs,
+  fleets,
+  runtimeReleases,
 } from "../../src/lib/server/schema.ts";
 import { apiResource, cliClientId } from "../../src/lib/server/auth-options.ts";
 import { createTestEnvironment } from "../environment.ts";
@@ -25,13 +35,24 @@ let server: ReturnType<typeof spawn>;
 
 let logs = "";
 
+const runtimeBucket = `runtime-ui-${crypto.randomUUID()}`;
+
+const s3 = new S3Client({
+  endpoint: "http://127.0.0.1:25400",
+  region: "us-east-1",
+  forcePathStyle: true,
+  credentials: { accessKeyId: "local-tests", secretAccessKey: "local-tests-only" },
+});
+
 test.beforeAll(async () => {
   environment = await createTestEnvironment();
+  await s3.send(new CreateBucketCommand({ Bucket: runtimeBucket }));
   server = spawn(process.execPath, ["build"], {
     cwd: fileURLToPath(new URL("../../", import.meta.url)),
     env: {
       ...process.env,
       ...environment.environment,
+      S3_BUCKET: runtimeBucket,
       NODE_ENV: "production",
       HOST: "127.0.0.1",
       PORT: "25430",
@@ -74,11 +95,106 @@ test.afterAll(async () => {
   }
 
   await environment?.close();
+  const objects = await s3.send(new ListObjectsV2Command({ Bucket: runtimeBucket }));
+
+  if (objects.Contents?.length)
+    await s3.send(
+      new DeleteObjectsCommand({
+        Bucket: runtimeBucket,
+        Delete: { Objects: objects.Contents.map(({ Key }) => ({ Key })) },
+      }),
+    );
+  await s3.send(new DeleteBucketCommand({ Bucket: runtimeBucket }));
+  s3.destroy();
 });
 
 test.afterEach(async ({ browserName }, info) => {
   if (info.status !== info.expectedStatus)
     await info.attach(`${browserName}-server-log`, { body: logs, contentType: "text/plain" });
+});
+
+test("installs a runtime release and keeps activation pending until the executor confirms it", async ({
+  page,
+  context,
+}) => {
+  const [initialFleet] = await environment.database.db.select().from(fleets);
+
+  if (!initialFleet) throw new Error("Default fleet is missing");
+  const session = await environment.users.login({ userId: environment.owner.id });
+  await context.addCookies(
+    session.cookies.map((cookie) => ({
+      name: cookie.name,
+      value: cookie.value,
+      domain: "localhost",
+      path: cookie.path,
+      httpOnly: true,
+      secure: false,
+      sameSite: "Lax",
+    })),
+  );
+  const source = "export default {};";
+
+  const release = {
+    protocol: 1,
+    version: "99.8.0",
+    celld: "0.6.2",
+    main: "loader.js",
+    modules: [
+      { name: "loader.js", source, sha256: createHash("sha256").update(source).digest("hex") },
+    ],
+  };
+
+  await page.goto("/settings?section=runtime");
+  await expect(page.getByRole("heading", { name: "App runtime", exact: true })).toBeVisible();
+  await page.getByLabel("Install a runtime release").setInputFiles({
+    name: "release.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(release)),
+  });
+  await page.getByRole("button", { name: "Install and activate" }).click();
+  await expect(page.getByText("Activating runtime 99.8.0 …")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Install and activate" })).toBeDisabled();
+  const [fleet] = await environment.database.db.select().from(fleets);
+
+  if (!fleet?.runtimeJobId) throw new Error("Runtime job was not queued");
+  await environment.database.db
+    .update(jobs)
+    .set({ state: "succeeded" })
+    .where(eq(jobs.id, fleet.runtimeJobId));
+  await environment.database.db
+    .update(fleets)
+    .set({ appliedRuntime: fleet.runtime })
+    .where(eq(fleets.id, fleet.id));
+  await expect(page.getByText("Activating runtime 99.8.0 …")).toBeHidden();
+  await expect(page.getByRole("button", { name: "Install and activate" })).toBeEnabled();
+  await page.getByLabel("Activate an installed version").selectOption(release.version);
+  await page.getByRole("button", { name: "Activate version", exact: true }).click();
+  await expect(page.getByText("Activating runtime 99.8.0 …")).toBeVisible();
+  const [updated] = await environment.database.db.select().from(fleets);
+  expect(updated?.runtimeJobId).not.toBe(fleet.runtimeJobId);
+
+  if (!updated?.runtimeJobId) throw new Error("Runtime rollback was not queued");
+
+  const [queued] = await environment.database.db
+    .select()
+    .from(jobs)
+    .where(eq(jobs.id, updated.runtimeJobId));
+
+  expect(queued).toMatchObject({ kind: "runtime", state: "queued", rollback: true });
+  await environment.database.db
+    .delete(jobs)
+    .where(inArray(jobs.id, [fleet.runtimeJobId, updated.runtimeJobId]));
+  await environment.database.db
+    .update(fleets)
+    .set({
+      runtime: initialFleet.runtime,
+      appliedRuntime: initialFleet.appliedRuntime,
+      runtimeJobId: initialFleet.runtimeJobId,
+    })
+    .where(eq(fleets.id, initialFleet.id));
+  await environment.database.db
+    .delete(runtimeReleases)
+    .where(eq(runtimeReleases.version, release.version));
 });
 
 test("shows connector discovery and serving app connections to a member", async ({
