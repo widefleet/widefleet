@@ -6,6 +6,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Unstable_DevWorker } from "wrangler";
+import { cloudflareLog } from "@platform/app-runtime/logs";
 import { publishedApp, runtimeRelease } from "@platform/contracts";
 import release from "@platform/app-runtime/release" with { type: "json" };
 import { z } from "zod";
@@ -157,6 +158,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
         // error behavior enabled on Workers since 2026-05-14.
         compatibility_flags: ["nodejs_compat", "workflows_preserve_non_retryable_error_message"],
         vars: {
+          WIDEFLEET_LOGS: "cloudflare",
           PRIVATE_ROOT_SECRET: "parent-only-fixture",
           WIDEFLEET_CONTROL_TOKEN: "local-test-only",
           WIDEFLEET_CONFIGURATION: JSON.stringify({
@@ -221,6 +223,52 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
     );
 
     if (directory) await rm(directory, { recursive: true, force: true });
+  });
+
+  it("captures actual Dynamic Worker logs with app, preview and version attribution", async () => {
+    for (const target of [app, preview]) {
+      expect((await fetchApp("/logs", undefined, target.hostname)).status).toBe(200);
+      await expect
+        .poll(async () => {
+          const records = z.array(cloudflareLog).parse(await json("/fixture/logs"));
+
+          return records.filter(
+            (record) =>
+              record.appId === target.appId &&
+              record.record.message.startsWith("fixture plain log"),
+          );
+        })
+        .toMatchObject([
+          { appId: target.appId, record: { source: "server", deploymentId: target.deploymentId } },
+        ]);
+    }
+
+    const records = z.array(cloudflareLog).parse(await json("/fixture/logs"));
+    expect(records.filter((record) => record.record.message === "older browser")).toMatchObject([
+      { record: { source: "browser", buildId: "older-build", deploymentId: null } },
+      { record: { source: "browser", buildId: "older-build", deploymentId: null } },
+    ]);
+  });
+
+  it("captures native uncaught failures without replacing the app error", async () => {
+    expect((await fetchApp("/throw")).status).toBe(500);
+    await expect
+      .poll(async () => {
+        const records = z.array(cloudflareLog).parse(await json("/fixture/logs"));
+
+        return records.find((record) =>
+          record.record.message.includes("fixture application failure"),
+        );
+      })
+      .toMatchObject({
+        appId: app.appId,
+        record: {
+          source: "runtime",
+          kind: "span_error",
+          level: "error",
+          deploymentId: app.deploymentId,
+        },
+      });
   });
 
   it("loads immutable app modules and assets from R2 by hostname", async () => {
@@ -395,6 +443,18 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
         error: { name: "ApplicationFailure", message: "permanent fixture" },
       });
     expect(await json(`/workflow/attempts?id=${id}`)).toEqual([{ label: "failure", attempt: 1 }]);
+    await expect
+      .poll(async () => {
+        const records = z.array(cloudflareLog).parse(await json("/fixture/logs"));
+
+        return records.filter(
+          (record) =>
+            record.appId === app.appId &&
+            record.record.level === "error" &&
+            record.record.message.includes("permanent fixture"),
+        ).length;
+      })
+      .toBe(1);
   }, 20_000);
 
   it("uses native retries and exposes the app step name and attempt", async () => {

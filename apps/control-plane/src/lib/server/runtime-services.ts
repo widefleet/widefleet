@@ -10,6 +10,7 @@ import { createWorkflowService } from "./workflows.ts";
 import { createMigrationService } from "./migrations.ts";
 import { createJobService } from "./jobs.ts";
 import { createUploadService } from "./uploads.ts";
+import type { createCloudflareLogs } from "./cloudflare-logs.ts";
 import { createTelemetry } from "./telemetry.ts";
 import { createDirectory } from "./directory.ts";
 import type { Configuration } from "./config.ts";
@@ -27,6 +28,7 @@ export const createRuntime = ({
   reporting,
   encryptionKey,
   execution,
+  hostedLogs,
 }: {
   configuration: Configuration & { BETTER_AUTH_SECRET: string };
   database: ReturnType<typeof createDatabase>;
@@ -35,6 +37,7 @@ export const createRuntime = ({
   reporting: ReturnType<typeof createReporting>;
   encryptionKey: string;
   execution?: HostedExecution;
+  hostedLogs?: ReturnType<typeof createCloudflareLogs>;
 }) => {
   const services = {
     configuration,
@@ -52,7 +55,7 @@ export const createRuntime = ({
     connectors: createConnectorService(database.db, storage, encryptionKey, execution),
     releases: createRuntimeReleaseService(database.db, storage),
     uploads: createUploadService(database.db, storage, configuration, execution),
-    telemetry: createTelemetry(database.db, storage, configuration),
+    telemetry: createTelemetry(database.db, storage, configuration, hostedLogs),
   };
 
   let current: ReturnType<typeof snapshot> | undefined;

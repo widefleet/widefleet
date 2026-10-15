@@ -7,6 +7,7 @@ import { createReporting } from "./reporting.ts";
 import { createRuntime } from "./runtime-services.ts";
 import { createSettingsService } from "./settings.ts";
 import { createR2Storage } from "./storage/r2.ts";
+import { createCloudflareLogs } from "./cloudflare-logs.ts";
 import { createCloudflareExecution } from "./cloudflare-execution.ts";
 
 export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
@@ -36,6 +37,7 @@ export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
     settings,
     storage,
     execution: createCloudflareExecution(bindings, database.db, storage),
+    hostedLogs: createCloudflareLogs(bindings),
     reporting,
     encryptionKey: configuration.PLATFORM_ENCRYPTION_KEY,
   });

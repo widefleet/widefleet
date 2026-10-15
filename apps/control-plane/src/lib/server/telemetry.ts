@@ -4,6 +4,7 @@ import { Result } from "better-result";
 import { and, eq, ne } from "drizzle-orm";
 import { z } from "zod";
 import { appVisibility } from "./apps.ts";
+import type { createCloudflareLogs } from "./cloudflare-logs.ts";
 import type { Configuration } from "./config.ts";
 import type { Database } from "./database.ts";
 import { InvalidOperation, TelemetryNotConfigured, TelemetryUnavailable } from "./errors.ts";
@@ -20,7 +21,7 @@ const cursorData = z.strictObject({
   since: contract.logTimestamp,
   until: contract.logTimestamp,
   through: z.string().regex(/^[0-9]+$/),
-  position,
+  position: z.union([position, z.strictObject({ cloudflare: z.string().min(1).max(256) })]),
 });
 
 const storedLog = z.object({
@@ -85,6 +86,7 @@ export const createTelemetry = (
   database: Database,
   storage: ArtifactStorage,
   configuration: Configuration,
+  cloudflareLogs?: ReturnType<typeof createCloudflareLogs>,
 ) => {
   const signature = (value: string) =>
     createHmac("sha256", z.string().min(32).parse(configuration.BETTER_AUTH_SECRET))
@@ -92,7 +94,9 @@ export const createTelemetry = (
       .digest("hex");
 
   const credentials = (appId: string) =>
-    configuration.CLICKHOUSE_URL ? { token: `telemetry_${signature(`ingest:${appId}`)}` } : null;
+    !cloudflareLogs && configuration.CLICKHOUSE_URL
+      ? { token: `telemetry_${signature(`ingest:${appId}`)}` }
+      : null;
 
   let inflight = 0;
 
@@ -246,6 +250,59 @@ export const createTelemetry = (
         if (end <= timeNanos(since) || end - timeNanos(since) > maxRangeNanos)
           throw badRequest("Use an increasing time range of at most 30 days");
 
+        let deploymentBuild = "";
+
+        if (input.deploymentId) {
+          const [deployment] = await database
+            .select({ metadata: artifacts.metadata })
+            .from(deployments)
+            .innerJoin(artifacts, eq(deployments.artifactId, artifacts.id))
+            .where(and(eq(deployments.appId, input.appId), eq(deployments.id, input.deploymentId)))
+            .limit(1);
+
+          if (!deployment)
+            throw new InvalidOperation({ code: "NOT_FOUND", message: "Deployment not found" });
+          deploymentBuild =
+            contract.workerMetadata.parse(deployment.metadata).debug?.build_id ?? "";
+        }
+
+        if (cloudflareLogs) {
+          if (saved && !("cloudflare" in saved.position)) throw badRequest("Invalid log cursor");
+          const through = saved?.through ?? String(BigInt(Date.now()) * 1000n);
+
+          const page = await cloudflareLogs(input, {
+            since,
+            until,
+            through,
+            buildId: deploymentBuild,
+            offset: saved && "cloudflare" in saved.position ? saved.position.cloudflare : undefined,
+          });
+
+          const symbolicate = createSymbolicator(database, storage, input.appId);
+          const entries = [];
+
+          for (const entry of page.entries) entries.push(await symbolicate(entry));
+          let nextCursor: string | null = null;
+
+          if (page.offset) {
+            const data = Buffer.from(
+              JSON.stringify({
+                filter,
+                since,
+                until,
+                through,
+                position: { cloudflare: page.offset },
+              }),
+            ).toString("base64url");
+
+            nextCursor = `${data}.${signature(`cursor:${data}`)}`;
+          }
+
+          return contract.logPage.parse({ entries, nextCursor, receivedThrough: through, since });
+        }
+
+        if (saved && "cloudflare" in saved.position) throw badRequest("Invalid log cursor");
+
         const through =
           saved?.through ??
           z
@@ -278,7 +335,7 @@ export const createTelemetry = (
 
         const ascending = input.receivedAfter !== undefined;
 
-        if (saved) {
+        if (saved && "received" in saved.position) {
           parameters.set("position", saved.position.received);
           parameters.set("id", saved.position.id);
           conditions.push(
@@ -302,18 +359,8 @@ export const createTelemetry = (
         }
 
         if (input.deploymentId) {
-          const [deployment] = await database
-            .select({ metadata: artifacts.metadata })
-            .from(deployments)
-            .innerJoin(artifacts, eq(deployments.artifactId, artifacts.id))
-            .where(and(eq(deployments.appId, input.appId), eq(deployments.id, input.deploymentId)))
-            .limit(1);
-
-          if (!deployment)
-            throw new InvalidOperation({ code: "NOT_FOUND", message: "Deployment not found" });
-          const build = contract.workerMetadata.parse(deployment.metadata).debug?.build_id ?? "";
           parameters.set("deployment", input.deploymentId);
-          parameters.set("deploymentBuild", build);
+          parameters.set("deploymentBuild", deploymentBuild);
           conditions.push(
             "(deploymentId = {deployment:String} OR (l.Source = 'browser' AND {deploymentBuild:String} != '' AND l.BuildId = {deploymentBuild:String}))",
           );

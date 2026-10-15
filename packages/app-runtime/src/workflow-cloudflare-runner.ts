@@ -22,6 +22,8 @@ import {
 } from "./workflow-cloudflare-errors.ts";
 import type { CloudflareWorkflowSteps } from "./workflow-cloudflare.ts";
 
+const restoredStepErrors = new WeakSet<Error>();
+
 type Callback = (context: StepContext) => Promise<WorkflowValue>;
 
 const value = async (operation: () => Promise<WorkflowResult>) => {
@@ -30,11 +32,30 @@ const value = async (operation: () => Promise<WorkflowResult>) => {
 
   if (result.error) {
     const error = nativeWorkflowFault(result.error);
-    throw error === result.error ? new NativeWorkflowError(error) : restore(error);
+
+    if (error === result.error) throw new NativeWorkflowError(error);
+    const restored = restore(error);
+    restoredStepErrors.add(restored);
+
+    throw restored;
   }
 
   return result.value;
 };
+
+const captureApp = <T>(operation: () => Promise<T>) =>
+  captureWorkflow(async () => {
+    try {
+      return await operation();
+    } catch (cause) {
+      if (
+        !(cause instanceof NativeWorkflowError) &&
+        !(cause instanceof Error && restoredStepErrors.has(cause))
+      )
+        console.error(cause);
+      throw cause;
+    }
+  });
 
 export class WorkflowRunner extends WorkerEntrypoint<Record<string, WorkflowValue>> {
   ready() {
@@ -44,7 +65,7 @@ export class WorkflowRunner extends WorkerEntrypoint<Record<string, WorkflowValu
     return true;
   }
   run(event: AppEvent, native: Rpc.Stub<CloudflareWorkflowSteps>) {
-    return captureWorkflow(async () => {
+    return captureApp(async () => {
       this.ready();
 
       return new ApplicationWorkflow(this.ctx, this.env).run(event, {
@@ -64,7 +85,7 @@ export class WorkflowRunner extends WorkerEntrypoint<Record<string, WorkflowValu
 
           return value(() =>
             native.do(name, functionConfig.success ? {} : stepConfig(config), (context) =>
-              captureWorkflow(() => insideStep.run(true, () => invoke(context))),
+              captureApp(() => insideStep.run(true, () => invoke(context))),
             ),
           );
         },

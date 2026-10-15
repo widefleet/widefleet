@@ -91,6 +91,35 @@ struct Page {
     since: String,
 }
 
+// A follow window can arrive in either backend's native pagination order.
+// Flush only after its final page, ordered by receipt time across all pages.
+#[derive(Default)]
+struct FollowBuffer {
+    entries: Vec<Log>,
+    bytes: usize,
+}
+
+impl FollowBuffer {
+    fn push(&mut self, entry: Log) -> Result<()> {
+        self.bytes += serde_json::to_vec(&entry)?.len();
+        if self.bytes > 32 * 1024 * 1024 || self.entries.len() >= 100_000 {
+            return Err(Error::invalid("Follow exceeded its ordering buffer; narrow the filters and restart with --since to recover history".into()));
+        }
+        self.entries.push(entry);
+        Ok(())
+    }
+
+    fn drain(&mut self) -> Result<Vec<Log>> {
+        let mut keyed = std::mem::take(&mut self.entries)
+            .into_iter()
+            .map(|entry| Ok((micros(&entry.received_at)?, entry)))
+            .collect::<Result<Vec<_>>>()?;
+        keyed.sort_by(|(time_a, a), (time_b, b)| time_a.cmp(time_b).then(a.id.cmp(&b.id)));
+        self.bytes = 0;
+        Ok(keyed.into_iter().map(|(_, entry)| entry).collect())
+    }
+}
+
 fn safe_text(value: &str) -> String {
     value
         .chars()
@@ -159,6 +188,7 @@ async fn poll(api: &Api, credentials: &auth::Credentials, options: Options) -> R
     let mut cursor: Option<String> = None;
     let mut after: Option<u64> = None;
     let mut seen = HashMap::<String, u64>::new();
+    let mut pending = FollowBuffer::default();
     loop {
         let token = auth::access_token(api, credentials).await?;
         let mut request = api
@@ -174,10 +204,14 @@ async fn poll(api: &Api, credentials: &auth::Credentials, options: Options) -> R
         if first {
             page.entries.reverse();
         }
-        for entry in &page.entries {
+        for entry in page.entries {
             let received = micros(&entry.received_at)?;
             if seen.insert(entry.id.clone(), received).is_none() {
-                output(entry, json_output)?;
+                if first {
+                    output(&entry, json_output)?;
+                } else {
+                    pending.push(entry)?;
+                }
             }
         }
         if !options.follow {
@@ -193,6 +227,9 @@ async fn poll(api: &Api, credentials: &auth::Credentials, options: Options) -> R
         } else if let Some(next) = page.next_cursor {
             cursor = Some(next);
             continue;
+        }
+        for entry in pending.drain()? {
+            output(&entry, json_output)?;
         }
         // Re-read a bounded ingestion overlap to cover concurrent writes. This
         // deliberately follows receive time, so delayed exports remain visible.
@@ -222,5 +259,28 @@ mod tests {
             super::safe_text("message\u{1b}[2J\n\tframe"),
             "message[2J\n\tframe"
         );
+    }
+    #[test]
+    fn follow_orders_records_across_backend_pages_and_breaks_timestamp_ties()
+    -> platform_core::Result<()> {
+        let mut buffer = super::FollowBuffer::default();
+        for (id, received) in [("new", "10000"), ("z", "900"), ("a", "900"), ("old", "80")] {
+            let entry: super::Log = serde_json::from_value(serde_json::json!({
+                "id": id, "receivedAt": received, "timestamp": "2026-10-15T00:00:00Z",
+                "level":"info", "source":"server", "kind":"log", "message":id,
+                "body":id, "frames":[]
+            }))?;
+            buffer.push(entry)?;
+        }
+        let entries = buffer.drain()?;
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.id.as_str())
+                .collect::<Vec<_>>(),
+            ["old", "a", "z", "new"]
+        );
+        assert!(buffer.drain()?.is_empty());
+        Ok(())
     }
 }

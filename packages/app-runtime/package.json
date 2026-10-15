@@ -1,6 +1,6 @@
 {
   "name": "@platform/app-runtime",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "private": true,
   "license": "MIT",
   "files": [
@@ -11,7 +11,8 @@
   "type": "module",
   "exports": {
     "./release": "./dist/release.json",
-    "./network": "./src/network.ts"
+    "./network": "./src/network.ts",
+    "./logs": "./src/cloudflare-logs.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

@@ -7,10 +7,10 @@
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
   "preview_urls": false,
-  "observability": { "enabled": true },
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
   "worker_loaders": [{ "binding": "WIDEFLEET_LOADER" }],
   "r2_buckets": [{ "binding": "WIDEFLEET_PACKAGES", "bucket_name": "widefleet-artifacts" }],
-  "vars": { "WIDEFLEET_CONFIGURATION": "{\"source\":\"r2\"}" },
+  "vars": { "WIDEFLEET_CONFIGURATION": "{\"source\":\"r2\"}", "WIDEFLEET_LOGS": "cloudflare" },
   "durable_objects": {
     "bindings": [
       { "name": "WIDEFLEET_WORKFLOW_CATALOG", "class_name": "CloudflareWorkflowCatalog" },
