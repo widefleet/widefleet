@@ -1,9 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { EventEmitter, once } from "node:events";
 import { initializeRuntime } from "../src/lib/server/runtime-initialization.ts";
 import { fileURLToPath } from "node:url";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { open, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { installationSettings, settingsInput } from "@platform/contracts";
@@ -19,6 +20,8 @@ import { authBundle } from "../src/lib/server/auth-bundle.ts";
 import { createRecoveryLink } from "../src/lib/server/recovery.ts";
 import { createIdentityService } from "../src/lib/server/identity.ts";
 import { createTestEnvironment } from "./environment.ts";
+import { createSettingsService } from "../src/lib/server/settings.ts";
+import type { AppSignIn } from "../src/lib/server/app-sign-in.ts";
 
 describe("Platform setup and managed settings", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
@@ -226,6 +229,86 @@ describe("Platform setup and managed settings", () => {
       await writer.close();
       await older;
     }
+  });
+
+  it("orders overlapping saves from separate hosted request instances", async () => {
+    const current = await input();
+
+    if (!current.identity) throw new Error("Expected configured identity");
+    const gate = new EventEmitter();
+    const paused = once(gate, "paused");
+    const published: { clientId: string; secret: string }[] = [];
+
+    const signIn = {
+      callbackUrl: "https://auth.apps.localhost/oauth2/callback",
+      plan: () => Promise.resolve({ restartRequired: false, message: "Fixture" }),
+      status: () =>
+        Promise.resolve({
+          revision: published.at(-1)?.clientId ?? "",
+          state: "active",
+          message: "Fixture",
+        }),
+      publish: async (identity, secret, force) => {
+        if (force) {
+          if (identity.apps.clientId === "older-client") {
+            const resumed = once(gate, "resume");
+            gate.emit("paused");
+            await resumed;
+          }
+
+          published.push({ clientId: identity.apps.clientId, secret });
+        }
+
+        return identity.apps.clientId;
+      },
+    } satisfies AppSignIn;
+
+    const service = () =>
+      createSettingsService(
+        environment.configuration,
+        environment.database.db,
+        environment.environment.PLATFORM_ENCRYPTION_KEY,
+        signIn,
+      );
+
+    const change = (clientId: string, secret: string) =>
+      settingsInput.parse({
+        ...current,
+        identity: {
+          ...current.identity,
+          apps: { clientId, secret: { type: "value", value: secret } },
+        },
+      });
+
+    const older = service().initialize(change("older-client", "older-secret"));
+    await paused;
+    const newer = service().initialize(change("newer-client", "newer-secret"));
+
+    try {
+      // Wait until the second request has either reached the database lock or
+      // published out of order. Avoid relying on an arbitrary scheduling delay.
+      await vi.waitFor(async () => {
+        const blocked = await environment.database.db.execute(sql`
+          select 1 from pg_stat_activity
+          where datname = current_database() and wait_event_type = 'Lock'
+        `);
+
+        expect(
+          blocked.rows.length > 0 || published.some(({ clientId }) => clientId === "newer-client"),
+        ).toBe(true);
+      });
+    } finally {
+      gate.emit("resume");
+      await Promise.all([older, newer]);
+    }
+
+    expect(published).toEqual([
+      { clientId: "older-client", secret: "older-secret" },
+      { clientId: "newer-client", secret: "newer-secret" },
+    ]);
+    expect((await readInstallation(environment.database.db)).settings.identity?.apps.clientId).toBe(
+      "newer-client",
+    );
   });
 
   it("renews active normal sessions after the refresh interval", async () => {

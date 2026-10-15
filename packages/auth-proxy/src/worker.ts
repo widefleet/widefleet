@@ -95,9 +95,13 @@ export default {
       try {
         return await control(request, environment);
       } catch {
+        console.error("Auth proxy operation failed", { phase: "control" });
+
         return reply(503, "Auth configuration could not be applied");
       }
     }
+
+    let phase = "configuration";
 
     try {
       const installed = await configuration(environment);
@@ -106,6 +110,7 @@ export default {
       const routes = new Map<string, Promise<ReturnType<typeof authRoute.parse> | null>>();
 
       const resolve = (hostname: string) => {
+        phase = "app-route";
         let route = routes.get(hostname);
 
         if (!route) {
@@ -119,7 +124,12 @@ export default {
       };
 
       const proxy = createAuthProxy(installed.configuration, {
-        resolve: async (hostname) => (await resolve(hostname))?.access ?? null,
+        resolve: async (hostname) => {
+          const route = await resolve(hostname);
+          phase = "authentication";
+
+          return route?.access ?? null;
+        },
         fetch: async (forwarded) => {
           const route = await resolve(new URL(forwarded.url).hostname);
 
@@ -128,6 +138,7 @@ export default {
 
           // A stale KV route must never authorize a different app reusing this hostname.
           headers.set("x-widefleet-app-id", route.appId);
+          phase = "app-runtime";
 
           if (environment.APP_RUNTIME)
             return environment.APP_RUNTIME.fetch(new Request(forwarded, { headers }));
@@ -148,6 +159,7 @@ export default {
         },
       });
 
+      phase = "authentication";
       const response = await proxy.fetch(request);
       const route = routes.get(url.hostname);
       const resolved = route ? await route : null;
@@ -160,6 +172,8 @@ export default {
 
       return response;
     } catch {
+      console.error("Auth proxy operation failed", { phase });
+
       return reply(503, "Company sign-in is temporarily unavailable");
     }
   },

@@ -17,6 +17,7 @@ import { z } from "zod";
 import { oauthClient } from "../../src/lib/server/auth-schema.ts";
 import { apiResource } from "../../src/lib/server/auth-options.ts";
 import { createTestEnvironment } from "../environment.ts";
+import { installedAuth } from "../installation/installed-auth.ts";
 
 const execute = promisify(execFile);
 
@@ -64,6 +65,7 @@ describe.runIf(process.env["RUN_IMAGE_TESTS"] === "1")("release container images
 
     let running = false;
     let storageInitialized = false;
+    const auth = await installedAuth();
 
     try {
       await execute("docker", [
@@ -274,6 +276,12 @@ describe.runIf(process.env["RUN_IMAGE_TESTS"] === "1")("release container images
       ).stdout.trim();
 
       expect(socket.startsWith("unix://")).toBe(true);
+      await auth.start();
+      await auth.publish({
+        ...auth.configuration,
+        domain: environment.configuration.APP_DOMAIN,
+        redirectUrl: `https://auth.${environment.configuration.APP_DOMAIN}/oauth2/callback`,
+      });
 
       const agentSettings = {
         PLATFORM_URL: environment.configuration.PLATFORM_URL,
@@ -283,13 +291,14 @@ describe.runIf(process.env["RUN_IMAGE_TESTS"] === "1")("release container images
         PLATFORM_AGENT_HOST_STATE: state,
         PLATFORM_ROUTING_DIRECTORY: "/state/routes",
         PLATFORM_RUNTIME_IMAGE: runtimeImage,
+        PLATFORM_APP_AUTH_URL: `http://${auth.name}:4180/`,
         CELLD_BINARY: "/usr/local/bin/celld",
         FLEET_S3_ENDPOINT: "http://rustfs:9000",
         FLEET_RUNTIME_S3_ENDPOINT: "http://internal-app-platform-test-rustfs-1:9000",
         FLEET_S3_BUCKET: fleetBucket,
         FLEET_S3_ACCESS_KEY_ID: environment.environment.S3_ACCESS_KEY_ID,
         FLEET_S3_SECRET_ACCESS_KEY: environment.environment.S3_SECRET_ACCESS_KEY,
-        PLATFORM_TRUSTED_CONTAINERS: "internal-app-platform-test-rustfs-1",
+        PLATFORM_TRUSTED_CONTAINERS: `internal-app-platform-test-rustfs-1,${auth.name}`,
       };
 
       const agent = () =>
@@ -304,6 +313,8 @@ describe.runIf(process.env["RUN_IMAGE_TESTS"] === "1")("release container images
             `${socket.slice("unix://".length)}:/var/run/docker.sock`,
             "--volume",
             `${state}:/state`,
+            "--volumes-from",
+            `${auth.name}:ro`,
             ...Object.entries(agentSettings).flatMap(([key, value]) => [
               "--env",
               `${key}=${value}`,
@@ -339,6 +350,14 @@ describe.runIf(process.env["RUN_IMAGE_TESTS"] === "1")("release container images
 
       expect(worker.stdout).toBe("release image works");
 
+      const authResponse = () =>
+        auth.node(
+          'const response=await fetch("http://127.0.0.1:4180/",{headers:{"x-forwarded-host":process.argv[1],"x-forwarded-proto":"https"}}); console.log(JSON.stringify({status:response.status,revision:response.headers.get("x-widefleet-access-revision")}));',
+          app.hostname,
+        );
+
+      expect(JSON.parse(await authResponse())).toEqual({ status: 401, revision: `${app.id}:0` });
+
       const usedImage = await execute("docker", [
         "inspect",
         `platform-fleet-${app.fleetId}`,
@@ -357,7 +376,10 @@ describe.runIf(process.env["RUN_IMAGE_TESTS"] === "1")("release container images
       expect(usedImage.stdout.trim()).toBe(selectedImage.stdout.trim());
       await request(`/apps/${app.id}`, "DELETE");
       await agent();
+      expect(JSON.parse(await authResponse())).toEqual({ status: 404, revision: null });
     } finally {
+      await auth.dispose();
+
       if (fleetId) {
         const appName = `platform-fleet-${fleetId}`;
         await execute("docker", ["rm", "--force", appName]).catch(() => undefined);
