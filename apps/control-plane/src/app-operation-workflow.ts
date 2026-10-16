@@ -77,15 +77,13 @@ export class AppOperationWorkflow extends WorkflowEntrypoint<
         throw new NonRetryableError("Hostname belongs to another app");
 
       if (command.kind === "workflows") {
-        if (!this.env.APP_RUNTIME || !this.env.APP_RUNTIME_TOKEN)
-          throw new Error("App runtime is not configured");
+        if (!this.env.APP_RUNTIME) throw new Error("App runtime is not configured");
 
         const response = await this.env.APP_RUNTIME.fetch(
           `https://${app.hostname}/.well-known/widefleet/workflows`,
           {
             method: "POST",
             headers: {
-              authorization: `Bearer ${this.env.APP_RUNTIME_TOKEN}`,
               "content-type": "application/json",
             },
             body: JSON.stringify({

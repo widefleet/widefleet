@@ -15,8 +15,7 @@ ENV NODE_ENV=production HOST=0.0.0.0 PORT=3000 BODY_SIZE_LIMIT=100M PROTOCOL_HEA
 WORKDIR /application
 COPY --from=build --chown=node:node /application .
 COPY LICENSE /usr/share/licenses/widefleet/LICENSE
-COPY infra/traefik/app-auth.json /infra/traefik/app-auth.json
-RUN mkdir -p /var/lib/widefleet/auth /var/lib/widefleet/edge \
+RUN mkdir -p /var/lib/widefleet/runtime /var/lib/widefleet/edge \
     && chown -R node:node /var/lib/widefleet && chmod 700 /var/lib/widefleet
 USER node
 EXPOSE 3000

@@ -30,12 +30,12 @@ import {
 } from "./schema.ts";
 import { createR2Storage } from "./storage/r2.ts";
 import { transact } from "./transactions.ts";
+import { publishAuthRoute } from "./cloudflare-auth-proxy.ts";
 
 const deploymentConfiguration = z.object({
   CLOUDFLARE_ACCOUNT_ID: z.string().regex(/^[a-f0-9]{32}$/),
   CLOUDFLARE_API_TOKEN: z.string().min(1),
   APP_RUNTIME_NAME: z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/),
-  APP_RUNTIME_TOKEN: z.string().min(32),
 });
 
 const value = <T, E>(result: Result<T, E>) => {
@@ -290,22 +290,18 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
             const published = contract.publishedApp.parse({ ...selected, version });
             const body = JSON.stringify(published);
 
-            // Access groups can exceed R2's metadata limit; the immutable reference switches with code.
             const customMetadata = {
-              widefleet_access: `access/${app.id}/${version}.json`,
               widefleet_deployment_sequence: String(
                 command.kind === "deploy" ? sequence : servingSequence,
               ),
             };
 
-            await immutable(customMetadata.widefleet_access, JSON.stringify(access));
             await immutable(`versions/${app.id}/${version}.json`, body, customMetadata);
 
             const response = await runtime.fetch(
               `https://${app.hostname}/.well-known/widefleet/ready`,
               {
                 headers: {
-                  authorization: `Bearer ${configuration.APP_RUNTIME_TOKEN}`,
                   "x-widefleet-candidate": `${app.id}/${version}`,
                 },
                 redirect: "manual",
@@ -369,10 +365,9 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
                 configuration.APP_RUNTIME_NAME,
               ).beginActivation(command.id, app.id);
 
-            if (
-              currentBody !== body ||
-              current?.customMetadata?.["widefleet_access"] !== customMetadata.widefleet_access
-            ) {
+            await publishAuthRoute(bindings, app.hostname, { appId: app.id, access });
+
+            if (currentBody !== body) {
               if (command.kind === "deploy" && !current)
                 await withCloudflareDatabase(bindings, async ({ db: history }) => {
                   const [operation] = await history

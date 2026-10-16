@@ -5,14 +5,23 @@ x-azure: &azure
   AZURE_TENANT_ID:
   AZURE_FEDERATED_TOKEN_FILE:
 
+x-storage: &storage
+  <<: *azure
+  ARTIFACT_STORAGE_PROVIDER: azure
+  FLEET_STORAGE_PROVIDER: azure
+  AZURE_STORAGE_CONTAINER: ${AZURE_STORAGE_CONTAINER:?Set AZURE_STORAGE_CONTAINER}
+  FLEET_AZURE_CONTAINER: ${FLEET_AZURE_CONTAINER:?Set FLEET_AZURE_CONTAINER}
+
 services:
+  initialize:
+    environment: *storage
   control-plane:
+    environment: *storage
+  runtime:
     environment:
       <<: *azure
-      ARTIFACT_STORAGE_PROVIDER: azure
       FLEET_STORAGE_PROVIDER: azure
-      AZURE_STORAGE_CONTAINER: ${AZURE_STORAGE_CONTAINER:?Set AZURE_STORAGE_CONTAINER}
-      FLEET_AZURE_CONTAINER: ${FLEET_AZURE_CONTAINER:?Set FLEET_AZURE_CONTAINER}
+      FLEET_AZURE_CONTAINER: ${FLEET_AZURE_CONTAINER}
   agent:
     environment:
       <<: *azure

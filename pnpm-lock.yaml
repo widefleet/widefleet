@@ -243,6 +243,9 @@ importers:
       '@platform/app-runtime':
         specifier: workspace:*
         version: link:../../packages/app-runtime
+      '@platform/auth-proxy':
+        specifier: workspace:*
+        version: link:../../packages/auth-proxy
       '@platform/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -274,9 +277,6 @@ importers:
       '@lucide/svelte':
         specifier: 1.52.0
         version: 1.52.0(svelte@5.57.1)
-      '@platform/auth-proxy':
-        specifier: workspace:*
-        version: link:../../packages/auth-proxy
       '@sveltejs/adapter-cloudflare':
         specifier: 8.0.0
         version: 8.0.0(@sveltejs/kit@3.0.0(@sveltejs/vite-plugin-svelte@7.3.1(svelte@5.57.1)(vite@8.3.2(@types/node@26.6.4)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1)))(svelte@5.57.1)(typescript@6.0.3)(vite@8.3.2(@types/node@26.6.4)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1)))(wrangler@4.147.0(@cloudflare/workers-types@5.20261003.1)(@types/node@26.6.4))
@@ -356,6 +356,9 @@ importers:
 
   packages/app-runtime:
     dependencies:
+      '@platform/auth-proxy':
+        specifier: workspace:*
+        version: link:../auth-proxy
       '@platform/contracts':
         specifier: workspace:*
         version: link:../contracts

@@ -272,6 +272,7 @@ pub struct ReleaseModule {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RuntimeRelease {
+    pub auth: u32,
     pub protocol: u32,
     pub version: String,
     pub celld: String,

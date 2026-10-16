@@ -1,4 +1,5 @@
-import { authConfiguration, createAuthProxy } from "@platform/auth-proxy";
+import { createAuthHandler, type AuthEnvironment } from "@platform/auth-proxy/worker";
+import { authControlPath } from "@platform/auth-proxy/publication";
 import { z } from "zod";
 
 const environment = z.object({
@@ -24,32 +25,60 @@ globalThis.fetch = (input, init) => {
 };
 
 export default {
-  async fetch(request: Request, input: z.infer<typeof environment>) {
+  async fetch(request: Request, input: z.infer<typeof environment> & AuthEnvironment) {
     const env = environment.parse(input);
 
     graphOrigin = env.GRAPH_ORIGIN;
-    const configuration = authConfiguration.parse(JSON.parse(env.CONFIGURATION));
 
-    const routes = new Map([
-      ["ledger.apps.example.test", { revision: 1, groups: ["accounting"] }],
-      ["preview.ledger.apps.example.test", { revision: 1, groups: ["reviewers"] }],
-      ["ledger-pr42.apps.example.test", { revision: 1, groups: ["accounting"] }],
-      ["welcome.apps.example.test", { revision: 0, groups: [] }],
-    ]);
+    const worker = createAuthHandler(input, async (appRequest, appId) =>
+      Response.json(
+        {
+          appId,
+          url: appRequest.url,
+          method: appRequest.method,
+          headers: Object.fromEntries(appRequest.headers),
+          body: await appRequest.text(),
+        },
+        { headers: { "set-cookie": "app_cookie=blocked; Path=/" } },
+      ),
+    );
 
-    const proxy = createAuthProxy(configuration, {
-      resolve: (hostname) => Promise.resolve(routes.get(hostname) ?? null),
-      fetch: async (forwarded) =>
-        Response.json(
-          {
-            url: forwarded.url,
-            method: forwarded.method,
-            headers: Object.fromEntries(forwarded.headers),
-            body: await forwarded.text(),
-          },
-          { headers: { "set-cookie": "app_cookie=blocked; Path=/" } },
-        ),
-    });
+    if (new URL(request.url).pathname === "/_fixture/install") {
+      const publish = (path: string, body: string) =>
+        worker.fetch(
+          new Request(`https://auth.invalid${authControlPath}${path}`, {
+            method: "PUT",
+            headers: {
+              authorization: `Bearer ${input.WIDEFLEET_CONTROL_TOKEN}`,
+              "content-type": "application/json",
+            },
+            body,
+          }),
+        );
+
+      const installed = await publish("/configuration", env.CONFIGURATION);
+
+      if (!installed.ok) return installed;
+
+      for (const [hostname, groups] of [
+        ["ledger.apps.example.test", ["accounting"]],
+        ["preview.ledger.apps.example.test", ["reviewers"]],
+        ["ledger-pr42.apps.example.test", ["accounting"]],
+        ["welcome.apps.example.test", []],
+      ] as const) {
+        const result = await publish(
+          `/apps/${hostname}`,
+          JSON.stringify({
+            appId: "00000000-0000-4000-8000-000000000003",
+            access: { revision: 1, groups },
+          }),
+        );
+
+        if (!result.ok) return result;
+      }
+
+      return new Response(null, { status: 204 });
+    }
 
     // Route the local test socket to its synthetic public HTTPS origin. This is
     // a test-only envelope, never a trusted-header option in the auth proxy.
@@ -60,6 +89,6 @@ export default {
       request.headers.get("x-fixture-origin") ?? "https://auth.apps.example.test",
     );
 
-    return proxy.fetch(new Request(publicUrl, request));
+    return worker.fetch(new Request(publicUrl, request));
   },
 };

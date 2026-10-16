@@ -1,10 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { EventEmitter, once } from "node:events";
 import { initializeRuntime } from "../src/lib/server/runtime-initialization.ts";
 import { fileURLToPath } from "node:url";
-import { eq } from "drizzle-orm";
-import { copyFile, open, readFile, rm, writeFile } from "node:fs/promises";
+import { eq, sql } from "drizzle-orm";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { installationSettings, settingsInput } from "@platform/contracts";
 import { createAuthentication, companyLoginRevision } from "../src/lib/server/auth.ts";
@@ -15,10 +14,11 @@ import {
   installationId,
   readInstallation,
 } from "../src/lib/server/installation-store.ts";
-import { authBundle } from "../src/lib/server/auth-bundle.ts";
 import { createRecoveryLink } from "../src/lib/server/recovery.ts";
 import { createIdentityService } from "../src/lib/server/identity.ts";
 import { createTestEnvironment } from "./environment.ts";
+import { createSettingsService } from "../src/lib/server/settings.ts";
+import type { AppSignIn } from "../src/lib/server/app-sign-in.ts";
 
 describe("Platform setup and managed settings", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
@@ -130,16 +130,9 @@ describe("Platform setup and managed settings", () => {
       "replacement-management-secret",
     );
 
-    const bundle = authBundle.parse(
-      JSON.parse(
-        await readFile(
-          join(environment.configuration.PLATFORM_AUTH_DIRECTORY, "desired.json"),
-          "utf8",
-        ),
-      ),
-    );
+    const bundle = environment.authControl.read();
 
-    expect(bundle.clientSecret).toBe("private-management-secret");
+    expect(bundle.configuration?.clientSecret).toBe("private-management-secret");
     expect(await environment.database.db.select().from(installationSecrets)).toHaveLength(2);
   });
 
@@ -157,84 +150,134 @@ describe("Platform setup and managed settings", () => {
     await environment.settings.setExternalManagement(principal(), false);
   });
 
-  it("requires restart acknowledgement only for changes to proxy options", async () => {
+  it("applies client changes without restarting the auth proxy", async () => {
     const current = await input();
 
     if (!current.identity) throw new Error("Expected configured identity");
-    const directory = environment.configuration.PLATFORM_AUTH_DIRECTORY;
-    await copyFile(join(directory, "desired.json"), join(directory, "active.json"));
     current.identity.apps.secret = { type: "value", value: "rotated-app-secret" };
-    const original = structuredClone(current);
-    expect(await environment.settings.plan(principal(), current)).toMatchObject({
-      restartRequired: false,
-    });
     current.identity.apps.clientId = "replacement-app-client";
     expect(await environment.settings.plan(principal(), current)).toMatchObject({
-      restartRequired: true,
+      restartRequired: false,
     });
-    await expect(
-      environment.settings.update(principal(), { ...current, acknowledgeRestart: false }, true),
-    ).rejects.toMatchObject({ code: "CONFLICT" });
-    await environment.settings.update(principal(), { ...current, acknowledgeRestart: true }, true);
+    await environment.settings.update(principal(), { ...current, acknowledgeRestart: false }, true);
     expect((await input()).identity?.apps.clientId).toBe("replacement-app-client");
-    // Simulate a failed activation: the saved settings changed, but the active proxy did not.
-    expect(await environment.settings.plan(principal(), await input())).toMatchObject({
-      restartRequired: true,
-    });
-    expect(await environment.settings.plan(principal(), original)).toMatchObject({
-      restartRequired: false,
-    });
-    await copyFile(join(directory, "desired.json"), join(directory, "active.json"));
-    expect(await environment.settings.plan(principal(), await input())).toMatchObject({
-      restartRequired: false,
-    });
+
+    const bundle = environment.authControl.read();
+
+    expect(bundle.configuration?.clientId).toBe("replacement-app-client");
+    expect(bundle.configuration?.clientSecret).toBe("rotated-app-secret");
   });
 
-  it("cannot overwrite a completed update with an older delayed publication", async () => {
+  it("reads installed status without publishing and reports unavailable or unapplied settings", async () => {
+    const current = await input();
+    const before = environment.authControl.read().publications;
+    await environment.settings.resolve();
+    await environment.settings.read(principal());
+    expect(environment.authControl.read().publications).toBe(before);
+
+    if (!current.identity) throw new Error("Expected configured identity");
+    current.identity.apps.clientId = "not-yet-installed-client";
+    environment.authControl.available(false);
+
+    try {
+      expect((await environment.settings.read(principal())).activation.state).toBe("failed");
+      expect(
+        (
+          await environment.settings.update(
+            principal(),
+            { ...current, acknowledgeRestart: false },
+            true,
+          )
+        ).error,
+      ).toBe("App sign-in could not be prepared");
+    } finally {
+      environment.authControl.available(true);
+    }
+
+    expect((await environment.settings.read(principal())).activation.state).toBe("failed");
+    expect(environment.authControl.read().publications).toBe(before);
+    await environment.settings.update(principal(), { ...current, acknowledgeRestart: false }, true);
+    expect((await environment.settings.read(principal())).activation.state).toBe("active");
+  });
+
+  it("orders overlapping saves from separate hosted request instances", async () => {
     const current = await input();
 
     if (!current.identity) throw new Error("Expected configured identity");
-    const directory = environment.configuration.PLATFORM_AUTH_DIRECTORY;
-    const path = join(directory, "desired.json");
-    await rm(path);
-    await promisify(execFile)("mkfifo", [path]);
-    // Pause the older publication at its existing-file read while another request
-    // saves settings. No external secret source is involved.
-    const older = environment.settings.resolve();
-    const writer = await open(path, "w");
+    const gate = new EventEmitter();
+    const paused = once(gate, "paused");
+    const published: { clientId: string; secret: string }[] = [];
+
+    const signIn = {
+      callbackUrl: "https://auth.apps.localhost/oauth2/callback",
+      plan: () => Promise.resolve({ restartRequired: false, message: "Fixture" }),
+      status: () =>
+        Promise.resolve({
+          revision: published.at(-1)?.clientId ?? "",
+          state: "active",
+          message: "Fixture",
+        }),
+      publish: async (identity, secret, force) => {
+        if (force) {
+          if (identity.apps.clientId === "older-client") {
+            const resumed = once(gate, "resume");
+            gate.emit("paused");
+            await resumed;
+          }
+
+          published.push({ clientId: identity.apps.clientId, secret });
+        }
+
+        return identity.apps.clientId;
+      },
+    } satisfies AppSignIn;
+
+    const service = () =>
+      createSettingsService(
+        environment.configuration,
+        environment.database.db,
+        environment.environment.PLATFORM_ENCRYPTION_KEY,
+        signIn,
+      );
+
+    const change = (clientId: string, secret: string) =>
+      settingsInput.parse({
+        ...current,
+        identity: {
+          ...current.identity,
+          apps: { clientId, secret: { type: "value", value: secret } },
+        },
+      });
+
+    const older = service().initialize(change("older-client", "older-secret"));
+    await paused;
+    const newer = service().initialize(change("newer-client", "newer-secret"));
 
     try {
-      current.identity.directory = null;
-      current.identity.apps.secret = { type: "value", value: "replacement-app-secret" };
-      current.identity.apps.clientId = "latest-client";
-
-      const updated = environment.settings.update(
-        principal(),
-        { ...current, acknowledgeRestart: true },
-        true,
-      );
-
+      // Wait until the second request has either reached the database lock or
+      // published out of order. Avoid relying on an arbitrary scheduling delay.
       await vi.waitFor(async () => {
+        const blocked = await environment.database.db.execute(sql`
+          select 1 from pg_stat_activity
+          where datname = current_database() and wait_event_type = 'Lock'
+        `);
+
         expect(
-          (await readInstallation(environment.database.db)).settings.identity?.apps.clientId,
-        ).toBe("latest-client");
+          blocked.rows.length > 0 || published.some(({ clientId }) => clientId === "newer-client"),
+        ).toBe(true);
       });
-      await writer.writeFile("{}");
-      await writer.close();
-      const [previous] = await Promise.all([older, updated]);
-      expect(previous.identity).not.toBeNull();
-      expect(previous.error).toBeNull();
-
-      const bundle = authBundle.parse(
-        JSON.parse(await readFile(join(directory, "desired.json"), "utf8")),
-      );
-
-      expect(bundle).toHaveProperty("proxy.providers.0.clientID", "latest-client");
-      await copyFile(join(directory, "desired.json"), join(directory, "active.json"));
     } finally {
-      await writer.close();
-      await older;
+      gate.emit("resume");
+      await Promise.all([older, newer]);
     }
+
+    expect(published).toEqual([
+      { clientId: "older-client", secret: "older-secret" },
+      { clientId: "newer-client", secret: "newer-secret" },
+    ]);
+    expect((await readInstallation(environment.database.db)).settings.identity?.apps.clientId).toBe(
+      "newer-client",
+    );
   });
 
   it("renews active normal sessions after the refresh interval", async () => {

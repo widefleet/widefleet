@@ -172,6 +172,13 @@ export default {
   ...runtime,
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    url.protocol = "https:";
+    url.port = "";
+    request = new Request(url, request);
+    if (request.headers.get('x-fixture-management') === 'true') {
+      request.headers.delete('x-fixture-management');
+      return env.RUNTIME_MANAGEMENT.fetch(request);
+    }
     if (url.pathname === '/fixture/logs') return Response.json(logRecords);
     if (url.pathname === '/fixture/tcp') {
       const socket = connect(url.searchParams.get('address'));
@@ -185,6 +192,7 @@ export default {
       for (const asset of assets) await env.WIDEFLEET_PACKAGES.put('apps/' + app.appId + '/assets/' + asset.hash, asset.source);
       await env.WIDEFLEET_PACKAGES.put('versions/' + app.appId + '/' + app.version + '.json', JSON.stringify(app));
       await env.WIDEFLEET_PACKAGES.put('hosts/' + app.hostname + '.json', JSON.stringify(app));
+      await env.AUTH_CONFIG.put('apps/' + app.hostname, JSON.stringify({appId:app.appId, access:{revision:1,groups:[]}}));
       return new Response(null, { status: 204 });
     }
     return runtime.fetch(request, env, ctx);

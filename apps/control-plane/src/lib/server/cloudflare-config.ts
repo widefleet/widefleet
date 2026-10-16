@@ -14,10 +14,10 @@ export interface CloudflareBindings {
   DEPLOYMENTS?: Workflow<z.infer<typeof deploymentWorkflowCommand>>;
   APP_OPERATIONS?: Workflow<z.infer<typeof cloudflareAppOperation>>;
   APP_RUNTIME?: Fetcher;
+  APP_COOKIE_SECRET?: string;
   CLOUDFLARE_ACCOUNT_ID?: string;
   CLOUDFLARE_API_TOKEN?: string;
   APP_RUNTIME_NAME?: string;
-  APP_RUNTIME_TOKEN?: string;
   PLATFORM_USAGE_REPORTING?: string;
   PLATFORM_CRASH_REPORTING?: string;
 }

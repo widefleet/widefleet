@@ -19,22 +19,17 @@ pub struct Configuration {
     pub token: String,
     #[arg(long, env = "PLATFORM_AGENT_STATE", default_value = ".local/agent")]
     pub state: PathBuf,
-    /// Absolute path to the same state directory on the Docker host.
-    #[arg(long, env = "PLATFORM_AGENT_HOST_STATE")]
-    pub host_state: Option<PathBuf>,
+    /// Runtime container started by the installation's Compose configuration.
     #[arg(
         long,
-        env = "PLATFORM_RUNTIME_IMAGE",
-        default_value = "app-platform-runtime:0.1.0"
+        env = "PLATFORM_RUNTIME_CONTAINER",
+        default_value = "app-platform-runtime"
     )]
-    pub runtime_image: String,
+    pub runtime_container: String,
     #[arg(long, env = "CELLD_BINARY", default_value = "celld")]
     pub celld: PathBuf,
     #[command(flatten)]
     pub storage: crate::storage::StorageOptions,
-    /// Existing trusted containers to connect to the fleet's private network.
-    #[arg(long, env = "PLATFORM_TRUSTED_CONTAINERS", value_delimiter = ',')]
-    pub trusted_containers: Vec<String>,
     /// Traefik watches this persistent directory independently of the agent.
     #[arg(long, env = "PLATFORM_ROUTING_DIRECTORY")]
     pub routing_directory: PathBuf,
@@ -45,13 +40,19 @@ pub struct Configuration {
         default_value = "https://app-platform-proxy:8443"
     )]
     pub proxy_url: String,
-    /// OAuth2 Proxy endpoint as reached by Traefik.
+    /// Private runtime origin reachable from the agent and Traefik.
     #[arg(
         long,
-        env = "PLATFORM_APP_AUTH_URL",
-        default_value = "http://oauth2-proxy:4180/"
+        env = "PLATFORM_APP_RUNTIME_URL",
+        default_value = "http://runtime:8080/"
     )]
-    pub app_auth_url: String,
+    pub app_runtime_url: String,
+    #[arg(
+        long,
+        env = "PLATFORM_RUNTIME_KEY_FILE",
+        default_value = "/runtime-config/control-token"
+    )]
+    pub runtime_key_file: PathBuf,
     /// Match the certificate mode configured for Traefik.
     #[arg(long, env = "TLS_MODE", default_value = "provided")]
     pub tls_mode: TlsMode,

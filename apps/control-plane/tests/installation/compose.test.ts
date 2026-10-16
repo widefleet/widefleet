@@ -81,14 +81,14 @@ describe.runIf(process.env["RUN_INSTALLATION_TESTS"] === "1")(
     it("starts without identity settings and separates shared proxy state from the database", async () => {
       const { services } = await render(["compose.base", "compose.azure"]);
       const control = serviceSchema.parse(services["control-plane"]);
-      const sso = serviceSchema.parse(services["oauth2-proxy"]);
+      const runtime = serviceSchema.parse(services["runtime"]);
       expect(configurationSchema.parse(control.environment).IDENTITY).toBeNull();
       expect(control.environment).not.toHaveProperty("ENTRA_CLIENT_SECRET");
-      expect(sso.environment).not.toHaveProperty("DATABASE_URL");
-      expect(sso.depends_on).toEqual({});
+      expect(runtime.environment).not.toHaveProperty("DATABASE_URL");
+      expect(runtime.depends_on).toHaveProperty("initialize");
       expect(
-        control.volumes.find((mount) => mount.target === "/var/lib/widefleet/auth")?.source,
-      ).toBe(sso.volumes.find((mount) => mount.target === "/auth")?.source);
+        control.volumes.find((mount) => mount.target === "/var/lib/widefleet/runtime")?.source,
+      ).toBe(runtime.volumes.find((mount) => mount.target === "/runtime-config")?.source);
       expect(control.volumes.some((mount) => mount.target.includes("docker.sock"))).toBe(false);
       expect(services).not.toHaveProperty("configure-edge");
     });
@@ -130,10 +130,8 @@ describe.runIf(process.env["RUN_INSTALLATION_TESTS"] === "1")(
         expect(Boolean(services["postgres"])).toBe(database === "local");
         expect(Boolean(control.depends_on["postgres"])).toBe(database === "local");
         expect(Boolean(services["storage"])).toBe(storage === "rustfs");
-        expect(Boolean(control.depends_on["storage"])).toBe(storage === "rustfs");
-        expect(agent.environment["PLATFORM_TRUSTED_CONTAINERS"]).toBe(
-          storage === "rustfs" ? "app-platform-proxy,app-platform-storage" : "app-platform-proxy",
-        );
+        expect(Boolean(services["initialize"]?.depends_on["storage"])).toBe(storage === "rustfs");
+        expect(agent.environment["PLATFORM_RUNTIME_CONTAINER"]).toBe("app-platform-runtime");
         expect(configuration.TLS_MODE).toBe(tls);
         expect(agent.environment["TLS_MODE"] ?? "provided").toBe(tls);
         expect(agent.environment["APP_DOMAIN"]).toBe(configuration.APP_DOMAIN);
@@ -201,7 +199,7 @@ describe.runIf(process.env["RUN_INSTALLATION_TESTS"] === "1")(
         },
       );
 
-      for (const name of ["control-plane", "agent"]) {
+      for (const name of ["initialize", "control-plane", "agent", "runtime"]) {
         const service = serviceSchema.parse(services[name]);
         expect(service.environment["AZURE_CLIENT_ID"]).toBe(installationSettings.ENTRA_CLIENT_ID);
         expect(service.environment["AZURE_STORAGE_ACCESS_KEY"] ?? undefined).toBeUndefined();

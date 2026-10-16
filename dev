@@ -18,23 +18,6 @@ if docker container inspect widefleet-local-proxy >/dev/null 2>&1; then
     exit 1
   fi
 fi
-local_fleets=()
-for directory in "$WIDEFLEET_LOCAL_DATA"/agent/*; do
-  [[ -d "$directory" ]] || continue
-  fleet_id="${directory##*/}"
-  [[ "$fleet_id" =~ ^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$ ]] || continue
-  local_fleets+=("platform-fleet-$fleet_id")
-done
-stop_apps() {
-  local container owner
-  for container in "${local_fleets[@]}"; do
-    if docker container inspect "$container" >/dev/null 2>&1; then
-      owner="$(docker inspect "$container" --format '{{index .Config.Labels "app-platform.fleet-id"}}')"
-      [[ "$container" == "platform-fleet-$owner" ]] || { echo 'Unexpected container ownership.' >&2; exit 1; }
-      docker stop --time 30 "$container" >/dev/null
-    fi
-  done
-}
 case "${1:-up}" in
   up)
     if [[ "$(docker info --format '{{.OSType}}/{{.Architecture}}')" != linux/x86_64 ]]; then
@@ -42,38 +25,21 @@ case "${1:-up}" in
       exit 1
     fi
     mkdir -p "$WIDEFLEET_LOCAL_DATA"
-    # Rebuilding a tag can discard its old image index on containerd-backed Docker,
-    # even while a fleet uses it. Keep that immutable image available for probes.
-    for container in "${local_fleets[@]}"; do
-      if docker container inspect "$container" >/dev/null 2>&1; then
-        owner="$(docker inspect "$container" --format '{{index .Config.Labels "app-platform.fleet-id"}}')"
-        [[ "$container" == "platform-fleet-$owner" ]] || { echo 'Unexpected container ownership.' >&2; exit 1; }
-        runtime_image="$(docker inspect "$container" --format '{{.Image}}')"
-        docker image tag "$runtime_image" "widefleet-local-runtime:${runtime_image#sha256:}"
-      fi
-    done
     docker build -f infra/runtime/Dockerfile -t app-platform-runtime:0.1.0 .
     docker build -f infra/agent/Dockerfile -t app-platform-agent:0.1.0 .
     "${compose[@]}" build tools
     "${compose[@]}" run --rm -T --no-deps configure
     "${compose[@]}" up -d --wait postgres storage proxy identity clickhouse otel-collector
-    "${compose[@]}" run --rm -T --no-deps tools node --env-file=/data/identity.env tools/initialize.ts
+    "${compose[@]}" run --rm -T --no-deps tools node --env-file=/data/identity.env tools/prepare-installation.ts
     "${compose[@]}" run --rm -T --no-deps tools node --env-file=/data/identity.env tools/initialize-storage.ts
+    "${compose[@]}" up -d --wait runtime
     "${compose[@]}" up -d --wait control-plane
     local_tool seed
-    "${compose[@]}" up -d --force-recreate oauth2-proxy
     "${compose[@]}" up -d agent
-    for container in "${local_fleets[@]}"; do
-      if docker container inspect "$container" >/dev/null 2>&1; then
-        owner="$(docker inspect "$container" --format '{{index .Config.Labels "app-platform.fleet-id"}}')"
-        [[ "$container" == "platform-fleet-$owner" ]] || { echo 'Unexpected container ownership.' >&2; exit 1; }
-        docker start "$container" >/dev/null
-      fi
-    done
     local_tool deploy
     echo 'Management: http://localhost:25450 (choose admin@example.test)'
     echo 'App: https://team-notes.apps.localhost:25453'
-    echo 'App SSO: https://auth.apps.localhost:25453/oauth2/sign_in'
+    echo 'Sign in by opening the app.'
     echo 'The two local HTTPS hosts use a self-signed development certificate.'
     ;;
   deploy)
@@ -88,21 +54,13 @@ case "${1:-up}" in
   logs) "${compose[@]}" logs --tail 100 -f ;;
   down)
     "${compose[@]}" stop agent
-    stop_apps
     "${compose[@]}" stop
     echo 'Local demo stopped; data retained. Run ./dev up to resume.'
     ;;
   reset)
     [[ "${2:-}" == --yes ]] || { echo 'This deletes all local demo apps and data. Repeat with ./dev reset --yes.' >&2; exit 1; }
     "${compose[@]}" stop agent
-    stop_apps
-    for container in "${local_fleets[@]}"; do
-      if docker container inspect "$container" >/dev/null 2>&1; then docker rm "$container" >/dev/null; fi
-    done
     "${compose[@]}" down --volumes --remove-orphans
-    for network in "${local_fleets[@]}"; do
-      if docker network inspect "$network" >/dev/null 2>&1; then docker network rm "$network" >/dev/null; fi
-    done
     if [[ -d "$WIDEFLEET_LOCAL_DATA" ]]; then
       docker run --rm --mount "type=bind,source=$WIDEFLEET_LOCAL_DATA,target=/data" \
         widefleet-local-tools:0.1.0 node --input-type=module --eval \

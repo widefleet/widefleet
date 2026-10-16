@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   edgeInfrastructure,
@@ -18,8 +17,4 @@ export const initializeEdge = async (configuration: Configuration) => {
     JSON.stringify(traefikConfiguration(edge)),
   );
   await writePrivateFile(join(directory, "routes/platform.yaml"), JSON.stringify(edgeRoutes(edge)));
-  await writePrivateFile(
-    join(directory, "routes/app-auth.yaml"),
-    await readFile("/infra/traefik/app-auth.json", "utf8"),
-  );
 };

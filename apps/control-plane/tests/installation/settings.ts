@@ -1,7 +1,6 @@
 // Synthetic operator settings shared by the isolated installation fixtures.
 export const installationSettings = {
   PLATFORM_CONTROL_PLANE_IMAGE: "fixture/control-plane:latest",
-  PLATFORM_SSO_IMAGE: "fixture/sso:latest",
   PLATFORM_AGENT_IMAGE: "fixture/agent:latest",
   PLATFORM_RUNTIME_IMAGE: "fixture/runtime:latest",
   PLATFORM_DATA_DIRECTORY: "/tmp/widefleet-installation-fixture",

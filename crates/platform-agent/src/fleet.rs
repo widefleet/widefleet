@@ -126,7 +126,10 @@ pub async fn prepare(
     telemetry: Option<platform_core::model::TelemetryDestination>,
 ) -> Result<Prepared> {
     validate_connector_classes(&packages.connectors)?;
-    if packages.runtime.protocol != 1 || packages.runtime.celld != crate::native::VERSION {
+    if packages.runtime.protocol != 1
+        || packages.runtime.auth != 1
+        || packages.runtime.celld != crate::native::VERSION
+    {
         return Err(Error::invalid(
             "Unsupported runtime installation protocol or celld version".into(),
         ));
@@ -400,6 +403,10 @@ pub async fn prepare(
         "WIDEFLEET_PACKAGES".into(),
         json!({ "binding": "WIDEFLEET_PACKAGES", "bucket_name": "widefleet-packages" }),
     );
+    namespaces.insert(
+        "AUTH_CONFIG".into(),
+        json!({ "binding": "AUTH_CONFIG", "id": "widefleet-auth" }),
+    );
     let mut services = Vec::new();
     let mut connector_configurations = Vec::new();
     for connector in &packages.connectors {
@@ -472,21 +479,19 @@ pub async fn prepare(
     let project = directory.join("runtime");
     tokio::fs::create_dir_all(&project).await?;
     write_modules(&project, &packages.runtime.modules).await?;
-    let mut config = json!({
-        "name": "widefleet", "main": packages.runtime.main, "no_bundle": true,
-        "compatibility_date": "2026-10-01", "compatibility_flags": ["nodejs_compat"],
-        "worker_loaders": [{ "binding": "WIDEFLEET_LOADER" }],
-        "vars": { "WIDEFLEET_CONTROL_TOKEN": token, "WIDEFLEET_CONFIGURATION": serde_json::to_string(&json!({ "crons": crons, "queues": queues }))? },
-        "d1_databases": databases.values().collect::<Vec<_>>(), "r2_buckets": buckets.values().collect::<Vec<_>>(),
-        "kv_namespaces": namespaces.values().collect::<Vec<_>>(), "services": services,
-        "triggers": { "crons": native_crons(&crons) },
-        "queues": { "producers": producers.values().collect::<Vec<_>>(), "consumers": consumers.values().collect::<Vec<_>>() },
-    });
-    if packages.runtime.workflows == Some(1) {
-        config["services"].as_array_mut().ok_or_else(|| Error::invalid("Invalid service configuration".into()))?.push(json!({ "binding": "WIDEFLEET_WORKFLOW_SESSIONS", "service": "widefleet", "entrypoint": "WorkflowSessions" }));
-        config["workflows"] = json!([{ "binding": "WIDEFLEET_WORKFLOWS", "name": "widefleet-apps", "class_name": "AppWorkflow" }]);
-        config["durable_objects"] = json!({ "bindings": [{ "name": "WIDEFLEET_WORKFLOW_CATALOG", "class_name": "WidefleetWorkflowCatalog" }] });
-    }
+    let mut config = platform_agent::runtime::configuration(&packages.runtime, &token)?;
+    config["vars"]["WIDEFLEET_CONFIGURATION"] = json!(serde_json::to_string(
+        &json!({ "crons": crons, "queues": queues })
+    )?);
+    config["d1_databases"] = json!(databases.values().collect::<Vec<_>>());
+    config["r2_buckets"] = json!(buckets.values().collect::<Vec<_>>());
+    config["kv_namespaces"] = json!(namespaces.values().collect::<Vec<_>>());
+    config["services"]
+        .as_array_mut()
+        .ok_or_else(|| Error::invalid("Invalid service configuration".into()))?
+        .extend(services);
+    config["triggers"] = json!({ "crons": native_crons(&crons) });
+    config["queues"] = json!({ "producers": producers.values().collect::<Vec<_>>(), "consumers": consumers.values().collect::<Vec<_>>() });
     tokio::fs::write(
         project.join("wrangler.json"),
         serde_json::to_vec_pretty(&config)?,

@@ -8,6 +8,7 @@ COPY crates ./crates
 RUN cargo build --locked --release --package platform-agent --package platform-cli
 
 FROM ${RUNTIME_IMAGE}
+USER root
 COPY LICENSE /usr/share/licenses/widefleet/LICENSE
 COPY --from=build /source/target/release/platform-agent /usr/local/bin/platform-agent
 COPY --from=build /source/target/release/widefleet /usr/local/bin/widefleet

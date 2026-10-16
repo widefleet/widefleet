@@ -15,6 +15,11 @@ services:
       timeout: 3s
       retries: 20
 
+  initialize:
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      DATABASE_URL: postgres://platform:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/platform
   control-plane:
     depends_on:
       postgres: { condition: service_healthy }

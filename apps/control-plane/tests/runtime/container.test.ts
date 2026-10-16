@@ -8,15 +8,16 @@ import {
 import * as contract from "@platform/contracts";
 import { sql } from "drizzle-orm";
 import { execFile } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { oauthClient } from "../../src/lib/server/auth-schema.ts";
 import { apiResource } from "../../src/lib/server/auth-options.ts";
 import { createTestEnvironment } from "../environment.ts";
+import { runtimeIdentity } from "../runtime-identity.ts";
 
 const execute = promisify(execFile);
 
@@ -25,7 +26,8 @@ describe.runIf(process.env["RUN_IMAGE_TESTS"] === "1")("release container images
     const environment = await createTestEnvironment("http://localhost:25434");
     const state = await mkdtemp(join(tmpdir(), "widefleet-image-test-"));
     const suffix = crypto.randomUUID();
-    const name = `platform-image-test-${suffix}`;
+    const name = `image-test-${suffix}`;
+    const runtimeName = `${name}-runtime`;
     const artifactBucket = `image-artifacts-${suffix}`;
     const fleetBucket = `image-fleets-${suffix}`;
     const databaseUrl = new URL(environment.environment.DATABASE_URL);
@@ -39,9 +41,18 @@ describe.runIf(process.env["RUN_IMAGE_TESTS"] === "1")("release container images
       S3_BUCKET: artifactBucket,
       FLEET_S3_BUCKET: fleetBucket,
       PORT: "25434",
+      PLATFORM_STATE_DIRECTORY: "/installation",
+      PLATFORM_RUNTIME_DIRECTORY: "/installation/runtime",
+      PLATFORM_APP_RUNTIME_URL: `http://${runtimeName}:8080`,
     };
 
+    await mkdir(join(state, "agent"));
+    await mkdir(join(state, "runtime-state"));
+
     const arguments_ = [
+      "--user=0:0",
+      "--volume",
+      `${state}:/installation`,
       "--network",
       "internal-app-platform-test_default",
       ...Object.entries(settings).flatMap(([key, value]) => ["--env", `${key}=${value}`]),
@@ -50,7 +61,7 @@ describe.runIf(process.env["RUN_IMAGE_TESTS"] === "1")("release container images
     const image = process.env["PLATFORM_CONTROL_PLANE_IMAGE"] ?? "app-platform-control-plane:0.1.0";
     const agentImage = process.env["PLATFORM_AGENT_IMAGE"] ?? "app-platform-agent:0.1.0";
     const runtimeImage = process.env["PLATFORM_RUNTIME_IMAGE"] ?? "app-platform-runtime:0.1.0";
-    let fleetId: string | undefined;
+    let runtimeRunning = false;
 
     const s3 = new S3Client({
       endpoint: environment.environment.S3_ENDPOINT,
@@ -64,6 +75,7 @@ describe.runIf(process.env["RUN_IMAGE_TESTS"] === "1")("release container images
 
     let running = false;
     let storageInitialized = false;
+    const identity = await runtimeIdentity(environment.configuration.APP_DOMAIN);
 
     try {
       await execute("docker", [
@@ -94,11 +106,14 @@ describe.runIf(process.env["RUN_IMAGE_TESTS"] === "1")("release container images
         "node",
         "--input-type=module",
         "--eval",
-        'import { readFile } from "node:fs/promises"; console.log(JSON.stringify({ middleware: JSON.parse(await readFile("/installation/config/routes/app-auth.yaml", "utf8")), proxy: JSON.parse(await readFile("/installation/config/traefik.json", "utf8")) }));',
+        'import { readFile } from "node:fs/promises"; console.log(JSON.stringify({ routes: JSON.parse(await readFile("/installation/config/routes/platform.yaml", "utf8")), proxy: JSON.parse(await readFile("/installation/config/traefik.json", "utf8")) }));',
       ]);
 
       const configuration = z.unknown().parse(JSON.parse(rendered.stdout));
-      expect(configuration).toHaveProperty("middleware.http.middlewares");
+      expect(configuration).toHaveProperty(
+        "routes.http.services.app-sso.loadBalancer.servers.0.url",
+        "http://runtime:8080",
+      );
       expect(configuration).toHaveProperty("proxy.providers.file.directory", "/config/routes");
       expect(configuration).not.toHaveProperty("proxy.certificatesResolvers");
 
@@ -134,6 +149,75 @@ describe.runIf(process.env["RUN_IMAGE_TESTS"] === "1")("release container images
           (await s3.send(new HeadBucketCommand({ Bucket: bucket }))).$metadata.httpStatusCode,
         ).toBe(200);
       }
+
+      const installed = await execute("docker", [
+        "run",
+        "--rm",
+        "--network=none",
+        "--user=0:0",
+        "--volume",
+        `${state}:/installation:ro`,
+        image,
+        "node",
+        "--input-type=module",
+        "--eval",
+        'import {readFile} from "node:fs/promises"; console.log(await readFile("/installation/runtime/installation.json", "utf8"));',
+      ]);
+
+      const installation = z
+        .object({ fleetId: z.uuid(), controlToken: z.string() })
+        .parse(JSON.parse(installed.stdout));
+
+      await execute("docker", [
+        "run",
+        "--detach",
+        "--name",
+        runtimeName,
+        "--user=0:0",
+        "--network",
+        "internal-app-platform-test_default",
+        "--publish=127.0.0.1::8080",
+        "--volume",
+        `${state}/runtime:/runtime-config:ro`,
+        "--volume",
+        `${state}/runtime-state:/state`,
+        "--volume",
+        `${state}/agent:/agent-state:ro`,
+        "--env=FLEET_S3_ENDPOINT=http://rustfs:9000",
+        "--env",
+        `FLEET_S3_BUCKET=${fleetBucket}`,
+        "--env",
+        `FLEET_S3_ACCESS_KEY_ID=${environment.environment.S3_ACCESS_KEY_ID}`,
+        "--env",
+        `FLEET_S3_SECRET_ACCESS_KEY=${environment.environment.S3_SECRET_ACCESS_KEY}`,
+        runtimeImage,
+      ]);
+      runtimeRunning = true;
+
+      const runtimeUrl = async () =>
+        `http://${(await execute("docker", ["port", runtimeName, "8080/tcp"])).stdout.trim()}`;
+
+      const runtimeRequest = async (path: string, init?: RequestInit) =>
+        fetch(`${await runtimeUrl()}${path}`, init);
+
+      const controlHeaders = { authorization: `Bearer ${installation.controlToken}` };
+      await vi.waitFor(
+        async () =>
+          expect(
+            (await runtimeRequest("/.well-known/widefleet/runtime", { headers: controlHeaders }))
+              .status,
+          ).toBe(200),
+        { timeout: 45_000 },
+      );
+      expect(
+        (
+          await runtimeRequest("/.well-known/widefleet/auth/configuration", {
+            method: "PUT",
+            headers: controlHeaders,
+            body: JSON.stringify(identity.configuration),
+          })
+        ).status,
+      ).toBe(204);
 
       await execute("docker", [
         "run",
@@ -233,7 +317,7 @@ describe.runIf(process.env["RUN_IMAGE_TESTS"] === "1")("release container images
         ),
       );
 
-      fleetId = app.fleetId;
+      expect(app.fleetId).toBe(installation.fleetId);
 
       const session = contract.uploadSession.parse(
         await request(
@@ -277,16 +361,15 @@ describe.runIf(process.env["RUN_IMAGE_TESTS"] === "1")("release container images
         PLATFORM_AGENT_TOKEN: registration.token,
         DOCKER_HOST: "unix:///var/run/docker.sock",
         PLATFORM_AGENT_STATE: "/state",
-        PLATFORM_AGENT_HOST_STATE: state,
         PLATFORM_ROUTING_DIRECTORY: "/state/routes",
-        PLATFORM_RUNTIME_IMAGE: runtimeImage,
+        PLATFORM_RUNTIME_CONTAINER: runtimeName,
+        PLATFORM_APP_RUNTIME_URL: `http://${runtimeName}:8080/`,
         CELLD_BINARY: "/usr/local/bin/celld",
         FLEET_S3_ENDPOINT: "http://rustfs:9000",
-        FLEET_RUNTIME_S3_ENDPOINT: "http://internal-app-platform-test-rustfs-1:9000",
+        FLEET_RUNTIME_S3_ENDPOINT: "http://rustfs:9000",
         FLEET_S3_BUCKET: fleetBucket,
         FLEET_S3_ACCESS_KEY_ID: environment.environment.S3_ACCESS_KEY_ID,
         FLEET_S3_SECRET_ACCESS_KEY: environment.environment.S3_SECRET_ACCESS_KEY,
-        PLATFORM_TRUSTED_CONTAINERS: "internal-app-platform-test-rustfs-1",
       };
 
       const agent = () =>
@@ -300,7 +383,9 @@ describe.runIf(process.env["RUN_IMAGE_TESTS"] === "1")("release container images
             "--volume",
             `${socket.slice("unix://".length)}:/var/run/docker.sock`,
             "--volume",
-            `${state}:/state`,
+            `${state}/agent:/state`,
+            "--volume",
+            `${state}/runtime:/runtime-config:ro`,
             ...Object.entries(agentSettings).flatMap(([key, value]) => [
               "--env",
               `${key}=${value}`,
@@ -321,27 +406,25 @@ describe.runIf(process.env["RUN_IMAGE_TESTS"] === "1")("release container images
         expect.objectContaining({ id: deployment.id, status: "succeeded" }),
       ]);
 
-      const worker = await execute("docker", [
-        "exec",
-        `platform-fleet-${app.fleetId}`,
-        "curl",
-        "--fail",
-        "--silent",
-        "--max-time",
-        "15",
-        "-H",
-        `Host: ${app.hostname}`,
-        "http://127.0.0.1:8080/",
-      ]);
+      const appResponse = (authenticated = false) => {
+        const headers = new Headers({
+          host: app.hostname,
+          "x-forwarded-host": app.hostname,
+          "x-forwarded-proto": "https",
+          accept: "text/html",
+        });
 
-      expect(worker.stdout).toBe("release image works");
+        if (authenticated) headers.set("cookie", identity.cookie);
 
-      const usedImage = await execute("docker", [
-        "inspect",
-        `platform-fleet-${app.fleetId}`,
-        "--format",
-        "{{.Config.Image}}",
-      ]);
+        return runtimeRequest("/", { redirect: "manual", headers });
+      };
+
+      expect(await (await appResponse(true)).text()).toBe("release image works");
+      const unauthenticated = await appResponse();
+      expect(unauthenticated.status).toBe(302);
+      expect(unauthenticated.headers.get("x-widefleet-access-revision")).toBe(`${app.id}:0`);
+
+      const usedImage = await execute("docker", ["inspect", runtimeName, "--format", "{{.Image}}"]);
 
       const selectedImage = await execute("docker", [
         "image",
@@ -352,20 +435,16 @@ describe.runIf(process.env["RUN_IMAGE_TESTS"] === "1")("release container images
       ]);
 
       expect(usedImage.stdout.trim()).toBe(selectedImage.stdout.trim());
+      await execute("docker", ["restart", runtimeName]);
+      await vi.waitFor(
+        async () => expect(await (await appResponse(true)).text()).toBe("release image works"),
+        { timeout: 45_000 },
+      );
       await request(`/apps/${app.id}`, "DELETE");
       await agent();
+      expect((await appResponse(true)).status).toBe(404);
     } finally {
-      if (fleetId) {
-        const appName = `platform-fleet-${fleetId}`;
-        await execute("docker", ["rm", "--force", appName]).catch(() => undefined);
-        await execute("docker", [
-          "network",
-          "disconnect",
-          appName,
-          "internal-app-platform-test-rustfs-1",
-        ]).catch(() => undefined);
-        await execute("docker", ["network", "rm", appName]).catch(() => undefined);
-      }
+      if (runtimeRunning) await execute("docker", ["rm", "--force", runtimeName]);
 
       if (running) await execute("docker", ["rm", "--force", name]);
 

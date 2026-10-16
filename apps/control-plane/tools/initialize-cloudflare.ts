@@ -13,6 +13,10 @@ import {
 import { initializeCloudflareFleet } from "../src/lib/server/fleets.ts";
 import { initializeOrganization } from "../src/lib/server/organization.ts";
 import { createSettingsService } from "../src/lib/server/settings.ts";
+import { z } from "zod";
+import { createCloudflareAppSignIn } from "../src/lib/server/app-sign-in-cloudflare.ts";
+import { getPlatformProxy } from "wrangler";
+import type { AuthProxyBindings } from "../src/lib/server/cloudflare-auth-proxy.ts";
 
 const configuration = cloudflareConfigurationSchema.parse(process.env);
 
@@ -38,14 +42,30 @@ try {
     );
 
     if (bootstrap.settings) {
-      const settings = createSettingsService(
-        configuration,
-        database.db,
-        configuration.PLATFORM_ENCRYPTION_KEY,
-        null,
-      );
+      const secrets = z.object({ APP_COOKIE_SECRET: z.string().min(1) }).parse(process.env);
 
-      await settings.initialize(bootstrap.settings);
+      const proxy = await getPlatformProxy<AuthProxyBindings>({
+        configPath: fileURLToPath(new URL("../wrangler.initialize.jsonc", import.meta.url)),
+        persist: false,
+      });
+
+      try {
+        const settings = createSettingsService(
+          configuration,
+          database.db,
+          configuration.PLATFORM_ENCRYPTION_KEY,
+          createCloudflareAppSignIn(configuration, {
+            ...proxy.env,
+            ...secrets,
+          }),
+        );
+
+        const initialized = await settings.initialize(bootstrap.settings);
+
+        if (initialized.error) throw new Error(initialized.error);
+      } finally {
+        await proxy.dispose();
+      }
     }
 
     await createInstallationOwner(database.db, bootstrap.owner);

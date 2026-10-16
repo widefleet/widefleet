@@ -37,6 +37,14 @@ export const createSettingsService = (
   const resolveCurrent = (force = false) =>
     database.transaction(
       async (transaction) => {
+        // Hosted requests have separate service instances. Reuse the settings row
+        // lock so a newer save cannot publish before an older in-flight save.
+        if (force)
+          await transaction
+            .select({ id: installation.id })
+            .from(installation)
+            .where(eq(installation.id, installationId))
+            .for("update");
         const snapshotSecrets = createInstallationSecrets(transaction, encryptionKey);
 
         const state = await readInstallation(transaction);
@@ -100,7 +108,10 @@ export const createSettingsService = (
           revision,
         };
       },
-      { isolationLevel: "repeatable read", accessMode: "read only" },
+      {
+        isolationLevel: force ? "read committed" : "repeatable read",
+        accessMode: force ? "read write" : "read only",
+      },
     );
 
   // Every request uses the same publisher. A queued read

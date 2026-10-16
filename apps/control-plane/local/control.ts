@@ -124,7 +124,7 @@ if (command === "agent") {
         createAppSignIn(configuration, keys.cookie),
       );
 
-      await settings.initialize({
+      const applied = await settings.initialize({
         externallyManaged: false,
         identity: {
           provider: { type: "entra", tenantId: tenant, authority, label: "Microsoft" },
@@ -133,6 +133,9 @@ if (command === "agent") {
           directory: null,
         },
       });
+
+      if (applied.error || applied.activation.state !== "active")
+        throw new Error(applied.error ?? applied.activation.message);
       await database.db
         .update(installation)
         .set({ ownerId: "local-admin", localPasswordEnabled: false })

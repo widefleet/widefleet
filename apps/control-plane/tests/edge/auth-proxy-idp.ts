@@ -6,7 +6,7 @@ import { z } from "zod";
 
 const authorization = z.object({
   client_id: z.literal("app-login"),
-  redirect_uri: z.literal("https://auth.apps.example.test/oauth2/callback"),
+  redirect_uri: z.url(),
   state: z.string().min(1),
   nonce: z.string().min(1),
   code_challenge: z.string().min(1),
@@ -17,7 +17,9 @@ export const tenantId = "00000000-0000-4000-8000-000000000001";
 
 export const objectId = "00000000-0000-4000-8000-000000000002";
 
-export const createIdentityProvider = async () => {
+export const createIdentityProvider = async (
+  redirectUrl = "https://auth.apps.example.test/oauth2/callback",
+) => {
   const keys = await generateKeyPair("RS256", { extractable: true });
   const wrongKeys = await generateKeyPair("RS256");
   const publicKey = { ...(await exportJWK(keys.publicKey)), kid: "test", alg: "RS256", use: "sig" };
@@ -66,6 +68,8 @@ export const createIdentityProvider = async () => {
         response.end(JSON.stringify({ keys: [publicKey] }));
       } else if (url.pathname === "/authorize") {
         const parameters = authorization.parse(Object.fromEntries(url.searchParams));
+
+        if (parameters.redirect_uri !== redirectUrl) throw new Error("Unexpected callback URL");
         const code = randomUUID();
 
         codes.set(code, parameters);

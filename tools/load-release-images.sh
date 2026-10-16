@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-for component in runtime agent control-plane sso; do
+components=(runtime agent control-plane)
+if [[ -f infra/sso/Dockerfile ]]; then components+=(sso); fi
+
+for component in "${components[@]}"; do
   image="docker.io/widefleet/$component:${VERSION:?}"
   docker load --input "$RELEASE_IMAGES/$component.tar"
   test "$(docker image inspect "$image" --format '{{.Id}}')" = "$(cat "$RELEASE_IMAGES/$component.id")"

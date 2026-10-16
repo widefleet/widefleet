@@ -1,3 +1,5 @@
+import { createAuthControl } from "./auth-control.ts";
+import { installationKeys } from "../src/lib/server/installation-files.ts";
 import { createAppSignIn } from "../src/lib/server/app-sign-in-node.ts";
 import { createReporting } from "../src/lib/server/reporting.ts";
 import { betterAuth, type BetterAuthOptions } from "better-auth";
@@ -90,13 +92,15 @@ export const createTestEnvironment = async (
   await admin.query(`CREATE DATABASE "${name}"`);
 
   const directory = await mkdtemp(join(tmpdir(), "widefleet-test-"));
+  const authControl = await createAuthControl(join(directory, "auth"));
   const ownerSubject = "00000000-0000-4000-8000-000000000003";
 
   const environment = {
     PLATFORM_USAGE_REPORTING: "false",
     PLATFORM_CRASH_REPORTING: "false",
     PLATFORM_STATE_DIRECTORY: directory,
-    PLATFORM_AUTH_DIRECTORY: join(directory, "auth"),
+    PLATFORM_RUNTIME_DIRECTORY: join(directory, "auth"),
+    PLATFORM_APP_RUNTIME_URL: authControl.url,
     PLATFORM_ENCRYPTION_KEY: "local-integration-test-encryption-key-only",
     DATABASE_URL: `postgres://platform_test:local-test-only@127.0.0.1:25432/${name}`,
     PLATFORM_URL: platformUrl,
@@ -154,7 +158,7 @@ export const createTestEnvironment = async (
     configuration,
     database.db,
     environment.PLATFORM_ENCRYPTION_KEY,
-    createAppSignIn(configuration, Buffer.alloc(32, 1).toString("base64url")),
+    createAppSignIn(configuration, (await installationKeys(configuration)).cookie),
   );
 
   await settings.initialize({
@@ -181,6 +185,7 @@ export const createTestEnvironment = async (
 
   return {
     configuration,
+    authControl,
     reporting: createReporting(configuration, database.db),
     replacementClient,
     settings,
@@ -204,6 +209,7 @@ export const createTestEnvironment = async (
     },
     close: async () => {
       await emulator.close();
+      await authControl.close();
       await database.close();
       await admin.query(`DROP DATABASE "${name}" WITH (FORCE)`);
       await admin.end();

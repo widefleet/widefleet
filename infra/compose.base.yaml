@@ -1,23 +1,32 @@
 name: app-platform
 
+x-control-plane: &control-plane
+  image: ${PLATFORM_CONTROL_PLANE_IMAGE:?Load the release images environment file}
+  environment:
+    DATABASE_URL: ${DATABASE_URL:-}
+    PLATFORM_URL: ${PLATFORM_URL:?Set PLATFORM_URL}
+    PLATFORM_USAGE_REPORTING: ${PLATFORM_USAGE_REPORTING:-}
+    PLATFORM_CRASH_REPORTING: ${PLATFORM_CRASH_REPORTING:-}
+    APP_DOMAIN: ${APP_DOMAIN:?Set APP_DOMAIN}
+    PLATFORM_CONFIG_DIRECTORY: /var/lib/widefleet/edge
+    PLATFORM_RUNTIME_DIRECTORY: /var/lib/widefleet/runtime
+    PLATFORM_ENCRYPTION_KEY: ${PLATFORM_ENCRYPTION_KEY:-}
+  volumes:
+    - platform-state:/var/lib/widefleet
+    - edge-config:/var/lib/widefleet/edge
+    - runtime-config:/var/lib/widefleet/runtime
+  networks: [management, edge]
+
 services:
+  initialize:
+    <<: *control-plane
+    command: [sh, -ec, "node tools/initialize-storage.ts && node tools/prepare-installation.ts"]
+
   control-plane:
-    image: ${PLATFORM_CONTROL_PLANE_IMAGE:?Load the release images environment file}
+    <<: *control-plane
     restart: unless-stopped
-    environment:
-      DATABASE_URL: ${DATABASE_URL:-}
-      PLATFORM_URL: ${PLATFORM_URL:?Set PLATFORM_URL}
-      PLATFORM_USAGE_REPORTING: ${PLATFORM_USAGE_REPORTING:-}
-      PLATFORM_CRASH_REPORTING: ${PLATFORM_CRASH_REPORTING:-}
-      APP_DOMAIN: ${APP_DOMAIN:?Set APP_DOMAIN}
-      PLATFORM_CONFIG_DIRECTORY: /var/lib/widefleet/edge
-      PLATFORM_AUTH_DIRECTORY: /var/lib/widefleet/auth
-      PLATFORM_ENCRYPTION_KEY: ${PLATFORM_ENCRYPTION_KEY:-}
-    volumes:
-      - platform-state:/var/lib/widefleet
-      - edge-config:/var/lib/widefleet/edge
-      - app-auth:/var/lib/widefleet/auth
-    networks: [management, edge]
+    depends_on:
+      runtime: { condition: service_healthy }
     healthcheck:
       test:
         [
@@ -30,12 +39,27 @@ services:
       timeout: 5s
       retries: 6
 
-  oauth2-proxy:
-    image: ${PLATFORM_SSO_IMAGE:?Load the release images environment file}
+  runtime:
+    container_name: app-platform-runtime
+    image: ${PLATFORM_RUNTIME_IMAGE:?Load the release images environment file}
     restart: unless-stopped
+    depends_on:
+      initialize: { condition: service_completed_successfully }
     volumes:
-      - app-auth:/auth
-    networks: [edge]
+      - runtime-config:/runtime-config:ro
+      - runtime-state:/state
+      - ${PLATFORM_DATA_DIRECTORY}/agent:/agent-state:ro
+    networks: [management, edge]
+    stop_grace_period: 45s
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: ["/tmp:rw,nosuid,nodev,noexec,size=64m"]
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, http://127.0.0.1:8081/state]
+      interval: 5s
+      timeout: 3s
+      retries: 12
 
   proxy:
     image: traefik:v3.7.13@sha256:24841fe2de7304c149343d877d2923b4c8800a38ba015dea9174c23b20e344a0
@@ -56,6 +80,8 @@ services:
     image: ${PLATFORM_AGENT_IMAGE:?Load the release images environment file}
     profiles: [agent]
     restart: unless-stopped
+    depends_on:
+      runtime: { condition: service_healthy }
     environment:
       PLATFORM_URL: ${PLATFORM_URL}
       PLATFORM_USAGE_REPORTING: ${PLATFORM_USAGE_REPORTING:-}
@@ -63,25 +89,17 @@ services:
       PLATFORM_AGENT_TOKEN: ${PLATFORM_AGENT_TOKEN:-}
       DOCKER_HOST: unix:///var/run/docker.sock
       PLATFORM_AGENT_STATE: /state
-      PLATFORM_AGENT_HOST_STATE: ${PLATFORM_DATA_DIRECTORY}/agent
       PLATFORM_ROUTING_DIRECTORY: /config/routes
       APP_DOMAIN: ${APP_DOMAIN:?Set APP_DOMAIN}
       CELLD_BINARY: /usr/local/bin/celld
-      PLATFORM_RUNTIME_IMAGE: ${PLATFORM_RUNTIME_IMAGE:?Load the release images environment file}
-      PLATFORM_TRUSTED_CONTAINERS: app-platform-proxy
+      PLATFORM_RUNTIME_CONTAINER: app-platform-runtime
     volumes:
       - ${DOCKER_SOCKET_FILE:?Set the Docker socket path}:/var/run/docker.sock
       - ${PLATFORM_DATA_DIRECTORY}/agent:/state
       - edge-config:/config
+      - runtime-config:/runtime-config:ro
     networks: [management]
     stop_grace_period: 45s
-
-  # Pull this image before the agent creates fleet containers on the same Docker host.
-  runtime-image:
-    image: ${PLATFORM_RUNTIME_IMAGE:?Load the release images environment file}
-    profiles: [images]
-    entrypoint: [/usr/local/bin/celld]
-    command: [--version]
 
 networks:
   management:
@@ -90,4 +108,5 @@ networks:
 volumes:
   platform-state:
   edge-config:
-  app-auth:
+  runtime-config:
+  runtime-state:

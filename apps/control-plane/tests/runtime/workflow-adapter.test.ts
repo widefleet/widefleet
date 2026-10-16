@@ -1,3 +1,5 @@
+import { runtimeIdentity } from "../runtime-identity.ts";
+import { encodeConfiguration } from "@platform/auth-proxy/publication";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -115,6 +117,9 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
       records.flatMap((record) => (record.id === id ? [record.label] : []));
 
     beforeAll(async () => {
+      const identity = await runtimeIdentity();
+      const authToken = "native-runtime-fixture-control-token-never-deploy";
+      const authConfiguration = await encodeConfiguration(authToken, identity.configuration);
       directory = await mkdtemp(join(tmpdir(), "widefleet-workflow-adapter-test-"));
       observer = createServer((request, response) => {
         const url = new URL(request.url ?? "/", "http://observer.fixture");
@@ -160,7 +165,7 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
         appId,
         version,
         deploymentId: crypto.randomUUID(),
-        hostname: "127.0.0.1",
+        hostname: "fixture.apps.example.test",
         metadata: {
           main_module: "app.js",
           compatibility_date: "2026-10-01",
@@ -215,16 +220,23 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
           async record(id, label) { return (await fetch(${JSON.stringify(observeOrigin)} + '/record?' + new URLSearchParams({ id, label }))).json(); }
         }
         export default { async fetch(request, env, ctx) {
+          const incoming = new URL(request.url);
+          incoming.protocol = 'https:'; incoming.hostname = 'fixture.apps.example.test'; incoming.port = '';
+          const headers = new Headers(request.headers); headers.set('cookie', ${JSON.stringify(identity.cookie)});
+          if (incoming.pathname === '/.well-known/widefleet/ready') headers.set('authorization', 'Bearer ' + env.WIDEFLEET_CONTROL_TOKEN);
+          request = new Request(incoming, new Request(request, {headers}));
           const path = new URL(request.url).pathname;
           if (path === '/fixture/init') {
             const app = ${JSON.stringify(app)};
             await env.WIDEFLEET_PACKAGES.put('apps/${appId}/modules/${hash}', ${JSON.stringify(applicationSource)});
             await env.WIDEFLEET_PACKAGES.put('versions/${appId}/${version}.json', JSON.stringify(app));
-            await env.WIDEFLEET_PACKAGES.put('hosts/127.0.0.1.json', JSON.stringify(app));
+            await env.WIDEFLEET_PACKAGES.put('hosts/fixture.apps.example.test.json', JSON.stringify(app));
+            await env.AUTH_CONFIG.put('configuration', ${JSON.stringify(authConfiguration)});
+            for (const hostname of ['fixture.apps.example.test', 'spa.apps.example.test']) await env.AUTH_CONFIG.put('apps/' + hostname, JSON.stringify({appId:app.appId,access:{revision:0,groups:[]}}));
             return Response.json({ ok: true });
           }
           if (path === '/fixture/deploy') {
-            const previous = await (await env.WIDEFLEET_PACKAGES.get('hosts/127.0.0.1.json')).json();
+            const previous = await (await env.WIDEFLEET_PACKAGES.get('hosts/fixture.apps.example.test.json')).json();
             const next = { ...previous, version: crypto.randomUUID(), capabilities: {}, capabilityRevision: 2 };
             const source = ${JSON.stringify(applicationSource)}.replace('(a + next.payload.add) * 2', '(a + next.payload.add) * 3');
             const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(source))), byte => byte.toString(16).padStart(2, '0')).join('');
@@ -232,7 +244,7 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
             if (new URL(request.url).searchParams.has('keepConnector')) next.capabilities = previous.capabilities;
             await env.WIDEFLEET_PACKAGES.put('apps/${appId}/modules/' + hash, source);
             await env.WIDEFLEET_PACKAGES.put('versions/${appId}/' + next.version + '.json', JSON.stringify(next));
-            await env.WIDEFLEET_PACKAGES.put('hosts/127.0.0.1.json', JSON.stringify(next));
+            await env.WIDEFLEET_PACKAGES.put('hosts/fixture.apps.example.test.json', JSON.stringify(next));
             return Response.json({ version: next.version });
           }
           return runtime.fetch(request, env, ctx);
@@ -258,7 +270,8 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
           compatibility_flags: ["nodejs_compat"],
           vars: {
             PLATFORM_SECRET: "synthetic-host-only",
-            WIDEFLEET_CONTROL_TOKEN: "synthetic-control",
+            WIDEFLEET_CONTROL_TOKEN: authToken,
+            WIDEFLEET_MANAGEMENT_HTTP: "true",
             WIDEFLEET_CONFIGURATION: '{"crons":{},"queues":{}}',
           },
           worker_loaders: [{ binding: "WIDEFLEET_LOADER" }],
@@ -269,7 +282,10 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
           d1_databases: [
             { binding: "DB", database_name: "workflow-test", database_id: "workflow-test" },
           ],
-          kv_namespaces: [{ binding: "KV", id: "workflow-test" }],
+          kv_namespaces: [
+            { binding: "KV", id: "workflow-test" },
+            { binding: "AUTH_CONFIG", id: "auth-config" },
+          ],
           durable_objects: {
             bindings: [
               { name: "WIDEFLEET_WORKFLOW_CATALOG", class_name: "WidefleetWorkflowCatalog" },
@@ -306,8 +322,11 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
     ) => {
       const response = await fetch(`${origin}/.well-known/widefleet/workflows`, {
         method: "POST",
-        headers: { authorization: "Bearer synthetic-control", "content-type": "application/json" },
-        body: JSON.stringify({ appId, hostname: "127.0.0.1", requestId, request }),
+        headers: {
+          authorization: "Bearer native-runtime-fixture-control-token-never-deploy",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ appId, hostname: "fixture.apps.example.test", requestId, request }),
       });
 
       const result = z.json().parse(await response.json());

@@ -38,6 +38,7 @@
     "@orpc/server": "1.15.4",
     "@orpc/zod": "1.15.4",
     "@platform/app-runtime": "workspace:*",
+    "@platform/auth-proxy": "workspace:*",
     "@platform/contracts": "workspace:*",
     "better-auth": "1.7.7",
     "better-result": "3.0.1",
@@ -50,7 +51,6 @@
   "devDependencies": {
     "@internationalized/date": "3.12.4",
     "@lucide/svelte": "1.52.0",
-    "@platform/auth-proxy": "workspace:*",
     "@sveltejs/adapter-cloudflare": "8.0.0",
     "@sveltejs/adapter-node": "6.0.0",
     "@sveltejs/kit": "3.0.0",

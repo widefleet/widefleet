@@ -47,7 +47,7 @@ fn docker_exec(
     .map_err(|error| Error::invalid(error.to_string()))?;
     let server = thread::spawn(move || {
         let (mut stream, path) = request(&listener)?;
-        assert!(path.contains("/containers/platform-fleet-"));
+        assert!(path.contains("/containers/app-platform-runtime"));
         respond(&mut stream, r#"{"Id":"fixture-exec"}"#)?;
         drop(stream);
 
@@ -113,7 +113,7 @@ async fn failed_heartbeat_waits_for_the_running_docker_command() -> Result<()> {
     let cancelled = AtomicBool::new(false);
     let finished = AtomicBool::new(false);
     let operation = async {
-        docker::execute_output(&docker, &job, vec!["fixture".into()]).await?;
+        docker::execute_output(&docker, "app-platform-runtime", vec!["fixture".into()]).await?;
         finished.store(true, Ordering::Relaxed);
         Ok(None)
     };
@@ -150,7 +150,8 @@ async fn failed_heartbeat_waits_for_the_running_docker_command() -> Result<()> {
 async fn docker_failures_preserve_both_streams_and_success_keeps_only_stdout() -> Result<()> {
     for exit in [0, 22] {
         let (docker, server) = docker_exec(exit, None)?;
-        let result = docker::execute_output(&docker, &job()?, vec!["fixture".into()]).await;
+        let result =
+            docker::execute_output(&docker, "app-platform-runtime", vec!["fixture".into()]).await;
         if exit == 0 {
             assert_eq!(result?, br#"{"message":"precise operator result"}"#);
         } else {

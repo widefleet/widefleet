@@ -51,29 +51,3 @@ pub async fn destination(
         token: credentials.token,
     }))
 }
-
-pub fn changed(current: &[String], requested: &[String]) -> bool {
-    requested.iter().any(|entry| {
-        if entry == "CELLD_OTEL=0" && !current.iter().any(|value| value.starts_with("CELLD_OTEL="))
-        {
-            return false;
-        }
-        !current.contains(entry)
-    })
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn detects_enabling_and_rotating_telemetry_without_recreating_disabled_runtimes() {
-        assert!(!super::changed(&[], &["CELLD_OTEL=0".into()]));
-        assert!(super::changed(
-            &[],
-            &["CELLD_OTEL=https://platform.example.test".into()]
-        ));
-        assert!(super::changed(
-            &["OTEL_EXPORTER_OTLP_HEADERS=old".into()],
-            &["OTEL_EXPORTER_OTLP_HEADERS=new".into()]
-        ));
-    }
-}

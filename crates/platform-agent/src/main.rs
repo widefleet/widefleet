@@ -8,7 +8,7 @@ mod fleet;
 mod migrations;
 mod native;
 mod reporting;
-mod storage;
+use platform_agent::storage;
 mod telemetry;
 
 use bollard::Docker;
@@ -47,9 +47,8 @@ async fn event(api: &Api, configuration: &Configuration, job: &Job, message: &st
 async fn recover(docker: &Docker, configuration: &Configuration, job: &Job) -> Result<()> {
     if let Some(recovery) = fleet::recover(configuration, job).await? {
         if recovery.reload {
-            let address =
-                docker::ensure(docker, configuration, job, &["CELLD_OTEL=0".into()]).await?;
-            docker::reload(docker, job, &address).await?;
+            let address = docker::ensure(docker, configuration).await?;
+            docker::reload(docker, &configuration.runtime_container, &address).await?;
         }
         for queue in recovery.wake {
             docker::wake_queue(docker, configuration, job, &queue).await?;
@@ -67,9 +66,7 @@ async fn execute(
     cancelled: &AtomicBool,
 ) -> Result<Option<Value>> {
     native::verify_publisher(configuration).await?;
-    let mut verified = configuration.clone();
-    verified.runtime_image = docker::verify_native(docker, configuration, job).await?;
-    let configuration = &verified;
+    docker::verify_native(docker, configuration).await?;
     docker::verify_storage(docker, configuration, job).await?;
     recover(docker, configuration, job).await?;
     if matches!(job.kind, JobKind::Migrations) {
@@ -89,8 +86,15 @@ async fn execute(
             .workflow
             .clone()
             .ok_or_else(|| Error::invalid("Workflow job has no request".into()))?;
-        docker::ensure(docker, configuration, job, &["CELLD_OTEL=0".into()]).await?;
-        let result = docker::workflow_request(docker, job, &token, request).await?;
+        docker::ensure(docker, configuration).await?;
+        let result = docker::workflow_request(
+            docker,
+            &configuration.runtime_container,
+            job,
+            &token,
+            request,
+        )
+        .await?;
         return Ok(Some(value!({ "workflow": result })));
     }
     if matches!(job.kind, JobKind::Configure) && job.artifact_id.is_none() {
@@ -105,11 +109,16 @@ async fn execute(
         )
         .await?;
         if let Some(token) = fleet::workflow_control(configuration, job).await? {
-            docker::ensure(docker, configuration, job, &["CELLD_OTEL=0".into()]).await?;
+            docker::ensure(docker, configuration).await?;
             loop {
-                let result =
-                    docker::workflow_request(docker, job, &token, value!({ "action": "purge" }))
-                        .await?;
+                let result = docker::workflow_request(
+                    docker,
+                    &configuration.runtime_container,
+                    job,
+                    &token,
+                    value!({ "action": "purge" }),
+                )
+                .await?;
                 if result.get("done").and_then(Value::as_bool) == Some(true) {
                     break;
                 }
@@ -119,6 +128,7 @@ async fn execute(
             }
         }
         docker::remove(configuration, job).await?;
+        access::remove(configuration, job).await?;
         let Some(packages) = fleet::detach(configuration, job).await? else {
             // An app can be deleted before any native fleet installation succeeds.
             return fleet::remove(configuration, job).await.map(|()| None);
@@ -175,25 +185,32 @@ async fn execute(
             .await?;
             fleet::publish(configuration, job, &packages, temporary.path()).await?;
         }
-        let telemetry = vec!["CELLD_OTEL=0".into()];
-        let address = docker::ensure(docker, configuration, job, &telemetry).await?;
+        let address = docker::ensure(docker, configuration).await?;
         if prepared.changed {
-            docker::reload(docker, job, &address).await?;
+            docker::reload(docker, &configuration.runtime_container, &address).await?;
         }
         docker::check_runtime(
             docker,
-            job,
+            &configuration.runtime_container,
             &address,
             &prepared.token,
             &packages.runtime.version,
         )
         .await?;
         for app in &prepared.probes {
-            docker::check_candidate(docker, job, &address, &prepared.token, app).await?;
+            docker::check_candidate(
+                docker,
+                &configuration.runtime_container,
+                &address,
+                &prepared.token,
+                app,
+            )
+            .await?;
         }
         // Confirm access before selecting new app code. A failed proxy probe
         // must not leave a newly serving deployment recorded as the old one.
         if prepared.app.is_some() {
+            access::publish(configuration, job).await?;
             docker::route(configuration, job).await?;
             access::verify(docker, configuration, job).await?;
         }
@@ -262,15 +279,6 @@ async fn run(
     configuration.storage.resolve()?;
     tokio::fs::create_dir_all(&configuration.state).await?;
     configuration.state = configuration.state.canonicalize()?;
-    if configuration
-        .host_state
-        .as_ref()
-        .is_some_and(|path| !path.is_absolute())
-    {
-        return Err(Error::invalid(
-            "PLATFORM_AGENT_HOST_STATE must be absolute".into(),
-        ));
-    }
     let lock = OpenOptions::new()
         .create(true)
         .truncate(false)

@@ -1,10 +1,6 @@
-import { chown, copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
-import {
-  edgeInfrastructure,
-  edgeRoutes,
-  appSsoConfiguration,
-} from "../tools/edge-configuration.ts";
-import { authority, clientId, clientSecret, requireLocal, tenant } from "./settings.ts";
+import { chown, mkdir, writeFile } from "node:fs/promises";
+import { edgeInfrastructure, edgeRoutes } from "../tools/edge-configuration.ts";
+import { clientId, requireLocal, tenant } from "./settings.ts";
 
 requireLocal();
 
@@ -39,31 +35,4 @@ const localRoutes = {
 
 routes.http.services.management.loadBalancer.servers = [{ url: "http://127.0.0.1:3000" }];
 
-routes.http.services["app-sso"].loadBalancer.servers = [{ url: "http://127.0.0.1:4180" }];
-
 await writeFile("/data/routes/platform.yaml", JSON.stringify(localRoutes));
-
-const alpha = appSsoConfiguration(
-  { type: "entra", tenantId: tenant, authority, label: "Microsoft" },
-  clientId,
-  "/run/secrets/app_entra_client_secret",
-);
-
-for (const provider of alpha.providers) {
-  // The emulator has a local issuer; native Entra requires Microsoft's issuer format.
-  provider.provider = "oidc";
-  provider.oidcConfig.issuerURL = `${authority}/${tenant}/v2.0`;
-}
-
-await writeFile("/data/oauth2-proxy.json", JSON.stringify(alpha));
-
-await writeFile("/data/client-secret", clientSecret, { mode: 0o444 });
-
-const middleware = await readFile("/workspace/infra/traefik/app-auth.json", "utf8");
-
-await writeFile(
-  "/data/routes/app-auth.yaml",
-  middleware.replace("http://oauth2-proxy:4180/", "http://127.0.0.1:4180/"),
-);
-
-await copyFile("/workspace/infra/oauth2-proxy/options.cfg", "/data/options.cfg");

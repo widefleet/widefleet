@@ -1,38 +1,46 @@
-import type { AppSignIn } from "./app-sign-in.ts";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { z } from "zod";
+import { authControlPath } from "@platform/auth-proxy/publication";
+import { createInstalledAppSignIn } from "./app-sign-in-installed.ts";
 import type { Configuration } from "./config.ts";
-import { appSsoConfiguration } from "../../../tools/edge-configuration.ts";
-import {
-  appCallbackUrl,
-  buildAuthBundle,
-  publishAuthBundle,
-  readActivation,
-  readActiveAuthBundle,
-} from "./auth-bundle.ts";
 
-export const createAppSignIn = (configuration: Configuration, cookieSecret: string): AppSignIn => ({
-  callbackUrl: appCallbackUrl(configuration),
-  publish: async (identity, clientSecret, force) => {
-    const bundle = buildAuthBundle(configuration, identity, clientSecret, cookieSecret);
-    await publishAuthBundle(configuration, bundle, force);
+export const createAppSignIn = (configuration: Configuration, cookieSecret: string) =>
+  createInstalledAppSignIn(
+    configuration,
+    cookieSecret,
+    async (method, body) => {
+      const key = z
+        .string()
+        .min(32)
+        .parse(
+          (
+            await readFile(join(configuration.PLATFORM_RUNTIME_DIRECTORY, "control-token"), "utf8")
+          ).trim(),
+        );
 
-    return bundle.revision;
-  },
-  status: () => readActivation(configuration),
-  plan: async (identity) => {
-    const active = await readActiveAuthBundle(configuration);
+      const options: RequestInit = {
+        method,
+        headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+        redirect: "error",
+        signal: AbortSignal.timeout(15_000),
+      };
 
-    const nextProxy = identity
-      ? appSsoConfiguration(identity.provider, identity.apps.clientId, "/runtime/client-secret")
-      : null;
+      if (method === "PUT") options.body = body ?? null;
 
-    const restartRequired =
-      active !== null && JSON.stringify(active.proxy) !== JSON.stringify(nextProxy);
+      const response = await fetch(
+        new URL(`${authControlPath}/configuration`, configuration.PLATFORM_APP_RUNTIME_URL),
+        options,
+      );
 
-    return {
-      restartRequired,
-      message: restartRequired
-        ? "This change restarts the sign-in service. Requests to published apps may fail temporarily, including for signed-in users."
-        : "This change can be applied without restarting the sign-in service.",
-    };
-  },
-});
+      if (!response.ok) {
+        await response.body?.cancel();
+        throw new Error(
+          `The auth proxy could not apply its configuration (HTTP ${response.status})`,
+        );
+      }
+
+      return response;
+    },
+    "immediate",
+  );

@@ -23,6 +23,7 @@ export const saveRuntime = async (
   storage: ArtifactStorage,
   release: z.infer<typeof contract.runtimeRelease>,
 ) => {
+  contract.runtimeRelease.parse(release);
   verifyModules(release);
   const bytes = Buffer.from(JSON.stringify(release));
   const checksum = createHash("sha256").update(bytes).digest("hex");

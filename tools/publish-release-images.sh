@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+components=(runtime agent control-plane)
+if [[ -f infra/sso/Dockerfile ]]; then components+=(sso); fi
+
 # Check all destinations and existing bytes before the first push.
-for component in runtime agent control-plane sso; do
+for component in "${components[@]}"; do
   package="$component"
   curl --fail --silent --show-error --retry 3 --connect-timeout 15 --max-time 60 \
     "https://hub.docker.com/v2/namespaces/widefleet/repositories/$package" \
@@ -16,7 +19,7 @@ done
 
 manifest="$RELEASE_IMAGES/widefleet-images-$VERSION.env"
 printf '# Widefleet %s; source commit %s\n' "$VERSION" "$REVISION" > "$manifest"
-for component in runtime agent control-plane sso; do
+for component in "${components[@]}"; do
   image="docker.io/widefleet/$component:$VERSION"
   if [[ "$(cat "$RELEASE_IMAGES/$component.existing")" == 0 ]]; then
     docker push "$image"

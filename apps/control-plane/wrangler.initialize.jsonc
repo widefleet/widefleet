@@ -1,0 +1,14 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "widefleet-initialize",
+  "compatibility_date": "2026-10-01",
+  // Used by the initialization command to reach the installed private entrypoint.
+  "services": [
+    {
+      "binding": "APP_RUNTIME",
+      "service": "widefleet-app-runtime",
+      "entrypoint": "RuntimeManagement",
+      "remote": true,
+    },
+  ],
+}

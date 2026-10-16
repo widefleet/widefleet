@@ -1,12 +1,9 @@
 import { expect, test } from "@playwright/test";
-import { copyFile, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { eq } from "drizzle-orm";
 import { installationSettings, settingsView } from "@platform/contracts";
-import { authBundle } from "../../src/lib/server/auth-bundle.ts";
 import { account } from "../../src/lib/server/auth-schema.ts";
 import { installation } from "../../src/lib/server/schema.ts";
 import { installationId } from "../../src/lib/server/installation-store.ts";
@@ -116,11 +113,9 @@ test("sets up an administrator, links and verifies company SSO, then closes pass
       .fill(environment.environment.ENTRA_CLIENT_SECRET);
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByText("Settings saved.", { exact: true })).toBeVisible();
-    // The browser fixture has no proxy process; represent the supervisor's acknowledged configuration.
-    await copyFile(
-      join(environment.configuration.PLATFORM_AUTH_DIRECTORY, "desired.json"),
-      join(environment.configuration.PLATFORM_AUTH_DIRECTORY, "active.json"),
-    );
+
+    const initial = environment.authControl.read();
+
     await page.getByRole("button", { name: "Link company account" }).click();
     await page.getByRole("button", { name: /sso@example.test/ }).click();
     await expect(page.getByRole("button", { name: "Test company sign-in" })).toBeVisible();
@@ -159,49 +154,33 @@ test("sets up an administrator, links and verifies company SSO, then closes pass
       .click();
     await page.getByLabel("Client ID", { exact: true }).fill("replacement-client");
     await page.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(page.getByRole("dialog")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Save and restart" })).toBeVisible();
-    await page.getByRole("button", { name: "Cancel", exact: true }).click();
-    await expect(page.getByRole("button", { name: "Save", exact: true })).toBeFocused();
-    // Once setup is complete, activation feedback must remain visible beside the editor.
-    await page.getByRole("button", { name: "Save", exact: true }).click();
-    await page.getByRole("button", { name: "Save and restart" }).click();
     await expect(page.getByText("Settings saved.", { exact: true })).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    // The HTTP publication is acknowledged before the settings save completes.
     await expect(page.getByLabel("Client ID", { exact: true })).toBeVisible();
-    await expect(
-      page.getByRole("status").filter({ hasText: "Activating configuration" }),
-    ).toBeVisible();
-
-    const desired = authBundle.parse(
-      JSON.parse(
-        await readFile(
-          join(environment.configuration.PLATFORM_AUTH_DIRECTORY, "desired.json"),
-          "utf8",
-        ),
-      ),
-    );
-
-    await writeFile(
-      join(environment.configuration.PLATFORM_AUTH_DIRECTORY, "status.json"),
-      JSON.stringify({
-        revision: desired.revision,
-        state: "failed",
-        message:
-          "The identity provider's TLS certificate is not trusted. Check the SSO container's CA certificates and the provider's certificate chain.",
-      }),
-      { mode: 0o600 },
-    );
     await expect(
       page
         .getByRole("status")
-        .filter({ hasText: "The identity provider's TLS certificate is not trusted." }),
-    ).toBeVisible({ timeout: 8000 });
+        .filter({ hasText: "The sign-in service is running with the saved configuration." }),
+    ).toBeVisible();
+
+    const desired = environment.authControl.read();
+    expect(desired.configuration?.clientId).toBe("replacement-client");
+    expect(desired.revision).not.toBe(initial.revision);
+    environment.authControl.available(false);
+    await page.reload();
+    await expect(
+      page.getByRole("status").filter({ hasText: "The auth proxy is unavailable." }),
+    ).toBeVisible();
     const settingsResponse = await page.request.get("/api/v1/settings");
     expect(settingsResponse.ok()).toBe(true);
-    expect(settingsView.parse(await settingsResponse.json()).activation.message).toContain(
-      "The identity provider's TLS certificate is not trusted.",
-    );
+    expect(settingsView.parse(await settingsResponse.json()).activation.state).toBe("failed");
+    await page
+      .getByRole("navigation", { name: "Sign-in settings" })
+      .getByRole("button", { name: "App sign-in", exact: false })
+      .click();
     await expect(page.getByLabel("Client ID", { exact: true })).toBeVisible();
+    environment.authControl.available(true);
 
     const link = await createRecoveryLink(
       environment.auth,
@@ -234,7 +213,6 @@ test("sets up an administrator, links and verifies company SSO, then closes pass
       .getByLabel("Client ID", { exact: true })
       .fill(environment.replacementClient.clientId);
     await page.getByRole("button", { name: "Save", exact: true }).click();
-    await page.getByRole("button", { name: "Save and restart" }).click();
     await expect(page.getByText("Settings saved.", { exact: true })).toBeVisible();
     await page
       .getByRole("navigation", { name: "Sign-in settings" })

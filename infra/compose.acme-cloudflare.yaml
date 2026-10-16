@@ -1,4 +1,9 @@
 services:
+  initialize:
+    environment:
+      TLS_MODE: cloudflare
+      ACME_ENVIRONMENT: ${ACME_ENVIRONMENT:-production}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL}
   control-plane:
     environment:
       TLS_MODE: cloudflare

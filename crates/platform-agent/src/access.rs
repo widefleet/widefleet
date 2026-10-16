@@ -5,7 +5,7 @@ use reqwest::Url;
 use serde_json::{Value, json};
 use std::time::Duration;
 
-pub fn middleware(configuration: &Configuration, job: &Job) -> Result<Value> {
+pub fn publication(job: &Job) -> Result<Value> {
     let access = job
         .access
         .as_ref()
@@ -21,7 +21,11 @@ pub fn middleware(configuration: &Configuration, job: &Job) -> Result<Value> {
     {
         return Err(Error::invalid("Invalid app access groups".into()));
     }
-    let mut address = Url::parse(&configuration.app_auth_url)
+    Ok(json!({ "appId": job.app_id()?, "access": access }))
+}
+
+pub fn origin(configuration: &Configuration) -> Result<Url> {
+    let address = Url::parse(&configuration.app_runtime_url)
         .map_err(|error| Error::invalid(error.to_string()))?;
     if !matches!(address.scheme(), "http" | "https")
         || !address.username().is_empty()
@@ -31,19 +35,46 @@ pub fn middleware(configuration: &Configuration, job: &Job) -> Result<Value> {
         || address.path() != "/"
     {
         return Err(Error::invalid(
-            "PLATFORM_APP_AUTH_URL must be the OAuth2 Proxy HTTP(S) origin".into(),
+            "PLATFORM_APP_RUNTIME_URL must be the private auth proxy HTTP(S) origin".into(),
         ));
     }
-    if !access.groups.is_empty() {
-        address
-            .query_pairs_mut()
-            .append_pair("allowed_groups", &access.groups.join(","));
+    Ok(address)
+}
+
+async fn update(configuration: &Configuration, job: &Job, body: Option<Value>) -> Result<()> {
+    let mut url = origin(configuration)?;
+    url.set_path(&format!(
+        "/.well-known/widefleet/auth/apps/{}",
+        job.hostname()?
+    ));
+    let key = tokio::fs::read_to_string(&configuration.runtime_key_file).await?;
+    if key.trim().len() < 32 {
+        return Err(Error::invalid("Auth proxy key is invalid".into()));
     }
-    Ok(json!({ "forwardAuth": {
-        "address": address.as_str(),
-        "authRequestHeaders": ["Cookie", "User-Agent", "Accept"],
-        "authResponseHeaders": ["X-Auth-Request-User", "X-Auth-Request-Email", "X-Auth-Request-Preferred-Username", "X-Auth-Request-Groups"]
-    } }))
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_secs(30))
+        .build()?;
+    let request = match body {
+        Some(body) => client.put(url).json(&body),
+        None => client.delete(url),
+    };
+    let response = request.bearer_auth(key.trim()).send().await?;
+    if !response.status().is_success() {
+        return Err(Error::invalid(format!(
+            "Auth proxy configuration failed (HTTP {})",
+            response.status()
+        )));
+    }
+    Ok(())
+}
+
+pub async fn publish(configuration: &Configuration, job: &Job) -> Result<()> {
+    update(configuration, job, Some(publication(job)?)).await
+}
+
+pub async fn remove(configuration: &Configuration, job: &Job) -> Result<()> {
+    update(configuration, job, None).await
 }
 
 pub fn marker(job: &Job) -> Result<String> {
@@ -97,7 +128,8 @@ pub async fn verify(docker: &Docker, configuration: &Configuration, job: &Job) -
         .as_ref()
         .is_some_and(|access| access.revision == 0 && access.groups.is_empty())
     {
-        // Revision zero preserves the existing installation-wide SSO rule.
+        // KV publication confirms the initial unrestricted rule. Later access
+        // changes additionally verify that ingress serves the requested revision.
         return Ok(());
     }
     let origin =
@@ -136,7 +168,9 @@ pub async fn verify(docker: &Docker, configuration: &Configuration, job: &Job) -
     // response headers cannot include SSO cookies in the persisted error.
     let mut last_observation = String::from("no probe response");
     for _ in 0..30 {
-        match docker::execute_output(docker, job, command.clone()).await {
+        match docker::execute_output(docker, &configuration.runtime_container, command.clone())
+            .await
+        {
             Ok(headers) => {
                 let headers = String::from_utf8_lossy(&headers);
                 if confirmed(&headers, &expected) {
@@ -149,82 +183,35 @@ pub async fn verify(docker: &Docker, configuration: &Configuration, job: &Job) -
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
     Err(Error::invalid(format!(
-        "Traefik has not confirmed the requested app access rules ({expected}): {last_observation}; retry after checking the private proxy connection"
+        "The auth proxy has not confirmed the requested app access rules ({expected}): {last_observation}; retry after checking the private proxy connection"
     )))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::Parser;
 
-    #[tokio::test]
-    async fn publishes_an_isolated_auth_rule_and_rejects_ambiguous_groups() -> Result<()> {
-        let directory = tempfile::tempdir()?;
-        let mut configuration = Configuration::try_parse_from([
-            "platform-agent",
-            "--url",
-            "https://platform.example.test",
-            "--token",
-            "fixture-only",
-            "--routing-directory",
-            "/unused",
-        ])
-        .map_err(|error| Error::invalid(error.to_string()))?;
-        configuration.routing_directory = directory.path().to_path_buf();
+    #[test]
+    fn publishes_exact_group_names_and_rejects_ambiguous_groups() -> Result<()> {
         let mut job: Job = serde_json::from_value(json!({
             "id": uuid::Uuid::new_v4(), "fleetId": uuid::Uuid::new_v4(), "appId": uuid::Uuid::new_v4(),
             "kind": "configure", "hostname": "review.notes.apps.example.test", "attempt": 1,
             "leaseToken": uuid::Uuid::new_v4(), "leaseUntil": "2099-01-01T00:00:00Z",
             "access": { "revision": 7, "groups": ["team&allowed_groups=other", "engineering"] }
         }))?;
-        docker::route(&configuration, &job).await?;
-        let name = format!("platform-app-{}", job.app_id()?);
-        let path = directory.path().join(format!("{name}.yaml"));
-        let bytes = tokio::fs::read(&path).await?;
-        let route: Value = serde_json::from_slice(&bytes)?;
+        let published = publication(&job)?;
         assert_eq!(
-            route["http"]["routers"][&name]["middlewares"],
-            json!([
-                "clear-client-identity@file",
-                format!("{name}-access-revision@file"),
-                format!("{name}-auth@file"),
-                "remove-app-credentials@file"
-            ])
+            published["access"]["groups"],
+            json!(["team&allowed_groups=other", "engineering"])
         );
-        let auth = middleware(&configuration, &job)?;
-        let address = Url::parse(
-            auth["forwardAuth"]["address"]
-                .as_str()
-                .ok_or_else(|| Error::invalid("No auth address".into()))?,
-        )
-        .map_err(|error| Error::invalid(error.to_string()))?;
-        assert_eq!(
-            address.query_pairs().collect::<Vec<_>>(),
-            vec![(
-                "allowed_groups".into(),
-                "team&allowed_groups=other,engineering".into()
-            )]
-        );
-        assert_eq!(route["http"]["middlewares"][format!("{name}-auth")], auth);
+        assert!(published.get("upstream").is_none());
         job.access
             .as_mut()
             .ok_or_else(|| Error::invalid("No access snapshot".into()))?
             .groups = vec!["engineering,other".into()];
-        assert!(docker::route(&configuration, &job).await.is_err());
-        assert_eq!(tokio::fs::read(&path).await?, bytes);
-        job.access
-            .as_mut()
-            .ok_or_else(|| Error::invalid("No access snapshot".into()))?
-            .groups
-            .clear();
-        assert_eq!(
-            middleware(&configuration, &job)?["forwardAuth"]["address"],
-            "http://oauth2-proxy:4180/"
-        );
+        assert!(publication(&job).is_err());
         job.access = None;
-        assert!(docker::route(&configuration, &job).await.is_err());
-        assert_eq!(tokio::fs::read(&path).await?, bytes);
+        assert!(publication(&job).is_err());
         Ok(())
     }
 

@@ -10,7 +10,7 @@ const execute = promisify(execFile);
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
 
-const components = ["runtime", "agent", "control-plane", "sso"];
+const components = ["runtime", "agent", "control-plane"];
 
 const fixture = async () => {
   const directory = await mkdtemp(join(tmpdir(), "widefleet-dockerhub-overviews-"));
@@ -100,12 +100,12 @@ cp "$payload" "$FIXTURE/remote/$component.json"
   return { directory, run };
 };
 
-it("syncs all four overviews verbatim without exposing credentials", async () => {
+it("syncs all image overviews verbatim without exposing credentials", async () => {
   const { directory, run } = await fixture();
 
   try {
     await writeFile(
-      join(directory, ".github/dockerhub/sso.md"),
+      join(directory, ".github/dockerhub/control-plane.md"),
       '# SSO\n\n"Quoted" text, backslash \\ and Unicode →\n',
     );
     const result = await run();
@@ -135,7 +135,7 @@ it.each(["missing", "empty"])(
     const { directory, run } = await fixture();
 
     try {
-      const overview = join(directory, ".github/dockerhub/sso.md");
+      const overview = join(directory, ".github/dockerhub/control-plane.md");
 
       if (state === "missing") await rm(overview);
       else await writeFile(overview, "");
@@ -203,12 +203,12 @@ it("skips an older retry without overwriting newer overviews", async () => {
   try {
     await run();
     await rm(join(directory, "requests.log"));
-    await writeFile(join(directory, ".github/dockerhub/sso.md"), "Outdated description");
-    const published = await readFile(join(directory, "remote/sso.json"), "utf8");
+    await writeFile(join(directory, ".github/dockerhub/control-plane.md"), "Outdated description");
+    const published = await readFile(join(directory, "remote/control-plane.json"), "utf8");
     const result = await run({ RELEASE_TAG: "v0.3.1" });
 
     expect(result.stdout).toContain("Skipping Docker Hub overviews for v0.3.1");
-    expect(await readFile(join(directory, "remote/sso.json"), "utf8")).toBe(published);
+    expect(await readFile(join(directory, "remote/control-plane.json"), "utf8")).toBe(published);
     await expect(readFile(join(directory, "requests.log"))).rejects.toThrow();
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -240,7 +240,7 @@ it("compares stable platform versions numerically across release pages", async (
     expect((await run()).stdout).toContain("latest published version is v0.3.10");
     await expect(readFile(join(directory, "requests.log"))).rejects.toThrow();
     await run({ RELEASE_TAG: "v0.3.10" });
-    expect(await readdir(join(directory, "remote"))).toHaveLength(4);
+    expect(await readdir(join(directory, "remote"))).toHaveLength(3);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

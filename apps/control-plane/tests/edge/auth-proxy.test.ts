@@ -48,6 +48,18 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
       redirectUrl: "https://auth.apps.example.test/oauth2/callback",
     });
 
+    const install = async <T extends { origin: string; stop: () => Promise<void> }>(running: T) => {
+      try {
+        const response = await fetch(`${running.origin}/_fixture/install`, { method: "POST" });
+        expect(response.status, await response.text()).toBe(204);
+
+        return running;
+      } catch (cause) {
+        await running.stop();
+        throw cause;
+      }
+    };
+
     const start = async (entra = false, target = runtime) => {
       await writeFile(
         join(directory, "wrangler.json"),
@@ -56,7 +68,9 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
           main: "worker.js",
           compatibility_date: "2026-10-01",
           compatibility_flags: ["nodejs_compat"],
+          kv_namespaces: [{ binding: "AUTH_CONFIG", id: "test-auth" }],
           vars: {
+            WIDEFLEET_CONTROL_TOKEN: "test-only-auth-proxy-control-key-32-characters",
             CONFIGURATION: JSON.stringify({
               ...configuration,
               provider: entra
@@ -86,7 +100,7 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
           },
         });
 
-        return { origin: `http://${dev.address}:${dev.port}`, stop: () => dev.stop() };
+        return install({ origin: `http://${dev.address}:${dev.port}`, stop: () => dev.stop() });
       }
 
       const reservation = createServer();
@@ -143,7 +157,7 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
         throw cause;
       }
 
-      return { origin, stop };
+      return install({ origin, stop });
     };
 
     const request = (url: string, init: RequestInit = {}) => {
@@ -225,6 +239,44 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
       await idp?.stop();
 
       if (directory) await rm(directory, { recursive: true, force: true });
+    });
+
+    it("publishes and removes app rules without restarting or contacting the control plane", async () => {
+      const path =
+        "https://auth.apps.example.test/.well-known/widefleet/auth/apps/ledger.apps.example.test";
+
+      const changed = {
+        appId: "00000000-0000-4000-8000-000000000003",
+        access: { revision: 2, groups: ["administrators"] },
+      };
+
+      const denied = await request(path, { method: "PUT", body: JSON.stringify(changed) });
+      expect(denied.status).toBe(403);
+
+      const headers = {
+        authorization: "Bearer test-only-auth-proxy-control-key-32-characters",
+        "content-type": "application/json",
+      };
+
+      const updated = await request(path, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify(changed),
+      });
+
+      expect(updated.status).toBe(204);
+
+      const app = await request("https://ledger.apps.example.test", {
+        headers: { cookie: sessionCookies },
+      });
+
+      expect(app.status).toBe(403);
+      expect(app.headers.get("x-widefleet-access-revision")).toBe(`${changed.appId}:2`);
+      expect((await request(path, { method: "DELETE", headers })).status).toBe(204);
+      expect(
+        (await request("https://ledger.apps.example.test", { headers: { cookie: sessionCookies } }))
+          .status,
+      ).toBe(404);
     });
 
     it("completes PKCE/nonce login and issues encrypted, one-hour Better Auth cookies", async () => {

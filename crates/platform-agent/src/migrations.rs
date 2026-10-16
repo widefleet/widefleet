@@ -49,28 +49,22 @@ async fn execute(
         .file_name()
         .and_then(|name| name.to_str())
         .ok_or_else(|| Error::invalid("Invalid migration staging directory".into()))?;
-    let mut command = vec![
+    let command = vec![
         "celld".into(),
         "d1".into(),
         "execute".into(),
         "migration".into(),
         "--file".into(),
-        format!("/state/{name}/query.sql"),
-        format!("/state/{name}"),
+        format!("/agent-state/{}/{name}/query.sql", job.fleet_id),
+        format!("/agent-state/{}/{name}", job.fleet_id),
         "--json".into(),
     ];
-    command.extend(
-        configuration
-            .storage
-            .resolve()?
-            .arguments(job.fleet_id, true),
-    );
     if cancelled.load(Ordering::Relaxed) {
         return Err(Error::invalid(
             "Migration interrupted before the next SQL command".into(),
         ));
     }
-    docker::execute_output(docker, job, command).await
+    docker::execute_native(docker, configuration, job, command).await
 }
 
 pub async fn run(
@@ -102,6 +96,7 @@ pub async fn run(
     let mut request: Request = serde_json::from_slice(&bytes)?;
     request.validate()?;
     let database = fleet::migration_database(configuration, job, &request).await?;
+    tokio::fs::create_dir_all(configuration.state.join(job.fleet_id.to_string())).await?;
     let temporary = tempfile::Builder::new()
         .prefix("migrations-")
         .tempdir_in(configuration.state.join(job.fleet_id.to_string()))?;

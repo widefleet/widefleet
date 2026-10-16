@@ -1,4 +1,4 @@
-import { copyFile, mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { edgeInfrastructure, edgeRoutes, traefikConfiguration } from "./edge-configuration.ts";
 
@@ -16,9 +16,4 @@ await writeFile(
 await writeFile(
   resolve(directory, "routes/platform.yaml"),
   JSON.stringify(edgeRoutes(configuration)),
-);
-
-await copyFile(
-  new URL("../../../infra/traefik/app-auth.json", import.meta.url),
-  resolve(directory, "routes/app-auth.yaml"),
 );
