@@ -14,9 +14,12 @@ import { fileURLToPath } from "node:url";
 import type { Unstable_DevWorker } from "wrangler";
 import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
+import { Result } from "better-result";
 import * as contract from "@platform/contracts";
 import release from "@platform/app-runtime/release" with { type: "json" };
 import { createTestEnvironment } from "../environment.ts";
+import { deployHostedRuntime } from "../../tools/hosted-runtime.ts";
+import { createCloudflareProvisioner } from "../../src/lib/server/cloudflare-provisioning.ts";
 import {
   capabilitiesSource,
   deploymentSource,
@@ -2636,6 +2639,76 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         state: "succeeded",
       });
       expect(runtimeUploads).toBe(before);
+    }, 20000);
+
+    it("rejects a delayed runtime command across infrastructure deployments and accepts a new update", async () => {
+      const cloudflare = createCloudflareProvisioner(
+        { accountId: "fixture", token: "fixture", runtimeName: "fixture" },
+        async () =>
+          Response.json({
+            success: true,
+            result: { bindings: [], annotations: { "workers/tag": bindingTag } },
+          }),
+      );
+
+      const install = (version: string) =>
+        deployHostedRuntime(
+          environment.database.db,
+          cloudflare,
+          {
+            put: async (key, bytes) => {
+              const response = await worker.fetch(
+                `http://fixture/storage?${new URLSearchParams({ key })}`,
+                { method: "PUT", body: new TextDecoder().decode(bytes) },
+              );
+
+              expect(response.status).toBe(204);
+
+              return Result.ok(undefined);
+            },
+          },
+          runtimeRelease(version),
+          async () => {
+            runtimeVersion = version;
+          },
+        );
+
+      await install("99.3.0");
+      const [fleet] = await environment.database.db.select().from(fleets);
+
+      if (!fleet?.runtime) throw new Error("Runtime fixture is missing");
+
+      const delayed = {
+        kind: "runtime",
+        id: crypto.randomUUID(),
+        fleetId: fleet.id,
+        previousJobId: fleet.runtimeJobId,
+        runtime: fleet.runtime,
+        actor: { id: "fixture-owner", admin: true },
+        createdAt: new Date().toISOString(),
+        rollback: true,
+      };
+
+      await install("99.4.0");
+      const before = runtimeUploads;
+      await worker.fetch("http://fixture/start?mode=accepted-only", {
+        method: "POST",
+        body: JSON.stringify(delayed),
+      });
+      await expect.poll(() => nativeStatus(delayed.id), { timeout: 15000 }).toBe("errored");
+      expect(await runtimeStatus()).toMatchObject({
+        jobId: null,
+        desiredVersion: "99.4.0",
+        activeVersion: "99.4.0",
+        state: "succeeded",
+      });
+      expect(runtimeUploads).toBe(before);
+
+      await selectRuntime({ version: "99.3.0" });
+      await expect
+        .poll(runtimeStatus)
+        .toMatchObject({ activeVersion: "99.3.0", state: "succeeded" });
+      expect(runtimeUploads).toBe(before + 1);
     }, 20000);
 
     it("deploys apps after runtime code changes but its confirmation fails", async () => {

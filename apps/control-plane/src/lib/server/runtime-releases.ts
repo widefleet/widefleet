@@ -20,7 +20,7 @@ export const runtimeReference = z.strictObject({
 
 export const saveRuntime = async (
   transaction: Transaction,
-  storage: ArtifactStorage,
+  storage: Pick<ArtifactStorage, "put">,
   release: z.infer<typeof contract.runtimeRelease>,
 ) => {
   contract.runtimeRelease.parse(release);

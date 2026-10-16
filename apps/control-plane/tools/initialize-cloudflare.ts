@@ -45,7 +45,9 @@ try {
       const secrets = z.object({ APP_COOKIE_SECRET: z.string().min(1) }).parse(process.env);
 
       const proxy = await getPlatformProxy<AuthProxyBindings>({
-        configPath: fileURLToPath(new URL("../wrangler.initialize.jsonc", import.meta.url)),
+        configPath:
+          process.env["WIDEFLEET_INITIALIZE_CONFIG"] ??
+          fileURLToPath(new URL("../wrangler.initialize.jsonc", import.meta.url)),
         persist: false,
       });
 
