@@ -49,6 +49,20 @@ pnpm --filter @platform/docs run deploy
 
 Deployment commands prepare the existing build before uploading it. They do not rebuild or change embedded analytics settings.
 
+Set `INDEXNOW_KEY` as a Cloudflare Workers Builds secret before the first production deployment, or export it for an approved local deployment. It must match the existing verification file served by the website at `https://widefleet.com/<key>.txt`. Keep the key out of this public repository. The deploy script reads it from the environment and omits it from its logs.
+
+The production deploy compares the published `/docs/sitemap.xml` with the prepared build before running Wrangler. After deployment, it verifies the published sitemap and root IndexNow key, then submits new URLs, changed `lastmod` values and removed URLs to Bing's IndexNow endpoint. Keep each page's `lastModified` frontmatter accurate; dates without a time cannot distinguish updates within the same day. Unchanged sitemaps and Preview deployments send nothing. Website URLs remain outside this submission scope.
+
+An unreadable or invalid previous sitemap stops deployment before Wrangler runs. A 404 means there is no previous sitemap, so all new entries are submitted. Transient submission failures are retried. If submission still fails after deployment, the build reports that deployment succeeded but IndexNow was not confirmed. Copy the `Pending submission` JSON from the build log into `indexnow-pending.json`, add `key` with the configured secret and `keyLocation` with `https://widefleet.com/<key>.txt`, then retry after resolving the reported error. Keep this local file out of version control:
+
+```sh
+curl --fail-with-body --json @indexnow-pending.json https://www.bing.com/indexnow
+```
+
+HTTP 429 stops automatic retries. Retry the pending batch no earlier than the reported `Retry-After`; if absent, wait at least 10 minutes.
+
+HTTP 200 confirms submission; HTTP 202 means key validation is still pending. Rebuilding an unchanged sitemap does not resend the failed batch.
+
 For a docs Preview without analytics:
 
 ```sh
