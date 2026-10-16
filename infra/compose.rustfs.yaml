@@ -15,9 +15,6 @@ services:
       - /logs:uid=10001,gid=10001
     networks: [management]
 
-  control-plane:
+  initialize:
     depends_on:
       storage: { condition: service_started }
-  agent:
-    environment:
-      PLATFORM_TRUSTED_CONTAINERS: app-platform-proxy,app-platform-auth-proxy,app-platform-storage

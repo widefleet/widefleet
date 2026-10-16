@@ -1,3 +1,5 @@
+import { runtimeIdentity } from "../runtime-identity.ts";
+import { encodeConfiguration } from "@platform/auth-proxy/publication";
 import { createHash } from "node:crypto";
 import { forward, followRedirects } from "@platform/app-runtime/network";
 import { transform } from "esbuild";
@@ -108,6 +110,9 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
     };
 
     beforeAll(async () => {
+      const identity = await runtimeIdentity();
+      const authToken = "native-runtime-fixture-control-token-never-deploy";
+      const authConfiguration = await encodeConfiguration(authToken, identity.configuration);
       directory = await mkdtemp(join(tmpdir(), "widefleet-dynamic-test-"));
       await execute("openssl", [
         "req",
@@ -288,7 +293,7 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
         appId,
         version,
         deploymentId,
-        hostname: "127.0.0.1",
+        hostname: "fixture.apps.example.test",
         metadata: {
           ...metadata,
           debug: { build_id: "fixture-current-build", source_maps: {} },
@@ -350,23 +355,30 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
         const app = ${JSON.stringify(app)};
         let initialized;
         export default { ...runtime, async fetch(request, env, ctx) {
+          const incoming = new URL(request.url);
+          incoming.protocol = 'https:'; incoming.hostname = 'fixture.apps.example.test'; incoming.port = '';
+          const headers = new Headers(request.headers); headers.set('cookie', ${JSON.stringify(identity.cookie)});
+          if (incoming.pathname === '/.well-known/widefleet/ready') headers.set('authorization', 'Bearer ' + env.WIDEFLEET_CONTROL_TOKEN);
+          request = new Request(incoming, new Request(request, {headers}));
           initialized ??= (async () => {
             await env.WIDEFLEET_PACKAGES.put('apps/${appId}/modules/${hash}', ${JSON.stringify(source)});
             for (const asset of ${JSON.stringify(assetFiles)}) await env.WIDEFLEET_PACKAGES.put('apps/${appId}/assets/' + asset.hash, asset.text);
             await env.WIDEFLEET_PACKAGES.put('versions/${appId}/${version}.json', JSON.stringify(app));
-            await env.WIDEFLEET_PACKAGES.put('hosts/127.0.0.1.json', JSON.stringify(app));
+            await env.WIDEFLEET_PACKAGES.put('hosts/fixture.apps.example.test.json', JSON.stringify(app));
+            await env.AUTH_CONFIG.put('configuration', ${JSON.stringify(authConfiguration)});
+            for (const hostname of ['fixture.apps.example.test', 'spa.apps.example.test']) await env.AUTH_CONFIG.put('apps/' + hostname, JSON.stringify({appId:app.appId,access:{revision:0,groups:[]}}));
             const spaRules = '/* /index.html 200\\n';
             const spaHash = '${"6".repeat(32)}';
             await env.WIDEFLEET_PACKAGES.put('apps/${appId}/assets/' + spaHash, spaRules);
-            await env.WIDEFLEET_PACKAGES.put('hosts/spa.fixture.json', JSON.stringify({
-              ...app, hostname: 'spa.fixture',
+            await env.WIDEFLEET_PACKAGES.put('hosts/spa.apps.example.test.json', JSON.stringify({
+              ...app, hostname: 'spa.apps.example.test',
               manifest: { ...app.manifest, '/index.html': app.manifest['/static/index.html'], '/_redirects': { hash: spaHash, size: spaRules.length } },
             }));
           })();
           await initialized;
           if (new URL(request.url).pathname.startsWith('/fixture/spa/')) {
             const url = new URL(request.url);
-            url.hostname = 'spa.fixture';
+            url.hostname = 'spa.apps.example.test';
             url.pathname = url.pathname.slice('/fixture/spa'.length);
             return runtime.fetch(new Request(url, request), env, ctx);
           }
@@ -377,7 +389,7 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
           if (new URL(request.url).pathname === '/fixture/version') {
             const next = { ...app, version: crypto.randomUUID() };
             await env.WIDEFLEET_PACKAGES.put('versions/${appId}/' + next.version + '.json', JSON.stringify(next));
-            await env.WIDEFLEET_PACKAGES.put('hosts/127.0.0.1.json', JSON.stringify(next));
+            await env.WIDEFLEET_PACKAGES.put('hosts/fixture.apps.example.test.json', JSON.stringify(next));
             return new Response(null, { status: 204 });
           }
           if (new URL(request.url).searchParams.get('operation') === 'abort') {
@@ -402,12 +414,12 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
           compatibility_flags: metadata.compatibility_flags,
           vars: {
             PRIVATE_ROOT_SECRET: "must-not-be-visible",
-            WIDEFLEET_CONTROL_TOKEN: "fixture-only",
+            WIDEFLEET_CONTROL_TOKEN: authToken,
             WIDEFLEET_CONFIGURATION: JSON.stringify({
-              crons: { "* * * * *": ["127.0.0.1"] },
+              crons: { "* * * * *": ["fixture.apps.example.test"] },
               queues: {
-                fixture: { hostname: "127.0.0.1", queue: "fixture" },
-                dead: { hostname: "127.0.0.1", queue: "dead" },
+                fixture: { hostname: "fixture.apps.example.test", queue: "fixture" },
+                dead: { hostname: "fixture.apps.example.test", queue: "dead" },
               },
             }),
           },
@@ -420,7 +432,10 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
             { binding: "FILES", bucket_name: "fixture" },
             { binding: "WIDEFLEET_PACKAGES", bucket_name: "widefleet-packages" },
           ],
-          kv_namespaces: [{ binding: "KV", id: "fixture" }],
+          kv_namespaces: [
+            { binding: "KV", id: "fixture" },
+            { binding: "AUTH_CONFIG", id: "auth-config" },
+          ],
           triggers: { crons: ["* * * * *"] },
           queues: {
             producers: [{ binding: "JOBS", queue: "fixture" }],
@@ -805,8 +820,11 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
       expect(await (await fetch(`${origin}/loop`)).text()).toBe("same asset");
       const redirect = await fetch(`${origin}/old`, { redirect: "manual" });
       expect(redirect.status).toBe(302);
-      expect(redirect.headers.get("location")).toBe(`${origin}/about/`);
-      expect(await (await fetch(`${origin}/about`)).text()).toBe("<p>about</p>");
+      expect(redirect.headers.get("location")).toBe("https://fixture.apps.example.test/about/");
+      const canonical = await fetch(`${origin}/about`, { redirect: "manual" });
+      expect(canonical.status).toBe(307);
+      expect(canonical.headers.get("location")).toBe("https://fixture.apps.example.test/about/");
+      expect(await (await fetch(`${origin}/about/`)).text()).toBe("<p>about</p>");
     });
 
     it("serves rewrite targets once without redirecting the original URL", async () => {
@@ -829,7 +847,7 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
 
       const direct = await fetch(`${origin}/static/index.html`, { redirect: "manual" });
       expect(direct.status).toBe(307);
-      expect(direct.headers.get("location")).toBe(`${origin}/static/`);
+      expect(direct.headers.get("location")).toBe("https://fixture.apps.example.test/static/");
     });
 
     it("attributes console errors through a trusted tail without exposing ingestion credentials", async () => {

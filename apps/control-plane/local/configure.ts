@@ -35,6 +35,4 @@ const localRoutes = {
 
 routes.http.services.management.loadBalancer.servers = [{ url: "http://127.0.0.1:3000" }];
 
-routes.http.services["app-sso"].loadBalancer.servers = [{ url: "http://127.0.0.1:4180" }];
-
 await writeFile("/data/routes/platform.yaml", JSON.stringify(localRoutes));

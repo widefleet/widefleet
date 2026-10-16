@@ -21,13 +21,11 @@ pub fn publication(job: &Job) -> Result<Value> {
     {
         return Err(Error::invalid("Invalid app access groups".into()));
     }
-    Ok(
-        json!({ "appId": job.app_id()?, "access": access, "upstream": format!("http://{}:8080", docker::name(job)) }),
-    )
+    Ok(json!({ "appId": job.app_id()?, "access": access }))
 }
 
 pub fn origin(configuration: &Configuration) -> Result<Url> {
-    let address = Url::parse(&configuration.app_auth_url)
+    let address = Url::parse(&configuration.app_runtime_url)
         .map_err(|error| Error::invalid(error.to_string()))?;
     if !matches!(address.scheme(), "http" | "https")
         || !address.username().is_empty()
@@ -37,7 +35,7 @@ pub fn origin(configuration: &Configuration) -> Result<Url> {
         || address.path() != "/"
     {
         return Err(Error::invalid(
-            "PLATFORM_APP_AUTH_URL must be the private auth proxy HTTP(S) origin".into(),
+            "PLATFORM_APP_RUNTIME_URL must be the private auth proxy HTTP(S) origin".into(),
         ));
     }
     Ok(address)
@@ -49,7 +47,7 @@ async fn update(configuration: &Configuration, job: &Job, body: Option<Value>) -
         "/.well-known/widefleet/auth/apps/{}",
         job.hostname()?
     ));
-    let key = tokio::fs::read_to_string(&configuration.auth_key_file).await?;
+    let key = tokio::fs::read_to_string(&configuration.runtime_key_file).await?;
     if key.trim().len() < 32 {
         return Err(Error::invalid("Auth proxy key is invalid".into()));
     }
@@ -170,7 +168,9 @@ pub async fn verify(docker: &Docker, configuration: &Configuration, job: &Job) -
     // response headers cannot include SSO cookies in the persisted error.
     let mut last_observation = String::from("no probe response");
     for _ in 0..30 {
-        match docker::execute_output(docker, job, command.clone()).await {
+        match docker::execute_output(docker, &configuration.runtime_container, command.clone())
+            .await
+        {
             Ok(headers) => {
                 let headers = String::from_utf8_lossy(&headers);
                 if confirmed(&headers, &expected) {
@@ -204,10 +204,7 @@ mod tests {
             published["access"]["groups"],
             json!(["team&allowed_groups=other", "engineering"])
         );
-        assert_eq!(
-            published["upstream"],
-            format!("http://{}:8080", docker::name(&job))
-        );
+        assert!(published.get("upstream").is_none());
         job.access
             .as_mut()
             .ok_or_else(|| Error::invalid("No access snapshot".into()))?

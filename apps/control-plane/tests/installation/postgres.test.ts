@@ -98,7 +98,7 @@ describe.runIf(process.env["RUN_INSTALLATION_TESTS"] === "1")(
             ...installationSettings,
             DATABASE_URL: databaseUrl,
             PLATFORM_STATE_DIRECTORY: join(directory, "state"),
-            PLATFORM_AUTH_DIRECTORY: join(directory, "auth"),
+            PLATFORM_RUNTIME_DIRECTORY: join(directory, "auth"),
             S3_ENDPOINT: "http://127.0.0.1:1",
             S3_BUCKET: "fixture-artifacts",
           },

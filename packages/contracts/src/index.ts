@@ -267,6 +267,7 @@ export const artifact = z.strictObject({
 // than JavaScript changes, determine whether an installer update is necessary.
 export const runtimeRelease = z.strictObject({
   protocol: z.literal(1),
+  auth: z.literal(1),
   version: z.string().regex(/^[0-9]+\.[0-9]+\.[0-9]+$/),
   celld: z.literal("0.6.2"),
   workflows: z.literal(1).optional(),

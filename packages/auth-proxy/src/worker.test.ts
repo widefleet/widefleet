@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import worker from "./worker.ts";
+import { createAuthHandler } from "./worker.ts";
 import { authControlPath } from "./publication.ts";
 
 describe("Auth proxy diagnostics", () => {
@@ -9,7 +9,7 @@ describe("Auth proxy diagnostics", () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     const environment = {
-      AUTH_PROXY_KEY: key,
+      WIDEFLEET_CONTROL_TOKEN: key,
       get AUTH_CONFIG(): never {
         throw new Error(privateValue);
       },
@@ -25,7 +25,10 @@ describe("Auth proxy diagnostics", () => {
             })
           : new Request("https://notes.apps.example.test/");
 
-      const response = await worker.fetch(request, environment);
+      const response = await createAuthHandler(environment, async () => new Response("App")).fetch(
+        request,
+      );
+
       expect(response.status).toBe(503);
       expect(log.mock.calls).toEqual([["Auth proxy operation failed", { phase }]]);
       expect(await response.text()).not.toContain(privateValue);

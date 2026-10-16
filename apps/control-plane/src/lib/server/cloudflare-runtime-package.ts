@@ -5,6 +5,7 @@ import { InvalidOperation } from "./errors.ts";
 import { verifyModules } from "./package-storage.ts";
 
 export const validateCloudflareRuntime = (release: z.infer<typeof contract.runtimeRelease>) => {
+  contract.runtimeRelease.parse(release);
   verifyModules(release);
 
   // Protocol 1 uses the installed loader, catalog and Workflow bindings. Releases

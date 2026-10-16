@@ -15,7 +15,7 @@ export const createAppSignIn = (configuration: Configuration, cookieSecret: stri
         .min(32)
         .parse(
           (
-            await readFile(join(configuration.PLATFORM_AUTH_DIRECTORY, "control-token"), "utf8")
+            await readFile(join(configuration.PLATFORM_RUNTIME_DIRECTORY, "control-token"), "utf8")
           ).trim(),
         );
 
@@ -29,7 +29,7 @@ export const createAppSignIn = (configuration: Configuration, cookieSecret: stri
       if (method === "PUT") options.body = body ?? null;
 
       const response = await fetch(
-        new URL(`${authControlPath}/configuration`, configuration.PLATFORM_APP_AUTH_URL),
+        new URL(`${authControlPath}/configuration`, configuration.PLATFORM_APP_RUNTIME_URL),
         options,
       );
 

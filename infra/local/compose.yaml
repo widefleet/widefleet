@@ -19,8 +19,8 @@ x-local: &local
     S3_SECRET_ACCESS_KEY: local-demo-only
     BETTER_AUTH_SECRET: local-demo-only-never-use-in-a-real-installation
     PLATFORM_STATE_DIRECTORY: /data/platform
-    PLATFORM_AUTH_DIRECTORY: /data/platform/auth
-    PLATFORM_APP_AUTH_URL: http://127.0.0.1:4180
+    PLATFORM_RUNTIME_DIRECTORY: /data/platform/auth
+    PLATFORM_APP_RUNTIME_URL: http://runtime:8080
     CLICKHOUSE_URL: http://clickhouse:8123
     CLICKHOUSE_USER: widefleet_reader
     CLICKHOUSE_PASSWORD: local-reader-only
@@ -102,29 +102,22 @@ services:
       interval: 1s
       timeout: 3s
       retries: 30
-  auth-proxy:
-    <<: *local
-    network_mode: service:proxy
-    command: ["sh", "/workspace/infra/sso/entrypoint.sh"]
+  runtime:
+    image: app-platform-runtime:0.1.0
+    container_name: widefleet-local-runtime
+    # The local tools create private configuration as container root.
+    user: "0:0"
     environment:
-      <<: *environment
-      AUTH_PROXY_SOURCE_DIRECTORY: /workspace/infra/sso
-      PROXY_RUNTIME_DIRECTORY: /data/auth-runtime
-      AUTH_PROXY_WORKER: /workspace/packages/auth-proxy/dist/worker.js
-      CELLD_BUCKET: s3://local-fleets/auth-proxy
-      S3_ENDPOINT: http://storage:9000
-      AWS_REGION: us-east-1
-      AWS_ACCESS_KEY_ID: local-demo
-      AWS_SECRET_ACCESS_KEY: local-demo-only
+      FLEET_S3_ENDPOINT: http://widefleet-local-storage:9000
+      FLEET_S3_BUCKET: local-fleets
+      FLEET_S3_ACCESS_KEY_ID: local-demo
+      FLEET_S3_SECRET_ACCESS_KEY: local-demo-only
+    volumes:
+      - ${WIDEFLEET_LOCAL_DATA}/platform/auth:/runtime-config:ro
+      - runtime:/state
+      - ${WIDEFLEET_LOCAL_DATA}/agent:/agent-state:ro
     healthcheck:
-      test:
-        [
-          "CMD",
-          "node",
-          "--input-type=module",
-          "--eval",
-          "import {readFile} from 'node:fs/promises'; const key=(await readFile('/data/platform/auth/control-token','utf8')).trim(); const response=await fetch('http://127.0.0.1:4180/.well-known/widefleet/auth/configuration',{headers:{authorization:'Bearer '+key}}); if (!response.ok) process.exit(1)",
-        ]
+      test: [CMD, curl, --fail, --silent, http://127.0.0.1:8081/state]
       interval: 1s
       timeout: 3s
       retries: 30
@@ -137,7 +130,6 @@ services:
       <<: *environment
       DOCKER_HOST: unix:///var/run/docker.sock
       PLATFORM_AGENT_STATE: /data/agent
-      PLATFORM_AGENT_HOST_STATE: ${WIDEFLEET_LOCAL_DATA}/agent
       PLATFORM_ROUTING_DIRECTORY: /data/routes
       CELLD_BINARY: /usr/local/bin/celld
       FLEET_S3_ENDPOINT: http://storage:9000
@@ -146,10 +138,10 @@ services:
       FLEET_S3_BUCKET: local-fleets
       FLEET_S3_ACCESS_KEY_ID: local-demo
       FLEET_S3_SECRET_ACCESS_KEY: local-demo-only
-      PLATFORM_TRUSTED_CONTAINERS: widefleet-local-proxy,widefleet-local-storage
+      PLATFORM_RUNTIME_CONTAINER: widefleet-local-runtime
       PLATFORM_PROXY_URL: https://widefleet-local-proxy:25453
-      PLATFORM_APP_AUTH_URL: http://127.0.0.1:4180/
-      PLATFORM_AUTH_KEY_FILE: /data/platform/auth/control-token
+      PLATFORM_APP_RUNTIME_URL: http://runtime:8080/
+      PLATFORM_RUNTIME_KEY_FILE: /data/platform/auth/control-token
       PLATFORM_RUNTIME_PLATFORM_URL: http://widefleet-local-proxy:25450
     volumes:
       - ${WIDEFLEET_LOCAL_DATA}:/data
@@ -200,3 +192,4 @@ volumes:
   objects:
   clickhouse:
   otel-queue:
+  runtime:

@@ -24,7 +24,7 @@ const compile = async (entry: string, define: Record<string, string>) => {
       "cloudflare:workflows",
       "./__widefleet_app.js",
       "./__widefleet_workflow.js",
-      "node:async_hooks",
+      "node:*",
     ],
     alias: {
       "widefleet:app": "./__widefleet_app.js",
@@ -63,6 +63,7 @@ await writeFile(
   new URL("release.json", directory),
   JSON.stringify({
     protocol: 1,
+    auth: 1,
     version,
     celld: "0.6.2",
     workflows: 1,

@@ -70,7 +70,7 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
           compatibility_flags: ["nodejs_compat"],
           kv_namespaces: [{ binding: "AUTH_CONFIG", id: "test-auth" }],
           vars: {
-            AUTH_PROXY_KEY: "test-only-auth-proxy-control-key-32-characters",
+            WIDEFLEET_CONTROL_TOKEN: "test-only-auth-proxy-control-key-32-characters",
             CONFIGURATION: JSON.stringify({
               ...configuration,
               provider: entra

@@ -26,14 +26,14 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")("Packaged auth pr
       });
       await fixture.route([]);
       expect((await fixture.login()).status).toBe(503);
-      await docker("cp", certificates.ca, `${fixture.name}:/runtime/test-ca.pem`);
+      await docker("cp", certificates.ca, `${fixture.name}:/state/test-ca.pem`);
       await docker(
         "exec",
         "--user=root",
         fixture.name,
         "sh",
         "-c",
-        "cat /runtime/test-ca.pem >> /etc/ssl/certs/ca-certificates.crt",
+        "cat /state/test-ca.pem >> /etc/ssl/certs/ca-certificates.crt",
       );
       await fixture.restart();
       await fixture.trustProviderCertificate(certificates.ca);

@@ -47,9 +47,9 @@ try {
         configuration.PLATFORM_ENCRYPTION_KEY,
         createCloudflareAppSignIn(configuration, {
           ...z
-            .object({ AUTH_PROXY_KEY: z.string().min(32), APP_COOKIE_SECRET: z.string().min(1) })
+            .object({ APP_RUNTIME_TOKEN: z.string().min(32), APP_COOKIE_SECRET: z.string().min(1) })
             .parse(process.env),
-          AUTH_PROXY: {
+          APP_RUNTIME: {
             fetch: (url, init) =>
               fetch(new URL(new URL(url).pathname, appCallbackUrl(configuration)), {
                 ...init,

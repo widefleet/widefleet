@@ -101,7 +101,7 @@ export const edgeRoutes = (configuration: z.infer<typeof edgeInfrastructure>) =>
       },
       services: {
         management: { loadBalancer: { servers: [{ url: "http://control-plane:3000" }] } },
-        "app-sso": { loadBalancer: { servers: [{ url: "http://auth-proxy:4180" }] } },
+        "app-sso": { loadBalancer: { servers: [{ url: "http://runtime:8080" }] } },
       },
     },
   };

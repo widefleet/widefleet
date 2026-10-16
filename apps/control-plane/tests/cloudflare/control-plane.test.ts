@@ -50,10 +50,13 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
       entry,
       `
       import application from ${JSON.stringify(configuration.main)};
-      import authProxy from ${JSON.stringify(fileURLToPath(import.meta.resolve("@platform/auth-proxy/worker")))};
+      import { createAuthHandler } from ${JSON.stringify(fileURLToPath(import.meta.resolve("@platform/auth-proxy/worker")))};
       import { WorkerEntrypoint, WorkflowEntrypoint } from 'cloudflare:workers';
-      export class AuthProxy extends WorkerEntrypoint {
-        fetch(request) { return authProxy.fetch(request, this.env); }
+      export class AppRuntime extends WorkerEntrypoint {
+        fetch(request) {
+          return createAuthHandler({ AUTH_CONFIG: this.env.AUTH_CONFIG, WIDEFLEET_CONTROL_TOKEN: this.env.APP_RUNTIME_TOKEN },
+            async () => new Response("No apps installed", { status: 404 })).fetch(request);
+        }
       }
       export class AcceptedDeployment extends WorkflowEntrypoint {
         async run(event, step) { await step.sleep('pending', '1 day'); }
@@ -75,14 +78,14 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
         },
         vars: {
           ...environment.environment,
-          AUTH_PROXY_KEY: "local-control-plane-auth-key-never-deploy",
+          APP_RUNTIME_TOKEN: "local-control-plane-auth-key-never-deploy",
           APP_COOKIE_SECRET: Buffer.alloc(32, 1).toString("base64url"),
         },
         services: [
           {
-            binding: "AUTH_PROXY",
+            binding: "APP_RUNTIME",
             service: "widefleet-control-plane-test",
-            entrypoint: "AuthProxy",
+            entrypoint: "AppRuntime",
           },
         ],
         kv_namespaces: [{ binding: "AUTH_CONFIG", id: "auth-config" }],

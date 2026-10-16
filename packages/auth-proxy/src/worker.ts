@@ -9,10 +9,9 @@ import {
 } from "./publication.ts";
 import { createAuthProxy } from "./proxy.ts";
 
-export interface AuthProxyEnvironment {
+export interface AuthEnvironment {
   AUTH_CONFIG: KVNamespace;
-  AUTH_PROXY_KEY: string;
-  APP_RUNTIME?: { fetch: typeof fetch };
+  WIDEFLEET_CONTROL_TOKEN: string;
 }
 
 const reply = (status: number, message: string) =>
@@ -21,16 +20,16 @@ const reply = (status: number, message: string) =>
     headers: { "cache-control": "no-store" },
   });
 
-const configuration = async (environment: AuthProxyEnvironment) => {
+const configuration = async (environment: AuthEnvironment) => {
   const value = await environment.AUTH_CONFIG.get("configuration");
 
-  return value ? decodeConfiguration(environment.AUTH_PROXY_KEY, value) : null;
+  return value ? decodeConfiguration(environment.WIDEFLEET_CONTROL_TOKEN, value) : null;
 };
 
-const control = async (request: Request, environment: AuthProxyEnvironment) => {
+const control = async (request: Request, environment: AuthEnvironment) => {
   if (
-    environment.AUTH_PROXY_KEY.length < 32 ||
-    request.headers.get("authorization") !== `Bearer ${environment.AUTH_PROXY_KEY}`
+    environment.WIDEFLEET_CONTROL_TOKEN.length < 32 ||
+    request.headers.get("authorization") !== `Bearer ${environment.WIDEFLEET_CONTROL_TOKEN}`
   )
     return reply(403, "Forbidden");
   const path = new URL(request.url).pathname.slice(authControlPath.length);
@@ -60,7 +59,7 @@ const control = async (request: Request, environment: AuthProxyEnvironment) => {
       const input = authConfiguration.parse(await request.json());
       await environment.AUTH_CONFIG.put(
         "configuration",
-        await encodeConfiguration(environment.AUTH_PROXY_KEY, input),
+        await encodeConfiguration(environment.WIDEFLEET_CONTROL_TOKEN, input),
       );
 
       return reply(204, "");
@@ -87,8 +86,11 @@ const control = async (request: Request, environment: AuthProxyEnvironment) => {
   return reply(404, "Not found");
 };
 
-export default {
-  async fetch(request: Request, environment: AuthProxyEnvironment) {
+export const createAuthHandler = (
+  environment: AuthEnvironment,
+  runApp: (request: Request, appId: string) => Promise<Response>,
+) => ({
+  async fetch(request: Request) {
     const url = new URL(request.url);
 
     if (url.pathname.startsWith(`${authControlPath}/`)) {
@@ -134,28 +136,9 @@ export default {
           const route = await resolve(new URL(forwarded.url).hostname);
 
           if (!route) return reply(404, "Not found");
-          const headers = new Headers(forwarded.headers);
-
-          // A stale KV route must never authorize a different app reusing this hostname.
-          headers.set("x-widefleet-app-id", route.appId);
           phase = "app-runtime";
 
-          if (environment.APP_RUNTIME)
-            return environment.APP_RUNTIME.fetch(new Request(forwarded, { headers }));
-
-          if (!route.upstream) return reply(503, "App runtime is not connected");
-          const source = new URL(forwarded.url);
-          const target = new URL(route.upstream);
-
-          target.pathname = source.pathname;
-          target.search = source.search;
-
-          headers.set("x-forwarded-host", source.host);
-          headers.set("x-forwarded-proto", source.protocol.slice(0, -1));
-
-          return fetch(
-            new Request(target, new Request(forwarded, { headers, redirect: "manual" })),
-          );
+          return runApp(forwarded, route.appId);
         },
       });
 
@@ -171,10 +154,11 @@ export default {
         );
 
       return response;
-    } catch {
+    } catch (cause) {
+      if (phase === "app-runtime") throw cause;
       console.error("Auth proxy operation failed", { phase });
 
       return reply(503, "Company sign-in is temporarily unavailable");
     }
   },
-};
+});

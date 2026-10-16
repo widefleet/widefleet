@@ -1,3 +1,4 @@
+import { createAuthHandler } from "@platform/auth-proxy";
 import { appEventConfiguration } from "@platform/contracts";
 import { publishedApp } from "@platform/contracts";
 import { z } from "zod";
@@ -68,22 +69,98 @@ const run = async <T>(
   }
 };
 
+const managementRequest = (request: Request, environment: ParentEnvironment) => {
+  const token = z.string().min(32).safeParse(environment.WIDEFLEET_CONTROL_TOKEN);
+
+  return token.success && request.headers.get("authorization") === `Bearer ${token.data}`;
+};
+
+const dispatchApp = async (
+  request: Request,
+  environment: ParentEnvironment,
+  context: ExecutionContext,
+  authenticatedApp: string | null,
+) => {
+  const url = new URL(request.url);
+  const candidate = request.headers.get("x-widefleet-candidate");
+  let app;
+
+  if (candidate) {
+    if (!managementRequest(request, environment)) return new Response(null, { status: 403 });
+
+    const [appId, version] = z
+      .tuple([publishedApp.shape.appId, publishedApp.shape.version])
+      .parse(candidate.split("/"));
+
+    app = await readApp(environment, `versions/${appId}/${version}.json`);
+  } else {
+    if (!/^[a-z0-9.-]+$/.test(url.hostname)) return new Response(null, { status: 400 });
+    app = await readApp(environment, `hosts/${url.hostname}.json`);
+  }
+
+  if (!app) return new Response("App is not published", { status: 404 });
+
+  if (authenticatedApp !== null && authenticatedApp !== app.appId)
+    return new Response("App authorization is being updated", { status: 503 });
+
+  if (url.pathname === "/.well-known/widefleet/ready") {
+    await run(app, environment, context, (worker) =>
+      worker.getEntrypoint<Events>("Events").ready(),
+    );
+
+    for (const binding of app.metadata.bindings) {
+      if (binding.type !== "workflow") continue;
+
+      const worker = environment.WIDEFLEET_LOADER.load(
+        await workerCode(app, environment, context, binding.workflow_name),
+      );
+
+      try {
+        await worker.getEntrypoint<WorkflowRunner>("WorkflowRunner").ready();
+      } finally {
+        worker.dispose?.();
+      }
+    }
+
+    return Response.json({
+      deploymentId: app.deploymentId,
+      networkRevision: app.network.revision,
+      capabilityRevision: app.capabilityRevision,
+      version: app.version,
+      runtimeVersion: WIDEFLEET_RUNTIME_VERSION,
+    });
+  }
+
+  if (candidate) return new Response(null, { status: 403 });
+
+  if (request.method === "GET" || request.method === "HEAD") {
+    const asset = await serveAsset(request, environment, app);
+
+    if (asset.status !== 404) return browserPolicy(asset, app.network.policy.browser);
+  }
+
+  return browserPolicy(
+    // celld forwards incoming request cancellation only when the signal is
+    // explicitly supplied to the subrequest.
+    await run(app, environment, context, (worker) =>
+      worker.getEntrypoint().fetch(request, { signal: request.signal }),
+    ),
+    app.network.policy.browser,
+  );
+};
+
 export default {
   async fetch(request: Request, environment: ParentEnvironment, context: ExecutionContext) {
     const url = new URL(request.url);
 
     if (url.pathname === "/.well-known/widefleet/runtime") {
-      if (request.headers.get("authorization") !== `Bearer ${environment.WIDEFLEET_CONTROL_TOKEN}`)
-        return new Response(null, { status: 403 });
+      if (!managementRequest(request, environment)) return new Response(null, { status: 403 });
 
       return Response.json({ runtimeVersion: WIDEFLEET_RUNTIME_VERSION });
     }
 
     if (url.pathname === "/.well-known/widefleet/workflows") {
-      if (
-        request.method !== "POST" ||
-        request.headers.get("authorization") !== `Bearer ${environment.WIDEFLEET_CONTROL_TOKEN}`
-      )
+      if (request.method !== "POST" || !managementRequest(request, environment))
         return new Response(null, { status: 403 });
 
       try {
@@ -116,74 +193,18 @@ export default {
       }
     }
 
-    const candidate = request.headers.get("x-widefleet-candidate");
-    let app;
+    if (
+      url.pathname === "/.well-known/widefleet/ready" ||
+      request.headers.has("x-widefleet-candidate")
+    ) {
+      if (!managementRequest(request, environment)) return new Response(null, { status: 403 });
 
-    if (candidate) {
-      if (request.headers.get("authorization") !== `Bearer ${environment.WIDEFLEET_CONTROL_TOKEN}`)
-        return new Response(null, { status: 403 });
-
-      const [appId, version] = z
-        .tuple([publishedApp.shape.appId, publishedApp.shape.version])
-        .parse(candidate.split("/"));
-
-      app = await readApp(environment, `versions/${appId}/${version}.json`);
-    } else {
-      if (!/^[a-z0-9.-]+$/.test(url.hostname)) return new Response(null, { status: 400 });
-      app = await readApp(environment, `hosts/${url.hostname}.json`);
+      return dispatchApp(request, environment, context, null);
     }
 
-    if (!app) return new Response("App is not published", { status: 404 });
-
-    const authenticatedApp = request.headers.get("x-widefleet-app-id");
-
-    if (authenticatedApp && authenticatedApp !== app.appId)
-      return new Response("App authorization is being updated", { status: 503 });
-
-    if (url.pathname === "/.well-known/widefleet/ready") {
-      await run(app, environment, context, (worker) =>
-        worker.getEntrypoint<Events>("Events").ready(),
-      );
-
-      for (const binding of app.metadata.bindings) {
-        if (binding.type !== "workflow") continue;
-
-        const worker = environment.WIDEFLEET_LOADER.load(
-          await workerCode(app, environment, context, binding.workflow_name),
-        );
-
-        try {
-          await worker.getEntrypoint<WorkflowRunner>("WorkflowRunner").ready();
-        } finally {
-          worker.dispose?.();
-        }
-      }
-
-      return Response.json({
-        deploymentId: app.deploymentId,
-        networkRevision: app.network.revision,
-        capabilityRevision: app.capabilityRevision,
-        version: app.version,
-        runtimeVersion: WIDEFLEET_RUNTIME_VERSION,
-      });
-    }
-
-    if (candidate) return new Response(null, { status: 403 });
-
-    if (request.method === "GET" || request.method === "HEAD") {
-      const asset = await serveAsset(request, environment, app);
-
-      if (asset.status !== 404) return browserPolicy(asset, app.network.policy.browser);
-    }
-
-    return browserPolicy(
-      // celld forwards incoming request cancellation only when the signal is
-      // explicitly supplied to the subrequest.
-      await run(app, environment, context, (worker) =>
-        worker.getEntrypoint().fetch(request, { signal: request.signal }),
-      ),
-      app.network.policy.browser,
-    );
+    return createAuthHandler(environment, (authenticated, appId) =>
+      dispatchApp(authenticated, environment, context, appId),
+    ).fetch(request);
   },
   async scheduled(
     controller: ScheduledController,

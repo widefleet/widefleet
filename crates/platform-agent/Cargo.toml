@@ -1,5 +1,6 @@
 [package]
 name = "platform-agent"
+default-run = "platform-agent"
 version.workspace = true
 license.workspace = true
 edition.workspace = true

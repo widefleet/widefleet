@@ -1,4 +1,4 @@
-import worker, { type AuthProxyEnvironment } from "@platform/auth-proxy/worker";
+import { createAuthHandler, type AuthEnvironment } from "@platform/auth-proxy/worker";
 import { authControlPath } from "@platform/auth-proxy/publication";
 import { z } from "zod";
 
@@ -25,10 +25,23 @@ globalThis.fetch = (input, init) => {
 };
 
 export default {
-  async fetch(request: Request, input: z.infer<typeof environment> & AuthProxyEnvironment) {
+  async fetch(request: Request, input: z.infer<typeof environment> & AuthEnvironment) {
     const env = environment.parse(input);
 
     graphOrigin = env.GRAPH_ORIGIN;
+
+    const worker = createAuthHandler(input, async (appRequest, appId) =>
+      Response.json(
+        {
+          appId,
+          url: appRequest.url,
+          method: appRequest.method,
+          headers: Object.fromEntries(appRequest.headers),
+          body: await appRequest.text(),
+        },
+        { headers: { "set-cookie": "app_cookie=blocked; Path=/" } },
+      ),
+    );
 
     if (new URL(request.url).pathname === "/_fixture/install") {
       const publish = (path: string, body: string) =>
@@ -36,12 +49,11 @@ export default {
           new Request(`https://auth.invalid${authControlPath}${path}`, {
             method: "PUT",
             headers: {
-              authorization: `Bearer ${input.AUTH_PROXY_KEY}`,
+              authorization: `Bearer ${input.WIDEFLEET_CONTROL_TOKEN}`,
               "content-type": "application/json",
             },
             body,
           }),
-          input,
         );
 
       const installed = await publish("/configuration", env.CONFIGURATION);
@@ -77,23 +89,6 @@ export default {
       request.headers.get("x-fixture-origin") ?? "https://auth.apps.example.test",
     );
 
-    return worker.fetch(new Request(publicUrl, request), {
-      ...input,
-      APP_RUNTIME: {
-        fetch: async (forwarded, init) => {
-          const appRequest = new Request(forwarded, init);
-
-          return Response.json(
-            {
-              url: appRequest.url,
-              method: appRequest.method,
-              headers: Object.fromEntries(appRequest.headers),
-              body: await appRequest.text(),
-            },
-            { headers: { "set-cookie": "app_cookie=blocked; Path=/" } },
-          );
-        },
-      },
-    });
+    return worker.fetch(new Request(publicUrl, request));
   },
 };

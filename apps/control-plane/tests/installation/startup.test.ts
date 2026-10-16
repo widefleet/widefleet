@@ -1,3 +1,9 @@
+import {
+  DeleteBucketCommand,
+  DeleteObjectsCommand,
+  ListObjectsV2Command,
+  S3Client,
+} from "@aws-sdk/client-s3";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -37,7 +43,14 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")("First container 
       DATABASE_URL: databaseUrl.href,
       PLATFORM_CONTROL_PLANE_IMAGE:
         process.env["PLATFORM_CONTROL_PLANE_IMAGE"] ?? "widefleet-control-plane:sso-check",
-      PLATFORM_SSO_IMAGE: process.env["PLATFORM_SSO_IMAGE"] ?? "widefleet-sso:setup-check",
+      PLATFORM_RUNTIME_IMAGE:
+        process.env["PLATFORM_RUNTIME_IMAGE"] ?? "widefleet-runtime:setup-check",
+      S3_ENDPOINT: "http://rustfs:9000",
+      FLEET_RUNTIME_S3_ENDPOINT: "http://rustfs:9000",
+      S3_ACCESS_KEY_ID: "local-tests",
+      S3_SECRET_ACCESS_KEY: "local-tests-only",
+      S3_BUCKET: `${name}-a`,
+      FLEET_S3_BUCKET: `${name}-f`,
       PLATFORM_DATA_DIRECTORY: directory,
     };
 
@@ -51,7 +64,7 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")("First container 
     );
     await writeFile(
       overrideFile,
-      `services:\n  proxy:\n    container_name: ${name}-proxy\n    ports: !reset []\nnetworks:\n  management:\n    external: true\n    name: internal-app-platform-test_default\n`,
+      `services:\n  runtime:\n    container_name: ${name}-runtime\n  proxy:\n    container_name: ${name}-proxy\n    ports: !reset []\nnetworks:\n  management:\n    external: true\n    name: internal-app-platform-test_default\n`,
     );
 
     const compose = (...args: string[]) =>
@@ -66,7 +79,7 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")("First container 
           "-f",
           "infra/compose.base.yaml",
           "-f",
-          "infra/compose.azure.yaml",
+          "infra/compose.s3.yaml",
           "-f",
           overrideFile,
           ...args,
@@ -97,7 +110,7 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")("First container 
         const owner = await stat(key);
         const setup = await fetch("http://127.0.0.1:3000/setup");
         const body = await setup.text();
-        const auth = await stat("/var/lib/widefleet/auth");
+        const auth = await stat("/var/lib/widefleet/runtime");
         console.log(JSON.stringify({setup: setup.status, form: body.includes("Your first administrator account"), key: createHash("sha256").update(await readFile(key)).digest("hex"), mode: owner.mode & 511, authOwner: auth.uid}));
       `,
       );
@@ -163,12 +176,55 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")("First container 
       expect(restarted.key).toBe(first.key);
       expect(restarted.form).toBe(false);
     } catch (cause) {
-      const logs = await compose("logs", "control-plane", "proxy");
+      const logs = await compose("logs", "initialize", "runtime", "control-plane", "proxy");
       console.error(logs.stdout, logs.stderr);
       throw cause;
     } finally {
       await compose("down", "--volumes", "--remove-orphans");
-      await environment.close();
+
+      const s3 = new S3Client({
+        endpoint: environment.environment.S3_ENDPOINT,
+        region: "us-east-1",
+        forcePathStyle: true,
+        credentials: {
+          accessKeyId: settings.S3_ACCESS_KEY_ID,
+          secretAccessKey: settings.S3_SECRET_ACCESS_KEY,
+        },
+      });
+
+      try {
+        for (const bucket of [settings.S3_BUCKET, settings.FLEET_S3_BUCKET]) {
+          while (true) {
+            const page = await s3
+              .send(new ListObjectsV2Command({ Bucket: bucket }))
+              .catch((cause) => {
+                if (z.object({ name: z.literal("NoSuchBucket") }).safeParse(cause).success)
+                  return null;
+                throw cause;
+              });
+
+            if (!page) break;
+
+            const objects = (page.Contents ?? []).flatMap((item) =>
+              item.Key ? [{ Key: item.Key }] : [],
+            );
+
+            if (!objects.length) break;
+            await s3.send(
+              new DeleteObjectsCommand({ Bucket: bucket, Delete: { Objects: objects } }),
+            );
+          }
+
+          await s3.send(new DeleteBucketCommand({ Bucket: bucket })).catch((cause) => {
+            if (!z.object({ name: z.literal("NoSuchBucket") }).safeParse(cause).success)
+              throw cause;
+          });
+        }
+      } finally {
+        s3.destroy();
+        await environment.close();
+      }
+
       await rm(directory, { recursive: true, force: true });
     }
   }, 90_000);

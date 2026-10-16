@@ -1,3 +1,4 @@
+import { runtimeIdentity } from "../runtime-identity.ts";
 import { connectorServiceBinding } from "../../src/lib/server/cloudflare-connector-package.ts";
 import { connectorReference } from "../../src/lib/server/connector-package.ts";
 import { connectorFixture } from "../cloudflare-connector.fixture.ts";
@@ -45,6 +46,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
   () => {
     let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
     let directory: string;
+    let identity: Awaited<ReturnType<typeof runtimeIdentity>>;
     let worker: Unstable_DevWorker;
     let first: Awaited<ReturnType<typeof seedDeployment>>;
     let preview: Awaited<ReturnType<typeof seedDeployment>>;
@@ -434,6 +436,31 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       });
     };
 
+    const authenticatedFetch = (
+      url: string,
+      init?: { method?: string; body?: string; headers?: Record<string, string> },
+    ) => {
+      const headers = new Headers(init?.headers);
+      headers.set("cookie", identity.cookie);
+
+      return worker.fetch(url, { ...init, headers: Object.fromEntries(headers) });
+    };
+
+    const publishIdentity = async () => {
+      expect(
+        (
+          await worker.fetch(
+            "https://auth.apps.example.test/.well-known/widefleet/auth/configuration",
+            {
+              method: "PUT",
+              headers: { authorization: `Bearer ${token}` },
+              body: JSON.stringify(identity.configuration),
+            },
+          )
+        ).status,
+      ).toBe(204);
+    };
+
     const seed = async (entry: typeof first) => {
       const response = await worker.fetch("http://fixture/seed", {
         method: "POST",
@@ -543,6 +570,11 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
     };
 
     beforeAll(async () => {
+      identity = await runtimeIdentity("example.test", [
+        "engineering",
+        "support",
+        largeGroups[0] ?? "",
+      ]);
       environment = await createTestEnvironment();
       (await initializeCloudflareFleet(environment.database.db)).unwrap();
       first = await seedDeployment(environment.database.db);
@@ -569,7 +601,6 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         join(directory, "fixture.ts"),
         `
       import runtime from './runtime.js';
-      import authProxy from ${JSON.stringify(fileURLToPath(import.meta.resolve("@platform/auth-proxy/worker")))};
       import {WorkerEntrypoint} from 'cloudflare:workers';
       export class WIDEFLEET_CONNECTOR extends WorkerEntrypoint { #value = 'default-connector'; read() { return this.#value; } }
       export class Reader extends WorkerEntrypoint { read() { return 'named-connector'; } }
@@ -599,7 +630,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       };
       export default { ...runtime, async fetch(request, env, ctx) {
         const url = new URL(request.url);
-        if (url.pathname.startsWith('/.well-known/widefleet/auth/')) return authProxy.fetch(request, env);
+        if (url.hostname !== "fixture") { url.protocol = "https:"; url.port = ""; request = new Request(url, request); }
         if (url.pathname === '/.well-known/widefleet/runtime') {
           if (request.headers.get('authorization') !== 'Bearer ' + env.APP_RUNTIME_TOKEN) return new Response(null, {status:403});
           return nativeFetch(${JSON.stringify(apiOrigin)} + '/fixture-runtime-version', {headers:{authorization:'Bearer local-provisioning-token'}});
@@ -781,7 +812,6 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
             CLOUDFLARE_API_TOKEN: "local-provisioning-token",
             APP_RUNTIME_NAME: "fixture-runtime",
             APP_RUNTIME_TOKEN: token,
-            AUTH_PROXY_KEY: "local-deployment-auth-proxy-key-never-deploy",
             WIDEFLEET_CONTROL_TOKEN: token,
             WIDEFLEET_CONFIGURATION: JSON.stringify({ source: "r2" }),
           },
@@ -838,7 +868,6 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           },
           services: [
             { binding: "APP_RUNTIME", service: "widefleet-deployment-test" },
-            { binding: "AUTH_PROXY", service: "widefleet-deployment-test" },
             ...["default", "Reader"].map((entrypoint) => {
               const binding = connectorServiceBinding(first.fleetId, "app-connector", entrypoint);
 
@@ -866,6 +895,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         }),
       );
       worker = await start();
+      await publishIdentity();
       await seed(first);
       await seed(preview);
       await seed(delayed);
@@ -883,8 +913,8 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
 
     it("publishes hosted sign-in configuration explicitly and keeps reads from replacing it", async () => {
       const service = createCloudflareAppSignIn(environment.configuration, {
-        AUTH_PROXY: { fetch: (url, init) => worker.fetch(url, init) },
-        AUTH_PROXY_KEY: "local-deployment-auth-proxy-key-never-deploy",
+        APP_RUNTIME: { fetch: (url, init) => worker.fetch(url, init) },
+        APP_RUNTIME_TOKEN: token,
         APP_COOKIE_SECRET: Buffer.alloc(32, 1).toString("base64url"),
       });
 
@@ -900,7 +930,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       });
 
       const original = await service.publish(identity, "fixture-client-secret", false);
-      expect(await service.status()).toMatchObject({ state: "waiting", revision: "" });
+      expect(await service.status()).toMatchObject({ state: "active" });
       expect(await service.publish(identity, "fixture-client-secret", true)).toBe(original);
       expect(await service.status()).toMatchObject({ state: "active", revision: original });
 
@@ -909,6 +939,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       expect(await service.publish(identity, "fixture-client-secret", false)).toBe(original);
       expect(await service.status()).toMatchObject({ state: "active", revision: rotated });
       expect(await service.plan(identity)).toMatchObject({ restartRequired: false });
+      await publishIdentity();
     });
 
     it("provisions, verifies and activates apps with isolated native D1/R2 data", async () => {
@@ -940,7 +971,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         JSON.stringify({ revision: 1, groups: largeGroups }),
       );
 
-      const response = await worker.fetch(`https://${first.hostname}/resources`, {
+      const response = await authenticatedFetch(`https://${first.hostname}/resources`, {
         method: "PUT",
         body: "production fixture",
       });
@@ -950,19 +981,27 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         rows: [{ value: "production fixture" }],
         file: "production fixture",
       });
-      const isolated = await worker.fetch(`https://${preview.hostname}/resources`);
+      const isolated = await authenticatedFetch(`https://${preview.hostname}/resources`);
       expect(await isolated.json()).toEqual({ rows: [], file: null });
     }, 100_000);
 
     it("rejects an auth route for a different app reusing the hostname", async () => {
-      const mismatched = await worker.fetch(`https://${first.hostname}/resources`, {
+      const route = (appId: string) =>
+        worker.fetch(
+          `https://auth.apps.example.test/.well-known/widefleet/auth/apps/${first.hostname}`,
+          {
+            method: "PUT",
+            headers: { authorization: `Bearer ${token}` },
+            body: JSON.stringify({ appId, access: { revision: 1, groups: ["engineering"] } }),
+          },
+        );
+
+      expect((await route(preview.appId)).status).toBe(204);
+      expect((await authenticatedFetch(`https://${first.hostname}/resources`)).status).toBe(503);
+      expect((await route(first.appId)).status).toBe(204);
+
+      const matching = await authenticatedFetch(`https://${first.hostname}/resources`, {
         headers: { "x-widefleet-app-id": preview.appId },
-      });
-
-      expect(mismatched.status).toBe(503);
-
-      const matching = await worker.fetch(`https://${first.hostname}/resources`, {
-        headers: { "x-widefleet-app-id": first.appId },
       });
 
       expect(matching.status).toBe(200);
@@ -1119,7 +1158,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         .toBe("errored");
       expect((await operation(entry.command.id))?.error).toBeTruthy();
       expect(await host(first.hostname)).toEqual(before);
-      expect(await (await worker.fetch(`https://${first.hostname}/`)).text()).toBe(
+      expect(await (await authenticatedFetch(`https://${first.hostname}/`)).text()).toBe(
         "deployed fixture",
       );
     }, 40_000);
@@ -1189,7 +1228,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       expect((await host(first.hostname))?.body).toMatchObject({
         network: { revision: 1, policy: { backend: ["https://api.example.test"] } },
       });
-      expect(await (await worker.fetch(`https://${first.hostname}/`)).text()).toBe(
+      expect(await (await authenticatedFetch(`https://${first.hostname}/`)).text()).toBe(
         "second version",
       );
 
@@ -1263,7 +1302,9 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       expect(patches).toBe(prepared);
       expect(createdDatabases.size).toBe(2);
       expect(buckets.size).toBe(2);
-      expect(await (await worker.fetch(`https://${first.hostname}/`)).text()).toBe("third version");
+      expect(await (await authenticatedFetch(`https://${first.hostname}/`)).text()).toBe(
+        "third version",
+      );
     }, 40_000);
     it("does not let an explicitly restarted older deployment overwrite newer code", async () => {
       const before = await host(first.hostname);
@@ -1274,7 +1315,9 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         .poll(() => nativeStatus(rejected.command.id), { timeout: 30_000, interval: 100 })
         .toBe("errored");
       expect(await host(first.hostname)).toEqual(before);
-      expect(await (await worker.fetch(`https://${first.hostname}/`)).text()).toBe("third version");
+      expect(await (await authenticatedFetch(`https://${first.hostname}/`)).text()).toBe(
+        "third version",
+      );
     }, 40_000);
     it("preserves a completed deployment when only its final history write needs recovery", async () => {
       await dispatch(first);
@@ -1333,7 +1376,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       await dispatch(codeOnly);
       await completed(codeOnly.command.id);
       expect(bindingRequests).toBe(before + 1);
-      expect((await worker.fetch(`https://${first.hostname}/resources`)).status).toBe(200);
+      expect((await authenticatedFetch(`https://${first.hostname}/resources`)).status).toBe(200);
       await worker.stop();
       worker = await start();
 
@@ -1345,7 +1388,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       });
       await completed(delayed.command.id);
       expect(bindingRequests).toBe(before + 1);
-      expect((await worker.fetch(`https://${delayed.hostname}/resources`)).status).toBe(200);
+      expect((await authenticatedFetch(`https://${delayed.hostname}/resources`)).status).toBe(200);
       const [reconciled] = await environment.database.db.select().from(cloudflareRuntimeBindings);
       expect(reconciled?.pending).toBeNull();
     }, 90_000);
@@ -1356,7 +1399,9 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       await dispatch(lostResponse);
       await completed(lostResponse.command.id);
       expect(bindingRequests).toBe(before + 1);
-      expect((await worker.fetch(`https://${lostResponse.hostname}/resources`)).status).toBe(200);
+      expect((await authenticatedFetch(`https://${lostResponse.hostname}/resources`)).status).toBe(
+        200,
+      );
       const [record] = await environment.database.db.select().from(cloudflareRuntimeBindings);
       expect(record?.pending).toBeNull();
     }, 60_000);
@@ -1504,9 +1549,9 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
     const appJson = async (
       entry: typeof first,
       path: string,
-      init?: Parameters<Unstable_DevWorker["fetch"]>[1],
+      init?: { method?: string; body?: string; headers?: Record<string, string> },
     ) => {
-      const response = await worker.fetch(`https://${entry.hostname}${path}`, init);
+      const response = await authenticatedFetch(`https://${entry.hostname}${path}`, init);
       expect(response.status, await response.clone().text()).toBe(200);
 
       return z.json().parse(await response.json());
@@ -1922,12 +1967,12 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       await seed(entry);
       await dispatch(entry);
       await completed(entry.command.id);
-      expect(await (await worker.fetch(`https://${entry.hostname}/`)).json()).toEqual({
+      expect(await (await authenticatedFetch(`https://${entry.hostname}/`)).json()).toEqual({
         value: "default-connector",
         secret: null,
       });
       await bind({ connector: reference.name, entrypoint: "Reader" });
-      expect(await (await worker.fetch(`https://${entry.hostname}/`)).json()).toEqual({
+      expect(await (await authenticatedFetch(`https://${entry.hostname}/`)).json()).toEqual({
         value: "named-connector",
         secret: null,
       });
@@ -1938,7 +1983,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         activeConnectors: { ERP: { connector: reference.name, entrypoint: "Reader" } },
       });
       await bind(null);
-      expect(await (await worker.fetch(`https://${entry.hostname}/`)).json()).toEqual({
+      expect(await (await authenticatedFetch(`https://${entry.hostname}/`)).json()).toEqual({
         value: null,
         secret: null,
       });
@@ -2176,7 +2221,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         expect((await host(entry.hostname))?.body).toEqual({ deleted: true, appId: entry.appId });
         const stored = await worker.fetch(`http://fixture/storage?prefix=apps/${entry.appId}/`);
         expect(await stored.json()).toEqual([]);
-        expect((await worker.fetch(`https://${entry.hostname}/`)).status).toBe(404);
+        expect((await authenticatedFetch(`https://${entry.hostname}/`)).status).toBe(404);
       }
     }, 60000);
 
@@ -2223,8 +2268,8 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       await removed(preview.appId);
       expect((await host(preview.hostname))?.body).toEqual({ deleted: true, appId: preview.appId });
       expect(await host(first.hostname)).toEqual(parentHost);
-      expect((await worker.fetch(`https://${preview.hostname}/`)).status).toBe(404);
-      expect((await worker.fetch(`https://${first.hostname}/`)).status).toBe(200);
+      expect((await authenticatedFetch(`https://${preview.hostname}/`)).status).toBe(404);
+      expect((await authenticatedFetch(`https://${first.hostname}/`)).status).toBe(200);
 
       for (const [kind, key] of oldResources) {
         const name = resourceName(preview.appId, kind, key);
@@ -2315,7 +2360,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
 
       expect(record?.state).toBe("deleting");
       expect((await operation(id))?.error).toBe("Cloudflare could not complete app removal");
-      expect((await worker.fetch(`https://${delayed.hostname}/`)).status).toBe(404);
+      expect((await authenticatedFetch(`https://${delayed.hostname}/`)).status).toBe(404);
       deniedBucket = "";
       const commandKey = `apps/${delayed.appId}/commands/${id}.json`;
       expect(
@@ -2364,7 +2409,9 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       await dispatch(replacement);
       await completed(replacement.command.id);
       expect((await host(preview.hostname))?.body).toMatchObject({ appId: replacement.appId });
-      expect(await (await worker.fetch(`https://${preview.hostname}/`)).text()).toBe("replacement");
+      expect(await (await authenticatedFetch(`https://${preview.hostname}/`)).text()).toBe(
+        "replacement",
+      );
     }, 60000);
 
     const runtimeRelease = (version: string) =>

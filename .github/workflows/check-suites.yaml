@@ -19,7 +19,7 @@ jobs:
       matrix:
         # Each suite owns its services and fixed test ports on a separate runner.
         # Keep Rust and runtime tests together to reuse the CLI and agent binaries.
-        suite: [source, integration, cloudflare, packaged-sso, rust-runtime]
+        suite: [source, integration, cloudflare, packaged-runtime, rust-runtime]
     env:
       PLATFORM_USAGE_REPORTING: "false"
       PLATFORM_CRASH_REPORTING: "false"
@@ -37,7 +37,7 @@ jobs:
         with:
           version: v29.8.1
       - name: Set up the image cache builder
-        if: matrix.suite == 'packaged-sso' || matrix.suite == 'rust-runtime'
+        if: matrix.suite == 'packaged-runtime' || matrix.suite == 'rust-runtime'
         id: buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
@@ -56,10 +56,10 @@ jobs:
         if: matrix.suite == 'source'
         run: pnpm check
       - name: Build the app runtime for packaged tests
-        if: matrix.suite == 'packaged-sso'
+        if: matrix.suite == 'packaged-runtime'
         run: pnpm --filter @platform/app-runtime build
       - name: Generate the control-plane test configuration
-        if: matrix.suite == 'packaged-sso'
+        if: matrix.suite == 'packaged-runtime'
         run: pnpm --filter @platform/control-plane exec svelte-kit sync
       - name: Build the control plane and app runtime
         if: matrix.suite == 'integration' || matrix.suite == 'rust-runtime'
@@ -67,8 +67,6 @@ jobs:
       - name: Build and bundle the Cloudflare control plane
         if: matrix.suite == 'cloudflare'
         run: |
-          pnpm --filter @platform/auth-proxy build
-          pnpm --filter @platform/control-plane exec wrangler deploy --config ../../packages/auth-proxy/wrangler.jsonc --dry-run --outdir ../../packages/auth-proxy/dist/cloudflare-bundle
           pnpm --filter @platform/control-plane build:cloudflare
           pnpm --filter @platform/control-plane exec wrangler deploy --dry-run --outdir dist/cloudflare/bundle
           pnpm --filter @platform/control-plane exec wrangler deploy --config ../../packages/app-runtime/wrangler.jsonc --dry-run --outdir ../../packages/app-runtime/dist/cloudflare-bundle
@@ -97,7 +95,7 @@ jobs:
         if: matrix.suite == 'integration'
         run: pnpm --filter @platform/control-plane test:e2e
       - name: Build the control-plane image
-        if: matrix.suite == 'packaged-sso'
+        if: matrix.suite == 'packaged-runtime'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -108,20 +106,20 @@ jobs:
           tags: widefleet-control-plane:sso-check
           cache-from: type=gha,scope=check-control-plane-v1
           cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'type=gha,scope=check-control-plane-v1,mode=max' || '' }}
-      - name: Build the SSO image
-        if: matrix.suite == 'packaged-sso'
+      - name: Build the runtime image
+        if: matrix.suite == 'packaged-runtime'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          file: infra/sso/Dockerfile
+          file: infra/runtime/Dockerfile
           builder: ${{ steps.buildx.outputs.name }}
           load: true
           push: false
-          tags: widefleet-sso:setup-check
-          cache-from: type=gha,scope=check-sso-v1
-          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'type=gha,scope=check-sso-v1,mode=max' || '' }}
-      - name: Test packaged SSO configuration
-        if: matrix.suite == 'packaged-sso'
+          tags: widefleet-runtime:setup-check
+          cache-from: type=gha,scope=check-auth-runtime-v1
+          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'type=gha,scope=check-auth-runtime-v1,mode=max' || '' }}
+      - name: Test packaged runtime and authentication
+        if: matrix.suite == 'packaged-runtime'
         run: RUN_PACKAGED_EDGE_TESTS=1 pnpm exec vitest run apps/control-plane/tests/installation/packaged-edge.test.ts apps/control-plane/tests/installation/auth-container.test.ts apps/control-plane/tests/installation/sso-tls.test.ts apps/control-plane/tests/installation/startup.test.ts apps/control-plane/tests/edge/sso.test.ts
       - name: Install Rust toolchain
         if: matrix.suite == 'rust-runtime'

@@ -15,6 +15,7 @@ export type NativeBindings = {
 };
 
 export type ParentEnvironment = {
+  AUTH_CONFIG: KVNamespace;
   WIDEFLEET_WORKFLOW_CATALOG: DurableObjectNamespace<
     import("./workflow-catalog.ts").WorkflowCatalog
   >;

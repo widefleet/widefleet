@@ -20,14 +20,20 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")("Installed auth p
       expect(app.cookies).toEqual([]);
 
       const echoed = z
-        .object({ headers: z.record(z.string(), z.string()), body: z.string() })
+        .object({
+          headers: z.record(z.string(), z.string()),
+          body: z.string(),
+          bindings: z.array(z.string()),
+        })
         .parse(JSON.parse(app.body));
 
       expect(echoed.body).toBe("app-request");
+      expect(echoed.bindings).not.toContain("AUTH_CONFIG");
+      expect(echoed.bindings).not.toContain("WIDEFLEET_CONTROL_TOKEN");
       expect(echoed.headers["x-auth-request-user"]).toBe("rotation-user");
       expect(echoed.headers["x-auth-request-email"]).toBe("rotation@example.test");
-      expect(echoed.headers["x-forwarded-host"]).toBe("notes.apps.example.test");
-      expect(echoed.headers["x-forwarded-proto"]).toBe("https");
+      expect(echoed.headers).not.toHaveProperty("x-forwarded-host");
+      expect(echoed.headers).not.toHaveProperty("x-forwarded-proto");
       expect(echoed.headers).not.toHaveProperty("cookie");
       expect(echoed.headers).not.toHaveProperty("authorization");
       const repeatedSlash = await fixture.app(login.cookie, "//unrelated.invalid/report?value=1");
@@ -53,16 +59,7 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")("Installed auth p
         docker("exec", fixture.name, "test", "-e", "/auth/desired.json"),
       ).rejects.toThrow();
       await fixture.restart();
-      // Restart only the synthetic upstream; neither an identity provider nor management is running.
-      await docker(
-        "exec",
-        "-d",
-        fixture.client,
-        "node",
-        "--input-type=module",
-        "--eval",
-        'import {createServer} from "node:http";createServer((request,response)=>response.end("still-running")).listen(4183,"127.0.0.1");',
-      );
+      // The app and its session survive with neither an identity provider nor management running.
       await vi.waitFor(async () => expect((await fixture.app(login.cookie)).status).toBe(200), {
         timeout: 10_000,
       });

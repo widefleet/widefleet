@@ -1,6 +1,6 @@
 {
   "name": "@platform/app-runtime",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "private": true,
   "license": "MIT",
   "files": [
@@ -19,6 +19,7 @@
     "build": "node build.ts"
   },
   "dependencies": {
+    "@platform/auth-proxy": "workspace:*",
     "@platform/contracts": "workspace:*",
     "zod": "4.6.5"
   },

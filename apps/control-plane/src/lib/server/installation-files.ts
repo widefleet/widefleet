@@ -20,7 +20,7 @@ export const writePrivateFile = async (path: string, content: string) => {
   await rename(temporary, path);
 };
 
-const persistentKey = async (directory: string, name: string) => {
+export const persistentKey = async (directory: string, name: string) => {
   const path = join(directory, name);
   const existing = await readOptionalFile(path);
 

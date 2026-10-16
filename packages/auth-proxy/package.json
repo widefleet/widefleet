@@ -10,7 +10,6 @@
     "./worker": "./src/worker.ts"
   },
   "scripts": {
-    "build": "node build.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

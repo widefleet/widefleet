@@ -1,3 +1,4 @@
+import { runtimeIdentity } from "../runtime-identity.ts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
@@ -18,6 +19,8 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
   let worker: Unstable_DevWorker;
   let tcpAddress: string;
   let connections = 0;
+  let identity: Awaited<ReturnType<typeof runtimeIdentity>>;
+  const controlToken = "runtime-fixture-control-token-never-deploy";
 
   const tcp = createServer((socket) => {
     connections++;
@@ -83,13 +86,24 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
 
   const fetchApp = (
     path: string,
-    init?: Parameters<Unstable_DevWorker["fetch"]>[1],
+    init?: { method?: string; body?: string; headers?: Record<string, string> },
     host = hostname,
-  ) => worker.fetch(`https://${host}${path}`, init);
+  ) => {
+    const headers = new Headers(init?.headers);
+    headers.set("cookie", identity.cookie);
+
+    if (path === "/.well-known/widefleet/ready")
+      headers.set("authorization", `Bearer ${controlToken}`);
+
+    return worker.fetch(`https://${host}${path}`, {
+      ...init,
+      headers: Object.fromEntries(headers),
+    });
+  };
 
   const json = async (
     path: string,
-    init?: Parameters<Unstable_DevWorker["fetch"]>[1],
+    init?: { method?: string; body?: string; headers?: Record<string, string> },
     host = hostname,
   ) => {
     const response = await fetchApp(path, init, host);
@@ -134,6 +148,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
   };
 
   beforeAll(async () => {
+    identity = await runtimeIdentity("example.test");
     tcp.listen(0, "127.0.0.1");
     await once(tcp, "listening");
     tcpAddress = `127.0.0.1:${z.object({ port: z.number() }).parse(tcp.address()).port}`;
@@ -160,7 +175,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
         vars: {
           WIDEFLEET_LOGS: "cloudflare",
           PRIVATE_ROOT_SECRET: "parent-only-fixture",
-          WIDEFLEET_CONTROL_TOKEN: "local-test-only",
+          WIDEFLEET_CONTROL_TOKEN: controlToken,
           WIDEFLEET_CONFIGURATION: JSON.stringify({
             crons: { "* * * * *": [hostname, previewHostname] },
             queues: {
@@ -180,6 +195,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
           { binding: "PREVIEW_DB", database_name: "preview", database_id: "preview" },
         ],
         kv_namespaces: [
+          { binding: "AUTH_CONFIG", id: "auth-config" },
           { binding: "KV", id: "fixture" },
           { binding: "PREVIEW_KV", id: "preview" },
         ],
@@ -212,6 +228,15 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
       }),
     );
     worker = await start();
+    expect(
+      (
+        await worker.fetch("https://auth.example.test/.well-known/widefleet/auth/configuration", {
+          method: "PUT",
+          headers: { authorization: `Bearer ${controlToken}` },
+          body: JSON.stringify(identity.configuration),
+        })
+      ).status,
+    ).toBe(204);
     await publish(app);
     await publish(preview);
   }, 30_000);
@@ -223,6 +248,36 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
     );
 
     if (directory) await rm(directory, { recursive: true, force: true });
+  });
+
+  it("protects runtime management endpoints and app assets from unauthenticated requests", async () => {
+    for (const path of [
+      "/.well-known/widefleet/runtime",
+      "/.well-known/widefleet/ready",
+      "/.well-known/widefleet/workflows",
+      "/.well-known/widefleet/auth/configuration",
+    ]) {
+      for (const authorization of ["", "Bearer undefined", "Bearer invalid"]) {
+        const response = await worker.fetch(`https://${hostname}${path}`, {
+          headers: { authorization },
+        });
+
+        expect(response.status).toBe(403);
+      }
+    }
+
+    const forged = await worker.fetch(`https://${hostname}/asset.txt`, {
+      headers: { "x-auth-request-user": "forged", "x-auth-request-email": "forged@example.test" },
+    });
+
+    expect(forged.status).toBe(401);
+    expect(await forged.text()).not.toBe(asset);
+
+    const candidate = await worker.fetch(`https://${hostname}/asset.txt`, {
+      headers: { cookie: identity.cookie, "x-widefleet-candidate": `${app.appId}/${app.version}` },
+    });
+
+    expect(candidate.status).toBe(403);
   });
 
   it("captures actual Dynamic Worker logs with app, preview and version attribution", async () => {
@@ -678,7 +733,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
 
         expect(
           await json("/.well-known/widefleet/runtime", {
-            headers: { authorization: "Bearer local-test-only" },
+            headers: { authorization: "Bearer runtime-fixture-control-token-never-deploy" },
           }),
         ).toEqual({ runtimeVersion: version });
         expect(

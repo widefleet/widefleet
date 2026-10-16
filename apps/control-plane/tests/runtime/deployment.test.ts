@@ -1,3 +1,4 @@
+import { runtimeIdentity } from "../runtime-identity.ts";
 import { chromium } from "@playwright/test";
 import { build } from "esbuild";
 import { and, eq } from "drizzle-orm";
@@ -58,6 +59,9 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
   const createdApps: string[] = [];
   const hostnames = new Map<string, string>();
   let serverLogs = "";
+  let runtimeOrigin: string;
+  let identity: Awaited<ReturnType<typeof runtimeIdentity>>;
+  const runtimeControlToken = "runtime-test-auth-proxy-key-never-deploy";
   let rejectCompletion = false;
   let rejectHeartbeat = false;
   let activeAgent: ReturnType<typeof execFile> | undefined;
@@ -195,21 +199,6 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     // A private fixture proxy supplies the same trusted protocol header as Traefik.
     // The real CLI sends only its public Origin and never forges proxy headers.
     proxy = createServer((incoming, outgoing) => {
-      // Other deployment tests stub publication only; the access test below
-      // verifies ingress, and packaged tests exercise the actual auth worker.
-      if (incoming.url?.startsWith("/.well-known/widefleet/auth/apps/")) {
-        incoming.resume();
-        outgoing
-          .writeHead(
-            incoming.headers.authorization === "Bearer runtime-test-auth-proxy-key-never-deploy"
-              ? 204
-              : 403,
-          )
-          .end();
-
-        return;
-      }
-
       if (rejectHeartbeat && incoming.url?.endsWith("/heartbeat")) {
         incoming.resume();
         outgoing.writeHead(503).end("Synthetic heartbeat failure");
@@ -243,16 +232,35 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     });
     proxy.listen(proxyPort, "127.0.0.1");
     await once(proxy, "listening");
+    const [fleet] = await environment.database.db.select().from(fleets);
+
+    if (!fleet) throw new Error("Missing fleet");
+    fleetId = fleet.id;
+    identity = await runtimeIdentity("apps.localhost", ["finance"], ["engineering"]);
+    await mkdir(join(state, fleetId), { recursive: true });
+    await writeFile(
+      join(state, "installation.json"),
+      JSON.stringify({ fleetId, controlToken: runtimeControlToken }),
+    );
+    await writeFile(
+      join(environment.environment.PLATFORM_RUNTIME_DIRECTORY, "control-token"),
+      runtimeControlToken,
+    );
+    await execute("docker", ["network", "create", `platform-fleet-${fleetId}`]);
+    await execute("docker", [
+      "network",
+      "connect",
+      `platform-fleet-${fleetId}`,
+      "internal-app-platform-test-rustfs-1",
+    ]);
+    await startRuntime();
+    await publishIdentity();
     await startServer();
 
     const registration = z
       .object({ agent: contract.agent, token: z.string() })
       .parse(await (await request("/agents", "POST", { name: "Runtime fixture agent" })).json());
 
-    const [fleet] = await environment.database.db.select().from(fleets);
-
-    if (!fleet) throw new Error("Missing fleet");
-    fleetId = fleet.id;
     agentToken = registration.token;
 
     let archive = process.env["CLI_RELEASE_ARCHIVE"];
@@ -370,12 +378,69 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     await environment?.close();
   });
 
-  const agent = (
-    runtimeImage = process.env["PLATFORM_RUNTIME_IMAGE"],
+  const startRuntime = async (
+    image = process.env["PLATFORM_RUNTIME_IMAGE"] ?? "app-platform-runtime:0.1.0",
+  ) => {
+    await execute("docker", [
+      "run",
+      "-d",
+      "--name",
+      `platform-fleet-${fleetId}`,
+      "--user=0",
+      "--network",
+      `platform-fleet-${fleetId}`,
+      "--publish",
+      "127.0.0.1::8080",
+      "--volume",
+      `${state}/${fleetId}:/state`,
+      "--volume",
+      `${state}:/agent-state:ro`,
+      "--volume",
+      `${state}/installation.json:/runtime-config/installation.json:ro`,
+      "--env",
+      "FLEET_S3_ENDPOINT=http://internal-app-platform-test-rustfs-1:9000",
+      "--env",
+      `FLEET_S3_BUCKET=${environment.configuration.S3_BUCKET}`,
+      "--env",
+      "FLEET_S3_ACCESS_KEY_ID=local-tests",
+      "--env",
+      "FLEET_S3_SECRET_ACCESS_KEY=local-tests-only",
+      image,
+    ]);
+    runtimeOrigin = `http://${(await execute("docker", ["port", `platform-fleet-${fleetId}`, "8080/tcp"])).stdout.trim()}`;
+    await vi.waitFor(
+      async () =>
+        expect(
+          (
+            await fetch(`${runtimeOrigin}/.well-known/widefleet/runtime`, {
+              headers: { authorization: `Bearer ${runtimeControlToken}` },
+            })
+          ).status,
+        ).toBe(200),
+      { timeout: 45_000 },
+    );
+  };
+
+  const publishIdentity = async () => {
+    expect(
+      (
+        await fetch(`${runtimeOrigin}/.well-known/widefleet/auth/configuration`, {
+          method: "PUT",
+          headers: { authorization: `Bearer ${runtimeControlToken}` },
+          body: JSON.stringify(identity.configuration),
+        })
+      ).status,
+    ).toBe(204);
+  };
+
+  const agent = async (
+    runtimeContainer = `platform-fleet-${fleetId}`,
     platformUrl = environment.configuration.PLATFORM_URL,
     celld = join(root, ".tools/celld"),
     edge?: { proxy: string; auth: string },
   ) => {
+    runtimeOrigin = `http://${(await execute("docker", ["port", `platform-fleet-${fleetId}`, "8080/tcp"])).stdout.trim()}`;
+
     const operation = execute(join(root, "target/debug/platform-agent"), ["--once"], {
       cwd: root,
       timeout: 120_000,
@@ -385,20 +450,19 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
         PLATFORM_URL: platformUrl,
         PLATFORM_AGENT_TOKEN: agentToken,
         PLATFORM_AGENT_STATE: state,
-        PLATFORM_RUNTIME_IMAGE: runtimeImage,
+        PLATFORM_RUNTIME_CONTAINER: runtimeContainer,
         PLATFORM_ROUTING_DIRECTORY: join(state, "routes"),
         APP_DOMAIN: environment.configuration.APP_DOMAIN,
         TLS_MODE: "cloudflare",
         CELLD_BINARY: celld,
         PLATFORM_PROXY_URL: edge?.proxy,
-        PLATFORM_APP_AUTH_URL: edge?.auth ?? environment.configuration.PLATFORM_URL,
-        PLATFORM_AUTH_KEY_FILE: join(state, "auth-key"),
+        PLATFORM_APP_RUNTIME_URL: edge?.auth ?? runtimeOrigin,
+        PLATFORM_RUNTIME_KEY_FILE: join(state, "auth-key"),
         FLEET_S3_ENDPOINT: "http://127.0.0.1:25400",
         FLEET_RUNTIME_S3_ENDPOINT: "http://internal-app-platform-test-rustfs-1:9000",
         FLEET_S3_BUCKET: environment.configuration.S3_BUCKET,
         FLEET_S3_ACCESS_KEY_ID: "local-tests",
         FLEET_S3_SECRET_ACCESS_KEY: "local-tests-only",
-        PLATFORM_TRUSTED_CONTAINERS: "internal-app-platform-test-rustfs-1",
         // Runtime transport is tested separately with a real local celld. This
         // fixture checks recreation/state and must not contact an external host.
         PLATFORM_RUNTIME_PLATFORM_URL: "http://telemetry.invalid",
@@ -544,6 +608,13 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       method,
       "-H",
       `Host: ${hostnames.get(appId)}`,
+      "-H",
+      "X-Forwarded-Proto: https",
+      "-H",
+      `Cookie: ${identity.cookie}`,
+      ...(path === "/.well-known/widefleet/ready"
+        ? ["-H", `Authorization: Bearer ${runtimeControlToken}`]
+        : []),
       `http://127.0.0.1:8080${path}`,
     ]);
 
@@ -600,7 +671,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       bundle: true,
       format: "esm",
       platform: "neutral",
-      external: ["cloudflare:workers", "cloudflare:workflows"],
+      external: ["cloudflare:workers", "cloudflare:workflows", "node:*"],
       write: false,
     });
 
@@ -617,105 +688,41 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     };
   };
 
-  it("rejects mismatched native binaries before publishing or starting fleet state", async () => {
+  it("rejects mismatched native binaries without changing the running runtime", async () => {
     appDirectory = state;
     const runtime = await bundledRuntime();
-    const directory = join(state, "native-version-fixture");
-    const binary = join(directory, "celld");
-    const image = `widefleet-native-version-test:${fleetId}`;
-    const container = `platform-fleet-${fleetId}`;
-    const selectedImage = process.env["PLATFORM_RUNTIME_IMAGE"] ?? "app-platform-runtime:0.1.0";
-    await mkdir(directory);
+    const binary = join(state, "mismatched-celld");
     await writeFile(binary, '#!/bin/sh\nprintf "celld 0.0.0\\n"\n', { mode: 0o755 });
-    await writeFile(
-      join(directory, "Dockerfile"),
-      `FROM ${selectedImage}\nCOPY celld /usr/local/bin/celld\n`,
+
+    const before = await s3.send(
+      new GetObjectCommand({
+        Bucket: environment.configuration.S3_BUCKET,
+        Key: `fleets/${fleetId}/deploy/current.json`,
+      }),
     );
-    await execute("docker", ["build", "-t", image, directory]);
 
-    const rejected = async (operation: () => ReturnType<typeof agent>, message: string) => {
-      await manageRuntime("/runtime", runtime);
-      await expect(operation()).rejects.toThrow(message);
-      expect(await manageRuntime("/runtime")).toMatchObject({
-        activeVersion: null,
-        state: "failed",
-      });
+    const pointer = await before.Body?.transformToString();
+    await manageRuntime("/runtime", runtime);
+    await expect(agent(undefined, undefined, binary)).rejects.toThrow(
+      "Publisher binary requires celld 0.6.2",
+    );
 
-      const objects = await s3.send(
-        new ListObjectsV2Command({
-          Bucket: environment.configuration.S3_BUCKET,
-          Prefix: `fleets/${fleetId}/`,
-        }),
-      );
+    const after = await s3.send(
+      new GetObjectCommand({
+        Bucket: environment.configuration.S3_BUCKET,
+        Key: `fleets/${fleetId}/deploy/current.json`,
+      }),
+    );
 
-      expect(objects.Contents ?? []).toEqual([]);
-      expect(
-        (
-          await execute("docker", [
-            "ps",
-            "-a",
-            "--filter",
-            `name=^/${container}-version-check$`,
-            "--format",
-            "{{.Names}}",
-          ])
-        ).stdout.trim(),
-      ).toBe("");
-    };
-
-    try {
-      await rejected(
-        () => agent(undefined, undefined, binary),
-        "Publisher binary requires celld 0.6.2",
-      );
-      await writeFile(binary, '#!/bin/sh\nprintf "celld 0.6.2\\n"\nexit 1\n');
-      await rejected(
-        () => agent(undefined, undefined, binary),
-        "Publisher celld version check failed",
-      );
-      await rejected(() => agent(image), "Configured runtime image requires celld 0.6.2");
-      expect(
-        (
-          await execute("docker", ["ps", "-a", "--filter", `name=^/${container}$`, "-q"])
-        ).stdout.trim(),
-      ).toBe("");
-
-      const existing = await execute("docker", [
-        "run",
-        "--detach",
-        "--name",
-        container,
-        "--label",
-        `app-platform.fleet-id=${fleetId}`,
-        "--entrypoint",
-        "/bin/sleep",
-        image,
-        "infinity",
-      ]);
-
-      for (const running of [true, false]) {
-        if (!running) await execute("docker", ["stop", container]);
-        await rejected(() => agent(), `Fleet container ${container} requires celld 0.6.2`);
-        expect(
-          (
-            await execute("docker", [
-              "inspect",
-              "--format",
-              "{{.Id}} {{.State.Running}}",
-              container,
-            ])
-          ).stdout.trim(),
-        ).toBe(`${existing.stdout.trim()} ${running}`);
-      }
-
-      await execute("docker", ["rename", container, `${container}-previous`]);
-      await rejected(() => agent(), `Fleet container ${container}-previous requires celld 0.6.2`);
-    } finally {
-      for (const name of [container, `${container}-previous`, `${container}-version-check`])
-        await execute("docker", ["rm", "-f", name]).catch(() => undefined);
-      await execute("docker", ["image", "rm", image]);
-    }
-  }, 120000);
+    expect(await after.Body?.transformToString()).toBe(pointer);
+    expect(
+      (
+        await fetch(`${runtimeOrigin}/.well-known/widefleet/runtime`, {
+          headers: { authorization: `Bearer ${runtimeControlToken}` },
+        })
+      ).status,
+    ).toBe(200);
+  }, 120_000);
 
   it("activates a runtime without apps and rolls it back through the CLI after replacing the executor", async () => {
     appDirectory = state;
@@ -1250,18 +1257,18 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
         "--max-time",
         "15",
         "-H",
-        "X-Auth-Request-User: test-user",
+        `Cookie: ${identity.cookie}`,
         "-H",
-        "X-Auth-Request-Preferred-Username: Starter Test",
+        "X-Forwarded-Proto: https",
         "-H",
         `Host: ${app.hostname}`,
         "-H",
-        `Origin: http://${app.hostname}`,
+        `Origin: https://${app.hostname}`,
         ...args,
       ]);
 
     const initial = await curl("http://127.0.0.1:8080/");
-    expect(initial.stdout).toContain("Angemeldet als Starter Test");
+    expect(initial.stdout).toContain("Angemeldet als Example User");
 
     const pixel = Buffer.from(
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a8J0AAAAASUVORK5CYII=",
@@ -1362,13 +1369,13 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       "-H",
       `Host: ${preview.hostname}`,
       "-H",
-      "X-Auth-Request-User: test-user",
+      "X-Forwarded-Proto: https",
       "-H",
-      "X-Auth-Request-Preferred-Username: Preview Test",
+      `Cookie: ${identity.cookie}`,
       "http://127.0.0.1:8080/",
     ]);
 
-    expect(previewPage.stdout).toContain("Angemeldet als Preview Test");
+    expect(previewPage.stdout).toContain("Angemeldet als Example User");
     expect(previewPage.stdout).not.toContain("Persisted starter note");
     expect(
       JSON.parse(await readFile(join(state, `routes/platform-app-${preview.id}.yaml`), "utf8")),
@@ -1852,7 +1859,11 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
             middlewares: {
               "fixture-host": {
                 headers: {
-                  customRequestHeaders: { Host: app.hostname, "X-Forwarded-Host": app.hostname },
+                  customRequestHeaders: {
+                    Host: app.hostname,
+                    "X-Forwarded-Host": app.hostname,
+                    Cookie: identity.cookie,
+                  },
                 },
               },
             },
@@ -1865,6 +1876,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
               app: {
                 rule: `Host(\`${app.hostname}\`)`,
                 priority: 1000,
+                middlewares: ["fixture-host"],
                 entryPoints: ["websecure"],
                 tls: {},
                 service: "browser-fixture",
@@ -2144,7 +2156,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       policy: { backend: ["https://api.example.test"] },
     });
     expect(await readFile(join(state, "routes", `platform-app-${app.id}.yaml`), "utf8")).toContain(
-      environment.configuration.PLATFORM_URL,
+      `http://platform-fleet-${fleetId}:8080`,
     );
     await stopServer();
     await execute("docker", ["restart", `platform-fleet-${fleetId}`]);
@@ -2554,74 +2566,19 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     const first = await publish(app.id, "one");
     await agent();
     const edgeName = `widefleet-access-test-${crypto.randomUUID()}`;
-    const authName = `${edgeName}-auth`;
-    const reservation = createServer();
-    await new Promise<void>((resolve) => reservation.listen(0, "127.0.0.1", resolve));
-    const authPort = z.object({ port: z.number() }).parse(reservation.address()).port;
-    await new Promise<void>((resolve) => reservation.close(() => resolve()));
-    const fixturePath = join(state, "access-fixture.js");
-    // Share the proxy's network namespace so the host agent and Traefik can use
-    // the same loopback origin even when Docker runs rootless.
-    const edge = { proxy: `https://${authName}:8443`, auth: `http://127.0.0.1:${authPort}/` };
+    const edge = { proxy: `https://${edgeName}:8443`, auth: runtimeOrigin };
     let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
-    await writeFile(
-      fixturePath,
-      `
-      const { createServer } = require('node:http');
-      const routes = new Map();
-      createServer(async (request, response) => {
-        const url = new URL(request.url, 'http://fixture');
-        if (url.pathname.startsWith('/.well-known/widefleet/auth/apps/')) {
-          if (request.headers.authorization !== 'Bearer runtime-test-auth-proxy-key-never-deploy') { response.writeHead(403).end(); return; }
-          const host = url.pathname.split('/').at(-1);
-          if(request.method==='DELETE') routes.delete(host);
-          else { let body=''; for await(const chunk of request) body+=chunk; routes.set(host,JSON.parse(body)); }
-          response.writeHead(204).end(); return;
-        }
-        const publicUrl = new URL(request.url, 'https://' + request.headers.host);
-        const route = routes.get(publicUrl.hostname);
-        if(!route) { response.writeHead(404).end(); return; }
-        response.setHeader('X-Widefleet-Access-Revision', route.appId + ':' + route.access.revision);
-        const group = request.headers.cookie?.replace('fixture=', '');
-        if(!group || route.access.groups.length && !route.access.groups.includes(group)) {
-          response.writeHead(!group?401:403).end(); return;
-        }
-        const target = new URL(publicUrl.pathname + publicUrl.search, route.upstream);
-        const headers = {...request.headers, 'x-auth-request-user':'synthetic-user', 'x-auth-request-groups':group, 'x-forwarded-host':publicUrl.host, 'x-forwarded-proto':'https'};
-        delete headers.cookie;
-        const result = await fetch(target, {headers,redirect:'manual'});
-        response.writeHead(result.status); response.end(Buffer.from(await result.arrayBuffer()));
-      }).listen(${authPort}, '0.0.0.0');
-    `,
-    );
 
     try {
       await execute("docker", [
         "run",
         "-d",
         "--name",
-        authName,
+        edgeName,
         "--network",
         `platform-fleet-${fleetId}`,
         "--publish",
-        `127.0.0.1:${authPort}:${authPort}`,
-        "--publish",
         "127.0.0.1::8443",
-        "--volume",
-        `${fixturePath}:/fixture.js:ro`,
-        "node:26.8.2-bookworm-slim",
-        "node",
-        "/fixture.js",
-      ]);
-
-      await vi.waitFor(async () => expect((await fetch(edge.auth)).status).toBe(404));
-      await execute("docker", [
-        "run",
-        "-d",
-        "--name",
-        edgeName,
-        "--network",
-        `container:${authName}`,
         "--volume",
         `${state}/routes:/routes:ro`,
         "traefik:v3.7.13@sha256:24841fe2de7304c149343d877d2923b4c8800a38ba015dea9174c23b20e344a0",
@@ -2629,7 +2586,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
         "--providers.file.directory=/routes",
         "--providers.file.watch=true",
       ]);
-      const published = (await execute("docker", ["port", authName, "8443/tcp"])).stdout.trim();
+      const published = (await execute("docker", ["port", edgeName, "8443/tcp"])).stdout.trim();
       let origin = `https://${app.hostname}:${new URL(`https://${published}`).port}`;
       browser = await chromium.launch();
       const context = await browser.newContext({ ignoreHTTPSErrors: true });
@@ -2648,14 +2605,22 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
         revision: 1,
         appliedRevision: 1,
       });
-      expect((await context.request.get(origin, { maxRedirects: 0 })).status()).toBe(401);
-      const allowed = await context.request.get(origin, { headers: { cookie: "fixture=finance" } });
+      expect(
+        (
+          await context.request.get(origin, { maxRedirects: 0, headers: { host: app.hostname } })
+        ).status(),
+      ).toBe(401);
+
+      const allowed = await context.request.get(origin, {
+        headers: { host: app.hostname, cookie: identity.cookie },
+      });
+
       expect(allowed.status()).toBe(200);
       expect(await allowed.json()).toMatchObject({ version: "one" });
       expect(
         (
           await context.request.get(`${origin}/note.txt`, {
-            headers: { cookie: "fixture=engineering" },
+            headers: { host: app.hostname, cookie: z.string().parse(identity.otherCookie) },
           })
         ).status(),
       ).toBe(403);
@@ -2666,12 +2631,16 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       let previewOrigin = `https://${preview.hostname}:${new URL(origin).port}`;
       expect(
         (
-          await context.request.get(previewOrigin, { headers: { cookie: "fixture=finance" } })
+          await context.request.get(previewOrigin, {
+            headers: { host: preview.hostname, cookie: identity.cookie },
+          })
         ).status(),
       ).toBe(200);
       expect(
         (
-          await context.request.get(previewOrigin, { headers: { cookie: "fixture=engineering" } })
+          await context.request.get(previewOrigin, {
+            headers: { host: preview.hostname, cookie: z.string().parse(identity.otherCookie) },
+          })
         ).status(),
       ).toBe(403);
 
@@ -2685,7 +2654,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
         activeDeploymentId: first.id,
       });
       await execute("docker", ["start", edgeName]);
-      const restarted = (await execute("docker", ["port", authName, "8443/tcp"])).stdout.trim();
+      const restarted = (await execute("docker", ["port", edgeName, "8443/tcp"])).stdout.trim();
       origin = `https://${app.hostname}:${new URL(`https://${restarted}`).port}`;
       previewOrigin = `https://${preview.hostname}:${new URL(origin).port}`;
       const second = await publish(app.id, "two");
@@ -2706,24 +2675,37 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       expect(
         (
           await context.request.get(`${origin}/note.txt`, {
-            headers: { cookie: "fixture=engineering" },
+            headers: { host: app.hostname, cookie: z.string().parse(identity.otherCookie) },
           })
         ).status(),
       ).toBe(200);
       expect(
         (
-          await context.request.get(previewOrigin, { headers: { cookie: "fixture=engineering" } })
+          await context.request.get(previewOrigin, {
+            headers: { host: preview.hostname, cookie: z.string().parse(identity.otherCookie) },
+          })
         ).status(),
       ).toBe(200);
-      expect((await context.request.get(origin, { maxRedirects: 0 })).status()).toBe(401);
-      expect((await context.request.get(previewOrigin, { maxRedirects: 0 })).status()).toBe(401);
+      expect(
+        (
+          await context.request.get(origin, { maxRedirects: 0, headers: { host: app.hostname } })
+        ).status(),
+      ).toBe(401);
+      expect(
+        (
+          await context.request.get(previewOrigin, {
+            maxRedirects: 0,
+            headers: { host: preview.hostname },
+          })
+        ).status(),
+      ).toBe(401);
       await request(`/apps/${preview.id}`, "DELETE");
       await agent();
       await request(`/apps/${app.id}`, "DELETE");
       await agent();
     } finally {
       await browser?.close();
-      await execute("docker", ["rm", "-f", edgeName, authName]);
+      await execute("docker", ["rm", "-f", edgeName]);
     }
   }, 180000);
   it("deploys and manages standard app Workflows through CLI, agent and runtime", async () => {
@@ -2849,12 +2831,13 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       await browser.close();
     }
 
-    await execute("docker", ["stop", `platform-fleet-${fleetId}`]);
+    await execute("docker", ["restart", `platform-fleet-${fleetId}`]);
     await operation("pause", "example", "retained-instance");
     expect(await operation("status", "example", "retained-instance")).toMatchObject({
       status: "paused",
     });
     await execute("docker", ["rm", "-f", `platform-fleet-${fleetId}`]);
+    await startRuntime();
     await operation("resume", "example", "retained-instance");
     await writeFile(
       join(appDirectory, "worker.js"),
@@ -2900,7 +2883,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     expect((await appRequest(app.id)).stdout).toBe("new code");
     expect((await s3.send(new ListObjectsV2Command(retainedVersions))).KeyCount).toBe(1);
     await cli("delete", app.id, "--yes");
-    await execute("docker", ["stop", `platform-fleet-${fleetId}`]);
+    await execute("docker", ["restart", `platform-fleet-${fleetId}`]);
     await agent();
     await expect(appRequest(app.id)).rejects.toThrow();
     expect((await s3.send(new ListObjectsV2Command(retainedVersions))).KeyCount).toBe(0);
@@ -2971,6 +2954,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     await agent();
     await cli("delete", app.id, "--yes");
     await execute("docker", ["rm", "-f", `platform-fleet-${fleetId}`]);
+    await startRuntime();
     await agent();
     await expect(appRequest(app.id)).rejects.toThrow();
   }, 180_000);

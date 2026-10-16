@@ -14,8 +14,6 @@ export interface CloudflareBindings {
   DEPLOYMENTS?: Workflow<z.infer<typeof deploymentWorkflowCommand>>;
   APP_OPERATIONS?: Workflow<z.infer<typeof cloudflareAppOperation>>;
   APP_RUNTIME?: Fetcher;
-  AUTH_PROXY?: Fetcher;
-  AUTH_PROXY_KEY?: string;
   APP_COOKIE_SECRET?: string;
   CLOUDFLARE_ACCOUNT_ID?: string;
   CLOUDFLARE_API_TOKEN?: string;

@@ -2,7 +2,7 @@ import { authControlPath, authHostname, authRoute } from "@platform/auth-proxy/p
 import type { z } from "zod";
 
 export interface AuthProxyBindings {
-  AUTH_PROXY?: {
+  APP_RUNTIME?: {
     fetch: (
       url: string,
       init: { method: string; headers: Record<string, string>; body?: string | null },
@@ -13,7 +13,7 @@ export interface AuthProxyBindings {
       body: { cancel: () => Promise<void> } | null;
     }>;
   };
-  AUTH_PROXY_KEY?: string;
+  APP_RUNTIME_TOKEN?: string;
 }
 
 export const authProxyRequest = async (
@@ -22,15 +22,15 @@ export const authProxyRequest = async (
   method: string,
   body?: string,
 ) => {
-  if (!bindings.AUTH_PROXY || !bindings.AUTH_PROXY_KEY)
-    throw new Error("Auth proxy binding or key is missing");
+  if (!bindings.APP_RUNTIME || !bindings.APP_RUNTIME_TOKEN)
+    throw new Error("App runtime binding or key is missing");
 
-  const response = await bindings.AUTH_PROXY.fetch(
+  const response = await bindings.APP_RUNTIME.fetch(
     `https://auth.invalid${authControlPath}${path}`,
     {
       method,
       headers: {
-        authorization: `Bearer ${bindings.AUTH_PROXY_KEY}`,
+        authorization: `Bearer ${bindings.APP_RUNTIME_TOKEN}`,
         "content-type": "application/json",
       },
       body: body ?? null,

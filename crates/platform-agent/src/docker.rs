@@ -1,287 +1,26 @@
 use crate::config::Configuration;
-use bollard::{
-    Docker,
-    container::LogOutput,
-    exec::StartExecResults,
-    models::{
-        ContainerCreateBody, ContainerInspectResponse, EndpointIpamConfig, EndpointSettings,
-        ExecConfig, HostConfig, HostConfigLogConfig, NetworkConnectRequest, NetworkCreateRequest,
-        NetworkingConfig, RestartPolicy, RestartPolicyNameEnum,
-    },
-    query_parameters::{
-        AttachContainerOptionsBuilder, CreateContainerOptionsBuilder, InspectContainerOptions,
-        InspectNetworkOptions, RemoveContainerOptionsBuilder, RenameContainerOptions,
-        StartContainerOptions, StopContainerOptionsBuilder, WaitContainerOptions,
-    },
-};
+use bollard::{Docker, container::LogOutput, exec::StartExecResults, models::ExecConfig};
 use futures_util::StreamExt;
 use platform_core::{
     Error, Result,
     model::{Job, PublishedApp},
 };
+use serde::Deserialize;
 use serde_json::{Value, json as value};
-use std::{
-    collections::{HashMap, HashSet},
-    net::Ipv4Addr,
-    time::Duration,
-};
+use std::time::Duration;
 
 fn docker_error(error: bollard::errors::Error) -> Error {
     Error::invalid(format!("Docker operation failed: {error}"))
 }
-fn missing(error: &bollard::errors::Error) -> bool {
-    matches!(
-        error,
-        bollard::errors::Error::DockerResponseServerError {
-            status_code: 404,
-            ..
-        }
+
+pub async fn verify_native(docker: &Docker, configuration: &Configuration) -> Result<()> {
+    let output = execute_output(
+        docker,
+        &configuration.runtime_container,
+        vec!["celld".into(), "--version".into()],
     )
-}
-pub fn name(job: &Job) -> String {
-    format!("platform-fleet-{}", job.fleet_id)
-}
-fn labels(job: &Job) -> HashMap<String, String> {
-    HashMap::from([("app-platform.fleet-id".into(), job.fleet_id.to_string())])
-}
-
-async fn owned_container(
-    docker: &Docker,
-    job: &Job,
-    container: &str,
-) -> Result<Option<ContainerInspectResponse>> {
-    match docker
-        .inspect_container(container, None::<InspectContainerOptions>)
-        .await
-    {
-        Ok(record) => {
-            if record
-                .config
-                .as_ref()
-                .and_then(|config| config.labels.as_ref())
-                .and_then(|labels| labels.get("app-platform.fleet-id"))
-                != Some(&job.fleet_id.to_string())
-            {
-                return Err(Error::invalid(
-                    "Refusing to replace a container not owned by this fleet".into(),
-                ));
-            }
-            Ok(Some(record))
-        }
-        Err(error) if missing(&error) => Ok(None),
-        Err(error) => Err(docker_error(error)),
-    }
-}
-
-async fn discard_container(docker: &Docker, container: &str) -> Result<()> {
-    match docker
-        .remove_container(
-            container,
-            Some(
-                RemoveContainerOptionsBuilder::default()
-                    .force(true)
-                    .v(false)
-                    .build(),
-            ),
-        )
-        .await
-    {
-        Ok(()) => Ok(()),
-        Err(error) if missing(&error) => Ok(()),
-        Err(error) => Err(docker_error(error)),
-    }
-}
-
-async fn restore_runtime(
-    docker: &Docker,
-    job: &Job,
-    previous: &str,
-    replacement: Option<&str>,
-) -> Result<()> {
-    if let Some(replacement) = replacement {
-        discard_container(docker, replacement).await?;
-    }
-    let record = docker
-        .inspect_container(previous, None::<InspectContainerOptions>)
-        .await
-        .map_err(docker_error)?;
-    let name = name(job);
-    if record.name.as_deref() != Some(&format!("/{name}")) {
-        docker
-            .rename_container(previous, RenameContainerOptions { name })
-            .await
-            .map_err(docker_error)?;
-    }
-    docker
-        .start_container(previous, None::<StartContainerOptions>)
-        .await
-        .map_err(docker_error)?;
-    Ok(())
-}
-
-// A retained previous container also makes an interrupted swap recoverable on
-// the next job. Never run two runtimes against the same state directory.
-async fn recover_replacement(docker: &Docker, job: &Job, address: &str) -> Result<()> {
-    let name = name(job);
-    let previous = format!("{name}-previous");
-    if let Some(previous_container) = owned_container(docker, job, &previous).await? {
-        let replacement = owned_container(docker, job, &name).await?;
-        let recovered = if replacement.is_some() {
-            // Activation may already have succeeded before the agent stopped.
-            // Finish the cutover if the replacement can serve the published
-            // artifact; the old container is only a fallback, not a failure flag.
-            let resumed = async {
-                if previous_container.state.and_then(|state| state.running) == Some(true) {
-                    docker
-                        .stop_container(
-                            &previous,
-                            Some(StopContainerOptionsBuilder::default().t(30).build()),
-                        )
-                        .await
-                        .map_err(docker_error)?;
-                }
-                docker
-                    .start_container(&name, None::<StartContainerOptions>)
-                    .await
-                    .map_err(docker_error)?;
-                activate(docker, job, address).await
-            }
-            .await;
-            if resumed.is_ok() {
-                // Cleanup failure must not roll back a successfully activated runtime.
-                docker
-                    .remove_container(
-                        &previous,
-                        Some(RemoveContainerOptionsBuilder::default().v(false).build()),
-                    )
-                    .await
-                    .map_err(docker_error)?;
-                true
-            } else {
-                false
-            }
-        } else {
-            false
-        };
-        if !recovered {
-            restore_runtime(
-                docker,
-                job,
-                &previous,
-                replacement.as_ref().and_then(|record| record.id.as_deref()),
-            )
-            .await?;
-        }
-    }
-    let pending = format!("{name}-replacement");
-    if owned_container(docker, job, &pending).await?.is_some() {
-        discard_container(docker, &pending).await?;
-    }
-    Ok(())
-}
-
-pub async fn verify_native(
-    docker: &Docker,
-    configuration: &Configuration,
-    job: &Job,
-) -> Result<String> {
-    let selected = docker
-        .inspect_image(&configuration.runtime_image)
-        .await
-        .map_err(docker_error)?
-        .id
-        .ok_or_else(|| Error::invalid("Runtime image has no immutable ID".into()))?;
-    let mut images = vec![(selected.clone(), "Configured runtime image".to_owned())];
-    for container in [name(job), format!("{}-previous", name(job))] {
-        if let Some(record) = owned_container(docker, job, &container).await? {
-            let image = record
-                .image
-                .ok_or_else(|| Error::invalid("Fleet container has no image ID".into()))?;
-            images.push((image, format!("Fleet container {container}")));
-        }
-    }
-    // Probe immutable image bytes without starting a fleet or mounting its data.
-    // This also checks stopped containers and either side of interrupted swaps.
-    let probe = format!("{}-version-check", name(job));
-    if owned_container(docker, job, &probe).await?.is_some() {
-        discard_container(docker, &probe).await?;
-    }
-    let mut checked = HashSet::new();
-    for (image, source) in images {
-        if !checked.insert(image.clone()) {
-            continue;
-        }
-        let id = docker
-            .create_container(
-                Some(
-                    CreateContainerOptionsBuilder::default()
-                        .name(&probe)
-                        .build(),
-                ),
-                ContainerCreateBody {
-                    image: Some(image),
-                    entrypoint: Some(vec!["/usr/local/bin/celld".into()]),
-                    cmd: Some(vec!["--version".into()]),
-                    labels: Some(labels(job)),
-                    host_config: Some(HostConfig {
-                        network_mode: Some("none".into()),
-                        readonly_rootfs: Some(true),
-                        cap_drop: Some(vec!["ALL".into()]),
-                        log_config: Some(HostConfigLogConfig {
-                            typ: Some("none".into()),
-                            ..Default::default()
-                        }),
-                        ..Default::default()
-                    }),
-                    ..Default::default()
-                },
-            )
-            .await
-            .map_err(docker_error)?
-            .id;
-        let result = tokio::time::timeout(Duration::from_secs(10), async {
-            // Attach before starting the short-lived process. Its output must
-            // not depend on the host's log driver or stored-log availability.
-            let mut output = docker
-                .attach_container(
-                    &id,
-                    Some(
-                        AttachContainerOptionsBuilder::default()
-                            .stdout(true)
-                            .stderr(true)
-                            .stream(true)
-                            .build(),
-                    ),
-                )
-                .await
-                .map_err(docker_error)?
-                .output;
-            docker
-                .start_container(&id, None::<StartContainerOptions>)
-                .await
-                .map_err(docker_error)?;
-            let mut bytes = Vec::new();
-            while let Some(message) = output.next().await {
-                bytes.extend_from_slice(message.map_err(docker_error)?.as_ref());
-            }
-            docker
-                .wait_container(&id, None::<WaitContainerOptions>)
-                .next()
-                .await
-                .ok_or_else(|| {
-                    Error::invalid("Native version probe returned no exit status".into())
-                })?
-                .map_err(docker_error)?;
-            crate::native::verify(&bytes, &source)
-        })
-        .await
-        .map_err(|_| Error::invalid(format!("{source} celld version check timed out")));
-        // The fixed, owned probe name also permits cleanup after agent interruption.
-        discard_container(docker, &id).await?;
-        result??;
-    }
-    // Container creation uses the checked digest even if its tag is moved later.
-    Ok(selected)
+    .await?;
+    crate::native::verify(&output, "Installed runtime")
 }
 
 pub async fn verify_storage(
@@ -289,313 +28,58 @@ pub async fn verify_storage(
     configuration: &Configuration,
     job: &Job,
 ) -> Result<()> {
-    let container = match docker
-        .inspect_container(&name(job), None::<InspectContainerOptions>)
-        .await
-    {
-        Ok(container) => container,
-        Err(error) if missing(&error) => return Ok(()),
-        Err(error) => return Err(docker_error(error)),
-    };
-    let config = container
-        .config
-        .ok_or_else(|| Error::invalid("App container has no configuration".into()))?;
-    if config
-        .labels
-        .as_ref()
-        .and_then(|labels| labels.get("app-platform.fleet-id"))
-        != Some(&job.fleet_id.to_string())
-    {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Installed {
+        fleet_id: uuid::Uuid,
+        arguments: Vec<String>,
+        azure_account: Option<String>,
+    }
+    let installed: Installed = serde_json::from_slice(
+        &execute_output(
+            docker,
+            &configuration.runtime_container,
+            vec!["cat".into(), "/state/runtime.json".into()],
+        )
+        .await?,
+    )?;
+    if installed.fleet_id != job.fleet_id {
         return Err(Error::invalid(
-            "Refusing to use a container not owned by this fleet".into(),
+            "The runtime belongs to a different fleet".into(),
         ));
     }
+    let environment = installed
+        .azure_account
+        .map(|account| format!("AZURE_STORAGE_ACCOUNT_NAME={account}"))
+        .into_iter()
+        .collect::<Vec<_>>();
     configuration.storage.resolve()?.verify_runtime(
         job.fleet_id,
-        &config.cmd.unwrap_or_default(),
-        &config.env.unwrap_or_default(),
+        &installed.arguments,
+        &environment,
     )
 }
 
-pub async fn ensure(
-    docker: &Docker,
-    configuration: &Configuration,
-    job: &Job,
-    telemetry: &[String],
-) -> Result<String> {
-    let name = name(job);
-    let network = match docker
-        .inspect_network(&name, None::<InspectNetworkOptions>)
-        .await
-    {
-        Ok(network) => network,
-        Err(error) if missing(&error) => {
-            docker
-                .create_network(NetworkCreateRequest {
-                    name: name.clone(),
-                    driver: Some("bridge".into()),
-                    labels: Some(labels(job)),
-                    ..Default::default()
-                })
-                .await
-                .map_err(docker_error)?;
-            docker
-                .inspect_network(&name, None::<InspectNetworkOptions>)
-                .await
-                .map_err(docker_error)?
-        }
-        Err(error) => return Err(docker_error(error)),
-    };
-    if network
-        .labels
-        .as_ref()
-        .and_then(|labels| labels.get("app-platform.fleet-id"))
-        != Some(&job.fleet_id.to_string())
-    {
-        return Err(Error::invalid(
-            "Refusing to use a network not owned by this fleet".into(),
-        ));
-    }
-    let gateway = network
-        .ipam
-        .and_then(|ipam| ipam.config)
-        .and_then(|config| config.into_iter().find_map(|item| item.gateway))
-        .ok_or_else(|| Error::invalid("App network has no IPv4 gateway".into()))?;
-    let gateway: Ipv4Addr = gateway
-        .parse()
-        .map_err(|error| Error::invalid(format!("Invalid Docker network gateway: {error}")))?;
-    let address = Ipv4Addr::from(
-        u32::from(gateway)
-            .checked_add(1)
-            .ok_or_else(|| Error::invalid("Invalid Docker network range".into()))?,
-    )
-    .to_string();
-    recover_replacement(docker, job, &address).await?;
-    let existing = owned_container(docker, job, &name).await?;
-    let replacement = existing.as_ref().filter(|container| {
-        crate::telemetry::changed(
-            container
-                .config
-                .as_ref()
-                .and_then(|config| config.env.as_deref())
-                .unwrap_or_default(),
-            telemetry,
-        )
-    });
-    let created = if existing.is_none() || replacement.is_some() {
-        let local_state = configuration.state.join(job.fleet_id.to_string());
-        tokio::fs::create_dir_all(&local_state).await?;
-        let host_state = configuration
-            .host_state
-            .as_ref()
-            .unwrap_or(&configuration.state)
-            .join(job.fleet_id.to_string());
-        let storage = configuration.storage.resolve()?;
-        let mut environment: Vec<String> = storage
-            .environment(true)
-            .into_iter()
-            .map(|(key, value)| format!("{key}={value}"))
-            .collect();
-        environment.extend([
-            "CELLD_WATCH=/state/node".into(),
-            "CELLD_ASSET_CACHE_DIR=/state/assets".into(),
-            "CELLD_SHUTDOWN_TOTAL_MS=10000".into(),
-        ]);
-        environment.extend_from_slice(telemetry);
-        let mut arguments = storage.arguments(job.fleet_id, true);
-        arguments.extend([
-            "--listen".into(),
-            "0.0.0.0:8080".into(),
-            "--internal-listen".into(),
-            format!("{address}:8081"),
-            "--advertise".into(),
-            format!("{address}:8081"),
-            "--trust-forwarded-headers".into(),
-        ]);
-        let options = ContainerCreateBody {
-            image: Some(configuration.runtime_image.clone()),
-            labels: Some(labels(job)),
-            env: Some(environment),
-            cmd: Some(arguments),
-            stop_timeout: Some(30),
-            host_config: Some(HostConfig {
-                binds: Some(vec![format!("{}:/state", host_state.display())]),
-                mounts: Some(storage.credential_mount().into_iter().collect()),
-                network_mode: Some(name.clone()),
-                readonly_rootfs: Some(true),
-                cap_drop: Some(vec!["ALL".into()]),
-                security_opt: Some(vec!["no-new-privileges:true".into()]),
-                pids_limit: Some(256),
-                tmpfs: Some(HashMap::from([(
-                    "/tmp".into(),
-                    "rw,nosuid,nodev,noexec,size=64m".into(),
-                )])),
-                restart_policy: Some(RestartPolicy {
-                    name: Some(RestartPolicyNameEnum::UNLESS_STOPPED),
-                    maximum_retry_count: None,
-                }),
-                ..Default::default()
-            }),
-            networking_config: Some(NetworkingConfig {
-                endpoints_config: Some(HashMap::from([(
-                    name.clone(),
-                    EndpointSettings {
-                        ipam_config: Some(EndpointIpamConfig {
-                            ipv4_address: Some(address.clone()),
-                            ..Default::default()
-                        }),
-                        aliases: Some(vec![name.clone()]),
-                        ..Default::default()
-                    },
-                )])),
-            }),
-            ..Default::default()
-        };
-        // Prepare and create the replacement while the current runtime still
-        // serves traffic. Missing images or invalid configuration cannot stop it.
-        // Docker allocates the fixed address on start, after the old runtime is
-        // stopped, not when this stopped candidate is created.
-        let create_name = if replacement.is_some() {
-            format!("{name}-replacement")
-        } else {
-            name.clone()
-        };
-        Some(
-            docker
-                .create_container(
-                    Some(
-                        CreateContainerOptionsBuilder::default()
-                            .name(&create_name)
-                            .build(),
-                    ),
-                    options,
-                )
-                .await
-                .map_err(docker_error)?
-                .id,
-        )
-    } else {
-        None
-    };
-    for (index, trusted) in configuration.trusted_containers.iter().enumerate() {
-        let container = docker
-            .inspect_container(trusted, None::<InspectContainerOptions>)
-            .await
-            .map_err(docker_error)?;
-        let connected = container
-            .network_settings
-            .and_then(|settings| settings.networks)
-            .is_some_and(|networks| networks.contains_key(&name));
-        if !connected {
-            docker
-                .connect_network(
-                    &name,
-                    NetworkConnectRequest {
-                        container: trusted.clone(),
-                        endpoint_config: Some(EndpointSettings {
-                            ipam_config: Some(EndpointIpamConfig {
-                                ipv4_address: Some(
-                                    Ipv4Addr::from(
-                                        u32::from(gateway)
-                                            .checked_add(
-                                                u32::try_from(index).map_err(|error| {
-                                                    Error::invalid(error.to_string())
-                                                })? + 2,
-                                            )
-                                            .ok_or_else(|| {
-                                                Error::invalid(
-                                                    "Docker network address overflow".into(),
-                                                )
-                                            })?,
-                                    )
-                                    .to_string(),
-                                ),
-                                ..Default::default()
-                            }),
-                            ..Default::default()
-                        }),
-                    },
-                )
-                .await
-                .map_err(docker_error)?;
-        }
-    }
-    if let Some(previous) = replacement {
-        let previous = previous
-            .id
-            .as_deref()
-            .ok_or_else(|| Error::invalid("App container has no ID".into()))?;
-        let next = created
-            .as_deref()
-            .ok_or_else(|| Error::invalid("Missing replacement container".into()))?;
-        tracing::info!(fleet = %job.fleet_id, "Replacing fleet runtime to apply configuration; persistent state is retained");
-        let swapped = async {
-            docker
-                .rename_container(
-                    previous,
-                    RenameContainerOptions {
-                        name: format!("{name}-previous"),
-                    },
-                )
-                .await
-                .map_err(docker_error)?;
-            docker
-                .stop_container(
-                    previous,
-                    Some(StopContainerOptionsBuilder::default().t(30).build()),
-                )
-                .await
-                .map_err(docker_error)?;
-            docker
-                .rename_container(next, RenameContainerOptions { name: name.clone() })
-                .await
-                .map_err(docker_error)?;
-            docker
-                .start_container(next, None::<StartContainerOptions>)
-                .await
-                .map_err(docker_error)?;
-            activate(docker, job, &address).await
-        }
-        .await;
-        if let Err(cause) = swapped {
-            if let Err(recovery) = restore_runtime(docker, job, previous, Some(next)).await {
-                return Err(Error::invalid(format!(
-                    "Runtime replacement failed: {cause}; restoring the previous runtime also failed: {recovery}"
-                )));
-            }
-            return Err(cause);
-        }
-        docker
-            .remove_container(
-                previous,
-                Some(RemoveContainerOptionsBuilder::default().v(false).build()),
-            )
-            .await
-            .map_err(docker_error)?;
-    } else {
-        docker
-            .start_container(&name, None::<StartContainerOptions>)
-            .await
-            .map_err(docker_error)?;
-        activate(docker, job, &address).await?;
-    }
-    Ok(address)
+pub async fn ensure(docker: &Docker, configuration: &Configuration) -> Result<String> {
+    let address = "127.0.0.1";
+    activate(docker, &configuration.runtime_container, address).await?;
+    Ok(address.into())
 }
 
 async fn operator(
     docker: &Docker,
-    job: &Job,
+    container: &str,
     address: &str,
     port: u16,
     path: &str,
     method: &str,
 ) -> Result<Value> {
-    operator_headers(docker, job, address, port, path, method, &[]).await
+    operator_headers(docker, container, address, port, path, method, &[]).await
 }
 
 async fn operator_headers(
     docker: &Docker,
-    job: &Job,
+    container: &str,
     address: &str,
     port: u16,
     path: &str,
@@ -616,23 +100,61 @@ async fn operator_headers(
     for header in headers {
         command.extend(["-H".into(), header.clone()]);
     }
-    execute_json(docker, job, command).await
+    execute_json(docker, container, command).await
 }
 
-async fn execute_json(docker: &Docker, job: &Job, command: Vec<String>) -> Result<Value> {
+async fn execute_json(docker: &Docker, container: &str, command: Vec<String>) -> Result<Value> {
     Ok(serde_json::from_slice(
-        &execute_output(docker, job, command).await?,
+        &execute_output(docker, container, command).await?,
     )?)
 }
 
-pub async fn execute_output(docker: &Docker, job: &Job, command: Vec<String>) -> Result<Vec<u8>> {
+pub async fn execute_output(
+    docker: &Docker,
+    container: &str,
+    command: Vec<String>,
+) -> Result<Vec<u8>> {
+    execute_with_environment(docker, container, command, Vec::new()).await
+}
+
+pub async fn execute_native(
+    docker: &Docker,
+    configuration: &Configuration,
+    job: &Job,
+    mut command: Vec<String>,
+) -> Result<Vec<u8>> {
+    let storage = configuration.storage.resolve()?;
+    command.extend(storage.arguments(job.fleet_id, true));
+    // Docker exec does not inherit environment added by the container entrypoint.
+    let environment = storage
+        .environment(true)
+        .into_iter()
+        .map(|(name, value)| format!("{name}={value}"))
+        .collect();
+    execute_with_environment(
+        docker,
+        &configuration.runtime_container,
+        command,
+        environment,
+    )
+    .await
+}
+
+async fn execute_with_environment(
+    docker: &Docker,
+    container: &str,
+    command: Vec<String>,
+    environment: Vec<String>,
+) -> Result<Vec<u8>> {
     let exec = docker
         .create_exec(
-            &name(job),
+            container,
             ExecConfig {
+                user: Some("0".into()),
                 attach_stdout: Some(true),
                 attach_stderr: Some(true),
                 cmd: Some(command),
+                env: Some(environment),
                 ..Default::default()
             },
         )
@@ -671,22 +193,21 @@ pub async fn wake_queue(
     job: &Job,
     queue: &str,
 ) -> Result<()> {
-    let storage = configuration.storage.resolve()?;
     let command = |operation: &str| {
-        let mut command = vec![
+        vec![
             "celld".into(),
             "queue".into(),
             operation.into(),
             queue.into(),
             "--json".into(),
-        ];
-        command.extend(storage.arguments(job.fleet_id, true));
-        command
+        ]
     };
-    let info = execute_json(docker, job, command("info")).await?;
+    let info: Value = serde_json::from_slice(
+        &execute_native(docker, configuration, job, command("info")).await?,
+    )?;
     match info.get("paused").and_then(Value::as_bool) {
         Some(false) => {
-            execute_json(docker, job, command("resume")).await?;
+            execute_native(docker, configuration, job, command("resume")).await?;
         }
         Some(true) => {} // Preserve an operator's explicit pause.
         None => {
@@ -698,10 +219,10 @@ pub async fn wake_queue(
     Ok(())
 }
 
-pub async fn activate(docker: &Docker, job: &Job, address: &str) -> Result<()> {
+pub async fn activate(docker: &Docker, container: &str, address: &str) -> Result<()> {
     let mut ready = false;
     for _ in 0..30 {
-        if operator(docker, job, address, 8081, "/state", "GET")
+        if operator(docker, container, address, 8081, "/state", "GET")
             .await
             .is_ok()
         {
@@ -718,8 +239,8 @@ pub async fn activate(docker: &Docker, job: &Job, address: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn reload(docker: &Docker, job: &Job, address: &str) -> Result<()> {
-    let response = operator(docker, job, address, 8081, "/reload", "POST").await?;
+pub async fn reload(docker: &Docker, container: &str, address: &str) -> Result<()> {
+    let response = operator(docker, container, address, 8081, "/reload", "POST").await?;
     if response.get("ok").and_then(Value::as_bool) != Some(true) {
         return Err(Error::invalid(format!(
             "celld rejected the deployment: {response}"
@@ -730,14 +251,14 @@ pub async fn reload(docker: &Docker, job: &Job, address: &str) -> Result<()> {
 
 pub async fn check_runtime(
     docker: &Docker,
-    job: &Job,
+    container: &str,
     address: &str,
     token: &str,
     version: &str,
 ) -> Result<()> {
     let ready = operator_headers(
         docker,
-        job,
+        container,
         address,
         8080,
         "/.well-known/widefleet/runtime",
@@ -755,7 +276,7 @@ pub async fn check_runtime(
 
 pub async fn check_candidate(
     docker: &Docker,
-    job: &Job,
+    container: &str,
     address: &str,
     token: &str,
     app: &PublishedApp,
@@ -770,7 +291,7 @@ pub async fn check_candidate(
     ];
     let ready = operator_headers(
         docker,
-        job,
+        container,
         address,
         8080,
         "/.well-known/widefleet/ready",
@@ -795,10 +316,10 @@ pub async fn route(configuration: &Configuration, job: &Job) -> Result<()> {
     tokio::fs::create_dir_all(&configuration.routing_directory).await?;
     let name = format!("platform-app-{}", job.app_id()?);
     let tls = route_tls(configuration, job.hostname()?)?;
-    let upstream = crate::access::origin(configuration)?;
+    let upstream = format!("http://{}:8080", configuration.runtime_container);
     let route = value!({ "http": {
         "routers": { &name: { "rule": format!("Host(`{}`)", job.hostname()?), "entryPoints": ["websecure"], "tls": tls, "service": &name } },
-        "services": { &name: { "loadBalancer": { "servers": [{ "url": upstream.as_str() }] } } },
+        "services": { &name: { "loadBalancer": { "servers": [{ "url": upstream }] } } },
     } });
     let temporary = configuration.routing_directory.join(format!(".{name}.tmp"));
     // JSON is valid YAML; Traefik's file provider discovers .yaml, not .json.
@@ -849,6 +370,7 @@ pub async fn remove(configuration: &Configuration, job: &Job) -> Result<()> {
 
 pub async fn workflow_request(
     docker: &Docker,
+    container: &str,
     job: &Job,
     token: &str,
     request: Value,
@@ -859,7 +381,7 @@ pub async fn workflow_request(
     )?;
     let response = execute_json(
         docker,
-        job,
+        container,
         vec![
             "curl".into(),
             "--silent".into(),

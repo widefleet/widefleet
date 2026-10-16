@@ -356,6 +356,9 @@ importers:
 
   packages/app-runtime:
     dependencies:
+      '@platform/auth-proxy':
+        specifier: workspace:*
+        version: link:../auth-proxy
       '@platform/contracts':
         specifier: workspace:*
         version: link:../contracts

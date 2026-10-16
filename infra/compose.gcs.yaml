@@ -1,14 +1,19 @@
+x-storage: &storage
+  ARTIFACT_STORAGE_PROVIDER: gcs
+  FLEET_STORAGE_PROVIDER: gcs
+  GCS_BUCKET: ${GCS_BUCKET:?Set GCS_BUCKET}
+  FLEET_GCS_BUCKET: ${FLEET_GCS_BUCKET:?Set FLEET_GCS_BUCKET}
+  GOOGLE_APPLICATION_CREDENTIALS:
+
 services:
-  auth-proxy:
-    environment:
-      CELLD_BUCKET: gs://${FLEET_GCS_BUCKET}/auth-proxy
-      GOOGLE_APPLICATION_CREDENTIALS:
+  initialize:
+    environment: *storage
   control-plane:
+    environment: *storage
+  runtime:
     environment:
-      ARTIFACT_STORAGE_PROVIDER: gcs
       FLEET_STORAGE_PROVIDER: gcs
-      GCS_BUCKET: ${GCS_BUCKET:?Set GCS_BUCKET}
-      FLEET_GCS_BUCKET: ${FLEET_GCS_BUCKET:?Set FLEET_GCS_BUCKET}
+      FLEET_GCS_BUCKET: ${FLEET_GCS_BUCKET}
       GOOGLE_APPLICATION_CREDENTIALS:
   agent:
     environment:

@@ -25,7 +25,7 @@ temporary=$(mktemp -d)
 trap 'rm -rf "$temporary"' EXIT
 
 # Prepare every overview before making any changes to Docker Hub.
-for component in runtime agent control-plane sso; do
+for component in runtime agent control-plane; do
   overview="$root/.github/dockerhub/$component.md"
   test -s "$overview"
   jq -n --rawfile overview "$overview" '{full_description: $overview}' > "$temporary/$component.json"
@@ -38,7 +38,7 @@ jq -n '{identifier: env.DOCKERHUB_USERNAME, secret: env.DOCKERHUB_TOKEN}' \
 jq -er '.access_token | strings | select(length > 0) | "Authorization: Bearer \(.)"' \
   "$temporary/auth.json" > "$temporary/authorization"
 
-for component in runtime agent control-plane sso; do
+for component in runtime agent control-plane; do
   curl --fail --silent --show-error --retry 3 --connect-timeout 15 --max-time 60 \
     --request PATCH --header "@$temporary/authorization" \
     --json "@$temporary/$component.json" --output /dev/null \

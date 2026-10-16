@@ -3,11 +3,12 @@ import {
   DeleteBucketCommand,
   DeleteObjectsCommand,
   ListObjectsV2Command,
+  PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
 import { build } from "esbuild";
 import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { vi, expect } from "vitest";
 import { z } from "zod";
-import { activationStatus, identitySettingsInput } from "@platform/contracts";
+import { activationStatus, identitySettingsInput, publishedApp } from "@platform/contracts";
 import { authConfiguration } from "@platform/auth-proxy";
 import { authControlPath } from "@platform/auth-proxy/publication";
 
@@ -31,7 +32,9 @@ export const installedAuth = async () => {
   const directory = await mkdtemp(join(tmpdir(), "widefleet-auth-container-"));
   const client = `${name}-client`;
   const volume = `${name}-state`;
-  const image = process.env["PLATFORM_SSO_IMAGE"] ?? "widefleet-sso:setup-check";
+  const image = process.env["PLATFORM_RUNTIME_IMAGE"] ?? "widefleet-runtime:setup-check";
+  const fleetId = randomUUID();
+  const controlToken = `test-runtime-control-${randomUUID()}`;
   let trustedProvider = false;
 
   const s3 = new S3Client({
@@ -79,7 +82,7 @@ export const installedAuth = async () => {
     status: activationStatus.parse(
       JSON.parse(
         await node(
-          'import {readFile} from "node:fs/promises"; const key=(await readFile("/auth/control-token","utf8")).trim(); const response=await fetch("http://127.0.0.1:4180' +
+          'import {readFile} from "node:fs/promises"; const key=(await readFile("/runtime-config/control-token","utf8")).trim(); const response=await fetch("http://127.0.0.1:8080' +
             "/.well-known/widefleet/auth/configuration" +
             '",{headers:{authorization:"Bearer "+key}}); if(!response.ok)throw new Error("Auth proxy unavailable");console.log(await response.text());',
         ),
@@ -94,7 +97,7 @@ export const installedAuth = async () => {
       .parse(
         JSON.parse(
           await node(
-            'import {readFile} from "node:fs/promises"; const key=(await readFile("/auth/control-token","utf8")).trim(); const response=await fetch("http://127.0.0.1:4180"+process.argv[1],{method:process.argv[2],headers:{authorization:"Bearer "+key,"content-type":"application/json"},...(process.argv[3]?{body:process.argv[3]}:{})}); console.log(response.status);',
+            'import {readFile} from "node:fs/promises"; const key=(await readFile("/runtime-config/control-token","utf8")).trim(); const response=await fetch("http://127.0.0.1:8080"+process.argv[1],{method:process.argv[2],headers:{authorization:"Bearer "+key,"content-type":"application/json"},...(process.argv[3]?{body:process.argv[3]}:{})}); console.log(response.status);',
             authControlPath + path,
             method,
             body ?? "",
@@ -110,17 +113,16 @@ export const installedAuth = async () => {
         JSON.stringify({
           appId: "00000000-0000-4000-8000-000000000001",
           access: { revision, groups },
-          upstream: "http://127.0.0.1:4183",
         }),
       ),
     ).toBe(204);
   };
 
   const publish = async (input = configuration) => {
-    const origin = `http://${(await docker("port", name, "4180/tcp")).stdout.trim()}`;
+    const origin = `http://${(await docker("port", name, "8080/tcp")).stdout.trim()}`;
     await writeFile(
       join(directory, "control-token"),
-      (await docker("exec", name, "cat", "/auth/control-token")).stdout.trim(),
+      (await docker("exec", name, "cat", "/runtime-config/control-token")).stdout.trim(),
       { mode: 0o600 },
     );
 
@@ -130,8 +132,8 @@ export const installedAuth = async () => {
           DATABASE_URL: "postgres://fixture:fixture@localhost/fixture",
           PLATFORM_URL: "https://platform.example.test",
           APP_DOMAIN: input.domain,
-          PLATFORM_APP_AUTH_URL: origin,
-          PLATFORM_AUTH_DIRECTORY: directory,
+          PLATFORM_APP_RUNTIME_URL: origin,
+          PLATFORM_RUNTIME_DIRECTORY: directory,
         }),
         ARTIFACT_STORAGE_PROVIDER: "s3",
       },
@@ -205,6 +207,65 @@ export const installedAuth = async () => {
 
   const start = async () => {
     await docker("volume", "create", volume);
+    await docker("volume", "create", `${volume}-config`);
+    await docker(
+      "run",
+      "--rm",
+      "--user=0",
+      "--volume",
+      `${volume}-config:/runtime-config`,
+      "--entrypoint=sh",
+      image,
+      "-ec",
+      'umask 077; printf "%s" "$1" > /runtime-config/installation.json; printf "%s" "$2" > /runtime-config/control-token; chown -R 1000:1000 /runtime-config',
+      "fixture",
+      JSON.stringify({ fleetId, controlToken }),
+      controlToken,
+    );
+
+    const source = `export default { async fetch(request, env) {
+      const url = new URL(request.url);
+      return Response.json({url:url.pathname+url.search,headers:Object.fromEntries(request.headers),body:await request.text(),bindings:Object.keys(env)}, {headers:{"set-cookie":"app-cookie=blocked"}});
+    }};`;
+
+    const hash = createHash("sha256").update(source).digest("hex");
+
+    const app = publishedApp.parse({
+      id: randomUUID(),
+      appId: "00000000-0000-4000-8000-000000000001",
+      version: randomUUID(),
+      deploymentId: randomUUID(),
+      hostname: "notes.apps.example.test",
+      metadata: {
+        main_module: "app.js",
+        compatibility_date: "2026-10-01",
+        compatibility_flags: [],
+        assets: { binding: "ASSETS", upload_session: randomUUID() },
+        bindings: [],
+        crons: [],
+        queue_consumers: [],
+      },
+      modules: [{ name: "app.js", type: "esm", sha256: hash, size: Buffer.byteLength(source) }],
+      manifest: {},
+      nativeBindings: {},
+      capabilities: {},
+      capabilityRevision: 0,
+      network: { revision: 0, policy: { backend: [], browser: [] } },
+    });
+
+    for (const [key, body] of Object.entries({
+      [`apps/${app.appId}/modules/${hash}`]: source,
+      [`hosts/${app.hostname}.json`]: JSON.stringify(app),
+    })) {
+      await s3.send(
+        new PutObjectCommand({
+          Bucket: name,
+          Key: `fleets/${fleetId}/r2/widefleet-packages/${key}`,
+          Body: body,
+        }),
+      );
+    }
+
     await docker(
       "run",
       "-d",
@@ -212,42 +273,32 @@ export const installedAuth = async () => {
       name,
       "--network=internal-app-platform-test_default",
       "--publish",
-      "127.0.0.1::4180",
+      "127.0.0.1::8080",
       "--volume",
-      `${volume}:/auth`,
+      `${volume}-config:/runtime-config:ro`,
+      "--volume",
+      `${volume}:/state`,
       "--env",
-      `CELLD_BUCKET=s3://${name}/auth-proxy`,
+      `FLEET_S3_BUCKET=${name}`,
       "--env",
-      "S3_ENDPOINT=http://rustfs:9000",
+      "FLEET_S3_ENDPOINT=http://rustfs:9000",
       "--env",
-      "AWS_REGION=us-east-1",
+      "FLEET_S3_ACCESS_KEY_ID=local-tests",
       "--env",
-      "AWS_ACCESS_KEY_ID=local-tests",
-      "--env",
-      "AWS_SECRET_ACCESS_KEY=local-tests-only",
+      "FLEET_S3_SECRET_ACCESS_KEY=local-tests-only",
       image,
     );
     await startClient();
     await vi.waitFor(async () => expect((await inspect()).status.state).toBe("waiting"), {
       timeout: 30_000,
     });
-    await docker(
-      "exec",
-      "-d",
-      client,
-      "node",
-      "--input-type=module",
-      "--eval",
-      'import {createServer} from "node:http"; createServer(async (request,response)=>{const chunks=[];for await(const chunk of request)chunks.push(chunk);response.setHeader("content-type","application/json");response.setHeader("set-cookie","app-cookie=blocked");response.end(JSON.stringify({url:request.url,headers:request.headers,body:Buffer.concat(chunks).toString()}));}).listen(4183,"0.0.0.0");',
-    );
-    await vi.waitFor(() => node('await fetch("http://127.0.0.1:4183");'), { timeout: 10_000 });
   };
 
   const login = async () =>
     z.object({ status: z.number(), cookie: z.string(), location: z.string().nullable() }).parse(
       JSON.parse(
         await node(`
-    const base="http://127.0.0.1:4180";
+    const base="http://127.0.0.1:8080";
     const headers={"x-forwarded-host":"auth.apps.example.test","x-forwarded-proto":"https"};
     const started=await fetch(base+"/oauth2/start?rd=https://notes.apps.example.test/",{redirect:"manual",headers});
     if(started.status!==302){console.log(JSON.stringify({status:started.status,cookie:"",location:null}));}else{
@@ -266,7 +317,7 @@ export const installedAuth = async () => {
       JSON.parse(
         await node(
           `
-    const response=await fetch("http://127.0.0.1:4180"+process.argv[2],{redirect:"manual",method:"POST",body:"app-request",headers:{"x-forwarded-host":"notes.apps.example.test","x-forwarded-proto":"https",cookie:process.argv[1],authorization:"Bearer must-not-reach-app","x-auth-request-user":"forged"}});
+    const response=await fetch("http://127.0.0.1:8080"+process.argv[2],{redirect:"manual",method:"POST",body:"app-request",headers:{"x-forwarded-host":"notes.apps.example.test","x-forwarded-proto":"https",cookie:process.argv[1],authorization:"Bearer must-not-reach-app","x-auth-request-user":"forged"}});
     console.log(JSON.stringify({status:response.status,body:await response.text(),cookies:response.headers.getSetCookie()}));
   `,
           cookie,
@@ -278,7 +329,7 @@ export const installedAuth = async () => {
   const dispose = async () => {
     await docker("rm", "--force", client).catch(() => undefined);
     await docker("rm", "--force", name).catch(() => undefined);
-    await docker("volume", "rm", volume).catch(() => undefined);
+    await docker("volume", "rm", volume, `${volume}-config`).catch(() => undefined);
 
     for (;;) {
       const page = await s3.send(new ListObjectsV2Command({ Bucket: name }));

@@ -1,12 +1,17 @@
 import { createAppSignIn } from "./app-sign-in-node.ts";
 import { bootstrapConfiguration } from "@platform/contracts";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { createAuthentication, registerCli } from "./auth.ts";
 import { readConfiguration, type Configuration } from "./config.ts";
 import { createDatabase } from "./database.ts";
 import { initializeEdge } from "./edge.ts";
-import { installationKeys, readOptionalFile } from "./installation-files.ts";
+import {
+  installationKeys,
+  persistentKey,
+  readOptionalFile,
+  writePrivateFile,
+} from "./installation-files.ts";
 import {
   createInstallationOwner,
   initializeInstallation,
@@ -14,6 +19,8 @@ import {
 } from "./installation-store.ts";
 import { initializeOrganization } from "./organization.ts";
 import { createSettingsService } from "./settings.ts";
+import { defaultFleet } from "./fleets.ts";
+import { z } from "zod";
 
 const readBootstrap = async (configuration: Configuration) => {
   if (!configuration.PLATFORM_BOOTSTRAP_FILE) return null;
@@ -24,7 +31,7 @@ const readBootstrap = async (configuration: Configuration) => {
   return bootstrapConfiguration.parse(JSON.parse(source));
 };
 
-export const initializeRuntime = async (
+export const prepareInstallation = async (
   input = readConfiguration(),
   migrationsFolder = resolve("migrations"),
 ) => {
@@ -38,6 +45,40 @@ export const initializeRuntime = async (
     await initializeOrganization(database.db);
     await initializeInstallation(database.db);
 
+    const fleet = await database.db.transaction(defaultFleet);
+    const path = join(configuration.PLATFORM_RUNTIME_DIRECTORY, "installation.json");
+    const existing = await readOptionalFile(path);
+
+    const controlToken = await persistentKey(
+      configuration.PLATFORM_RUNTIME_DIRECTORY,
+      "control-token",
+    );
+
+    if (existing !== null) {
+      const installed = z
+        .object({ fleetId: z.uuid(), controlToken: z.string() })
+        .parse(JSON.parse(existing));
+
+      if (installed.fleetId !== fleet.id || installed.controlToken !== controlToken)
+        throw new Error("Runtime configuration belongs to a different installation");
+    } else {
+      await writePrivateFile(path, JSON.stringify({ fleetId: fleet.id, controlToken }));
+    }
+
+    return { keys, configuration, database };
+  } catch (cause) {
+    await database.close();
+    throw cause;
+  }
+};
+
+export const initializeRuntime = async (
+  input = readConfiguration(),
+  migrationsFolder = resolve("migrations"),
+) => {
+  const { keys, configuration, database } = await prepareInstallation(input, migrationsFolder);
+
+  try {
     const settings = createSettingsService(
       configuration,
       database.db,
