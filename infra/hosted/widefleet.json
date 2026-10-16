@@ -2,5 +2,6 @@
   "name": "widefleet",
   "platformUrl": "https://app.widefleet.com",
   "appDomain": "widefleet.app",
-  "appZone": "widefleet.app"
+  "appZone": "widefleet.app",
+  "hyperdriveId": "416c7f64ea0d45149e6a82f3fc6bb3c4"
 }

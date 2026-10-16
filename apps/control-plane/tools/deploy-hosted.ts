@@ -130,7 +130,7 @@ const run = async (
     const output = z.object({ stdout: z.string(), stderr: z.string() }).safeParse(result.error);
 
     if (output.success) console.error(redact(`${output.data.stdout}\n${output.data.stderr}`));
-    // execFile's error message includes argv, including the Hyperdrive password.
+    // execFile's error message includes argv, which may contain sensitive values.
     throw new Error(`${command} failed; see the sanitized command output above`);
   }
 
@@ -168,7 +168,7 @@ try {
 
   const ids = hostedResourceIds.parse({
     account: secrets.CLOUDFLARE_ACCOUNT_ID,
-    ...(await provisionHostedResources(installation, cloudflare, wrangler, secrets.DATABASE_URL)),
+    ...(await provisionHostedResources(installation, cloudflare, wrangler)),
   });
 
   const configs = await hostedConfigurations(installation, ids);

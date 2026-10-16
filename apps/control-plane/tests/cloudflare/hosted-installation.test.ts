@@ -23,9 +23,10 @@ const installation = hostedInstallation.parse({
   platformUrl: "https://platform.example.test",
   appDomain: "apps.example.test",
   appZone: "example.test",
+  hyperdriveId: "2".repeat(32),
 });
 
-const ids = { account: "0".repeat(32), auth: "1".repeat(32), hyperdrive: "2".repeat(32) };
+const ids = { account: "0".repeat(32), auth: "1".repeat(32) };
 
 const configuration = {
   accountId: ids.account,
@@ -33,10 +34,8 @@ const configuration = {
   runtimeName: "fixture-app-runtime",
 };
 
-const databaseUrl = "postgresql://fixture:synthetic-password@db.example.test/fixture";
-
 describe("Hosted resource provisioning", () => {
-  it("uses Wrangler for writes and reuses resources on subsequent deployments", async () => {
+  it("reuses resources and preserves the existing Hyperdrive origin credentials", async () => {
     const created = new Set<string>();
     const writes: string[][] = [];
 
@@ -56,13 +55,6 @@ describe("Hosted resource provisioning", () => {
           result: created.has("kv") ? [{ id: ids.auth, title: "fixture-auth" }] : [],
         });
 
-      if (path.endsWith("/hyperdrive/configs"))
-        return Response.json({
-          success: true,
-          result: created.has("hyperdrive")
-            ? [{ id: ids.hyperdrive, name: "fixture-postgres" }]
-            : [],
-        });
       throw new Error(`Unexpected request: ${path}`);
     });
 
@@ -71,21 +63,26 @@ describe("Hosted resource provisioning", () => {
       created.add(args[0] ?? "");
     };
 
-    expect(await provisionHostedResources(installation, cloudflare, wrangler, databaseUrl)).toEqual(
-      { auth: ids.auth, hyperdrive: ids.hyperdrive },
-    );
+    expect(await provisionHostedResources(installation, cloudflare, wrangler)).toEqual({
+      auth: ids.auth,
+    });
     expect(writes.map((args) => args.slice(0, 3))).toEqual([
       ["r2", "bucket", "create"],
       ["kv", "namespace", "create"],
-      ["hyperdrive", "create", "fixture-postgres"],
+      ["hyperdrive", "update", installation.hyperdriveId],
     ]);
-    expect(writes[2]).toEqual(
-      expect.arrayContaining(["--caching-disabled", "--sslmode", "verify-full"]),
-    );
+    expect(writes[2]).toEqual([
+      "hyperdrive",
+      "update",
+      installation.hyperdriveId,
+      "--caching-disabled",
+      "--sslmode",
+      "verify-full",
+    ]);
+    const settingsUpdate = writes[2];
     writes.length = 0;
-    await provisionHostedResources(installation, cloudflare, wrangler, databaseUrl);
-    expect(writes).toHaveLength(1);
-    expect(writes[0]?.slice(0, 3)).toEqual(["hyperdrive", "update", ids.hyperdrive]);
+    await provisionHostedResources(installation, cloudflare, wrangler);
+    expect(writes).toEqual([settingsUpdate]);
   });
 
   it("does not interpret a provider failure as a missing resource", async () => {
@@ -96,14 +93,9 @@ describe("Hosted resource provisioning", () => {
 
     let writes = 0;
     await expect(
-      provisionHostedResources(
-        installation,
-        cloudflare,
-        async () => {
-          writes++;
-        },
-        databaseUrl,
-      ),
+      provisionHostedResources(installation, cloudflare, async () => {
+        writes++;
+      }),
     ).rejects.toThrow("HTTP 503");
     expect(writes).toBe(0);
   });
@@ -160,6 +152,10 @@ describe("Hosted resource provisioning", () => {
         },
       ]);
       expect(configs.controlPlane.vars["APP_RUNTIME_NAME"]).toBe(configuration.runtimeName);
+      expect(configs.controlPlane.hyperdrive).toEqual([
+        { binding: "HYPERDRIVE", id: installation.hyperdriveId },
+      ]);
+      expect(configs.controlPlane.vars).not.toHaveProperty("DATABASE_URL");
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

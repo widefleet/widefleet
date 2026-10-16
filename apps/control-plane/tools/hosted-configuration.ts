@@ -11,6 +11,7 @@ export const hostedInstallation = z
     platformUrl: runtimeConfigurationSchema.shape.PLATFORM_URL,
     appDomain: z.hostname(),
     appZone: z.hostname(),
+    hyperdriveId: z.string().regex(/^[a-f0-9]{32}$/),
   })
   .refine(
     (value) => value.appDomain === value.appZone || value.appDomain.endsWith(`.${value.appZone}`),
@@ -25,13 +26,11 @@ export const hostedResourceNames = (installation: z.infer<typeof hostedInstallat
   controlPlane: `${installation.name}-control-plane`,
   artifacts: `${installation.name}-artifacts`,
   auth: `${installation.name}-auth`,
-  hyperdrive: `${installation.name}-postgres`,
 });
 
 export const hostedResourceIds = z.object({
   account: z.string().regex(/^[a-f0-9]{32}$/),
   auth: z.string().regex(/^[a-f0-9]{32}$/),
-  hyperdrive: z.string().regex(/^[a-f0-9]{32}$/),
 });
 
 const readWorkerConfiguration = async (directory: string) => {
@@ -123,7 +122,7 @@ export const hostedConfigurations = async (
         PLATFORM_URL: installation.platformUrl,
         APP_DOMAIN: installation.appDomain,
       },
-      hyperdrive: [{ binding: "HYPERDRIVE", id: ids.hyperdrive }],
+      hyperdrive: [{ binding: "HYPERDRIVE", id: installation.hyperdriveId }],
       r2_buckets: [{ binding: "ARTIFACTS", bucket_name: names.artifacts }],
     },
     initialize: {

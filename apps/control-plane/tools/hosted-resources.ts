@@ -9,7 +9,6 @@ export const provisionHostedResources = async (
   installation: z.infer<typeof hostedInstallation>,
   cloudflare: ReturnType<typeof createCloudflareProvisioner>,
   wrangler: (args: string[]) => Promise<void>,
-  databaseUrl: string,
 ) => {
   const names = hostedResourceNames(installation);
 
@@ -20,20 +19,6 @@ export const provisionHostedResources = async (
         .parse(await cloudflare.request(`/storage/kv/namespaces?page=${page}&per_page=100`));
 
       const found = entries.find((entry) => entry.title === names.auth);
-
-      if (found) return found.id;
-
-      if (entries.length < 100) return null;
-    }
-  };
-
-  const findHyperdrive = async () => {
-    for (let page = 1; ; page++) {
-      const entries = z
-        .array(z.object({ id: z.string(), name: z.string() }))
-        .parse(await cloudflare.request(`/hyperdrive/configs?page=${page}&per_page=100`));
-
-      const found = entries.find((entry) => entry.name === names.hyperdrive);
 
       if (found) return found.id;
 
@@ -55,24 +40,18 @@ export const provisionHostedResources = async (
     auth = await findAuth();
   }
 
-  let hyperdrive = await findHyperdrive();
-
-  const connection = [
-    "--connection-string",
-    databaseUrl,
+  // The existing Hyperdrive owns the application's database credentials. The
+  // deployment role's DATABASE_URL must never replace that connection.
+  await wrangler([
+    "hyperdrive",
+    "update",
+    installation.hyperdriveId,
     "--caching-disabled",
     "--sslmode",
     "verify-full",
-  ];
+  ]);
 
-  if (hyperdrive) {
-    await wrangler(["hyperdrive", "update", hyperdrive, ...connection]);
-  } else {
-    await wrangler(["hyperdrive", "create", names.hyperdrive, ...connection, "--no-update-config"]);
-    hyperdrive = await findHyperdrive();
-  }
+  if (!auth) throw new Error("The created Auth KV namespace could not be found");
 
-  if (!auth || !hyperdrive) throw new Error("The created Hosted resources could not be found");
-
-  return { auth, hyperdrive };
+  return { auth };
 };
