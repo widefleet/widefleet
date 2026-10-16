@@ -10,7 +10,7 @@ import { edgeInfrastructure, edgeRoutes } from "../../tools/edge-configuration.t
 describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")(
   "Traefik with the installed auth proxy",
   () => {
-    it("protects app requests, replaces forwarded headers, and preserves management cookies", async () => {
+    it("protects app requests, strips forwarding headers, and preserves management cookies", async () => {
       const fixture = await installedAuth();
       const proxy = `${fixture.name}-traefik`;
 
@@ -19,6 +19,15 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")(
         await fixture.startProvider();
         await fixture.publish();
         await fixture.route([]);
+        await docker(
+          "exec",
+          "-d",
+          fixture.client,
+          "node",
+          "--input-type=module",
+          "--eval",
+          'import {createServer} from "node:http"; createServer((request,response)=>{response.setHeader("set-cookie","management-cookie=preserved");response.end(JSON.stringify({headers:request.headers}));}).listen(4183,"0.0.0.0");',
+        );
         const certificates = await createCertificates(fixture.directory);
 
         const routes = edgeRoutes(
@@ -29,7 +38,7 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")(
         );
 
         routes.http.services["app-sso"].loadBalancer.servers = [
-          { url: `http://${fixture.name}:4180` },
+          { url: `http://${fixture.name}:8080` },
         ];
         routes.http.services.management.loadBalancer.servers = [
           { url: `http://${fixture.name}:4183` },
@@ -142,8 +151,8 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")(
           .parse(JSON.parse(authenticated.body));
 
         expect(echoed.headers["x-auth-request-user"]).toBe("rotation-user");
-        expect(echoed.headers["x-forwarded-host"]).toBe("notes.apps.example.test");
-        expect(echoed.headers["x-forwarded-proto"]).toBe("https");
+        expect(echoed.headers).not.toHaveProperty("x-forwarded-host");
+        expect(echoed.headers).not.toHaveProperty("x-forwarded-proto");
         expect(echoed.headers).not.toHaveProperty("cookie");
         expect(echoed.headers).not.toHaveProperty("authorization");
         expect(authenticated.headers["set-cookie"]).toBeUndefined();
@@ -161,10 +170,11 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")(
           cookie: "management=preserved",
         });
 
+        expect(management.status).toBe(200);
         expect(JSON.parse(management.body)).toMatchObject({
           headers: { cookie: "management=preserved" },
         });
-        expect(management.headers["set-cookie"]).toEqual(["app-cookie=blocked"]);
+        expect(management.headers["set-cookie"]).toEqual(["management-cookie=preserved"]);
         expect(
           (await request("auth.apps.example.test", {}, "/.well-known/widefleet/auth/configuration"))
             .status,

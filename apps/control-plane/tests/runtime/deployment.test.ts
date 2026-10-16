@@ -1850,8 +1850,8 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
 
     try {
-      // Authentication has separate edge coverage. Route this fixture directly
-      // to the runtime while retaining its real browser network policy.
+      // Use a real fixture login for this CSP test. Synthetic resource origins
+      // share the app backend; the browser still enforces its actual network policy.
       await writeFile(
         routePath,
         JSON.stringify({
@@ -2036,7 +2036,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
         { timeout: 10000 },
       );
       await probe("granted", true);
-      const staticResponse = await page.goto(`${origin}/static.html`);
+      const staticResponse = await page.goto(`${origin}/static`);
       expect(staticResponse?.status()).toBe(200);
       expect(staticResponse?.headers()["content-security-policy"]).toContain("default-src 'self'");
       await probe("static", true);
