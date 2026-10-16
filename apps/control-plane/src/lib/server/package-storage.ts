@@ -25,7 +25,7 @@ export const verifyModules = (
 };
 
 export const savePackage = async (
-  storage: ArtifactStorage,
+  storage: Pick<ArtifactStorage, "put">,
   release: z.infer<typeof contract.runtimeRelease> | z.infer<typeof contract.connectorPackage>,
 ) => {
   verifyModules(release);

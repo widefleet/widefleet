@@ -139,6 +139,9 @@ export const createCloudflareRuntimeReleases = (
 
     const active = await Result.tryPromise(() => readCloudflareRuntimeVersion(bindings));
 
+    if (!snapshot.id && active.isOk() && snapshot.selected?.version === active.value)
+      state = "succeeded";
+
     return contract.runtimeStatus.parse({
       desiredVersion: snapshot.selected?.version ?? null,
       jobId: snapshot.id,
