@@ -116,6 +116,18 @@ services:
       AWS_REGION: us-east-1
       AWS_ACCESS_KEY_ID: local-demo
       AWS_SECRET_ACCESS_KEY: local-demo-only
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "--input-type=module",
+          "--eval",
+          "import {readFile} from 'node:fs/promises'; const key=(await readFile('/data/platform/auth/control-token','utf8')).trim(); const response=await fetch('http://127.0.0.1:4180/.well-known/widefleet/auth/configuration',{headers:{authorization:'Bearer '+key}}); if (!response.ok) process.exit(1)",
+        ]
+      interval: 1s
+      timeout: 3s
+      retries: 30
     stop_grace_period: 45s
   agent:
     <<: *local

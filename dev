@@ -60,8 +60,8 @@ case "${1:-up}" in
     "${compose[@]}" run --rm -T --no-deps tools node --env-file=/data/identity.env tools/initialize.ts
     "${compose[@]}" run --rm -T --no-deps tools node --env-file=/data/identity.env tools/initialize-storage.ts
     "${compose[@]}" up -d --wait control-plane
+    "${compose[@]}" up -d --force-recreate --wait auth-proxy
     local_tool seed
-    "${compose[@]}" up -d --force-recreate auth-proxy
     "${compose[@]}" up -d agent
     for container in "${local_fleets[@]}"; do
       if docker container inspect "$container" >/dev/null 2>&1; then
