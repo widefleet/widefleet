@@ -35,13 +35,16 @@ async function request(url: string, options: RequestInit = {}, acceptedStatuses 
         cache: "no-store",
         signal: AbortSignal.timeout(10_000),
       });
+
+      if (acceptedStatuses.includes(response.status)) {
+        // Receiving headers alone does not mean the sitemap download completed.
+        return { status: response.status, text: await response.text() };
+      }
     } catch (cause) {
       if (attempt === 2) throw new Error(`Request failed: ${url}`, { cause });
       await sleep(1_000 * 2 ** attempt);
       continue;
     }
-
-    if (acceptedStatuses.includes(response.status)) return response;
 
     const status = response.status;
     const retryAfter = response.headers.get("retry-after");
@@ -95,9 +98,8 @@ export async function deployWithIndexNow(options: IndexNowOptions, deploy: () =>
   const previous =
     previousResponse.status === 404
       ? new Map<string, string>()
-      : parseSitemap(await previousResponse.text());
+      : parseSitemap(previousResponse.text);
 
-  if (previousResponse.status === 404) await previousResponse.body?.cancel();
   validateScope(previous, options);
 
   const urls = changedUrls(previous, next);
@@ -127,7 +129,7 @@ export async function deployWithIndexNow(options: IndexNowOptions, deploy: () =>
 
     for (let attempt = 0; attempt < 3; attempt++) {
       const response = await request(options.sitemapUrl);
-      const live = parseSitemap(await response.text());
+      const live = parseSitemap(response.text);
 
       if (changedUrls(live, next).length === 0) {
         published = true;
@@ -140,7 +142,7 @@ export async function deployWithIndexNow(options: IndexNowOptions, deploy: () =>
     if (!published) throw new Error("The deployed sitemap does not match the new build.");
 
     const publishedKey = await request(payload.keyLocation)
-      .then((response) => response.text())
+      .then((response) => response.text)
       .catch(() => {
         // Request errors contain the URL, which would disclose the key in logs.
         throw new Error("The IndexNow verification file could not be fetched.");
@@ -159,8 +161,6 @@ export async function deployWithIndexNow(options: IndexNowOptions, deploy: () =>
       },
       [200, 202],
     );
-
-    await response.body?.cancel();
 
     const result = response.status === 202 ? "received; key validation pending" : "accepted";
 

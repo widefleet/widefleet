@@ -33,6 +33,7 @@ async function createFixture() {
     postStatus: 200,
     keyStatus: 200,
     retryOnce: false,
+    dropSitemapPhase: "",
     key: "synthetic-indexnow-key",
     requests,
     submissions,
@@ -60,6 +61,15 @@ async function createFixture() {
     if (request.url?.endsWith(".txt")) {
       response.statusCode = state.keyStatus;
       response.end(state.key);
+
+      return;
+    }
+
+    if (state.dropSitemapPhase === (state.published ? "after" : "before")) {
+      state.dropSitemapPhase = "";
+      response.writeHead(200, { "Content-Type": "application/xml", "Content-Length": "1000" });
+      response.write("<urlset>");
+      setTimeout(() => response.destroy(), 25);
 
       return;
     }
@@ -275,6 +285,25 @@ test("reports an IndexNow rejection separately from a successful deployment", as
   assert.equal(fixture.state.published, true);
   assert.equal(fixture.state.submissions.length, 1);
 });
+
+for (const phase of ["before", "after"]) {
+  test(`retries a sitemap body interrupted ${phase} deployment`, async () => {
+    await fixture.prepare([], [["/", "2026-10-16"]]);
+    fixture.state.dropSitemapPhase = phase;
+    await deployWithIndexNow(fixture.options, () => fixture.deploy());
+    assert.equal(fixture.state.dropSitemapPhase, "");
+    assert.equal(fixture.state.submissions.length, 1);
+    assert.deepEqual(fixture.state.requests, [
+      "GET /sitemap-pages.xml",
+      ...(phase === "before"
+        ? ["GET /sitemap-pages.xml", "DEPLOY"]
+        : ["DEPLOY", "GET /sitemap-pages.xml"]),
+      "GET /sitemap-pages.xml",
+      "GET /synthetic-indexnow-key.txt",
+      "POST /indexnow",
+    ]);
+  });
+}
 
 test("does not submit while the deployed sitemap is stale", async () => {
   await fixture.prepare([], [["/", "2026-10-16"]]);
