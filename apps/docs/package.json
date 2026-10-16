@@ -8,7 +8,7 @@
     "dev": "DOCS_POSTHOG_KEY= DOCS_WEBSITE_URL=${DOCS_WEBSITE_URL:-http://localhost:5178} blume dev --host 127.0.0.1 --port 4321",
     "build": "blume build",
     "preview": "pnpm run prepare:deploy && wrangler dev --ip 127.0.0.1 --port 4321",
-    "deploy": "pnpm run prepare:deploy && wrangler deploy",
+    "deploy": "pnpm run prepare:deploy && node scripts/deploy.ts",
     "deploy:preview": "pnpm run prepare:deploy && wrangler preview",
     "typecheck": "tsc --noEmit",
     "doctor": "blume doctor",
@@ -19,6 +19,7 @@
     "blume": "2.1.1"
   },
   "devDependencies": {
+    "fast-xml-parser": "5.11.2",
     "wrangler": "4.147.0"
   }
 }
