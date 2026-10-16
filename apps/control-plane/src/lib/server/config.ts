@@ -57,6 +57,7 @@ export const runtimeConfigurationSchema = z.object({
   APP_HTTPS_PORT: z.coerce.number().int().min(1).max(65535).default(443),
   BETTER_AUTH_SECRET: z.string().min(32).optional(),
   PLATFORM_STATE_DIRECTORY: z.string().min(1).default("/var/lib/widefleet"),
+  PLATFORM_APP_AUTH_URL: telemetryUrl.default("http://auth-proxy:4180"),
   PLATFORM_AUTH_DIRECTORY: z.string().min(1).default("/var/lib/widefleet/auth"),
   PLATFORM_CONFIG_DIRECTORY: z.string().min(1).optional(),
   TLS_MODE: z.enum(["provided", "cloudflare"]).default("provided"),

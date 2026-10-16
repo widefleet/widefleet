@@ -1,0 +1,9 @@
+{
+  "name": "widefleet-auth-proxy",
+  "main": "worker.js",
+  "no_bundle": true,
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": { "AUTH_PROXY_KEY": "__AUTH_PROXY_KEY__" },
+  "kv_namespaces": [{ "binding": "AUTH_CONFIG", "id": "widefleet-auth" }]
+}

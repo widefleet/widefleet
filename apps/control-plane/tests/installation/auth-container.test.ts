@@ -42,22 +42,22 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")("Installed auth p
         'await fetch("http://127.0.0.1:4181/rotate",{method:"POST",body:"rotated-secret"});',
       );
       await fixture.publish({ ...fixture.configuration, clientSecret: "rotated-secret" });
-      expect((await fixture.inspect()).child).toBe(original.child);
+      expect((await fixture.inspect()).process).toBe(original.process);
       expect((await fixture.login()).location).toBe("https://notes.apps.example.test/");
       expect((await fixture.app(login.cookie)).status).toBe(200);
-      // The desired file belongs to management. KV must be sufficient after restart.
-      await fixture.node(
-        'import {unlink} from "node:fs/promises"; await unlink("/auth/desired.json");',
+      expect((await docker("exec", fixture.name, "cat", "/proc/1/comm")).stdout.trim()).toBe(
+        "celld",
       );
-      await docker("restart", "--time", "45", fixture.name);
-      await vi.waitFor(async () => expect((await fixture.inspect()).status.state).toBe("active"), {
-        timeout: 30_000,
-      });
+      await expect(docker("exec", fixture.name, "sh", "-c", "command -v node")).rejects.toThrow();
+      await expect(
+        docker("exec", fixture.name, "test", "-e", "/auth/desired.json"),
+      ).rejects.toThrow();
+      await fixture.restart();
       // Restart only the synthetic upstream; neither an identity provider nor management is running.
       await docker(
         "exec",
         "-d",
-        fixture.name,
+        fixture.client,
         "node",
         "--input-type=module",
         "--eval",

@@ -20,6 +20,7 @@ x-local: &local
     BETTER_AUTH_SECRET: local-demo-only-never-use-in-a-real-installation
     PLATFORM_STATE_DIRECTORY: /data/platform
     PLATFORM_AUTH_DIRECTORY: /data/platform/auth
+    PLATFORM_APP_AUTH_URL: http://127.0.0.1:4180
     CLICKHOUSE_URL: http://clickhouse:8123
     CLICKHOUSE_USER: widefleet_reader
     CLICKHOUSE_PASSWORD: local-reader-only
@@ -104,9 +105,10 @@ services:
   auth-proxy:
     <<: *local
     network_mode: service:proxy
-    command: ["node", "tools/sso-supervisor.ts"]
+    command: ["sh", "/workspace/infra/sso/entrypoint.sh"]
     environment:
       <<: *environment
+      AUTH_PROXY_SOURCE_DIRECTORY: /workspace/infra/sso
       PROXY_RUNTIME_DIRECTORY: /data/auth-runtime
       AUTH_PROXY_WORKER: /workspace/packages/auth-proxy/dist/worker.js
       CELLD_BUCKET: s3://local-fleets/auth-proxy

@@ -8,16 +8,19 @@ import {
 import { build } from "esbuild";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { vi, expect } from "vitest";
 import { z } from "zod";
-import { activationStatus } from "@platform/contracts";
+import { activationStatus, identitySettingsInput } from "@platform/contracts";
 import { authConfiguration } from "@platform/auth-proxy";
-import { configurationRevision, authControlPath } from "@platform/auth-proxy/publication";
+import { authControlPath } from "@platform/auth-proxy/publication";
+
+import { createAppSignIn } from "../../src/lib/server/app-sign-in-node.ts";
+import { runtimeConfigurationSchema } from "../../src/lib/server/config.ts";
 
 const execute = promisify(execFile);
 
@@ -26,8 +29,10 @@ export const docker = (...args: string[]) => execute("docker", args);
 export const installedAuth = async () => {
   const name = `widefleet-auth-test-${randomUUID()}`;
   const directory = await mkdtemp(join(tmpdir(), "widefleet-auth-container-"));
+  const client = `${name}-client`;
   const volume = `${name}-state`;
   const image = process.env["PLATFORM_SSO_IMAGE"] ?? "widefleet-sso:setup-check";
+  let trustedProvider = false;
 
   const s3 = new S3Client({
     endpoint: "http://127.0.0.1:25400",
@@ -58,7 +63,8 @@ export const installedAuth = async () => {
     (
       await docker(
         "exec",
-        name,
+        ...(trustedProvider ? ["--env=NODE_EXTRA_CA_CERTS=/runtime/test-ca.pem"] : []),
+        client,
         "node",
         "--use-system-ca",
         "--input-type=module",
@@ -69,16 +75,18 @@ export const installedAuth = async () => {
       )
     ).stdout.trim();
 
-  const inspect = async () =>
-    z
-      .object({ status: activationStatus, child: z.string() })
-      .parse(
-        JSON.parse(
-          await node(
-            'import {readFile} from "node:fs/promises"; console.log(JSON.stringify({status:JSON.parse(await readFile("/auth/status.json","utf8")),child:(await readFile("/proc/1/task/1/children","utf8")).trim()}));',
-          ),
+  const inspect = async () => ({
+    status: activationStatus.parse(
+      JSON.parse(
+        await node(
+          'import {readFile} from "node:fs/promises"; const key=(await readFile("/auth/control-token","utf8")).trim(); const response=await fetch("http://127.0.0.1:4180' +
+            "/.well-known/widefleet/auth/configuration" +
+            '",{headers:{authorization:"Bearer "+key}}); if(!response.ok)throw new Error("Auth proxy unavailable");console.log(await response.text());',
         ),
-      );
+      ),
+    ),
+    process: (await docker("exec", name, "cat", "/proc/1/stat")).stdout.split(" ")[21],
+  });
 
   const control = async (path: string, method: string, body?: string) =>
     z
@@ -86,7 +94,7 @@ export const installedAuth = async () => {
       .parse(
         JSON.parse(
           await node(
-            'import {readFile} from "node:fs/promises"; const key=await readFile("/auth/control-token","utf8"); const response=await fetch("http://127.0.0.1:4180"+process.argv[1],{method:process.argv[2],headers:{authorization:"Bearer "+key,"content-type":"application/json"},...(process.argv[3]?{body:process.argv[3]}:{})}); console.log(response.status);',
+            'import {readFile} from "node:fs/promises"; const key=(await readFile("/auth/control-token","utf8")).trim(); const response=await fetch("http://127.0.0.1:4180"+process.argv[1],{method:process.argv[2],headers:{authorization:"Bearer "+key,"content-type":"application/json"},...(process.argv[3]?{body:process.argv[3]}:{})}); console.log(response.status);',
             authControlPath + path,
             method,
             body ?? "",
@@ -109,26 +117,53 @@ export const installedAuth = async () => {
   };
 
   const publish = async (input = configuration) => {
-    const revision = await configurationRevision(input);
-    await node(
-      'import {writeFile,rename} from "node:fs/promises"; await writeFile("/auth/desired.tmp",process.argv[1],{mode:384}); await rename("/auth/desired.tmp","/auth/desired.json");',
-      JSON.stringify({ revision, configuration: input }),
+    const origin = `http://${(await docker("port", name, "4180/tcp")).stdout.trim()}`;
+    await writeFile(
+      join(directory, "control-token"),
+      (await docker("exec", name, "cat", "/auth/control-token")).stdout.trim(),
+      { mode: 0o600 },
     );
-    await vi.waitFor(
-      async () => expect((await inspect()).status).toMatchObject({ revision, state: "active" }),
-      { timeout: 20_000 },
+
+    const signIn = createAppSignIn(
+      {
+        ...runtimeConfigurationSchema.parse({
+          DATABASE_URL: "postgres://fixture:fixture@localhost/fixture",
+          PLATFORM_URL: "https://platform.example.test",
+          APP_DOMAIN: input.domain,
+          PLATFORM_APP_AUTH_URL: origin,
+          PLATFORM_AUTH_DIRECTORY: directory,
+        }),
+        ARTIFACT_STORAGE_PROVIDER: "s3",
+      },
+      input.cookieSecret,
     );
+
+    const revision = await signIn.publish(
+      identitySettingsInput.parse({
+        provider: input.provider,
+        management: {
+          clientId: input.clientId,
+          secret: { type: "value", value: input.clientSecret },
+        },
+        apps: { clientId: input.clientId, secret: { type: "value", value: input.clientSecret } },
+        directory: null,
+      }),
+      input.clientSecret,
+      true,
+    );
+
+    expect(await signIn.status()).toMatchObject({ revision, state: "active" });
 
     return revision;
   };
 
   const startProvider = async (tls = false) => {
-    await docker("cp", join(directory, "provider.mjs"), `${name}:/runtime/provider.mjs`);
+    await docker("cp", join(directory, "provider.mjs"), `${client}:/runtime/provider.mjs`);
     await docker(
       "exec",
       "-d",
       ...(tls ? ["--env=OIDC_TLS_DIRECTORY=/runtime"] : []),
-      name,
+      client,
       "node",
       "/runtime/provider.mjs",
     );
@@ -141,6 +176,33 @@ export const installedAuth = async () => {
     );
   };
 
+  const startClient = () =>
+    docker(
+      "run",
+      "-d",
+      "--name",
+      client,
+      "--network",
+      `container:${name}`,
+      "--volumes-from",
+      `${name}:ro`,
+      "node:26.8.2-bookworm-slim@sha256:cd9f682fa2885cd1056e830424764158570061c59736a1da836bc3d73df095ae",
+      "node",
+      "--input-type=module",
+      "--eval",
+      'import {mkdirSync} from "node:fs"; mkdirSync("/runtime",{recursive:true}); setInterval(()=>{},1000);',
+    );
+
+  const restart = async () => {
+    trustedProvider = false;
+    await docker("rm", "--force", client);
+    await docker("restart", "--time", "45", name);
+    await startClient();
+    await vi.waitFor(async () => expect((await inspect()).status.state).toBe("active"), {
+      timeout: 30_000,
+    });
+  };
+
   const start = async () => {
     await docker("volume", "create", volume);
     await docker(
@@ -149,6 +211,8 @@ export const installedAuth = async () => {
       "--name",
       name,
       "--network=internal-app-platform-test_default",
+      "--publish",
+      "127.0.0.1::4180",
       "--volume",
       `${volume}:/auth`,
       "--env",
@@ -163,13 +227,14 @@ export const installedAuth = async () => {
       "AWS_SECRET_ACCESS_KEY=local-tests-only",
       image,
     );
+    await startClient();
     await vi.waitFor(async () => expect((await inspect()).status.state).toBe("waiting"), {
       timeout: 30_000,
     });
     await docker(
       "exec",
       "-d",
-      name,
+      client,
       "node",
       "--input-type=module",
       "--eval",
@@ -211,6 +276,7 @@ export const installedAuth = async () => {
     );
 
   const dispose = async () => {
+    await docker("rm", "--force", client).catch(() => undefined);
     await docker("rm", "--force", name).catch(() => undefined);
     await docker("volume", "rm", volume).catch(() => undefined);
 
@@ -229,6 +295,12 @@ export const installedAuth = async () => {
 
   return {
     name,
+    client,
+    trustProviderCertificate: async (certificate: string) => {
+      await docker("cp", certificate, `${client}:/runtime/test-ca.pem`);
+      trustedProvider = true;
+    },
+    restart,
     directory,
     configuration,
     start,

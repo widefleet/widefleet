@@ -16,7 +16,7 @@ services:
     volumes:
       - platform-state:/var/lib/widefleet
       - edge-config:/var/lib/widefleet/edge
-      - app-auth:/var/lib/widefleet/auth
+      - app-auth:/var/lib/widefleet/auth:ro
     networks: [management, edge]
     healthcheck:
       test:

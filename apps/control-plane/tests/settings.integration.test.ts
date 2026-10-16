@@ -1,11 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { EventEmitter, once } from "node:events";
 import { initializeRuntime } from "../src/lib/server/runtime-initialization.ts";
 import { fileURLToPath } from "node:url";
 import { eq, sql } from "drizzle-orm";
-import { open, readFile, rm, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { installationSettings, settingsInput } from "@platform/contracts";
 import { createAuthentication, companyLoginRevision } from "../src/lib/server/auth.ts";
@@ -16,7 +14,6 @@ import {
   installationId,
   readInstallation,
 } from "../src/lib/server/installation-store.ts";
-import { authBundle } from "../src/lib/server/auth-bundle.ts";
 import { createRecoveryLink } from "../src/lib/server/recovery.ts";
 import { createIdentityService } from "../src/lib/server/identity.ts";
 import { createTestEnvironment } from "./environment.ts";
@@ -133,16 +130,9 @@ describe("Platform setup and managed settings", () => {
       "replacement-management-secret",
     );
 
-    const bundle = authBundle.parse(
-      JSON.parse(
-        await readFile(
-          join(environment.configuration.PLATFORM_AUTH_DIRECTORY, "desired.json"),
-          "utf8",
-        ),
-      ),
-    );
+    const bundle = environment.authControl.read();
 
-    expect(bundle.configuration.clientSecret).toBe("private-management-secret");
+    expect(bundle.configuration?.clientSecret).toBe("private-management-secret");
     expect(await environment.database.db.select().from(installationSecrets)).toHaveLength(2);
   });
 
@@ -172,63 +162,42 @@ describe("Platform setup and managed settings", () => {
     await environment.settings.update(principal(), { ...current, acknowledgeRestart: false }, true);
     expect((await input()).identity?.apps.clientId).toBe("replacement-app-client");
 
-    const bundle = authBundle.parse(
-      JSON.parse(
-        await readFile(
-          join(environment.configuration.PLATFORM_AUTH_DIRECTORY, "desired.json"),
-          "utf8",
-        ),
-      ),
-    );
+    const bundle = environment.authControl.read();
 
-    expect(bundle.configuration.clientId).toBe("replacement-app-client");
-    expect(bundle.configuration.clientSecret).toBe("rotated-app-secret");
+    expect(bundle.configuration?.clientId).toBe("replacement-app-client");
+    expect(bundle.configuration?.clientSecret).toBe("rotated-app-secret");
   });
 
-  it("cannot overwrite a completed update with an older delayed publication", async () => {
+  it("reads installed status without publishing and reports unavailable or unapplied settings", async () => {
     const current = await input();
+    const before = environment.authControl.read().publications;
+    await environment.settings.resolve();
+    await environment.settings.read(principal());
+    expect(environment.authControl.read().publications).toBe(before);
 
     if (!current.identity) throw new Error("Expected configured identity");
-    const directory = environment.configuration.PLATFORM_AUTH_DIRECTORY;
-    const path = join(directory, "desired.json");
-    await rm(path);
-    await promisify(execFile)("mkfifo", [path]);
-    // Pause the older publication at its existing-file read while another request
-    // saves settings. No external secret source is involved.
-    const older = environment.settings.resolve();
-    const writer = await open(path, "w");
+    current.identity.apps.clientId = "not-yet-installed-client";
+    environment.authControl.available(false);
 
     try {
-      current.identity.directory = null;
-      current.identity.apps.secret = { type: "value", value: "replacement-app-secret" };
-      current.identity.apps.clientId = "latest-client";
-
-      const updated = environment.settings.update(
-        principal(),
-        { ...current, acknowledgeRestart: true },
-        true,
-      );
-
-      await vi.waitFor(async () => {
-        expect(
-          (await readInstallation(environment.database.db)).settings.identity?.apps.clientId,
-        ).toBe("latest-client");
-      });
-      await writer.writeFile("{}");
-      await writer.close();
-      const [previous] = await Promise.all([older, updated]);
-      expect(previous.identity).not.toBeNull();
-      expect(previous.error).toBeNull();
-
-      const bundle = authBundle.parse(
-        JSON.parse(await readFile(join(directory, "desired.json"), "utf8")),
-      );
-
-      expect(bundle).toHaveProperty("configuration.clientId", "latest-client");
+      expect((await environment.settings.read(principal())).activation.state).toBe("failed");
+      expect(
+        (
+          await environment.settings.update(
+            principal(),
+            { ...current, acknowledgeRestart: false },
+            true,
+          )
+        ).error,
+      ).toBe("App sign-in could not be prepared");
     } finally {
-      await writer.close();
-      await older;
+      environment.authControl.available(true);
     }
+
+    expect((await environment.settings.read(principal())).activation.state).toBe("failed");
+    expect(environment.authControl.read().publications).toBe(before);
+    await environment.settings.update(principal(), { ...current, acknowledgeRestart: false }, true);
+    expect((await environment.settings.read(principal())).activation.state).toBe("active");
   });
 
   it("orders overlapping saves from separate hosted request instances", async () => {
