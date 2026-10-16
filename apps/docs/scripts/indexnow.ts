@@ -50,7 +50,12 @@ async function request(url: string, options: RequestInit = {}, acceptedStatuses 
     const retryAfter = response.headers.get("retry-after");
     await response.body?.cancel();
 
-    const retryable = status === 408 || status === 429 || status >= 500;
+    if (status === 429) {
+      const wait = retryAfter ? `Retry-After: ${retryAfter}` : "wait at least 10 minutes";
+      throw new Error(`HTTP 429 from ${url}. Pause submissions and retry later (${wait}).`);
+    }
+
+    const retryable = status === 408 || status >= 500;
 
     const requestedDelay = retryAfter
       ? Math.max(Number(retryAfter) * 1_000 || Date.parse(retryAfter) - Date.now(), 0)

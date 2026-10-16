@@ -59,6 +59,8 @@ An unreadable or invalid previous sitemap stops deployment before Wrangler runs.
 curl --fail-with-body --json @indexnow-pending.json https://www.bing.com/indexnow
 ```
 
+HTTP 429 stops automatic retries. Retry the pending batch no earlier than the reported `Retry-After`; if absent, wait at least 10 minutes.
+
 HTTP 200 confirms submission; HTTP 202 means key validation is still pending. Rebuilding an unchanged sitemap does not resend the failed batch.
 
 For a docs Preview without analytics:

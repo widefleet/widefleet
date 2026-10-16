@@ -31,6 +31,7 @@ async function createFixture() {
     next: "",
     previousStatus: 200,
     postStatus: 200,
+    retryAfter: "",
     keyStatus: 200,
     retryOnce: false,
     dropSitemapPhase: "",
@@ -50,6 +51,8 @@ async function createFixture() {
       });
       request.on("end", () => {
         state.submissions.push(body);
+
+        if (state.retryAfter) response.setHeader("Retry-After", state.retryAfter);
         response.statusCode =
           state.retryOnce && state.submissions.length === 1 ? 503 : state.postStatus;
         response.end();
@@ -274,6 +277,31 @@ test("retries a transient IndexNow error with the same batch", async () => {
   assert.equal(fixture.state.submissions.length, 2);
   assert.equal(fixture.state.submissions[0], fixture.state.submissions[1]);
 });
+
+for (const retryAfter of ["", "600", "Fri, 16 Oct 2026 14:00:00 GMT"]) {
+  test(`stops on rate limiting and preserves recovery instructions (${retryAfter || "no Retry-After"})`, async () => {
+    await fixture.prepare([], [["/", "2026-10-16"]]);
+    fixture.state.postStatus = 429;
+    fixture.state.retryAfter = retryAfter;
+    await assert.rejects(
+      deployWithIndexNow(fixture.options, () => fixture.deploy()),
+      (error: Error) => {
+        assert.match(error.message, /Deployment succeeded, but IndexNow/);
+        assert.ok(error.cause instanceof Error);
+        assert.match(error.cause.message, /HTTP 429/);
+        assert.ok(
+          error.cause.message.includes(
+            retryAfter ? `Retry-After: ${retryAfter}` : "wait at least 10 minutes",
+          ),
+        );
+
+        return true;
+      },
+    );
+    assert.equal(fixture.state.published, true);
+    assert.equal(fixture.state.submissions.length, 1);
+  });
+}
 
 test("reports an IndexNow rejection separately from a successful deployment", async () => {
   await fixture.prepare([], [["/", "2026-10-16"]]);
