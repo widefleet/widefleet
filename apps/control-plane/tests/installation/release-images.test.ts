@@ -162,7 +162,7 @@ it("verifies transported image IDs and rejects a mismatched artifact", async () 
   const { directory, run } = await fixture();
 
   try {
-    for (const component of ["runtime", "agent", "control-plane", "sso"]) {
+    for (const component of ["runtime", "agent", "control-plane"]) {
       await writeFile(join(directory, `${component}.id`), "sha256:tested\n");
     }
 

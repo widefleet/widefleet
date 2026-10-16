@@ -2,7 +2,6 @@
 set -euo pipefail
 
 components=(runtime agent control-plane)
-if [[ -f infra/sso/Dockerfile ]]; then components+=(sso); fi
 
 # Check all destinations and existing bytes before the first push.
 for component in "${components[@]}"; do
