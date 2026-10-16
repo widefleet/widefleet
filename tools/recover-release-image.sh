@@ -2,7 +2,7 @@
 set -euo pipefail
 
 component=${1:?Expected image component}
-case "$component" in runtime|agent|control-plane|sso) ;; *) exit 1 ;; esac
+case "$component" in runtime|agent|control-plane) ;; *) exit 1 ;; esac
 package="$component"
 image="docker.io/widefleet/$package:${VERSION:?}"
 metadata="${RELEASE_IMAGES:?}/$component.registry.json"
