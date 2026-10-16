@@ -175,6 +175,10 @@ export default {
     url.protocol = "https:";
     url.port = "";
     request = new Request(url, request);
+    if (request.headers.get('x-fixture-management') === 'true') {
+      request.headers.delete('x-fixture-management');
+      return env.RUNTIME_MANAGEMENT.fetch(request);
+    }
     if (url.pathname === '/fixture/logs') return Response.json(logRecords);
     if (url.pathname === '/fixture/tcp') {
       const socket = connect(url.searchParams.get('address'));

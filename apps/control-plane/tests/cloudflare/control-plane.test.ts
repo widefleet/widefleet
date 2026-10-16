@@ -50,12 +50,11 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
       entry,
       `
       import application from ${JSON.stringify(configuration.main)};
-      import { createAuthHandler } from ${JSON.stringify(fileURLToPath(import.meta.resolve("@platform/auth-proxy/worker")))};
+      import { manageAuthConfiguration } from ${JSON.stringify(fileURLToPath(import.meta.resolve("@platform/auth-proxy/worker")))};
       import { WorkerEntrypoint, WorkflowEntrypoint } from 'cloudflare:workers';
       export class AppRuntime extends WorkerEntrypoint {
         fetch(request) {
-          return createAuthHandler({ AUTH_CONFIG: this.env.AUTH_CONFIG, WIDEFLEET_CONTROL_TOKEN: this.env.APP_RUNTIME_TOKEN },
-            async () => new Response("No apps installed", { status: 404 })).fetch(request);
+          return manageAuthConfiguration(request, { AUTH_CONFIG: this.env.AUTH_CONFIG, WIDEFLEET_CONTROL_TOKEN: this.env.WIDEFLEET_CONTROL_TOKEN });
         }
       }
       export class AcceptedDeployment extends WorkflowEntrypoint {
@@ -78,7 +77,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
         },
         vars: {
           ...environment.environment,
-          APP_RUNTIME_TOKEN: "local-control-plane-auth-key-never-deploy",
+          WIDEFLEET_CONTROL_TOKEN: "local-control-plane-auth-key-never-deploy",
           APP_COOKIE_SECRET: Buffer.alloc(32, 1).toString("base64url"),
         },
         services: [

@@ -415,6 +415,7 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
           vars: {
             PRIVATE_ROOT_SECRET: "must-not-be-visible",
             WIDEFLEET_CONTROL_TOKEN: authToken,
+            WIDEFLEET_MANAGEMENT_HTTP: "true",
             WIDEFLEET_CONFIGURATION: JSON.stringify({
               crons: { "* * * * *": ["fixture.apps.example.test"] },
               queues: {

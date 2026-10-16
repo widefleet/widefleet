@@ -271,6 +271,7 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
           vars: {
             PLATFORM_SECRET: "synthetic-host-only",
             WIDEFLEET_CONTROL_TOKEN: authToken,
+            WIDEFLEET_MANAGEMENT_HTTP: "true",
             WIDEFLEET_CONFIGURATION: '{"crons":{},"queues":{}}',
           },
           worker_loaders: [{ binding: "WIDEFLEET_LOADER" }],

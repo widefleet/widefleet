@@ -92,8 +92,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
     const headers = new Headers(init?.headers);
     headers.set("cookie", identity.cookie);
 
-    if (path === "/.well-known/widefleet/ready")
-      headers.set("authorization", `Bearer ${controlToken}`);
+    if (path.startsWith("/.well-known/widefleet/")) headers.set("x-fixture-management", "true");
 
     return worker.fetch(`https://${host}${path}`, {
       ...init,
@@ -216,6 +215,11 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
         },
         migrations: [{ tag: "v1", new_sqlite_classes: ["CloudflareWorkflowCatalog"] }],
         services: [
+          {
+            binding: "RUNTIME_MANAGEMENT",
+            service: "widefleet-runtime-test",
+            entrypoint: "RuntimeManagement",
+          },
           { binding: "CONNECTOR", service: "widefleet-runtime-test", entrypoint: "Connector" },
         ],
         workflows: [
@@ -232,7 +236,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
       (
         await worker.fetch("https://auth.example.test/.well-known/widefleet/auth/configuration", {
           method: "PUT",
-          headers: { authorization: `Bearer ${controlToken}` },
+          headers: { "x-fixture-management": "true" },
           body: JSON.stringify(identity.configuration),
         })
       ).status,
@@ -257,12 +261,17 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
       "/.well-known/widefleet/workflows",
       "/.well-known/widefleet/auth/configuration",
     ]) {
-      for (const authorization of ["", "Bearer undefined", "Bearer invalid"]) {
+      for (const authorization of [
+        "",
+        "Bearer undefined",
+        "Bearer invalid",
+        `Bearer ${controlToken}`,
+      ]) {
         const response = await worker.fetch(`https://${hostname}${path}`, {
           headers: { authorization },
         });
 
-        expect(response.status).toBe(403);
+        expect(response.status).toBe(404);
       }
     }
 
@@ -273,11 +282,30 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
     expect(forged.status).toBe(401);
     expect(await forged.text()).not.toBe(asset);
 
-    const candidate = await worker.fetch(`https://${hostname}/asset.txt`, {
-      headers: { cookie: identity.cookie, "x-widefleet-candidate": `${app.appId}/${app.version}` },
+    for (const candidate of ["", `${app.appId}/${app.version}`]) {
+      const response = await worker.fetch(`https://${hostname}/asset.txt`, {
+        headers: {
+          cookie: identity.cookie,
+          authorization: `Bearer ${controlToken}`,
+          "x-widefleet-candidate": candidate,
+        },
+      });
+
+      expect(response.status).toBe(404);
+    }
+  });
+
+  it("uses the private service binding without a token and does not forward app requests", async () => {
+    expect(await json("/.well-known/widefleet/runtime")).toEqual({
+      runtimeVersion: release.version,
+    });
+    expect(await json("/.well-known/widefleet/ready")).toMatchObject({ version: app.version });
+
+    const response = await worker.fetch(`https://${hostname}/asset.txt`, {
+      headers: { "x-fixture-management": "true", cookie: identity.cookie },
     });
 
-    expect(candidate.status).toBe(403);
+    expect(response.status).toBe(404);
   });
 
   it("captures actual Dynamic Worker logs with app, preview and version attribution", async () => {
@@ -731,11 +759,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
         await writeFile(join(directory, "runtime.js"), source);
         worker = await start();
 
-        expect(
-          await json("/.well-known/widefleet/runtime", {
-            headers: { authorization: "Bearer runtime-fixture-control-token-never-deploy" },
-          }),
-        ).toEqual({ runtimeVersion: version });
+        expect(await json("/.well-known/widefleet/runtime")).toEqual({ runtimeVersion: version });
         expect(
           await Promise.all(
             [hostname, previewHostname].map((host) => json("/resources", undefined, host)),

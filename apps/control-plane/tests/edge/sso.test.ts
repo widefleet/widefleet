@@ -5,7 +5,11 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { installedAuth, docker } from "../installation/installed-auth.ts";
 import { createCertificates } from "../installation/certificates.ts";
-import { edgeInfrastructure, edgeRoutes } from "../../tools/edge-configuration.ts";
+import {
+  edgeInfrastructure,
+  edgeRoutes,
+  publicAppRequest,
+} from "../../tools/edge-configuration.ts";
 
 describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")(
   "Traefik with the installed auth proxy",
@@ -51,7 +55,7 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")(
             routers: {
               ...routes.http.routers,
               app: {
-                rule: "Host(`notes.apps.example.test`)",
+                rule: `Host(\`notes.apps.example.test\`) && ${publicAppRequest}`,
                 entryPoints: ["websecure"],
                 service: "app-sso",
                 tls: {},
@@ -175,10 +179,35 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")(
           headers: { cookie: "management=preserved" },
         });
         expect(management.headers["set-cookie"]).toEqual(["management-cookie=preserved"]);
-        expect(
-          (await request("auth.apps.example.test", {}, "/.well-known/widefleet/auth/configuration"))
-            .status,
-        ).toBe(403);
+        const token = (await readFile(join(fixture.directory, "control-token"), "utf8")).trim();
+
+        for (const hostname of ["auth.apps.example.test", "notes.apps.example.test"]) {
+          for (const path of [
+            "/.well-known/widefleet/auth/configuration",
+            "/.well-known/widefleet/runtime",
+            "/.well-known/widefleet/ready",
+            "/.well-known/widefleet/workflows",
+          ]) {
+            for (const authorization of ["", `Bearer ${token}`])
+              expect(
+                (await request(hostname, { authorization, cookie: login.cookie }, path)).status,
+              ).toBe(404);
+          }
+
+          for (const candidate of ["", "forged/version"])
+            expect(
+              (
+                await request(hostname, {
+                  authorization: `Bearer ${token}`,
+                  cookie: login.cookie,
+                  "x-widefleet-candidate": candidate,
+                })
+              ).status,
+            ).toBe(404);
+        }
+
+        // The public routing restriction must not disable the private API.
+        expect((await fixture.inspect()).status.state).toBe("active");
       } finally {
         await docker("rm", "--force", proxy).catch(() => undefined);
         await fixture.dispose();

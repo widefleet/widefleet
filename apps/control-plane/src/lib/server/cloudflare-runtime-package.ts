@@ -33,15 +33,13 @@ export const cloudflareRuntimeUpload = (release: z.infer<typeof contract.runtime
 };
 
 export const readCloudflareRuntimeVersion = async (
-  bindings: Pick<CloudflareBindings, "APP_RUNTIME" | "APP_RUNTIME_TOKEN">,
+  bindings: Pick<CloudflareBindings, "APP_RUNTIME">,
 ) => {
-  if (!bindings.APP_RUNTIME || !bindings.APP_RUNTIME_TOKEN)
-    throw new Error("App runtime is not configured");
+  if (!bindings.APP_RUNTIME) throw new Error("App runtime is not configured");
 
   const response = await bindings.APP_RUNTIME.fetch(
     "https://runtime.internal/.well-known/widefleet/runtime",
     {
-      headers: { authorization: `Bearer ${bindings.APP_RUNTIME_TOKEN}` },
       redirect: "manual",
     },
   );

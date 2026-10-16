@@ -18,7 +18,6 @@ export interface CloudflareBindings {
   CLOUDFLARE_ACCOUNT_ID?: string;
   CLOUDFLARE_API_TOKEN?: string;
   APP_RUNTIME_NAME?: string;
-  APP_RUNTIME_TOKEN?: string;
   PLATFORM_USAGE_REPORTING?: string;
   PLATFORM_CRASH_REPORTING?: string;
 }

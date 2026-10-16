@@ -20,7 +20,13 @@
       "class_name": "DeploymentWorkflow",
     },
   ],
-  "services": [{ "binding": "APP_RUNTIME", "service": "widefleet-app-runtime" }],
+  "services": [
+    {
+      "binding": "APP_RUNTIME",
+      "service": "widefleet-app-runtime",
+      "entrypoint": "RuntimeManagement",
+    },
+  ],
   "vars": {
     "APP_RUNTIME_NAME": "widefleet-app-runtime",
     "CLOUDFLARE_ACCOUNT_ID": "00000000000000000000000000000000",

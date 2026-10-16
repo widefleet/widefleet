@@ -21,7 +21,6 @@ export const createCloudflareRemover = (bindings: CloudflareBindings, transport 
       CLOUDFLARE_ACCOUNT_ID: z.string().regex(/^[a-f0-9]{32}$/),
       CLOUDFLARE_API_TOKEN: z.string().min(1),
       APP_RUNTIME_NAME: z.string().min(1),
-      APP_RUNTIME_TOKEN: z.string().min(32),
     })
     .parse(bindings);
 
@@ -105,7 +104,6 @@ export const createCloudflareRemover = (bindings: CloudflareBindings, transport 
           method: "POST",
           redirect: "manual",
           headers: {
-            authorization: `Bearer ${configuration.APP_RUNTIME_TOKEN}`,
             "content-type": "application/json",
           },
           body: JSON.stringify({

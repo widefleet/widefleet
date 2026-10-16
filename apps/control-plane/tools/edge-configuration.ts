@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+export const publicAppRequest =
+  "!PathPrefix(`/.well-known/widefleet/`) && !HeaderRegexp(`X-Widefleet-Candidate`, `.*`)";
+
 const hostname = z.string().regex(/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/);
 
 export const edgeInfrastructure = z
@@ -92,7 +95,7 @@ export const edgeRoutes = (configuration: z.infer<typeof edgeInfrastructure>) =>
               : {},
         },
         "app-sso": {
-          rule: `Host(\`auth.${configuration.APP_DOMAIN}\`) || (HostRegexp(\`^[a-z0-9-]+\\.([a-z0-9-]+\\.)?${domainPattern}$\`) && PathPrefix(\`/oauth2/\`))`,
+          rule: `(Host(\`auth.${configuration.APP_DOMAIN}\`) || (HostRegexp(\`^[a-z0-9-]+\\.([a-z0-9-]+\\.)?${domainPattern}$\`) && PathPrefix(\`/oauth2/\`))) && ${publicAppRequest}`,
           priority: 10000,
           entryPoints: ["websecure"],
           service: "app-sso",

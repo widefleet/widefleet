@@ -1,4 +1,6 @@
-import { createAuthHandler } from "@platform/auth-proxy";
+import { createAuthHandler, manageAuthConfiguration } from "@platform/auth-proxy";
+import { authControlPath } from "@platform/auth-proxy/publication";
+import { WorkerEntrypoint } from "cloudflare:workers";
 import { appEventConfiguration } from "@platform/contracts";
 import { publishedApp } from "@platform/contracts";
 import { z } from "zod";
@@ -86,8 +88,6 @@ const dispatchApp = async (
   let app;
 
   if (candidate) {
-    if (!managementRequest(request, environment)) return new Response(null, { status: 403 });
-
     const [appId, version] = z
       .tuple([publishedApp.shape.appId, publishedApp.shape.version])
       .parse(candidate.split("/"));
@@ -149,57 +149,81 @@ const dispatchApp = async (
   );
 };
 
+const isManagementRequest = (request: Request) =>
+  new URL(request.url).pathname.startsWith("/.well-known/widefleet/") ||
+  request.headers.has("x-widefleet-candidate");
+
+const manageRuntime = async (
+  request: Request,
+  environment: ParentEnvironment,
+  context: ExecutionContext,
+) => {
+  const url = new URL(request.url);
+
+  if (url.pathname === "/.well-known/widefleet/runtime") {
+    return Response.json({ runtimeVersion: WIDEFLEET_RUNTIME_VERSION });
+  }
+
+  if (url.pathname === "/.well-known/widefleet/workflows") {
+    if (request.method !== "POST") return new Response(null, { status: 403 });
+
+    try {
+      const input = z
+        .strictObject({
+          appId: z.uuid(),
+          hostname: z.string(),
+          requestId: z.uuid(),
+          request: z.union([workflowRequest, z.strictObject({ action: z.literal("purge") })]),
+        })
+        .parse(await request.json());
+
+      const catalog = workflowCatalog(environment, input.appId);
+
+      const result =
+        input.request.action === "purge"
+          ? await catalog.purge()
+          : await catalog.manage(
+              { appId: input.appId, hostname: input.hostname, workflow: input.request.workflow },
+              input.requestId,
+              input.request,
+            );
+
+      return Response.json({ result: workflowJson(result) });
+    } catch (error) {
+      return Response.json(
+        { error: error instanceof Error ? error.message : String(error) },
+        { status: 400 },
+      );
+    }
+  }
+
+  if (url.pathname === "/.well-known/widefleet/ready") {
+    return dispatchApp(request, environment, context, null);
+  }
+
+  if (url.pathname.startsWith(`${authControlPath}/`))
+    return manageAuthConfiguration(request, environment);
+
+  return new Response(null, { status: 404 });
+};
+
+export class RuntimeManagement extends WorkerEntrypoint<ParentEnvironment> {
+  override fetch(request: Request) {
+    return manageRuntime(request, this.env, this.ctx);
+  }
+}
+
 export default {
   async fetch(request: Request, environment: ParentEnvironment, context: ExecutionContext) {
-    const url = new URL(request.url);
+    if (isManagementRequest(request)) {
+      // Only the private native listener accepts token-authenticated HTTP management.
+      // Hosted management is available exclusively through RuntimeManagement.
+      if (environment["WIDEFLEET_MANAGEMENT_HTTP"] !== "true")
+        return new Response(null, { status: 404 });
 
-    if (url.pathname === "/.well-known/widefleet/runtime") {
       if (!managementRequest(request, environment)) return new Response(null, { status: 403 });
 
-      return Response.json({ runtimeVersion: WIDEFLEET_RUNTIME_VERSION });
-    }
-
-    if (url.pathname === "/.well-known/widefleet/workflows") {
-      if (request.method !== "POST" || !managementRequest(request, environment))
-        return new Response(null, { status: 403 });
-
-      try {
-        const input = z
-          .strictObject({
-            appId: z.uuid(),
-            hostname: z.string(),
-            requestId: z.uuid(),
-            request: z.union([workflowRequest, z.strictObject({ action: z.literal("purge") })]),
-          })
-          .parse(await request.json());
-
-        const catalog = workflowCatalog(environment, input.appId);
-
-        const result =
-          input.request.action === "purge"
-            ? await catalog.purge()
-            : await catalog.manage(
-                { appId: input.appId, hostname: input.hostname, workflow: input.request.workflow },
-                input.requestId,
-                input.request,
-              );
-
-        return Response.json({ result: workflowJson(result) });
-      } catch (error) {
-        return Response.json(
-          { error: error instanceof Error ? error.message : String(error) },
-          { status: 400 },
-        );
-      }
-    }
-
-    if (
-      url.pathname === "/.well-known/widefleet/ready" ||
-      request.headers.has("x-widefleet-candidate")
-    ) {
-      if (!managementRequest(request, environment)) return new Response(null, { status: 403 });
-
-      return dispatchApp(request, environment, context, null);
+      return manageRuntime(request, environment, context);
     }
 
     return createAuthHandler(environment, (authenticated, appId) =>

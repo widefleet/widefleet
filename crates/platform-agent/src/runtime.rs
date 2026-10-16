@@ -11,7 +11,7 @@ pub fn configuration(release: &RuntimeRelease, token: &str) -> Result<Value> {
         "name": "widefleet", "main": release.main, "no_bundle": true,
         "compatibility_date": "2026-10-01", "compatibility_flags": ["nodejs_compat"],
         "worker_loaders": [{ "binding": "WIDEFLEET_LOADER" }],
-        "vars": { "WIDEFLEET_CONTROL_TOKEN": token, "WIDEFLEET_CONFIGURATION": "{\"crons\":{},\"queues\":{}}" },
+        "vars": { "WIDEFLEET_CONTROL_TOKEN": token, "WIDEFLEET_MANAGEMENT_HTTP": "true", "WIDEFLEET_CONFIGURATION": "{\"crons\":{},\"queues\":{}}" },
         "r2_buckets": [{ "binding": "WIDEFLEET_PACKAGES", "bucket_name": "widefleet-packages" }],
         "kv_namespaces": [{ "binding": "AUTH_CONFIG", "id": "widefleet-auth" }],
         "services": [],

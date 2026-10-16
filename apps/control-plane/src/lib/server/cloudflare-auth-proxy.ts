@@ -13,7 +13,6 @@ export interface AuthProxyBindings {
       body: { cancel: () => Promise<void> } | null;
     }>;
   };
-  APP_RUNTIME_TOKEN?: string;
 }
 
 export const authProxyRequest = async (
@@ -22,15 +21,13 @@ export const authProxyRequest = async (
   method: string,
   body?: string,
 ) => {
-  if (!bindings.APP_RUNTIME || !bindings.APP_RUNTIME_TOKEN)
-    throw new Error("App runtime binding or key is missing");
+  if (!bindings.APP_RUNTIME) throw new Error("App runtime management binding is missing");
 
   const response = await bindings.APP_RUNTIME.fetch(
     `https://auth.invalid${authControlPath}${path}`,
     {
       method,
       headers: {
-        authorization: `Bearer ${bindings.APP_RUNTIME_TOKEN}`,
         "content-type": "application/json",
       },
       body: body ?? null,

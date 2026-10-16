@@ -318,7 +318,7 @@ pub async fn route(configuration: &Configuration, job: &Job) -> Result<()> {
     let tls = route_tls(configuration, job.hostname()?)?;
     let upstream = format!("http://{}:8080", configuration.runtime_container);
     let route = value!({ "http": {
-        "routers": { &name: { "rule": format!("Host(`{}`)", job.hostname()?), "entryPoints": ["websecure"], "tls": tls, "service": &name } },
+        "routers": { &name: { "rule": format!("Host(`{}`) && !PathPrefix(`/.well-known/widefleet/`) && !HeaderRegexp(`X-Widefleet-Candidate`, `.*`)", job.hostname()?), "entryPoints": ["websecure"], "tls": tls, "service": &name } },
         "services": { &name: { "loadBalancer": { "servers": [{ "url": upstream }] } } },
     } });
     let temporary = configuration.routing_directory.join(format!(".{name}.tmp"));

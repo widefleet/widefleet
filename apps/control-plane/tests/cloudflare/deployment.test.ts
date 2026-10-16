@@ -446,10 +446,16 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       return worker.fetch(url, { ...init, headers: Object.fromEntries(headers) });
     };
 
+    const managementFetch = (
+      url: string,
+      init?: { method?: string; body?: string | null; headers?: Record<string, string> },
+    ) =>
+      worker.fetch(url, { ...init, headers: { ...init?.headers, "x-fixture-management": "true" } });
+
     const publishIdentity = async () => {
       expect(
         (
-          await worker.fetch(
+          await managementFetch(
             "https://auth.apps.example.test/.well-known/widefleet/auth/configuration",
             {
               method: "PUT",
@@ -600,7 +606,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       await writeFile(
         join(directory, "fixture.ts"),
         `
-      import runtime from './runtime.js';
+      import runtime, { RuntimeManagement as BaseManagement } from './runtime.js';
       import {WorkerEntrypoint} from 'cloudflare:workers';
       export class WIDEFLEET_CONNECTOR extends WorkerEntrypoint { #value = 'default-connector'; read() { return this.#value; } }
       export class Reader extends WorkerEntrypoint { read() { return 'named-connector'; } }
@@ -628,12 +634,25 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         const url = new URL(request.url);
         return nativeFetch(url.origin === 'https://api.cloudflare.com' ? new Request(${JSON.stringify(apiOrigin)} + url.pathname + url.search, request) : request);
       };
+      export class RuntimeManagement extends BaseManagement {
+        async fetch(request) {
+          const url = new URL(request.url);
+          if (url.pathname === '/.well-known/widefleet/runtime')
+            return nativeFetch(${JSON.stringify(apiOrigin)} + '/fixture-runtime-version', {headers:{authorization:'Bearer local-provisioning-token'}});
+          const response = await super.fetch(request);
+          if (url.pathname === '/.well-known/widefleet/ready' && response.ok) {
+            const version = await nativeFetch(${JSON.stringify(apiOrigin)} + '/fixture-runtime-version?readiness', {headers:{authorization:'Bearer local-provisioning-token'}});
+            return Response.json({...await response.json(), ...await version.json()});
+          }
+          return response;
+        }
+      }
       export default { ...runtime, async fetch(request, env, ctx) {
         const url = new URL(request.url);
         if (url.hostname !== "fixture") { url.protocol = "https:"; url.port = ""; request = new Request(url, request); }
-        if (url.pathname === '/.well-known/widefleet/runtime') {
-          if (request.headers.get('authorization') !== 'Bearer ' + env.APP_RUNTIME_TOKEN) return new Response(null, {status:403});
-          return nativeFetch(${JSON.stringify(apiOrigin)} + '/fixture-runtime-version', {headers:{authorization:'Bearer local-provisioning-token'}});
+        if (request.headers.get('x-fixture-management') === 'true') {
+          request.headers.delete('x-fixture-management');
+          return env.APP_RUNTIME.fetch(request);
         }
         if (url.hostname === 'fixture' && url.pathname === '/runtime') {
           const input = request.method === 'GET' ? null : await request.json();
@@ -790,12 +809,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           }
           return Response.json(await instance.status());
         }
-        const response = await runtime.fetch(request, env, ctx);
-        if (url.pathname === '/.well-known/widefleet/ready' && response.ok) {
-          const version = await nativeFetch(${JSON.stringify(apiOrigin)} + '/fixture-runtime-version?readiness', {headers:{authorization:'Bearer local-provisioning-token'}});
-          return Response.json({...await response.json(), ...await version.json()});
-        }
-        return response;
+        return runtime.fetch(request, env, ctx);
       } };
     `,
       );
@@ -811,7 +825,6 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
             CLOUDFLARE_ACCOUNT_ID: "0".repeat(32),
             CLOUDFLARE_API_TOKEN: "local-provisioning-token",
             APP_RUNTIME_NAME: "fixture-runtime",
-            APP_RUNTIME_TOKEN: token,
             WIDEFLEET_CONTROL_TOKEN: token,
             WIDEFLEET_CONFIGURATION: JSON.stringify({ source: "r2" }),
           },
@@ -867,7 +880,11 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
             })),
           },
           services: [
-            { binding: "APP_RUNTIME", service: "widefleet-deployment-test" },
+            {
+              binding: "APP_RUNTIME",
+              service: "widefleet-deployment-test",
+              entrypoint: "RuntimeManagement",
+            },
             ...["default", "Reader"].map((entrypoint) => {
               const binding = connectorServiceBinding(first.fleetId, "app-connector", entrypoint);
 
@@ -913,8 +930,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
 
     it("publishes hosted sign-in configuration explicitly and keeps reads from replacing it", async () => {
       const service = createCloudflareAppSignIn(environment.configuration, {
-        APP_RUNTIME: { fetch: (url, init) => worker.fetch(url, init) },
-        APP_RUNTIME_TOKEN: token,
+        APP_RUNTIME: { fetch: managementFetch },
         APP_COOKIE_SECRET: Buffer.alloc(32, 1).toString("base64url"),
       });
 
@@ -987,7 +1003,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
 
     it("rejects an auth route for a different app reusing the hostname", async () => {
       const route = (appId: string) =>
-        worker.fetch(
+        managementFetch(
           `https://auth.apps.example.test/.well-known/widefleet/auth/apps/${first.hostname}`,
           {
             method: "PUT",
@@ -2300,7 +2316,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         expect(await response.json()).toEqual([]);
       }
 
-      const catalog = await worker.fetch(
+      const catalog = await managementFetch(
         `https://${preview.hostname}/.well-known/widefleet/workflows`,
         {
           method: "POST",

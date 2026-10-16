@@ -36,7 +36,6 @@ const deploymentConfiguration = z.object({
   CLOUDFLARE_ACCOUNT_ID: z.string().regex(/^[a-f0-9]{32}$/),
   CLOUDFLARE_API_TOKEN: z.string().min(1),
   APP_RUNTIME_NAME: z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/),
-  APP_RUNTIME_TOKEN: z.string().min(32),
 });
 
 const value = <T, E>(result: Result<T, E>) => {
@@ -303,7 +302,6 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               `https://${app.hostname}/.well-known/widefleet/ready`,
               {
                 headers: {
-                  authorization: `Bearer ${configuration.APP_RUNTIME_TOKEN}`,
                   "x-widefleet-candidate": `${app.id}/${version}`,
                 },
                 redirect: "manual",

@@ -27,11 +27,6 @@ const configuration = async (environment: AuthEnvironment) => {
 };
 
 const control = async (request: Request, environment: AuthEnvironment) => {
-  if (
-    environment.WIDEFLEET_CONTROL_TOKEN.length < 32 ||
-    request.headers.get("authorization") !== `Bearer ${environment.WIDEFLEET_CONTROL_TOKEN}`
-  )
-    return reply(403, "Forbidden");
   const path = new URL(request.url).pathname.slice(authControlPath.length);
 
   if (path === "/configuration") {
@@ -86,6 +81,20 @@ const control = async (request: Request, environment: AuthEnvironment) => {
   return reply(404, "Not found");
 };
 
+// The caller must authorize the request or expose this only through a private service binding.
+export const manageAuthConfiguration = async (request: Request, environment: AuthEnvironment) => {
+  try {
+    if (environment.WIDEFLEET_CONTROL_TOKEN.length < 32)
+      throw new Error("Auth configuration encryption key is missing or too short");
+
+    return await control(request, environment);
+  } catch {
+    console.error("Auth proxy operation failed", { phase: "control" });
+
+    return reply(503, "Auth configuration could not be applied");
+  }
+};
+
 export const createAuthHandler = (
   environment: AuthEnvironment,
   runApp: (request: Request, appId: string) => Promise<Response>,
@@ -94,13 +103,13 @@ export const createAuthHandler = (
     const url = new URL(request.url);
 
     if (url.pathname.startsWith(`${authControlPath}/`)) {
-      try {
-        return await control(request, environment);
-      } catch {
-        console.error("Auth proxy operation failed", { phase: "control" });
+      if (
+        environment.WIDEFLEET_CONTROL_TOKEN.length < 32 ||
+        request.headers.get("authorization") !== `Bearer ${environment.WIDEFLEET_CONTROL_TOKEN}`
+      )
+        return reply(403, "Forbidden");
 
-        return reply(503, "Auth configuration could not be applied");
-      }
+      return manageAuthConfiguration(request, environment);
     }
 
     let phase = "configuration";
