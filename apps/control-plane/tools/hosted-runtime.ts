@@ -61,7 +61,9 @@ export const deployHostedRuntime = (
       .set({
         runtime: reference,
         appliedRuntime: reference,
-        runtimeJobId: null,
+        // Advance the existing selection marker even without a Workflow job;
+        // commands prepared before this deployment must not replace its runtime.
+        runtimeJobId: crypto.randomUUID(),
       })
       .where(eq(fleets.id, fleet.id));
   });

@@ -105,7 +105,9 @@ export const createCloudflareRuntimeReleases = (
 
       return Result.ok({
         selected,
-        id,
+        // Infrastructure deployments advance the selection marker without
+        // creating a Workflow operation. Only real jobs have a native status.
+        id: operation ? id : null,
         operation,
         versions: (
           await transaction.select().from(runtimeReleases).orderBy(desc(runtimeReleases.createdAt))
