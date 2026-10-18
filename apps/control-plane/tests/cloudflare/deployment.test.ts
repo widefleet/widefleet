@@ -2492,9 +2492,16 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
     const selectRuntime = async (
       input: z.infer<typeof contract.runtimeRelease> | { version: string },
     ) => {
+      // Wrangler forwards bodies as streams; retain the known length of the release.
+      const payload = JSON.stringify(input);
+
       const response = await worker.fetch("http://fixture/runtime", {
         method: "POST",
-        body: JSON.stringify(input),
+        headers: {
+          "content-type": "application/json",
+          "content-length": String(Buffer.byteLength(payload)),
+        },
+        body: payload,
       });
 
       const body: unknown = await response.json();
@@ -2607,9 +2614,15 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         ],
         ["/runtime", { version: "98.0.0" }, "This runtime version has not been installed"],
       ] as const) {
+        const payload = JSON.stringify(input);
+
         const response = await worker.fetch(`http://fixture${path}`, {
           method: "POST",
-          body: JSON.stringify(input),
+          headers: {
+            "content-type": "application/json",
+            "content-length": String(Buffer.byteLength(payload)),
+          },
+          body: payload,
         });
 
         expect(await response.json()).toEqual({ error });
