@@ -7,7 +7,6 @@ import { DatabaseSync } from "node:sqlite";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { once } from "node:events";
-import { channel } from "node:diagnostics_channel";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -111,28 +110,6 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
     let runtimeUploadMode = "normal";
     let runtimeUploads = 0;
     let runtimeVersionUnavailable = false;
-
-    const transportChannels = ["create", "bodySent", "headers", "trailers", "error"].map((event) =>
-      channel(`undici:request:${event}`),
-    );
-
-    const logRuntimeTransport = ((message, name) => {
-      const parsed = z
-        .object({ request: z.object({ method: z.string(), path: z.string() }) })
-        .safeParse(message);
-
-      if (
-        parsed.success &&
-        parsed.data.request.method === "POST" &&
-        parsed.data.request.path.startsWith("/runtime")
-      )
-        console.error(
-          "runtime transport",
-          String(name),
-          parsed.data.request.path,
-          performance.now(),
-        );
-    }) satisfies Parameters<ReturnType<typeof channel>["subscribe"]>[0];
 
     const api = createServer((request, response) => {
       const handle = async () => {
@@ -614,7 +591,6 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
     };
 
     beforeAll(async () => {
-      for (const transport of transportChannels) transport.subscribe(logRuntimeTransport);
       identity = await runtimeIdentity("example.test", [
         "engineering",
         "support",
@@ -694,10 +670,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           return env.APP_RUNTIME.fetch(request);
         }
         if (url.hostname === 'fixture' && url.pathname === '/runtime') {
-          const started = Date.now();
-          console.error('runtime fixture received', request.method, url.search);
           const input = request.method === 'GET' ? null : await request.json();
-          console.error('runtime fixture parsed', Date.now() - started);
           const result = await withCloudflareDatabase(env, ({db}) => {
             const storage = createArtifactStorage(createR2Storage(env.ARTIFACTS));
             const deployments = {
@@ -710,10 +683,8 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
             };
             const service = createRuntimeReleaseService(db, storage, createCloudflareExecution({...env, DEPLOYMENTS:deployments}, db, storage));
             const principal = {id:'fixture-owner',admin:!url.searchParams.has('nonadmin')};
-            const operation = input === null ? service.read(principal) : 'modules' in input ? service.install(principal,input) : service.rollback(principal,input);
-            return operation.then(result => {console.error('runtime fixture service completed', Date.now() - started); return result;});
+            return input === null ? service.read(principal) : 'modules' in input ? service.install(principal,input) : service.rollback(principal,input);
           });
-          console.error('runtime fixture database closed', Date.now() - started);
           return Response.json(result.isErr() ? {error:result.error.message} : result.value, {status:result.isErr()?400:200});
         }
         if (url.hostname === 'fixture' && url.pathname === '/prepare-connector') {
@@ -963,7 +934,6 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       await seed(lostResponse);
     }, 45_000);
     afterAll(async () => {
-      for (const transport of transportChannels) transport.unsubscribe(logRuntimeTransport);
       await worker?.stop();
       api.close();
 
@@ -2598,12 +2568,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
     }, 20000);
 
     it("rejects runtime changes by nonadministrators, incompatible releases and unavailable rollback versions", async () => {
-      const started = performance.now();
       const before = runtimeUploads;
       const unauthorized = await worker.fetch("http://fixture/runtime?nonadmin");
       expect(await unauthorized.json()).toEqual({ error: "Administrator permission is required" });
       expect(unauthorized.status).toBe(400);
-      console.log("runtime validation GET", performance.now() - started);
 
       for (const [path, input, error] of [
         ["/runtime?nonadmin", runtimeRelease("99.4.0"), "Administrator permission is required"],
@@ -2627,7 +2595,6 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
 
         expect(await response.json()).toEqual({ error });
         expect(response.status).toBe(400);
-        console.log("runtime validation POST", path, performance.now() - started);
       }
 
       expect(runtimeUploads).toBe(before);
@@ -2636,7 +2603,6 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         activeVersion: "99.3.0",
         state: "succeeded",
       });
-      console.log("runtime validation status", performance.now() - started);
     });
 
     it("uses the confirmed runtime for an app deployment accepted before a runtime rollback", async () => {
