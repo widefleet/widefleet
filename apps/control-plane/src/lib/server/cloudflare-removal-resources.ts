@@ -58,7 +58,8 @@ export const removeCloudflareResource = async (
 
   const remove = async (operation: string, run: () => Promise<Response>) => {
     try {
-      await call(operation, run);
+      const response = await call(operation, run);
+      await response.body?.cancel();
     } catch (error) {
       if (!(error instanceof CloudflareApiError) || error.status !== 404) throw error;
     }

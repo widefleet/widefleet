@@ -80,6 +80,33 @@ describe("Hosted app resource removal", () => {
     );
   });
 
+  it("releases a successful delete response body before completing the resource removal", async () => {
+    let cancelled = false;
+
+    const api = provisioner(async (input, init) => {
+      const request = new Request(input, init);
+
+      if (request.method === "GET")
+        return Response.json({
+          success: true,
+          result: [{ queue_id: "owned-id", queue_name: "owned" }],
+        });
+
+      expect(request.method).toBe("DELETE");
+
+      return new Response(
+        new ReadableStream({
+          cancel() {
+            cancelled = true;
+          },
+        }),
+      );
+    });
+
+    expect(await removeCloudflareResource(api, { kind: "queue", name: "owned" })).toBe(true);
+    expect(cancelled).toBe(true);
+  });
+
   it("accepts queue deletion without a result envelope and does not recreate an absent queue", async () => {
     let present = true;
     const methods: string[] = [];
