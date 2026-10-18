@@ -7,6 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { once } from "node:events";
+import { channel } from "node:diagnostics_channel";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -110,6 +111,28 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
     let runtimeUploadMode = "normal";
     let runtimeUploads = 0;
     let runtimeVersionUnavailable = false;
+
+    const transportChannels = ["create", "bodySent", "headers", "trailers", "error"].map((event) =>
+      channel(`undici:request:${event}`),
+    );
+
+    const logRuntimeTransport = ((message, name) => {
+      const parsed = z
+        .object({ request: z.object({ method: z.string(), path: z.string() }) })
+        .safeParse(message);
+
+      if (
+        parsed.success &&
+        parsed.data.request.method === "POST" &&
+        parsed.data.request.path.startsWith("/runtime")
+      )
+        console.error(
+          "runtime transport",
+          String(name),
+          parsed.data.request.path,
+          performance.now(),
+        );
+    }) satisfies Parameters<ReturnType<typeof channel>["subscribe"]>[0];
 
     const api = createServer((request, response) => {
       const handle = async () => {
@@ -591,6 +614,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
     };
 
     beforeAll(async () => {
+      for (const transport of transportChannels) transport.subscribe(logRuntimeTransport);
       identity = await runtimeIdentity("example.test", [
         "engineering",
         "support",
@@ -939,6 +963,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       await seed(lostResponse);
     }, 45_000);
     afterAll(async () => {
+      for (const transport of transportChannels) transport.unsubscribe(logRuntimeTransport);
       await worker?.stop();
       api.close();
 
