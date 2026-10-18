@@ -61,6 +61,7 @@ describe("Control-plane runtime settings", () => {
     const reads = vi.spyOn(environment.settings, "resolve");
     const request = createRequestRuntime(resolve);
     const [first, simultaneous] = await Promise.all([request(), request()]);
+    await first.auth.$context;
     expect(simultaneous).toBe(first);
     expect(await request()).toBe(first);
     expect(reads).toHaveBeenCalledTimes(1);
@@ -71,6 +72,7 @@ describe("Control-plane runtime settings", () => {
     input.identity.management.secret = { type: "value", value: "changed-within-request" };
     await first.settings.initialize(input);
     const [refreshed, simultaneousRefresh] = await Promise.all([request(), request()]);
+    await refreshed.auth.$context;
     expect(simultaneousRefresh).toBe(refreshed);
     expect(refreshed.configuration.IDENTITY?.management.clientSecret).toBe(
       "changed-within-request",
@@ -84,7 +86,8 @@ describe("Control-plane runtime settings", () => {
 
   it("checks settings again on the next HTTP request even if the previous request was cached", async () => {
     const request = createRequestRuntime(resolve);
-    await request();
+    const first = await request();
+    await first.auth.$context;
     await environment.database.db.delete(installation).where(eq(installation.id, "widefleet"));
     await expect(createRequestRuntime(resolve)()).rejects.toThrow(
       "The installation has not been initialized",
