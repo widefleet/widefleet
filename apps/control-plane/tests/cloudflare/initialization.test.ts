@@ -6,7 +6,9 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { account, oauthClient, user } from "../../src/lib/server/auth-schema.ts";
+import { sql } from "drizzle-orm";
+import { account, oauthClient, oauthResource, user } from "../../src/lib/server/auth-schema.ts";
+import { cliScopes } from "../../src/lib/server/auth-options.ts";
 import { cloudflareConfigurationSchema } from "../../src/lib/server/cloudflare-config.ts";
 import { createDatabase } from "../../src/lib/server/database.ts";
 import { readInstallation } from "../../src/lib/server/installation-store.ts";
@@ -98,5 +100,50 @@ describe("Hosted installation initialization", () => {
       { id: installed.ownerId, email: "owner@example.test" },
     ]);
     expect(await database.db.select().from(oauthClient)).toHaveLength(1);
+    expect(await database.db.select().from(oauthResource)).toMatchObject([
+      {
+        identifier: `${environment.PLATFORM_URL}/api/v1`,
+        allowedScopes: cliScopes,
+        accessTokenTtl: 300,
+        disabled: false,
+      },
+    ]);
   }, 30_000);
+
+  it("updates the resource policy and CLI scopes when initialization runs for an upgrade", async () => {
+    await database.db.update(oauthResource).set({
+      allowedScopes: ["platform:read"],
+      accessTokenTtl: 3600,
+    });
+    await database.db.update(oauthClient).set({ scopes: ["platform:read"] });
+
+    expect((await initialize()).stdout).toContain("Hosted installation initialized");
+    expect(await database.db.select().from(oauthResource)).toMatchObject([
+      { allowedScopes: cliScopes, accessTokenTtl: 300 },
+    ]);
+    expect(await database.db.select().from(oauthClient)).toMatchObject([{ scopes: cliScopes }]);
+  });
+
+  it("exits unsuccessfully if the expected policy was not stored", async () => {
+    await database.db.update(oauthResource).set({ accessTokenTtl: 3600 });
+    await database.db.execute(sql`
+      CREATE FUNCTION fixture_skip_policy_update() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN RETURN OLD; END;
+      $$;
+      CREATE TRIGGER fixture_skip_policy_update BEFORE UPDATE ON oauth_resource
+        FOR EACH ROW EXECUTE FUNCTION fixture_skip_policy_update();
+    `);
+
+    try {
+      const failed = initialize();
+      await expect(failed).rejects.toThrow("CLI resource policy was not initialized");
+      await expect(failed).rejects.toHaveProperty("code", 1);
+      await expect(failed).rejects.toHaveProperty("stdout", "");
+    } finally {
+      await database.db.execute(sql`DROP TRIGGER fixture_skip_policy_update ON oauth_resource`);
+    }
+
+    expect((await initialize()).stdout).toContain("Hosted installation initialized");
+    expect(await database.db.select().from(oauthResource)).toMatchObject([{ accessTokenTtl: 300 }]);
+  });
 });

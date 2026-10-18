@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { installationOrganizationId } from "../organization.ts";
 import { member, organization } from "./auth-schema.ts";
-import type { Database } from "./database.ts";
+import type { Database, DatabaseExecutor } from "./database.ts";
 
 export const initializeOrganization = async (database: Database) => {
   await database
@@ -15,7 +15,7 @@ export const initializeOrganization = async (database: Database) => {
     .onConflictDoNothing();
 };
 
-export const enrollCompanyUser = async (database: Database, userId: string) => {
+export const enrollCompanyUser = async (database: DatabaseExecutor, userId: string) => {
   const [installation] = await database
     .select({ id: organization.id })
     .from(organization)
