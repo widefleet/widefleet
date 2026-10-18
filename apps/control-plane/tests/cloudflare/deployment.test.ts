@@ -2568,19 +2568,26 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
     it("rejects runtime changes by nonadministrators, incompatible releases and unavailable rollback versions", async () => {
       const started = performance.now();
       const before = runtimeUploads;
-      expect((await worker.fetch("http://fixture/runtime?nonadmin")).status).toBe(400);
+      const unauthorized = await worker.fetch("http://fixture/runtime?nonadmin");
+      expect(await unauthorized.json()).toEqual({ error: "Administrator permission is required" });
+      expect(unauthorized.status).toBe(400);
       console.log("runtime validation GET", performance.now() - started);
 
-      for (const [path, input] of [
-        ["/runtime?nonadmin", runtimeRelease("99.4.0")],
-        ["/runtime", { ...runtimeRelease("99.4.0"), cloudflare: undefined }],
-        ["/runtime", { version: "98.0.0" }],
+      for (const [path, input, error] of [
+        ["/runtime?nonadmin", runtimeRelease("99.4.0"), "Administrator permission is required"],
+        [
+          "/runtime",
+          { ...runtimeRelease("99.4.0"), cloudflare: undefined },
+          "This release does not support Cloudflare runtime protocol 1",
+        ],
+        ["/runtime", { version: "98.0.0" }, "This runtime version has not been installed"],
       ] as const) {
         const response = await worker.fetch(`http://fixture${path}`, {
           method: "POST",
           body: JSON.stringify(input),
         });
 
+        expect(await response.json()).toEqual({ error });
         expect(response.status).toBe(400);
         console.log("runtime validation POST", path, performance.now() - started);
       }
