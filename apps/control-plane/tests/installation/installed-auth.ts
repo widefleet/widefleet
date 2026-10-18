@@ -151,10 +151,9 @@ export const installedAuth = async () => {
         directory: null,
       }),
       input.clientSecret,
-      true,
     );
 
-    expect(await signIn.status()).toMatchObject({ revision, state: "active" });
+    expect(await signIn.status(revision)).toMatchObject({ revision, state: "active" });
 
     return revision;
   };

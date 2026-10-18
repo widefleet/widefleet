@@ -61,20 +61,21 @@ export const createRuntime = ({
   let current: ReturnType<typeof snapshot> | undefined;
   let previous = "";
 
-  const snapshot = (active: typeof configuration) => {
+  const snapshot = (active: typeof configuration, ownerId: string | null) => {
     const auth = createAuthentication(active, database.db);
 
     return {
       ...services,
       configuration: active,
+      ownerId,
       auth,
       identity: createIdentityService(auth, database.db, active),
       directory: createDirectory(active),
     };
   };
 
-  return async () => {
-    const resolved = await settings.resolve();
+  return async (loaded?: Awaited<ReturnType<typeof settings.resolve>>) => {
+    const resolved = loaded ?? (await settings.resolve());
 
     const active = {
       ...configuration,
@@ -85,12 +86,37 @@ export const createRuntime = ({
     const fingerprint = JSON.stringify([active.IDENTITY, active.LOCAL_PASSWORD_ENABLED]);
 
     if (!current || previous !== fingerprint) {
-      current = snapshot(active);
+      current = snapshot(active, resolved.state.ownerId);
       previous = fingerprint;
     }
+
+    if (current.ownerId !== resolved.state.ownerId)
+      current = { ...current, ownerId: resolved.state.ownerId };
 
     return current;
   };
 };
 
 export type Runtime = Awaited<ReturnType<ReturnType<typeof createRuntime>>>;
+
+// Each HTTP request shares its first read. A settings write in the same process
+// invalidates that read, including SvelteKit query refreshes after remote commands.
+export const createRequestRuntime = (resolve: () => Promise<Runtime>) => {
+  let pending: Promise<Runtime> | undefined;
+  let current: Runtime | undefined;
+  let revision = -1;
+
+  return () => {
+    if (!pending || (current && current.settings.revision !== revision)) {
+      current = undefined;
+      pending = resolve().then((runtime) => {
+        current = runtime;
+        revision = runtime.settings.revision;
+
+        return runtime;
+      });
+    }
+
+    return pending;
+  };
+};

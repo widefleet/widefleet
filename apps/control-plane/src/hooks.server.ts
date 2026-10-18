@@ -1,5 +1,6 @@
 import { building } from "$app/env";
 import type { Handle, HandleServerError, ServerInit } from "@sveltejs/kit/hooks";
+import { createRequestRuntime } from "#server/runtime-services";
 import { getRuntime } from "#server/runtime-node";
 
 export const init: ServerInit = async () => {
@@ -7,7 +8,7 @@ export const init: ServerInit = async () => {
 };
 
 export const handle: Handle = ({ event, resolve }) => {
-  event.locals.runtime = getRuntime;
+  event.locals.runtime = createRequestRuntime(getRuntime);
 
   return resolve(event);
 };

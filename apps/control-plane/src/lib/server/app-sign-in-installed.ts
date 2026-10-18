@@ -11,28 +11,27 @@ export const createInstalledAppSignIn = (
   request: (method: "GET" | "PUT", body?: string) => Promise<{ text(): Promise<string> }>,
   propagation: "immediate" | "eventual",
 ): AppSignIn => {
-  let expectedRevision = "";
+  const prepare = (identity: Parameters<AppSignIn["publish"]>[0], clientSecret: string) =>
+    authConfiguration.parse({
+      provider: identity.provider,
+      clientId: identity.apps.clientId,
+      clientSecret,
+      cookieSecret,
+      domain: configuration.APP_DOMAIN,
+      redirectUrl: appCallbackUrl(configuration),
+    });
 
   return {
     callbackUrl: appCallbackUrl(configuration),
-    publish: async (identity, clientSecret, force) => {
-      const input = authConfiguration.parse({
-        provider: identity.provider,
-        clientId: identity.apps.clientId,
-        clientSecret,
-        cookieSecret,
-        domain: configuration.APP_DOMAIN,
-        redirectUrl: appCallbackUrl(configuration),
-      });
-
-      expectedRevision = await configurationRevision(input);
-
-      // Reading settings must not overwrite a newer publication or consume KV writes.
-      if (force) await request("PUT", JSON.stringify(input));
+    revision: (identity, clientSecret) => configurationRevision(prepare(identity, clientSecret)),
+    publish: async (identity, clientSecret) => {
+      const input = prepare(identity, clientSecret);
+      const expectedRevision = await configurationRevision(input);
+      await request("PUT", JSON.stringify(input));
 
       return expectedRevision;
     },
-    status: async () => {
+    status: async (expectedRevision) => {
       try {
         const current = activationStatus.parse(JSON.parse(await (await request("GET")).text()));
 

@@ -190,6 +190,7 @@ export const createTestEnvironment = async (
     replacementClient,
     settings,
     owner,
+    ownerId: owner.id,
     ownerSubject,
     environment,
     database,

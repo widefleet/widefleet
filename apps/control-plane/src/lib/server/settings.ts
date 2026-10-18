@@ -10,7 +10,7 @@ import { appCallbackUrl, type AppSignIn } from "./app-sign-in.ts";
 import { companyAccountProvider, companyIdentity } from "./company-identity.ts";
 import { companyLoginRevision, type Authentication } from "./auth.ts";
 import type { Configuration } from "./config.ts";
-import type { Database } from "./database.ts";
+import type { Database, DatabaseExecutor } from "./database.ts";
 import type { Principal } from "./identity.ts";
 import { InvalidOperation } from "./errors.ts";
 import { createInstallationSecrets } from "./installation-secrets.ts";
@@ -34,105 +34,102 @@ export const createSettingsService = (
 ) => {
   const secrets = createInstallationSecrets(database, encryptionKey);
 
-  const resolveCurrent = (force = false) =>
-    database.transaction(
+  let revision = 0;
+
+  const readCurrent = async (transaction: DatabaseExecutor) => {
+    const snapshotSecrets = createInstallationSecrets(transaction, encryptionKey);
+
+    const state = await readInstallation(transaction);
+    const identity = state.settings.identity;
+
+    if (!identity) return { state, identity: null, errors: [] };
+
+    let resolved: z.infer<typeof companyIdentity> | null = null;
+    const errors: string[] = [];
+
+    try {
+      resolved = companyIdentity.parse({
+        provider: identity.provider,
+        management: {
+          clientId: identity.management.clientId,
+          clientSecret: await snapshotSecrets.resolve(identity.management.secret),
+        },
+      });
+    } catch (cause) {
+      errors.push(
+        cause instanceof InvalidOperation
+          ? cause.message
+          : "Management sign-in could not be prepared",
+      );
+    }
+
+    if (identity.directory && resolved) {
+      try {
+        resolved.directory = {
+          clientId: identity.directory.clientId,
+          clientSecret: await snapshotSecrets.resolve(identity.directory.secret),
+        };
+      } catch (cause) {
+        errors.push(
+          cause instanceof InvalidOperation
+            ? cause.message
+            : "The group directory could not be prepared",
+        );
+      }
+    }
+
+    return { state, identity: resolved, errors };
+  };
+
+  const resolve = () =>
+    database.transaction(readCurrent, {
+      isolationLevel: "repeatable read",
+      accessMode: "read only",
+    });
+
+  const inspect = async (publish = false) => {
+    const resolved = await database.transaction(
       async (transaction) => {
-        // Hosted requests have separate service instances. Reuse the settings row
-        // lock so a newer save cannot publish before an older in-flight save.
-        if (force)
+        // Keep publication ordered across hosted requests and self-hosted processes.
+        // Ordinary readers use MVCC and do not wait for this writer's row lock.
+        if (publish)
           await transaction
             .select({ id: installation.id })
             .from(installation)
             .where(eq(installation.id, installationId))
             .for("update");
-        const snapshotSecrets = createInstallationSecrets(transaction, encryptionKey);
+        const current = await readCurrent(transaction);
+        const identity = current.state.settings.identity;
+        let expectedRevision = "";
 
-        const state = await readInstallation(transaction);
-        const identity = state.settings.identity;
-
-        if (!identity) return { state, identity: null, error: null, revision: "" };
-
-        let resolved: z.infer<typeof companyIdentity> | null = null;
-        let revision = "";
-        const errors: string[] = [];
-
-        try {
-          resolved = companyIdentity.parse({
-            provider: identity.provider,
-            management: {
-              clientId: identity.management.clientId,
-              clientSecret: await snapshotSecrets.resolve(identity.management.secret),
-            },
-          });
-        } catch (cause) {
-          errors.push(
-            cause instanceof InvalidOperation
-              ? cause.message
-              : "Management sign-in could not be prepared",
-          );
-        }
-
-        if (identity.directory && resolved) {
+        if (identity && appSignIn) {
           try {
-            resolved.directory = {
-              clientId: identity.directory.clientId,
-              clientSecret: await snapshotSecrets.resolve(identity.directory.secret),
-            };
+            const secret = await createInstallationSecrets(transaction, encryptionKey).resolve(
+              identity.apps.secret,
+            );
+
+            expectedRevision = await appSignIn.revision(identity, secret);
+
+            if (publish) await appSignIn.publish(identity, secret);
           } catch (cause) {
-            errors.push(
+            current.errors.push(
               cause instanceof InvalidOperation
                 ? cause.message
-                : "The group directory could not be prepared",
+                : "App sign-in could not be prepared",
             );
           }
         }
 
-        try {
-          revision = appSignIn
-            ? await appSignIn.publish(
-                identity,
-                await snapshotSecrets.resolve(identity.apps.secret),
-                force,
-              )
-            : "";
-        } catch (cause) {
-          errors.push(
-            cause instanceof InvalidOperation ? cause.message : "App sign-in could not be prepared",
-          );
-        }
-
-        return {
-          state,
-          identity: resolved,
-          error: errors.length ? errors.join(". ") : null,
-          revision,
-        };
+        return { ...current, revision: expectedRevision };
       },
       {
-        isolationLevel: force ? "read committed" : "repeatable read",
-        accessMode: force ? "read write" : "read only",
+        isolationLevel: publish ? "read committed" : "repeatable read",
+        accessMode: publish ? "read write" : "read only",
       },
     );
 
-  // Every request uses the same publisher. A queued read
-  // starts after the preceding publication, so an older read cannot overwrite a completed save.
-  let publication = Promise.resolve();
-
-  const resolve = (force = false) => {
-    const result = publication.then(() => resolveCurrent(force));
-    publication = result.then(
-      () => undefined,
-      () => undefined,
-    );
-
-    return result;
-  };
-
-  const inspect = async (force = false) => {
-    const resolved = await resolve(force);
-
     const current = appSignIn
-      ? await appSignIn.status()
+      ? await appSignIn.status(resolved.revision)
       : {
           revision: "",
           state: "waiting" as const,
@@ -158,7 +155,7 @@ export const createSettingsService = (
         : null,
       appCallbackUrl: appSignIn?.callbackUrl ?? appCallbackUrl(configuration),
       activation,
-      error: resolved.error,
+      error: resolved.errors.length ? resolved.errors.join(". ") : null,
     };
   };
 
@@ -238,10 +235,15 @@ export const createSettingsService = (
         .where(notInArray(installationSecrets.id, referenced));
     });
 
+    revision++;
+
     return inspect(true);
   };
 
   return {
+    get revision() {
+      return revision;
+    },
     resolve,
     inspect,
     initialize: async (input: z.infer<typeof settingsInput>) => {
@@ -290,14 +292,15 @@ export const createSettingsService = (
         })
         .where(eq(installation.id, installationId));
 
+      revision++;
+
       return inspect();
     },
     complete: async (principal: Principal, auth: Authentication, headers: Headers) => {
       requireAdmin(principal);
       const current = await auth.api.getSession({ headers });
-      const state = await readInstallation(database);
-
       const resolved = await resolve();
+      const state = resolved.state;
       const proof = companyLoginRevision({ ...configuration, IDENTITY: resolved.identity });
 
       if (!proof || !state.settings.identity || current?.session.companyConfiguration !== proof)
@@ -321,6 +324,8 @@ export const createSettingsService = (
           .where(inArray(oauthRefreshToken.sessionId, localSessions));
         await transaction.delete(session).where(eq(session.companyConfiguration, ""));
       });
+
+      revision++;
 
       return inspect();
     },

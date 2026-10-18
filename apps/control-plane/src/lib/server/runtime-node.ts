@@ -9,12 +9,7 @@ const startRuntime = async () => {
   const { configuration, database, settings, encryptionKey } = await initializeRuntime();
   const storage = createStorage(configuration);
 
-  const reporting = createReporting(
-    configuration,
-    database.db,
-    fetch,
-    async () => (await settings.resolve()).identity,
-  );
+  const reporting = createReporting(configuration, database.db);
 
   reporting.start();
   process.once("uncaughtException", (error) => {
