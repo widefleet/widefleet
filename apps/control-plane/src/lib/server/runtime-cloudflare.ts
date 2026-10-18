@@ -2,9 +2,8 @@ import { error } from "@sveltejs/kit";
 import { createArtifactStorage } from "./artifact-storage.ts";
 import { readCloudflareConfiguration, type CloudflareBindings } from "./cloudflare-config.ts";
 import { createDatabase } from "./database.ts";
-import { readInstallation } from "./installation-store.ts";
 import { createReporting } from "./reporting.ts";
-import { createRuntime } from "./runtime-services.ts";
+import { createRuntime, createRequestRuntime } from "./runtime-services.ts";
 import { createSettingsService } from "./settings.ts";
 import { createR2Storage } from "./storage/r2.ts";
 import { createCloudflareLogs } from "./cloudflare-logs.ts";
@@ -23,12 +22,7 @@ export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
     createCloudflareAppSignIn(configuration, bindings),
   );
 
-  const reporting = createReporting(
-    configuration,
-    database.db,
-    fetch,
-    async () => (await settings.resolve()).identity,
-  );
+  const reporting = createReporting(configuration, database.db);
 
   const storage = createArtifactStorage(createR2Storage(bindings.ARTIFACTS));
 
@@ -43,22 +37,17 @@ export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
     encryptionKey: configuration.PLATFORM_ENCRYPTION_KEY,
   });
 
-  let initialized: Promise<void> | undefined;
-
-  const verifyInstallation = async () => {
-    if (!(await readInstallation(database.db)).ownerId)
-      error(503, "Initialize the hosted installation before accepting requests");
-  };
-
   return {
-    get: async () => {
-      initialized ??= verifyInstallation();
-      await initialized;
-      const runtime = await resolve();
+    get: createRequestRuntime(async () => {
+      const installed = await settings.resolve();
+
+      if (!installed.state.ownerId)
+        error(503, "Initialize the hosted installation before accepting requests");
+      const runtime = await resolve(installed);
       await runtime.auth.$context;
 
       return runtime;
-    },
+    }),
     close: async () => {
       try {
         await reporting.close();

@@ -4,12 +4,9 @@ import type { z } from "zod";
 
 export interface AppSignIn {
   callbackUrl: string;
-  publish(
-    identity: z.infer<typeof identitySettingsInput>,
-    clientSecret: string,
-    force: boolean,
-  ): Promise<string>;
-  status(): Promise<z.infer<typeof activationStatus>>;
+  publish(identity: z.infer<typeof identitySettingsInput>, clientSecret: string): Promise<string>;
+  revision(identity: z.infer<typeof identitySettingsInput>, clientSecret: string): Promise<string>;
+  status(expectedRevision: string): Promise<z.infer<typeof activationStatus>>;
   plan(
     identity: z.infer<typeof identitySettingsInput> | null,
   ): Promise<z.infer<typeof settingsPlan>>;

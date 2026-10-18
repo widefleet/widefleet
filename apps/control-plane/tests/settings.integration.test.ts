@@ -19,6 +19,7 @@ import { createIdentityService } from "../src/lib/server/identity.ts";
 import { createTestEnvironment } from "./environment.ts";
 import { createSettingsService } from "../src/lib/server/settings.ts";
 import type { AppSignIn } from "../src/lib/server/app-sign-in.ts";
+import { createInstalledAppSignIn } from "../src/lib/server/app-sign-in-installed.ts";
 
 describe("Platform setup and managed settings", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
@@ -217,16 +218,15 @@ describe("Platform setup and managed settings", () => {
           state: "active",
           message: "Fixture",
         }),
-      publish: async (identity, secret, force) => {
-        if (force) {
-          if (identity.apps.clientId === "older-client") {
-            const resumed = once(gate, "resume");
-            gate.emit("paused");
-            await resumed;
-          }
-
-          published.push({ clientId: identity.apps.clientId, secret });
+      revision: (identity) => Promise.resolve(identity.apps.clientId),
+      publish: async (identity, secret) => {
+        if (identity.apps.clientId === "older-client") {
+          const resumed = once(gate, "resume");
+          gate.emit("paused");
+          await resumed;
         }
+
+        published.push({ clientId: identity.apps.clientId, secret });
 
         return identity.apps.clientId;
       },
@@ -278,6 +278,109 @@ describe("Platform setup and managed settings", () => {
     expect((await readInstallation(environment.database.db)).settings.identity?.apps.clientId).toBe(
       "newer-client",
     );
+  });
+
+  it("resolves management settings without reading the app credential", async () => {
+    const original = (await readInstallation(environment.database.db)).settings;
+
+    if (!original.identity) throw new Error("Expected configured identity");
+    const settings = installationSettings.parse(original);
+
+    if (!settings.identity) throw new Error("Expected configured identity");
+    settings.identity.apps.secret = { type: "stored", id: crypto.randomUUID() };
+    await environment.database.db
+      .update(installation)
+      .set({ settings })
+      .where(eq(installation.id, installationId));
+
+    try {
+      const management = await environment.settings.resolve();
+      expect(management.identity?.management.clientId).toBe(original.identity.management.clientId);
+      expect(management.errors).toEqual([]);
+      expect((await environment.settings.inspect()).error).not.toBeNull();
+    } finally {
+      await environment.database.db
+        .update(installation)
+        .set({ settings: original })
+        .where(eq(installation.id, installationId));
+    }
+  });
+
+  it("lets a second settings read finish while an earlier read is still preparing its app status", async () => {
+    const gate = new EventEmitter();
+    const entered = once(gate, "entered");
+    let reads = 0;
+
+    const signIn: AppSignIn = {
+      callbackUrl: "https://auth.apps.localhost/oauth2/callback",
+      plan: () => Promise.resolve({ restartRequired: false, message: "Fixture" }),
+      publish: () => {
+        throw new Error("A read must not publish");
+      },
+      revision: async () => {
+        if (reads++ === 0) {
+          const resumed = once(gate, "resume");
+          gate.emit("entered");
+          await resumed;
+        }
+
+        return "fixture-revision";
+      },
+      status: (revision) => Promise.resolve({ revision, state: "active", message: "Fixture" }),
+    };
+
+    const service = createSettingsService(
+      environment.configuration,
+      environment.database.db,
+      environment.environment.PLATFORM_ENCRYPTION_KEY,
+      signIn,
+    );
+
+    const first = service.inspect();
+    await entered;
+    let completed = false;
+
+    const second = service.inspect().then((view) => {
+      completed = true;
+
+      return view;
+    });
+
+    try {
+      await vi.waitFor(() => expect(completed).toBe(true));
+    } finally {
+      gate.emit("resume");
+      await Promise.all([first, second]);
+    }
+
+    expect((await second).activation.state).toBe("active");
+  });
+
+  it("compares app status with each reader's own expected revision", async () => {
+    const current = await input();
+
+    if (!current.identity) throw new Error("Expected configured identity");
+    let installed = "";
+
+    const service = createInstalledAppSignIn(
+      environment.configuration,
+      Buffer.alloc(32, 1).toString("base64url"),
+      (method) => {
+        expect(method).toBe("GET");
+
+        return Promise.resolve(
+          Response.json({ revision: installed, state: "active", message: "Fixture" }),
+        );
+      },
+      "immediate",
+    );
+
+    const original = await service.revision(current.identity, "original-secret");
+    const changed = await service.revision(current.identity, "changed-secret");
+    installed = changed;
+    const [older, newer] = await Promise.all([service.status(original), service.status(changed)]);
+    expect(older).toMatchObject({ revision: original, state: "failed" });
+    expect(newer).toMatchObject({ revision: changed, state: "active" });
   });
 
   it("renews active normal sessions after the refresh interval", async () => {
