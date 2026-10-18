@@ -108,7 +108,8 @@ if (posthogKey) {
     }),
     posthog({
       key: posthogKey,
-      host: process.env["DOCS_POSTHOG_HOST"]?.trim() || "https://eu.i.posthog.com",
+      host: process.env["DOCS_POSTHOG_HOST"]?.trim() || "/adler",
+      ui_host: "https://eu.posthog.com",
       persistence: "cookie",
       opt_out_capturing_persistence_type: "cookie",
       cookie_expiration: 180,

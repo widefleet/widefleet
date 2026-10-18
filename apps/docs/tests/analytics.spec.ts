@@ -22,10 +22,12 @@ declare global {
         options: { send_instantly: boolean },
       ) => CapturedEvent | undefined;
       config: {
+        api_host: string;
         autocapture: boolean;
         cross_subdomain_cookie: boolean;
         disable_persistence: boolean;
         token: string;
+        ui_host: string;
       };
       get_distinct_id: () => string;
     };
@@ -65,22 +67,29 @@ test.beforeEach(async ({ context }) => {
   await context.route("**/*", async (route) => {
     const url = new URL(route.request().url());
 
-    if (url.hostname === "127.0.0.1" && url.port === (process.env["DOCS_TEST_PORT"] ?? "14321")) {
+    const local =
+      url.hostname === "127.0.0.1" && url.port === (process.env["DOCS_TEST_PORT"] ?? "14321");
+
+    const proxy = local && url.pathname.startsWith("/adler/");
+
+    if (local && !proxy) {
       await route.continue();
 
       return;
     }
 
     analyticsRequests += 1;
+    // Fail on direct SDK or event requests instead of silently mocking a bypass.
+    expect(proxy, `Analytics request bypassed /adler: ${url.href}`).toBe(true);
 
-    if (url.pathname === "/static/array.js") {
+    if (url.pathname === "/adler/static/array.js") {
       sdkLoads += 1;
       await route.fulfill({ contentType: "application/javascript", body: sdk });
 
       return;
     }
 
-    if (url.pathname === "/e/" || url.pathname === "/i/v0/e/") {
+    if (url.pathname === "/adler/e/" || url.pathname === "/adler/i/v0/e/") {
       const body = route.request().postDataBuffer();
 
       if (!body) throw new Error("Expected an analytics request body");
@@ -147,6 +156,8 @@ test("enables visits and interactions only after accepting and remembers consent
     "phc_docs_synthetic_verification",
   );
   expect(await page.evaluate(() => window.posthog?.config.autocapture)).toBe(true);
+  expect(await page.evaluate(() => window.posthog?.config.api_host)).toBe("/adler");
+  expect(await page.evaluate(() => window.posthog?.config.ui_host)).toBe("https://eu.posthog.com");
   expect(await page.evaluate(() => window.posthog?.config.cross_subdomain_cookie)).toBe(false);
   await page.evaluate(() =>
     window.posthog?.capture("search", { query: "synthetic_accepted" }, { send_instantly: true }),
