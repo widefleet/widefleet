@@ -104,6 +104,8 @@ The [Blume patch](../patches/blume@2.1.1.patch) allows the preference bridge to 
 
 Analytics settings are embedded at build time. `DOCS_POSTHOG_KEY` overrides the configured public browser project token; never use a personal API key. An explicitly empty key removes analytics and the consent banner. The dev script always supplies an empty key. For local production previews, disable analytics or use a synthetic test project's token.
 
+The default ingestion host is `/adler`, served by the website's SvelteKit Worker on the shared production origin. Deploy that proxy before publishing this configuration. It forwards events and SDK assets to PostHog EU; `ui_host` stays `https://eu.posthog.com`. Standalone docs Previews do not serve `/adler`: keep analytics disabled there, or set `DOCS_POSTHOG_HOST` to a local test receiver when using a synthetic token.
+
 See the [environment template](../apps/docs/.env.example) for URL and ingestion-host overrides. Blume loads `.env` and `.env.local` from the docs directory and its ancestors to the repository root; process environment values take precedence.
 
 ## Verify maintenance changes
