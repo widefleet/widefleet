@@ -670,7 +670,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           return env.APP_RUNTIME.fetch(request);
         }
         if (url.hostname === 'fixture' && url.pathname === '/runtime') {
+          const started = Date.now();
+          console.error('runtime fixture received', request.method, url.search);
           const input = request.method === 'GET' ? null : await request.json();
+          console.error('runtime fixture parsed', Date.now() - started);
           const result = await withCloudflareDatabase(env, ({db}) => {
             const storage = createArtifactStorage(createR2Storage(env.ARTIFACTS));
             const deployments = {
@@ -683,8 +686,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
             };
             const service = createRuntimeReleaseService(db, storage, createCloudflareExecution({...env, DEPLOYMENTS:deployments}, db, storage));
             const principal = {id:'fixture-owner',admin:!url.searchParams.has('nonadmin')};
-            return input === null ? service.read(principal) : 'modules' in input ? service.install(principal,input) : service.rollback(principal,input);
+            const operation = input === null ? service.read(principal) : 'modules' in input ? service.install(principal,input) : service.rollback(principal,input);
+            return operation.then(result => {console.error('runtime fixture service completed', Date.now() - started); return result;});
           });
+          console.error('runtime fixture database closed', Date.now() - started);
           return Response.json(result.isErr() ? {error:result.error.message} : result.value, {status:result.isErr()?400:200});
         }
         if (url.hostname === 'fixture' && url.pathname === '/prepare-connector') {
@@ -2561,8 +2566,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
     }, 20000);
 
     it("rejects runtime changes by nonadministrators, incompatible releases and unavailable rollback versions", async () => {
+      const started = performance.now();
       const before = runtimeUploads;
       expect((await worker.fetch("http://fixture/runtime?nonadmin")).status).toBe(400);
+      console.log("runtime validation GET", performance.now() - started);
 
       for (const [path, input] of [
         ["/runtime?nonadmin", runtimeRelease("99.4.0")],
@@ -2575,6 +2582,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         });
 
         expect(response.status).toBe(400);
+        console.log("runtime validation POST", path, performance.now() - started);
       }
 
       expect(runtimeUploads).toBe(before);
@@ -2583,6 +2591,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         activeVersion: "99.3.0",
         state: "succeeded",
       });
+      console.log("runtime validation status", performance.now() - started);
     });
 
     it("uses the confirmed runtime for an app deployment accepted before a runtime rollback", async () => {
