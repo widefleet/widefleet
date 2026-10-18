@@ -191,6 +191,7 @@ export const createTestEnvironment = async (
     settings,
     owner,
     ownerId: owner.id,
+    settingsRevision: settings.revision,
     ownerSubject,
     environment,
     database,

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { EventEmitter, once } from "node:events";
 import { eq } from "drizzle-orm";
 import { settingsInput } from "@platform/contracts";
 import { companyLoginRevision } from "../src/lib/server/auth.ts";
@@ -88,6 +89,46 @@ describe("Control-plane runtime settings", () => {
     await expect(createRequestRuntime(resolve)()).rejects.toThrow(
       "The installation has not been initialized",
     );
+  });
+
+  it("refreshes a request when another settings write overlaps its first read", async () => {
+    const gate = new EventEmitter();
+    const captured = once(gate, "captured");
+    const read = environment.settings.resolve;
+
+    const reads = vi.spyOn(environment.settings, "resolve").mockImplementationOnce(async () => {
+      const snapshot = await read();
+      const resumed = once(gate, "resume");
+      gate.emit("captured");
+      await resumed;
+
+      return snapshot;
+    });
+
+    const request = createRequestRuntime(resolve);
+    const pending = request();
+    await captured;
+
+    try {
+      const input = settingsInput.parse((await environment.settings.inspect()).settings);
+
+      if (!input.identity) throw new Error("Expected the fixture's company login");
+      input.identity.management.secret = { type: "value", value: "changed-during-read" };
+      await environment.settings.initialize(input);
+    } finally {
+      gate.emit("resume");
+    }
+
+    const first = await pending;
+    await first.auth.$context;
+    expect(first.configuration.IDENTITY?.management.clientSecret).toBe("local-tests-only");
+    const [refreshed, simultaneous] = await Promise.all([request(), request()]);
+    await refreshed.auth.$context;
+    expect(refreshed.configuration.IDENTITY?.management.clientSecret).toBe("changed-during-read");
+    expect(refreshed.auth).not.toBe(first.auth);
+    expect(simultaneous).toBe(refreshed);
+    expect(await request()).toBe(refreshed);
+    expect(reads).toHaveBeenCalledTimes(2);
   });
 
   it("disables password sign-in on the next resolution after setup closes", async () => {

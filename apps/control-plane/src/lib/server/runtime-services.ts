@@ -61,13 +61,18 @@ export const createRuntime = ({
   let current: ReturnType<typeof snapshot> | undefined;
   let previous = "";
 
-  const snapshot = (active: typeof configuration, ownerId: string | null) => {
+  const snapshot = (
+    active: typeof configuration,
+    ownerId: string | null,
+    settingsRevision: number,
+  ) => {
     const auth = createAuthentication(active, database.db);
 
     return {
       ...services,
       configuration: active,
       ownerId,
+      settingsRevision,
       auth,
       identity: createIdentityService(auth, database.db, active),
       directory: createDirectory(active),
@@ -86,12 +91,19 @@ export const createRuntime = ({
     const fingerprint = JSON.stringify([active.IDENTITY, active.LOCAL_PASSWORD_ENABLED]);
 
     if (!current || previous !== fingerprint) {
-      current = snapshot(active, resolved.state.ownerId);
+      current = snapshot(active, resolved.state.ownerId, resolved.revision);
       previous = fingerprint;
     }
 
-    if (current.ownerId !== resolved.state.ownerId)
-      current = { ...current, ownerId: resolved.state.ownerId };
+    if (
+      current.ownerId !== resolved.state.ownerId ||
+      current.settingsRevision !== resolved.revision
+    )
+      current = {
+        ...current,
+        ownerId: resolved.state.ownerId,
+        settingsRevision: resolved.revision,
+      };
 
     return current;
   };
@@ -104,14 +116,12 @@ export type Runtime = Awaited<ReturnType<ReturnType<typeof createRuntime>>>;
 export const createRequestRuntime = (resolve: () => Promise<Runtime>) => {
   let pending: Promise<Runtime> | undefined;
   let current: Runtime | undefined;
-  let revision = -1;
 
   return () => {
-    if (!pending || (current && current.settings.revision !== revision)) {
+    if (!pending || (current && current.settings.revision !== current.settingsRevision)) {
       current = undefined;
       pending = resolve().then((runtime) => {
         current = runtime;
-        revision = runtime.settings.revision;
 
         return runtime;
       });

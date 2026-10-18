@@ -81,11 +81,17 @@ export const createSettingsService = (
     return { state, identity: resolved, errors };
   };
 
-  const resolve = () =>
-    database.transaction(readCurrent, {
+  const resolve = async () => {
+    // A write overlapping this snapshot must invalidate it, even if it finishes first.
+    const startedRevision = revision;
+
+    const current = await database.transaction(readCurrent, {
       isolationLevel: "repeatable read",
       accessMode: "read only",
     });
+
+    return { ...current, revision: startedRevision };
+  };
 
   const inspect = async (publish = false) => {
     const resolved = await database.transaction(
