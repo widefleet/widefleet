@@ -960,15 +960,15 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         apps: client,
       });
 
-      const original = await service.publish(identity, "fixture-client-secret", false);
-      expect(await service.status()).toMatchObject({ state: "active" });
-      expect(await service.publish(identity, "fixture-client-secret", true)).toBe(original);
-      expect(await service.status()).toMatchObject({ state: "active", revision: original });
+      const original = await service.revision(identity, "fixture-client-secret");
+      expect(await service.status(original)).toMatchObject({ state: "active" });
+      expect(await service.publish(identity, "fixture-client-secret")).toBe(original);
+      expect(await service.status(original)).toMatchObject({ state: "active", revision: original });
 
-      const rotated = await service.publish(identity, "rotated-client-secret", true);
+      const rotated = await service.publish(identity, "rotated-client-secret");
       expect(rotated).not.toBe(original);
-      expect(await service.publish(identity, "fixture-client-secret", false)).toBe(original);
-      expect(await service.status()).toMatchObject({ state: "active", revision: rotated });
+      expect(await service.revision(identity, "fixture-client-secret")).toBe(original);
+      expect(await service.status(rotated)).toMatchObject({ state: "active", revision: rotated });
       expect(await service.plan(identity)).toMatchObject({ restartRequired: false });
       await publishIdentity();
     });
