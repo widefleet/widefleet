@@ -117,7 +117,7 @@ export const createCloudflareEvents = (
     throw new Error("Event registration changed concurrently; retry the deployment");
   };
 
-  const script = `/workers/scripts/${encodeURIComponent(runtimeName)}/schedules`;
+  const { client, account, call } = provisioner;
 
   const syncCrons = () =>
     updateCloudflareSubscription(
@@ -127,16 +127,21 @@ export const createCloudflareEvents = (
       async () =>
         z
           .object({ schedules: z.array(z.object({ cron: z.string() })) })
-          .parse(await provisioner.request(script))
+          .parse(
+            await call("read Worker schedules", () =>
+              client.workers.scripts.schedules.get(runtimeName, account),
+            ),
+          )
           .schedules.map((item) => item.cron)
           .sort(),
       async () => Object.keys((await read()).value.configuration.crons).sort(),
       async (crons) => {
-        await provisioner.request(script, {
-          method: "PUT",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(crons.map((cron) => ({ cron }))),
-        });
+        await call("update Worker schedules", () =>
+          client.workers.scripts.schedules.update(runtimeName, {
+            ...account,
+            body: crons.map((cron) => ({ cron })),
+          }),
+        );
       },
     );
 
@@ -158,7 +163,6 @@ export const createCloudflareEvents = (
           throw new Error("The provisioned app queue is missing");
         }
 
-        const path = `/queues/${encodeURIComponent(native.queue_id)}/consumers`;
         let consumerId: string | null = null;
         await updateCloudflareSubscription(
           database,
@@ -182,7 +186,7 @@ export const createCloudflareEvents = (
                   )
                   .default([]),
               })
-              .parse(await provisioner.request(`/queues/${encodeURIComponent(native.queue_id)}`));
+              .parse(await call("get queue", () => client.queues.get(native.queue_id, account)));
 
             if (
               response.consumers.length > 1 ||
@@ -235,19 +239,24 @@ export const createCloudflareEvents = (
             });
           },
           async (target) => {
+            const id = consumerId;
+
             if (!target) {
-              if (!consumerId) throw new Error("Queue consumer disappeared during removal");
-              await provisioner.request(`${path}/${encodeURIComponent(consumerId)}`, {
-                method: "DELETE",
-              });
+              if (!id) throw new Error("Queue consumer disappeared during removal");
+              await call("delete queue consumer", () =>
+                client.queues.consumers.delete(id, { ...account, queue_id: native.queue_id }),
+              );
+            } else if (id) {
+              await call("update queue consumer", () =>
+                client.queues.consumers.update(id, {
+                  ...account,
+                  queue_id: native.queue_id,
+                  ...target,
+                }),
+              );
             } else {
-              await provisioner.request(
-                consumerId ? `${path}/${encodeURIComponent(consumerId)}` : path,
-                {
-                  method: consumerId ? "PUT" : "POST",
-                  headers: { "content-type": "application/json" },
-                  body: JSON.stringify(target),
-                },
+              await call("create queue consumer", () =>
+                client.queues.consumers.create(native.queue_id, { ...account, ...target }),
               );
             }
           },

@@ -181,7 +181,14 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           } else ok({});
         } else if (url.pathname.endsWith("/d1/database")) {
           if (request.method === "GET") {
-            ok([...createdDatabases].map((name) => ({ name, uuid: databases.get(name) ?? "" })));
+            ok(
+              [...createdDatabases]
+                .map((name) => ({ name, uuid: databases.get(name) ?? "" }))
+                .slice(
+                  (Number(url.searchParams.get("page") ?? 1) - 1) * 100,
+                  Number(url.searchParams.get("page") ?? 1) * 100,
+                ),
+            );
           } else {
             const { name } = z.object({ name: z.string() }).parse(JSON.parse(body));
 
@@ -251,7 +258,15 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
             ok([{ success: true, results: [] }]);
           }
         } else if (url.pathname.endsWith("/storage/kv/namespaces")) {
-          if (request.method === "GET") ok([...namespaces].map(([title, id]) => ({ title, id })));
+          if (request.method === "GET")
+            ok(
+              [...namespaces]
+                .map(([title, id]) => ({ title, id }))
+                .slice(
+                  (Number(url.searchParams.get("page") ?? 1) - 1) * 100,
+                  Number(url.searchParams.get("page") ?? 1) * 100,
+                ),
+            );
           else {
             const { title } = z.object({ title: z.string() }).parse(JSON.parse(body));
             const id = createHash("sha256").update(title).digest("hex").slice(0, 32);
@@ -2447,9 +2462,16 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
     const selectRuntime = async (
       input: z.infer<typeof contract.runtimeRelease> | { version: string },
     ) => {
+      // Wrangler forwards bodies as streams; retain the known length of the release.
+      const payload = JSON.stringify(input);
+
       const response = await worker.fetch("http://fixture/runtime", {
         method: "POST",
-        body: JSON.stringify(input),
+        headers: {
+          "content-type": "application/json",
+          "content-length": String(Buffer.byteLength(payload)),
+        },
+        body: payload,
       });
 
       const body: unknown = await response.json();
@@ -2547,18 +2569,31 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
 
     it("rejects runtime changes by nonadministrators, incompatible releases and unavailable rollback versions", async () => {
       const before = runtimeUploads;
-      expect((await worker.fetch("http://fixture/runtime?nonadmin")).status).toBe(400);
+      const unauthorized = await worker.fetch("http://fixture/runtime?nonadmin");
+      expect(await unauthorized.json()).toEqual({ error: "Administrator permission is required" });
+      expect(unauthorized.status).toBe(400);
 
-      for (const [path, input] of [
-        ["/runtime?nonadmin", runtimeRelease("99.4.0")],
-        ["/runtime", { ...runtimeRelease("99.4.0"), cloudflare: undefined }],
-        ["/runtime", { version: "98.0.0" }],
+      for (const [path, input, error] of [
+        ["/runtime?nonadmin", runtimeRelease("99.4.0"), "Administrator permission is required"],
+        [
+          "/runtime",
+          { ...runtimeRelease("99.4.0"), cloudflare: undefined },
+          "This release does not support Cloudflare runtime protocol 1",
+        ],
+        ["/runtime", { version: "98.0.0" }, "This runtime version has not been installed"],
       ] as const) {
+        const payload = JSON.stringify(input);
+
         const response = await worker.fetch(`http://fixture${path}`, {
           method: "POST",
-          body: JSON.stringify(input),
+          headers: {
+            "content-type": "application/json",
+            "content-length": String(Buffer.byteLength(payload)),
+          },
+          body: payload,
         });
 
+        expect(await response.json()).toEqual({ error });
         expect(response.status).toBe(400);
       }
 

@@ -105,9 +105,13 @@ export const executeCloudflareRuntime = async (
             // A timeout does not cancel the provider's write. This lock orders local
             // attempts; it cannot fence a provider write that finishes after disconnect.
             try {
-              await provisioner.request(
-                `/workers/scripts/${encodeURIComponent(configuration.APP_RUNTIME_NAME)}/content`,
-                { method: "PUT", body: cloudflareRuntimeUpload(runtime) },
+              await provisioner.call("upload runtime Worker", () =>
+                provisioner.client.workers.scripts.content.update(
+                  configuration.APP_RUNTIME_NAME,
+                  { ...provisioner.account, metadata: { main_module: runtime.main } },
+                  // Preserve JSON metadata and module names in multipart uploads.
+                  { body: Object.fromEntries(cloudflareRuntimeUpload(runtime)) },
+                ),
               );
             } catch (error) {
               if (

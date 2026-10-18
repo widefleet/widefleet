@@ -24,11 +24,11 @@ export const runCloudflareMigrations = async (
     const results = z
       .array(z.object({ success: z.boolean(), results: z.array(z.unknown()).optional() }))
       .parse(
-        await provisioner.request(`/d1/database/${encodeURIComponent(databaseId)}/query`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ sql }),
-        }),
+        (
+          await provisioner.call("query D1 database", () =>
+            provisioner.client.d1.database.query(databaseId, { ...provisioner.account, sql }),
+          )
+        ).result,
       );
 
     if (results.some((result) => !result.success)) throw new Error("Cloudflare D1 query failed");

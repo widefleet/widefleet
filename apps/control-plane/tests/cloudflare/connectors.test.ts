@@ -75,14 +75,30 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
           expect(databases.has(name)).toBe(false);
           databases.set(name, crypto.randomUUID());
           ok({ name, uuid: databases.get(name) ?? "" });
-        } else ok([...databases].map(([name, uuid]) => ({ name, uuid })));
+        } else
+          ok(
+            [...databases]
+              .map(([name, uuid]) => ({ name, uuid }))
+              .slice(
+                (Number(url.searchParams.get("page") ?? 1) - 1) * 100,
+                Number(url.searchParams.get("page") ?? 1) * 100,
+              ),
+          );
       } else if (path.endsWith("/storage/kv/namespaces")) {
         if (request.method === "POST") {
           const title = z.string().parse(json()["title"]);
           expect(namespaces.has(title)).toBe(false);
           namespaces.set(title, crypto.randomUUID());
           ok({ title, id: namespaces.get(title) ?? "" });
-        } else ok([...namespaces].map(([title, id]) => ({ title, id })));
+        } else
+          ok(
+            [...namespaces]
+              .map(([title, id]) => ({ title, id }))
+              .slice(
+                (Number(url.searchParams.get("page") ?? 1) - 1) * 100,
+                Number(url.searchParams.get("page") ?? 1) * 100,
+              ),
+          );
       } else if (path.endsWith("/r2/buckets")) {
         const name = z.string().parse(json()["name"]);
         expect(buckets.has(name)).toBe(false);

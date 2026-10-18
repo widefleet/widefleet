@@ -2,7 +2,9 @@ import { createHash } from "node:crypto";
 import type * as contract from "@platform/contracts";
 import { z } from "zod";
 
-const envelope = z.object({ success: z.boolean(), result: z.unknown().optional() });
+import { CloudflareApiError, cloudflareCall, createCloudflareClient } from "./cloudflare-client.ts";
+
+export { CloudflareApiError } from "./cloudflare-client.ts";
 
 const database = z.object({ uuid: z.uuid(), name: z.string() });
 
@@ -46,62 +48,34 @@ export const cloudflareResource = z.discriminatedUnion("type", [
   z.object({ type: z.literal("queue"), name: z.string(), queue_name: z.string() }),
 ]);
 
-export class CloudflareApiError extends Error {
-  readonly status: number;
-
-  constructor(status: number) {
-    // Upstream bodies can contain configuration and credentials. Keep them out of job logs.
-    super(`Cloudflare provisioning request failed (HTTP ${status})`);
-    this.name = "CloudflareApiError";
-    this.status = status;
-  }
-}
-
 export const createCloudflareProvisioner = (
   configuration: { accountId: string; token: string; runtimeName: string },
   transport: typeof fetch = fetch,
 ) => {
-  const root = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(configuration.accountId)}`;
+  const client = createCloudflareClient(configuration.token, transport);
+  const account = { account_id: configuration.accountId };
+  const call = cloudflareCall;
 
-  const request = async (path: string, options: RequestInit = {}) => {
-    const headers = new Headers(options.headers);
-    headers.set("authorization", `Bearer ${configuration.token}`);
+  const findDatabase = (name: string) =>
+    call("list D1 databases", async () => {
+      for await (const entry of client.d1.database.list({
+        ...account,
+        name,
+        page: 1,
+        per_page: 100,
+      }))
+        if (entry.name === name) return database.parse(entry).uuid;
 
-    const response = await transport(`${root}${path}`, {
-      ...options,
-      headers,
-      redirect: "manual",
-      signal: AbortSignal.timeout(30_000),
+      return null;
     });
 
-    if (!response.ok) {
-      await response.body?.cancel();
-      throw new CloudflareApiError(response.status);
-    }
+  const findNamespace = (title: string) =>
+    call("list KV namespaces", async () => {
+      for await (const entry of client.kv.namespaces.list({ ...account, page: 1, per_page: 100 }))
+        if (entry.title === title) return namespace.parse(entry).id;
 
-    if (response.status === 204) return undefined;
-    const body = envelope.parse(await response.json());
-
-    if (!body.success) throw new CloudflareApiError(response.status);
-
-    return body.result;
-  };
-
-  const findDatabase = async (name: string) => {
-    for (let page = 1; ; page++) {
-      const found = z
-        .array(database)
-        .parse(
-          await request(`/d1/database?name=${encodeURIComponent(name)}&page=${page}&per_page=100`),
-        );
-
-      const match = found.find((entry) => entry.name === name);
-
-      if (match) return match.uuid;
-
-      if (found.length < 100) return null;
-    }
-  };
+      return null;
+    });
 
   const ensureDatabase = async (name: string) => {
     const existing = await findDatabase(name);
@@ -109,11 +83,7 @@ export const createCloudflareProvisioner = (
     if (existing) return existing;
 
     const created = database.parse(
-      await request("/d1/database", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name }),
-      }),
+      await call("create D1 database", () => client.d1.database.create({ ...account, name })),
     );
 
     if (created.name !== name) throw new Error("Cloudflare returned an unexpected database");
@@ -123,18 +93,16 @@ export const createCloudflareProvisioner = (
 
   const ensureBucket = async (name: string) => {
     try {
-      const existing = bucket.parse(await request(`/r2/buckets/${encodeURIComponent(name)}`));
+      const existing = bucket.parse(
+        await call("get R2 bucket", () => client.r2.buckets.get(name, account)),
+      );
 
       if (existing.name !== name) throw new Error("Cloudflare returned an unexpected bucket");
     } catch (error) {
       if (!(error instanceof CloudflareApiError) || error.status !== 404) throw error;
 
       const created = bucket.parse(
-        await request("/r2/buckets", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ name }),
-        }),
+        await call("create R2 bucket", () => client.r2.buckets.create({ ...account, name })),
       );
 
       if (created.name !== name) throw new Error("Cloudflare returned an unexpected bucket");
@@ -142,24 +110,12 @@ export const createCloudflareProvisioner = (
   };
 
   const ensureNamespace = async (title: string) => {
-    for (let page = 1; ; page++) {
-      const found = z
-        .array(namespace)
-        .parse(await request(`/storage/kv/namespaces?page=${page}&per_page=100`));
+    const existing = await findNamespace(title);
 
-      const existing = found.find((entry) => entry.title === title);
-
-      if (existing) return existing.id;
-
-      if (found.length < 100) break;
-    }
+    if (existing) return existing;
 
     const created = namespace.parse(
-      await request("/storage/kv/namespaces", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title }),
-      }),
+      await call("create KV namespace", () => client.kv.namespaces.create({ ...account, title })),
     );
 
     if (created.title !== title) throw new Error("Cloudflare returned an unexpected namespace");
@@ -167,16 +123,19 @@ export const createCloudflareProvisioner = (
     return created.id;
   };
 
-  const findQueue = async (name: string) => {
-    for (let page = 1; ; page++) {
-      const found = z.array(queue).parse(await request(`/queues?page=${page}&per_page=100`));
-      const existing = found.find((entry) => entry.queue_name === name);
+  // The SDK models queues as SinglePage and omits page parameters (cloudflare 7.3).
+  // Keep paging explicitly until that endpoint supports automatic iteration.
+  const findQueue = (name: string) =>
+    call("list queues", async () => {
+      for (let page = 1; ; page++) {
+        const found = await client.queues.list(account, { query: { page, per_page: 100 } });
+        const existing = found.result.find((entry) => entry.queue_name === name);
 
-      if (existing) return existing;
+        if (existing) return queue.parse(existing);
 
-      if (found.length < 100) return null;
-    }
-  };
+        if (found.result.length < 100) return null;
+      }
+    });
 
   const ensureQueue = async (name: string) => {
     const existing = await findQueue(name);
@@ -184,11 +143,7 @@ export const createCloudflareProvisioner = (
     if (existing) return existing;
 
     const created = queue.parse(
-      await request("/queues", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ queue_name: name }),
-      }),
+      await call("create queue", () => client.queues.create({ ...account, queue_name: name })),
     );
 
     if (created.queue_name !== name) throw new Error("Cloudflare returned an unexpected queue");
@@ -203,33 +158,39 @@ export const createCloudflareProvisioner = (
     ensureBucket,
     ensureNamespace,
     ensureQueue,
-    request,
+    client,
+    account,
+    call,
+    findNamespace,
     scope: `${configuration.accountId}/${configuration.runtimeName}`,
     readBindings: async () =>
       workerBindings.parse(
-        await request(`/workers/scripts/${encodeURIComponent(configuration.runtimeName)}/settings`),
+        await call("read Worker bindings", () =>
+          client.workers.scripts.scriptAndVersionSettings.get(configuration.runtimeName, account),
+        ),
       ),
     writeBindings: async (
       id: string,
       retained: string[],
       resources: z.infer<typeof cloudflareResource>[],
     ) => {
-      const settings = new FormData();
-      settings.set(
-        "settings",
-        JSON.stringify({
-          annotations: { "workers/tag": id },
-          bindings: [
-            // Inheritance preserves secrets, native bindings and retained app versions.
-            ...retained.map((name) => ({ name, type: "inherit" })),
-            ...resources,
-          ],
-        }),
+      const settings = {
+        annotations: { "workers/tag": id },
+        bindings: [
+          // Inheritance preserves secrets, native bindings and retained app versions.
+          ...retained.map((name) => ({ name, type: "inherit" as const })),
+          ...resources,
+        ],
+      };
+
+      await call("update Worker bindings", () =>
+        client.workers.scripts.scriptAndVersionSettings.edit(
+          configuration.runtimeName,
+          account,
+          // The SDK flattens objects into form fields; this API requires a JSON part.
+          { body: { settings: JSON.stringify(settings) } },
+        ),
       );
-      await request(`/workers/scripts/${encodeURIComponent(configuration.runtimeName)}/settings`, {
-        method: "PATCH",
-        body: settings,
-      });
     },
     provision: async (app: Pick<z.infer<typeof contract.artifact>, "appId" | "metadata">) => {
       const nativeBindings: Record<string, string> = {};
