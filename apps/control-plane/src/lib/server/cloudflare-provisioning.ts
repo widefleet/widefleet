@@ -47,10 +47,13 @@ export const cloudflareResource = z.discriminatedUnion("type", [
 ]);
 
 export class CloudflareApiError extends Error {
-  constructor(readonly status: number) {
+  readonly status: number;
+
+  constructor(status: number) {
     // Upstream bodies can contain configuration and credentials. Keep them out of job logs.
     super(`Cloudflare provisioning request failed (HTTP ${status})`);
     this.name = "CloudflareApiError";
+    this.status = status;
   }
 }
 
