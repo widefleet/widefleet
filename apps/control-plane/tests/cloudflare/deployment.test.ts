@@ -181,7 +181,14 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           } else ok({});
         } else if (url.pathname.endsWith("/d1/database")) {
           if (request.method === "GET") {
-            ok([...createdDatabases].map((name) => ({ name, uuid: databases.get(name) ?? "" })));
+            ok(
+              [...createdDatabases]
+                .map((name) => ({ name, uuid: databases.get(name) ?? "" }))
+                .slice(
+                  (Number(url.searchParams.get("page") ?? 1) - 1) * 100,
+                  Number(url.searchParams.get("page") ?? 1) * 100,
+                ),
+            );
           } else {
             const { name } = z.object({ name: z.string() }).parse(JSON.parse(body));
 
@@ -251,7 +258,15 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
             ok([{ success: true, results: [] }]);
           }
         } else if (url.pathname.endsWith("/storage/kv/namespaces")) {
-          if (request.method === "GET") ok([...namespaces].map(([title, id]) => ({ title, id })));
+          if (request.method === "GET")
+            ok(
+              [...namespaces]
+                .map(([title, id]) => ({ title, id }))
+                .slice(
+                  (Number(url.searchParams.get("page") ?? 1) - 1) * 100,
+                  Number(url.searchParams.get("page") ?? 1) * 100,
+                ),
+            );
           else {
             const { title } = z.object({ title: z.string() }).parse(JSON.parse(body));
             const id = createHash("sha256").update(title).digest("hex").slice(0, 32);

@@ -54,9 +54,11 @@ export const removeCloudflareResource = async (
   provisioner: ReturnType<typeof createCloudflareProvisioner>,
   resource: z.infer<typeof removalResource>,
 ) => {
-  const remove = async (path: string) => {
+  const { client, account, call } = provisioner;
+
+  const remove = async (operation: string, run: () => Promise<Response>) => {
     try {
-      await provisioner.request(path, { method: "DELETE" });
+      await call(operation, run);
     } catch (error) {
       if (!(error instanceof CloudflareApiError) || error.status !== 404) throw error;
     }
@@ -65,45 +67,54 @@ export const removeCloudflareResource = async (
   if (resource.kind === "d1") {
     const id = await provisioner.findDatabase(resource.name);
 
-    if (id) await remove(`/d1/database/${encodeURIComponent(id)}`);
+    if (id)
+      await remove("delete D1 database", () => client.d1.database.delete(id, account).asResponse());
   } else if (resource.kind === "queue") {
     const queue = await provisioner.findQueue(resource.name);
 
-    if (queue) await remove(`/queues/${encodeURIComponent(queue.queue_id)}`);
+    if (queue)
+      await remove("delete queue", () =>
+        client.queues.delete(queue.queue_id, account).asResponse(),
+      );
   } else if (resource.kind === "kv") {
-    for (let page = 1; ; page++) {
-      const found = z
-        .array(z.object({ id: z.string(), title: z.string() }))
-        .parse(await provisioner.request(`/storage/kv/namespaces?page=${page}&per_page=100`));
+    const id = await provisioner.findNamespace(resource.name);
 
-      const match = found.find((entry) => entry.title === resource.name);
-
-      if (match) {
-        await remove(`/storage/kv/namespaces/${encodeURIComponent(match.id)}`);
-        break;
-      }
-
-      if (found.length < 100) break;
-    }
+    if (id)
+      await remove("delete KV namespace", () =>
+        client.kv.namespaces.delete(id, account).asResponse(),
+      );
   } else {
-    const path = `/r2/buckets/${encodeURIComponent(resource.name)}`;
-
     try {
       // Delete one bounded page per Workflow checkpoint. Always read the first
       // page again: keys have disappeared, so an offset can skip remaining data.
       const objects = z
         .array(z.object({ key: z.string() }))
-        .parse(await provisioner.request(`${path}/objects?per_page=100`));
+        .parse(
+          (
+            await call("list R2 objects", () =>
+              client.r2.buckets.objects.list(resource.name, { ...account, per_page: 100 }),
+            )
+          ).result,
+        );
 
       for (let index = 0; index < objects.length; index += 4)
         await Promise.all(
-          objects
-            .slice(index, index + 4)
-            .map((object) => remove(`${path}/objects/${encodeURIComponent(object.key)}`)),
+          objects.slice(index, index + 4).map((object) =>
+            remove("delete R2 object", () =>
+              client.r2.buckets.objects
+                .delete(object.key, {
+                  ...account,
+                  bucket_name: resource.name,
+                })
+                .asResponse(),
+            ),
+          ),
         );
 
       if (objects.length) return false;
-      await remove(path);
+      await remove("delete R2 bucket", () =>
+        client.r2.buckets.delete(resource.name, account).asResponse(),
+      );
     } catch (error) {
       if (!(error instanceof CloudflareApiError) || error.status !== 404) throw error;
     }

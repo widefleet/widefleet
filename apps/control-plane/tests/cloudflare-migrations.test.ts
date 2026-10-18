@@ -108,7 +108,7 @@ describe("Hosted D1 migrations", () => {
       ]);
 
       cloud.loseResponse();
-      await expect(cloud.run(input)).rejects.toThrow("Lost query response");
+      await expect(cloud.run(input)).rejects.toThrow("connection error");
       expect(await cloud.run(input)).toEqual([{ name: "1_create.sql", applied: true }]);
       expect(cloud.writes).toHaveLength(1);
       expect(cloud.database.prepare("SELECT COUNT(*) AS count FROM records").get()).toEqual({

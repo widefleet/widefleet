@@ -99,7 +99,7 @@ describe("Cloudflare logs through the shared authorized service", () => {
         expect(new Headers(options?.headers).get("authorization")).toBe(
           "Bearer private-fixture-token",
         );
-        expect(options?.redirect).toBe("error");
+        expect(options?.redirect).toBe("manual");
         const body = requestSchema.parse(JSON.parse(z.string().parse(options?.body)));
         requests.push(body);
 

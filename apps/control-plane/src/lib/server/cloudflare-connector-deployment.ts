@@ -99,7 +99,6 @@ export const createCloudflareConnectorDeployment = (
             const release = await loadConnector(storage, selected);
 
             const workerName = connectorWorkerName(command.fleetId, selected.name);
-            const path = `/workers/scripts/${encodeURIComponent(workerName)}`;
             let deployedVersion: string | null = null;
 
             const readVersion = async () => {
@@ -108,7 +107,14 @@ export const createCloudflareConnectorDeployment = (
                   .object({
                     annotations: z.object({ "workers/tag": z.uuid() }),
                   })
-                  .parse(await provisioner.request(`${path}/settings`));
+                  .parse(
+                    await provisioner.call("read connector Worker settings", () =>
+                      provisioner.client.workers.scripts.scriptAndVersionSettings.get(
+                        workerName,
+                        provisioner.account,
+                      ),
+                    ),
+                  );
 
                 deployedVersion = current.annotations["workers/tag"];
 
@@ -171,9 +177,15 @@ export const createCloudflareConnectorDeployment = (
                         }),
                       })
                       .parse(
-                        await provisioner.request(
-                          `/workers/services/${encodeURIComponent(workerName)}`,
-                        ),
+                        (
+                          await provisioner.call("read connector migration tag", () =>
+                            // The SDK has no Workers Services method. Its generic transport
+                            // retains the same timeout, authentication and error handling.
+                            provisioner.client.get<{ result: unknown }>(
+                              `/accounts/${encodeURIComponent(configuration.CLOUDFLARE_ACCOUNT_ID)}/workers/services/${encodeURIComponent(workerName)}`,
+                            ),
+                          )
+                        ).result,
                       );
 
                     migrationTag = service.default_environment.script.migration_tag ?? null;
@@ -203,19 +215,29 @@ export const createCloudflareConnectorDeployment = (
                 },
                 async () => {
                   if (!upload) throw new Error("Connector upload was not prepared");
-                  await provisioner.request(path, { method: "PUT", body: upload });
+                  const body = Object.fromEntries(upload);
+                  await provisioner.call("upload connector Worker", () =>
+                    provisioner.client.workers.scripts.update(
+                      workerName,
+                      { ...provisioner.account, metadata: {} },
+                      { body, headers: { "content-type": null } },
+                    ),
+                  );
                 },
               ),
             );
             // The default module always returns 404, including before these URL settings apply.
-            await provisioner.request(`${path}/subdomain`, {
-              method: "POST",
-              headers: {
-                "content-type": "application/json",
-                "Cloudflare-Workers-Script-Api-Date": "2025-08-01",
-              },
-              body: JSON.stringify({ enabled: false, previews_enabled: false }),
-            });
+            await provisioner.call("disable connector public URLs", () =>
+              provisioner.client.workers.scripts.subdomain.create(
+                workerName,
+                {
+                  ...provisioner.account,
+                  enabled: false,
+                  previews_enabled: false,
+                },
+                { headers: { "Cloudflare-Workers-Script-Api-Date": "2025-08-01" } },
+              ),
+            );
             await transaction
               .update(connectors)
               .set({ appliedPackage: selected })

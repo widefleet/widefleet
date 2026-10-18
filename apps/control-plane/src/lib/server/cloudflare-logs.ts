@@ -1,21 +1,23 @@
+import type { TelemetryQueryParams } from "cloudflare/resources/workers/observability/telemetry";
 import { cloudflareLog } from "@platform/app-runtime/logs";
 import * as contract from "@platform/contracts";
 import { z } from "zod";
 import type { CloudflareBindings } from "./cloudflare-config.ts";
+import { cloudflareCall, createCloudflareClient } from "./cloudflare-client.ts";
 import { TelemetryNotConfigured } from "./errors.ts";
 
-const leaf = (key: string, operation: string, value: string) => ({
+const leaf = (key: string, operation: "eq" | "regex", value: string) => ({
   key,
   operation,
   value,
-  type: "string",
+  type: "string" as const,
 });
 
-const numeric = (key: string, operation: string, value: number) => ({
+const numeric = (key: string, operation: "eq" | "gte" | "lte" | "lt", value: number) => ({
   key,
   operation,
   value,
-  type: "number",
+  type: "number" as const,
 });
 
 const responseSchema = z.object({
@@ -94,15 +96,15 @@ export const createCloudflareLogs =
     const deploymentFilter = input.deploymentId
       ? [
           {
-            kind: "group",
-            filterCombination: "or",
+            kind: "group" as const,
+            filterCombination: "or" as const,
             filters: [
               leaf("record.deploymentId", "eq", input.deploymentId),
               ...(window.buildId
                 ? [
                     {
-                      kind: "group",
-                      filterCombination: "and",
+                      kind: "group" as const,
+                      filterCombination: "and" as const,
                       filters: [
                         leaf("record.source", "eq", "browser"),
                         leaf("record.buildId", "eq", window.buildId),
@@ -115,41 +117,33 @@ export const createCloudflareLogs =
         ]
       : [];
 
-    const response = await transport(
-      `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(bindings.CLOUDFLARE_ACCOUNT_ID)}/workers/observability/telemetry/query`,
-      {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${bindings.CLOUDFLARE_API_TOKEN}`,
-          "content-type": "application/json",
-        },
-        redirect: "error",
-        signal: AbortSignal.timeout(20_000),
-        body: JSON.stringify({
-          queryId: "widefleet-runtime-logs",
-          view: "events",
-          dry: true,
-          limit: input.limit + 1,
-          offset: window.offset,
-          offsetDirection: "next",
-          // Cloudflare timestamps the tail's console output. Filter the original
-          // event time separately so delayed tails can still appear in --follow.
-          timeframe: { from: Date.parse(window.since), to: Number(BigInt(window.through) / 1000n) },
-          parameters: {
-            datasets: ["cloudflare-workers"],
-            filterCombination: "and",
-            filters: [...filters, ...deploymentFilter],
-          },
-        }),
+    const accountId = bindings.CLOUDFLARE_ACCOUNT_ID;
+    const client = createCloudflareClient(bindings.CLOUDFLARE_API_TOKEN, transport);
+
+    const query: TelemetryQueryParams = {
+      account_id: accountId,
+      queryId: "widefleet-runtime-logs",
+      view: "events",
+      dry: true,
+      limit: input.limit + 1,
+      offsetDirection: "next",
+      // Cloudflare timestamps the tail's console output. Filter the original
+      // event time separately so delayed tails can still appear in --follow.
+      timeframe: { from: Date.parse(window.since), to: Number(BigInt(window.through) / 1000n) },
+      parameters: {
+        datasets: ["cloudflare-workers"],
+        filterCombination: "and" as const,
+        filters: [...filters, ...deploymentFilter],
       },
+    };
+
+    if (window.offset !== undefined) query.offset = window.offset;
+
+    const response = await cloudflareCall("query runtime logs", () =>
+      client.workers.observability.telemetry.query(query, { timeout: 20_000 }),
     );
 
-    if (!response.ok) {
-      await response.body?.cancel();
-      throw new Error(`Cloudflare log query failed (HTTP ${response.status})`);
-    }
-
-    const events = responseSchema.parse(await response.json()).result.events.events;
+    const events = responseSchema.shape.result.parse(response).events.events;
 
     for (const event of events)
       if (
