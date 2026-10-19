@@ -75,7 +75,7 @@ widefleet connector list
 widefleet connector show erp
 ```
 
-The CLI bundles TypeScript/JavaScript and installed dependencies, discovers exported entrypoints, uploads the artifact and waits for activation. `--config PATH` selects another Wrangler file; `--no-wait` returns after queuing. Build progress uses stderr; `--json` or redirected stdout returns structured results. Run any project-specific code generation before deployment.
+The CLI bundles TypeScript/JavaScript and installed dependencies, discovers exported entrypoints, uploads the code and private source maps, and waits for activation. `--config PATH` selects another Wrangler file; `--no-wait` returns after queuing. Build progress uses stderr; `--json` or redirected stdout returns structured results. Run any project-specific code generation before deployment.
 
 Each artifact is immutable and identified by its content checksum. PostgreSQL stores references and deployment status; Object Storage stores code and configuration. Repeating an unchanged successful or pending deployment reuses it; repeating a failed deployment retries. To restore previous code, deploy the previous source checkout. This does not reverse data changes. A newer concurrent deployment is reported explicitly if it supersedes a waiting command.
 
@@ -119,7 +119,7 @@ Changes activate the connector's currently desired code and a fixed snapshot of 
 
 ### Storage and recovery
 
-Like apps, connector versions reference immutable code modules stored by checksum. Secret-only changes reuse those modules; each runtime version snapshot contains configuration, module references and encrypted secrets instead of another copy of the code.
+Like apps, connector artifacts and runtime versions reference immutable modules stored by checksum. Code and private source maps use the same module validation and storage rules as apps: up to 32 runtime modules and 500 maps, with at most 20 MiB per file. Secret-only changes reuse those modules; each runtime version snapshot contains configuration, module references and encrypted secrets instead of another copy of the code. Source maps are excluded from executable runtime modules.
 
 The control plane encrypts values using the installation encryption key and stores the ciphertexts in connector activation snapshots in PostgreSQL. Desired, applied and queued snapshots own their secret values independently of login settings and credential cleanup. Source artifacts contain no managed secret values. The active deployment agent, or the hosted deployment operation on Cloudflare, sends the selected values through the runtime's private management interface. Restore PostgreSQL together with the same installation key.
 
@@ -139,7 +139,7 @@ widefleet logs --connector erp --version VERSION_ID --json
 
 Connector logs use the existing runtime logging backend: Workers Logs on hosted Cloudflare and the [Collector/ClickHouse pipeline](/self-hosting/runtime-logs) on self-hosted installations. Enable that pipeline before querying self-hosted logs. If it is unavailable, the UI and API report the configuration problem; invocation results do not depend on successful log delivery.
 
-Connector logs come from the same native `WorkerCode.tails` interface as app logs. Widefleet supplies trusted fleet, connector and version attribution and forwards the records to the configured backend. It does not replace console methods or wrap connector methods to capture additional events. Connector logs have separate ingestion credentials and administrator authorization; an app grant does not grant access to shared connector logs. Connector stacks retain generated locations; app source-map resolution does not apply to connector packages.
+Connector logs come from the same native `WorkerCode.tails` interface as app logs. Widefleet supplies trusted fleet, connector and version attribution and forwards the records to the configured backend. It does not replace console methods or wrap connector methods to capture additional events. Connector logs have separate ingestion credentials and administrator authorization; an app grant does not grant access to shared connector logs. Connector errors use the same source-map resolution as app errors. The UI, CLI and API show original source locations when the deployed package includes a matching map. Maps are selected from the logged connector version, including older deployments and secret-only updates; querying logs does not download code modules. Missing or invalid maps retain the generated stack so the original error remains visible.
 
 Coverage depends on the runtime. celld 0.6.2 delivers tails for entrypoint `fetch()` calls, including their registered `waitUntil` work; it does not deliver tails for RPC or facet invocations. The local workerd tests verify native HTTP and RPC tails. In the celld 0.6.2 connector gateway test, a rejected `fetch()` call also produces no tail; do not rely on connector logs as a complete failure record. A missing native event is not reconstructed by Widefleet. See [runtime compatibility](/reference/runtime-compatibility) for the observed runtime differences.
 
