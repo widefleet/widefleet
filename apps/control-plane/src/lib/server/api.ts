@@ -11,6 +11,7 @@ import { binaryPaths, binarySchemas } from "./openapi-binary.ts";
 import { DirectoryUnavailable } from "./directory.ts";
 import { InvalidOperation, TelemetryNotConfigured, TelemetryUnavailable } from "./errors.ts";
 import { createInstallationOwner, readInstallation } from "./installation-store.ts";
+import { connectorLogService } from "./telemetry.ts";
 
 const settingsOperation = async <T>(operation: () => Promise<T>) => {
   try {
@@ -187,6 +188,13 @@ export const createApi = (runtime: Runtime) => {
       .output(contract.connectorStatus)
       .handler(async ({ context, input }) =>
         unwrap(await runtime.connectors.read(context.principal, input.name)),
+      ),
+    connectorLogs: read
+      .route({ method: "GET", path: "/connectors/{name}/logs" })
+      .input(contract.connectorLogQuery)
+      .output(contract.logPage)
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.telemetry.queryConnector(context.principal, input)),
       ),
     connectorDeploy: write
       .route({ method: "PUT", path: "/connectors/{name}" })
@@ -626,6 +634,22 @@ export const createApi = (runtime: Runtime) => {
 
         return runtime.telemetry.credentials(artifact.appId);
       }),
+    connectorTelemetryCredentials: agent
+      .route({ method: "GET", path: "/agent/jobs/{jobId}/connector-telemetry" })
+      .input(leaseInput)
+      .output(z.record(contract.appSlug, contract.telemetryCredentials))
+      .handler(async ({ context, input }) => {
+        const targets = unwrap(
+          await runtime.jobs.connectorTelemetry(context.agent.id, input.jobId, input.leaseToken),
+        );
+
+        return Object.fromEntries(
+          targets.map((target) => [
+            target.name,
+            runtime.telemetry.credentials(connectorLogService(target)),
+          ]),
+        );
+      }),
   };
 
   const handler = new OpenAPIHandler(router);
@@ -633,12 +657,25 @@ export const createApi = (runtime: Runtime) => {
 
   const dispatch = async (request: Request) => {
     const url = new URL(request.url);
+
+    const connectorTelemetry =
+      /^\/api\/v1\/telemetry\/connectors\/([^/]+)\/([^/]+)\/v1\/logs$/.exec(url.pathname);
+
+    if (connectorTelemetry && request.method === "POST")
+      return runtime.telemetry.ingest(
+        request,
+        {
+          fleetId: contract.identifier.parse(connectorTelemetry[1]),
+          name: contract.appSlug.parse(connectorTelemetry[2]),
+        },
+        "logs",
+      );
     const telemetry = /^\/api\/v1\/telemetry\/([^/]+)\/v1\/(logs|traces)$/.exec(url.pathname);
 
     if (telemetry && request.method === "POST")
       return runtime.telemetry.ingest(
         request,
-        contract.identifier.parse(telemetry[1]),
+        { appId: contract.identifier.parse(telemetry[1]) },
         z.enum(["logs", "traces"]).parse(telemetry[2]),
       );
 

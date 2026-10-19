@@ -90,12 +90,8 @@ import * as connector from ${JSON.stringify(`./${release.main}`)};
 export * from ${JSON.stringify(`./${release.main}`)};
 export { default } from ${JSON.stringify(`./${release.main}`)};
 ${classes
-  .map((name, index) => {
-    const binding = configuration.durable_objects.bindings.find((item) => item.class_name === name);
-
-    if (!binding) throw new Error("Connector Durable Object binding is missing");
-
-    return `
+  .map(
+    (name, index) => `
 const Facet${index} = class extends connector[${JSON.stringify(name)}] {
   #pending;
   constructor(ctx, env) {
@@ -107,12 +103,6 @@ const Facet${index} = class extends connector[${JSON.stringify(name)}] {
       task.then(() => pending.delete(task), () => pending.delete(task));
       waitUntil(task);
     }});
-    const gateway = env[${JSON.stringify(`WIDEFLEET_STATE_${binding.name}`)}];
-    Object.defineProperties(ctx.storage, {
-      getAlarm: { configurable: true, value: () => gateway.scheduleAlarm(ctx.props.objectId, 'get') },
-      setAlarm: { configurable: true, value: async (time) => { await gateway.scheduleAlarm(ctx.props.objectId, 'set', Number(time)); } },
-      deleteAlarm: { configurable: true, value: async () => { await gateway.scheduleAlarm(ctx.props.objectId, 'delete'); } },
-    });
     super(ctx, env);
     this.#pending = pending;
   }
@@ -120,11 +110,10 @@ const Facet${index} = class extends connector[${JSON.stringify(name)}] {
     return connectorResponse(await super.fetch(request), request.signal, this.ctx);
   }
   async WIDEFLEET_DRAIN() { while (this.#pending.size) await Promise.allSettled([...this.#pending]); }
-  WIDEFLEET_ALARM(info) { return super.alarm(info); }
 };
 export { Facet${index} as ${name} };
-`;
-  })
+`,
+  )
   .join("\n")}
 export class WIDEFLEET_READY extends workers.WorkerEntrypoint {
   ready() {
@@ -143,6 +132,25 @@ export class WIDEFLEET_READY extends workers.WorkerEntrypoint {
     mainModule: "__widefleet_connector.js",
     modules: Object.fromEntries(modules),
     env: Object.fromEntries(bindings),
+    tails:
+      environment["WIDEFLEET_LOGS"] === "cloudflare"
+        ? [
+            context.exports.CloudflareTelemetry({
+              props: { fleetId, connector: release.name, connectorVersion: version },
+            }),
+          ]
+        : snapshot.telemetry
+          ? [
+              context.exports.Telemetry({
+                props: {
+                  ...snapshot.telemetry,
+                  fleetId,
+                  connector: release.name,
+                  connectorVersion: version,
+                },
+              }),
+            ]
+          : [],
   };
 };
 

@@ -9,7 +9,8 @@ import type { Configuration } from "./config.ts";
 import type { Database } from "./database.ts";
 import { InvalidOperation, TelemetryNotConfigured, TelemetryUnavailable } from "./errors.ts";
 import type { Principal } from "./identity.ts";
-import { apps, artifacts, deployments } from "./schema.ts";
+import { apps, artifacts, connectors, deployments, fleets } from "./schema.ts";
+import { administrator } from "./connector-changes.ts";
 import { createSymbolicator } from "./source-maps.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import { readBody } from "./upload-body.ts";
@@ -35,6 +36,7 @@ const storedLog = z.object({
   stack: z.string(),
   buildId: z.string(),
   deploymentId: z.string(),
+  connectorVersion: z.string(),
   requestId: z.string(),
   traceId: z.string(),
   spanId: z.string(),
@@ -46,6 +48,16 @@ const storedLog = z.object({
 const badRequest = (message: string) => new InvalidOperation({ code: "BAD_REQUEST", message });
 
 const nullable = (value: string) => value || null;
+
+const connectorTarget = z.object({ fleetId: contract.identifier, name: contract.appSlug });
+
+export const connectorLogService = (target: z.infer<typeof connectorTarget>) =>
+  `connector:${target.fleetId}:${target.name}`;
+
+export const runtimeLogQuery = z.union([
+  contract.logQuery,
+  contract.connectorLogQuery.extend({ fleetId: contract.identifier }),
+]);
 
 const maxRange = 30 * 86_400_000;
 
@@ -138,8 +150,13 @@ export const createTelemetry = (
     return z.json().parse(await response.json());
   };
 
-  const ingest = async (request: Request, appId: string, signal: "logs" | "traces") => {
-    const expected = credentials(appId)?.token;
+  const ingest = async (
+    request: Request,
+    target: z.infer<typeof contract.appPath> | z.infer<typeof connectorTarget>,
+    signal: "logs" | "traces",
+  ) => {
+    const service = "appId" in target ? target.appId : connectorLogService(target);
+    const expected = credentials(service)?.token;
     const supplied = request.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
 
     if (
@@ -157,13 +174,20 @@ export const createTelemetry = (
     inflight++;
 
     try {
-      const [app] = await database
-        .select({ id: apps.id })
-        .from(apps)
-        .where(and(eq(apps.id, appId), ne(apps.state, "deleting")))
-        .limit(1);
+      const [source] =
+        "appId" in target
+          ? await database
+              .select({ id: apps.id })
+              .from(apps)
+              .where(and(eq(apps.id, target.appId), ne(apps.state, "deleting")))
+              .limit(1)
+          : await database
+              .select({ id: connectors.name })
+              .from(connectors)
+              .where(and(eq(connectors.fleetId, target.fleetId), eq(connectors.name, target.name)))
+              .limit(1);
 
-      if (!app) return new Response("Telemetry source is unavailable", { status: 403 });
+      if (!source) return new Response("Telemetry source is unavailable", { status: 403 });
 
       const contentType = request.headers.get("content-type")?.split(";", 1)[0];
 
@@ -184,7 +208,13 @@ export const createTelemetry = (
           method: "POST",
           body: Buffer.from(bytes.value),
           redirect: "error",
-          headers: { "content-type": contentType, "x-widefleet-app-id": appId },
+          headers: {
+            "content-type": contentType,
+            "x-widefleet-service-id": service,
+            "x-widefleet-app-id": "appId" in target ? target.appId : "",
+            "x-widefleet-fleet-id": "appId" in target ? "" : target.fleetId,
+            "x-widefleet-connector": "appId" in target ? "" : target.name,
+          },
           signal: AbortSignal.timeout(8000),
         },
       );
@@ -209,16 +239,34 @@ export const createTelemetry = (
     }
   };
 
-  const query = (principal: Principal, input: z.infer<typeof contract.logQuery>) =>
+  const query = (principal: Principal, input: z.infer<typeof runtimeLogQuery>) =>
     Result.tryPromise({
       try: async () => {
-        const [app] = await database
-          .select({ id: apps.id })
-          .from(apps)
-          .where(and(eq(apps.id, input.appId), appVisibility(database, principal)))
-          .limit(1);
+        if ("appId" in input) {
+          const [app] = await database
+            .select({ id: apps.id })
+            .from(apps)
+            .where(and(eq(apps.id, input.appId), appVisibility(database, principal)))
+            .limit(1);
 
-        if (!app) throw new InvalidOperation({ code: "NOT_FOUND", message: "App not found" });
+          if (!app) throw new InvalidOperation({ code: "NOT_FOUND", message: "App not found" });
+        } else {
+          administrator(principal);
+
+          const [connector] = await database
+            .select({ name: connectors.name })
+            .from(connectors)
+            .where(and(eq(connectors.fleetId, input.fleetId), eq(connectors.name, input.name)))
+            .limit(1);
+
+          if (!connector)
+            throw new InvalidOperation({ code: "NOT_FOUND", message: "Connector not found" });
+        }
+
+        const symbolicate =
+          "appId" in input
+            ? createSymbolicator(database, storage, input.appId)
+            : async (entry: z.infer<typeof contract.runtimeLog>) => entry;
 
         const { cursor, ...filters } = input;
         const filter = signature(JSON.stringify(filters));
@@ -252,7 +300,7 @@ export const createTelemetry = (
 
         let deploymentBuild = "";
 
-        if (input.deploymentId) {
+        if ("appId" in input && input.deploymentId) {
           const [deployment] = await database
             .select({ metadata: artifacts.metadata })
             .from(deployments)
@@ -278,7 +326,6 @@ export const createTelemetry = (
             offset: saved && "cloudflare" in saved.position ? saved.position.cloudflare : undefined,
           });
 
-          const symbolicate = createSymbolicator(database, storage, input.appId);
           const entries = [];
 
           for (const entry of page.entries) entries.push(await symbolicate(entry));
@@ -314,7 +361,7 @@ export const createTelemetry = (
         if (!through) throw new Error("Missing ClickHouse watermark");
 
         const parameters = new Map([
-          ["app", input.appId],
+          ["app", "appId" in input ? input.appId : connectorLogService(input)],
           ["since", since],
           ["until", until],
           ["through", through],
@@ -358,7 +405,12 @@ export const createTelemetry = (
           conditions.push("l.TraceId = {trace:String}");
         }
 
-        if (input.deploymentId) {
+        if (!("appId" in input) && input.version) {
+          parameters.set("version", input.version);
+          conditions.push("JSONExtractString(l.Body, 'connectorVersion') = {version:String}");
+        }
+
+        if ("appId" in input && input.deploymentId) {
           parameters.set("deployment", input.deploymentId);
           parameters.set("deploymentBuild", deploymentBuild);
           conditions.push(
@@ -383,6 +435,7 @@ export const createTelemetry = (
         toString(toUnixTimestamp64Micro(l.ReceivedAt)) AS receivedAt,
         l.SeverityNumber AS severity, l.Source AS source, l.Kind AS kind,
         l.Message AS message, l.Stack AS stack,
+        JSONExtractString(l.Body, 'connectorVersion') AS connectorVersion,
         if(l.Source = 'browser' OR l.BuildId != '', l.BuildId, c.build) AS buildId,
         if(l.Source = 'browser' OR l.DeploymentId != '', l.DeploymentId, c.deployment) AS deploymentId,
         if(l.RequestId != '', l.RequestId, c.request) AS requestId,
@@ -409,7 +462,6 @@ export const createTelemetry = (
 
         const more = rows.length > input.limit;
         const selected = rows.slice(0, input.limit);
-        const symbolicate = createSymbolicator(database, storage, input.appId);
         const entries: z.infer<typeof contract.runtimeLog>[] = [];
 
         for (const row of selected) {
@@ -426,6 +478,7 @@ export const createTelemetry = (
               stack: nullable(row.stack) ?? (/\n\s*at\s/.test(row.message) ? row.message : null),
               buildId: nullable(row.buildId),
               deploymentId: contract.identifier.safeParse(row.deploymentId).data ?? null,
+              connectorVersion: contract.identifier.safeParse(row.connectorVersion).data ?? null,
               requestId: nullable(row.requestId),
               traceId: nullable(row.traceId),
               spanId: nullable(row.spanId),
@@ -463,5 +516,35 @@ export const createTelemetry = (
             }),
     });
 
-  return { credentials, ingest, query };
+  const queryConnector = async (
+    principal: Principal,
+    input: z.infer<typeof contract.connectorLogQuery>,
+  ) => {
+    const target = await Result.tryPromise({
+      try: async () => {
+        administrator(principal);
+
+        const [fleet] = await database
+          .select({ id: fleets.id })
+          .from(fleets)
+          .where(eq(fleets.name, "default"))
+          .limit(1);
+
+        if (!fleet) throw new InvalidOperation({ code: "NOT_FOUND", message: "Fleet not found" });
+
+        return { ...input, fleetId: fleet.id };
+      },
+      catch: (cause) =>
+        cause instanceof InvalidOperation
+          ? cause
+          : new TelemetryUnavailable({
+              message: "Runtime logs are temporarily unavailable. Please try again later.",
+              cause,
+            }),
+    });
+
+    return target.isErr() ? target : query(principal, target.value);
+  };
+
+  return { credentials, ingest, query, queryConnector };
 };

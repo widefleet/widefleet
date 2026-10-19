@@ -92,7 +92,8 @@ async fn main() -> Result<()> {
     {
         let release: RuntimeRelease =
             serde_json::from_slice(&tokio::fs::read(&options.release).await?)?;
-        let config = runtime::configuration(&release, &installation.control_token)?;
+        let connector_key = runtime::connector_key(store.as_ref(), installation.fleet_id).await?;
+        let config = runtime::configuration(&release, &installation.control_token, &connector_key)?;
         let directory = tempfile::tempdir()?;
         for module in &release.modules {
             if module.name != "loader.js"

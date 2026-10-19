@@ -159,6 +159,14 @@
         </Accordion.Trigger>
         <Accordion.Content>
           <div class="border-t pt-4 pb-1">
+            {#if data.admin}
+              <Button
+                href={`/connectors/${entry.name}/logs`}
+                variant="outline"
+                size="sm"
+                class="mb-4">View logs</Button
+              >
+            {/if}
             {#if entry.entrypoints.length}
               <p class="text-muted-foreground mb-3 text-xs">Available entrypoints</p>
               <div class="flex flex-wrap gap-2">

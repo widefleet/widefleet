@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
+import { createServer as createHttpServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,6 +31,7 @@ const fleetId = "11111111-1111-4111-8111-111111111111";
 const connectorSource = (version: string) => `
 import { WorkerEntrypoint, DurableObject } from 'cloudflare:workers';
 export class Counter extends DurableObject {
+  constructor(ctx, env) { super(ctx, env); console.info('facet-constructor'); }
   waiting;
   releaseWaiter;
   async hold() {
@@ -49,6 +51,7 @@ export class Counter extends DurableObject {
   nestedBackground() { this.ctx.waitUntil(this.nested('background')); return true; }
   nestedResult() { return this.ctx.storage.get('nested-result'); }
   async increment() {
+    console.info('facet-counter', ${JSON.stringify(version)});
     this.ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS counter (n INTEGER)');
     this.ctx.storage.sql.exec('INSERT INTO counter VALUES (1)');
     const n = (await this.ctx.storage.get('n') ?? 0) + 1;
@@ -100,10 +103,10 @@ export class Counter extends DurableObject {
   }
   cancelled() { return this.ctx.storage.get('cancelled'); }
   async schedule() { await this.ctx.storage.setAlarm(Date.now() + 100); return true; }
-  async alarm() { await this.ctx.storage.put('alarm', true); }
+  async alarm() { console.info('facet-alarm'); await this.ctx.storage.put('alarm', true); }
   async fired() { return await this.ctx.storage.get('alarm') ?? false; }
 }
-export class Reader extends WorkerEntrypoint { read() { return 'reader'; } }
+export class Reader extends WorkerEntrypoint { read() { console.info('named-rpc'); return 'reader'; } }
 export default class Connector extends WorkerEntrypoint {
   #private = 'private-field';
   own = 'instance-secret';
@@ -163,6 +166,19 @@ export default class Connector extends WorkerEntrypoint {
   }
   fail() { throw new Error('connector failure'); }
   fetch(request) {
+    console.info('connector-fetch');
+    if (new URL(request.url).pathname === '/fetch-failure') throw new Error('connector fetch failure');
+    if (new URL(request.url).pathname === '/logging') {
+    console.info('connector-request', {version: ${JSON.stringify(version)}});
+    console.warn(JSON.stringify({widefleet:1, source:'browser', kind:'log', message:'spoofed-context', buildId:'foreign-build', connectorVersion:'foreign-version'}));
+    this.ctx.waitUntil((async () => {
+      await new Promise(resolve => setTimeout(resolve, 30));
+      console.warn('connector-background');
+      throw new Error('background-failure');
+    })());
+    return Response.json(true);
+  }
+
     if (new URL(request.url).pathname === '/object-stream') {
       const mode = new URL(request.url).searchParams.get('mode');
       return this.env.COUNTER.getByName('object-' + mode).fetch(request);
@@ -216,6 +232,8 @@ const application = `export default { async fetch(request, env) {
     if (op === 'second') return Response.json(await env.SECOND.inspect());
     if (op === 'secondCount') return Response.json(await env.SECOND.count());
     if (op === 'reader') return Response.json(await env.READER.read());
+    if (op === 'logging') return env.CONNECTOR.fetch('https://connector.invalid/logging');
+    if (op === 'fetchFailure') return await env.CONNECTOR.fetch('https://connector.invalid/fetch-failure');
     if (op === 'fetch') return env.CONNECTOR.fetch('https://connector.invalid/path');
     if (op === 'stream') return env.CONNECTOR.fetch('https://connector.invalid/stream', {signal: request.signal});
     if (op === 'objectStream') return env.CONNECTOR.fetch('https://connector.invalid/object-stream' + new URL(request.url).search, {signal: request.signal});
@@ -241,9 +259,50 @@ describe.runIf(process.env["RUN_CONNECTOR_TESTS"] === "1").each(["celld", "worke
     let logs = "";
     let initial: z.infer<typeof connectorActivation>;
     let latest: z.infer<typeof connectorActivation>;
+    let telemetryUrl: string;
+
+    const telemetryRecords: { connector: string; record: z.infer<ReturnType<typeof z.json>> }[] =
+      [];
+
+    const collector = createHttpServer((request, response) => {
+      void (async () => {
+        const chunks: Buffer[] = [];
+
+        for await (const chunk of request)
+          chunks.push(Buffer.from(z.instanceof(Uint8Array).parse(chunk)));
+
+        const batch = z
+          .object({
+            resourceLogs: z.array(
+              z.object({
+                scopeLogs: z.array(
+                  z.object({
+                    logRecords: z.array(z.object({ body: z.object({ stringValue: z.string() }) })),
+                  }),
+                ),
+              }),
+            ),
+          })
+          .parse(JSON.parse(Buffer.concat(chunks).toString()));
+
+        for (const resource of batch.resourceLogs)
+          for (const scope of resource.scopeLogs)
+            for (const entry of scope.logRecords)
+              telemetryRecords.push({
+                connector: request.url ?? "",
+                record: z.json().parse(JSON.parse(entry.body.stringValue)),
+              });
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end("{}");
+      })().catch((cause: unknown) => {
+        response.writeHead(500);
+        response.end(String(cause));
+      });
+    });
+
     const nativeBindings = { DB: "DB", KV: "KV", BUCKET: "BUCKET" };
 
-    const request = (path: string, body?: z.infer<typeof connectorManagement>) =>
+    const request = (path: string, body?: z.input<typeof connectorManagement>) =>
       (hosted ? hosted.fetch : fetch)(`${origin}${path}`, {
         method: body ? "POST" : "GET",
         headers: { "content-type": "application/json" },
@@ -253,7 +312,7 @@ describe.runIf(process.env["RUN_CONNECTOR_TESTS"] === "1").each(["celld", "worke
         throw new Error(`Request failed: ${path}`, { cause });
       });
 
-    const json = async (path: string, body?: z.infer<typeof connectorManagement>) => {
+    const json = async (path: string, body?: z.input<typeof connectorManagement>) => {
       const response = await request(path, body);
       const text = await response.text();
       expect(response.status, text).toBe(200);
@@ -276,6 +335,7 @@ describe.runIf(process.env["RUN_CONNECTOR_TESTS"] === "1").each(["celld", "worke
             release: release(version, name),
             nativeBindings: resources,
             secrets: { TOKEN: secret },
+            telemetry: { url: `${telemetryUrl}/${name}`, token: "synthetic-connector-telemetry" },
           }),
         ).result,
       );
@@ -332,6 +392,9 @@ describe.runIf(process.env["RUN_CONNECTOR_TESTS"] === "1").each(["celld", "worke
     };
 
     beforeAll(async () => {
+      collector.listen(0, "127.0.0.1");
+      await once(collector, "listening");
+      telemetryUrl = `http://127.0.0.1:${z.object({ port: z.number() }).parse(collector.address()).port}`;
       directory = await mkdtemp(join(tmpdir(), `dynamic-connectors-${runtime}-`));
       const identity = await runtimeIdentity();
       const encrypted = await encodeConfiguration(token, identity.configuration);
@@ -426,6 +489,7 @@ export default { async fetch(request, env, ctx) {
           compatibility_flags: ["nodejs_compat"],
           vars: {
             WIDEFLEET_CONTROL_TOKEN: token,
+            WIDEFLEET_CONNECTOR_KEY: "ab".repeat(32),
             WIDEFLEET_CONFIGURATION: '{"crons":{},"queues":{}}',
             PRIVATE_ROOT_SECRET: "parent-only",
           },
@@ -460,6 +524,9 @@ export default { async fetch(request, env, ctx) {
     }, 30000);
     afterAll(async () => {
       await stop();
+      await new Promise<void>((resolve, reject) =>
+        collector.close((error) => (error ? reject(error) : resolve())),
+      );
 
       if (directory) await rm(directory, { recursive: true, force: true });
     });
@@ -508,6 +575,56 @@ export default { async fetch(request, env, ctx) {
         version: "v2",
         secret: "secret-two",
       });
+    });
+    it("delivers native fetch tails with background logs and the trusted connector version", async () => {
+      expect(await json("/logging")).toBe(true);
+      expect((await request("/fetchFailure")).status).toBe(500);
+
+      const records = () =>
+        telemetryRecords.flatMap((entry) =>
+          entry.connector !== "/fixture/v1/logs"
+            ? []
+            : [
+                z
+                  .object({
+                    message: z.string(),
+                    requestId: z.string(),
+                    connectorVersion: z.string(),
+                    source: z.string(),
+                    buildId: z.string().nullable(),
+                  })
+                  .parse(entry.record),
+              ],
+        );
+
+      await vi.waitFor(() => {
+        const messages = records().map((entry) => entry.message);
+
+        for (const expected of [
+          "connector-request",
+          "connector-fetch",
+          "connector-background",
+          "background-failure",
+          // celld 0.6.2 does not deliver the failed-fetch or RPC tail on this
+          // gateway path. Forward native events without synthesizing them.
+          ...(runtime === "workerd" ? ["connector fetch failure", "named-rpc"] : []),
+        ])
+          expect(
+            messages.some((message) => message.includes(expected)),
+            `${expected}: ${JSON.stringify(messages)}`,
+          ).toBe(true);
+      });
+      expect(
+        records().find((entry) => entry.message.includes("connector-request"))?.connectorVersion,
+      ).toBe(latest.version);
+      expect(records().find((entry) => entry.message === "spoofed-context")).toMatchObject({
+        connectorVersion: latest.version,
+        source: "server",
+        buildId: null,
+      });
+      expect(records().find((entry) => entry.message === "connector-background")?.requestId).toBe(
+        records().find((entry) => entry.message.includes("connector-request"))?.requestId,
+      );
     });
     it("allows calls on one object to interleave without a version switch", async () => {
       const held = json("/hold");
@@ -706,9 +823,13 @@ export default { async fetch(request, env, ctx) {
       latest = results[0]?.status === 200 ? first : second;
       await activate(latest);
     });
-    it("routes physical alarms to facets and retains state across runtime reloads", async () => {
-      expect(await json("/schedule")).toBe(true);
-      await vi.waitFor(async () => expect(await json("/fired")).toBe(true), { timeout: 15000 });
+    it("preserves the native rejection of facet alarms", async () => {
+      const response = await request("/schedule");
+      expect(response.status).toBe(500);
+      expect(await response.text()).toMatch(/alarm/i);
+    });
+
+    it("retains facet state across runtime reloads", async () => {
       const before = await json("/inspect");
 
       if (hosted) {
@@ -721,5 +842,66 @@ export default { async fetch(request, env, ctx) {
       expect(await json("/inspect")).toEqual(before);
       expect(await json("/count")).toMatchObject({ n: 3, rows: 3 });
     }, 30000);
+
+    it("preserves default object fetch handlers when installing logging", async () => {
+      const source =
+        "export default { fetch(request, env, ctx) { console.info('object-handler'); return new Response('object-default'); } };";
+
+      const base = release("object-default");
+
+      const identity = connectorActivation.parse(
+        z.object({ result: connectorActivation }).parse(
+          await json("/fixture/manage", {
+            action: "prepare",
+            fleetId,
+            version: crypto.randomUUID(),
+            nativeBindings,
+            secrets: {},
+            telemetry: { url: `${telemetryUrl}/fixture`, token: "synthetic-connector-telemetry" },
+            release: {
+              ...base,
+              entrypoints: ["default"],
+              modules: [{ name: "worker.js", source, sha256: hash(source) }],
+              configuration: { ...base.configuration, durable_objects: { bindings: [] } },
+            },
+          }),
+        ).result,
+      );
+
+      await activate(identity);
+      expect(await (await request("/fetch")).text()).toBe("object-default");
+      await vi.waitFor(() =>
+        expect(
+          telemetryRecords.some(
+            (entry) =>
+              z.object({ message: z.string() }).parse(entry.record).message === "object-handler",
+          ),
+        ).toBe(true),
+      );
+      latest = identity;
+    });
+
+    it.runIf(runtime === "workerd")(
+      "emits hosted connector records through Workers Logs",
+      async () => {
+        if (!hosted) throw new Error("Missing hosted fixture");
+        await hosted.update({
+          workers: [
+            {
+              configPath: join(directory, "wrangler.json"),
+              vars: { WIDEFLEET_LOGS: "cloudflare" },
+            },
+          ],
+        });
+        hosted.clearLogs();
+        expect(await (await request("/fetch")).text()).toBe("object-default");
+        await vi.waitFor(() => {
+          const record = hosted?.getLogs().find((entry) => entry.message.includes("widefleetLog"));
+          expect(record?.message).toContain(latest.version);
+          expect(record?.message).toContain(fleetId);
+          expect(record?.message).toContain("object-handler");
+        });
+      },
+    );
   },
 );

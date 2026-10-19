@@ -21,14 +21,16 @@ export const digest = async (value: string) =>
     (byte) => byte.toString(16).padStart(2, "0"),
   ).join("");
 
-const key = async (environment: ParentEnvironment) =>
+const key = async (environment: Pick<ParentEnvironment, "WIDEFLEET_CONNECTOR_KEY">) =>
   crypto.subtle.importKey(
     "raw",
-    await crypto.subtle.digest(
-      "SHA-256",
-      new TextEncoder().encode(
-        `widefleet/connector-secrets/v1/${z.string().min(32).parse(environment.WIDEFLEET_CONTROL_TOKEN)}`,
-      ),
+    Uint8Array.from(
+      z
+        .string()
+        .regex(/^[a-f0-9]{64}$/)
+        .parse(environment.WIDEFLEET_CONNECTOR_KEY)
+        .match(/../g) ?? [],
+      (byte) => Number.parseInt(byte, 16),
     ),
     "AES-GCM",
     false,
@@ -39,7 +41,7 @@ const associatedData = (identity: z.infer<typeof connectorActivation>) =>
   new TextEncoder().encode(connectorKey(identity));
 
 export const encryptConnectorSecrets = async (
-  environment: ParentEnvironment,
+  environment: Pick<ParentEnvironment, "WIDEFLEET_CONNECTOR_KEY">,
   identity: z.infer<typeof connectorActivation>,
   secrets: z.infer<typeof connectorPreparation>["secrets"],
 ) => {
@@ -60,7 +62,7 @@ export const encryptConnectorSecrets = async (
 };
 
 export const decryptConnectorSecrets = async (
-  environment: ParentEnvironment,
+  environment: Pick<ParentEnvironment, "WIDEFLEET_CONNECTOR_KEY">,
   identity: z.infer<typeof connectorActivation>,
   ciphertext: string,
 ) => {

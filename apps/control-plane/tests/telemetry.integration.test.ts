@@ -27,8 +27,8 @@ import { createIdentityService } from "../src/lib/server/identity.ts";
 import { createJobService } from "../src/lib/server/jobs.ts";
 import { createStorage } from "../src/lib/server/storage.ts";
 import { createUploadService } from "../src/lib/server/uploads.ts";
-import { createTelemetry } from "../src/lib/server/telemetry.ts";
-import { agents, artifacts, deployments } from "../src/lib/server/schema.ts";
+import { createTelemetry, connectorLogService } from "../src/lib/server/telemetry.ts";
+import { agents, artifacts, connectors, deployments } from "../src/lib/server/schema.ts";
 
 const execute = promisify(execFile);
 
@@ -358,6 +358,79 @@ describe.runIf(process.env["RUN_TELEMETRY_TESTS"] === "1")(
           },
         ),
       );
+
+    it("ingests and reads connector logs through the same collector with separate credentials and access", async () => {
+      const [agent] = await environment.database.db
+        .select()
+        .from(agents)
+        .where(eq(agents.id, agentId));
+
+      if (!agent) throw new Error("Missing fixture agent");
+      const target = { fleetId: agent.fleetId, name: "logging-fixture" };
+      const version = crypto.randomUUID();
+      await environment.database.db
+        .insert(connectors)
+        .values({ ...target, package: {}, jobId: crypto.randomUUID() });
+
+      const body = logBatch(
+        [
+          JSON.stringify({
+            widefleet: 1,
+            source: "server",
+            kind: "log",
+            message: "connector-otlp-fixture",
+            connectorVersion: version,
+          }),
+        ],
+        appId,
+        trace,
+      );
+
+      const submit = (token: string) =>
+        api(
+          new Request(
+            `${origin}/api/v1/telemetry/connectors/${target.fleetId}/${target.name}/v1/logs`,
+            {
+              method: "POST",
+              headers: {
+                "content-type": "application/x-protobuf",
+                authorization: `Bearer ${token}`,
+                "x-widefleet-service-id": appId,
+              },
+              body: Buffer.from(body),
+            },
+          ),
+        );
+
+      expect((await submit(telemetry.credentials(appId)?.token ?? "")).status).toBe(401);
+      expect(
+        (await submit(telemetry.credentials(connectorLogService(target))?.token ?? "")).status,
+      ).toBe(200);
+
+      const readConnector = (headers: Headers, filter = "") =>
+        api(new Request(`${origin}/api/v1/connectors/${target.name}/logs${filter}`, { headers }));
+
+      expect((await readConnector(outsiderHeaders)).status).toBe(403);
+      await vi.waitFor(
+        async () => {
+          const response = await readConnector(adminHeaders, `?version=${version}`);
+          expect(response.status).toBe(200);
+          expect(contract.logPage.parse(await response.json()).entries).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                message: "connector-otlp-fixture",
+                connectorVersion: version,
+                deploymentId: null,
+              }),
+            ]),
+          );
+        },
+        { timeout: 10000 },
+      );
+      const wrongVersion = await readConnector(adminHeaders, `?version=${crypto.randomUUID()}`);
+      expect(contract.logPage.parse(await wrongVersion.json()).entries).toHaveLength(0);
+      expect((await page("?query=connector-otlp-fixture")).entries).toHaveLength(0);
+    });
 
     it("binds OTLP to the authenticated app and resolves old browser builds", async () => {
       const bodies = [

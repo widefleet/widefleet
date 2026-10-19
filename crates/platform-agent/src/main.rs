@@ -176,6 +176,11 @@ async fn execute(
     } else {
         telemetry::destination(api, configuration, job).await?
     };
+    let connector_telemetry = if packages.connectors.is_empty() {
+        Default::default()
+    } else {
+        telemetry::connector_destinations(api, configuration, job).await?
+    };
     let mut prepared = fleet::prepare(
         configuration,
         job,
@@ -183,6 +188,7 @@ async fn execute(
         &packages,
         temporary.path(),
         telemetry,
+        connector_telemetry,
     )
     .await?;
     let activation = async {

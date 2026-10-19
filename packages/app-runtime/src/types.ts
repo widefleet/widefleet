@@ -23,6 +23,7 @@ export type ParentEnvironment = {
   WIDEFLEET_LOADER: WorkerLoader;
   WIDEFLEET_PACKAGES: R2Bucket;
   WIDEFLEET_CONTROL_TOKEN: string;
+  WIDEFLEET_CONNECTOR_KEY: string;
   WIDEFLEET_CONFIGURATION: string;
   WIDEFLEET_CONNECTORS: DurableObjectNamespace<import("./connector-catalog.ts").ConnectorCatalog>;
   WIDEFLEET_CONNECTOR_STATE: DurableObjectNamespace<

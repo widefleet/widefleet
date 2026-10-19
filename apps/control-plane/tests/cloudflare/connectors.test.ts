@@ -133,6 +133,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
       CLOUDFLARE_API_TOKEN: "synthetic-connector-token",
       APP_RUNTIME_NAME: "fixture-runtime",
       WIDEFLEET_CONTROL_TOKEN: "hosted-connector-control-key-never-deploy",
+      WIDEFLEET_CONNECTOR_KEY: "ab".repeat(32),
       WIDEFLEET_CONFIGURATION: '{"crons":{},"queues":{}}',
     };
 

@@ -84,6 +84,7 @@ pub async fn prepare(
     packages: &RuntimePackages,
     directory: &Path,
     telemetry: Option<platform_core::model::TelemetryDestination>,
+    connector_telemetry: BTreeMap<String, platform_core::model::TelemetryDestination>,
 ) -> Result<Prepared> {
     if packages.runtime.protocol != 1
         || packages.runtime.auth != 1
@@ -436,6 +437,7 @@ pub async fn prepare(
                 "action": "prepare", "fleetId": job.fleet_id, "version": job.id,
                 "release": connector, "nativeBindings": native_bindings,
                 "secrets": packages.connector_secrets.get(&connector.name).cloned().unwrap_or_default(),
+                "telemetry": connector_telemetry.get(&connector.name),
             }));
         }
     }
@@ -460,7 +462,10 @@ pub async fn prepare(
     let project = directory.join("runtime");
     tokio::fs::create_dir_all(&project).await?;
     write_modules(&project, &packages.runtime.modules).await?;
-    let mut config = platform_agent::runtime::configuration(&packages.runtime, &token)?;
+    let connector_key =
+        platform_agent::runtime::connector_key(store.as_ref(), job.fleet_id).await?;
+    let mut config =
+        platform_agent::runtime::configuration(&packages.runtime, &token, &connector_key)?;
     config["vars"]["WIDEFLEET_CONFIGURATION"] = json!(serde_json::to_string(
         &json!({ "crons": crons, "queues": queues })
     )?);

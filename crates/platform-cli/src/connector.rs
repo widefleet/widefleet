@@ -127,7 +127,7 @@ pub(crate) struct Bindings {
     error: Option<String>,
 }
 
-fn segment(value: &str) -> Result<&str> {
+pub(crate) fn segment(value: &str) -> Result<&str> {
     if value.is_empty()
         || !value
             .bytes()

@@ -130,6 +130,7 @@ export const createCloudflareConnectorDeployment = (
               release,
               nativeBindings,
               secrets,
+              telemetry: null,
             });
 
             await manage({ action: "activate", ...prepared });

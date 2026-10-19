@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { CloudflareBindings } from "./cloudflare-config.ts";
 import { cloudflareCall, createCloudflareClient } from "./cloudflare-client.ts";
 import { TelemetryNotConfigured } from "./errors.ts";
+import type { runtimeLogQuery } from "./telemetry.ts";
 
 const leaf = (key: string, operation: "eq" | "regex", value: string) => ({
   key,
@@ -44,7 +45,7 @@ export const createCloudflareLogs =
     transport: typeof fetch = fetch,
   ) =>
   async (
-    input: z.infer<typeof contract.logQuery>,
+    input: z.infer<typeof runtimeLogQuery>,
     window: {
       since: string;
       until: string;
@@ -65,7 +66,13 @@ export const createCloudflareLogs =
     const filters = [
       leaf("$workers.scriptName", "eq", bindings.APP_RUNTIME_NAME),
       numeric("widefleetLog", "eq", 1),
-      leaf("appId", "eq", input.appId),
+      ...("appId" in input
+        ? [leaf("appId", "eq", input.appId)]
+        : [
+            leaf("fleetId", "eq", input.fleetId),
+            leaf("connector", "eq", input.name),
+            ...(input.version ? [leaf("record.connectorVersion", "eq", input.version)] : []),
+          ]),
       numeric(
         "eventTime",
         "gte",
@@ -93,29 +100,30 @@ export const createCloudflareLogs =
         leaf("record.body", "regex", `(?i)${input.query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
       );
 
-    const deploymentFilter = input.deploymentId
-      ? [
-          {
-            kind: "group" as const,
-            filterCombination: "or" as const,
-            filters: [
-              leaf("record.deploymentId", "eq", input.deploymentId),
-              ...(window.buildId
-                ? [
-                    {
-                      kind: "group" as const,
-                      filterCombination: "and" as const,
-                      filters: [
-                        leaf("record.source", "eq", "browser"),
-                        leaf("record.buildId", "eq", window.buildId),
-                      ],
-                    },
-                  ]
-                : []),
-            ],
-          },
-        ]
-      : [];
+    const deploymentFilter =
+      "appId" in input && input.deploymentId
+        ? [
+            {
+              kind: "group" as const,
+              filterCombination: "or" as const,
+              filters: [
+                leaf("record.deploymentId", "eq", input.deploymentId),
+                ...(window.buildId
+                  ? [
+                      {
+                        kind: "group" as const,
+                        filterCombination: "and" as const,
+                        filters: [
+                          leaf("record.source", "eq", "browser"),
+                          leaf("record.buildId", "eq", window.buildId),
+                        ],
+                      },
+                    ]
+                  : []),
+              ],
+            },
+          ]
+        : [];
 
     const accountId = bindings.CLOUDFLARE_ACCOUNT_ID;
     const client = createCloudflareClient(bindings.CLOUDFLARE_API_TOKEN, transport);
@@ -147,10 +155,14 @@ export const createCloudflareLogs =
 
     for (const event of events)
       if (
-        event.source.appId !== input.appId ||
+        ("appId" in input
+          ? event.source.appId !== input.appId
+          : event.source.appId !== null ||
+            event.source.fleetId !== input.fleetId ||
+            event.source.connector !== input.name) ||
         event.$workers.scriptName !== bindings.APP_RUNTIME_NAME
       )
-        throw new Error("Cloudflare returned logs outside the authorized app");
+        throw new Error("Cloudflare returned logs outside the authorized source");
 
     const selected = events.slice(0, input.limit);
 

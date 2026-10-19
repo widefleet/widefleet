@@ -32,9 +32,13 @@ export class ConnectorCatalog extends DurableObject<ParentEnvironment> {
   }
   async prepare(input: z.infer<typeof connectorPreparation>) {
     const prepared = connectorPreparation.parse(input);
-    const { fleetId, version, release, secrets, nativeBindings } = prepared;
+    const { fleetId, version, release, secrets, nativeBindings, telemetry } = prepared;
     const identity = { fleetId, version, name: release.name };
-    const fingerprint = await digest(JSON.stringify({ release, nativeBindings, secrets }));
+
+    const fingerprint = await digest(
+      JSON.stringify({ release, nativeBindings, secrets, telemetry }),
+    );
+
     const active = await this.current();
 
     if (active && (await readConnector(this.env, active)).fingerprint === fingerprint)
@@ -53,6 +57,7 @@ export class ConnectorCatalog extends DurableObject<ParentEnvironment> {
         version,
         release,
         nativeBindings,
+        telemetry,
         fingerprint,
         previous: active?.version ?? null,
         ciphertext: await encryptConnectorSecrets(this.env, identity, secrets),

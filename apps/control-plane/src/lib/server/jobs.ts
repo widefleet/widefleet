@@ -327,6 +327,19 @@ export const createJobService = (
         ),
       });
     }),
+  connectorTelemetry: (agentId: string, jobId: string, leaseToken: string) =>
+    transact(database, async (transaction) => {
+      const lease = await leasedJob(transaction, agentId, jobId, leaseToken);
+
+      if (lease.isErr()) return lease;
+
+      return Result.ok(
+        z
+          .array(connectorReference)
+          .parse(lease.value.connectors)
+          .map((reference) => ({ fleetId: lease.value.fleetId, name: reference.name })),
+      );
+    }),
   artifact: (agentId: string, jobId: string, leaseToken: string) =>
     transact(database, async (transaction) => {
       const lease = await leasedJob(transaction, agentId, jobId, leaseToken);

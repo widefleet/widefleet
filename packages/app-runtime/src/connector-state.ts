@@ -48,17 +48,11 @@ export class ConnectorState extends WorkerEntrypoint<
 
     return stub.fetch(new Request(request, { headers }), { signal: request.signal });
   }
-  async scheduleAlarm(objectId: string, operation: "get" | "set" | "delete", time?: number) {
-    const { stub, identity } = await this.#target(objectId);
-
-    return stub.schedule(identity, operation, time);
-  }
 }
 
 // These methods are supplied by the generated wrapper, never by connector code.
 declare class LoadedConnectorFacet extends DurableObject {
   WIDEFLEET_DRAIN(): Promise<void>;
-  WIDEFLEET_ALARM(info?: AlarmInvocationInfo): Promise<void>;
 }
 
 export class ConnectorSupervisor extends DurableObject<ParentEnvironment> {
@@ -125,9 +119,7 @@ export class ConnectorSupervisor extends DurableObject<ParentEnvironment> {
       throw new Error("Connector Durable Object class is not declared");
     const worker = loadConnectorWorker(snapshot, this.env, this.ctx);
 
-    const facetClass = worker.getDurableObjectClass<LoadedConnectorFacet>(identity.className, {
-      props: { objectId: identity.objectId },
-    });
+    const facetClass = worker.getDurableObjectClass<LoadedConnectorFacet>(identity.className);
 
     if (this.#current && this.#current.identity.version !== identity.version) {
       do {
@@ -163,38 +155,5 @@ export class ConnectorSupervisor extends DurableObject<ParentEnvironment> {
     return this.#dispatch(identity, (facet) =>
       facet.fetch(new Request(request, { headers }), { signal: request.signal }),
     );
-  }
-  async schedule(identity: StateVersion, operation: "get" | "set" | "delete", time?: number) {
-    const current = stateVersion.parse(await this.ctx.storage.get("identity"));
-
-    if (JSON.stringify(current) !== JSON.stringify(stateVersion.parse(identity)))
-      throw new Error("Connector alarm version was superseded");
-
-    switch (operation) {
-      case "get":
-        return this.ctx.storage.getAlarm();
-      case "set":
-        await this.ctx.storage.setAlarm(z.number().finite().parse(time));
-
-        return null;
-      case "delete":
-        await this.ctx.storage.deleteAlarm();
-
-        return null;
-    }
-  }
-  override async alarm(info?: AlarmInvocationInfo) {
-    const previous = stateVersion.parse(await this.ctx.storage.get("identity"));
-    const active = await connectorCatalog(this.env, previous.fleetId, previous.name).current();
-
-    if (!active) throw new Error("Connector is not active");
-
-    const invocation = info && {
-      isRetry: info.isRetry,
-      retryCount: info.retryCount,
-      scheduledTime: info.scheduledTime,
-    };
-
-    return this.#dispatch({ ...previous, ...active }, (facet) => facet.WIDEFLEET_ALARM(invocation));
   }
 }

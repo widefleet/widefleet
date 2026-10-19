@@ -400,6 +400,10 @@ export const connectorPreparation = z.strictObject({
   release: connectorPackage,
   nativeBindings: z.record(bindingName, bindingName),
   secrets: z.record(connectorSecretName, connectorSecretValue),
+  telemetry: z
+    .strictObject({ url: z.url(), token: z.string().min(1) })
+    .nullable()
+    .default(null),
 });
 
 export const connectorActivation = z.strictObject({
@@ -581,6 +585,11 @@ export const logQuery = appPath.extend({
   cursor: z.string().min(1).max(4096).optional(),
 });
 
+export const connectorLogQuery = logQuery.omit({ appId: true, deploymentId: true }).extend({
+  name: appSlug,
+  version: identifier.optional(),
+});
+
 export const stackFrame = z.strictObject({
   generatedFile: z.string(),
   generatedLine: z.number().int(),
@@ -603,6 +612,7 @@ export const runtimeLog = z.strictObject({
   frames: z.array(stackFrame),
   buildId: z.string().nullable(),
   deploymentId: identifier.nullable(),
+  connectorVersion: identifier.nullable().default(null),
   requestId: z.string().nullable(),
   traceId: z.string().nullable(),
   spanId: z.string().nullable(),
