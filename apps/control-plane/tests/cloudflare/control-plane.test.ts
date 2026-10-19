@@ -19,16 +19,19 @@ import { installation } from "../../src/lib/server/schema.ts";
 import { installationId, readInstallation } from "../../src/lib/server/installation-store.ts";
 import { initializeCloudflareFleet } from "../../src/lib/server/fleets.ts";
 import { createTestEnvironment } from "../environment.ts";
+import { observeOAuthResourceWrites } from "../oauth-resource-writes.ts";
 
 describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control plane", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
   let directory: string;
   let worker: Unstable_DevWorker;
   let administrator: APIRequestContext;
+  let resourceWrites: Awaited<ReturnType<typeof observeOAuthResourceWrites>>;
   const origin = "http://127.0.0.1:25460";
 
   beforeAll(async () => {
     environment = await createTestEnvironment(origin, "oidc");
+    resourceWrites = await observeOAuthResourceWrites(environment.database.db);
     (await initializeCloudflareFleet(environment.database.db)).unwrap();
     directory = await mkdtemp(join(tmpdir(), "widefleet-cloudflare-"));
     const { unstable_dev, unstable_readConfig } = await import("wrangler");
@@ -177,9 +180,23 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
     });
 
     expect(rejected.status()).toBe(403);
+    expect(await resourceWrites()).toBe(0);
   });
 
   it("persists device authorization and token refresh across independent Worker requests", async () => {
+    for (const scope of ["unknown:scope", "openid platform:read unknown:scope"]) {
+      const rejected = await administrator.post("/api/auth/device/code", {
+        form: {
+          client_id: cliClientId,
+          scope,
+          resource: apiResource(environment.configuration),
+        },
+      });
+
+      expect(rejected.status()).toBe(400);
+      expect(await rejected.json()).toMatchObject({ error: "invalid_scope" });
+    }
+
     const started = await administrator.post("/api/auth/device/code", {
       form: {
         client_id: cliClientId,
@@ -216,7 +233,11 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
     expect(exchange.status()).toBe(200);
 
     const tokens = z
-      .object({ access_token: z.string(), refresh_token: z.string() })
+      .object({
+        access_token: z.string(),
+        refresh_token: z.string(),
+        expires_in: z.number().positive().max(300),
+      })
       .parse(await exchange.json());
 
     const me = await fetch(`${origin}/api/v1/me`, {
@@ -237,6 +258,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
     expect(refresh.status()).toBe(200);
     const renewed = z.object({ refresh_token: z.string() }).parse(await refresh.json());
     expect(renewed.refresh_token).not.toBe(tokens.refresh_token);
+    expect(await resourceWrites()).toBe(0);
   });
 
   it("validates asset hashes, deduplicates R2 uploads, and saves the bundled runtime without filesystem access", async () => {

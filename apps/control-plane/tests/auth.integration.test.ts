@@ -90,7 +90,7 @@ describe("OAuth device authorization against PostgreSQL", () => {
       .update(oauthClient)
       .set({ scopes: ["platform:read"] })
       .where(eq(oauthClient.clientId, cliClientId));
-    await registerCli(environment.auth, environment.database.db, environment.configuration);
+    await registerCli(environment.database.db, environment.configuration);
 
     const clients = await environment.database.db
       .select()

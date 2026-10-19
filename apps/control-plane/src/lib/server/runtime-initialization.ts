@@ -2,7 +2,7 @@ import { createAppSignIn } from "./app-sign-in-node.ts";
 import { bootstrapConfiguration } from "@platform/contracts";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { join, resolve } from "node:path";
-import { createAuthentication, registerCli } from "./auth.ts";
+import { registerCli } from "./auth.ts";
 import { readConfiguration, type Configuration } from "./config.ts";
 import { createDatabase } from "./database.ts";
 import { initializeEdge } from "./edge.ts";
@@ -97,7 +97,7 @@ export const initializeRuntime = async (
       }
     }
 
-    await registerCli(createAuthentication(configuration, database.db), database.db, configuration);
+    await registerCli(database.db, configuration);
 
     return { configuration, database, settings, encryptionKey: keys.encryption };
   } catch (cause) {
