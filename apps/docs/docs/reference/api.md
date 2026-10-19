@@ -1,14 +1,52 @@
 ---
 title: API and uploads
 description: Authentication, app publication and the Worker upload contract.
-lastModified: 2026-10-12
+lastModified: 2026-10-20
 ---
 
 Authenticated clients can fetch `/api/v1/openapi.json`. The document covers management operations, agent jobs, binary assets and multipart Workers.
 
 Clients must send `Origin: <PLATFORM_URL>` for OAuth form requests and Worker uploads. SvelteKit's CSRF protection and Better Auth's protections remain enabled.
 
-1. Resolve or create the configured name with `PUT /api/v1/apps/by-name/{slug}`. The server checks permissions and assigns the deployment host on creation. Explicit `POST /api/v1/apps` remains available for previews and administrative scripts.
+## Organization context
+
+This section describes unreleased organization-selection behavior and requires
+a platform build containing that capability.
+
+`GET /api/v1/organizations` requires an authenticated session or a token with
+`platform:read`. It works before an organization is selected and returns only
+available memberships as `{ id, name, slug, role }` objects.
+
+For API requests, send `X-Widefleet-Organization: ORGANIZATION_ID` using an ID from
+that response. Selection does not grant access: the server checks current
+membership and role on each request. The header takes precedence over a browser
+session's active organization. Without either, a standard installation uses its
+own organization; installations that require a choice return
+`403 ORGANIZATION_REQUIRED`. An invalid or unavailable explicit selection fails
+with `403` and never falls back to another organization.
+
+Browser users choose an organization at `/organizations` or follow the organization
+name in the workspace header. `PUT /api/v1/organization` accepts
+`{ "organizationId": "ORGANIZATION_ID" }` and requires `platform:write` or a
+same-origin browser request. For a browser session it saves the active organization;
+for a token it validates the selection for that call without saving a preference.
+Token clients must continue sending the selection header on subsequent requests.
+
+`GET /api/v1/me` returns the selected context under `application`:
+`fleetId`, `organizationId` and `admin`. The nested `admin` field applies to app
+administration within that scope. The top-level `admin` field remains installation
+administration. Connector catalogs and deployment-agent discovery are scoped to
+the selected fleet; the central company directory is available only in its own
+installation organization.
+
+Use [CLI organization selection](/reference/cli-configuration#select-an-organization)
+for equivalent CLI commands. If a browser selection becomes unavailable, the
+workspace returns to organization selection. With no available memberships, ask
+an administrator to grant access.
+
+## Publish an app
+
+1. Resolve or create the configured name with `PUT /api/v1/apps/by-name/{slug}`. The server checks permissions and assigns the deployment host on creation. Names are unique within the selected application fleet. Explicit `POST /api/v1/apps` remains available for previews and administrative scripts.
 2. Submit an asset manifest to `/api/v1/apps/{appId}/assets-upload-session`.
 3. Upload each missing hash to the returned session's asset endpoint. The API verifies both bytes and declared size.
 4. Upload the Worker as multipart data to `/api/v1/apps/{appId}/worker` with a UUID `Idempotency-Key` header. Include one JSON `metadata` field and file parts named after their modules.

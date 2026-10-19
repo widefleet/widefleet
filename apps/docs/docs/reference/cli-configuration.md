@@ -1,7 +1,7 @@
 ---
 title: CLI configuration
 description: Inspect, change and distribute the platform URL used by the Widefleet CLI.
-lastModified: 2026-10-12
+lastModified: 2026-10-20
 ---
 
 Company discovery and saved configuration require CLI 0.3.2 or newer. Check
@@ -9,6 +9,42 @@ Company discovery and saved configuration require CLI 0.3.2 or newer. Check
 
 The CLI remembers the platform URL after a successful login. Credentials stay
 in the operating system's credential store or the explicitly selected session file.
+
+## Select an organization
+
+Organization selection is unreleased and requires matching platform and CLI builds
+that include this capability. Check `widefleet --help` for `--organization`.
+
+After logging in, list the organizations available to your account:
+
+```sh
+widefleet organizations
+```
+
+The JSON response contains each organization's `id`, `name`, `slug` and your `role`.
+Use an `id` from that response in place of `ORGANIZATION_ID`:
+
+```sh
+widefleet --organization ORGANIZATION_ID whoami
+widefleet --organization ORGANIZATION_ID apps
+```
+
+`whoami` includes the selected organization and fleet under `application`.
+`application.admin` grants application administration within that scope;
+the top-level `admin` field represents installation administration.
+
+For several commands in the same Bash session, set `PLATFORM_ORGANIZATION` to the
+selected ID. `--organization` overrides the environment variable for one command.
+This preference is not saved in the CLI configuration or credential store.
+Browser organization changes do not change the CLI target. The CLI sends the
+selection on every API request, including uploads and deployment polling.
+
+A standard installation uses its own organization when no selection is supplied.
+An installation that requires a choice returns `ORGANIZATION_REQUIRED` until you
+select one. An unavailable organization or removed membership fails with `403`;
+the CLI never switches to another organization automatically. Run
+`widefleet organizations` again and choose an available ID, or ask your
+administrator to restore access.
 
 ## Inspect or change the URL
 
