@@ -121,9 +121,27 @@ Changes activate the connector's currently desired code and a fixed snapshot of 
 
 The control plane encrypts values using the installation encryption key and stores the ciphertexts in connector activation snapshots in PostgreSQL. Desired, applied and queued snapshots own their secret values independently of login settings and credential cleanup. Source artifacts contain no managed secret values. The active deployment agent, or the hosted deployment operation on Cloudflare, sends the selected values through the runtime's private management interface. Restore PostgreSQL together with the same installation key.
 
-The runtime encrypts each version's secrets in its immutable connector snapshot in runtime object storage, using a key derived from the runtime control token. These snapshots keep serving independent of management. Preserve the runtime control token, object storage and persistent runtime state together in backups; replacing the token alone makes existing snapshots unreadable. The agent's activation journal contains version identities, not plaintext connector secrets. Historical encrypted snapshots remain after rotation or deletion. Administrators with the encryption keys and trusted connector code can read the values; protect those keys and the data plane accordingly.
+The runtime encrypts each version's secrets in its immutable connector snapshot using a separate `WIDEFLEET_CONNECTOR_KEY`. This key is independent of the runtime control token, so changing the control token does not invalidate connector secrets. Self-hosted installations create and retain one random key per fleet in fleet object storage; back up the full fleet storage and persistent runtime state together. Hosted deployments require `WIDEFLEET_CONNECTOR_KEY` as a runtime Worker secret through the deployment configuration. Generate 32 random bytes encoded as 64 lowercase hexadecimal characters, for example with `openssl rand -hex 32`, and preserve that key with the runtime storage backup. Replacing the encryption key requires keeping the old key or re-encrypting the snapshots; automatic key rotation is not implemented. These snapshots keep serving independent of management. The agent's activation journal contains version identities, not plaintext connector secrets. Historical encrypted snapshots remain after rotation or deletion. Administrators with the encryption keys and trusted connector code can read the values; protect those keys and the data plane accordingly.
 
 Upgrade the control plane, CLI, agent and app runtime together before using Dynamic connectors.
+
+## Connector logs
+
+Owners and administrators can open **Connectors → expand a connector → View logs** to inspect runtime output, search messages and filter by severity, time and connector version. CLI users can read or follow the same records:
+
+```sh
+widefleet logs --connector erp --since 1h
+widefleet logs --connector erp --level error --follow
+widefleet logs --connector erp --version VERSION_ID --json
+```
+
+Connector logs use the existing runtime logging backend: Workers Logs on hosted Cloudflare and the [Collector/ClickHouse pipeline](/self-hosting/runtime-logs) on self-hosted installations. Enable that pipeline before querying self-hosted logs. If it is unavailable, the UI and API report the configuration problem; invocation results do not depend on successful log delivery.
+
+Connector logs come from the same native `WorkerCode.tails` interface as app logs. Widefleet supplies trusted fleet, connector and version attribution and forwards the records to the configured backend. It does not replace console methods or wrap connector methods to capture additional events. Connector logs have separate ingestion credentials and administrator authorization; an app grant does not grant access to shared connector logs. Connector stacks retain generated locations; app source-map resolution does not apply to connector packages.
+
+Coverage depends on the runtime. celld 0.6.2 delivers tails for entrypoint `fetch()` calls, including their registered `waitUntil` work; it does not deliver tails for RPC or facet invocations. The local workerd tests verify native HTTP and RPC tails. In the celld 0.6.2 connector gateway test, a rejected `fetch()` call also produces no tail; do not rely on connector logs as a complete failure record. A missing native event is not reconstructed by Widefleet. See [runtime compatibility](/reference/runtime-compatibility) for the observed runtime differences.
+
+Native capture limits and delivery behavior apply. Export is best-effort, without a durable Widefleet queue or retry, so outages and runtime termination can lose records. Keep credentials and unnecessary personal data out of console output. Confirm capture by invoking a connector HTTP endpoint, then refreshing **View logs** or running the CLI command above.
 
 ## Give an app its binding
 
@@ -160,7 +178,7 @@ Implement state in a `DurableObject` and declare its class in `durable_objects.b
 
 Keep the fleet, connector, class name and object ID stable to preserve state across deployments. Different connectors can use the same class name without sharing data. Within one connector, bindings to the same class share its namespace. Address the same object deliberately, for example `env.STATE.getByName("erp-connection")`. Object IDs are opaque platform identifiers; use `idFromString()` to restore a saved ID. Renaming a connector or class creates a different namespace and does not migrate stored data.
 
-Connector objects support SQLite and key-value storage, RPC, `fetch()` and storage alarms. The runtime forwards alarms to the active connector version. Before replacing a loaded facet, it waits for active calls, response streams and registered `waitUntil` work. A response stream keeps its version until it completes, fails or is cancelled, including asynchronous cancellation cleanup. Calls within the same version can interleave, including nested calls while that version drains. WebSocket hibernation is outside the connector contract.
+Connector objects support SQLite and key-value storage, RPC and `fetch()`. Facet storage alarms are unavailable in celld 0.6.2 and the tested workerd runtime: native `setAlarm()` rejects the call. Widefleet does not redirect alarms to a different object or modify the storage API. Before replacing a loaded facet, it waits for active calls, response streams and registered `waitUntil` work. A response stream keeps its version until it completes, fails or is cancelled, including asynchronous cancellation cleanup. Calls within the same version can interleave, including nested calls while that version drains. WebSockets are outside the connector contract: celld 0.6.2 facets cannot hibernate WebSocket connections.
 
 Connector code and secret updates prepare an immutable version, check readiness and switch the active version. They do not require a native Worker deployment or a celld reload. Adding or changing native resources can still update shared runtime configuration. New calls from every bound app resolve the active connector version; existing calls retain their selected code and secret snapshot. An object that has already advanced to a newer version rejects requests from an older version instead of downgrading its state handler.
 
@@ -176,16 +194,17 @@ Use matching platform releases containing Dynamic connector support. Runtime ver
 
 The OpenAPI document includes connector artifact schemas and normal OAuth authentication:
 
-| Operation                                                     | Endpoint                                                                                              |
-| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| Browse connector names and grantable entrypoints              | `GET /api/v1/connector-catalog`                                                                       |
-| Inspect app resources and desired / active connector bindings | `GET /api/v1/apps/{appId}/connections`                                                                |
-| List / inspect connector deployments                          | `GET /api/v1/connectors`, `GET /api/v1/connectors/{name}`                                             |
-| List secret names and activation status                       | `GET /api/v1/connectors/{name}/secrets`                                                               |
-| Set / delete a connector secret                               | `PUT /api/v1/connectors/{name}/secrets/{secret}` with `{ "value": "..." }`, `DELETE` at the same path |
-| Upload and deploy the bundled project                         | `PUT /api/v1/connectors/{name}`                                                                       |
-| Read app bindings and activation state                        | `GET /api/v1/apps/{appId}/bindings`                                                                   |
-| Set one binding                                               | `PUT /api/v1/apps/{appId}/bindings/{binding}` with `{ "connector": "erp", "entrypoint": "default" }`  |
-| Remove one binding                                            | `DELETE /api/v1/apps/{appId}/bindings/{binding}`                                                      |
+| Operation                                                         | Endpoint                                                                                              |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Browse connector names and grantable entrypoints                  | `GET /api/v1/connector-catalog`                                                                       |
+| Inspect app resources and desired / active connector bindings     | `GET /api/v1/apps/{appId}/connections`                                                                |
+| Read connector logs with time, severity, text and version filters | `GET /api/v1/connectors/{name}/logs`                                                                  |
+| List / inspect connector deployments                              | `GET /api/v1/connectors`, `GET /api/v1/connectors/{name}`                                             |
+| List secret names and activation status                           | `GET /api/v1/connectors/{name}/secrets`                                                               |
+| Set / delete a connector secret                                   | `PUT /api/v1/connectors/{name}/secrets/{secret}` with `{ "value": "..." }`, `DELETE` at the same path |
+| Upload and deploy the bundled project                             | `PUT /api/v1/connectors/{name}`                                                                       |
+| Read app bindings and activation state                            | `GET /api/v1/apps/{appId}/bindings`                                                                   |
+| Set one binding                                                   | `PUT /api/v1/apps/{appId}/bindings/{binding}` with `{ "connector": "erp", "entrypoint": "default" }`  |
+| Remove one binding                                                | `DELETE /api/v1/apps/{appId}/bindings/{binding}`                                                      |
 
 Binding updates are atomic and do not require a caller-supplied revision. Connector deployment, administrative status listing and grant changes require administrator access. Members can browse the connector catalog; app collaborators can read their app's connections and bindings. CLI users select names and project context; IDs remain API identifiers.

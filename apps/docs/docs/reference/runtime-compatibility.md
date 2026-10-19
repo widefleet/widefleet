@@ -44,10 +44,13 @@ Widefleet integrates the native runtime as follows:
   connector and class; different connectors can reuse class names. A default
   Worker export is required even with named RPC entrypoints. The common RPC
   contract transfers values, with `fetch()` for streaming bodies. Callbacks,
-  returned RPC objects and WebSocket hibernation are outside that contract.
-  Connector tests on celld 0.6.2 and local workerd cover state, alarms, version
-  changes and response streaming; these are separate from the older native
-  observations in the table above.
+  returned RPC objects and WebSockets are outside that contract; celld 0.6.2
+  facets cannot hibernate WebSocket connections.
+  Connector tests on celld 0.6.2 and local workerd cover persistent state,
+  version changes and response streaming. Native facet alarms reject calls in
+  both runtimes; Widefleet supplies no alarm scheduler. Connector logs use the
+  same native tails and logging backends as apps, so celld's fetch-only capture
+  limit also applies to connectors. See [connector logs](/guides/connectors#connector-logs).
 - App removal clears deletable files and active references. Native D1/KV/Queue cells and shared deployment
   history may remain. See [app removal](/reference/runtime#app-removal).
 - Widefleet adds no blanket CPU/RAM, request, Worker-cache or origin-count caps.
