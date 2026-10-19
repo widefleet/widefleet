@@ -85,7 +85,7 @@ export const connectorCode = async (
     "__widefleet_connector.js",
     `
 import * as workers from 'cloudflare:workers';
-import './__widefleet_bindings.js';
+import { connectorResponse } from './__widefleet_bindings.js';
 import * as connector from ${JSON.stringify(`./${release.main}`)};
 export * from ${JSON.stringify(`./${release.main}`)};
 export { default } from ${JSON.stringify(`./${release.main}`)};
@@ -116,6 +116,9 @@ const Facet${index} = class extends connector[${JSON.stringify(name)}] {
     super(ctx, env);
     this.#pending = pending;
   }
+  async fetch(request) {
+    return connectorResponse(await super.fetch(request), request.signal, this.ctx);
+  }
   async WIDEFLEET_DRAIN() { while (this.#pending.size) await Promise.allSettled([...this.#pending]); }
   WIDEFLEET_ALARM(info) { return super.alarm(info); }
 };
@@ -135,7 +138,8 @@ export class WIDEFLEET_READY extends workers.WorkerEntrypoint {
 
   return {
     compatibilityDate: configuration.compatibility_date,
-    compatibilityFlags: configuration.compatibility_flags,
+    // Facet response readers must observe disconnects even while a read is pending.
+    compatibilityFlags: [...configuration.compatibility_flags, "enable_request_signal"],
     mainModule: "__widefleet_connector.js",
     modules: Object.fromEntries(modules),
     env: Object.fromEntries(bindings),

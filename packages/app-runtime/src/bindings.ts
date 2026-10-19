@@ -4,6 +4,7 @@ import type { WorkflowBinding, InstanceInput } from "./workflow-catalog.ts";
 import { installFetch } from "./fetch.ts";
 import { env } from "cloudflare:workers";
 import "./connector-bindings.ts";
+
 import { config } from "./config.ts";
 import * as z from "zod";
 import type {
@@ -15,6 +16,8 @@ import type {
   StatementInput,
 } from "./storage.ts";
 import { objectListing, objectMetadata, type ObjectOperation } from "./objects.ts";
+
+export { connectorResponse } from "./connector-response.ts";
 
 const binding = <T extends Database | KeyValue | Producer | WorkflowBinding>(name: string) => {
   // SAFETY: These service bindings are created by the trusted loader, from the same manifest.

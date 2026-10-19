@@ -39,6 +39,15 @@ export class Counter extends DurableObject {
     return 'released';
   }
   release() { this.releaseWaiter(); return true; }
+  async nested(mode) {
+    await this.env.KV.put('nested-started-' + mode, 'yes');
+    while (!await this.env.KV.get('nested-release-' + mode)) await new Promise(resolve => setTimeout(resolve, 10));
+    const result = await this.env.COUNTER.getByName('nested-' + mode).increment();
+    await this.ctx.storage.put('nested-result', result);
+    return result;
+  }
+  nestedBackground() { this.ctx.waitUntil(this.nested('background')); return true; }
+  nestedResult() { return this.ctx.storage.get('nested-result'); }
   async increment() {
     this.ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS counter (n INTEGER)');
     this.ctx.storage.sql.exec('INSERT INTO counter VALUES (1)');
@@ -59,7 +68,37 @@ export class Counter extends DurableObject {
     return true;
   }
   async backgroundValue() { return await this.ctx.storage.get('background') ?? null; }
-  fetch(request) { return new Response(new URL(request.url).pathname); }
+  fetch(request) {
+    const url = new URL(request.url);
+    if (url.pathname !== '/object-stream') return new Response(url.pathname);
+    const mode = url.searchParams.get('mode');
+    const env = this.env;
+    const ctx = this.ctx;
+    let sent = false;
+    let cancelled = false;
+    return new Response(new ReadableStream({
+      start(controller) { controller.enqueue(new TextEncoder().encode(${JSON.stringify(version)})); },
+      async pull(controller) {
+        if (sent) return;
+        sent = true;
+        while (!cancelled && !await env.KV.get('object-release-' + mode)) await new Promise(resolve => setTimeout(resolve, 10));
+        if (cancelled) return;
+        if (mode === 'error') { controller.error(new Error('object stream failed')); return; }
+        controller.enqueue(new TextEncoder().encode(await env.WIDEFLEET_SECRETS.get('TOKEN')));
+        controller.close();
+      },
+      cancel() {
+        cancelled = true;
+        const cleanup = (async () => {
+          await new Promise(resolve => setTimeout(resolve, 30));
+          await ctx.storage.put('cancelled', await env.WIDEFLEET_SECRETS.get('TOKEN'));
+        })();
+        ctx.waitUntil(cleanup);
+        return cleanup;
+      },
+    }), {headers: {'content-type': 'text/event-stream', 'cache-control': 'no-transform'}});
+  }
+  cancelled() { return this.ctx.storage.get('cancelled'); }
   async schedule() { await this.ctx.storage.setAlarm(Date.now() + 100); return true; }
   async alarm() { await this.ctx.storage.put('alarm', true); }
   async fired() { return await this.ctx.storage.get('alarm') ?? false; }
@@ -80,6 +119,30 @@ export default class Connector extends WorkerEntrypoint {
   async count() { return this.env.COUNTER.getByName('shared').increment(); }
   async hold() { return this.env.COUNTER.getByName('interleave').hold(); }
   async release() { return this.env.COUNTER.getByName('interleave').release(); }
+  nested() { return this.env.COUNTER.getByName('nested-call').nested('call'); }
+  nestedBackground() { return this.env.COUNTER.getByName('nested-background').nestedBackground(); }
+  nextNested() { return this.env.COUNTER.getByName('nested-call').increment(); }
+  nextNestedBackground() { return this.env.COUNTER.getByName('nested-background').increment(); }
+  nestedResult() { return this.env.COUNTER.getByName('nested-background').nestedResult(); }
+  nextObject(mode) { return this.env.COUNTER.getByName('object-' + mode).increment(); }
+  objectCancelled() { return this.env.COUNTER.getByName('object-cancel').cancelled(); }
+  async objectError() {
+    const response = await this.env.COUNTER.getByName('object-error').fetch('https://object.invalid/object-stream?mode=error');
+    const reader = response.body.getReader();
+    await reader.read();
+    await this.env.KV.put('object-error-started', 'yes');
+    try { await reader.read(); return {failed: false}; }
+    catch { return {failed: true}; }
+  }
+  async cancelObject() {
+    const response = await this.env.COUNTER.getByName('object-cancel').fetch('https://object.invalid/object-stream?mode=cancel');
+    const reader = response.body.getReader();
+    await reader.read();
+    await this.env.KV.put('object-cancel-started', 'yes');
+    while (!await this.env.KV.get('object-cancel-go')) await new Promise(resolve => setTimeout(resolve, 10));
+    await reader.cancel();
+    return true;
+  }
   async stateDelayed() { return this.env.COUNTER.getByName('running').delayed(); }
   async stateNext() { return this.env.COUNTER.getByName('running').increment(); }
   async background() { return this.env.COUNTER.getByName('background').background(); }
@@ -100,6 +163,10 @@ export default class Connector extends WorkerEntrypoint {
   }
   fail() { throw new Error('connector failure'); }
   fetch(request) {
+    if (new URL(request.url).pathname === '/object-stream') {
+      const mode = new URL(request.url).searchParams.get('mode');
+      return this.env.COUNTER.getByName('object-' + mode).fetch(request);
+    }
     if (new URL(request.url).pathname !== '/stream') return new Response('connector:' + new URL(request.url).pathname);
     const env = this.env;
     const ctx = this.ctx;
@@ -151,6 +218,8 @@ const application = `export default { async fetch(request, env) {
     if (op === 'reader') return Response.json(await env.READER.read());
     if (op === 'fetch') return env.CONNECTOR.fetch('https://connector.invalid/path');
     if (op === 'stream') return env.CONNECTOR.fetch('https://connector.invalid/stream', {signal: request.signal});
+    if (op === 'objectStream') return env.CONNECTOR.fetch('https://connector.invalid/object-stream' + new URL(request.url).search, {signal: request.signal});
+    if (op === 'nextObject') return Response.json(await env.CONNECTOR.nextObject(new URL(request.url).searchParams.get('mode')));
     if (op === 'then') return Response.json((await Promise.resolve(env.CONNECTOR)) === env.CONNECTOR);
     if (op === 'values') {
       const result = await env.CONNECTOR.echo({ date: new Date(0), bytes: new Uint8Array([4,2]), map: new Map([['a', 42]]), set: new Set(['b']), big: 42n });
@@ -305,10 +374,18 @@ describe.runIf(process.env["RUN_CONNECTOR_TESTS"] === "1").each(["celld", "worke
         join(directory, "index.js"),
         `
 import * as workers from 'cloudflare:workers';
-import runtime from './runtime.js';
+import runtime, {ConnectorSupervisor as NativeConnectorSupervisor} from './runtime.js';
 export * from './runtime.js';
+export class ConnectorSupervisor extends NativeConnectorSupervisor {
+  invoke(identity, method, args) {
+    const result = super.invoke(identity, method, args);
+    if (method === 'increment') this.ctx.waitUntil(this.env.KV.put('object-received', identity.version));
+    return result;
+  }
+}
 export default { async fetch(request, env, ctx) {
   const url = new URL(request.url);
+  if (url.pathname === '/fixture/release') { await env.KV.put(url.searchParams.get('key'), 'yes'); return Response.json(true); }
   if (url.pathname === '/fixture/manage') return ctx.exports.RuntimeManagement({props:{}}).fetch(new Request('https://runtime.internal/.well-known/widefleet/connectors', request));
   if (url.pathname === '/fixture/started') return Response.json(await env.KV.get(url.searchParams.get('key') ?? 'started'));
   if (url.pathname === '/fixture/seed') {
@@ -494,6 +571,111 @@ export default { async fetch(request, env, ctx) {
       await vi.waitFor(async () =>
         expect(await json("/fixture/started?key=stream-cancelled")).toBe("yes"),
       );
+    });
+    it.each(["call", "background"])(
+      "allows nested %s work while its object drains",
+      async (mode) => {
+        const previous = "nested-old-" + mode;
+        await activate(await prepare(previous, previous));
+        const pending = json(mode === "call" ? "/nested" : "/nestedBackground");
+        const completed = Promise.allSettled([pending]);
+        await vi.waitFor(async () =>
+          expect(await json("/fixture/started?key=nested-started-" + mode)).toBe("yes"),
+        );
+        latest = await prepare("nested-new-" + mode, "nested-new-" + mode);
+        await activate(latest);
+        const next = json(mode === "call" ? "/nextNested" : "/nextNestedBackground");
+        const advanced = Promise.allSettled([next]);
+        await vi.waitFor(async () =>
+          expect(await json("/fixture/started?key=object-received")).toBe(latest.version),
+        );
+        await json("/fixture/release?key=nested-release-" + mode);
+        expect(await completed).toMatchObject([
+          { status: "fulfilled", value: mode === "call" ? { version: previous, n: 1 } : true },
+        ]);
+        expect(await advanced).toMatchObject([
+          { status: "fulfilled", value: { version: "nested-new-" + mode, n: 2 } },
+        ]);
+
+        if (mode === "background")
+          expect(await json("/nestedResult")).toMatchObject({ version: previous, n: 1 });
+      },
+    );
+    it("keeps an object stream alive until completion before replacing its facet", async () => {
+      const mode = "complete";
+      await activate(await prepare("object-old-" + mode, "object-secret-" + mode));
+
+      const response = await fetch(`${origin}/objectStream?mode=${mode}`, {
+        signal: AbortSignal.timeout(4000),
+      });
+
+      const reader = response.body?.getReader();
+
+      if (!reader) throw new Error("Object stream has no body");
+      expect(
+        new TextDecoder().decode(z.instanceof(Uint8Array).parse((await reader.read()).value)),
+      ).toBe("object-old-" + mode);
+
+      const rest = (async () => {
+        let text = "";
+
+        for (;;) {
+          const chunk = await reader.read();
+
+          if (chunk.done) return { text };
+          text += new TextDecoder().decode(z.instanceof(Uint8Array).parse(chunk.value));
+        }
+      })().catch(() => ({ failed: true }));
+
+      latest = await prepare("object-new-" + mode, "object-new-" + mode);
+      await activate(latest);
+      const next = json("/nextObject?mode=" + mode);
+      const advanced = Promise.allSettled([next]);
+      await vi.waitFor(async () =>
+        expect(await json("/fixture/started?key=object-received")).toBe(latest.version),
+      );
+      await json("/fixture/release?key=object-release-" + mode);
+      expect(await rest).toEqual({ text: "object-secret-" + mode });
+      expect(await advanced).toMatchObject([
+        { status: "fulfilled", value: { version: "object-new-" + mode, n: 1 } },
+      ]);
+    });
+    it("forwards object stream failures and releases the next generation", async () => {
+      await activate(await prepare("error-old", "error-secret"));
+      const failed = Promise.allSettled([json("/objectError")]);
+      await vi.waitFor(async () =>
+        expect(await json("/fixture/started?key=object-error-started")).toBe("yes"),
+      );
+      latest = await prepare("error-new", "error-new-secret");
+      await activate(latest);
+      const next = Promise.allSettled([json("/nextObject?mode=error")]);
+      await vi.waitFor(async () =>
+        expect(await json("/fixture/started?key=object-received")).toBe(latest.version),
+      );
+      await json("/fixture/release?key=object-release-error");
+      expect(await failed).toEqual([{ status: "fulfilled", value: { failed: true } }]);
+      expect(await next).toMatchObject([
+        { status: "fulfilled", value: { version: "error-new", n: 1 } },
+      ]);
+    });
+    it("waits for object stream cancellation and cleanup before replacing its facet", async () => {
+      await activate(await prepare("cancel-old", "cancel-secret"));
+      const cancelled = Promise.allSettled([json("/cancelObject")]);
+      await vi.waitFor(async () =>
+        expect(await json("/fixture/started?key=object-cancel-started")).toBe("yes"),
+      );
+      latest = await prepare("cancel-new", "new-secret");
+      await activate(latest);
+      const next = Promise.allSettled([json("/nextObject?mode=cancel")]);
+      await vi.waitFor(async () =>
+        expect(await json("/fixture/started?key=object-received")).toBe(latest.version),
+      );
+      await json("/fixture/release?key=object-cancel-go");
+      expect(await cancelled).toEqual([{ status: "fulfilled", value: true }]);
+      expect(await next).toMatchObject([
+        { status: "fulfilled", value: { version: "cancel-new", n: 1 } },
+      ]);
+      expect(await json("/objectCancelled")).toBe("cancel-secret");
     });
     it("rejects bad code and stale activations, and chooses one concurrent winner", async () => {
       const bad = release("broken");

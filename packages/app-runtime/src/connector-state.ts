@@ -63,27 +63,35 @@ declare class LoadedConnectorFacet extends DurableObject {
 
 export class ConnectorSupervisor extends DurableObject<ParentEnvironment> {
   #pending = Promise.resolve();
-  #version: string | undefined;
-  #running: Fetcher<LoadedConnectorFacet> | undefined;
+  #current: { identity: StateVersion; facet: Fetcher<LoadedConnectorFacet> } | undefined;
   #calls = new Set<Promise<ConnectorValue | void>>();
+  #track<T extends ConnectorValue | void>(result: Promise<T>) {
+    this.#calls.add(result);
+    void result.then(
+      () => {
+        this.#calls.delete(result);
+      },
+      () => {
+        this.#calls.delete(result);
+      },
+    );
+
+    return result;
+  }
   #dispatch<T extends ConnectorValue | void>(
     identity: StateVersion,
     operation: (facet: Fetcher<LoadedConnectorFacet>) => Promise<T>,
   ) {
-    // Serialize generation selection, while allowing calls on the same facet to
-    // interleave normally. A version switch waits for all earlier calls.
+    // The draining generation must remain callable: its requests and waitUntil
+    // work can await another call to this object while a replacement is queued.
+    if (this.#current && JSON.stringify(this.#current.identity) === JSON.stringify(identity))
+      return this.#track(operation(this.#current.facet));
+
+    // Serialize generation changes, without queuing the draining generation's
+    // nested calls behind the change that is waiting for them.
     const selected = this.#pending.then(async () => {
       const facet = await this.#facet(identity);
-      const result = operation(facet);
-      this.#calls.add(result);
-      void result.then(
-        () => {
-          this.#calls.delete(result);
-        },
-        () => {
-          this.#calls.delete(result);
-        },
-      );
+      const result = this.#track(operation(facet));
 
       return { result };
     });
@@ -121,19 +129,23 @@ export class ConnectorSupervisor extends DurableObject<ParentEnvironment> {
       props: { objectId: identity.objectId },
     });
 
-    if (this.#version && this.#version !== identity.version) {
-      await Promise.allSettled(this.#calls);
-      // waitUntil work belongs to the old facet too, even after its caller left.
-      await this.#running?.WIDEFLEET_DRAIN();
+    if (this.#current && this.#current.identity.version !== identity.version) {
+      do {
+        await Promise.allSettled(this.#calls);
+        await this.#current.facet.WIDEFLEET_DRAIN();
+        // Nested calls may have joined while the previous batch was draining.
+      } while (this.#calls.size);
+
+      this.#current = undefined;
       this.ctx.facets.abort("state", new Error("Connector version changed"));
     }
 
-    this.#version = identity.version;
     await this.ctx.storage.put("identity", identity);
 
-    this.#running = this.ctx.facets.get("state", () => ({ class: facetClass }));
+    const facet = this.ctx.facets.get("state", () => ({ class: facetClass }));
+    this.#current = { identity, facet };
 
-    return this.#running;
+    return facet;
   }
   invoke(identity: StateVersion, method: string, args: ConnectorValue[]) {
     return this.#dispatch(stateVersion.parse(identity), async (facet) =>
