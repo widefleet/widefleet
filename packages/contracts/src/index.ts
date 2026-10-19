@@ -364,6 +364,8 @@ export const storedConnectorPackage = connectorPackage.extend({
     .max(532),
 });
 
+export const connectorUploadMetadata = connectorPackage.omit({ name: true, modules: true });
+
 export const connectorSecretName = bindingName.refine(
   (name) => !name.startsWith("WIDEFLEET_") && name !== "__proto__",
   "Reserved connector secret name",

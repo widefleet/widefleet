@@ -16,6 +16,7 @@ mod preview;
 mod reporting;
 mod runtime;
 mod settings;
+mod upload;
 mod workflows;
 
 use clap::{Parser, Subcommand};

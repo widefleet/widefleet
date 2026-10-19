@@ -1,18 +1,15 @@
 use crate::migrations::Database;
-use crate::{auth, installation, preview};
+use crate::{auth, installation, preview, upload};
 use clap::Args;
 use platform_core::{
     Error, Result, asset_hash,
     http::{Api, json},
     model::{
-        App, Asset, AssetManifest, Binding, DebugMetadata, Deployment, QueueConsumer,
+        App, Asset, AssetManifest, Binding, DebugMetadata, Deployment, ModuleType, QueueConsumer,
         UploadSession, WorkerAssets, WorkerMetadata,
     },
 };
-use reqwest::{
-    Method,
-    multipart::{Form, Part},
-};
+use reqwest::Method;
 use serde::Deserialize;
 use serde_json::json as value;
 use std::{
@@ -503,22 +500,14 @@ async fn publish(
     let request_id = Uuid::new_v4();
     // Retry only this immutable publish, always with the same request ID and content.
     for attempt in 0..3 {
-        let mut form = Form::new()
-            .text("metadata", serde_json::to_string(&metadata)?)
-            .part(
-                "worker.js",
-                Part::bytes(worker.clone())
-                    .file_name("worker.js")
-                    .mime_str("application/javascript+module")?,
-            );
-        for (name, bytes) in &map_uploads {
-            form = form.part(
-                name.clone(),
-                Part::bytes(bytes.clone())
-                    .file_name(name.clone())
-                    .mime_str("application/source-map+json")?,
-            );
-        }
+        let form = upload::worker(
+            &metadata,
+            std::iter::once(("worker.js", &ModuleType::Esm, worker.as_slice())).chain(
+                map_uploads
+                    .iter()
+                    .map(|(name, bytes)| (name.as_str(), &ModuleType::Sourcemap, bytes.as_slice())),
+            ),
+        )?;
         let token = auth::access_token(api, credentials).await?;
         let sent = api
             .authenticated(Method::PUT, &format!("/apps/{app}/worker"), &token)

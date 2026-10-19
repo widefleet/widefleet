@@ -30,7 +30,14 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       createdAt: "2026-10-01T00:00:00.000Z",
     });
 
-    const requests: { path: string; method: string; authorization: string; body: string }[] = [];
+    const requests: {
+      path: string;
+      method: string;
+      authorization: string;
+      contentType: string;
+      body: string;
+    }[] = [];
+
     let directory: string;
     let origin: string;
     let executable: string;
@@ -48,6 +55,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
           path: request.url ?? "",
           method: request.method ?? "",
           authorization: request.headers.authorization ?? "",
+          contentType: request.headers["content-type"] ?? "",
           body,
         });
         response.setHeader("content-type", "application/json");
@@ -198,21 +206,45 @@ export default class Connector extends WorkerEntrypoint {
         }),
       );
       await cli("deploy", "--config", "connector.jsonc", "--no-wait");
-      const release = contract.connectorPackage.parse(JSON.parse(requests.at(-1)?.body ?? ""));
-      const map = release.modules.find((module) => module.type === "sourcemap");
+
+      const readUpload = async () => {
+        const request = requests.at(-1);
+        expect(request?.contentType).toMatch(/^multipart\/form-data; boundary=/);
+
+        const form = await new Response(request?.body, {
+          headers: { "content-type": request?.contentType ?? "" },
+        }).formData();
+
+        const metadata = contract.connectorUploadMetadata.parse(
+          JSON.parse(z.string().parse(form.get("metadata"))),
+        );
+
+        const modules = [];
+
+        for (const [name, file] of form.entries()) {
+          if (name === "metadata") continue;
+          const part = z.instanceof(File).parse(file);
+          modules.push({ name, type: part.type, source: await part.text() });
+        }
+
+        return { metadata, modules };
+      };
+
+      const release = await readUpload();
+      const map = release.modules.find((module) => module.type === "application/source-map+json");
       expect(map).toBeDefined();
-      expect(release.debug?.source_maps).toEqual({ "worker.js": map?.name });
+      expect(release.metadata.debug?.source_maps).toEqual({ "worker.js": map?.name });
       expect(JSON.parse(map?.source ?? "")).toMatchObject({
         version: 3,
         sources: ["../worker.ts"],
         sourcesContent: [expect.stringContaining("fail(): never")],
       });
-      expect(release.modules.find((module) => module.type === "esm")?.source).not.toContain(
-        "sourceMappingURL",
-      );
+      expect(
+        release.modules.find((module) => module.type === "application/javascript+module")?.source,
+      ).not.toContain("sourceMappingURL");
       await cli("deploy", "--config", "connector.jsonc", "--no-wait");
-      const repeated = contract.connectorPackage.parse(JSON.parse(requests.at(-1)?.body ?? ""));
-      expect(repeated.debug?.build_id).toBe(release.debug?.build_id);
+      const repeated = await readUpload();
+      expect(repeated.metadata.debug?.build_id).toBe(release.metadata.debug?.build_id);
       expect(repeated.modules).toEqual(release.modules);
     });
     it("browses the catalog and reads serving app resources without mutations", async () => {

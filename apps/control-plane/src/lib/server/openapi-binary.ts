@@ -1,17 +1,74 @@
 import { toOpenAPISchema, type OpenAPIGenerator } from "@orpc/openapi";
 import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
-import { deployment, workerMetadata } from "@platform/contracts";
+import {
+  deployment,
+  workerMetadata,
+  connectorUploadMetadata,
+  connectorStatus,
+  appSlug,
+} from "@platform/contracts";
 
 const converter = new ZodToJsonSchemaConverter();
 
 export const binarySchemas = {
+  ConnectorName: toOpenAPISchema(converter.convert(appSlug, { strategy: "input" })[1]),
   WorkerUploadMetadata: toOpenAPISchema(
     converter.convert(workerMetadata, { strategy: "input" })[1],
   ),
   QueuedDeployment: toOpenAPISchema(converter.convert(deployment, { strategy: "output" })[1]),
+  ConnectorUploadMetadata: toOpenAPISchema(
+    converter.convert(connectorUploadMetadata, { strategy: "input" })[1],
+  ),
+  ConnectorDeploymentStatus: toOpenAPISchema(
+    converter.convert(connectorStatus, { strategy: "output" })[1],
+  ),
 };
 
+const workerRequestBody = (metadata: string) => ({
+  required: true,
+  content: {
+    "multipart/form-data": {
+      schema: {
+        type: "object" as const,
+        required: ["metadata"],
+        properties: { metadata: { $ref: `#/components/schemas/${metadata}` } },
+        additionalProperties: { type: "string" as const, format: "binary" },
+      },
+      encoding: { metadata: { contentType: "application/json" } },
+    },
+  },
+});
+
+const workerUploadDescription =
+  "Use one metadata field containing JSON and one file part per module, named after that module. Source maps are private artifacts referenced by metadata.debug.source_maps, never public assets or runtime modules. Up to 32 runtime modules and 500 source maps, 20 MiB per file, 64 KiB of UTF-8 metadata and 100 MiB per request.";
+
 export const binaryPaths = {
+  "/connectors/{name}": {
+    put: {
+      operationId: "connectorDeploy",
+      summary: "Upload connector modules and queue activation",
+      description: `${workerUploadDescription} Supported MIME types: application/javascript+module, application/source-map+json. Requires platform:write scope and administrator access. The connector name comes from the path. Repeating an unchanged pending or successful deployment returns its status; repeating a failed deployment retries it.`,
+      parameters: [
+        {
+          name: "name",
+          in: "path",
+          required: true,
+          schema: { $ref: "#/components/schemas/ConnectorName" },
+        },
+      ],
+      requestBody: workerRequestBody("ConnectorUploadMetadata"),
+      responses: {
+        "200": {
+          description: "Connector deployment accepted",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/ConnectorDeploymentStatus" },
+            },
+          },
+        },
+      },
+    },
+  },
   "/apps/{appId}/assets/{sessionId}/{hash}": {
     put: {
       operationId: "uploadAsset",
@@ -63,8 +120,7 @@ export const binaryPaths = {
     put: {
       operationId: "publishWorker",
       summary: "Publish immutable worker modules after uploading all missing assets",
-      description:
-        "Use one metadata field containing JSON and one file part per module, named after that module. Supported MIME types: application/javascript+module, application/wasm, text/plain, application/octet-stream, application/source-map+json. Source maps are private artifacts referenced by metadata.debug.source_maps, never public assets or runtime modules. Up to 32 runtime modules and 500 source maps, 20 MiB per file, 100 MiB per request. Repeating the same Idempotency-Key and upload session returns the original deployment; changed content conflicts.",
+      description: `${workerUploadDescription} Supported MIME types: application/javascript+module, application/wasm, text/plain, application/octet-stream, application/source-map+json. Repeating the same Idempotency-Key and upload session returns the original deployment; changed content conflicts.`,
       parameters: [
         { name: "appId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
         {
@@ -74,22 +130,7 @@ export const binaryPaths = {
           schema: { type: "string", format: "uuid" },
         },
       ],
-      requestBody: {
-        required: true,
-        content: {
-          "multipart/form-data": {
-            schema: {
-              type: "object",
-              required: ["metadata"],
-              properties: {
-                metadata: { $ref: "#/components/schemas/WorkerUploadMetadata" },
-              },
-              additionalProperties: { type: "string", format: "binary" },
-            },
-            encoding: { metadata: { contentType: "application/json" } },
-          },
-        },
-      },
+      requestBody: workerRequestBody("WorkerUploadMetadata"),
       responses: {
         "200": {
           description: "Deployment queued",

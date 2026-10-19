@@ -1,4 +1,4 @@
-use crate::{apps, auth, deploy};
+use crate::{apps, auth, deploy, upload};
 use clap::{Args, Subcommand};
 use platform_core::{
     Error, Result,
@@ -468,9 +468,25 @@ pub async fn run(api: &Api, credentials: &auth::Credentials, options: Options) -
             );
             let token = auth::access_token(api, credentials).await?;
             let path = format!("/connectors/{}", package.name);
+            let mut metadata = serde_json::json!({
+                "protocol": package.protocol,
+                "main": package.main,
+                "entrypoints": package.entrypoints,
+                "configuration": package.configuration,
+            });
+            if let Some(debug) = package.debug {
+                metadata["debug"] = serde_json::to_value(debug)?;
+            }
+            let form = upload::worker(
+                &metadata,
+                package
+                    .modules
+                    .iter()
+                    .map(|module| (module.name.as_str(), &module.kind, module.source.as_bytes())),
+            )?;
             let current: Status = json(
                 api.authenticated(Method::PUT, &path, &token)
-                    .json(&package)
+                    .multipart(form)
                     .send()
                     .await?,
             )

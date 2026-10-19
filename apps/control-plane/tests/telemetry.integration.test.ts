@@ -1,4 +1,4 @@
-import { connectorDebugFixture } from "./cloudflare-connector.fixture.ts";
+import { connectorDebugFixture, connectorUploadForm } from "./cloudflare-connector.fixture.ts";
 import { createWorkflowService } from "../src/lib/server/workflows.ts";
 import { createMigrationService } from "../src/lib/server/migrations.ts";
 import { createConnectorService } from "../src/lib/server/connectors.ts";
@@ -370,13 +370,13 @@ describe.runIf(process.env["RUN_TELEMETRY_TESTS"] === "1")(
       const target = { fleetId: agent.fleetId, name: "logging-fixture" };
       const headers = new Headers(adminHeaders);
       headers.set("origin", origin);
-      headers.set("content-type", "application/json");
+      headers.delete("content-type");
 
       const deployed = await api(
         new Request(`${origin}/api/v1/connectors/${target.name}`, {
           method: "PUT",
           headers,
-          body: JSON.stringify(connectorDebugFixture(target.name)),
+          body: connectorUploadForm(connectorDebugFixture(target.name)),
         }),
       );
 

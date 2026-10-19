@@ -1,5 +1,26 @@
 import { createHash } from "node:crypto";
 import { connectorPackage } from "@platform/contracts";
+import type { z } from "zod";
+
+export const connectorUploadForm = (release: z.input<typeof connectorPackage>) => {
+  const { name: _name, modules, ...metadata } = release;
+  const form = new FormData();
+  form.set("metadata", JSON.stringify(metadata));
+
+  for (const module of modules)
+    form.append(
+      module.name,
+      new Blob([module.source], {
+        type:
+          module.type === "sourcemap"
+            ? "application/source-map+json"
+            : "application/javascript+module",
+      }),
+      module.name,
+    );
+
+  return form;
+};
 
 export const connectorSource = `
 import {WorkerEntrypoint, DurableObject} from "cloudflare:workers";

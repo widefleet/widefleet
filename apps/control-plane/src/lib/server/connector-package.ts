@@ -2,7 +2,9 @@ import * as contract from "@platform/contracts";
 import { z } from "zod";
 import { InvalidOperation, StorageUnavailable } from "./errors.ts";
 import { loadPackage, storePackage, verifyModules } from "./package-storage.ts";
-import { prepareModules, storeModules } from "./worker-modules.ts";
+import { prepareModules, storeModules, type WorkerModule } from "./worker-modules.ts";
+import { createHash } from "node:crypto";
+import { Result } from "better-result";
 import type { ArtifactStorage } from "./storage.ts";
 
 export const connectorReference = z.strictObject({
@@ -14,6 +16,27 @@ export const connectorReference = z.strictObject({
   secrets: z.record(contract.connectorSecretName, z.string().min(1)).default({}),
   secretRevision: z.number().int().nonnegative().default(0),
 });
+
+export const uploadedConnector = (
+  name: string,
+  metadata: z.infer<typeof contract.connectorUploadMetadata>,
+  modules: WorkerModule[],
+) =>
+  Result.try({
+    try: () =>
+      contract.connectorPackage.parse({
+        ...metadata,
+        name,
+        modules: modules.map((module) => ({
+          name: module.name,
+          type: module.type,
+          source: new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(module.bytes),
+          sha256: createHash("sha256").update(module.bytes).digest("hex"),
+        })),
+      }),
+    catch: () =>
+      new InvalidOperation({ code: "BAD_REQUEST", message: "Invalid connector modules" }),
+  });
 
 export const validateConnectorSecret = (value: string) => {
   const result = contract.connectorSecretValue.safeParse(value);
