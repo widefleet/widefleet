@@ -133,6 +133,7 @@ describe("Hosted installation initialization", () => {
       expect(await database.db.select().from(oauthClient)).toMatchObject([{ scopes: cliScopes }]);
     });
 
+    // Failure and recovery each start a CLI process with its own 15-second deadline.
     it("exits unsuccessfully if the expected policy was not stored", async () => {
       await database.db.update(oauthResource).set({ accessTokenTtl: 3600 });
       await database.db.execute(sql`
@@ -156,6 +157,6 @@ describe("Hosted installation initialization", () => {
       expect(await database.db.select().from(oauthResource)).toMatchObject([
         { accessTokenTtl: 300 },
       ]);
-    });
+    }, 30_000);
   });
 });
