@@ -1,7 +1,7 @@
 ---
 title: Runtime compatibility
 description: Supported runtime integrations and verified differences from Cloudflare.
-lastModified: 2026-10-12
+lastModified: 2026-10-19
 ---
 
 Widefleet currently uses celld **0.6.2**. Dynamic Worker and deployment tests exercise the new
@@ -39,9 +39,15 @@ Widefleet integrates the native runtime as follows:
 - Provisioning manages one node per fleet. celld itself supports multiple nodes.
 - [Workflows](/guides/workflows) use the usual `WorkflowEntrypoint` and step APIs
   through a platform adapter on unchanged celld. Automatic facets are excluded.
-  [Connectors](/guides/connectors) run as regular Workers and may declare their own
-  Durable Objects. Class names must be unique within the fleet; a default Worker
-  export is required even with named RPC entrypoints.
+- **Unreleased:** [Connectors](/guides/connectors) run as Dynamic Workers on celld
+  and Cloudflare. Their Durable Objects use persistent facets, isolated by fleet,
+  connector and class; different connectors can reuse class names. A default
+  Worker export is required even with named RPC entrypoints. The common RPC
+  contract transfers values, with `fetch()` for streaming bodies. Callbacks,
+  returned RPC objects and WebSocket hibernation are outside that contract.
+  Connector tests on celld 0.6.2 and local workerd cover state, alarms, version
+  changes and response streaming; these are separate from the older native
+  observations in the table above.
 - App removal clears deletable files and active references. Native D1/KV/Queue cells and shared deployment
   history may remain. See [app removal](/reference/runtime#app-removal).
 - Widefleet adds no blanket CPU/RAM, request, Worker-cache or origin-count caps.

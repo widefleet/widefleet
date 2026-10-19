@@ -1,10 +1,12 @@
 ---
 title: IT connectors
-description: Find integrations, inspect app connections and manage native RPC bindings.
-lastModified: 2026-10-12
+description: Deploy Dynamic Worker integrations and grant apps access to their APIs.
+lastModified: 2026-10-19
 ---
 
-IT can deploy a Worker from its own repository with `widefleet connector deploy`. Apps receive a native service binding and call its methods directly, for example `env.ERP.listCustomers()`. Connector code runs as a regular Worker in the shared fleet, with its own declared resources. It is independent of the Widefleet runtime and Rust agent releases.
+IT can deploy a Worker from its own repository with `widefleet connector deploy`. Apps receive a scoped binding and call its methods directly, for example `env.ERP.listCustomers()`. Connector code runs as a Dynamic Worker with its own declared resources on both self-hosted celld and Cloudflare. Once the supporting platform release is installed, connector code and secret updates activate independently of platform releases.
+
+**Unreleased:** Dynamic connector activation requires matching control-plane, CLI, agent and app-runtime releases containing this implementation. The deployment, state and secret-storage behavior below describes that implementation, rather than the currently published releases.
 
 ## Find connectors and inspect your app
 
@@ -88,7 +90,7 @@ widefleet connector secret list erp
 widefleet connector secret delete erp ERP_API_KEY
 ```
 
-Values are accepted only through a file or redirected stdin, never a command-line argument. Input is preserved exactly, including trailing newlines; use a file without a final newline when the credential requires it. The CLI accepts 1–65536 UTF-8 bytes. `put` and `delete` wait for activation; `--no-wait` returns after queuing. Listing returns names and activation status, never values. These operations use the same administrator permissions and ordinary login as connector deployment.
+Values are accepted only through a file or redirected stdin, never a command-line argument. Input is preserved exactly, including trailing newlines; use a file without a final newline when the credential requires it. Secret values must contain 1–5000 UTF-8 bytes. Variables and secrets together are limited to 128 names. `put` and `delete` wait for activation; `--no-wait` returns after queuing. Listing returns names and activation status, never values. These operations use the same administrator permissions and ordinary login as connector deployment.
 
 The platform supplies an asynchronous `WIDEFLEET_SECRETS` binding only to that connector:
 
@@ -111,17 +113,17 @@ export default class ERP extends WorkerEntrypoint<Env> {
 }
 ```
 
-Missing secrets reject the promise. Secret names are case-sensitive and follow binding-name syntax. The prefix `WIDEFLEET_` and the name `__proto__` are reserved. Ordinary `vars` remain separate; a same-named variable does not satisfy a secret lookup. The getter runs in a separate platform-owned Worker for each connector, reached through a native service binding in the same celld process. Connector code is deployed unchanged. Apps cannot bind to the secret Worker. Trusted connector authors must keep secret values out of business responses and logs. For local Wrangler tests, supply a test implementation of the binding; Widefleet provides it during fleet activation.
+Missing secrets reject the promise. Secret names are case-sensitive and follow binding-name syntax. The prefix `WIDEFLEET_` and the name `__proto__` are reserved. Ordinary `vars` remain separate; a same-named variable does not satisfy a secret lookup. The getter resolves secrets from the calling connector's immutable version through a platform-owned binding. Apps cannot obtain that binding through a connector grant. Trusted connector authors must keep secret values out of business responses and logs. For local Wrangler tests, supply a test implementation of the binding; Widefleet provides it during fleet activation.
 
-Changes activate the connector's currently desired code and a fixed snapshot of its secrets. `secretRevision` and `appliedSecretRevision` distinguish the saved and serving configurations independently of the code checksum. A failed activation retains the previous serving generation. Retry by setting the secret again or redeploying the desired source; code rollback preserves the latest desired secrets. Requests already in flight may finish with the previous generation. Secrets belong to the connector, not to a particular app or user.
+Changes activate the connector's currently desired code and a fixed snapshot of its secrets. `secretRevision` and `appliedSecretRevision` distinguish the saved and confirmed serving configurations independently of the code checksum. A failed readiness check leaves the previous serving generation active. Retry by setting the secret again or redeploying the desired source; code rollback preserves the latest desired secrets. Requests already in flight may finish with the previous generation. Secrets belong to the connector, not to a particular app or user.
 
 ### Storage and recovery
 
-The control plane encrypts values using the installation encryption key and stores the ciphertexts directly in the connector activation snapshots in PostgreSQL. Desired, applied and queued job snapshots own their secret values independently of login settings and credential cleanup. Source artifacts contain no managed secret values. Only the agent holding the active job lease receives decrypted values. Restore PostgreSQL together with the same installation key. Historical snapshots retain ciphertext copies for recovery.
+The control plane encrypts values using the installation encryption key and stores the ciphertexts in connector activation snapshots in PostgreSQL. Desired, applied and queued snapshots own their secret values independently of login settings and credential cleanup. Source artifacts contain no managed secret values. The active deployment agent, or the hosted deployment operation on Cloudflare, sends the selected values through the runtime's private management interface. Restore PostgreSQL together with the same installation key.
 
-The backend keeps secrets available during control-plane outages by storing plaintext variables in each secret Worker's private fleet configuration. Values can also exist in agent staging files, activation journals, fleet object storage manifests and backups. Fleet/storage administrators and trusted connector code can read them. Deleting or rotating a secret updates the serving configuration; historical copies remain. Protect and back up the data plane accordingly.
+The runtime encrypts each version's secrets in its immutable connector snapshot in runtime object storage, using a key derived from the runtime control token. These snapshots keep serving independent of management. Preserve the runtime control token, object storage and persistent runtime state together in backups; replacing the token alone makes existing snapshots unreadable. The agent's activation journal contains version identities, not plaintext connector secrets. Historical encrypted snapshots remain after rotation or deletion. Administrators with the encryption keys and trusted connector code can read the values; protect those keys and the data plane accordingly.
 
-Upgrade the control plane, CLI and agent together before using connector secrets.
+Upgrade the control plane, CLI, agent and app runtime together before using Dynamic connectors.
 
 ## Give an app its binding
 
@@ -140,25 +142,33 @@ These commands resolve the existing app from `wrangler.jsonc` or `--app NAME`. T
 const customers = await env.ERP.listCustomers();
 ```
 
-The binding grants the selected entrypoint's native RPC surface. To expose a narrower API, the connector author exports a separate `WorkerEntrypoint` class and IT selects it with `--entrypoint CustomerReader`. The IT project supplies the corresponding TypeScript interface or type package to app projects.
+The binding grants the selected entrypoint's callable RPC methods and `fetch()` handler. To expose a narrower API, the connector author exports a separate `WorkerEntrypoint` class and IT selects it with `--entrypoint CustomerReader`. The IT project supplies the corresponding TypeScript interface or type package to app projects.
 
-Bindings default to the connector's `default` export. celld 0.6.1 requires a default Worker export even when callers select a named entrypoint. Export a `WorkerEntrypoint` class as default, or supply a default fetch handler alongside named entrypoints. Exported Durable Object classes are excluded from the CLI's entrypoint list.
+RPC arguments and results use transferable values, including ordinary data objects, dates, byte arrays, maps and sets. Callbacks, returned RPC objects and streams passed through custom RPC are outside the common connector contract. For large exports, expose a `fetch()` handler and consume its response body as a stream. A remote session can instead be represented by an ID passed to subsequent methods. Instance fields and platform lifecycle methods are not callable RPC methods.
+
+Bindings default to the connector's `default` export. A connector package must include a default Worker export even when callers select a named entrypoint. Export a `WorkerEntrypoint` class as default, or supply a default fetch handler alongside named entrypoints. Exported Durable Object classes are excluded from the CLI's entrypoint list.
 
 A binding can be saved before the app's first deployment. Otherwise changes wait for activation, unless `--no-wait` is used. Status distinguishes saved, pending, active and failed; repeating a failed change retries it. A failed code deployment does not mark already active grants as failed. Previews start without connector grants, and app code rollback keeps current bindings. Resource-name collisions and reserved `WIDEFLEET_` names are rejected.
 
 ## Resources and activation
 
-Connector configuration supports `vars`, D1, R2, KV and local Durable Object bindings with `new_sqlite_classes` migrations. Resources belong to the connector, independently of similarly named app resources. A connector does not inherit the loader's storage, administrative token or Worker Loader binding. Its normal outbound networking is independent of the user app's network allowlist; trusted connector code must enforce its own business restrictions.
+Connector configuration supports `vars`, D1, R2, KV and local Durable Object bindings. Resources belong to the connector, independently of similarly named app resources or another connector's resources. A connector does not inherit the loader's storage, administrative token or Worker Loader binding. Its normal outbound networking is independent of the user app's network allowlist; trusted connector code must enforce its own business restrictions.
 
-An optional Wrangler `database_id` is accepted for D1; Widefleet assigns its fleet-local storage identity from the connector and database names. Binding-name conflicts are checked against active apps and queued/running app deployments. DO class names remain reserved while either the desired or applied connector package declares them, including after a failed update.
+An optional Wrangler `database_id` selects D1's logical identity, falling back to `database_name`. Widefleet scopes that identity to the connector and provisions the native resource. App binding-name conflicts are checked against active apps and queued/running app deployments.
 
-The IT project can implement state in a normal `DurableObject`, declare it in `durable_objects.bindings`, and register its class in `migrations`. Keeping the connector and class names stable preserves that namespace across deployments. Shared state requires deliberately addressing the same object, such as `env.STATE.getByName("erp-connection")`. celld requires DO class names to be unique across the fleet; namespace/class renames are not a supported data migration.
+Implement state in a `DurableObject` and declare its class in `durable_objects.bindings`. Widefleet hosts each object as a persistent facet behind a shared runtime Durable Object. Connector classes do not need native class migrations; the CLI removes Wrangler `migrations` from the published package, so a project can retain them for local native development.
 
-Connector updates use a celld reload and affect every app bound to that connector. The existing activation journal and recovery path preserve the previous serving generation on failure. Before changing installed entrypoints, both desired app grants and actual serving snapshots are checked: a failed revocation cannot authorize removing a still-used entrypoint. Already-running requests can finish under their previous bindings.
+Keep the fleet, connector, class name and object ID stable to preserve state across deployments. Different connectors can use the same class name without sharing data. Within one connector, bindings to the same class share its namespace. Address the same object deliberately, for example `env.STATE.getByName("erp-connection")`. Object IDs are opaque platform identifiers; use `idFromString()` to restore a saved ID. Renaming a connector or class creates a different namespace and does not migrate stored data.
+
+Connector objects support SQLite and key-value storage, RPC, `fetch()` and storage alarms. The runtime forwards alarms to the active connector version. Before replacing a loaded facet, it waits for active calls and registered `waitUntil` work; calls within the same version can interleave. WebSocket hibernation is outside the connector contract.
+
+Connector code and secret updates prepare an immutable version, check readiness and switch the active version. They do not require a native Worker deployment or a celld reload. Adding or changing native resources can still update shared runtime configuration. New calls from every bound app resolve the active connector version; existing calls retain their selected code and secret snapshot. An object that has already advanced to a newer version rejects requests from an older version instead of downgrading its state handler.
+
+Failed preparation leaves the serving version active, and activation retries are idempotent. Check `widefleet connector show NAME` to distinguish desired from confirmed serving state after a failed operation, then retry the deployment. Before removing installed entrypoints, both desired app grants and actual serving snapshots are checked: a failed revocation cannot authorize removing a still-used entrypoint.
 
 Installed code, configuration, bindings and state remain in the data plane. Serving apps and ordinary runtime restarts work without the control plane or deployment agent. App deletion removes that app's references, not a shared connector or its data.
 
-Use matching CLI, control-plane and agent releases. Connector support is included in `0.3.0`. Upgrades from pre-connector development snapshots require a fresh fleet: migration `0009` rejects existing apps, selected runtimes or running jobs before adding the connector schema. Runtime versions remain immutable; published runtime releases must use a new version for changed bytes.
+Use matching platform releases containing Dynamic connector support. Runtime versions remain immutable; published runtime releases must use a new version for changed bytes. The Dynamic connector publication contract replaces the earlier native connector format; it does not include a native connector migration path.
 
 `vars` are ordinary package configuration; use the dedicated secret commands for credentials. Connector cron/queue configuration, cross-fleet bindings and connector removal commands are not implemented here. Runtime updates preserve installed connectors. Native RPC/DO/telemetry differences are described in the [celld compatibility notes](/reference/runtime-compatibility).
 
