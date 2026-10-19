@@ -2382,9 +2382,16 @@ describe("Platform API with PostgreSQL and RustFS", () => {
 
     expect(second.secretRevision).toBe(2);
     expect(await environment.database.db.select().from(installationSecrets)).toEqual(loginSecrets);
+
     // Saving unchanged login settings still runs its credential cleanup. Both
     // the claimed and newer queued connector snapshots must remain decryptable.
-    const owner = { ...environment.owner, role: "owner" as const, admin: true, creator: true };
+    const owner = {
+      ...environment.owner,
+      application: { ...environment.application, admin: true },
+      role: "owner" as const,
+      admin: true,
+      creator: true,
+    };
 
     const settings = contract.settingsInput.parse(
       (await environment.settings.read(owner)).settings,

@@ -15,6 +15,18 @@
     "#server/*": "./src/lib/server/*.ts",
     "#shadcn/*": "./src/lib/*"
   },
+  "exports": {
+    "./application-context": "./src/lib/server/application-context.ts",
+    "./applications": "./src/lib/server/apps.ts",
+    "./identity": "./src/lib/server/identity.ts",
+    "./database": "./src/lib/server/database.ts",
+    "./schema": "./src/lib/server/schema.ts",
+    "./auth-schema": "./src/lib/server/auth-schema.ts",
+    "./authentication": "./src/lib/server/auth.ts",
+    "./configuration": "./src/lib/server/config.ts",
+    "./runtime": "./src/lib/server/runtime-services.ts",
+    "./migrations/*": "./migrations/*"
+  },
   "scripts": {
     "test:e2e": "playwright test",
     "initialize": "node tools/initialize.ts",

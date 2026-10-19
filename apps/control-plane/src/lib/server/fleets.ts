@@ -1,5 +1,5 @@
 import { Result } from "better-result";
-import type { Database } from "./database.ts";
+import type { Database, DatabaseExecutor } from "./database.ts";
 import { InvalidOperation } from "./errors.ts";
 import { transact } from "./transactions.ts";
 import { eq } from "drizzle-orm";
@@ -7,7 +7,7 @@ import { agents, apps, fleets, jobs } from "./schema.ts";
 import type { Transaction } from "./transactions.ts";
 
 // The installation's execution target exists independently of agent credentials.
-export const defaultFleet = async (transaction: Transaction) => {
+export const defaultFleet = async (transaction: DatabaseExecutor) => {
   const [fleet] = await transaction.select().from(fleets).where(eq(fleets.name, "default"));
 
   if (!fleet) throw new Error("The installation has no default fleet");

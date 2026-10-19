@@ -1,5 +1,5 @@
 import { Result } from "better-result";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { managedApp, lockAppDescendants } from "./apps.ts";
 import { lockFleet } from "./fleets.ts";
@@ -25,7 +25,7 @@ export const registerCloudflareRemoval = (
     const [scope] = await transaction
       .select({ fleetId: apps.fleetId })
       .from(apps)
-      .where(eq(apps.id, command.appId));
+      .where(and(eq(apps.id, command.appId), eq(apps.fleetId, command.actor.application.fleetId)));
 
     if (scope) await lockFleet(transaction, scope.fleetId);
     const access = await managedApp(transaction, command.actor, command.appId);
@@ -57,7 +57,7 @@ export const registerCloudflareRemoval = (
       return Result.ok(z.array(removalTarget).parse(existing.targets));
     }
 
-    const descendants = await lockAppDescendants(transaction, command.appId);
+    const descendants = await lockAppDescendants(transaction, access.value);
 
     const targets = [access.value, ...descendants]
       .toReversed()
@@ -128,7 +128,11 @@ export const createCloudflareRemoval =
                     id,
                     appId,
                     kind: "remove" as const,
-                    actor: { id: principal.id, admin: principal.admin },
+                    actor: {
+                      id: principal.id,
+                      admin: principal.admin,
+                      application: principal.application,
+                    },
                     createdAt: new Date().toISOString(),
                   };
 

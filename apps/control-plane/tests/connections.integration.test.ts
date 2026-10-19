@@ -22,7 +22,13 @@ describe("Connector discovery and app connections", () => {
     await environment.users.saveUser(record);
     await environment.linkMicrosoftUser(record.id);
 
-    return { ...record, role: "member" as const, admin: false, creator: true };
+    return {
+      ...record,
+      application: environment.application,
+      role: "member" as const,
+      admin: false,
+      creator: true,
+    };
   };
 
   beforeAll(async () => {

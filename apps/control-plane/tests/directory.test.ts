@@ -12,6 +12,11 @@ const creator = {
   role: "member" as const,
   admin: false,
   creator: true,
+  application: {
+    fleetId: "00000000-0000-4000-8000-000000000001",
+    organizationId: "widefleet",
+    admin: false,
+  },
 };
 
 const configuration = {

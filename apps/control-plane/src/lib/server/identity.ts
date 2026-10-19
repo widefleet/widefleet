@@ -12,6 +12,9 @@ import {
 import type { Authentication } from "./auth.ts";
 import type { Configuration } from "./config.ts";
 import type { Database } from "./database.ts";
+import type { FleetSelector } from "./application-context.ts";
+import { defaultFleet } from "./fleets.ts";
+import { fleets } from "./schema.ts";
 import { DatabaseUnavailable } from "./errors.ts";
 
 export class AuthenticationFailed extends TaggedError("AuthenticationFailed")<{
@@ -25,9 +28,20 @@ export const createIdentityService = (
   auth: Authentication,
   database: Database,
   configuration: Configuration,
+  selectFleet: FleetSelector = async () => (await defaultFleet(database)).id,
 ) => {
-  const resolveUser = (userId: string) =>
+  const resolveUser = (userId: string, request: Request, activeOrganizationId: string | null) =>
     Result.gen(async function* () {
+      const fleetId = yield* Result.await(
+        Result.tryPromise({
+          try: () => selectFleet({ userId, request, activeOrganizationId }),
+          catch: (cause) =>
+            cause instanceof AuthenticationFailed
+              ? cause
+              : new DatabaseUnavailable({ message: "Could not resolve application access", cause }),
+        }),
+      );
+
       const [record] = yield* Result.await(
         Result.tryPromise({
           try: () =>
@@ -37,14 +51,13 @@ export const createIdentityService = (
                 name: user.name,
                 email: user.email,
                 role: member.role,
+                organizationId: member.organizationId,
               })
               .from(user)
+              .innerJoin(fleets, eq(fleets.id, fleetId))
               .innerJoin(
                 member,
-                and(
-                  eq(member.userId, user.id),
-                  eq(member.organizationId, installationOrganizationId),
-                ),
+                and(eq(member.userId, user.id), eq(member.organizationId, fleets.organizationId)),
               )
               .where(eq(user.id, userId)),
           catch: (cause) =>
@@ -72,7 +85,15 @@ export const createIdentityService = (
         name: record.name,
         email: record.email,
         role: role.data,
-        admin: organizationRoles[role.data].authorize({ agent: ["manage"] }).success,
+        // Installation administration never follows an unrelated organization role.
+        admin:
+          record.organizationId === installationOrganizationId &&
+          organizationRoles[role.data].authorize({ agent: ["manage"] }).success,
+        application: {
+          fleetId,
+          organizationId: record.organizationId,
+          admin: organizationRoles[role.data].authorize({ agent: ["manage"] }).success,
+        },
         creator: organizationRoles[role.data].authorize({ app: ["create"] }).success,
       });
     });
@@ -121,7 +142,7 @@ export const createIdentityService = (
           });
         }
 
-        return resolveUser(verified.sub);
+        return resolveUser(verified.sub, request, null);
       }
 
       if (
@@ -149,7 +170,7 @@ export const createIdentityService = (
         });
       }
 
-      return resolveUser(session.user.id);
+      return resolveUser(session.user.id, request, session.session.activeOrganizationId ?? null);
     });
 
   return { authenticate };

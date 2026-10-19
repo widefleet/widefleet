@@ -5,34 +5,36 @@ import type { z } from "zod";
 import type { Configuration } from "./config.ts";
 import type { Database } from "./database.ts";
 import { member, user } from "./auth-schema.ts";
-import { installationOrganizationId } from "../organization.ts";
 import { findMembers } from "./member-directory.ts";
 import { InvalidOperation } from "./errors.ts";
 import type { Principal } from "./identity.ts";
 import { appGrants, apps, artifacts, deploymentEvents, deployments, jobs } from "./schema.ts";
 import { transact, type Transaction } from "./transactions.ts";
-import { defaultFleet, requireAgentExecution } from "./fleets.ts";
+import { lockFleet, requireAgentExecution } from "./fleets.ts";
 import { operationId, type HostedExecution } from "./deployment-execution.ts";
 
 export const appVisibility = (
   database: Database | Transaction,
-  principal: Pick<Principal, "id" | "admin">,
+  principal: Pick<Principal, "id" | "application">,
 ) =>
-  principal.admin
-    ? sql`true`
-    : or(
-        eq(apps.ownerId, principal.id),
-        exists(
-          database
-            .select({ id: appGrants.appId })
-            .from(appGrants)
-            .where(and(eq(appGrants.appId, apps.id), eq(appGrants.userId, principal.id))),
+  and(
+    eq(apps.fleetId, principal.application.fleetId),
+    principal.application.admin
+      ? sql`true`
+      : or(
+          eq(apps.ownerId, principal.id),
+          exists(
+            database
+              .select({ id: appGrants.appId })
+              .from(appGrants)
+              .where(and(eq(appGrants.appId, apps.id), eq(appGrants.userId, principal.id))),
+          ),
         ),
-      );
+  );
 
 export const managedApp = async (
   transaction: Transaction,
-  principal: Pick<Principal, "id" | "admin">,
+  principal: Pick<Principal, "id" | "application">,
   appId: string,
 ) => {
   const [record] = await transaction
@@ -49,8 +51,11 @@ export const managedApp = async (
 
 // The caller holds the root app lock. All tree mutations lock descendants from parent
 // to child, including access inheritance and removal of a legacy preview subtree.
-export const lockAppDescendants = async (transaction: Transaction, appId: string) => {
-  let parents = [appId];
+export const lockAppDescendants = async (
+  transaction: Transaction,
+  root: Pick<typeof apps.$inferSelect, "id" | "fleetId">,
+) => {
+  let parents = [root.id];
   const descendants = [];
 
   while (parents.length > 0) {
@@ -61,6 +66,11 @@ export const lockAppDescendants = async (transaction: Transaction, appId: string
       .orderBy(apps.id)
       .for("update");
 
+    if (level.some((app) => app.fleetId !== root.fleetId))
+      throw new InvalidOperation({
+        code: "CONFLICT",
+        message: "App previews belong to another fleet",
+      });
     descendants.push(...level);
     parents = level.map((app) => app.id);
   }
@@ -72,7 +82,7 @@ export const enqueueAppRemoval = async (
   transaction: Transaction,
   record: typeof apps.$inferSelect,
 ) => {
-  const descendants = await lockAppDescendants(transaction, record.id);
+  const descendants = await lockAppDescendants(transaction, record);
   const pending = [record, ...descendants].filter((app) => app.state !== "deleting");
 
   if (pending.length === 0) return;
@@ -201,13 +211,13 @@ const provisionApp = (
 ) =>
   transact(database, async (transaction) => {
     await transaction.execute(
-      sql`select pg_advisory_xact_lock(hashtextextended(${input.slug}, 0))`,
+      sql`select pg_advisory_xact_lock(hashtextextended(${JSON.stringify([principal.application.fleetId, input.slug])}, 0))`,
     );
 
     const [duplicate] = await transaction
       .select({ id: apps.id })
       .from(apps)
-      .where(eq(apps.slug, input.slug));
+      .where(and(eq(apps.fleetId, principal.application.fleetId), eq(apps.slug, input.slug)));
 
     if (!principal.creator && (mode === "create" || !duplicate))
       return Result.err(
@@ -234,8 +244,12 @@ const provisionApp = (
       return Result.ok(presentApp(existing.value, configuration));
     }
 
-    const fleet = await defaultFleet(transaction);
-    let hostname = `${input.slug}.${configuration.APP_DOMAIN}`;
+    const fleet = await lockFleet(transaction, principal.application.fleetId);
+
+    if (fleet.organizationId !== principal.application.organizationId)
+      throw new InvalidOperation({ code: "NOT_FOUND", message: "Fleet not found" });
+    const domain = fleet.appDomain ?? configuration.APP_DOMAIN;
+    let hostname = `${input.slug}.${domain}`;
     let accessGroups: string[] = [];
     let accessRevision = 0;
 
@@ -270,7 +284,7 @@ const provisionApp = (
       if (input.previewName !== undefined) {
         if (
           parent.value.parentId !== null ||
-          parent.value.hostname !== `${parent.value.slug}.${configuration.APP_DOMAIN}`
+          parent.value.hostname !== `${parent.value.slug}.${domain}`
         )
           return Result.err(
             new InvalidOperation({
@@ -323,13 +337,14 @@ export const createAppService = (
   configuration: Configuration,
   execution?: HostedExecution,
 ) => ({
-  catalog: () =>
+  catalog: (principal: Principal) =>
     transact(database, async (transaction) => {
       const records = await transaction
         .select({ id: apps.id, displayName: apps.displayName, hostname: apps.hostname })
         .from(apps)
         .where(
           and(
+            eq(apps.fleetId, principal.application.fleetId),
             eq(apps.catalogListed, true),
             isNull(apps.parentId),
             eq(apps.state, "active"),
@@ -352,7 +367,7 @@ export const createAppService = (
       if (access.isErr()) return access;
       const record = access.value;
 
-      if (!principal.admin && record.ownerId !== principal.id)
+      if (!principal.application.admin && record.ownerId !== principal.id)
         return Result.err(
           new InvalidOperation({
             code: "FORBIDDEN",
@@ -507,7 +522,7 @@ export const createAppService = (
 
       if (access.isErr()) return access;
 
-      const canManage = principal.admin || access.value.ownerId === principal.id;
+      const canManage = principal.application.admin || access.value.ownerId === principal.id;
 
       const [owner] = await transaction
         .select({ name: user.name, email: user.email })
@@ -520,7 +535,10 @@ export const createAppService = (
         .innerJoin(user, eq(user.id, appGrants.userId))
         .where(eq(appGrants.appId, appId));
 
-      const candidates = canManage && search ? await findMembers(transaction, search) : [];
+      const candidates =
+        canManage && search
+          ? await findMembers(transaction, principal.application.organizationId, search)
+          : [];
 
       return Result.ok({
         canManage,
@@ -542,7 +560,7 @@ export const createAppService = (
 
       if (access.isErr()) return access;
 
-      if (!principal.admin && access.value.ownerId !== principal.id)
+      if (!principal.application.admin && access.value.ownerId !== principal.id)
         return Result.err(
           new InvalidOperation({
             code: "FORBIDDEN",
@@ -555,7 +573,10 @@ export const createAppService = (
         .from(user)
         .innerJoin(
           member,
-          and(eq(member.userId, user.id), eq(member.organizationId, installationOrganizationId)),
+          and(
+            eq(member.userId, user.id),
+            eq(member.organizationId, principal.application.organizationId),
+          ),
         )
         .where(eq(user.id, userId));
 
@@ -577,7 +598,7 @@ export const createAppService = (
 
       if (access.isErr()) return access;
 
-      if (!principal.admin && access.value.ownerId !== principal.id)
+      if (!principal.application.admin && access.value.ownerId !== principal.id)
         return Result.err(
           new InvalidOperation({
             code: "FORBIDDEN",

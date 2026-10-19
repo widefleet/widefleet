@@ -27,6 +27,11 @@ describe("Installation reporting with synthetic PostHog transport", () => {
     role: "owner" as const,
     admin: true,
     creator: true,
+    application: {
+      fleetId: "00000000-0000-4000-8000-000000000001",
+      organizationId: "widefleet",
+      admin: true,
+    },
   };
 
   const transport: typeof fetch = async (input, init) => {
@@ -185,9 +190,10 @@ describe("Installation reporting with synthetic PostHog transport", () => {
     const records = await environment.database.db
       .insert(fleets)
       .values([
-        { name: "unused-reporting-fixture", appliedRuntime: null },
+        { name: "unused-reporting-fixture", organizationId: "widefleet", appliedRuntime: null },
         ...Array.from({ length: 20 }, (_, index) => ({
           name: `reporting-version-${index}`,
+          organizationId: "widefleet",
           appliedRuntime: { version: `1.0.${index}`, checksum: "a".repeat(64) },
         })),
       ])

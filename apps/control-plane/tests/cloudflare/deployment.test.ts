@@ -511,7 +511,12 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
     ) => {
       const response = await worker.fetch("http://fixture/start", {
         method: "POST",
-        body: JSON.stringify({ kind, appId, actor: { id: "fixture-owner", admin: false }, input }),
+        body: JSON.stringify({
+          kind,
+          appId,
+          actor: { id: "fixture-owner", admin: false, application: environment.application },
+          input,
+        }),
       });
 
       expect(response.status).toBe(200);
@@ -575,7 +580,11 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           appId,
           name,
           grant,
-          actor: { id: "fixture-owner", admin: true },
+          actor: {
+            id: "fixture-owner",
+            admin: true,
+            application: { ...environment.application, admin: true },
+          },
         }),
       });
 
@@ -683,7 +692,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
               get: id => env.DEPLOYMENTS.get(id),
             };
             const service = createRuntimeReleaseService(db, storage, createCloudflareExecution({...env, DEPLOYMENTS:deployments}, db, storage));
-            const principal = {id:'fixture-owner',admin:!url.searchParams.has('nonadmin')};
+            const principal = {id:'fixture-owner',admin:!url.searchParams.has('nonadmin'), application: {...${JSON.stringify(environment.application)}, admin:!url.searchParams.has('nonadmin')}};
             return input === null ? service.read(principal) : 'modules' in input ? service.install(principal,input) : service.rollback(principal,input);
           });
           return Response.json(result.isErr() ? {error:result.error.message} : result.value, {status:result.isErr()?400:200});
@@ -745,7 +754,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           const operations = input.unavailable ? { create(){throw new Error('Unavailable');}, get(){throw new Error('Unavailable');} } : env.APP_OPERATIONS;
           const result = await withCloudflareDatabase(env, async ({db}) => {
             const execution = createCloudflareExecution({...env,APP_OPERATIONS:operations}, db, createArtifactStorage(createR2Storage(env.ARTIFACTS)));
-            return createAppService(db, readCloudflareConfiguration(env), execution).remove({id:input.actor ?? 'fixture-owner',admin:false}, input.appId);
+            return createAppService(db, readCloudflareConfiguration(env), execution).remove({id:input.actor ?? 'fixture-owner',admin:false, application:${JSON.stringify(environment.application)}}, input.appId);
           });
           return Response.json(result.isErr() ? {error:result.error.message} : result.value, {status:result.isErr()?400:200});
         }
@@ -790,7 +799,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
             const operations = input.expired ? { create(){throw new Error('Expired native operation must not be recreated');}, get(){throw new Error('Expired native operation must not be read');} } : env.APP_OPERATIONS;
             const execution = createCloudflareExecution({...env,APP_OPERATIONS:operations}, db, storage);
             const service = input.kind === 'migrations' ? createMigrationService(db, storage, execution) : createWorkflowService(db, execution);
-            const principal = { id: input.actor ?? 'fixture-owner', admin: false, creator: true, name: 'Fixture', email: 'fixture@example.test', role: 'creator' };
+            const principal = { id: input.actor ?? 'fixture-owner', admin: false, creator: true, name: 'Fixture', email: 'fixture@example.test', role: 'member', application:${JSON.stringify(environment.application)} };
             if (input.read) return service.read(principal, input.appId, input.id);
             return service.create(principal, input.appId, input.id, input.request);
           });
@@ -803,12 +812,12 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         if (url.hostname === 'fixture' && url.pathname === '/history') {
           const result = await withCloudflareDatabase(env, async ({ db }) => {
             const executor = createCloudflareExecution(env, db, createArtifactStorage(createR2Storage(env.ARTIFACTS)));
-            return createAppService(db, readCloudflareConfiguration(env), executor).history({ id: 'fixture-owner', admin: true }, url.searchParams.get('appId'));
+            return createAppService(db, readCloudflareConfiguration(env), executor).history({ id: 'fixture-owner', admin: true, application: {...${JSON.stringify(environment.application)}, admin:true} }, url.searchParams.get('appId'));
           });
           return Response.json(result.unwrap());
         }
         if (url.hostname === 'fixture' && url.pathname === '/connections') {
-          const result = await withCloudflareDatabase(env, async ({db}) => createConnectorService(db, createArtifactStorage(createR2Storage(env.ARTIFACTS)), env.PLATFORM_ENCRYPTION_KEY).connections({id:'fixture-owner', admin:true}, url.searchParams.get('appId')));
+          const result = await withCloudflareDatabase(env, async ({db}) => createConnectorService(db, createArtifactStorage(createR2Storage(env.ARTIFACTS)), env.PLATFORM_ENCRYPTION_KEY).connections({id:'fixture-owner', admin:true, application: {...${JSON.stringify(environment.application)}, admin:true}}, url.searchParams.get('appId')));
           return Response.json(result.unwrap());
         }
         if (url.hostname === 'fixture' && url.pathname === '/host') {
@@ -1119,7 +1128,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         id,
         appId,
         kind: "network",
-        actor: { id: "fixture-owner", admin: false },
+        actor: { id: "fixture-owner", admin: false, application: environment.application },
         input: { target: "backend", action: "allow", origins: ["https://example.com"] },
         createdAt: new Date().toISOString(),
       };
@@ -1844,7 +1853,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
               id: first.command.id,
               appId: preview.appId,
               createdAt: new Date().toISOString(),
-              actor: { id: "fixture-owner", admin: false },
+              actor: { id: "fixture-owner", admin: false, application: environment.application },
               kind: "workflows",
               request: { action: "list", workflow: "example" },
             }),
@@ -2656,7 +2665,11 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         fleetId: fleet.id,
         previousJobId: fleet.runtimeJobId,
         runtime: fleet.runtime,
-        actor: { id: "fixture-owner", admin: true },
+        actor: {
+          id: "fixture-owner",
+          admin: true,
+          application: { ...environment.application, admin: true },
+        },
         createdAt: new Date().toISOString(),
         rollback: true,
       };
@@ -2722,7 +2735,11 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         fleetId: fleet.id,
         previousJobId: fleet.runtimeJobId,
         runtime: fleet.runtime,
-        actor: { id: "fixture-owner", admin: true },
+        actor: {
+          id: "fixture-owner",
+          admin: true,
+          application: { ...environment.application, admin: true },
+        },
         createdAt: new Date().toISOString(),
         rollback: true,
       };

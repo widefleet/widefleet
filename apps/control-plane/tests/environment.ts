@@ -1,3 +1,4 @@
+import { defaultFleet } from "../src/lib/server/fleets.ts";
 import { createAuthControl } from "./auth-control.ts";
 import { installationKeys } from "../src/lib/server/installation-files.ts";
 import { createAppSignIn } from "../src/lib/server/app-sign-in-node.ts";
@@ -185,6 +186,11 @@ export const createTestEnvironment = async (
 
   return {
     configuration,
+    application: {
+      fleetId: (await defaultFleet(database.db)).id,
+      organizationId: "widefleet",
+      admin: false,
+    },
     authControl,
     reporting: createReporting(configuration, database.db),
     replacementClient,

@@ -74,7 +74,7 @@ export const createCloudflareAppOperations = (
   storage: ArtifactStorage,
 ) => {
   const read = (
-    principal: Pick<Principal, "id" | "admin">,
+    principal: Pick<Principal, "id" | "application">,
     appId: string,
     id: string,
     kind: "migrations" | "workflows",
@@ -229,7 +229,7 @@ export const createCloudflareAppOperations = (
         appId,
         kind: "migrations",
         migration,
-        actor: { id: principal.id, admin: principal.admin },
+        actor: { id: principal.id, admin: principal.admin, application: principal.application },
         createdAt: new Date().toISOString(),
       });
 
@@ -250,7 +250,7 @@ export const createCloudflareAppOperations = (
         appId,
         kind: "workflows",
         request: contract.workflowRequest.parse(request),
-        actor: { id: principal.id, admin: principal.admin },
+        actor: { id: principal.id, admin: principal.admin, application: principal.application },
         createdAt: new Date().toISOString(),
       });
 

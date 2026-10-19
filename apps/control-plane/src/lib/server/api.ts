@@ -413,7 +413,7 @@ export const createApi = (runtime: Runtime) => {
     catalog: read
       .route({ method: "GET", path: "/catalog" })
       .output(z.array(contract.catalogEntry))
-      .handler(async () => unwrap(await runtime.apps.catalog())),
+      .handler(async ({ context }) => unwrap(await runtime.apps.catalog(context.principal))),
     setCatalogListing: write
       .route({ method: "PUT", path: "/apps/{appId}/catalog" })
       .input(contract.catalogListingInput)

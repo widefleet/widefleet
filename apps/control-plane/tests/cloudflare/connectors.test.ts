@@ -329,7 +329,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
             const storage = createArtifactStorage(createR2Storage(env.ARTIFACTS));
             const execution = createCloudflareExecution({...env, DEPLOYMENTS: workflow}, db, storage);
             const service = createConnectorService(db, storage, env.PLATFORM_ENCRYPTION_KEY, execution);
-            const actor = {id: 'fixture-admin', admin: input.admin !== false, creator: true, name: 'Fixture', email: 'fixture@example.test', role: 'admin'};
+            const actor = {id: 'fixture-admin', admin: input.admin !== false, creator: true, name: 'Fixture', email: 'fixture@example.test', role: 'admin', application: {...${JSON.stringify(environment.application)}, admin:input.admin !== false}};
             if (input.kind === 'deploy') return service.deploy(actor, input.release, input.modules.map(module => ({...module, bytes: new Uint8Array(module.bytes)})), input.requestId);
             if (input.kind === 'secret') return service.setSecret(actor, input.name, input.secret, input.value);
             if (input.kind === 'read') return service.read(actor, input.name);

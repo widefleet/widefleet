@@ -189,12 +189,12 @@ describe("Installation organization", () => {
 
   it("searches names and email addresses without treating input as SQL wildcards", async () => {
     const searched = await person("Searchable Person");
-    expect(await findMembers(environment.database.db, "SEARCHABLE")).toEqual([
-      expect.objectContaining({ userId: searched.record.id }),
-    ]);
-    expect(await findMembers(environment.database.db, searched.record.email)).toEqual([
-      expect.objectContaining({ userId: searched.record.id }),
-    ]);
-    expect(await findMembers(environment.database.db, "%")).toEqual([]);
+    expect(
+      await findMembers(environment.database.db, installationOrganizationId, "SEARCHABLE"),
+    ).toEqual([expect.objectContaining({ userId: searched.record.id })]);
+    expect(
+      await findMembers(environment.database.db, installationOrganizationId, searched.record.email),
+    ).toEqual([expect.objectContaining({ userId: searched.record.id })]);
+    expect(await findMembers(environment.database.db, installationOrganizationId, "%")).toEqual([]);
   });
 });
