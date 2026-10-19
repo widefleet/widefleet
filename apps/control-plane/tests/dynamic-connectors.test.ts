@@ -170,7 +170,8 @@ export default class Connector extends WorkerEntrypoint {
     if (new URL(request.url).pathname === '/fetch-failure') throw new Error('connector fetch failure');
     if (new URL(request.url).pathname === '/logging') {
     console.info('connector-request', {version: ${JSON.stringify(version)}});
-    console.warn(JSON.stringify({widefleet:1, source:'browser', kind:'log', message:'spoofed-context', buildId:'foreign-build', connectorVersion:'foreign-version'}));
+    console.warn(JSON.stringify({widefleet:1, source:'browser', kind:'log', message:'spoofed-context', buildId:'foreign-build', connectorVersion:'foreign-version', traceId:'a'.repeat(32), spanId:'b'.repeat(16)}));
+    console.info(JSON.stringify({widefleet:1, source:'server', message:'invalid-trace-context', traceId:'not-a-trace', spanId:'not-a-span'}));
     this.ctx.waitUntil((async () => {
       await new Promise(resolve => setTimeout(resolve, 30));
       console.warn('connector-background');
@@ -261,8 +262,12 @@ describe.runIf(process.env["RUN_CONNECTOR_TESTS"] === "1").each(["celld", "worke
     let latest: z.infer<typeof connectorActivation>;
     let telemetryUrl: string;
 
-    const telemetryRecords: { connector: string; record: z.infer<ReturnType<typeof z.json>> }[] =
-      [];
+    const telemetryRecords: {
+      connector: string;
+      record: z.infer<ReturnType<typeof z.json>>;
+      traceId: string | undefined;
+      spanId: string | undefined;
+    }[] = [];
 
     const collector = createHttpServer((request, response) => {
       void (async () => {
@@ -277,7 +282,13 @@ describe.runIf(process.env["RUN_CONNECTOR_TESTS"] === "1").each(["celld", "worke
               z.object({
                 scopeLogs: z.array(
                   z.object({
-                    logRecords: z.array(z.object({ body: z.object({ stringValue: z.string() }) })),
+                    logRecords: z.array(
+                      z.object({
+                        body: z.object({ stringValue: z.string() }),
+                        traceId: z.string().optional(),
+                        spanId: z.string().optional(),
+                      }),
+                    ),
                   }),
                 ),
               }),
@@ -291,6 +302,8 @@ describe.runIf(process.env["RUN_CONNECTOR_TESTS"] === "1").each(["celld", "worke
               telemetryRecords.push({
                 connector: request.url ?? "",
                 record: z.json().parse(JSON.parse(entry.body.stringValue)),
+                traceId: entry.traceId,
+                spanId: entry.spanId,
               });
         response.writeHead(200, { "content-type": "application/json" });
         response.end("{}");
@@ -625,6 +638,19 @@ export default { async fetch(request, env, ctx) {
       expect(records().find((entry) => entry.message === "connector-background")?.requestId).toBe(
         records().find((entry) => entry.message.includes("connector-request"))?.requestId,
       );
+
+      const context = (message: string) =>
+        telemetryRecords.find(
+          (entry) => z.object({ message: z.string() }).parse(entry.record).message === message,
+        );
+
+      expect(context("spoofed-context")).toMatchObject({
+        traceId: "a".repeat(32),
+        spanId: "b".repeat(16),
+      });
+
+      for (const message of ["invalid-trace-context", "connector-background"])
+        expect(context(message)).toMatchObject({ traceId: undefined, spanId: undefined });
     });
     it("allows calls on one object to interleave without a version switch", async () => {
       const held = json("/hold");

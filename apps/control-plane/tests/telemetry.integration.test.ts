@@ -372,19 +372,37 @@ describe.runIf(process.env["RUN_TELEMETRY_TESTS"] === "1")(
         .insert(connectors)
         .values({ ...target, package: {}, jobId: crypto.randomUUID() });
 
-      const body = logBatch(
-        [
-          JSON.stringify({
-            widefleet: 1,
-            source: "server",
-            kind: "log",
-            message: "connector-otlp-fixture",
-            connectorVersion: version,
-          }),
+      const body = JSON.stringify({
+        resourceLogs: [
+          {
+            resource: {
+              attributes: [{ key: "service.name", value: { stringValue: appId } }],
+            },
+            scopeLogs: [
+              {
+                logRecords: [
+                  {
+                    timeUnixNano: String(BigInt(Date.now()) * 1_000_000n),
+                    severityNumber: 9,
+                    severityText: "INFO",
+                    traceId: trace,
+                    spanId: "1234567890123456",
+                    body: {
+                      stringValue: JSON.stringify({
+                        widefleet: 1,
+                        source: "server",
+                        kind: "log",
+                        message: "connector-otlp-fixture",
+                        connectorVersion: version,
+                      }),
+                    },
+                  },
+                ],
+              },
+            ],
+          },
         ],
-        appId,
-        trace,
-      );
+      });
 
       const submit = (token: string) =>
         api(
@@ -393,7 +411,7 @@ describe.runIf(process.env["RUN_TELEMETRY_TESTS"] === "1")(
             {
               method: "POST",
               headers: {
-                "content-type": "application/x-protobuf",
+                "content-type": "application/json",
                 authorization: `Bearer ${token}`,
                 "x-widefleet-service-id": appId,
               },
@@ -413,7 +431,11 @@ describe.runIf(process.env["RUN_TELEMETRY_TESTS"] === "1")(
       expect((await readConnector(outsiderHeaders)).status).toBe(403);
       await vi.waitFor(
         async () => {
-          const response = await readConnector(adminHeaders, `?version=${version}`);
+          const response = await readConnector(
+            adminHeaders,
+            `?version=${version}&traceId=${trace}`,
+          );
+
           expect(response.status).toBe(200);
           expect(contract.logPage.parse(await response.json()).entries).toEqual(
             expect.arrayContaining([
@@ -421,6 +443,8 @@ describe.runIf(process.env["RUN_TELEMETRY_TESTS"] === "1")(
                 message: "connector-otlp-fixture",
                 connectorVersion: version,
                 deploymentId: null,
+                traceId: trace,
+                spanId: "1234567890123456",
               }),
             ]),
           );
@@ -429,6 +453,8 @@ describe.runIf(process.env["RUN_TELEMETRY_TESTS"] === "1")(
       );
       const wrongVersion = await readConnector(adminHeaders, `?version=${crypto.randomUUID()}`);
       expect(contract.logPage.parse(await wrongVersion.json()).entries).toHaveLength(0);
+      const wrongTrace = await readConnector(adminHeaders, `?traceId=${"f".repeat(32)}`);
+      expect(contract.logPage.parse(await wrongTrace.json()).entries).toHaveLength(0);
       expect((await page("?query=connector-otlp-fixture")).entries).toHaveLength(0);
     });
 

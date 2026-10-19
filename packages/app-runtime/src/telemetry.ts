@@ -85,6 +85,11 @@ export class Telemetry extends WorkerEntrypoint<
           timeUnixNano: String(BigInt(Math.trunc(eventTime)) * 1_000_000n),
           severityNumber: severity,
           severityText: record.level.toUpperCase(),
+          traceId: record.traceId ?? undefined,
+          spanId: z
+            .string()
+            .regex(/^[a-f0-9]{16}$/)
+            .safeParse(record.spanId).data,
           body: {
             stringValue: JSON.stringify({
               ...record,
