@@ -108,6 +108,7 @@ describe("Mandatory application context", () => {
         entrypoints: ["default", target === first ? "FirstReader" : "SecondReader"],
         classes: [],
       });
+
       await environment.database.db.insert(connectors).values({
         fleetId: target.fleetId,
         name: "erp",
@@ -135,10 +136,12 @@ describe("Mandatory application context", () => {
       await current.agents.disable({ ...second.principal, admin: true }, listing[0]?.id ?? ""),
     ).toMatchObject({ error: { code: "NOT_FOUND" } });
     const api = createApi(current);
+
     const request = (path: string) =>
       new Request(`${environment.configuration.PLATFORM_URL}/api/v1${path}`, {
         headers: first.headers,
       });
+
     expect(await (await api(request("/connector-catalog"))).json()).toEqual(catalog);
     expect(await (await api(request("/agents"))).json()).toEqual(listing);
 
