@@ -41,6 +41,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
         main: z.string(),
         compatibility_date: z.string(),
         compatibility_flags: z.array(z.string()),
+        vars: z.record(z.string(), z.string()),
       })
       .parse(
         unstable_readConfig({
@@ -79,6 +80,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
           binding: "ASSETS",
         },
         vars: {
+          ...configuration.vars,
           ...environment.environment,
           WIDEFLEET_CONTROL_TOKEN: "local-control-plane-auth-key-never-deploy",
           APP_COOKIE_SECRET: Buffer.alloc(32, 1).toString("base64url"),
@@ -136,6 +138,36 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
     const response = await fetch(`${origin}/healthz`);
     expect(await response.text()).toContain('"status":"ok"');
     expect(response.status).toBe(200);
+  });
+
+  it("limits login attempts across independent Worker requests for the same IP", async () => {
+    const signIn = (ip: string) =>
+      fetch(`${origin}/api/auth/sign-in/email`, {
+        method: "POST",
+        headers: { origin, "content-type": "application/json", "x-forwarded-for": ip },
+        body: JSON.stringify({
+          email: environment.owner.email,
+          password: "incorrect-local-test-password",
+        }),
+      });
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const response = await signIn("192.0.2.50");
+      expect(response.status).toBe(401);
+      expect(await response.json()).toMatchObject({ code: "INVALID_EMAIL_OR_PASSWORD" });
+    }
+
+    const limited = await signIn("192.0.2.50");
+    expect(limited.status).toBe(429);
+    expect(Number(limited.headers.get("x-retry-after"))).toBeGreaterThan(0);
+    expect(Number(limited.headers.get("x-retry-after"))).toBeLessThanOrEqual(10);
+    expect(await limited.json()).toMatchObject({
+      message: "Too many requests. Please try again later.",
+    });
+
+    const otherIp = await signIn("192.0.2.51");
+    expect(otherIp.status).toBe(401);
+    expect(await otherIp.json()).toMatchObject({ code: "INVALID_EMAIL_OR_PASSWORD" });
   });
 
   it("publishes saved app sign-in settings through the auth proxy service binding", async () => {
