@@ -112,6 +112,16 @@ describe("Mandatory application context", () => {
       .insert(appGrants)
       .values({ appId: b.unwrap().id, userId: first.person.id });
 
+    const ordinary = {
+      ...first.principal,
+      application: { ...first.principal.application, admin: false },
+    };
+
+    expect(await service.get(ordinary, b.unwrap().id)).toMatchObject({
+      error: { code: "NOT_FOUND" },
+    });
+    expect((await service.list(ordinary)).unwrap().map((app) => app.id)).toEqual([a.unwrap().id]);
+
     for (const operation of [
       service.get(first.principal, b.unwrap().id),
       service.history(first.principal, b.unwrap().id),
