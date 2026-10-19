@@ -371,6 +371,7 @@ describe.runIf(process.env["RUN_TELEMETRY_TESTS"] === "1")(
       const headers = new Headers(adminHeaders);
       headers.set("origin", origin);
       headers.delete("content-type");
+      headers.set("idempotency-key", crypto.randomUUID());
 
       const deployed = await api(
         new Request(`${origin}/api/v1/connectors/${target.name}`, {

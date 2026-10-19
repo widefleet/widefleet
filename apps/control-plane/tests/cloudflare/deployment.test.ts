@@ -2077,7 +2077,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         await bindConnector(entry.appId, "ERP", null);
         expect(await host(entry.hostname)).toBeNull();
         const replacement = connectorFixture(reference.name);
-        replacement.entrypoints = ["default"];
+        replacement.metadata.entrypoints = ["default"];
 
         const prepare = () =>
           worker.fetch("http://fixture/prepare-connector", {

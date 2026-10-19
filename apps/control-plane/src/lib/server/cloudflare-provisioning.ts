@@ -151,6 +151,62 @@ export const createCloudflareProvisioner = (
     return created;
   };
 
+  const provisionWorker = async (
+    scope: string,
+    bindings: z.infer<typeof contract.workerBinding>[],
+    consumers: z.infer<typeof contract.queueConsumer>[] = [],
+  ) => {
+    const nativeBindings: Record<string, string> = {};
+    const resources: z.infer<typeof cloudflareResource>[] = [];
+
+    for (const binding of bindings) {
+      if (binding.type === "plain_text" || binding.type === "workflow") continue;
+
+      const kind = { d1: "d1", r2_bucket: "r2", kv_namespace: "kv", queue: "queue" }[binding.type];
+
+      const logicalName =
+        binding.type === "d1"
+          ? (binding.database_id ?? binding.database_name)
+          : binding.type === "r2_bucket"
+            ? binding.bucket_name
+            : binding.type === "kv_namespace"
+              ? binding.id
+              : binding.queue;
+
+      // App IDs isolate production and previews; names remain stable across retries.
+      const name = cloudflareResourceName(scope, kind, logicalName);
+      const native = `B_${name}`;
+      nativeBindings[binding.name] = native;
+
+      if (resources.some((resource) => resource.name === native)) continue;
+
+      if (binding.type === "d1") {
+        resources.push({ type: "d1", name: native, id: await ensureDatabase(name) });
+      } else if (binding.type === "r2_bucket") {
+        await ensureBucket(name);
+        resources.push({ type: "r2_bucket", name: native, bucket_name: name });
+      } else if (binding.type === "kv_namespace") {
+        resources.push({
+          type: "kv_namespace",
+          name: native,
+          namespace_id: await ensureNamespace(name),
+        });
+      } else {
+        await ensureQueue(name);
+        resources.push({ type: "queue", name: native, queue_name: name });
+      }
+    }
+
+    for (const consumer of consumers) {
+      await ensureQueue(cloudflareResourceName(scope, "queue", consumer.queue));
+
+      if (consumer.dead_letter_queue)
+        await ensureQueue(cloudflareResourceName(scope, "queue", consumer.dead_letter_queue));
+    }
+
+    return { nativeBindings, resources };
+  };
+
   return {
     findDatabase,
     findQueue,
@@ -192,58 +248,8 @@ export const createCloudflareProvisioner = (
         ),
       );
     },
-    provision: async (app: Pick<z.infer<typeof contract.artifact>, "appId" | "metadata">) => {
-      const nativeBindings: Record<string, string> = {};
-      const resources: z.infer<typeof cloudflareResource>[] = [];
-
-      for (const binding of app.metadata.bindings) {
-        if (binding.type === "plain_text" || binding.type === "workflow") continue;
-
-        const kind = { d1: "d1", r2_bucket: "r2", kv_namespace: "kv", queue: "queue" }[
-          binding.type
-        ];
-
-        const logicalName =
-          binding.type === "d1"
-            ? (binding.database_id ?? binding.database_name)
-            : binding.type === "r2_bucket"
-              ? binding.bucket_name
-              : binding.type === "kv_namespace"
-                ? binding.id
-                : binding.queue;
-
-        // App IDs isolate production and previews; names remain stable across retries.
-        const name = cloudflareResourceName(app.appId, kind, logicalName);
-        const native = `B_${name}`;
-        nativeBindings[binding.name] = native;
-
-        if (resources.some((resource) => resource.name === native)) continue;
-
-        if (binding.type === "d1") {
-          resources.push({ type: "d1", name: native, id: await ensureDatabase(name) });
-        } else if (binding.type === "r2_bucket") {
-          await ensureBucket(name);
-          resources.push({ type: "r2_bucket", name: native, bucket_name: name });
-        } else if (binding.type === "kv_namespace") {
-          resources.push({
-            type: "kv_namespace",
-            name: native,
-            namespace_id: await ensureNamespace(name),
-          });
-        } else {
-          await ensureQueue(name);
-          resources.push({ type: "queue", name: native, queue_name: name });
-        }
-      }
-
-      for (const consumer of app.metadata.queue_consumers) {
-        await ensureQueue(cloudflareResourceName(app.appId, "queue", consumer.queue));
-
-        if (consumer.dead_letter_queue)
-          await ensureQueue(cloudflareResourceName(app.appId, "queue", consumer.dead_letter_queue));
-      }
-
-      return { nativeBindings, resources };
-    },
+    provisionWorker,
+    provision: (app: Pick<z.infer<typeof contract.artifact>, "appId" | "metadata">) =>
+      provisionWorker(app.appId, app.metadata.bindings, app.metadata.queue_consumers),
   };
 };

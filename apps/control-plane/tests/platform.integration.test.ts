@@ -1,4 +1,8 @@
-import { connectorUploadForm } from "./cloudflare-connector.fixture.ts";
+import {
+  connectorUploadForm,
+  connectorModule,
+  connectorFixture,
+} from "./cloudflare-connector.fixture.ts";
 import { createWorkflowService } from "../src/lib/server/workflows.ts";
 import { createMigrationService } from "../src/lib/server/migrations.ts";
 import { createHash } from "node:crypto";
@@ -182,10 +186,12 @@ describe("Platform API with PostgreSQL and RustFS", () => {
 
   const uploadConnector = (
     path: string,
-    release: z.input<typeof contract.connectorPackage>,
+    release: z.infer<typeof contract.connectorPackage>,
     credentials = adminHeaders,
+    requestId = crypto.randomUUID(),
   ) => {
     const headers = new Headers(credentials);
+    headers.set("idempotency-key", requestId);
     headers.set("origin", environment.configuration.PLATFORM_URL);
     headers.delete("content-type");
 
@@ -1998,14 +2004,15 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     const release = contract.connectorPackage.parse({
       protocol: 1,
       name: "erp-api",
-      main: "worker.js",
-      entrypoints: ["Customers", "default"],
       modules: [
-        { name: "worker.js", source, sha256: createHash("sha256").update(source).digest("hex") },
-      ],
-      configuration: {
+        connectorModule("worker.js", "esm", source),
+        connectorModule("payload.bin", "data", new Uint8Array([0, 255, 128, 1])),
+      ].sort((a, b) => a.name.localeCompare(b.name)),
+      metadata: {
+        main_module: "worker.js",
+        entrypoints: ["Customers", "default"],
         compatibility_date: "2026-10-01",
-        d1_databases: [{ binding: "DB", database_name: "customers", database_id: "local" }],
+        bindings: [{ type: "d1", name: "DB", database_name: "customers", database_id: "local" }],
       },
     });
 
@@ -2018,6 +2025,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       const headers = new Headers(adminHeaders);
       headers.set("origin", environment.configuration.PLATFORM_URL);
       headers.delete("content-type");
+      headers.set("idempotency-key", crypto.randomUUID());
 
       const response = await api(
         new Request(`${environment.configuration.PLATFORM_URL}/api/v1${path}`, {
@@ -2044,23 +2052,18 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       "worker.js",
     );
     await rejectsUpload(binary);
-    const invalidUtf8 = connectorUploadForm(release);
-    invalidUtf8.set(
+    const invalidMime = connectorUploadForm(release);
+    invalidMime.set(
       "worker.js",
-      new Blob([new Uint8Array([0xff])], { type: "application/javascript+module" }),
+      new Blob([new Uint8Array([0xff])], { type: "image/png" }),
       "worker.js",
     );
-    await rejectsUpload(invalidUtf8);
+    await rejectsUpload(invalidMime);
     const wrongName = connectorUploadForm(release);
     wrongName.set(
       "metadata",
       JSON.stringify({
-        ...contract.connectorUploadMetadata.parse({
-          protocol: release.protocol,
-          main: release.main,
-          entrypoints: release.entrypoints,
-          configuration: release.configuration,
-        }),
+        ...release.metadata,
         name: "other-connector",
       }),
     );
@@ -2070,13 +2073,15 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       (
         await uploadConnector(path, {
           ...release,
-          main: "missing.js",
+          metadata: { ...release.metadata, main_module: "missing.js" },
         })
       ).status,
     ).toBe(400);
 
+    const connectorRequest = crypto.randomUUID();
+
     const submitted = contract.connectorStatus.parse(
-      await (await uploadConnector(path, release)).json(),
+      await (await uploadConnector(path, release, adminHeaders, connectorRequest)).json(),
     );
 
     expect(
@@ -2087,23 +2092,38 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       (
         await uploadConnector(path, {
           ...release,
-          configuration: {
-            ...release.configuration,
-            vars: { WIDEFLEET_SECRET_API_KEY: "reserved" },
+          metadata: {
+            ...release.metadata,
+            bindings: [{ type: "plain_text", name: "WIDEFLEET_SECRET_API_KEY", text: "reserved" }],
           },
         })
       ).status,
     ).toBe(400);
     expect(
-      (await uploadConnector(path, { ...release, entrypoints: ["default", "WIDEFLEET_Secrets"] }))
-        .status,
+      (
+        await uploadConnector(path, {
+          ...release,
+          metadata: { ...release.metadata, entrypoints: ["default", "WIDEFLEET_Secrets"] },
+        })
+      ).status,
     ).toBe(400);
 
     const repeated = contract.connectorStatus.parse(
-      await (await uploadConnector(path, release)).json(),
+      await (await uploadConnector(path, release, adminHeaders, connectorRequest)).json(),
     );
 
     expect(repeated.jobId).toBe(submitted.jobId);
+    expect(
+      (
+        await uploadConnector(
+          path,
+          { ...release, metadata: { ...release.metadata, compatibility_date: "2026-10-02" } },
+          adminHeaders,
+          connectorRequest,
+        )
+      ).status,
+    ).toBe(409);
+
     const app = await createApp("connector-api");
     const bindingPath = `/apps/${app.id}/bindings`;
     expect(
@@ -2143,6 +2163,27 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     );
 
     expect(packages.connectors).toEqual([release]);
+    const payload = release.modules.find((module) => module.name === "payload.bin");
+
+    if (!payload) throw new Error("Missing binary fixture");
+
+    const download = (connector: string, checksum = payload.sha256, lease = pending.leaseToken) =>
+      json(
+        `/agent/jobs/${pending.id}/modules/${checksum}?leaseToken=${lease}&connector=${connector}`,
+        "GET",
+        undefined,
+        agentHeaders,
+      );
+
+    const binaryModule = await download(release.name);
+    expect(binaryModule.status).toBe(200);
+    expect(new Uint8Array(await binaryModule.arrayBuffer())).toEqual(
+      new Uint8Array([0, 255, 128, 1]),
+    );
+    expect((await download("another-connector")).status).toBe(404);
+    expect((await download(release.name, "f".repeat(64))).status).toBe(404);
+    expect((await download(release.name, payload.sha256, crypto.randomUUID())).status).toBe(409);
+
     expect(
       (
         await json(
@@ -2239,7 +2280,12 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       ).status,
     ).toBe(200);
     expect(
-      (await uploadConnector(path, { ...release, entrypoints: ["Replacement", "default"] })).status,
+      (
+        await uploadConnector(path, {
+          ...release,
+          metadata: { ...release.metadata, entrypoints: ["Replacement", "default"] },
+        })
+      ).status,
     ).toBe(409);
     await json(`${bindingPath}/ERP`, "DELETE");
     const removed = contract.capabilityState.parse(await (await json(bindingPath, "GET")).json());
@@ -2411,14 +2457,12 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     const release = contract.connectorPackage.parse({
       protocol: 1,
       name: "class-owner",
-      main: "worker.js",
-      entrypoints: ["default"],
-      modules: [
-        { name: "worker.js", source, sha256: createHash("sha256").update(source).digest("hex") },
-      ],
-      configuration: {
+      modules: [connectorModule("worker.js", "esm", source)],
+      metadata: {
+        main_module: "worker.js",
+        entrypoints: ["default"],
         compatibility_date: "2026-10-01",
-        durable_objects: { bindings: [{ name: "STATE", class_name: "SharedSession" }] },
+        durable_objects: [{ name: "STATE", class_name: "SharedSession" }],
       },
     });
 
@@ -2456,7 +2500,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
 
     const replacement = {
       ...release,
-      configuration: { ...release.configuration, durable_objects: { bindings: [] } },
+      metadata: { ...release.metadata, durable_objects: [] },
     };
 
     const pending = contract.connectorStatus.parse(
@@ -2825,29 +2869,33 @@ describe("Platform API with PostgreSQL and RustFS", () => {
   });
   it("enforces shared variable sizes and the combined secret limit before creating agent jobs", async () => {
     const source = "export default { fetch() { return new Response('fixture'); } }";
-    const vars = Object.fromEntries(Array.from({ length: 127 }, (_, i) => [`VAR_${i}`, ""]));
+    const vars = Object.fromEntries(Array.from({ length: 31 }, (_, i) => [`VAR_${i}`, ""]));
     vars["VAR_0"] = "é".repeat(2500);
 
     const release = contract.connectorPackage.parse({
       protocol: 1,
       name: "environment-limits",
-      main: "worker.js",
-      entrypoints: ["default"],
-      modules: [
-        { name: "worker.js", source, sha256: createHash("sha256").update(source).digest("hex") },
-      ],
-      configuration: { compatibility_date: "2026-10-01", vars },
+      modules: [connectorModule("worker.js", "esm", source)],
+      metadata: {
+        main_module: "worker.js",
+        entrypoints: ["default"],
+        compatibility_date: "2026-10-01",
+        bindings: Object.entries(vars).map(([name, text]) => ({ type: "plain_text", name, text })),
+      },
     });
 
     const path = `/connectors/${release.name}`;
     const before = await environment.database.db.select().from(jobs);
 
-    for (const value of ["x".repeat(5001), "é".repeat(2501)])
+    for (const value of ["x".repeat(16_385), "é".repeat(16_385)])
       expect(
         (
           await uploadConnector(path, {
             ...release,
-            configuration: { ...release.configuration, vars: { LABEL: value } },
+            metadata: {
+              ...release.metadata,
+              bindings: [{ type: "plain_text", name: "LABEL", text: value }],
+            },
           })
         ).status,
       ).toBe(400);
@@ -2855,12 +2903,24 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       (
         await uploadConnector(path, {
           ...release,
-          configuration: { ...release.configuration, vars: { ...vars, EXTRA: "", OVERFLOW: "" } },
+          metadata: {
+            ...release.metadata,
+            bindings: [
+              ...release.metadata.bindings,
+              { type: "plain_text", name: "EXTRA", text: "" },
+              { type: "plain_text", name: "OVERFLOW", text: "" },
+            ],
+          },
         })
       ).status,
     ).toBe(400);
     expect(await environment.database.db.select().from(jobs)).toHaveLength(before.length);
     expect((await uploadConnector(path, release)).status).toBe(200);
+
+    for (let i = 0; i < 96; i++)
+      expect(
+        (await json(`${path}/secrets/SEEDED_${i}`, "PUT", { value: "synthetic" })).status,
+      ).toBe(200);
 
     const attempts = await Promise.all(
       ["FIRST", "SECOND"].map((name) =>
@@ -2883,7 +2943,13 @@ describe("Platform API with PostgreSQL and RustFS", () => {
 
     const maximum = {
       ...release,
-      configuration: { ...release.configuration, vars: { ...vars, EXTRA: "x".repeat(5000) } },
+      metadata: {
+        ...release.metadata,
+        bindings: [
+          ...release.metadata.bindings,
+          { type: "plain_text" as const, name: "EXTRA", text: "x".repeat(5000) },
+        ],
+      },
     };
 
     const previous = await environment.database.db.select().from(jobs);
@@ -2896,5 +2962,44 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     expect((await json(secretPath, "DELETE")).status).toBe(200);
     expect((await uploadConnector(path, maximum)).status).toBe(200);
     expect((await json(secretPath, "PUT", { value: "synthetic" })).status).toBe(400);
+  });
+  it("replays connector uploads without changing a newer desired version", async () => {
+    const initial = connectorFixture("upload-retries");
+    const path = `/connectors/${initial.name}`;
+    const requestId = crypto.randomUUID();
+
+    const first = contract.connectorStatus.parse(
+      await (await uploadConnector(path, initial, adminHeaders, requestId)).json(),
+    );
+
+    // A failed activation can be resubmitted with a new request, just like an app upload.
+    await environment.database.db
+      .update(jobs)
+      .set({ state: "failed" })
+      .where(eq(jobs.id, first.jobId));
+    expect(
+      await (await uploadConnector(path, initial, adminHeaders, requestId)).json(),
+    ).toMatchObject({ jobId: first.jobId, state: "failed" });
+
+    const second = contract.connectorStatus.parse(
+      await (await uploadConnector(path, initial)).json(),
+    );
+
+    expect(second.jobId).not.toBe(first.jobId);
+    expect(
+      await (await uploadConnector(path, initial, adminHeaders, requestId)).json(),
+    ).toMatchObject({ jobId: first.jobId, state: "failed" });
+    expect(await (await json(path, "GET")).json()).toMatchObject({ jobId: second.jobId });
+    expect(
+      (
+        await uploadConnector(
+          path,
+          { ...initial, metadata: { ...initial.metadata, compatibility_date: "2026-10-02" } },
+          adminHeaders,
+          requestId,
+        )
+      ).status,
+    ).toBe(409);
+    expect(await (await json(path, "GET")).json()).toMatchObject({ jobId: second.jobId });
   });
 });

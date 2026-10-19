@@ -2,7 +2,11 @@ import * as contract from "@platform/contracts";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { parseWorkerUpload } from "../src/lib/server/upload-body.ts";
-import { connectorFixture, connectorUploadForm } from "./cloudflare-connector.fixture.ts";
+import {
+  connectorFixture,
+  connectorUploadForm,
+  connectorSource,
+} from "./cloudflare-connector.fixture.ts";
 
 describe.each(["app", "connector"])("Shared %s multipart upload", (kind) => {
   const read = (request: Request) =>
@@ -40,9 +44,7 @@ describe.each(["app", "connector"])("Shared %s multipart upload", (kind) => {
     const file = (await read(request(body))).unwrap();
     expect(file).toEqual(text);
     expect(file.modules).toEqual([expect.objectContaining({ name: "connector.js", type: "esm" })]);
-    expect(new TextDecoder().decode(file.modules[0]?.bytes)).toBe(
-      connectorFixture().modules[0]?.source,
-    );
+    expect(new TextDecoder().decode(file.modules[0]?.bytes)).toBe(connectorSource);
   });
 
   it("rejects JSON bodies, repeated or oversized metadata and non-file modules", async () => {

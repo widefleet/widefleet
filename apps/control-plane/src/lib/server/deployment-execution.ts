@@ -1,3 +1,4 @@
+import type { WorkerModule } from "./worker-modules.ts";
 import * as contract from "@platform/contracts";
 import { createHash } from "node:crypto";
 import type { Result } from "better-result";
@@ -39,7 +40,7 @@ export const deploymentCommand = z.discriminatedUnion("kind", [
 ]);
 
 // The same API idempotency key identifies the same deployment before its history exists.
-export const hostedDeploymentId = (appId: string, requestId: string) => {
+export const operationId = (appId: string, requestId: string) => {
   const hash = createHash("sha256")
     .update(JSON.stringify([appId, requestId]))
     .digest("hex");
@@ -67,6 +68,8 @@ export type HostedExecution = {
     deploy: (
       principal: Principal,
       release: z.infer<typeof contract.connectorPackage>,
+      modules: WorkerModule[],
+      requestId: string,
     ) => ConnectorResult<z.infer<typeof contract.connectorStatus>>;
     setSecret: (
       principal: Principal,

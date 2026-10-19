@@ -1,9 +1,4 @@
-import {
-  connectorPreparation,
-  connectorActivation,
-  storedConnectorPackage,
-  checksum,
-} from "@platform/contracts";
+import { connectorPreparation, connectorActivation, checksum } from "@platform/contracts";
 import { z } from "zod";
 import type { ParentEnvironment } from "./types.ts";
 
@@ -12,7 +7,6 @@ export const connectorGeneration = connectorActivation.extend({
 });
 
 export const connectorSnapshot = connectorPreparation.omit({ secrets: true }).extend({
-  release: storedConnectorPackage,
   ciphertext: z.string(),
   fingerprint: checksum,
   previous: z.string().nullable(),

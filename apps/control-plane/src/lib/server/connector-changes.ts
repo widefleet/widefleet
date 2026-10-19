@@ -1,3 +1,4 @@
+import type { WorkerModule } from "./worker-modules.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
 import { and, eq, inArray, or, sql } from "drizzle-orm";
@@ -103,6 +104,7 @@ export const prepareConnector = async (
   storage: ArtifactStorage,
   fleet: typeof fleets.$inferSelect,
   release: z.infer<typeof contract.connectorPackage>,
+  modules?: WorkerModule[],
 ) => {
   const inventory = await transaction
     .select()
@@ -112,34 +114,6 @@ export const prepareConnector = async (
   const existing = inventory.find((entry) => entry.name === release.name);
   const previous = existing ? connectorReference.parse(existing.package) : null;
   validateConnectorPackage(release, Object.keys(previous?.secrets ?? {}));
-
-  const classes = release.configuration.durable_objects.bindings.map(
-    (binding) => binding.class_name,
-  );
-
-  const resourceNames = [
-    ...Object.keys(release.configuration.vars),
-    ...release.configuration.d1_databases.map((binding) => binding.binding),
-    ...release.configuration.r2_buckets.map((binding) => binding.binding),
-    ...release.configuration.kv_namespaces.map((binding) => binding.binding),
-    ...release.configuration.durable_objects.bindings.map((binding) => binding.name),
-  ];
-
-  if (
-    [...resourceNames, ...release.entrypoints, ...classes].some((name) =>
-      name.startsWith("WIDEFLEET_"),
-    )
-  )
-    throw new InvalidOperation({
-      code: "BAD_REQUEST",
-      message: "Platform connector names are reserved",
-    });
-
-  if (new Set(resourceNames).size !== resourceNames.length)
-    throw new InvalidOperation({
-      code: "BAD_REQUEST",
-      message: "Connector resource binding names must be unique",
-    });
 
   const consumers = await transaction
     .select({ capabilities: apps.capabilities, applied: apps.appliedCapabilities })
@@ -153,7 +127,10 @@ export const prepareConnector = async (
         consumer.applied ? contract.capabilitySnapshot.parse(consumer.applied).grants : {},
       ),
     ])
-      if (grant.connector === release.name && !release.entrypoints.includes(grant.entrypoint))
+      if (
+        grant.connector === release.name &&
+        !release.metadata.entrypoints.includes(grant.entrypoint)
+      )
         throw new InvalidOperation({
           code: "CONFLICT",
           message: "Unbind existing app bindings before removing their connector entrypoint",
@@ -167,7 +144,7 @@ export const prepareConnector = async (
           value &&
           connectorReference
             .parse(value)
-            .entrypoints.some((name) => !release.entrypoints.includes(name)),
+            .entrypoints.some((name) => !release.metadata.entrypoints.includes(name)),
       ),
   );
 
@@ -188,7 +165,10 @@ export const prepareConnector = async (
 
     for (const operation of unconfirmed)
       for (const grant of Object.values(contract.capabilityState.parse(operation.result).grants))
-        if (grant.connector === release.name && !release.entrypoints.includes(grant.entrypoint))
+        if (
+          grant.connector === release.name &&
+          !release.metadata.entrypoints.includes(grant.entrypoint)
+        )
           throw new InvalidOperation({
             code: "CONFLICT",
             message:
@@ -196,15 +176,15 @@ export const prepareConnector = async (
           });
   }
 
-  const checksum = await saveConnector(storage, fleet.id, release);
+  const checksum = await saveConnector(storage, fleet.id, release, modules);
 
   const reference = connectorReference.parse({
     secrets: previous?.secrets ?? {},
     secretRevision: previous?.secretRevision ?? 0,
     name: release.name,
     checksum,
-    entrypoints: release.entrypoints,
-    classes: [...new Set(classes)],
+    entrypoints: release.metadata.entrypoints,
+    classes: [...new Set(release.metadata.durable_objects.map((binding) => binding.class_name))],
   });
 
   return { reference, existing };

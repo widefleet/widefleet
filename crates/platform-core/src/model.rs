@@ -116,18 +116,24 @@ pub struct WorkerAssets {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct WorkerMetadata {
+pub struct WorkerConfiguration {
     pub main_module: String,
     pub compatibility_date: String,
     pub compatibility_flags: Vec<String>,
     pub bindings: Vec<Binding>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug: Option<DebugMetadata>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct WorkerMetadata {
+    #[serde(flatten)]
+    pub worker: WorkerConfiguration,
     #[serde(default)]
     pub crons: Vec<String>,
     #[serde(default)]
     pub queue_consumers: Vec<QueueConsumer>,
     pub assets: WorkerAssets,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub debug: Option<DebugMetadata>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -305,19 +311,21 @@ pub struct RuntimePackages {
 pub struct ConnectorPackage {
     pub protocol: u32,
     pub name: String,
-    pub main: String,
-    pub modules: Vec<ConnectorModule>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub debug: Option<DebugMetadata>,
-    pub entrypoints: Vec<String>,
-    pub configuration: serde_json::Value,
+    pub metadata: ConnectorMetadata,
+    pub modules: Vec<Module>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct ConnectorModule {
+pub struct ConnectorMetadata {
+    #[serde(flatten)]
+    pub worker: WorkerConfiguration,
+    pub entrypoints: Vec<String>,
+    pub durable_objects: Vec<DurableObjectBinding>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct DurableObjectBinding {
     pub name: String,
-    #[serde(rename = "type")]
-    pub kind: ModuleType,
-    pub source: String,
-    pub sha256: String,
+    pub class_name: String,
 }

@@ -94,7 +94,7 @@ const connectorSymbols = async (
     if (fleetId !== target.fleetId) return null;
 
     return {
-      debug: release.debug,
+      debug: release.metadata.debug,
       modules: release.modules,
       scope: connectorModuleScope(fleetId, release.name),
     };

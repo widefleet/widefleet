@@ -3,7 +3,7 @@ use clap::{Args, Subcommand};
 use platform_core::{
     Error, Result,
     http::{Api, json},
-    model::{CapabilityGrant, ConnectorModule, ConnectorPackage, DebugMetadata, ModuleType},
+    model::{CapabilityGrant, ConnectorMetadata, DebugMetadata, DurableObjectBinding, ModuleType},
     sha256,
 };
 use reqwest::Method;
@@ -186,29 +186,48 @@ pub(crate) fn show_bindings(state: &Bindings, json_output: bool) -> Result<()> {
     Ok(())
 }
 
-async fn package(config: &Path) -> Result<ConnectorPackage> {
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConnectorConfiguration {
+    name: String,
+    #[serde(flatten)]
+    worker: crate::worker::Configuration,
+    #[serde(default)]
+    durable_objects: DurableObjects,
+    #[serde(rename = "$schema")]
+    _schema: Option<String>,
+    #[serde(rename = "no_bundle")]
+    _no_bundle: Option<bool>,
+    // Native Wrangler migrations have no role in Dynamic Worker facet deployment.
+    #[serde(rename = "migrations")]
+    _migrations: Option<Value>,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DurableObjects {
+    #[serde(default)]
+    bindings: Vec<DurableObjectBinding>,
+}
+
+struct Package {
+    name: String,
+    metadata: ConnectorMetadata,
+    modules: Vec<(String, ModuleType, Vec<u8>)>,
+}
+
+async fn package(config: &Path) -> Result<Package> {
     let config = config.canonicalize()?;
     let project = config
         .parent()
         .ok_or_else(|| Error::invalid("Connector configuration has no directory".into()))?;
-    let mut configuration: Value = jsonc_parser::parse_to_serde_value(
+    let configuration: ConnectorConfiguration = jsonc_parser::parse_to_serde_value(
         &std::fs::read_to_string(&config)?,
         &jsonc_parser::ParseOptions::default(),
     )
     .map_err(|error| Error::invalid(format!("Invalid Wrangler configuration: {error}")))?;
-    let name = configuration
-        .get("name")
-        .and_then(Value::as_str)
-        .ok_or_else(|| Error::invalid("Set name in the connector's Wrangler configuration".into()))?
-        .to_owned();
-    segment(&name)?;
-    let main = configuration
-        .get("main")
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            Error::invalid("Set main in the connector's Wrangler configuration".into())
-        })?;
-    let entry = project.join(main).canonicalize()?;
+    segment(&configuration.name)?;
+    let entry = project.join(&configuration.worker.main).canonicalize()?;
     if !entry.starts_with(project) {
         return Err(Error::invalid(
             "Connector entry must be inside its project".into(),
@@ -216,9 +235,10 @@ async fn package(config: &Path) -> Result<ConnectorPackage> {
     }
     let temporary = tempfile::tempdir_in(project)?;
     let node_compat = configuration
-        .get("compatibility_flags")
-        .and_then(Value::as_array)
-        .is_some_and(|flags| flags.iter().any(|flag| flag == "nodejs_compat"));
+        .worker
+        .compatibility_flags
+        .iter()
+        .any(|flag| flag == "nodejs_compat");
     let bundler = crate::installation::bundler().await?;
     let bundled = deploy::bundle(&bundler, project, &entry, temporary.path(), node_compat).await?;
     if !bundled.exports.iter().any(|name| name == "default") {
@@ -231,52 +251,38 @@ async fn package(config: &Path) -> Result<ConnectorPackage> {
         bundled.source.len(),
         [("worker.js".into(), temporary.path().join("worker.js.map"))],
     )?;
-    let source =
-        String::from_utf8(bundled.source).map_err(|error| Error::invalid(error.to_string()))?;
     let classes: BTreeSet<_> = configuration
-        .pointer("/durable_objects/bindings")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|binding| binding.get("class_name").and_then(Value::as_str))
+        .durable_objects
+        .bindings
+        .iter()
+        .map(|binding| &binding.class_name)
         .collect();
     let entrypoints = bundled
         .exports
         .into_iter()
-        .filter(|name| !classes.contains(name.as_str()))
+        .filter(|name| !classes.contains(name))
         .collect();
-    let object = configuration
-        .as_object_mut()
-        .ok_or_else(|| Error::invalid("Expected a Wrangler configuration object".into()))?;
-    for key in ["name", "main", "$schema", "no_bundle", "migrations"] {
-        object.remove(key);
-    }
-    let mut modules = vec![ConnectorModule {
-        name: "worker.js".into(),
-        kind: ModuleType::Esm,
-        sha256: sha256(source.as_bytes()),
-        source,
-    }];
-    for (name, bytes) in maps.uploads {
-        modules.push(ConnectorModule {
-            name,
-            kind: ModuleType::Sourcemap,
-            sha256: sha256(&bytes),
-            source: String::from_utf8(bytes).map_err(|error| Error::invalid(error.to_string()))?,
-        });
-    }
+    let mut modules = vec![("worker.js".into(), ModuleType::Esm, bundled.source)];
+    modules.extend(
+        maps.uploads
+            .into_iter()
+            .map(|(name, bytes)| (name, ModuleType::Sourcemap, bytes)),
+    );
     let build_id = sha256(&serde_json::to_vec(&modules)?);
-    Ok(ConnectorPackage {
-        protocol: 1,
-        name,
-        main: "worker.js".into(),
-        entrypoints,
+    Ok(Package {
+        name: configuration.name,
+        metadata: ConnectorMetadata {
+            worker: configuration.worker.metadata(
+                "worker.js".into(),
+                DebugMetadata {
+                    build_id,
+                    source_maps: maps.source_maps,
+                },
+            ),
+            entrypoints,
+            durable_objects: configuration.durable_objects.bindings,
+        },
         modules,
-        debug: Some(DebugMetadata {
-            build_id,
-            source_maps: maps.source_maps,
-        }),
-        configuration,
     })
 }
 
@@ -466,31 +472,10 @@ pub async fn run(api: &Api, credentials: &auth::Credentials, options: Options) -
                 package.name,
                 api.origin_text()
             );
-            let token = auth::access_token(api, credentials).await?;
             let path = format!("/connectors/{}", package.name);
-            let mut metadata = serde_json::json!({
-                "protocol": package.protocol,
-                "main": package.main,
-                "entrypoints": package.entrypoints,
-                "configuration": package.configuration,
-            });
-            if let Some(debug) = package.debug {
-                metadata["debug"] = serde_json::to_value(debug)?;
-            }
-            let form = upload::worker(
-                &metadata,
-                package
-                    .modules
-                    .iter()
-                    .map(|module| (module.name.as_str(), &module.kind, module.source.as_bytes())),
-            )?;
-            let current: Status = json(
-                api.authenticated(Method::PUT, &path, &token)
-                    .multipart(form)
-                    .send()
-                    .await?,
-            )
-            .await?;
+            let current: Status =
+                upload::publish(api, credentials, &path, &package.metadata, &package.modules)
+                    .await?;
             wait_for_connector(api, credentials, current, no_wait, json_output).await
         }
         Command::Secret { command } => secret_command(api, credentials, command, json_output).await,

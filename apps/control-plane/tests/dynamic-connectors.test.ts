@@ -1,3 +1,4 @@
+import { connectorFiles, connectorModule } from "./cloudflare-connector.fixture.ts";
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
@@ -22,7 +23,7 @@ import type { TestHarness } from "wrangler";
 
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 
-const hash = (source: string) => createHash("sha256").update(source).digest("hex");
+const hash = (source: string | Uint8Array) => createHash("sha256").update(source).digest("hex");
 
 const token = "dynamic-connector-fixture-control-token-never-deploy";
 
@@ -213,21 +214,42 @@ const release = (version: string, name = "fixture") => {
   return connectorPackage.parse({
     protocol: 1,
     name,
-    main: "worker.js",
-    modules: [{ name: "worker.js", source, sha256: hash(source) }],
-    entrypoints: ["default", "Reader"],
-    configuration: {
+    modules: [connectorModule("worker.js", "esm", source)],
+    metadata: {
+      main_module: "worker.js",
+      entrypoints: ["default", "Reader"],
       compatibility_date: "2026-10-01",
       compatibility_flags: ["nodejs_compat"],
-      d1_databases: [{ binding: "DB", database_name: "db" }],
-      r2_buckets: [{ binding: "BUCKET", bucket_name: "bucket" }],
-      kv_namespaces: [{ binding: "KV", id: "kv" }],
-      durable_objects: { bindings: [{ name: "COUNTER", class_name: "Counter" }] },
+      bindings: [
+        { type: "d1", name: "DB", database_name: "db" },
+        { type: "r2_bucket", name: "BUCKET", bucket_name: "bucket" },
+        { type: "kv_namespace", name: "KV", id: "kv" },
+      ],
+      durable_objects: [{ name: "COUNTER", class_name: "Counter" }],
     },
   });
 };
 
-const application = `export default { async fetch(request, env) {
+const sharedModules = [
+  connectorModule("payload.bin", "data", new Uint8Array([0, 255, 128, 1])),
+  connectorModule("label.txt", "text", "Grüße"),
+  connectorModule(
+    "answer.wasm",
+    "wasm",
+    new Uint8Array([
+      0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 127, 3, 2, 1, 0, 7, 10, 1, 6, 97, 110, 115,
+      119, 101, 114, 0, 0, 10, 6, 1, 4, 0, 65, 42, 11,
+    ]),
+  ),
+];
+
+const moduleImports = `import bytes from './payload.bin'; import label from './label.txt'; import wasm from './answer.wasm';`;
+
+const moduleResult = `({bytes: [...new Uint8Array(bytes)], label, answer: new WebAssembly.Instance(wasm).exports.answer()})`;
+
+const applicationSource = (imports: string, result: string) => `${imports}
+export default { async fetch(request, env) {
+  if (new URL(request.url).pathname === '/modules') return Response.json(${result});
   const op = new URL(request.url).pathname.slice(1);
   try {
     if (op === 'second') return Response.json(await env.SECOND.inspect());
@@ -253,6 +275,19 @@ const application = `export default { async fetch(request, env) {
 describe.runIf(process.env["RUN_CONNECTOR_TESTS"] === "1").each(["celld", "workerd"])(
   "Dynamic connectors on %s",
   (runtime) => {
+    const modules =
+      runtime === "workerd"
+        ? sharedModules
+        : sharedModules.filter((module) => module.type === "wasm");
+
+    const imports = runtime === "workerd" ? moduleImports : `import wasm from './answer.wasm';`;
+
+    const result =
+      runtime === "workerd"
+        ? moduleResult
+        : `({answer: new WebAssembly.Instance(wasm).exports.answer()})`;
+
+    const application = applicationSource(imports, result);
     let directory: string;
     let origin: string;
     let native: ReturnType<typeof spawn> | undefined;
@@ -333,25 +368,43 @@ describe.runIf(process.env["RUN_CONNECTOR_TESTS"] === "1").each(["celld", "worke
       return z.json().parse(JSON.parse(text));
     };
 
+    const stage = async (candidate: z.infer<typeof connectorPackage>) => {
+      for (const module of connectorFiles(candidate)) {
+        if (module.type === "sourcemap") continue;
+        const key = `connectors/${fleetId}/${candidate.name}/modules/${hash(module.bytes)}`;
+
+        const response = await (hosted ? hosted.fetch : fetch)(
+          `${origin}/fixture/module?key=${encodeURIComponent(key)}`,
+          { method: "PUT", body: new Uint8Array(module.bytes) },
+        );
+
+        expect(response.status).toBe(200);
+      }
+    };
+
     const prepare = async (
       version: string,
       secret: string,
       name = "fixture",
       resources = nativeBindings,
-    ) =>
-      connectorActivation.parse(
+    ) => {
+      const candidate = release(version, name);
+      await stage(candidate);
+
+      return connectorActivation.parse(
         z.object({ result: connectorActivation }).parse(
           await json("/fixture/manage", {
             action: "prepare",
             fleetId,
             version: crypto.randomUUID(),
-            release: release(version, name),
+            release: candidate,
             nativeBindings: resources,
             secrets: { TOKEN: secret },
             telemetry: { url: `${telemetryUrl}/${name}`, token: "synthetic-connector-telemetry" },
           }),
         ).result,
       );
+    };
 
     const activate = (identity: z.infer<typeof connectorActivation>) =>
       json("/fixture/manage", { action: "activate", ...identity });
@@ -434,6 +487,7 @@ describe.runIf(process.env["RUN_CONNECTOR_TESTS"] === "1").each(["celld", "worke
           assets: { binding: "ASSETS", upload_session: crypto.randomUUID() },
         },
         modules: [
+          ...modules,
           {
             name: "app.js",
             type: "esm",
@@ -476,6 +530,9 @@ export default { async fetch(request, env, ctx) {
   if (url.pathname === '/fixture/seed') {
     const app = ${JSON.stringify(app)};
     await env.WIDEFLEET_PACKAGES.put('apps/' + app.appId + '/modules/${hash(application)}', ${JSON.stringify(application)});
+    for (const module of ${JSON.stringify(connectorFiles({ ...release("shared-modules"), modules }).map((file) => ({ sha256: hash(file.bytes), bytes: [...file.bytes] })))}) {
+      await env.WIDEFLEET_PACKAGES.put('apps/' + app.appId + '/modules/' + module.sha256, new Uint8Array(module.bytes));
+    }
     await env.WIDEFLEET_PACKAGES.put('hosts/' + app.hostname + '.json', JSON.stringify(app));
     await env.AUTH_CONFIG.put('configuration', ${JSON.stringify(encrypted)});
     await env.AUTH_CONFIG.put('apps/' + app.hostname, JSON.stringify({appId:app.appId,access:{revision:1,groups:[]}}));
@@ -494,6 +551,7 @@ export default { async fetch(request, env, ctx) {
     return Response.json(listing.objects.map(object => ({key:object.key, etag:object.etag, uploaded:object.uploaded.toISOString()})));
   }
   if (url.pathname === '/fixture/module') {
+    if (request.method === 'PUT') { await env.WIDEFLEET_PACKAGES.put(url.searchParams.get('key'), await request.arrayBuffer(), {onlyIf:{etagDoesNotMatch:'*'}}); return Response.json(true); }
     const input = await request.json();
     if (input.source === null) await env.WIDEFLEET_PACKAGES.delete(input.key);
     else await env.WIDEFLEET_PACKAGES.put(input.key, input.source);
@@ -653,16 +711,12 @@ export default { async fetch(request, env, ctx) {
         mappings: "AAAA",
       });
 
-      candidate.debug = {
+      candidate.metadata.debug = {
         build_id: "mapped-fixture",
         source_maps: { "worker.js": "worker.js.map" },
       };
-      candidate.modules.push({
-        name: "worker.js.map",
-        type: "sourcemap",
-        source,
-        sha256: hash(source),
-      });
+      candidate.modules.push(connectorModule("worker.js.map", "sourcemap", source));
+      await stage(candidate);
 
       const result = z.object({ result: connectorActivation }).parse(
         await json("/fixture/manage", {
@@ -679,7 +733,7 @@ export default { async fetch(request, env, ctx) {
       await activate(result.result);
       expect(
         z.array(z.json()).parse(await json("/fixture/modules?name=mapped-fixture")),
-      ).toHaveLength(2);
+      ).toHaveLength(1);
     });
     it("rejects corrupt or missing modules while secret reads use only the snapshot", async () => {
       const name = "integrity-fixture";
@@ -974,12 +1028,8 @@ export default { async fetch(request, env, ctx) {
     });
     it("rejects bad code and stale activations, and chooses one concurrent winner", async () => {
       const bad = release("broken");
-      bad.modules[0] = {
-        type: "esm",
-        name: "worker.js",
-        source: "export !!!",
-        sha256: hash("export !!!"),
-      };
+      bad.modules[0] = connectorModule("worker.js", "esm", "export !!!");
+      await stage(bad);
       expect(
         (
           await request("/fixture/manage", {
@@ -1025,6 +1075,10 @@ export default { async fetch(request, env, ctx) {
         "export default { fetch(request, env, ctx) { console.info('object-handler'); return new Response('object-default'); } };";
 
       const base = release("object-default");
+      base.metadata.entrypoints = ["default"];
+      base.metadata.durable_objects = [];
+      base.modules = [connectorModule("worker.js", "esm", source)];
+      await stage(base);
 
       const identity = connectorActivation.parse(
         z.object({ result: connectorActivation }).parse(
@@ -1035,12 +1089,7 @@ export default { async fetch(request, env, ctx) {
             nativeBindings,
             secrets: {},
             telemetry: { url: `${telemetryUrl}/fixture`, token: "synthetic-connector-telemetry" },
-            release: {
-              ...base,
-              entrypoints: ["default"],
-              modules: [{ name: "worker.js", source, sha256: hash(source) }],
-              configuration: { ...base.configuration, durable_objects: { bindings: [] } },
-            },
+            release: base,
           }),
         ).result,
       );
@@ -1078,6 +1127,64 @@ export default { async fetch(request, env, ctx) {
           expect(record?.message).toContain(fleetId);
           expect(record?.message).toContain("object-handler");
         });
+      },
+    );
+    it("loads the same native module types for apps and connectors", async () => {
+      const expected =
+        runtime === "workerd"
+          ? { bytes: [0, 255, 128, 1], label: "Grüße", answer: 42 }
+          : { answer: 42 };
+
+      expect(await json("/modules")).toEqual(expected);
+      const candidate = release("binary-modules");
+      candidate.metadata.entrypoints = ["default"];
+      candidate.metadata.durable_objects = [];
+      candidate.modules = [
+        connectorModule(
+          "worker.js",
+          "esm",
+          `${imports} export default {fetch() {return Response.json(${result});}}`,
+        ),
+        ...modules,
+      ];
+      await stage(candidate);
+
+      const identity = connectorActivation.parse(
+        z.object({ result: connectorActivation }).parse(
+          await json("/fixture/manage", {
+            action: "prepare",
+            fleetId,
+            version: crypto.randomUUID(),
+            nativeBindings,
+            secrets: {},
+            release: candidate,
+          }),
+        ).result,
+      );
+
+      await activate(identity);
+      expect(await json("/fetch")).toEqual(expected);
+    });
+    it.runIf(runtime === "celld")(
+      "preserves the native rejection of text and data modules",
+      async () => {
+        for (const module of sharedModules.filter((module) => module.type !== "wasm")) {
+          const candidate = release("unsupported-" + module.type, "unsupported-" + module.type);
+          candidate.modules.push(module);
+          await stage(candidate);
+
+          const response = await request("/fixture/manage", {
+            action: "prepare",
+            fleetId,
+            version: crypto.randomUUID(),
+            release: candidate,
+            nativeBindings,
+            secrets: {},
+          });
+
+          expect(response.status).toBe(409);
+          expect(await response.text()).toContain("must be a string or wasm bytes");
+        }
       },
     );
   },

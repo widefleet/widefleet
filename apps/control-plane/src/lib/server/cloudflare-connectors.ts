@@ -1,3 +1,4 @@
+import { operationId } from "./deployment-execution.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
 import { and, eq } from "drizzle-orm";
@@ -6,6 +7,7 @@ import { isDeepStrictEqual } from "node:util";
 import { administrator, connectorStatus, prepareConnector } from "./connector-changes.ts";
 import {
   connectorReference,
+  connectorChecksum,
   loadConnector,
   validateConnectorSecret,
   validateConnectorPackage,
@@ -198,28 +200,43 @@ export const createCloudflareConnectors = (
 
   return {
     status: (current) => cloudflareConnectorStatus(bindings, current),
-    deploy: async (principal, release) => {
+    deploy: async (principal, release, modules, requestId) => {
       const prepared = await transact(database, async (transaction) => {
         administrator(principal);
         const fleet = await lockFleet(transaction, (await defaultFleet(transaction)).id);
 
-        const { reference, existing } = await prepareConnector(
-          transaction,
-          storage,
-          fleet,
-          release,
-        );
+        const id = operationId(`connectors/${fleet.id}/${release.name}`, requestId);
 
-        const current = existing
-          ? await cloudflareConnectorStatus(bindings, await connectorStatus(transaction, existing))
-          : null;
+        const [previous] = await transaction
+          .select()
+          .from(cloudflareOperations)
+          .where(eq(cloudflareOperations.id, id));
 
-        return Result.ok({
-          fleetId: fleet.id,
-          checksum: reference.checksum,
-          current:
-            current?.checksum === reference.checksum && current.state !== "failed" ? current : null,
-        });
+        const checksum = connectorChecksum(fleet.id, release);
+        let current = null;
+
+        if (previous) {
+          const original = connectorReference.parse(previous.result);
+
+          const [existing] = await transaction
+            .select()
+            .from(connectors)
+            .where(and(eq(connectors.fleetId, fleet.id), eq(connectors.name, release.name)));
+
+          if (original.checksum !== checksum || !existing)
+            throw new InvalidOperation({
+              code: "CONFLICT",
+              message: "The request ID already refers to another artifact",
+            });
+          current = await cloudflareConnectorStatus(
+            bindings,
+            await connectorStatus(transaction, { ...existing, package: original, jobId: id }),
+          );
+        } else {
+          await prepareConnector(transaction, storage, fleet, release, modules);
+        }
+
+        return Result.ok({ id, fleetId: fleet.id, checksum, current });
       });
 
       if (prepared.isErr()) return prepared;
@@ -228,7 +245,7 @@ export const createCloudflareConnectors = (
 
       return admit({
         kind: "connector",
-        id: crypto.randomUUID(),
+        id: prepared.value.id,
         fleetId: prepared.value.fleetId,
         createdAt: new Date().toISOString(),
         actor: principal,

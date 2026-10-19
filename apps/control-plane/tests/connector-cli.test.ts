@@ -35,6 +35,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       method: string;
       authorization: string;
       contentType: string;
+      requestId: string;
       body: string;
     }[] = [];
 
@@ -44,6 +45,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     let outcome = "active";
     let rejected = false;
     let superseded = false;
+    let uploadFailures = 0;
 
     const server = createServer((request, response) => {
       let body = "";
@@ -56,6 +58,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
           method: request.method ?? "",
           authorization: request.headers.authorization ?? "",
           contentType: request.headers["content-type"] ?? "",
+          requestId: String(request.headers["idempotency-key"] ?? ""),
           body,
         });
         response.setHeader("content-type", "application/json");
@@ -102,6 +105,12 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
               }),
             );
         } else if (request.url?.startsWith("/api/v1/connectors/erp")) {
+          if (request.method === "PUT" && uploadFailures-- > 0) {
+            response.writeHead(503).end(JSON.stringify({ message: "Synthetic transient failure" }));
+
+            return;
+          }
+
           if (rejected && request.method !== "GET")
             response
               .writeHead(403)
@@ -172,6 +181,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       outcome = "active";
       rejected = false;
       superseded = false;
+      uploadFailures = 0;
     });
     afterAll(async () => {
       await new Promise<void>((resolve, reject) =>
@@ -205,7 +215,28 @@ export default class Connector extends WorkerEntrypoint {
           compatibility_date: "2026-10-01",
         }),
       );
+      uploadFailures = 1;
       await cli("deploy", "--config", "connector.jsonc", "--no-wait");
+      expect(requests).toHaveLength(2);
+      const requestId = z.uuid().parse(requests[0]?.requestId);
+      expect(requests[1]?.requestId).toBe(requestId);
+
+      const uploadedParts = await Promise.all(
+        requests.map(async (request) => {
+          const form = await new Response(request.body, {
+            headers: { "content-type": request.contentType },
+          }).formData();
+
+          return Promise.all(
+            [...form].map(async ([name, part]) => [
+              name,
+              part instanceof File ? await part.text() : part,
+            ]),
+          );
+        }),
+      );
+
+      expect(uploadedParts[0]).toEqual(uploadedParts[1]);
 
       const readUpload = async () => {
         const request = requests.at(-1);
@@ -244,6 +275,7 @@ export default class Connector extends WorkerEntrypoint {
       ).not.toContain("sourceMappingURL");
       await cli("deploy", "--config", "connector.jsonc", "--no-wait");
       const repeated = await readUpload();
+      expect(requests.at(-1)?.requestId).not.toBe(requestId);
       expect(repeated.metadata.debug?.build_id).toBe(release.metadata.debug?.build_id);
       expect(repeated.modules).toEqual(release.modules);
     });

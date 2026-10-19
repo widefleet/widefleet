@@ -82,6 +82,13 @@ export const createApi = (runtime: Runtime) => {
     }
   });
 
+  const authenticateWrite = async (request: Request) => {
+    const principal = unwrap(await runtime.identity.authenticate(request, "platform:write"));
+    runtime.reporting.active(principal.id);
+
+    return principal;
+  };
+
   const read = base.use(async ({ context, next }) => {
     const principal = unwrap(await runtime.identity.authenticate(context.request, "platform:read"));
 
@@ -92,11 +99,7 @@ export const createApi = (runtime: Runtime) => {
   });
 
   const write = base.use(async ({ context, next }) => {
-    const principal = unwrap(
-      await runtime.identity.authenticate(context.request, "platform:write"),
-    );
-
-    runtime.reporting.active(principal.id);
+    const principal = await authenticateWrite(context.request);
 
     return next({ context: { principal } });
   });
@@ -709,11 +712,12 @@ export const createApi = (runtime: Runtime) => {
     const connectorUpload = /^\/api\/v1\/connectors\/([^/]+)$/.exec(url.pathname);
 
     if (connectorUpload && request.method === "PUT") {
-      const principal = unwrap(await runtime.identity.authenticate(request, "platform:write"));
+      const principal = await authenticateWrite(request);
       const name = contract.appSlug.parse(connectorUpload[1]);
 
       return apiOperation(async () => {
         administrator(principal);
+        const key = idempotencyKey(request);
 
         const { metadata, modules } = unwrap(
           await parseWorkerUpload(request, contract.connectorUploadMetadata),
@@ -721,7 +725,9 @@ export const createApi = (runtime: Runtime) => {
 
         const release = unwrap(uploadedConnector(name, metadata, modules));
 
-        return Response.json(unwrap(await runtime.connectors.deploy(principal, release)));
+        return Response.json(
+          unwrap(await runtime.connectors.deploy(principal, release, modules, key)),
+        );
       });
     }
 
@@ -730,7 +736,7 @@ export const createApi = (runtime: Runtime) => {
     );
 
     if (upload && request.method === "PUT") {
-      const principal = unwrap(await runtime.identity.authenticate(request, "platform:write"));
+      const principal = await authenticateWrite(request);
       const appId = contract.identifier.parse(upload[1]);
 
       if (upload[2] === "worker") {
@@ -781,17 +787,28 @@ export const createApi = (runtime: Runtime) => {
         });
       }
 
+      if (download[2] === "modules") {
+        const name = url.searchParams.get("connector");
+
+        const bytes = unwrap(
+          await runtime.jobs.module(
+            agent.id,
+            jobId,
+            leaseToken,
+            contract.checksum.parse(download[3]),
+            name === null ? null : contract.appSlug.parse(name),
+          ),
+        );
+
+        return new Response(Buffer.from(bytes), {
+          headers: { "content-type": "application/octet-stream", "cache-control": "no-store" },
+        });
+      }
+
       const artifact = unwrap(await runtime.jobs.artifact(agent.id, jobId, leaseToken));
 
-      const hash =
-        download[2] === "assets"
-          ? contract.assetHash.parse(download[3])
-          : contract.checksum.parse(download[3]);
-
-      const allowed =
-        download[2] === "assets"
-          ? Object.values(artifact.manifest).some((entry) => entry.hash === hash)
-          : artifact.modules.some((module) => module.sha256 === hash);
+      const hash = contract.assetHash.parse(download[3]);
+      const allowed = Object.values(artifact.manifest).some((entry) => entry.hash === hash);
 
       if (!allowed) throw new ORPCError("NOT_FOUND");
 

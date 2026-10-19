@@ -1,7 +1,7 @@
 import * as contract from "@platform/contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestEnvironment } from "./environment.ts";
-import { connectorDebugFixture } from "./cloudflare-connector.fixture.ts";
+import { connectorDebugFixture, connectorFiles } from "./cloudflare-connector.fixture.ts";
 import { seedDeployment } from "./cloudflare-deployment.fixture.ts";
 import { createArtifactStorage } from "../src/lib/server/artifact-storage.ts";
 import {
@@ -53,12 +53,12 @@ describe("Private connector debug artifacts", () => {
     "resolves historical %s versions without downloading code or using the current release",
     async (kind) => {
       const release = connectorDebugFixture(`debug-${kind}`);
-      const checksum = await saveConnector(storage, fleetId, release);
+      const checksum = await saveConnector(storage, fleetId, release, connectorFiles(release));
 
       const reference = connectorReference.parse({
         name: release.name,
         checksum,
-        entrypoints: release.entrypoints,
+        entrypoints: release.metadata.entrypoints,
         classes: ["Counter"],
       });
 
@@ -88,7 +88,9 @@ describe("Private connector debug artifacts", () => {
       expect(artifact.release.modules.every((module) => !("source" in module))).toBe(true);
       expect(await loadConnector(storage, reference)).toEqual(release);
       const keys = [...objects.keys()].sort();
-      expect(await saveConnector(storage, fleetId, release)).toBe(checksum);
+      expect(await saveConnector(storage, fleetId, release, connectorFiles(release))).toBe(
+        checksum,
+      );
       expect([...objects.keys()].sort()).toEqual(keys);
 
       reads.length = 0;

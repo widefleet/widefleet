@@ -1,4 +1,3 @@
-use crate::migrations::Database;
 use crate::{auth, installation, preview, upload};
 use clap::Args;
 use platform_core::{
@@ -27,19 +26,9 @@ struct Configuration {
     #[serde(rename = "$schema")]
     _schema: Option<String>,
     name: Option<String>,
-    main: PathBuf,
-    compatibility_date: String,
-    #[serde(default)]
-    compatibility_flags: Vec<String>,
+    #[serde(flatten)]
+    worker: crate::worker::Configuration,
     assets: Assets,
-    #[serde(default)]
-    vars: BTreeMap<String, String>,
-    #[serde(default)]
-    d1_databases: Vec<Database>,
-    #[serde(default)]
-    r2_buckets: Vec<Bucket>,
-    #[serde(default)]
-    kv_namespaces: Vec<Namespace>,
     #[serde(default)]
     triggers: Triggers,
     #[serde(default)]
@@ -59,24 +48,10 @@ struct Assets {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Bucket {
-    binding: String,
-    bucket_name: String,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct Workflow {
     binding: String,
     name: String,
     class_name: String,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Namespace {
-    binding: String,
-    id: String,
 }
 
 #[derive(Default, Deserialize)]
@@ -293,6 +268,7 @@ async fn publish(
         ))
     })?;
     if configuration
+        .worker
         .compatibility_flags
         .iter()
         .any(|flag| !matches!(flag.as_str(), "nodejs_als" | "nodejs_compat"))
@@ -302,11 +278,12 @@ async fn publish(
         ));
     }
     if configuration
+        .worker
         .compatibility_flags
         .iter()
         .collect::<BTreeSet<_>>()
         .len()
-        != configuration.compatibility_flags.len()
+        != configuration.worker.compatibility_flags.len()
     {
         return Err(Error::invalid("Compatibility flags must be unique".into()));
     }
@@ -330,13 +307,14 @@ async fn publish(
         local_command(project, &["run", "build"]).await?;
     }
     let temporary = tempfile::tempdir_in(project)?;
-    let entry = project.join(&configuration.main).canonicalize()?;
+    let entry = project.join(&configuration.worker.main).canonicalize()?;
     if !entry.starts_with(project) {
         return Err(Error::invalid(
             "Worker entry must be inside the app project".into(),
         ));
     }
     let node_compat = configuration
+        .worker
         .compatibility_flags
         .iter()
         .any(|flag| flag == "nodejs_compat");
@@ -429,38 +407,14 @@ async fn publish(
         )
         .await?;
     }
-    let mut bindings = Vec::new();
-    bindings.extend(
-        configuration
-            .vars
-            .into_iter()
-            .map(|(name, text)| Binding::PlainText { name, text }),
+    let mut worker_metadata = configuration.worker.metadata(
+        "worker.js".into(),
+        DebugMetadata {
+            build_id,
+            source_maps,
+        },
     );
-    bindings.extend(
-        configuration
-            .d1_databases
-            .into_iter()
-            .map(|database| Binding::D1 {
-                name: database.binding,
-                database_name: database.database_name,
-                database_id: database.database_id,
-            }),
-    );
-    bindings.extend(
-        configuration
-            .r2_buckets
-            .into_iter()
-            .map(|bucket| Binding::R2Bucket {
-                name: bucket.binding,
-                bucket_name: bucket.bucket_name,
-            }),
-    );
-    bindings.extend(configuration.kv_namespaces.into_iter().map(|namespace| {
-        Binding::KvNamespace {
-            name: namespace.binding,
-            id: namespace.id,
-        }
-    }));
+    let bindings = &mut worker_metadata.bindings;
     bindings.extend(
         configuration
             .queues
@@ -484,52 +438,30 @@ async fn publish(
     let metadata = WorkerMetadata {
         crons: configuration.triggers.crons,
         queue_consumers: configuration.queues.consumers,
-        debug: Some(DebugMetadata {
-            build_id,
-            source_maps,
-        }),
-        main_module: "worker.js".into(),
-        compatibility_date: configuration.compatibility_date,
-        compatibility_flags: configuration.compatibility_flags,
-        bindings,
+        worker: worker_metadata,
         assets: WorkerAssets {
             upload_session: session.id,
             binding: configuration.assets.binding,
         },
     };
-    let request_id = Uuid::new_v4();
-    // Retry only this immutable publish, always with the same request ID and content.
-    for attempt in 0..3 {
-        let form = upload::worker(
-            &metadata,
-            std::iter::once(("worker.js", &ModuleType::Esm, worker.as_slice())).chain(
-                map_uploads
-                    .iter()
-                    .map(|(name, bytes)| (name.as_str(), &ModuleType::Sourcemap, bytes.as_slice())),
-            ),
-        )?;
-        let token = auth::access_token(api, credentials).await?;
-        let sent = api
-            .authenticated(Method::PUT, &format!("/apps/{app}/worker"), &token)
-            .header("idempotency-key", request_id.to_string())
-            .multipart(form)
-            .send()
-            .await;
-        match sent {
-            Ok(response) if response.status().is_server_error() && attempt < 2 => {}
-            Ok(response) => {
-                let deployment = json(response).await?;
-                return Ok(DeploymentResult {
-                    deployment,
-                    url: app_url,
-                });
-            }
-            Err(_) if attempt < 2 => {}
-            Err(error) => return Err(error.into()),
-        }
-        tokio::time::sleep(Duration::from_secs(2)).await;
-    }
-    Err(Error::invalid("Deployment upload failed".into()))
+    let mut modules = vec![("worker.js".into(), ModuleType::Esm, worker)];
+    modules.extend(
+        map_uploads
+            .into_iter()
+            .map(|(name, bytes)| (name, ModuleType::Sourcemap, bytes)),
+    );
+    let deployment = upload::publish(
+        api,
+        credentials,
+        &format!("/apps/{app}/worker"),
+        &metadata,
+        &modules,
+    )
+    .await?;
+    Ok(DeploymentResult {
+        deployment,
+        url: app_url,
+    })
 }
 
 pub(crate) struct SourceMaps {

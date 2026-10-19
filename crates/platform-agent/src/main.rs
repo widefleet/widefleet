@@ -171,6 +171,26 @@ async fn execute(
     } else {
         None
     };
+    if matches!(job.kind, JobKind::Connector | JobKind::Runtime) {
+        for connector in &packages.connectors {
+            if std::path::Path::new(&connector.name).components().count() != 1
+                || connector.name == "."
+                || connector.name == ".."
+            {
+                return Err(Error::invalid("Unsafe connector name".into()));
+            }
+            artifact::fetch_modules(
+                api,
+                &configuration.token,
+                job,
+                &connector.modules,
+                &connector.metadata.worker.main_module,
+                &temporary.path().join("connectors").join(&connector.name),
+                Some(&connector.name),
+            )
+            .await?;
+        }
+    }
     let telemetry = if artifact.is_none() {
         None
     } else {

@@ -112,7 +112,7 @@ export class ConnectorSupervisor extends DurableObject<ParentEnvironment> {
     const snapshot = await readConnector(this.env, identity);
 
     if (
-      !snapshot.release.configuration.durable_objects.bindings.some(
+      !snapshot.release.metadata.durable_objects.some(
         (binding) => binding.class_name === identity.className,
       )
     )

@@ -208,20 +208,23 @@ export const debugMetadata = z.strictObject({
     .refine((maps) => Object.keys(maps).length <= 500, "Too many source maps"),
 });
 
-export const workerMetadata = z
-  .strictObject({
-    main_module: moduleName,
-    compatibility_date: z.iso.date(),
-    compatibility_flags: z
-      .array(z.enum(["nodejs_als", "nodejs_compat"]))
-      .max(2)
-      .refine((flags) => new Set(flags).size === flags.length, "Compatibility flags must be unique")
-      .default([]),
-    bindings: z.array(workerBinding).max(32).default([]),
+export const workerConfiguration = z.strictObject({
+  main_module: moduleName,
+  compatibility_date: z.iso.date(),
+  compatibility_flags: z
+    .array(z.enum(["nodejs_als", "nodejs_compat"]))
+    .max(2)
+    .refine((flags) => new Set(flags).size === flags.length, "Compatibility flags must be unique")
+    .default([]),
+  bindings: z.array(workerBinding).max(32).default([]),
+  debug: debugMetadata.optional(),
+});
+
+export const workerMetadata = workerConfiguration
+  .extend({
     crons: z.array(z.string().min(1)).default([]),
     queue_consumers: z.array(queueConsumer).default([]),
     assets: z.strictObject({ upload_session: identifier, binding: bindingName.default("ASSETS") }),
-    debug: debugMetadata.optional(),
   })
   .superRefine((metadata, context) => {
     const workflows = metadata.bindings
@@ -288,83 +291,52 @@ const connectorValueMaxBytes = 5_000;
 
 export const connectorEnvironmentMaxBindings = 128;
 
-const connectorVariableSizeMessage =
-  "Connector variables must contain at most 5 KB (5000 UTF-8 bytes)";
+export const connectorUploadMetadata = workerConfiguration
+  .extend({
+    entrypoints: z
+      .array(bindingName)
+      .min(1)
+      .refine((names) => names.includes("default"), "celld requires a default Worker export"),
+    durable_objects: z
+      .array(z.strictObject({ name: bindingName, class_name: bindingName }))
+      .default([]),
+  })
+  .superRefine((metadata, context) => {
+    const names = [
+      ...metadata.bindings.map((binding) => binding.name),
+      ...metadata.durable_objects.map((binding) => binding.name),
+    ];
 
-export const connectorConfiguration = z.strictObject({
-  compatibility_date: z.iso.date(),
-  compatibility_flags: workerMetadata.shape.compatibility_flags,
-  vars: z
-    .record(
-      bindingName,
-      z
-        .string()
-        .max(connectorValueMaxBytes, connectorVariableSizeMessage)
-        .refine(
-          (value) => new TextEncoder().encode(value).byteLength <= connectorValueMaxBytes,
-          connectorVariableSizeMessage,
-        ),
+    if (new Set(names).size !== names.length)
+      context.addIssue({ code: "custom", message: "Binding names must be unique" });
+
+    if (
+      [
+        ...names,
+        ...metadata.entrypoints,
+        ...metadata.durable_objects.map((binding) => binding.class_name),
+      ].some((name) => name.startsWith("WIDEFLEET_"))
     )
-    .refine(
-      (vars) => Object.keys(vars).length <= connectorEnvironmentMaxBindings,
-      "Connectors support at most 128 variables and secrets combined",
+      context.addIssue({
+        code: "custom",
+        message: "WIDEFLEET_ names are reserved for the platform",
+      });
+
+    if (
+      metadata.bindings.some((binding) => binding.type === "workflow" || binding.type === "queue")
     )
-    .default({}),
-  d1_databases: z
-    .array(
-      z.strictObject({
-        binding: bindingName,
-        database_name: z.string().min(1),
-        database_id: z.string().optional(),
-      }),
-    )
-    .default([]),
-  r2_buckets: z
-    .array(z.strictObject({ binding: bindingName, bucket_name: z.string().min(1) }))
-    .default([]),
-  kv_namespaces: z
-    .array(z.strictObject({ binding: bindingName, id: z.string().min(1) }))
-    .default([]),
-  durable_objects: z
-    .strictObject({
-      bindings: z.array(
-        z.strictObject({
-          name: bindingName,
-          class_name: bindingName,
-        }),
-      ),
-    })
-    .default({ bindings: [] }),
-});
+      context.addIssue({
+        code: "custom",
+        message: "Connector queues and workflows are not supported",
+      });
+  });
 
 export const connectorPackage = z.strictObject({
   protocol: z.literal(1),
   name: appSlug,
-  main: moduleName,
-  modules: z
-    .array(
-      runtimeRelease.shape.modules.element.extend({
-        type: z.enum(["esm", "sourcemap"]).default("esm"),
-      }),
-    )
-    .min(1)
-    .max(532),
-  debug: debugMetadata.optional(),
-  entrypoints: z
-    .array(bindingName)
-    .min(1)
-    .refine((names) => names.includes("default"), "celld requires a default Worker export"),
-  configuration: connectorConfiguration,
+  metadata: connectorUploadMetadata,
+  modules: artifact.shape.modules,
 });
-
-export const storedConnectorPackage = connectorPackage.extend({
-  modules: z
-    .array(storedModule.extend({ type: z.enum(["esm", "sourcemap"]) }))
-    .min(1)
-    .max(532),
-});
-
-export const connectorUploadMetadata = connectorPackage.omit({ name: true, modules: true });
 
 export const connectorSecretName = bindingName.refine(
   (name) => !name.startsWith("WIDEFLEET_") && name !== "__proto__",

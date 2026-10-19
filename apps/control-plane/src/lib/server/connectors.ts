@@ -1,3 +1,5 @@
+import { operationId } from "./deployment-execution.ts";
+import type { WorkerModule } from "./worker-modules.ts";
 import type { HostedExecution } from "./deployment-execution.ts";
 import {
   administrator,
@@ -18,8 +20,9 @@ import { defaultFleet, lockFleet, requireAgentExecution } from "./fleets.ts";
 import type { Principal } from "./identity.ts";
 import {
   connectorReference,
+  connectorChecksum,
   loadConnector,
-  validateConnectorEnvironment,
+  validateConnectorPackage,
   validateConnectorSecret,
 } from "./connector-package.ts";
 import { artifacts, connectors, deployments, jobs } from "./schema.ts";
@@ -177,9 +180,7 @@ export const createConnectorService = (
             secrets.set(secret, await encryptSecret(encryptionKey, value));
           }
 
-          validateConnectorEnvironment((await loadConnector(storage, reference)).configuration, [
-            ...secrets.keys(),
-          ]);
+          validateConnectorPackage(await loadConnector(storage, reference), [...secrets.keys()]);
 
           const next = {
             ...reference,
@@ -232,31 +233,56 @@ export const createConnectorService = (
 
       return Result.ok(await presentStatus(transaction, record, execution));
     }),
-  deploy: (principal: Principal, release: z.infer<typeof contract.connectorPackage>) =>
+  deploy: (
+    principal: Principal,
+    release: z.infer<typeof contract.connectorPackage>,
+    modules: WorkerModule[],
+    requestId: string,
+  ) =>
     execution
-      ? execution.connectors.deploy(principal, release)
+      ? execution.connectors.deploy(principal, release, modules, requestId)
       : transact(database, async (transaction) => {
           administrator(principal);
           const target = await defaultFleet(transaction);
           await lockFleet(transaction, target.id);
           await requireAgentExecution(transaction, target.id, "Connectors");
 
-          const { reference, existing } = await prepareConnector(
+          const id = operationId(`connectors/${target.id}/${release.name}`, requestId);
+          const [previous] = await transaction.select().from(jobs).where(eq(jobs.id, id));
+
+          if (previous) {
+            const original = connectorReference.parse(previous.connector);
+
+            const [existing] = await transaction
+              .select()
+              .from(connectors)
+              .where(and(eq(connectors.fleetId, target.id), eq(connectors.name, release.name)));
+
+            const checksum = connectorChecksum(target.id, release);
+
+            if (original.checksum !== checksum || previous.kind !== "connector" || !existing)
+              throw new InvalidOperation({
+                code: "CONFLICT",
+                message: "The request ID already refers to another artifact",
+              });
+
+            return Result.ok(
+              await presentStatus(
+                transaction,
+                { ...existing, package: original, jobId: id },
+                execution,
+              ),
+            );
+          }
+
+          const { reference } = await prepareConnector(
             transaction,
             storage,
             target,
             release,
+            modules,
           );
 
-          const checksum = reference.checksum;
-
-          if (existing && connectorReference.parse(existing.package).checksum === checksum) {
-            const current = await presentStatus(transaction, existing, execution);
-
-            if (current.state !== "failed") return Result.ok(current);
-          }
-
-          const id = crypto.randomUUID();
           await transaction
             .insert(jobs)
             .values({ id, fleetId: target.id, kind: "connector", connector: reference });

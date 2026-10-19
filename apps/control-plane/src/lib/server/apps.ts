@@ -12,7 +12,7 @@ import type { Principal } from "./identity.ts";
 import { appGrants, apps, artifacts, deploymentEvents, deployments, jobs } from "./schema.ts";
 import { transact, type Transaction } from "./transactions.ts";
 import { defaultFleet, requireAgentExecution } from "./fleets.ts";
-import { hostedDeploymentId, type HostedExecution } from "./deployment-execution.ts";
+import { operationId, type HostedExecution } from "./deployment-execution.ts";
 
 export const appVisibility = (
   database: Database | Transaction,
@@ -155,7 +155,7 @@ export const enqueueDeployment = async (
     return Result.ok(presentDeployment(existing));
   }
 
-  const deploymentId = hosted ? hostedDeploymentId(record.id, requestId) : crypto.randomUUID();
+  const deploymentId = hosted ? operationId(record.id, requestId) : crypto.randomUUID();
 
   if (hosted)
     return Result.ok(

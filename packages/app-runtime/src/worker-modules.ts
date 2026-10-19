@@ -15,6 +15,8 @@ export const loadModules = async (
 
     if (!object) throw new Error("Published module is missing");
     const data = await object.arrayBuffer();
+
+    if (data.byteLength !== module.size) throw new Error("Published module checksum mismatch");
     const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", data));
 
     if (Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("") !== module.sha256)

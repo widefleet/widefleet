@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   assetManifest,
   assetPath,
-  connectorConfiguration,
+  connectorUploadMetadata,
   connectorSecretValue,
   runtimePackages,
   workerMetadata,
@@ -24,28 +24,39 @@ describe("connector secret contracts", () => {
   });
 });
 
-describe("connector variable contracts", () => {
+describe.each([workerMetadata, connectorUploadMetadata])("shared worker variables", (schema) => {
+  const metadata = { main_module: "worker.js", compatibility_date: "2026-10-01" };
+
+  const parse = (bindings: { type: "plain_text"; name: string; text: string }[]) =>
+    schema.safeParse(
+      schema === workerMetadata
+        ? {
+            ...metadata,
+            bindings,
+            assets: { upload_session: "93d8fffd-d0ed-48cf-8fb7-570219c62a70" },
+          }
+        : { ...metadata, bindings, entrypoints: ["default"] },
+    ).success;
+
   it.each([
-    { label: "empty", value: "", accepted: true },
-    { label: "5000 ASCII bytes", value: "x".repeat(5000), accepted: true },
-    { label: "5001 ASCII bytes", value: "x".repeat(5001), accepted: false },
-    { label: "5000 UTF-8 bytes", value: "é".repeat(2500), accepted: true },
-    { label: "5002 UTF-8 bytes", value: "é".repeat(2501), accepted: false },
-  ])("validates variable values: $label", ({ value, accepted }) => {
-    expect(
-      connectorConfiguration.safeParse({ compatibility_date: "2026-10-01", vars: { LABEL: value } })
-        .success,
-    ).toBe(accepted);
+    { value: "", accepted: true },
+    { value: "é".repeat(16384), accepted: true },
+    { value: "x".repeat(16385), accepted: false },
+  ])("validates variable text length", ({ value, accepted }) => {
+    expect(parse([{ type: "plain_text", name: "LABEL", text: value }])).toBe(accepted);
   });
   it.each([
-    { count: 128, accepted: true },
-    { count: 129, accepted: false },
-  ])("validates $count variables before deployment", ({ count, accepted }) => {
+    { count: 32, accepted: true },
+    { count: 33, accepted: false },
+  ])("validates $count bindings", ({ count, accepted }) => {
     expect(
-      connectorConfiguration.safeParse({
-        compatibility_date: "2026-10-01",
-        vars: Object.fromEntries(Array.from({ length: count }, (_, i) => [`VAR_${i}`, ""])),
-      }).success,
+      parse(
+        Array.from({ length: count }, (_, i) => ({
+          type: "plain_text",
+          name: `VAR_${i}`,
+          text: "",
+        })),
+      ),
     ).toBe(accepted);
   });
 });

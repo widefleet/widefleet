@@ -1,11 +1,11 @@
 use crate::config::Configuration;
 use futures_util::TryStreamExt;
-use object_store::{ObjectStore, ObjectStoreExt, path::Path as ObjectPath};
+use object_store::{ObjectStore, ObjectStoreExt, PutMode, PutOptions, path::Path as ObjectPath};
 use platform_core::{
     Error, Result,
     model::{
-        Artifact, Binding, Job, JobKind, PublishedApp, PublishedCapability, ReleaseModule,
-        RuntimePackages,
+        Artifact, Binding, Job, JobKind, Module, ModuleType, PublishedApp, PublishedCapability,
+        ReleaseModule, RuntimePackages,
     },
     sha256,
 };
@@ -31,6 +31,78 @@ fn resource(owner: &str, kind: &str, name: &str) -> String {
         "r{}",
         &sha256(format!("{owner}/{kind}/{name}").as_bytes())[..40]
     )
+}
+
+fn native_resource(
+    owner: &str,
+    binding: &Binding,
+) -> Option<(String, &'static str, String, Value)> {
+    let (name, kind, logical) = match binding {
+        Binding::PlainText { .. } | Binding::Workflow { .. } => return None,
+        Binding::D1 {
+            name,
+            database_name,
+            database_id,
+        } => (name, "d1", database_id.as_ref().unwrap_or(database_name)),
+        Binding::R2Bucket { name, bucket_name } => (name, "r2", bucket_name),
+        Binding::KvNamespace { name, id } => (name, "kv", id),
+        Binding::Queue { name, queue } => (name, "queue", queue),
+    };
+    let id = resource(owner, kind, logical);
+    let native = format!("B_{id}");
+    let (field, config) = match kind {
+        "d1" => (
+            "d1_databases",
+            json!({ "binding": native, "database_name": id, "database_id": id }),
+        ),
+        "r2" => (
+            "r2_buckets",
+            json!({ "binding": native, "bucket_name": id }),
+        ),
+        "kv" => ("kv_namespaces", json!({ "binding": native, "id": id })),
+        "queue" => ("queues", json!({ "binding": native, "queue": id })),
+        _ => unreachable!(),
+    };
+    Some((name.clone(), field, native, config))
+}
+
+async fn publish_modules(
+    store: &Arc<dyn ObjectStore>,
+    job: &Job,
+    scope: &str,
+    modules: &[Module],
+    directory: &Path,
+) -> Result<()> {
+    for module in modules {
+        if matches!(module.kind, ModuleType::Sourcemap) {
+            continue;
+        }
+        let bytes = tokio::fs::read(directory.join(&module.name)).await?;
+        if bytes.len() as u64 != module.size || sha256(&bytes) != module.sha256 {
+            return Err(Error::invalid(
+                "Worker module checksum or size mismatch".into(),
+            ));
+        }
+        let key = ObjectPath::from(package_key(
+            job,
+            &format!("{scope}/modules/{}", module.sha256),
+        ));
+        match store
+            .put_opts(
+                &key,
+                bytes.into(),
+                PutOptions {
+                    mode: PutMode::Create,
+                    ..Default::default()
+                },
+            )
+            .await
+        {
+            Ok(_) | Err(object_store::Error::AlreadyExists { .. }) => {}
+            Err(error) => return Err(storage_error(error)),
+        }
+    }
+    Ok(())
 }
 
 fn native_crons(crons: &BTreeMap<String, BTreeSet<String>>) -> Vec<&str> {
@@ -123,6 +195,7 @@ pub async fn prepare(
         .iter()
         .flat_map(|connector| {
             connector
+                .metadata
                 .entrypoints
                 .iter()
                 .map(|entrypoint| (connector.name.clone(), entrypoint.clone()))
@@ -171,6 +244,7 @@ pub async fn prepare(
                     || app
                         .artifact
                         .metadata
+                        .worker
                         .bindings
                         .iter()
                         .any(|binding| binding.name() == name)
@@ -188,20 +262,14 @@ pub async fn prepare(
                 );
             }
         }
-        for module in &app.artifact.modules {
-            if matches!(module.kind, platform_core::model::ModuleType::Sourcemap) {
-                continue;
-            }
-            put(
-                &store,
-                &package_key(
-                    job,
-                    &format!("apps/{}/modules/{}", job.app_id()?, module.sha256),
-                ),
-                tokio::fs::read(directory.join(&module.name)).await?,
-            )
-            .await?;
-        }
+        publish_modules(
+            &store,
+            job,
+            &format!("apps/{}", app.artifact.app_id),
+            &app.artifact.modules,
+            directory,
+        )
+        .await?;
         for (path, entry) in &app.artifact.manifest {
             put(
                 &store,
@@ -257,6 +325,7 @@ pub async fn prepare(
         && current.iter().chain(retained.iter()).any(|app| {
             app.artifact
                 .metadata
+                .worker
                 .bindings
                 .iter()
                 .any(|binding| matches!(binding, Binding::Workflow { .. }))
@@ -279,41 +348,24 @@ pub async fn prepare(
     let active_versions: BTreeSet<_> = current.iter().map(|app| app.version).collect();
     for app in current.iter_mut().chain(retained.iter_mut()) {
         let owner = app.artifact.app_id.to_string();
-        for binding in &app.artifact.metadata.bindings {
-            let (name, kind, id) = match binding {
-                Binding::PlainText { .. } | Binding::Workflow { .. } => continue,
-                Binding::D1 {
-                    name,
-                    database_name,
-                    database_id,
-                } => (name, "d1", database_id.as_ref().unwrap_or(database_name)),
-                Binding::R2Bucket { name, bucket_name } => (name, "r2", bucket_name),
-                Binding::KvNamespace { name, id } => (name, "kv", id),
-                Binding::Queue { name, queue } => (name, "queue", queue),
-            };
-            let id = resource(&owner, kind, id);
-            let native = format!("B_{id}");
-            app.native_bindings.insert(name.clone(), native.clone());
-            match kind {
-                "d1" => {
-                    databases.insert(
-                        native.clone(),
-                        json!({ "binding": native, "database_name": id, "database_id": id }),
-                    );
+        for binding in &app.artifact.metadata.worker.bindings {
+            if let Some((name, field, native, config)) = native_resource(&owner, binding) {
+                app.native_bindings.insert(name, native.clone());
+                match field {
+                    "d1_databases" => {
+                        databases.insert(native, config);
+                    }
+                    "r2_buckets" => {
+                        buckets.insert(native, config);
+                    }
+                    "kv_namespaces" => {
+                        namespaces.insert(native, config);
+                    }
+                    "queues" => {
+                        producers.insert(native, config);
+                    }
+                    _ => unreachable!(),
                 }
-                "r2" => {
-                    buckets.insert(
-                        native.clone(),
-                        json!({ "binding": native, "bucket_name": id }),
-                    );
-                }
-                "kv" => {
-                    namespaces.insert(native.clone(), json!({ "binding": native, "id": id }));
-                }
-                "queue" => {
-                    producers.insert(native.clone(), json!({ "binding": native, "queue": id }));
-                }
-                _ => unreachable!(),
             }
         }
         if !active_versions.contains(&app.version) {
@@ -391,48 +443,28 @@ pub async fn prepare(
             ));
         }
         let mut native_bindings = BTreeMap::new();
-        for (field, identity) in [
-            ("d1_databases", "database_name"),
-            ("r2_buckets", "bucket_name"),
-            ("kv_namespaces", "id"),
-        ] {
-            for binding in connector
-                .configuration
-                .get(field)
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
+        for binding in &connector.metadata.worker.bindings {
+            if let Some((name, field, native, config)) =
+                native_resource(&format!("connector:{}", connector.name), binding)
             {
-                let name = (if field == "d1_databases" {
-                    binding.get("database_id").or_else(|| binding.get(identity))
-                } else {
-                    binding.get(identity)
-                })
-                .and_then(Value::as_str)
-                .ok_or_else(|| Error::invalid("Invalid connector resource".into()))?;
-                let declared = binding
-                    .get("binding")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| Error::invalid("Invalid connector binding".into()))?;
-                let id = resource(&format!("connector:{}", connector.name), field, name);
-                let native = format!("B_{id}");
-                native_bindings.insert(declared.to_owned(), native.clone());
-                connector_resources.entry(field.into()).or_default().insert(
-                    native.clone(),
-                    match field {
-                        "d1_databases" => {
-                            json!({ "binding": native, "database_name": id, "database_id": id })
-                        }
-                        "r2_buckets" => json!({ "binding": native, "bucket_name": id }),
-                        "kv_namespaces" => json!({ "binding": native, "id": id }),
-                        _ => unreachable!(),
-                    },
-                );
+                native_bindings.insert(name, native.clone());
+                connector_resources
+                    .entry(field.into())
+                    .or_default()
+                    .insert(native, config);
             }
         }
         // App operations only use the already active connector versions. Connector
         // changes prepare snapshots before the recovery journal commits activation.
         if matches!(job.kind, JobKind::Connector | JobKind::Runtime) {
+            publish_modules(
+                &store,
+                job,
+                &format!("connectors/{}/{}", job.fleet_id, connector.name),
+                &connector.modules,
+                &directory.join("connectors").join(&connector.name),
+            )
+            .await?;
             connector_preparations.push(json!({
                 "action": "prepare", "fleetId": job.fleet_id, "version": job.id,
                 "release": connector, "nativeBindings": native_bindings,
@@ -756,6 +788,7 @@ pub async fn recover(configuration: &Configuration, job: &Job) -> Result<Option<
             if app
                 .artifact
                 .metadata
+                .worker
                 .bindings
                 .iter()
                 .any(|binding| matches!(binding, Binding::Workflow { .. }))
@@ -865,6 +898,7 @@ pub async fn migration_database(
     let identity = app
         .artifact
         .metadata
+        .worker
         .bindings
         .iter()
         .find_map(|binding| match binding {
@@ -937,7 +971,7 @@ pub async fn remove(configuration: &Configuration, job: &Job) -> Result<()> {
         if app.artifact.app_id != job.app_id()? {
             continue;
         }
-        for binding in app.artifact.metadata.bindings {
+        for binding in app.artifact.metadata.worker.bindings {
             if let Binding::R2Bucket { bucket_name, .. } = binding {
                 let id = resource(&job.app_id()?.to_string(), "r2", &bucket_name);
                 prefixes.insert(format!("{}/r2/{id}/", prefix(job)));

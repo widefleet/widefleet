@@ -1,16 +1,15 @@
+import { createHash } from "node:crypto";
 import * as contract from "@platform/contracts";
 import { z } from "zod";
 import { InvalidOperation, StorageUnavailable } from "./errors.ts";
-import { loadPackage, storePackage, verifyModules } from "./package-storage.ts";
+import { loadPackage, storePackage } from "./package-storage.ts";
 import { prepareModules, storeModules, type WorkerModule } from "./worker-modules.ts";
-import { createHash } from "node:crypto";
-import { Result } from "better-result";
 import type { ArtifactStorage } from "./storage.ts";
 
 export const connectorReference = z.strictObject({
   name: contract.appSlug,
   checksum: contract.checksum,
-  entrypoints: contract.connectorPackage.shape.entrypoints,
+  entrypoints: contract.connectorUploadMetadata.shape.entrypoints,
   classes: z.array(z.string()),
   // Ciphertexts belong to the activation snapshot, independently of login settings.
   secrets: z.record(contract.connectorSecretName, z.string().min(1)).default({}),
@@ -22,21 +21,9 @@ export const uploadedConnector = (
   metadata: z.infer<typeof contract.connectorUploadMetadata>,
   modules: WorkerModule[],
 ) =>
-  Result.try({
-    try: () =>
-      contract.connectorPackage.parse({
-        ...metadata,
-        name,
-        modules: modules.map((module) => ({
-          name: module.name,
-          type: module.type,
-          source: new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(module.bytes),
-          sha256: createHash("sha256").update(module.bytes).digest("hex"),
-        })),
-      }),
-    catch: () =>
-      new InvalidOperation({ code: "BAD_REQUEST", message: "Invalid connector modules" }),
-  });
+  prepareModules(metadata.main_module, modules, metadata.debug).map((references) =>
+    contract.connectorPackage.parse({ protocol: 1, name, metadata, modules: references }),
+  );
 
 export const validateConnectorSecret = (value: string) => {
   const result = contract.connectorSecretValue.safeParse(value);
@@ -48,20 +35,21 @@ export const validateConnectorSecret = (value: string) => {
     });
 };
 
-export const validateConnectorEnvironment = (
-  configuration: z.infer<typeof contract.connectorConfiguration>,
+export const validateConnectorPackage = (
+  release: z.infer<typeof contract.connectorPackage>,
   secretNames: string[],
 ) => {
-  const variables = contract.connectorConfiguration.shape.vars.safeParse(configuration.vars);
+  const valid = contract.connectorPackage.safeParse(release);
 
-  if (!variables.success)
+  if (!valid.success)
     throw new InvalidOperation({
       code: "BAD_REQUEST",
-      message: variables.error.issues[0]?.message ?? "Invalid connector variables",
+      message: valid.error.issues[0]?.message ?? "Invalid worker configuration",
     });
 
   if (
-    Object.keys(variables.data).length + secretNames.length >
+    release.metadata.bindings.filter((binding) => binding.type === "plain_text").length +
+      secretNames.length >
     contract.connectorEnvironmentMaxBindings
   )
     throw new InvalidOperation({
@@ -70,34 +58,18 @@ export const validateConnectorEnvironment = (
     });
 };
 
-const connectorModules = (release: z.infer<typeof contract.connectorPackage>) =>
-  release.modules.map(({ source, name, type }) => ({
-    name,
-    type,
-    bytes: new TextEncoder().encode(source),
-  }));
-
-export const validateConnectorPackage = (
-  release: z.infer<typeof contract.connectorPackage>,
-  secretNames: string[],
-) => {
-  verifyModules(release);
-  const prepared = prepareModules(release.main, connectorModules(release), release.debug);
-
-  if (prepared.isErr()) throw prepared.error;
-  validateConnectorEnvironment(release.configuration, secretNames);
-
-  if (release.modules.some((module) => module.name.startsWith("__widefleet_")))
-    throw new InvalidOperation({
-      code: "BAD_REQUEST",
-      message: "Connector module name is reserved",
-    });
-};
-
 const connectorArtifact = z.strictObject({
   fleetId: contract.identifier,
-  release: contract.storedConnectorPackage,
+  release: contract.connectorPackage,
 });
+
+const artifactBytes = (fleetId: string, release: z.infer<typeof contract.connectorPackage>) =>
+  Buffer.from(JSON.stringify(connectorArtifact.parse({ fleetId, release })));
+
+export const connectorChecksum = (
+  fleetId: string,
+  release: z.infer<typeof contract.connectorPackage>,
+) => createHash("sha256").update(artifactBytes(fleetId, release)).digest("hex");
 
 export const connectorModuleScope = (fleetId: string, name: string) =>
   `connectors/${fleetId}/${name}`;
@@ -106,22 +78,29 @@ export const saveConnector = async (
   storage: ArtifactStorage,
   fleetId: string,
   release: z.infer<typeof contract.connectorPackage>,
+  modules?: WorkerModule[],
 ) => {
-  verifyModules(release);
-  const modules = connectorModules(release);
-  const prepared = prepareModules(release.main, modules, release.debug);
+  if (modules) {
+    const prepared = prepareModules(release.metadata.main_module, modules, release.metadata.debug);
 
-  if (prepared.isErr()) throw prepared.error;
-  const stored = await storeModules(storage, connectorModuleScope(fleetId, release.name), modules);
+    if (prepared.isErr()) throw prepared.error;
 
-  if (stored.isErr()) throw stored.error;
+    if (JSON.stringify(prepared.value) !== JSON.stringify(release.modules))
+      throw new InvalidOperation({
+        code: "BAD_REQUEST",
+        message: "Worker module references do not match uploaded files",
+      });
 
-  const artifact = connectorArtifact.parse({
-    fleetId,
-    release: { ...release, modules: prepared.value },
-  });
+    const stored = await storeModules(
+      storage,
+      connectorModuleScope(fleetId, release.name),
+      modules,
+    );
 
-  return storePackage(storage, Buffer.from(JSON.stringify(artifact)));
+    if (stored.isErr()) throw stored.error;
+  }
+
+  return storePackage(storage, artifactBytes(fleetId, release));
 };
 
 export const loadConnectorArtifact = async (
@@ -139,26 +118,4 @@ export const loadConnectorArtifact = async (
 export const loadConnector = async (
   storage: ArtifactStorage,
   reference: Pick<z.infer<typeof connectorReference>, "checksum" | "name">,
-) => {
-  const { fleetId, release } = await loadConnectorArtifact(storage, reference);
-  const modules = [];
-
-  for (const module of release.modules) {
-    const bytes = await storage.get(
-      `${connectorModuleScope(fleetId, release.name)}/modules/${module.sha256}`,
-    );
-
-    if (bytes.isErr()) throw bytes.error;
-    modules.push({
-      name: module.name,
-      type: module.type,
-      sha256: module.sha256,
-      source: new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes.value),
-    });
-  }
-
-  const value = { ...release, modules };
-  verifyModules(value);
-
-  return value;
-};
+) => (await loadConnectorArtifact(storage, reference)).release;

@@ -8,7 +8,7 @@ import {
   readConnector,
 } from "./connector-publication.ts";
 import type { ParentEnvironment } from "./types.ts";
-import { loadModules } from "./worker-modules.ts";
+import { workerDefinition, workerTails } from "./worker-definition.ts";
 
 export const connectorCode = async (
   snapshot: z.infer<typeof connectorSnapshot>,
@@ -17,73 +17,45 @@ export const connectorCode = async (
 ) => {
   const { release, fleetId, version } = snapshot;
   const identity = { fleetId, name: release.name, version };
-  const configuration = release.configuration;
-  const bindings = new Map<string, string | Fetcher>(Object.entries(configuration.vars));
+  const configuration = release.metadata;
 
-  const resources = [
-    ...configuration.d1_databases.map((item) => ({
-      type: "d1" as const,
-      name: item.binding,
-      database_name: item.database_name,
-    })),
-    ...configuration.r2_buckets.map((item) => ({
-      type: "r2_bucket" as const,
-      name: item.binding,
-      bucket_name: item.bucket_name,
-    })),
-    ...configuration.kv_namespaces.map((item) => ({
-      type: "kv_namespace" as const,
-      name: item.binding,
-      id: item.id,
-    })),
-  ];
+  const worker = await workerDefinition(
+    {
+      scope: connectorScope(identity),
+      metadata: configuration,
+      modules: release.modules,
+      nativeBindings: snapshot.nativeBindings,
+      objects: configuration.durable_objects.map((binding) => ({
+        ...binding,
+        scope: JSON.stringify([fleetId, release.name, binding.class_name]),
+      })),
+    },
+    environment,
+    context,
+  );
 
-  for (const resource of resources) {
-    const name = snapshot.nativeBindings[resource.name];
-
-    if (!name || !environment[name]) throw new Error("Connector resource is not installed");
-    const options = { props: { name } };
-
-    switch (resource.type) {
-      case "d1":
-        bindings.set(`WIDEFLEET_D1_${resource.name}`, context.exports.Database(options));
-        break;
-      case "r2_bucket":
-        bindings.set(`WIDEFLEET_R2_${resource.name}`, context.exports.Objects(options));
-        break;
-      case "kv_namespace":
-        bindings.set(`WIDEFLEET_KV_${resource.name}`, context.exports.KeyValue(options));
-        break;
-    }
-  }
+  const bindings = new Map(Object.entries(worker.env));
 
   bindings.set("WIDEFLEET_SECRETS", context.exports.ConnectorSecrets({ props: identity }));
 
-  for (const binding of configuration.durable_objects.bindings)
+  for (const binding of configuration.durable_objects)
     bindings.set(
       `WIDEFLEET_STATE_${binding.name}`,
       context.exports.ConnectorState({ props: { ...identity, className: binding.class_name } }),
     );
 
-  const modules = await loadModules(environment, connectorScope(identity), release.modules);
+  const modules = new Map(Object.entries(worker.modules));
 
-  modules.set(
-    "__widefleet_bindings.js",
-    `const WIDEFLEET_CONFIGURATION = ${JSON.stringify({ metadata: { bindings: resources }, objects: configuration.durable_objects.bindings.map((binding) => ({ ...binding, scope: JSON.stringify([fleetId, release.name, binding.class_name]) })) })};\n${WIDEFLEET_BINDINGS_SOURCE}`,
-  );
-
-  const classes = [
-    ...new Set(configuration.durable_objects.bindings.map((binding) => binding.class_name)),
-  ];
+  const classes = [...new Set(configuration.durable_objects.map((binding) => binding.class_name))];
 
   modules.set(
     "__widefleet_connector.js",
     `
 import * as workers from 'cloudflare:workers';
 import { connectorResponse } from './__widefleet_bindings.js';
-import * as connector from ${JSON.stringify(`./${release.main}`)};
-export * from ${JSON.stringify(`./${release.main}`)};
-export { default } from ${JSON.stringify(`./${release.main}`)};
+import * as connector from ${JSON.stringify(`./${configuration.main_module}`)};
+export * from ${JSON.stringify(`./${configuration.main_module}`)};
+export { default } from ${JSON.stringify(`./${configuration.main_module}`)};
 ${classes
   .map(
     (name, index) => `
@@ -112,7 +84,7 @@ export { Facet${index} as ${name} };
   .join("\n")}
 export class WIDEFLEET_READY extends workers.WorkerEntrypoint {
   ready() {
-    for (const name of ${JSON.stringify([...release.entrypoints, ...classes])})
+    for (const name of ${JSON.stringify([...configuration.entrypoints, ...classes])})
       if (!(name in connector)) throw new Error('Connector export is missing: ' + name);
     return true;
   }
@@ -121,31 +93,18 @@ export class WIDEFLEET_READY extends workers.WorkerEntrypoint {
   );
 
   return {
-    compatibilityDate: configuration.compatibility_date,
+    ...worker,
     // Facet response readers must observe disconnects even while a read is pending.
     compatibilityFlags: [...configuration.compatibility_flags, "enable_request_signal"],
     mainModule: "__widefleet_connector.js",
     modules: Object.fromEntries(modules),
     env: Object.fromEntries(bindings),
-    tails:
-      environment["WIDEFLEET_LOGS"] === "cloudflare"
-        ? [
-            context.exports.CloudflareTelemetry({
-              props: { fleetId, connector: release.name, connectorVersion: version },
-            }),
-          ]
-        : snapshot.telemetry
-          ? [
-              context.exports.Telemetry({
-                props: {
-                  ...snapshot.telemetry,
-                  fleetId,
-                  connector: release.name,
-                  connectorVersion: version,
-                },
-              }),
-            ]
-          : [],
+    tails: workerTails(
+      environment,
+      context,
+      { fleetId, connector: release.name, connectorVersion: version },
+      snapshot.telemetry,
+    ),
   };
 };
 

@@ -47,13 +47,19 @@ export const binaryPaths = {
     put: {
       operationId: "connectorDeploy",
       summary: "Upload connector modules and queue activation",
-      description: `${workerUploadDescription} Supported MIME types: application/javascript+module, application/source-map+json. Requires platform:write scope and administrator access. The connector name comes from the path. Repeating an unchanged pending or successful deployment returns its status; repeating a failed deployment retries it.`,
+      description: `${workerUploadDescription} Supported MIME types: application/javascript+module, application/wasm, text/plain, application/octet-stream, application/source-map+json. Requires platform:write scope and administrator access. The connector name comes from the path. Repeating the same Idempotency-Key and content returns the original deployment; changed content conflicts. Use a new key to retry a failed deployment.`,
       parameters: [
         {
           name: "name",
           in: "path",
           required: true,
           schema: { $ref: "#/components/schemas/ConnectorName" },
+        },
+        {
+          name: "Idempotency-Key",
+          in: "header",
+          required: true,
+          schema: { type: "string", format: "uuid" },
         },
       ],
       requestBody: workerRequestBody("ConnectorUploadMetadata"),
@@ -175,6 +181,13 @@ export const binaryPaths = {
       operationId: "downloadModule",
       summary: "Download a module belonging to the job's artifact with an active agent lease",
       parameters: [
+        {
+          name: "connector",
+          in: "query",
+          required: false,
+          schema: { $ref: "#/components/schemas/ConnectorName" },
+          description: "Select a connector manifest pinned to this job; omit for the app artifact.",
+        },
         { name: "jobId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
         {
           name: "sha256",

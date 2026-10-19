@@ -18,7 +18,7 @@ import {
   pendingCloudflareBindingMessage,
   updateCloudflareBindings,
 } from "./cloudflare-binding-updates.ts";
-import { deploymentCommand, hostedDeploymentId } from "./deployment-execution.ts";
+import { deploymentCommand, operationId } from "./deployment-execution.ts";
 import { DatabaseUnavailable, InvalidOperation } from "./errors.ts";
 import {
   apps,
@@ -281,7 +281,7 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               nativeBindings: command.kind === "deploy" ? nativeBindings : serving?.nativeBindings,
             };
 
-            const version = hostedDeploymentId(command.id, JSON.stringify({ ...selected, access }));
+            const version = operationId(command.id, JSON.stringify({ ...selected, access }));
             const published = contract.publishedApp.parse({ ...selected, version });
             const body = JSON.stringify(published);
 
