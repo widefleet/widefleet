@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { bootstrapConfiguration } from "@platform/contracts";
-import { createAuthentication, registerCli } from "../src/lib/server/auth.ts";
+import { registerCli } from "../src/lib/server/auth.ts";
 import { cloudflareConfigurationSchema } from "../src/lib/server/cloudflare-config.ts";
 import { createDatabase } from "../src/lib/server/database.ts";
 import {
@@ -31,7 +31,7 @@ try {
   if (fleet.isErr()) throw fleet.error;
   await initializeOrganization(database.db);
   await initializeInstallation(database.db);
-  await registerCli(createAuthentication(configuration, database.db), database.db, configuration);
+  await registerCli(database.db, configuration);
 
   if (!(await readInstallation(database.db)).ownerId) {
     if (!configuration.PLATFORM_BOOTSTRAP_FILE)

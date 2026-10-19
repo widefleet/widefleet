@@ -28,6 +28,7 @@
     },
   ],
   "vars": {
+    "NODE_ENV": "production",
     "APP_RUNTIME_NAME": "widefleet-app-runtime",
     "CLOUDFLARE_ACCOUNT_ID": "00000000000000000000000000000000",
     "PLATFORM_URL": "https://platform.example.com",

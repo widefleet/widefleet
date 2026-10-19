@@ -1,8 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { EventEmitter, once } from "node:events";
 import { eq } from "drizzle-orm";
 import { settingsInput } from "@platform/contracts";
 import { companyLoginRevision } from "../src/lib/server/auth.ts";
-import { createRuntime } from "../src/lib/server/runtime-services.ts";
+import { createRuntime, createRequestRuntime } from "../src/lib/server/runtime-services.ts";
 import { installation } from "../src/lib/server/schema.ts";
 import { createStorage } from "../src/lib/server/storage.ts";
 import { createTestEnvironment } from "./environment.ts";
@@ -54,6 +55,83 @@ describe("Control-plane runtime settings", () => {
     expect(rotated.reporting).toBe(first.reporting);
     expect(first.configuration.IDENTITY?.management.clientSecret).toBe("local-tests-only");
     expect(await resolve()).toBe(rotated);
+  });
+
+  it("shares a settings read within a request and refreshes after a settings command", async () => {
+    const reads = vi.spyOn(environment.settings, "resolve");
+    const request = createRequestRuntime(resolve);
+    const [first, simultaneous] = await Promise.all([request(), request()]);
+    await first.auth.$context;
+    expect(simultaneous).toBe(first);
+    expect(await request()).toBe(first);
+    expect(reads).toHaveBeenCalledTimes(1);
+
+    const input = settingsInput.parse((await environment.settings.inspect()).settings);
+
+    if (!input.identity) throw new Error("Expected the fixture's company login");
+    input.identity.management.secret = { type: "value", value: "changed-within-request" };
+    await first.settings.initialize(input);
+    const [refreshed, simultaneousRefresh] = await Promise.all([request(), request()]);
+    await refreshed.auth.$context;
+    expect(simultaneousRefresh).toBe(refreshed);
+    expect(refreshed.configuration.IDENTITY?.management.clientSecret).toBe(
+      "changed-within-request",
+    );
+    expect(refreshed.auth).not.toBe(first.auth);
+    expect(reads).toHaveBeenCalledTimes(2);
+
+    await createRequestRuntime(resolve)();
+    expect(reads).toHaveBeenCalledTimes(3);
+  });
+
+  it("checks settings again on the next HTTP request even if the previous request was cached", async () => {
+    const request = createRequestRuntime(resolve);
+    const first = await request();
+    await first.auth.$context;
+    await environment.database.db.delete(installation).where(eq(installation.id, "widefleet"));
+    await expect(createRequestRuntime(resolve)()).rejects.toThrow(
+      "The installation has not been initialized",
+    );
+  });
+
+  it("refreshes a request when another settings write overlaps its first read", async () => {
+    const gate = new EventEmitter();
+    const captured = once(gate, "captured");
+    const read = environment.settings.resolve;
+
+    const reads = vi.spyOn(environment.settings, "resolve").mockImplementationOnce(async () => {
+      const snapshot = await read();
+      const resumed = once(gate, "resume");
+      gate.emit("captured");
+      await resumed;
+
+      return snapshot;
+    });
+
+    const request = createRequestRuntime(resolve);
+    const pending = request();
+    await captured;
+
+    try {
+      const input = settingsInput.parse((await environment.settings.inspect()).settings);
+
+      if (!input.identity) throw new Error("Expected the fixture's company login");
+      input.identity.management.secret = { type: "value", value: "changed-during-read" };
+      await environment.settings.initialize(input);
+    } finally {
+      gate.emit("resume");
+    }
+
+    const first = await pending;
+    await first.auth.$context;
+    expect(first.configuration.IDENTITY?.management.clientSecret).toBe("local-tests-only");
+    const [refreshed, simultaneous] = await Promise.all([request(), request()]);
+    await refreshed.auth.$context;
+    expect(refreshed.configuration.IDENTITY?.management.clientSecret).toBe("changed-during-read");
+    expect(refreshed.auth).not.toBe(first.auth);
+    expect(simultaneous).toBe(refreshed);
+    expect(await request()).toBe(refreshed);
+    expect(reads).toHaveBeenCalledTimes(2);
   });
 
   it("disables password sign-in on the next resolution after setup closes", async () => {

@@ -1,12 +1,19 @@
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { DEVICE_CODE_GRANT_TYPE } from "@better-auth/oauth-provider";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { eq, sql } from "drizzle-orm";
-import { apiResource, authenticationOptions, cliClientId, cliScopes } from "./auth-options.ts";
+import {
+  apiResource,
+  authenticationOptions,
+  cliClientId,
+  cliResourcePolicy,
+  cliScopes,
+} from "./auth-options.ts";
 import * as authSchema from "./auth-schema.ts";
 import type { Configuration } from "./config.ts";
-import type { Database } from "./database.ts";
+import type { Database, DatabaseExecutor } from "./database.ts";
 import { enrollCompanyUser } from "./organization.ts";
 import { companyAccountProvider } from "./company-identity.ts";
 
@@ -22,9 +29,13 @@ export const companyLoginRevision = (configuration: Configuration) =>
         .digest("hex")
     : "";
 
-export const createAuthentication = (configuration: Configuration, database: Database) =>
+export const createAuthentication = (
+  configuration: Configuration,
+  database: DatabaseExecutor,
+  options: Parameters<typeof authenticationOptions>[1] = {},
+) =>
   betterAuth({
-    ...authenticationOptions(configuration),
+    ...authenticationOptions(configuration, options),
     database: drizzleAdapter(database, { provider: "pg", schema: authSchema, transaction: true }),
     databaseHooks: {
       session: {
@@ -71,15 +82,35 @@ export const createAuthentication = (configuration: Configuration, database: Dat
 
 export type Authentication = ReturnType<typeof createAuthentication>;
 
-export const registerCli = async (
-  auth: Authentication,
-  database: Database,
-  configuration: Configuration,
-) => {
-  await auth.$context;
-
-  await database.transaction(async (transaction) => {
+export const registerCli = async (database: Database, configuration: Configuration) =>
+  database.transaction(async (transaction) => {
     await transaction.execute(sql`select pg_advisory_xact_lock(1740031201)`);
+
+    const auth = createAuthentication(configuration, transaction, { initializeResources: true });
+    await auth.$context;
+
+    const policy = cliResourcePolicy(configuration);
+
+    const [resource] = await transaction
+      .select()
+      .from(authSchema.oauthResource)
+      .where(eq(authSchema.oauthResource.identifier, policy.identifier));
+
+    // Plugin initialization can defer seeding. Verify persisted policy before
+    // committing the client registration or reporting successful initialization.
+    if (
+      !resource ||
+      resource.name !== policy.identifier ||
+      resource.accessTokenTtl !== policy.accessTokenTtl ||
+      !isDeepStrictEqual(resource.allowedScopes, policy.allowedScopes) ||
+      resource.refreshTokenTtl !== null ||
+      resource.signingAlgorithm !== null ||
+      resource.signingKeyId !== null ||
+      resource.customClaims !== null ||
+      resource.dpopBoundAccessTokensRequired !== false ||
+      resource.disabled !== false
+    )
+      throw new Error("CLI resource policy was not initialized; retry installation initialization");
 
     const [client] = await transaction
       .select({ id: authSchema.oauthClient.id })
@@ -120,4 +151,3 @@ export const registerCli = async (
       })
       .onConflictDoNothing();
   });
-};

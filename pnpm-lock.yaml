@@ -255,6 +255,9 @@ importers:
       better-result:
         specifier: 3.0.1
         version: 3.0.1
+      cloudflare:
+        specifier: 7.3.0
+        version: 7.3.0
       drizzle-orm:
         specifier: 0.45.3
         version: 0.45.3(@cloudflare/workers-types@5.20261003.1)(@types/pg@8.23.1)(kysely@0.29.6)(pg@8.23.1)
@@ -3709,6 +3712,10 @@ packages:
   cliui@9.0.1:
     resolution: {integrity: sha512-k7ndgKhwoQveBL+/1tqGJYNz097I7WOvwbmmU2AR5+magtbjPWQTS1C5vzGkBC8Ym8UWRzfKUzUUqFLypY4Q+w==}
     engines: {node: '>=20'}
+
+  cloudflare@7.3.0:
+    resolution: {integrity: sha512-0P4cMFjzdIe388E57xNCV2wKzv1ZVZqMFu7+p2gsZuggbXs39xTKtXJN8FACkKh+xjLQ7dNruNlT/aT+9ajJtg==}
+    hasBin: true
 
   clsx@2.1.1:
     resolution: {integrity: sha512-eYm0QWBtUrBWZWG0d386OGAw16Z995PiOVo2B7bjWSbHedGl5e0ZWaq65kOGgUSNesEIDkB9ISbTg/JK9dhCZA==}
@@ -10170,6 +10177,8 @@ snapshots:
       string-width: 7.2.0
       strip-ansi: 7.2.0
       wrap-ansi: 9.0.2
+
+  cloudflare@7.3.0: {}
 
   clsx@2.1.1: {}
 

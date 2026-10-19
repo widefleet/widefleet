@@ -29,7 +29,6 @@ export const createReporting = (
   configuration: Configuration,
   database: Database,
   transport: typeof fetch = fetch,
-  identity = async () => configuration.IDENTITY,
 ) => {
   const symbolicate = createReportingSymbolicator();
   let stopped = false;
@@ -58,6 +57,7 @@ export const createReporting = (
 
     return {
       installationId: record.reportingId,
+      identity: contract.installationSettings.parse(record.settings).identity,
       preferences: { usage: record.usageReporting, crashes: record.crashReporting },
       effective: {
         usage: configuration.PLATFORM_USAGE_REPORTING ?? record.usageReporting,
@@ -153,7 +153,7 @@ export const createReporting = (
     },
   });
 
-  const snapshot = async () => {
+  const snapshot = async (company: z.infer<typeof contract.installationSettings>["identity"]) => {
     const [applicationCounts] = await database
       .select({
         apps: sql<number>`count(*) filter (where ${isNull(apps.parentId)})`.mapWith(Number),
@@ -189,8 +189,6 @@ export const createReporting = (
       if (runtime.success) runtimeVersions.push(runtime.data.version);
     }
 
-    const company = await identity();
-
     return {
       component: "control_plane",
       version,
@@ -221,7 +219,7 @@ export const createReporting = (
       client("usage", current.revision).capture({
         ...envelope,
         event: "installation_snapshot",
-        properties: { ...envelope.properties, ...(await snapshot()) },
+        properties: { ...envelope.properties, ...(await snapshot(current.identity)) },
       });
     }
 
@@ -320,7 +318,7 @@ export const createReporting = (
       return {
         ...envelope,
         event: "installation_snapshot",
-        properties: { ...envelope.properties, ...(await snapshot()) },
+        properties: { ...envelope.properties, ...(await snapshot(current.identity)) },
       };
     },
     active: (id: string) => {

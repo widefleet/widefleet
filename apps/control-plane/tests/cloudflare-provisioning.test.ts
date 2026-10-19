@@ -29,7 +29,14 @@ const fixture = () => {
 
     if (url.pathname.endsWith("/d1/database")) {
       if (request.method === "GET")
-        return ok([...databases].map(([name, uuid]) => ({ name, uuid })));
+        return ok(
+          [...databases]
+            .map(([name, uuid]) => ({ name, uuid }))
+            .slice(
+              (Number(url.searchParams.get("page") ?? 1) - 1) * 100,
+              Number(url.searchParams.get("page") ?? 1) * 100,
+            ),
+        );
       const { name } = z.object({ name: z.string() }).parse(await request.json());
       const uuid = crypto.randomUUID();
       expect(databases.has(name)).toBe(false);
@@ -45,7 +52,14 @@ const fixture = () => {
 
     if (url.pathname.endsWith("/storage/kv/namespaces")) {
       if (request.method === "GET")
-        return ok([...namespaces].map(([title, id]) => ({ title, id })));
+        return ok(
+          [...namespaces]
+            .map(([title, id]) => ({ title, id }))
+            .slice(
+              (Number(url.searchParams.get("page") ?? 1) - 1) * 100,
+              Number(url.searchParams.get("page") ?? 1) * 100,
+            ),
+        );
       const { title } = z.object({ title: z.string() }).parse(await request.json());
       expect(namespaces.has(title)).toBe(false);
       const id = crypto.randomUUID();
@@ -147,6 +161,43 @@ const app = () => ({
 });
 
 describe("Cloudflare app provisioning", () => {
+  it.each(["d1", "kv", "queue"])(
+    "finds an existing %s resource beyond the first page",
+    async (kind) => {
+      const pages: number[] = [];
+      const id = crypto.randomUUID();
+
+      const provisioner = createCloudflareProvisioner(
+        { accountId: "0".repeat(32), token: "fixture-token", runtimeName: "fixture" },
+        async (input, init) => {
+          const request = new Request(input, init);
+          expect(request.method).toBe("GET");
+          const page = Number(new URL(request.url).searchParams.get("page") ?? 1);
+          pages.push(page);
+
+          const names =
+            page === 1 ? Array.from({ length: 100 }, (_, index) => `other-${index}`) : ["owned"];
+
+          return Response.json({
+            success: true,
+            result: names.map((name) =>
+              kind === "d1"
+                ? { name, uuid: id }
+                : kind === "kv"
+                  ? { title: name, id }
+                  : { queue_name: name, queue_id: id },
+            ),
+          });
+        },
+      );
+
+      if (kind === "d1") expect(await provisioner.ensureDatabase("owned")).toBe(id);
+      else if (kind === "kv") expect(await provisioner.ensureNamespace("owned")).toBe(id);
+      else expect((await provisioner.ensureQueue("owned")).queue_id).toBe(id);
+      expect(pages).toEqual([1, 2]);
+    },
+  );
+
   it.each([
     { type: "d1", name: "RESOURCE", database_name: "data" },
     { type: "r2_bucket", name: "RESOURCE", bucket_name: "files" },
@@ -178,7 +229,7 @@ describe("Cloudflare app provisioning", () => {
       bindings: [{ type: "r2_bucket", name: "FILES", bucket_name: "files" }],
     });
     cloud.loseNextResponse();
-    await expect(cloud.create().provision(deployment)).rejects.toThrow("Lost creation response");
+    await expect(cloud.create().provision(deployment)).rejects.toThrow("connection error");
     expect((await cloud.create().provision(deployment)).resources).toHaveLength(1);
     expect(cloud.buckets.size).toBe(1);
   });
@@ -187,7 +238,7 @@ describe("Cloudflare app provisioning", () => {
     const cloud = fixture();
     const deployment = app();
     cloud.loseNextResponse();
-    await expect(cloud.create().provision(deployment)).rejects.toThrow("Lost creation response");
+    await expect(cloud.create().provision(deployment)).rejects.toThrow("connection error");
     const prepared = await cloud.create().provision(deployment);
     expect(await cloud.create().provision(deployment)).toEqual(prepared);
     const bindings = prepared.nativeBindings;
@@ -241,7 +292,7 @@ describe("Cloudflare app provisioning", () => {
         queue_consumers: kind === "queue" ? [{ queue: "jobs", dead_letter_queue: "failed" }] : [],
       });
       cloud.loseNextResponse();
-      await expect(cloud.create().provision(deployment)).rejects.toThrow("Lost creation response");
+      await expect(cloud.create().provision(deployment)).rejects.toThrow("connection error");
       const result = await cloud.create().provision(deployment);
       expect(await cloud.create().provision(deployment)).toEqual(result);
       expect(result.resources).toHaveLength(1);
@@ -273,31 +324,22 @@ describe("Cloudflare app provisioning", () => {
 
   it("redacts upstream credentials and does not treat failed lookups as missing resources", async () => {
     let requests = 0;
-    let cancellations = 0;
 
     const provisioner = createCloudflareProvisioner(
       { accountId: "0".repeat(32), token: "fixture-token", runtimeName: "fixture" },
       async () => {
         requests++;
 
-        return new Response(
-          new ReadableStream<Uint8Array>({
-            start(controller) {
-              controller.enqueue(new TextEncoder().encode("sensitive upstream credentials"));
-            },
-            cancel() {
-              cancellations++;
-            },
-          }),
+        return Response.json(
+          { errors: [{ code: 10000, message: "sensitive upstream credentials" }] },
           { status: 403 },
         );
       },
     );
 
     await expect(provisioner.provision(app())).rejects.toThrow(
-      "Cloudflare provisioning request failed (HTTP 403)",
+      "Cloudflare list D1 databases failed (HTTP 403; codes 10000)",
     );
     expect(requests).toBe(1);
-    expect(cancellations).toBe(1);
   });
 });

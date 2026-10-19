@@ -177,7 +177,7 @@ export const createTestEnvironment = async (
     password: "local-test-password-only",
   });
 
-  await registerCli(auth, database.db, configuration);
+  await registerCli(database.db, configuration);
 
   // The exported fixture factory accepts Better Auth's general plugin context.
   const fixtureAuth = betterAuth<BetterAuthOptions>(auth.options);
@@ -190,6 +190,8 @@ export const createTestEnvironment = async (
     replacementClient,
     settings,
     owner,
+    ownerId: owner.id,
+    settingsRevision: settings.revision,
     ownerSubject,
     environment,
     database,

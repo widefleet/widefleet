@@ -26,6 +26,12 @@ export const cliScopes = [
 
 export const apiResource = (configuration: Configuration) => `${configuration.PLATFORM_URL}/api/v1`;
 
+export const cliResourcePolicy = (configuration: Configuration) => ({
+  identifier: apiResource(configuration),
+  allowedScopes: cliScopes,
+  accessTokenTtl: 300,
+});
+
 export const managementProviders = (configuration: Configuration): GenericOAuthConfig[] => {
   const identity = configuration.IDENTITY;
 
@@ -50,7 +56,10 @@ export const managementProviders = (configuration: Configuration): GenericOAuthC
   ];
 };
 
-export const authenticationOptions = (configuration: Configuration) =>
+export const authenticationOptions = (
+  configuration: Configuration,
+  { initializeResources = false } = {},
+) =>
   ({
     appName: "Widefleet",
     baseURL: configuration.PLATFORM_URL,
@@ -143,9 +152,8 @@ export const authenticationOptions = (configuration: Configuration) =>
         loginPage: "/sign-in",
         consentPage: "/device",
         scopes: cliScopes,
-        resources: [
-          { identifier: apiResource(configuration), allowedScopes: cliScopes, accessTokenTtl: 300 },
-        ],
+        // Request-scoped instances read the policies persisted by installation setup.
+        resources: initializeResources ? [cliResourcePolicy(configuration)] : [],
         resourceSeedMode: "overwrite",
         enforcePerClientResources: true,
         allowDynamicClientRegistration: false,
