@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { createTestEnvironment } from "./environment.ts";
 import { member, organization } from "../src/lib/server/auth-schema.ts";
-import { apps, appGrants, fleets, jobs } from "../src/lib/server/schema.ts";
+import { apps, appGrants, fleets, jobs, connectors, agents } from "../src/lib/server/schema.ts";
 import { createIdentityService } from "../src/lib/server/identity.ts";
 import { createAppService } from "../src/lib/server/apps.ts";
 import { createAppAccessService } from "../src/lib/server/app-access.ts";
@@ -13,6 +13,7 @@ import { cloudflareRemovalCommand } from "../src/lib/server/cloudflare-removal-c
 import { createRuntime } from "../src/lib/server/runtime-services.ts";
 import { createApi } from "../src/lib/server/api.ts";
 import { createStorage } from "../src/lib/server/storage.ts";
+import { connectorReference } from "../src/lib/server/connector-package.ts";
 
 describe("Mandatory application context", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
@@ -82,6 +83,73 @@ describe("Mandatory application context", () => {
   });
   afterAll(async () => {
     await environment.close();
+  });
+
+  const runtime = () =>
+    createRuntime({
+      configuration: environment.configuration,
+      database: environment.database,
+      settings: environment.settings,
+      reporting: environment.reporting,
+      storage: createStorage(environment.configuration),
+      encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
+      fleetAccess: {
+        filterFleets: async (candidates) => candidates.map((candidate) => candidate.id),
+      },
+    })();
+
+  it("scopes connector and agent discovery and denies installation administration", async () => {
+    const current = await runtime();
+
+    for (const target of [first, second]) {
+      const reference = connectorReference.parse({
+        name: "erp",
+        checksum: "a".repeat(64),
+        entrypoints: ["default", target === first ? "FirstReader" : "SecondReader"],
+        classes: [],
+      });
+      await environment.database.db.insert(connectors).values({
+        fleetId: target.fleetId,
+        name: "erp",
+        package: reference,
+        appliedPackage: reference,
+        jobId: crypto.randomUUID(),
+      });
+      await environment.database.db.insert(agents).values({
+        id: crypto.randomUUID(),
+        fleetId: target.fleetId,
+        name: target === first ? "First agent" : "Second agent",
+        tokenHash: crypto.randomUUID(),
+      });
+    }
+
+    const catalog = [{ name: "erp", entrypoints: ["default", "FirstReader"] }];
+    expect((await current.connectors.catalog(first.principal)).unwrap()).toEqual(catalog);
+    const listing = (await current.agents.list(first.principal)).unwrap();
+    expect(listing.map((agent) => agent.name)).toEqual(["First agent"]);
+    expect(await current.agents.create(first.principal, { name: "Forbidden" })).toMatchObject({
+      error: { code: "FORBIDDEN" },
+    });
+    // Even installation administration cannot mutate an agent outside its selected fleet.
+    expect(
+      await current.agents.disable({ ...second.principal, admin: true }, listing[0]?.id ?? ""),
+    ).toMatchObject({ error: { code: "NOT_FOUND" } });
+    const api = createApi(current);
+    const request = (path: string) =>
+      new Request(`${environment.configuration.PLATFORM_URL}/api/v1${path}`, {
+        headers: first.headers,
+      });
+    expect(await (await api(request("/connector-catalog"))).json()).toEqual(catalog);
+    expect(await (await api(request("/agents"))).json()).toEqual(listing);
+
+    for (const path of [
+      "/connectors",
+      "/runtime",
+      "/settings",
+      "/reporting",
+      "/groups?query=Engineering&limit=10",
+    ])
+      expect((await api(request(path))).status).toBe(403);
   });
 
   it("allows the same name in separate fleets and scopes administrator, owner and grant access", async () => {
@@ -330,19 +398,9 @@ describe("Mandatory application context", () => {
   });
 
   it("uses the same scope in runtime services and the HTTP API used by the CLI", async () => {
-    const runtime = await createRuntime({
-      configuration: environment.configuration,
-      database: environment.database,
-      settings: environment.settings,
-      reporting: environment.reporting,
-      storage: createStorage(environment.configuration),
-      encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
-      fleetAccess: {
-        filterFleets: async (candidates) => candidates.map((candidate) => candidate.id),
-      },
-    })();
+    const current = await runtime();
 
-    const api = createApi(runtime);
+    const api = createApi(current);
     const headers = new Headers(first.headers);
     headers.set("content-type", "application/json");
     expect(
@@ -371,6 +429,6 @@ describe("Mandatory application context", () => {
     );
 
     expect(result.status).toBe(200);
-    expect(await result.json()).toEqual((await runtime.apps.list(first.principal)).unwrap());
+    expect(await result.json()).toEqual((await current.apps.list(first.principal)).unwrap());
   });
 });

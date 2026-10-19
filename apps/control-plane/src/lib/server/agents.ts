@@ -1,6 +1,6 @@
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { createHash, randomBytes } from "node:crypto";
 import type { z } from "zod";
 import type { Database } from "./database.ts";
@@ -8,7 +8,7 @@ import { InvalidOperation } from "./errors.ts";
 import type { Principal } from "./identity.ts";
 import { agents } from "./schema.ts";
 import { transact } from "./transactions.ts";
-import { defaultFleet, lockFleet } from "./fleets.ts";
+import { lockFleet } from "./fleets.ts";
 
 const presentAgent = (record: typeof agents.$inferSelect) =>
   contract.agent.parse({
@@ -30,7 +30,13 @@ export const createAgentService = (database: Database) => ({
         );
 
       return Result.ok(
-        (await transaction.select().from(agents).orderBy(agents.name)).map(presentAgent),
+        (
+          await transaction
+            .select()
+            .from(agents)
+            .where(eq(agents.fleetId, principal.application.fleetId))
+            .orderBy(agents.name)
+        ).map(presentAgent),
       );
     }),
   create: (principal: Principal, input: z.infer<typeof contract.createAgentInput>) =>
@@ -43,7 +49,7 @@ export const createAgentService = (database: Database) => ({
           }),
         );
 
-      const fleet = await lockFleet(transaction, (await defaultFleet(transaction)).id);
+      const fleet = await lockFleet(transaction, principal.application.fleetId);
 
       if (fleet.executor !== "agent")
         throw new InvalidOperation({
@@ -80,7 +86,7 @@ export const createAgentService = (database: Database) => ({
       const [record] = await transaction
         .update(agents)
         .set({ enabled: false })
-        .where(eq(agents.id, agentId))
+        .where(and(eq(agents.id, agentId), eq(agents.fleetId, principal.application.fleetId)))
         .returning();
 
       if (!record)

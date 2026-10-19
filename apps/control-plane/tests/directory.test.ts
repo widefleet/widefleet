@@ -36,6 +36,32 @@ const configuration = {
 };
 
 describe("company directory", () => {
+  it("does not use installation directory credentials for another organization", async () => {
+    let calls = 0;
+
+    const directory = createDirectory(configuration, async () => {
+      calls++;
+
+      return Response.json({ value: [] });
+    });
+
+    const result = await directory.search(
+      {
+        ...creator,
+        role: "admin",
+        application: {
+          ...creator.application,
+          organizationId: "another-organization",
+          admin: true,
+        },
+      },
+      { query: "Engineering", limit: 10 },
+    );
+
+    expect(result).toMatchObject({ error: { code: "FORBIDDEN" } });
+    expect(calls).toBe(0);
+  });
+
   it("returns native group IDs and names through one search contract and reuses the application token", async () => {
     const requests: Request[] = [];
 

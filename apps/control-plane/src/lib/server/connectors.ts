@@ -47,14 +47,12 @@ export const createConnectorService = (
   encryptionKey: string,
   execution?: HostedExecution,
 ) => ({
-  catalog: () =>
+  catalog: (principal: Principal) =>
     transact(database, async (transaction) => {
-      const fleet = await defaultFleet(transaction);
-
       const records = await transaction
         .select()
         .from(connectors)
-        .where(eq(connectors.fleetId, fleet.id))
+        .where(eq(connectors.fleetId, principal.application.fleetId))
         .orderBy(connectors.name);
 
       return Result.ok(

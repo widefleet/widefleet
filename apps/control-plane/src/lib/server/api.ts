@@ -189,7 +189,7 @@ export const createApi = (runtime: Runtime) => {
     connectorCatalog: read
       .route({ method: "GET", path: "/connector-catalog" })
       .output(z.array(contract.connectorCatalogEntry))
-      .handler(async () => unwrap(await runtime.connectors.catalog())),
+      .handler(async ({ context }) => unwrap(await runtime.connectors.catalog(context.principal))),
     appConnections: read
       .route({ method: "GET", path: "/apps/{appId}/connections" })
       .input(contract.appPath)
