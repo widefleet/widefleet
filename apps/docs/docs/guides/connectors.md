@@ -210,3 +210,27 @@ The OpenAPI document includes connector artifact schemas and normal OAuth authen
 | Remove one binding                                                | `DELETE /api/v1/apps/{appId}/bindings/{binding}`                                                      |
 
 Binding updates are atomic and do not require a caller-supplied revision. Connector deployment, administrative status listing and grant changes require administrator access. Members can browse the connector catalog; app collaborators can read their app's connections and bindings. CLI users select names and project context; IDs remain API identifiers.
+
+Connector uploads use the same `multipart/form-data` format as app Worker uploads: one JSON `metadata` field and one file part per module, with each part named after its module. The connector name comes from the URL. Metadata contains `protocol`, `main`, `entrypoints`, `configuration` and optional `debug`; it does not contain `name`, module sources or checksums. The server computes module checksums from the uploaded bytes. JSON-only connector uploads are rejected.
+
+For a connector bundled as `worker.js` with only a default export, create `metadata.json`:
+
+```json
+{
+  "protocol": 1,
+  "main": "worker.js",
+  "entrypoints": ["default"],
+  "configuration": { "compatibility_date": "2026-10-01" }
+}
+```
+
+With `PLATFORM_URL` set to the installation URL and `PLATFORM_ACCESS_TOKEN` to an administrator token with `platform:write`, upload it:
+
+```sh
+curl --fail-with-body --request PUT "$PLATFORM_URL/api/v1/connectors/erp" \
+  --header "Authorization: Bearer $PLATFORM_ACCESS_TOKEN" \
+  --form 'metadata=@metadata.json;type=application/json' \
+  --form 'worker.js=@worker.js;type=application/javascript+module'
+```
+
+The response contains the deployment status; read `GET /api/v1/connectors/erp` until activation succeeds or fails. For private source maps, add file parts with MIME type `application/source-map+json` and reference them through `debug.source_maps`, with a `debug.build_id`. Both upload paths enforce 64 KiB of UTF-8 metadata, 20 MiB per file, 100 MiB per complete request, at most 32 runtime modules and 500 source maps. Connectors accept JavaScript modules and source maps. Correct a rejected upload before retrying; repeating an unchanged pending or successful deployment returns its existing status.
