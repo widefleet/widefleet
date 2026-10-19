@@ -127,7 +127,9 @@ const run = async (
   );
 
   if (result.isErr()) {
-    const output = z.object({ stdout: z.string(), stderr: z.string() }).safeParse(result.error);
+    const output = z
+      .object({ stdout: z.string(), stderr: z.string() })
+      .safeParse(result.error.cause);
 
     if (output.success) console.error(redact(`${output.data.stdout}\n${output.data.stderr}`));
     // execFile's error message includes argv, which may contain sensitive values.
