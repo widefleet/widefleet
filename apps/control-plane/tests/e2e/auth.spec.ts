@@ -108,37 +108,43 @@ test("restricts connector logs to administrators and explains missing telemetry"
     jobId: crypto.randomUUID(),
   });
 
-  const person = environment.users.createUser({
-    name: "Log Reader",
-    email: "log-reader@example.test",
-  });
+  try {
+    const person = environment.users.createUser({
+      name: "Log Reader",
+      email: "log-reader@example.test",
+    });
 
-  await environment.users.saveUser(person);
-  await environment.linkMicrosoftUser(person.id);
-  const session = await environment.users.login({ userId: person.id });
-  await context.addCookies(
-    session.cookies.map((cookie) => ({
-      ...cookie,
-      domain: "localhost",
-      sameSite: "Lax",
-      secure: false,
-    })),
-  );
-  const path = `/connectors/${reference.name}/logs`;
-  expect((await page.goto(path))?.status()).toBe(403);
-  await environment.database.db
-    .update(member)
-    .set({ role: "admin" })
-    .where(eq(member.userId, person.id));
-  await page.goto("/connectors");
-  await page.getByRole("button", { name: /logging-fixture/ }).click();
-  await page.getByRole("link", { name: "View logs" }).click();
-  await expect(page).toHaveURL(new RegExp(`${path}$`));
-  await expect(page.getByRole("heading", { name: "logging-fixture logs" })).toBeVisible();
-  await expect(page.getByText("Runtime logging is not enabled", { exact: false })).toBeVisible();
-  await page.getByLabel("Since", { exact: true }).fill("invalid");
-  await page.getByRole("button", { name: "Apply filters" }).click();
-  await expect(page.getByText("Invalid input", { exact: false })).toBeVisible();
+    await environment.users.saveUser(person);
+    await environment.linkMicrosoftUser(person.id);
+    const session = await environment.users.login({ userId: person.id });
+    await context.addCookies(
+      session.cookies.map((cookie) => ({
+        ...cookie,
+        domain: "localhost",
+        sameSite: "Lax",
+        secure: false,
+      })),
+    );
+    const path = `/connectors/${reference.name}/logs`;
+    expect((await page.goto(path))?.status()).toBe(403);
+    await environment.database.db
+      .update(member)
+      .set({ role: "admin" })
+      .where(eq(member.userId, person.id));
+    await page.goto("/connectors");
+    await page.getByRole("button", { name: /logging-fixture/ }).click();
+    await page.getByRole("link", { name: "View logs" }).click();
+    await expect(page).toHaveURL(new RegExp(`${path}$`));
+    await expect(page.getByRole("heading", { name: "logging-fixture logs" })).toBeVisible();
+    await expect(page.getByText("Runtime logging is not enabled", { exact: false })).toBeVisible();
+    await page.getByLabel("Since", { exact: true }).fill("invalid");
+    await page.getByRole("button", { name: "Apply filters" }).click();
+    await expect(page.getByText("Invalid input", { exact: false })).toBeVisible();
+  } finally {
+    await environment.database.db
+      .delete(connectors)
+      .where(and(eq(connectors.fleetId, fleet.id), eq(connectors.name, reference.name)));
+  }
 });
 
 test("shows connector discovery and serving app connections to a member", async ({
