@@ -404,6 +404,15 @@ describe.runIf(process.env["RUN_CONNECTOR_TESTS"] === "1").each(["celld", "worke
       }
     };
 
+    const reload = async () => {
+      if (hosted) {
+        await hosted.update((current) => current);
+      } else {
+        await stop();
+        await start();
+      }
+    };
+
     beforeAll(async () => {
       collector.listen(0, "127.0.0.1");
       await once(collector, "listening");
@@ -475,8 +484,24 @@ export default { async fetch(request, env, ctx) {
   if (url.pathname === '/fixture/snapshots') {
     const listing = await env.WIDEFLEET_PACKAGES.list({prefix:'connectors/'});
     const values = [];
-    for (const object of listing.objects) values.push(await (await env.WIDEFLEET_PACKAGES.get(object.key)).text());
+    for (const object of listing.objects) {
+      if (object.key.includes('/versions/')) values.push(await (await env.WIDEFLEET_PACKAGES.get(object.key)).text());
+    }
     return Response.json(values);
+  }
+  if (url.pathname === '/fixture/modules') {
+    const listing = await env.WIDEFLEET_PACKAGES.list({prefix:'connectors/${fleetId}/' + url.searchParams.get('name') + '/modules/'});
+    return Response.json(listing.objects.map(object => ({key:object.key, etag:object.etag, uploaded:object.uploaded.toISOString()})));
+  }
+  if (url.pathname === '/fixture/module') {
+    const input = await request.json();
+    if (input.source === null) await env.WIDEFLEET_PACKAGES.delete(input.key);
+    else await env.WIDEFLEET_PACKAGES.put(input.key, input.source);
+    return Response.json(true);
+  }
+  if (url.pathname === '/fixture/secret') {
+    const identity = await request.json();
+    return Response.json(await ctx.exports.ConnectorSecrets({props:identity}).get('TOKEN'));
   }
   url.protocol = 'https:'; url.hostname = 'fixture.apps.example.test'; url.port = '';
   const headers = new Headers(request.headers); headers.set('cookie', ${JSON.stringify(identity.cookie)});
@@ -575,6 +600,95 @@ export default { async fetch(request, env, ctx) {
         secret: "secret-one",
       });
     });
+    it("reuses immutable modules across secret versions and stores only module references", async () => {
+      const name = "storage-fixture";
+      const first = await prepare("storage-v1", "first-storage-secret", name);
+      await activate(first);
+
+      const original = await json(`/fixture/modules?name=${name}`);
+      expect(z.array(z.json()).parse(original)).toHaveLength(1);
+
+      const second = await prepare("storage-v1", "second-storage-secret", name);
+      await activate(second);
+      expect(second.version).not.toBe(first.version);
+      expect(await json(`/fixture/modules?name=${name}`)).toEqual(original);
+
+      const snapshots = z
+        .array(z.string())
+        .parse(await json("/fixture/snapshots"))
+        .map((value) =>
+          z
+            .object({
+              version: z.string(),
+              release: z.object({ name: z.string(), modules: z.array(z.json()) }),
+            })
+            .parse(JSON.parse(value)),
+        )
+        .filter((snapshot) => snapshot.release.name === name);
+
+      expect(snapshots).toHaveLength(2);
+      expect(snapshots[0]?.release.modules).toEqual(snapshots[1]?.release.modules);
+      expect(snapshots[0]?.release.modules).toEqual([
+        {
+          name: "worker.js",
+          type: "esm",
+          sha256: hash(connectorSource("storage-v1")),
+          size: Buffer.byteLength(connectorSource("storage-v1")),
+        },
+      ]);
+      await activate(await prepare("storage-v2", "second-storage-secret", name));
+
+      const updated = z.array(z.json()).parse(await json(`/fixture/modules?name=${name}`));
+
+      expect(updated).toHaveLength(2);
+      expect(updated).toEqual(expect.arrayContaining(z.array(z.json()).parse(original)));
+    });
+    it("rejects corrupt or missing modules while secret reads use only the snapshot", async () => {
+      const name = "integrity-fixture";
+      const first = await prepare("integrity-v1", "integrity-secret", name);
+      const source = connectorSource("integrity-v1");
+      const key = `connectors/${fleetId}/${name}/modules/${hash(source)}`;
+
+      const overwrite = (source: string | null) =>
+        (hosted ? hosted.fetch : fetch)(`${origin}/fixture/module`, {
+          method: "POST",
+          body: JSON.stringify({ key, source }),
+        });
+
+      expect((await overwrite("export default { fetch() {} }; ")).status).toBe(200);
+
+      const input = {
+        action: "prepare" as const,
+        fleetId,
+        version: crypto.randomUUID(),
+        release: release("integrity-v1", name),
+        nativeBindings,
+        secrets: { TOKEN: "integrity-next-secret" },
+      };
+
+      const corrupted = await request("/fixture/manage", input);
+
+      expect(corrupted.status).toBe(409);
+      expect(await corrupted.json()).toEqual({ error: "Published module checksum mismatch" });
+      expect((await overwrite(null)).status).toBe(200);
+      // Module integrity is checked on load, outside the WorkerLoader cache.
+      await reload();
+
+      const secret = await (hosted ? hosted.fetch : fetch)(`${origin}/fixture/secret`, {
+        method: "POST",
+        body: JSON.stringify(first),
+      });
+
+      expect(await secret.json()).toBe("integrity-secret");
+
+      const missing = await request("/fixture/manage", input);
+
+      expect(missing.status).toBe(409);
+      expect(await missing.json()).toEqual({ error: "Published module is missing" });
+      expect((await overwrite(source)).status).toBe(200);
+      await reload();
+      expect((await request("/fixture/manage", input)).status).toBe(200);
+    }, 30000);
     it("pins in-flight calls while cached apps and facets switch version", async () => {
       const pending = json("/delayed");
       await vi.waitFor(async () => expect(await json("/fixture/started")).toBe("yes"));
@@ -857,13 +971,7 @@ export default { async fetch(request, env, ctx) {
 
     it("retains facet state across runtime reloads", async () => {
       const before = await json("/inspect");
-
-      if (hosted) {
-        await hosted.update((current) => current);
-      } else {
-        await stop();
-        await start();
-      }
+      await reload();
 
       expect(await json("/inspect")).toEqual(before);
       expect(await json("/count")).toMatchObject({ n: 3, rows: 3 });

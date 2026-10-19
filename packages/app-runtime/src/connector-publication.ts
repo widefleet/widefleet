@@ -1,4 +1,9 @@
-import { connectorPreparation, connectorActivation, checksum } from "@platform/contracts";
+import {
+  connectorPreparation,
+  connectorActivation,
+  storedModule,
+  checksum,
+} from "@platform/contracts";
 import { z } from "zod";
 import type { ParentEnvironment } from "./types.ts";
 
@@ -7,13 +12,19 @@ export const connectorGeneration = connectorActivation.extend({
 });
 
 export const connectorSnapshot = connectorPreparation.omit({ secrets: true }).extend({
+  release: connectorPreparation.shape.release.extend({
+    modules: z.array(storedModule.extend({ type: z.literal("esm") })).min(1),
+  }),
   ciphertext: z.string(),
   fingerprint: checksum,
   previous: z.string().nullable(),
 });
 
+export const connectorScope = (identity: { fleetId: string; name: string }) =>
+  `connectors/${identity.fleetId}/${identity.name}`;
+
 export const connectorKey = (identity: z.infer<typeof connectorActivation>) =>
-  `connectors/${identity.fleetId}/${identity.name}/versions/${identity.version}.json`;
+  `${connectorScope(identity)}/versions/${identity.version}.json`;
 
 export const digest = async (value: string) =>
   Array.from(

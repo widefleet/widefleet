@@ -9,6 +9,7 @@ import { z } from "zod";
 import {
   connectorGeneration,
   connectorKey,
+  connectorScope,
   connectorSnapshot,
   digest,
   encryptConnectorSecrets,
@@ -55,13 +56,31 @@ export class ConnectorCatalog extends DurableObject<ParentEnvironment> {
       snapshot = connectorSnapshot.parse({
         fleetId,
         version,
-        release,
+        release: {
+          ...release,
+          modules: release.modules.map(({ source, ...module }) => ({
+            ...module,
+            type: "esm",
+            size: new TextEncoder().encode(source).byteLength,
+          })),
+        },
         nativeBindings,
         telemetry,
         fingerprint,
         previous: active?.version ?? null,
         ciphertext: await encryptConnectorSecrets(this.env, identity, secrets),
       });
+
+      for (const module of release.modules) {
+        if ((await digest(module.source)) !== module.sha256)
+          throw new Error("Connector module checksum is invalid");
+        const key = `${connectorScope(identity)}/modules/${module.sha256}`;
+
+        if (!(await this.env.WIDEFLEET_PACKAGES.head(key)))
+          await this.env.WIDEFLEET_PACKAGES.put(key, module.source, {
+            onlyIf: { etagDoesNotMatch: "*" },
+          });
+      }
 
       const stored = await this.env.WIDEFLEET_PACKAGES.put(
         connectorKey(identity),

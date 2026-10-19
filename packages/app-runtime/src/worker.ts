@@ -1,4 +1,4 @@
-import { bytes } from "./catalog.ts";
+import { loadModules } from "./worker-modules.ts";
 import type { ParentEnvironment, PublishedApp } from "./types.ts";
 
 export const workerCode = async (
@@ -56,32 +56,7 @@ export const workerCode = async (
   for (const [name, grant] of Object.entries(app.capabilities))
     bindings.set(`WIDEFLEET_CONNECTOR_${name}`, context.exports.ConnectorGateway({ props: grant }));
 
-  const modules = new Map<string, string | WorkerLoaderModule>();
-
-  for (const module of app.modules) {
-    if (module.type === "sourcemap") continue;
-    const data = await bytes(environment, app, module.sha256);
-
-    switch (module.type) {
-      case "esm":
-        modules.set(
-          module.name,
-          new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(data),
-        );
-        break;
-      case "text":
-        modules.set(module.name, {
-          text: new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(data),
-        });
-        break;
-      case "wasm":
-        modules.set(module.name, { wasm: data });
-        break;
-      case "data":
-        modules.set(module.name, { data });
-        break;
-    }
-  }
+  const modules = await loadModules(environment, `apps/${app.appId}`, app.modules);
 
   // celld 0.6.2 registers the first builtin import surface it encounters.
   // Import the full namespace before linking app and platform sibling modules.

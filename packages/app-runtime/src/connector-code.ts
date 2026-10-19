@@ -3,11 +3,12 @@ import { connectorSecretName } from "@platform/contracts";
 import { z } from "zod";
 import {
   connectorSnapshot,
+  connectorScope,
   decryptConnectorSecrets,
-  digest,
   readConnector,
 } from "./connector-publication.ts";
 import type { ParentEnvironment } from "./types.ts";
+import { loadModules } from "./worker-modules.ts";
 
 export const connectorCode = async (
   snapshot: z.infer<typeof connectorSnapshot>,
@@ -64,13 +65,7 @@ export const connectorCode = async (
       context.exports.ConnectorState({ props: { ...identity, className: binding.class_name } }),
     );
 
-  const modules = new Map<string, string>();
-
-  for (const module of release.modules) {
-    if (module.name.startsWith("__widefleet_") || (await digest(module.source)) !== module.sha256)
-      throw new Error("Connector module name or checksum is invalid");
-    modules.set(module.name, module.source);
-  }
+  const modules = await loadModules(environment, connectorScope(identity), release.modules);
 
   modules.set(
     "__widefleet_bindings.js",
