@@ -7,9 +7,7 @@ import type { ArtifactStorage } from "./storage.ts";
 const key = (checksum: string) => `packages/sha256/${checksum}.json`;
 
 export const verifyModules = (
-  release:
-    | Pick<z.infer<typeof contract.runtimeRelease>, "main" | "modules">
-    | Pick<z.infer<typeof contract.connectorPackage>, "main" | "modules">,
+  release: Pick<z.infer<typeof contract.runtimeRelease>, "main" | "modules">,
 ) => {
   if (
     !release.modules.some((module) => module.name === release.main) ||
@@ -26,10 +24,14 @@ export const verifyModules = (
 
 export const savePackage = async (
   storage: Pick<ArtifactStorage, "put">,
-  release: z.infer<typeof contract.runtimeRelease> | z.infer<typeof contract.connectorPackage>,
+  release: z.infer<typeof contract.runtimeRelease>,
 ) => {
   verifyModules(release);
-  const bytes = Buffer.from(JSON.stringify(release));
+
+  return storePackage(storage, Buffer.from(JSON.stringify(release)));
+};
+
+export const storePackage = async (storage: Pick<ArtifactStorage, "put">, bytes: Uint8Array) => {
   const checksum = createHash("sha256").update(bytes).digest("hex");
   const saved = await storage.put(key(checksum), bytes, "application/json");
 

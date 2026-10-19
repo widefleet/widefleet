@@ -21,12 +21,20 @@ processors:
       # supply this header; never expose this receiver directly to app networks.
       - key: service.name
         action: upsert
-        from_context: metadata.x-widefleet-app-id
+        from_context: metadata.x-widefleet-service-id
         default_value: rejected
       - key: widefleet.app_id
         action: upsert
         from_context: metadata.x-widefleet-app-id
         default_value: rejected
+      - key: widefleet.fleet_id
+        action: upsert
+        from_context: metadata.x-widefleet-fleet-id
+        default_value: ""
+      - key: widefleet.connector
+        action: upsert
+        from_context: metadata.x-widefleet-connector
+        default_value: ""
 
 exporters:
   clickhouse:

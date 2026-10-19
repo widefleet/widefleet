@@ -8,6 +8,7 @@ Every platform capability must be available through the CLI, API, and UI, with c
 Preserve runtime behavior during lint, typing, and test-structure changes.
 Use public package exports; never cross package boundaries with relative imports.
 Extract shared logic only for genuinely shared behavior. Avoid generic abstractions for one-off duplication.
+Share app and connector infrastructure where behavior matches. Justify lasting differences before implementing them.
 Public PRs, commits, generated files, and documentation contain no private names, internal context, customer-derived data, or AI attribution.
 Keep public setup instructions self-contained. Do not reference private repositories or their source files, or require access to them.
 Inferred types over annotations. any is the enemy.

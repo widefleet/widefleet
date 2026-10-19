@@ -14,9 +14,15 @@ export const workflowApp = async (start: Start, environment: ParentEnvironment) 
     network: current.network,
     telemetry: current.telemetry,
     capabilities: Object.fromEntries(
-      Object.entries(pinned.capabilities).filter(
-        ([name, native]) => current.capabilities[name] === native,
-      ),
+      Object.entries(pinned.capabilities).filter(([name, grant]) => {
+        const active = current.capabilities[name];
+
+        return (
+          active?.fleetId === grant.fleetId &&
+          active.connector === grant.connector &&
+          active.entrypoint === grant.entrypoint
+        );
+      }),
     ),
   };
 };

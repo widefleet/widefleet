@@ -10,18 +10,15 @@ import { z } from "zod";
 import * as contract from "@platform/contracts";
 import type { Unstable_DevWorker } from "wrangler";
 import { createTestEnvironment } from "../environment.ts";
-import { connectorFixture } from "../cloudflare-connector.fixture.ts";
-import {
-  connectorWorkerModules,
-  connectorWorkerName,
-} from "../../src/lib/server/cloudflare-connector-package.ts";
+import { connectorFixture, connectorFiles } from "../cloudflare-connector.fixture.ts";
+import runtimeRelease from "@platform/app-runtime/release" with { type: "json" };
+import { cloudflareResourceName } from "../../src/lib/server/cloudflare-provisioning.ts";
 import { initializeCloudflareFleet } from "../../src/lib/server/fleets.ts";
-import { cloudflareOperations, connectors, fleets, jobs } from "../../src/lib/server/schema.ts";
+import { cloudflareOperations, fleets, jobs } from "../../src/lib/server/schema.ts";
 
-const uploadMetadata = z.object({
-  annotations: z.object({ "workers/tag": z.string() }),
-  bindings: z.array(z.object({ name: z.string(), type: z.string(), text: z.string().optional() })),
-  migrations: z.object({ new_tag: z.string(), old_tag: z.string().optional() }).optional(),
+const runtimeSettings = z.object({
+  annotations: z.object({ "workers/tag": z.string() }).optional(),
+  bindings: z.array(z.record(z.string(), z.json())),
 });
 
 describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors in workerd", () => {
@@ -30,16 +27,8 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
   let worker: Unstable_DevWorker;
   let origin = "";
   let fleetId = "";
-  let uploads = 0;
-  let mode = "normal";
-  let delayedUpload: (() => void) | undefined;
-  let localSecret: string | null = "first-synthetic-secret";
-
-  const scripts = new Map<
-    string,
-    { metadata: z.infer<typeof uploadMetadata>; migration: string | null }
-  >();
-
+  let patches = 0;
+  let settings: z.infer<typeof runtimeSettings> = { bindings: [] };
   const databases = new Map<string, string>();
   const namespaces = new Map<string, string>();
   const buckets = new Set<string>();
@@ -57,7 +46,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
       for await (const chunk of request) chunks.push(z.instanceof(Uint8Array).parse(chunk));
       const body = Buffer.concat(chunks);
 
-      const ok = (result: z.infer<typeof uploadMetadata> | z.infer<ReturnType<typeof z.json>>) => {
+      const ok = (result: z.infer<typeof runtimeSettings> | z.infer<ReturnType<typeof z.json>>) => {
         response.setHeader("content-type", "application/json");
         response.end(JSON.stringify({ success: true, result }));
       };
@@ -109,49 +98,24 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
 
         if (buckets.has(name)) ok({ name });
         else notFound();
-      } else if (path.includes("/workers/services/")) {
-        const state = scripts.get(path.split("/").at(-1) ?? "");
+      } else if (path.endsWith("/workers/scripts/fixture-runtime/settings")) {
+        if (request.method === "PATCH") {
+          const form = await new Response(body, {
+            headers: { "content-type": request.headers["content-type"] ?? "" },
+          }).formData();
 
-        if (state) ok({ default_environment: { script: { migration_tag: state.migration } } });
-        else notFound();
-      } else if (path.endsWith("/settings")) {
-        const state = scripts.get(path.split("/").at(-2) ?? "");
+          const next = runtimeSettings.parse(JSON.parse(z.string().parse(form.get("settings"))));
+          next.bindings = next.bindings.map((binding) =>
+            binding["type"] === "inherit"
+              ? (settings.bindings.find((previous) => previous["name"] === binding["name"]) ??
+                binding)
+              : binding,
+          );
+          settings = next;
+          patches++;
+        }
 
-        if (state) ok(state.metadata);
-        else notFound();
-      } else if (path.endsWith("/subdomain")) {
-        expect(JSON.parse(body.toString())).toEqual({ enabled: false, previews_enabled: false });
-        ok({ enabled: false, previews_enabled: false });
-      } else if (path.includes("/workers/scripts/") && request.method === "PUT") {
-        const name = path.split("/").at(-1) ?? "";
-
-        const form = await new Response(body, {
-          headers: { "content-type": request.headers["content-type"] ?? "" },
-        }).formData();
-
-        const metadata = uploadMetadata.parse(JSON.parse(z.string().parse(form.get("metadata"))));
-        const source = form.get("connector.js");
-
-        if (!(source instanceof Blob)) throw new Error("Missing uploaded connector source");
-        expect(await source.text()).toBe(release.modules[0]?.source);
-
-        const apply = () =>
-          scripts.set(name, {
-            metadata,
-            migration: metadata.migrations?.new_tag ?? scripts.get(name)?.migration ?? null,
-          });
-
-        uploads++;
-        const selectedMode = mode;
-        mode = "normal";
-
-        if (selectedMode === "delayed") delayedUpload = apply;
-        else apply();
-
-        if (selectedMode !== "normal") {
-          response.statusCode = 503;
-          response.end();
-        } else ok({ id: name });
+        ok(settings);
       } else throw new Error(`Unexpected fixture endpoint ${path}`);
     };
 
@@ -168,7 +132,9 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
       CLOUDFLARE_ACCOUNT_ID: "0".repeat(32),
       CLOUDFLARE_API_TOKEN: "synthetic-connector-token",
       APP_RUNTIME_NAME: "fixture-runtime",
-      WIDEFLEET_SECRET_API_KEY: localSecret ?? undefined,
+      WIDEFLEET_CONTROL_TOKEN: "hosted-connector-control-key-never-deploy",
+      WIDEFLEET_CONNECTOR_KEY: "ab".repeat(32),
+      WIDEFLEET_CONFIGURATION: '{"crons":{},"queues":{}}',
     };
 
     await writeFile(
@@ -193,28 +159,38 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
             class_name: "DeploymentWorkflow",
           },
         ],
+        worker_loaders: [{ binding: "WIDEFLEET_LOADER" }],
         r2_buckets: [
           { binding: "ARTIFACTS", bucket_name: "artifacts" },
-          { binding: "BUCKET", bucket_name: "files" },
+          { binding: "WIDEFLEET_PACKAGES", bucket_name: "artifacts" },
+          ...[release.name, "second-connector"].map((name) => ({
+            binding: `B_${cloudflareResourceName(`${fleetId}/connector/${name}`, "r2", "files")}`,
+            bucket_name: `files-${name}`,
+          })),
         ],
-        d1_databases: [
-          {
-            binding: "DB",
-            database_name: "data",
-            database_id: "00000000-0000-4000-8000-000000000001",
-          },
+        d1_databases: [release.name, "second-connector"].map((name) => ({
+          binding: `B_${cloudflareResourceName(`${fleetId}/connector/${name}`, "d1", "data")}`,
+          database_name: `data-${name}`,
+          database_id: name,
+        })),
+        kv_namespaces: [
+          { binding: "TEST_CONTROL", id: "test-control" },
+          ...[release.name, "second-connector"].map((name) => ({
+            binding: `B_${cloudflareResourceName(`${fleetId}/connector/${name}`, "kv", "cache")}`,
+            id: name,
+          })),
         ],
-        kv_namespaces: [{ binding: "KV", id: "0".repeat(32) }],
-        durable_objects: { bindings: [{ name: "COUNTER", class_name: "Counter" }] },
-        migrations: [{ tag: "v1", new_sqlite_classes: ["Counter"] }],
+        durable_objects: {
+          bindings: [
+            { name: "WIDEFLEET_CONNECTORS", class_name: "ConnectorCatalog" },
+            { name: "WIDEFLEET_CONNECTOR_STATE", class_name: "ConnectorSupervisor" },
+          ],
+        },
+        migrations: [
+          { tag: "v1", new_sqlite_classes: ["ConnectorCatalog", "ConnectorSupervisor"] },
+        ],
         services: [
-          { binding: "CONNECTOR", service: "connector-test", entrypoint: "WIDEFLEET_CONNECTOR" },
-          { binding: "READER", service: "connector-test", entrypoint: "Reader" },
-          {
-            binding: "WIDEFLEET_SECRETS",
-            service: "connector-test",
-            entrypoint: "WIDEFLEET_SECRET_READER",
-          },
+          { binding: "APP_RUNTIME", service: "connector-test", entrypoint: "RuntimeManagement" },
         ],
       }),
     );
@@ -234,7 +210,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
   };
 
   const command = async (
-    input: { admin?: boolean } & (
+    input: { admin?: boolean; requestId?: string } & (
       | { kind: "deploy"; release: z.infer<typeof contract.connectorPackage> }
       | { kind: "secret"; name: string; secret: string; value: string | null }
       | { kind: "read"; name: string }
@@ -244,7 +220,18 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
   ) => {
     const response = await worker.fetch("http://fixture/command", {
       method: "POST",
-      body: JSON.stringify(input),
+      body: JSON.stringify(
+        input.kind === "deploy"
+          ? {
+              ...input,
+              requestId: input.requestId ?? crypto.randomUUID(),
+              modules: connectorFiles(input.release).map((module) => ({
+                ...module,
+                bytes: [...module.bytes],
+              })),
+            }
+          : input,
+      ),
     });
 
     const body: unknown = await response.json();
@@ -287,15 +274,26 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
     await once(api, "listening");
     origin = `http://127.0.0.1:${z.object({ port: z.number() }).parse(api.address()).port}`;
 
-    for (const module of connectorWorkerModules(release))
+    for (const module of runtimeRelease.modules)
       await writeFile(join(directory, module.name), module.source);
     const server = fileURLToPath(new URL("../../src/lib/server/", import.meta.url));
     const workflow = fileURLToPath(new URL("../../src/deployment-workflow.ts", import.meta.url));
     await writeFile(
       join(directory, "fixture.ts"),
       `
-      import privateHttp from './__widefleet_connector__.mjs';
-      export * from './__widefleet_connector__.mjs';
+      import { RuntimeManagement as BaseManagement } from './loader.js';
+      export * from './loader.js';
+      export class RuntimeManagement extends BaseManagement {
+        async fetch(request) {
+          const input = await request.clone().json();
+          const response = await super.fetch(request);
+          if (input.action === 'activate' && response.ok && await this.env.TEST_CONTROL.get('lose-response')) {
+            await this.env.TEST_CONTROL.delete('lose-response');
+            throw new Error('Synthetic lost activation response');
+          }
+          return response;
+        }
+      }
       export {DeploymentWorkflow} from ${JSON.stringify(workflow)};
       import {withCloudflareDatabase} from ${JSON.stringify(server + "cloudflare-database.ts")};
       import {createCloudflareExecution} from ${JSON.stringify(server + "cloudflare-execution.ts")};
@@ -304,14 +302,19 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
       import {createR2Storage} from ${JSON.stringify(server + "storage/r2.ts")};
       const nativeFetch = globalThis.fetch;
       globalThis.fetch = (input, init) => {const request = new Request(input, init); const url = new URL(request.url); return nativeFetch(url.origin === 'https://api.cloudflare.com' ? new Request(${JSON.stringify(origin)} + url.pathname + url.search, request) : request);};
-      export default {async fetch(request, env) {
+      export default {async fetch(request, env, ctx) {
         const url = new URL(request.url);
+        const name = url.searchParams.get('connector') ?? ${JSON.stringify(release.name)};
+        const props = {fleetId: ${JSON.stringify(fleetId)}, connector:name, entrypoint:'default'};
+        const gateway = () => ctx.exports.ConnectorGateway({props});
+        if (url.pathname === '/fault') { await env.TEST_CONTROL.put('lose-response', 'yes'); return Response.json(true); }
+        if (url.pathname === '/active') return Response.json(await env.WIDEFLEET_CONNECTORS.get(env.WIDEFLEET_CONNECTORS.idFromName(JSON.stringify([props.fleetId, name]))).current());
         if (url.pathname === '/native') {
-          try { return Response.json({result: await env.CONNECTOR.inspect(), named: await env.READER.read()}); }
+          try { return Response.json({result: await gateway().invoke('inspect', []), named: await ctx.exports.ConnectorGateway({props:{...props,entrypoint:'Reader'}}).invoke('read', [])}); }
           catch (error) { return Response.json({error: error.message}, {status: 400}); }
         }
         if (url.pathname === '/secret') {
-          try { return Response.json(await env.CONNECTOR.secret(url.searchParams.get('name'))); }
+          try { return Response.json(await gateway().invoke('secret', [url.searchParams.get('name')])); }
           catch (error) { return Response.json({error: error.message}, {status: 400}); }
         }
         if (url.pathname === '/status') return Response.json(await (await env.DEPLOYMENTS.get(url.searchParams.get('id'))).status());
@@ -327,7 +330,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
             const execution = createCloudflareExecution({...env, DEPLOYMENTS: workflow}, db, storage);
             const service = createConnectorService(db, storage, env.PLATFORM_ENCRYPTION_KEY, execution);
             const actor = {id: 'fixture-admin', admin: input.admin !== false, creator: true, name: 'Fixture', email: 'fixture@example.test', role: 'admin'};
-            if (input.kind === 'deploy') return service.deploy(actor, input.release);
+            if (input.kind === 'deploy') return service.deploy(actor, input.release, input.modules.map(module => ({...module, bytes: new Uint8Array(module.bytes)})), input.requestId);
             if (input.kind === 'secret') return service.setSecret(actor, input.name, input.secret, input.value);
             if (input.kind === 'read') return service.read(actor, input.name);
             if (input.kind === 'bind') return service.bind(actor, input.appId, input.binding, input.grant);
@@ -335,7 +338,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
           });
           return Response.json(result.isErr() ? {error: result.error.message} : result.value, {status: result.isErr() ? 400 : 200});
         }
-        return privateHttp.fetch(request, env);
+        return new Response(null, {status:404});
       }};
     `,
     );
@@ -349,190 +352,136 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
     if (directory) await rm(directory, { recursive: true, force: true });
   });
 
-  it("deploys a connector and its resources through native Workflows without agent jobs", async () => {
-    const result = contract.connectorStatus.parse(await command({ kind: "deploy", release }));
+  it("deploys through Workflows using shared runtime resources and no connector Worker", async () => {
+    const requestId = crypto.randomUUID();
+
+    const result = contract.connectorStatus.parse(
+      await command({ kind: "deploy", release, requestId }),
+    );
+
     await completed(result.jobId);
-    expect(uploads).toBe(1);
+    expect(patches).toBe(1);
     expect(databases.size).toBe(1);
     expect(buckets.size).toBe(1);
     expect(namespaces.size).toBe(1);
     expect(await environment.database.db.select().from(jobs)).toHaveLength(0);
+    expect(
+      requests.some(
+        (request) => request.method === "PUT" && request.path.includes("/workers/scripts/"),
+      ),
+    ).toBe(false);
 
     const current = contract.connectorStatus.parse(
       await command({ kind: "read", name: release.name }),
     );
 
     expect(current).toMatchObject({ state: "succeeded", appliedChecksum: result.checksum });
-    expect(await command({ kind: "deploy", release })).toEqual(current);
+    expect(await command({ kind: "deploy", release, requestId })).toEqual(current);
   });
-  it("rejects unauthorized edits and oversized secrets before accepting an operation", async () => {
+  it("rejects unauthorized edits and oversized secrets before accepting operations", async () => {
     const before = await environment.database.db.select().from(cloudflareOperations);
     await command({ kind: "deploy", release, admin: false }, 400);
-    expect(
-      await command(
-        { kind: "secret", name: release.name, secret: "API_KEY", value: "é".repeat(2501) },
-        400,
-      ),
-    ).toEqual({ error: "Secret value must contain at most 5 KB (5000 UTF-8 bytes)" });
+    await command(
+      { kind: "secret", name: release.name, secret: "API_KEY", value: "é".repeat(2501) },
+      400,
+    );
     expect(await environment.database.db.select().from(cloudflareOperations)).toHaveLength(
       before.length,
     );
   });
-  it("rotates and removes native secrets without retaining plaintext in history", async () => {
+  it("rotates and removes secrets without native deployments or plaintext history", async () => {
+    const before = patches;
+
     for (const secret of ["é".repeat(2500), "second-synthetic-secret", null]) {
       const result = contract.connectorStatus.parse(
         await command({ kind: "secret", name: release.name, secret: "API_KEY", value: secret }),
       );
 
       await completed(result.jobId);
-      const uploaded = scripts.get(connectorWorkerName(fleetId, release.name));
-      expect(
-        uploaded?.metadata.bindings.find((binding) => binding.type === "secret_text")?.text ?? null,
-      ).toBe(secret);
+      const response = await worker.fetch("http://fixture/secret?name=API_KEY");
+      expect(response.status).toBe(secret === null ? 400 : 200);
 
-      const history = JSON.stringify(
-        await environment.database.db.select().from(cloudflareOperations),
-      );
-
-      if (secret !== null) expect(history).not.toContain(secret);
-      expect(databases.size).toBe(1);
-      expect(buckets.size).toBe(1);
-      expect(namespaces.size).toBe(1);
+      if (secret !== null) {
+        expect(await response.json()).toBe(secret);
+        expect(
+          JSON.stringify(await environment.database.db.select().from(cloudflareOperations)),
+        ).not.toContain(secret);
+      }
     }
+
+    expect(patches).toBe(before);
   });
-  it("confirms a lost upload response without uploading twice", async () => {
-    const before = uploads;
-    mode = "lost-response";
+  it("reconciles a lost activation response without activating a second generation", async () => {
+    const previous = z
+      .object({ sequence: z.number() })
+      .parse(await (await worker.fetch("http://fixture/active")).json());
 
-    const result = contract.connectorStatus.parse(
+    await worker.fetch("http://fixture/fault");
+
+    const accepted = contract.connectorStatus.parse(
       await command({
         kind: "secret",
         name: release.name,
         secret: "API_KEY",
-        value: "confirmed-synthetic-secret",
+        value: "recovered-secret",
       }),
     );
 
-    await completed(result.jobId);
-    expect(uploads).toBe(before + 1);
-  });
-  it("does not reserve an upload when migration preparation fails", async () => {
-    const script = scripts.get(connectorWorkerName(fleetId, release.name));
-
-    if (!script) throw new Error("Missing deployed connector");
-    const previous = script.migration;
-    const before = uploads;
-    script.migration = "unknown-remote-tag";
-
-    const failed = contract.connectorStatus.parse(
-      await command({
-        kind: "secret",
-        name: release.name,
-        secret: "API_KEY",
-        value: "prepared-secret",
-      }),
-    );
-
-    await completed(failed.jobId, true);
-    expect(uploads).toBe(before);
-    script.migration = previous;
-    const retried = contract.connectorStatus.parse(await command({ kind: "deploy", release }));
-    await completed(retried.jobId);
-    expect(uploads).toBe(before + 1);
-  });
-
-  it("blocks newer uploads until a delayed write is confirmed", async () => {
-    const before = uploads;
-    mode = "delayed";
-
-    const first = contract.connectorStatus.parse(
-      await command({
-        kind: "secret",
-        name: release.name,
-        secret: "API_KEY",
-        value: "delayed-synthetic-secret",
-      }),
-    );
-
-    await completed(first.jobId, true);
-
-    const pending = contract.connectorStatus.parse(
-      await command({ kind: "read", name: release.name }),
-    );
-
-    expect(pending.state).toBe("failed");
-    expect(pending.message).toContain("unconfirmed");
-
-    const second = contract.connectorStatus.parse(
-      await command({
-        kind: "secret",
-        name: release.name,
-        secret: "API_KEY",
-        value: "later-synthetic-secret",
-      }),
-    );
-
-    await completed(second.jobId, true);
-    expect(uploads).toBe(before + 1);
-    delayedUpload?.();
-    delayedUpload = undefined;
-    const recovery = contract.connectorStatus.parse(await command({ kind: "deploy", release }));
-    await completed(recovery.jobId);
-    expect(uploads).toBe(before + 2);
-    expect(
-      scripts.get(connectorWorkerName(fleetId, release.name))?.metadata.bindings,
-    ).toContainEqual({
-      type: "secret_text",
-      name: "WIDEFLEET_SECRET_API_KEY",
-      text: "later-synthetic-secret",
+    await completed(accepted.jobId);
+    expect(await (await worker.fetch("http://fixture/active")).json()).toMatchObject({
+      sequence: previous.sequence + 1,
     });
+    expect(await (await worker.fetch("http://fixture/secret?name=API_KEY")).json()).toBe(
+      "recovered-secret",
+    );
   });
-  it("isolates connector resources and secrets while allowing the same Durable Object class names", async () => {
+  it("isolates matching class names and resources across connectors", async () => {
     const second = connectorFixture("second-connector");
 
-    const initial = contract.connectorStatus.parse(
+    const deployed = contract.connectorStatus.parse(
       await command({ kind: "deploy", release: second }),
     );
 
-    await completed(initial.jobId);
+    await completed(deployed.jobId);
 
     const secret = contract.connectorStatus.parse(
       await command({
         kind: "secret",
         name: second.name,
         secret: "API_KEY",
-        value: "second-connector-secret",
+        value: "second-secret",
       }),
     );
 
     await completed(secret.jobId);
-    expect(databases.size).toBe(2);
-    expect(buckets.size).toBe(2);
-    expect(namespaces.size).toBe(2);
 
-    const firstBindings = scripts.get(connectorWorkerName(fleetId, release.name))?.metadata
-      .bindings;
+    for (const [name, value] of [
+      [release.name, "recovered-secret"],
+      [second.name, "second-secret"],
+    ]) {
+      expect(await (await worker.fetch("http://fixture/native?connector=" + name)).json()).toEqual({
+        named: "private-field",
+        result: { secret: value, count: 1, kv: "connector", bucket: "connector", counter: 1 },
+      });
+    }
 
-    const secondBindings = scripts.get(connectorWorkerName(fleetId, second.name))?.metadata
-      .bindings;
+    expect(await (await worker.fetch("http://fixture/native")).json()).toMatchObject({
+      result: { counter: 2, count: 2 },
+    });
 
-    expect(firstBindings?.find((binding) => binding.type === "secret_text")?.text).toBe(
-      "later-synthetic-secret",
-    );
-    expect(secondBindings?.find((binding) => binding.type === "secret_text")?.text).toBe(
-      "second-connector-secret",
-    );
+    for (const name of ["MISSING", "LABEL", "WIDEFLEET_SECRET_API_KEY", "__proto__"])
+      expect((await worker.fetch("http://fixture/secret?name=" + name)).status).toBe(400);
   });
+  it("preserves concurrent secret edits and distinct accepted operations", async () => {
+    const accepted = (
+      await Promise.all(
+        ["ALPHA", "BETA"].map((secret) =>
+          command({ kind: "secret", name: release.name, secret, value: "synthetic-" + secret }),
+        ),
+      )
+    ).map((value) => contract.connectorStatus.parse(value));
 
-  it("returns distinct accepted operations and preserves concurrent secret edits", async () => {
-    const results = await Promise.all(
-      ["ALPHA", "BETA"].map((secret) =>
-        command({ kind: "secret", name: release.name, secret, value: `synthetic-${secret}` }),
-      ),
-    );
-
-    const accepted = results.map((result) => contract.connectorStatus.parse(result));
-    expect(new Set(accepted.map((result) => result.jobId)).size).toBe(2);
+    expect(new Set(accepted.map((item) => item.jobId)).size).toBe(2);
 
     const current = contract.connectorStatus.parse(
       await command({ kind: "read", name: release.name }),
@@ -540,130 +489,56 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
 
     await completed(current.jobId);
 
-    for (const result of accepted)
-      await expect
-        .poll(
-          async () => {
-            const response = await worker.fetch(`http://fixture/status?id=${result.jobId}`);
-            const state = z.object({ status: z.string() }).parse(await response.json());
-
-            return state.status === "complete" || state.status === "errored";
-          },
-          { timeout: 30_000, interval: 100 },
-        )
-        .toBe(true);
-    const active = scripts.get(connectorWorkerName(fleetId, release.name))?.metadata.bindings;
-    expect(active).toContainEqual({
-      name: "WIDEFLEET_SECRET_ALPHA",
-      type: "secret_text",
-      text: "synthetic-ALPHA",
-    });
-    expect(active).toContainEqual({
-      name: "WIDEFLEET_SECRET_BETA",
-      type: "secret_text",
-      text: "synthetic-BETA",
-    });
+    for (const name of ["ALPHA", "BETA"])
+      expect(await (await worker.fetch("http://fixture/secret?name=" + name)).json()).toBe(
+        "synthetic-" + name,
+      );
   });
-
-  it.each(["missing-receipt", "pending-upload"])(
-    "validates live migration history after %s before sending another upload",
-    async (failure) => {
-      const initial = connectorFixture(`migration-${failure}`);
-
-      if (failure === "pending-upload") mode = "delayed";
-
-      const accepted = contract.connectorStatus.parse(
-        await command({ kind: "deploy", release: initial }),
-      );
-
-      await completed(accepted.jobId, failure === "pending-upload");
-
-      if (failure === "pending-upload") {
-        delayedUpload?.();
-        delayedUpload = undefined;
-      } else {
-        await environment.database.db
-          .update(connectors)
-          .set({ appliedPackage: null })
-          .where(eq(connectors.name, initial.name));
-      }
-
-      const before = uploads;
-      const rewritten = structuredClone(initial);
-      rewritten.configuration.migrations[0]?.new_sqlite_classes.push("AdditionalCounter");
-
-      const rejected = contract.connectorStatus.parse(
-        await command({ kind: "deploy", release: rewritten }),
-      );
-
-      await completed(rejected.jobId, true);
-      expect(uploads).toBe(before);
-
-      const recovered = contract.connectorStatus.parse(
-        await command({ kind: "deploy", release: initial }),
-      );
-
-      await completed(recovered.jobId);
-      expect(uploads).toBe(before + 1);
-      expect(
-        scripts.get(connectorWorkerName(fleetId, initial.name))?.metadata.migrations,
-      ).toBeUndefined();
-    },
-  );
-
-  it("executes original RPC classes with private fields and persistent D1, R2, KV and Durable Objects", async () => {
-    expect((await worker.fetch("http://fixture/public")).status).toBe(404);
-    const first = await worker.fetch("http://fixture/native");
-    expect(await first.json()).toEqual({
-      named: "private-field",
-      result: { secret: localSecret, count: 1, kv: "connector", bucket: "connector", counter: 1 },
-    });
-    await worker.stop();
-    localSecret = "rotated-native-secret";
-    worker = await start();
-    const second = await worker.fetch("http://fixture/native");
-    expect(await second.json()).toEqual({
-      named: "private-field",
-      result: { secret: localSecret, count: 2, kv: "connector", bucket: "connector", counter: 2 },
-    });
-
-    for (const name of ["MISSING", "LABEL", "WIDEFLEET_SECRET_API_KEY", "__proto__"])
-      expect((await worker.fetch(`http://fixture/secret?name=${name}`)).status).toBe(400);
-    await worker.stop();
-    localSecret = null;
-    worker = await start();
-    expect((await worker.fetch("http://fixture/secret?name=API_KEY")).status).toBe(400);
-  }, 60_000);
-  it("enforces shared variable limits across deployments and native secret updates", async () => {
-    const vars = Object.fromEntries(Array.from({ length: 127 }, (_, i) => [`VAR_${i}`, ""]));
+  it("enforces shared variable limits across deployments and secret updates", async () => {
+    const vars = Object.fromEntries(Array.from({ length: 31 }, (_, i) => [`VAR_${i}`, ""]));
     vars["VAR_0"] = "é".repeat(2500);
 
     const initial = contract.connectorPackage.parse({
       ...connectorFixture("environment-limits"),
-      configuration: { compatibility_date: "2026-10-01", vars },
+      metadata: {
+        main_module: "connector.js",
+        entrypoints: ["default"],
+        compatibility_date: "2026-10-01",
+        bindings: Object.entries(vars).map(([name, text]) => ({ type: "plain_text", name, text })),
+      },
     });
 
     const before = await environment.database.db.select().from(cloudflareOperations);
 
-    for (const value of ["x".repeat(5001), "é".repeat(2501)])
+    for (const value of ["x".repeat(16_385), "é".repeat(16_385)])
       expect(
         await command(
           {
             kind: "deploy",
             release: {
               ...initial,
-              configuration: { ...initial.configuration, vars: { LABEL: value } },
+              metadata: {
+                ...initial.metadata,
+                bindings: [{ type: "plain_text", name: "LABEL", text: value }],
+              },
             },
           },
           400,
         ),
-      ).toEqual({ error: "Connector variables must contain at most 5 KB (5000 UTF-8 bytes)" });
+      ).toHaveProperty("error");
     await command(
       {
         kind: "deploy",
         release: {
           ...initial,
-          configuration: { ...initial.configuration, vars: { ...vars, EXTRA: "", OVERFLOW: "" } },
+          metadata: {
+            ...initial.metadata,
+            bindings: [
+              ...initial.metadata.bindings,
+              { type: "plain_text", name: "EXTRA", text: "" },
+              { type: "plain_text", name: "OVERFLOW", text: "" },
+            ],
+          },
         },
       },
       400,
@@ -693,45 +568,63 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
 
     const maximum = {
       ...initial,
-      configuration: { ...initial.configuration, vars: { ...vars, EXTRA: "x".repeat(5000) } },
+      metadata: {
+        ...initial.metadata,
+        bindings: [
+          ...initial.metadata.bindings,
+          { type: "plain_text" as const, name: "EXTRA", text: "x".repeat(16_384) },
+        ],
+      },
     };
 
-    const previous = await environment.database.db.select().from(cloudflareOperations);
-    await command({ kind: "deploy", release: maximum }, 400);
-    await command(
-      { kind: "secret", name: initial.name, secret: "OVERFLOW", value: "synthetic" },
-      400,
-    );
-    expect(await environment.database.db.select().from(cloudflareOperations)).toHaveLength(
-      previous.length,
-    );
-
-    const removed = contract.connectorStatus.parse(
-      await command({
-        kind: "secret",
-        name: initial.name,
-        secret: "API_KEY",
-        value: null,
-      }),
-    );
-
-    await completed(removed.jobId);
-
-    const updated = contract.connectorStatus.parse(
+    const next = contract.connectorStatus.parse(
       await command({ kind: "deploy", release: maximum }),
     );
 
-    await completed(updated.jobId);
+    await completed(next.jobId);
+
+    const deleted = contract.connectorStatus.parse(
+      await command({ kind: "secret", name: initial.name, secret: "API_KEY", value: null }),
+    );
+
+    await completed(deleted.jobId);
+  });
+  it("replays upload identities without replacing a newer deployment", async () => {
+    const initial = release;
+    const requestId = crypto.randomUUID();
+
+    const first = contract.connectorStatus.parse(
+      await command({ kind: "deploy", release: initial, requestId }),
+    );
+
+    await completed(first.jobId);
+
+    const second = contract.connectorStatus.parse(
+      await command({ kind: "deploy", release: initial }),
+    );
+
+    expect(second.jobId).not.toBe(first.jobId);
+    await completed(second.jobId);
+    expect(await command({ kind: "deploy", release: initial, requestId })).toMatchObject({
+      jobId: first.jobId,
+      state: "succeeded",
+    });
+    expect(await command({ kind: "read", name: initial.name })).toMatchObject({
+      jobId: second.jobId,
+    });
     await command(
-      { kind: "secret", name: initial.name, secret: "API_KEY", value: "synthetic" },
+      {
+        kind: "deploy",
+        requestId,
+        release: {
+          ...initial,
+          metadata: { ...initial.metadata, compatibility_date: "2026-10-02" },
+        },
+      },
       400,
     );
-    const uploaded = scripts.get(connectorWorkerName(fleetId, initial.name));
-    expect(
-      uploaded?.metadata.bindings.filter((binding) => binding.type === "plain_text"),
-    ).toHaveLength(128);
-    expect(uploaded?.metadata.bindings.some((binding) => binding.type === "secret_text")).toBe(
-      false,
-    );
+    expect(await command({ kind: "read", name: initial.name })).toMatchObject({
+      jobId: second.jobId,
+    });
   });
 });

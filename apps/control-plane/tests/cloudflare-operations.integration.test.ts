@@ -1,5 +1,5 @@
 import { Result } from "better-result";
-import { connectorFixture } from "./cloudflare-connector.fixture.ts";
+import { connectorFixture, connectorFiles } from "./cloudflare-connector.fixture.ts";
 import { prepareConnector } from "../src/lib/server/connector-changes.ts";
 import { connectorReference } from "../src/lib/server/connector-package.ts";
 import { transact } from "../src/lib/server/transactions.ts";
@@ -212,7 +212,7 @@ describe("Cloudflare operation history", () => {
       .set({ capabilities: {}, capabilityRevision: 2 })
       .where(eq(apps.id, entry.appId));
     const replacement = connectorFixture(reference.name);
-    replacement.entrypoints = ["default"];
+    replacement.metadata.entrypoints = ["default"];
 
     const prepare = () =>
       transact(environment.database.db, async (transaction) => {
@@ -220,7 +220,15 @@ describe("Cloudflare operation history", () => {
 
         if (!fleet) throw new Error("Missing fixture fleet");
 
-        return Result.ok(await prepareConnector(transaction, storage, fleet, replacement));
+        return Result.ok(
+          await prepareConnector(
+            transaction,
+            storage,
+            fleet,
+            replacement,
+            connectorFiles(replacement),
+          ),
+        );
       });
 
     const blocked = await prepare();

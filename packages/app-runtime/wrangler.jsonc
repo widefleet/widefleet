@@ -16,9 +16,14 @@
   "durable_objects": {
     "bindings": [
       { "name": "WIDEFLEET_WORKFLOW_CATALOG", "class_name": "CloudflareWorkflowCatalog" },
+      { "name": "WIDEFLEET_CONNECTORS", "class_name": "ConnectorCatalog" },
+      { "name": "WIDEFLEET_CONNECTOR_STATE", "class_name": "ConnectorSupervisor" },
     ],
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["CloudflareWorkflowCatalog"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["CloudflareWorkflowCatalog"] },
+    { "tag": "v2", "new_sqlite_classes": ["ConnectorCatalog", "ConnectorSupervisor"] },
+  ],
   "workflows": [
     {
       "binding": "WIDEFLEET_WORKFLOWS",

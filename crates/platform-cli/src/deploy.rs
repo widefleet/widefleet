@@ -1,18 +1,14 @@
-use crate::migrations::Database;
-use crate::{auth, installation, preview};
+use crate::{auth, installation, preview, upload};
 use clap::Args;
 use platform_core::{
     Error, Result, asset_hash,
     http::{Api, json},
     model::{
-        App, Asset, AssetManifest, Binding, DebugMetadata, Deployment, QueueConsumer,
+        App, Asset, AssetManifest, Binding, DebugMetadata, Deployment, ModuleType, QueueConsumer,
         UploadSession, WorkerAssets, WorkerMetadata,
     },
 };
-use reqwest::{
-    Method,
-    multipart::{Form, Part},
-};
+use reqwest::Method;
 use serde::Deserialize;
 use serde_json::json as value;
 use std::{
@@ -30,19 +26,9 @@ struct Configuration {
     #[serde(rename = "$schema")]
     _schema: Option<String>,
     name: Option<String>,
-    main: PathBuf,
-    compatibility_date: String,
-    #[serde(default)]
-    compatibility_flags: Vec<String>,
+    #[serde(flatten)]
+    worker: crate::worker::Configuration,
     assets: Assets,
-    #[serde(default)]
-    vars: BTreeMap<String, String>,
-    #[serde(default)]
-    d1_databases: Vec<Database>,
-    #[serde(default)]
-    r2_buckets: Vec<Bucket>,
-    #[serde(default)]
-    kv_namespaces: Vec<Namespace>,
     #[serde(default)]
     triggers: Triggers,
     #[serde(default)]
@@ -62,24 +48,10 @@ struct Assets {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Bucket {
-    binding: String,
-    bucket_name: String,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct Workflow {
     binding: String,
     name: String,
     class_name: String,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Namespace {
-    binding: String,
-    id: String,
 }
 
 #[derive(Default, Deserialize)]
@@ -296,6 +268,7 @@ async fn publish(
         ))
     })?;
     if configuration
+        .worker
         .compatibility_flags
         .iter()
         .any(|flag| !matches!(flag.as_str(), "nodejs_als" | "nodejs_compat"))
@@ -305,11 +278,12 @@ async fn publish(
         ));
     }
     if configuration
+        .worker
         .compatibility_flags
         .iter()
         .collect::<BTreeSet<_>>()
         .len()
-        != configuration.compatibility_flags.len()
+        != configuration.worker.compatibility_flags.len()
     {
         return Err(Error::invalid("Compatibility flags must be unique".into()));
     }
@@ -333,13 +307,14 @@ async fn publish(
         local_command(project, &["run", "build"]).await?;
     }
     let temporary = tempfile::tempdir_in(project)?;
-    let entry = project.join(&configuration.main).canonicalize()?;
+    let entry = project.join(&configuration.worker.main).canonicalize()?;
     if !entry.starts_with(project) {
         return Err(Error::invalid(
             "Worker entry must be inside the app project".into(),
         ));
     }
     let node_compat = configuration
+        .worker
         .compatibility_flags
         .iter()
         .any(|flag| flag == "nodejs_compat");
@@ -360,21 +335,10 @@ async fn publish(
     let assets = collect_assets(&assets_root)?;
     let mut map_files = assets.source_maps.clone();
     map_files.insert("worker.js".into(), temporary.path().join("worker.js.map"));
-    let mut source_maps = BTreeMap::new();
-    let mut map_uploads = BTreeMap::new();
-    let mut upload_size = worker.len();
-    for (generated, path) in map_files {
-        let bytes = std::fs::read(path)?;
-        upload_size += bytes.len();
-        if bytes.len() > 20 * 1024 * 1024 || upload_size > 95 * 1024 * 1024 {
-            return Err(Error::invalid(
-                "Worker and source maps exceed the deployment limit".into(),
-            ));
-        }
-        let name = format!("map-{}.map", platform_core::sha256(&bytes));
-        source_maps.insert(generated, name.clone());
-        map_uploads.insert(name, bytes);
-    }
+    let SourceMaps {
+        source_maps,
+        uploads: map_uploads,
+    } = collect_source_maps(worker.len(), map_files)?;
     let build_id = build_version(&assets_root)?;
     let app = match target {
         Target::Preview(preview) => preview.resolve(api, credentials).await?,
@@ -443,38 +407,14 @@ async fn publish(
         )
         .await?;
     }
-    let mut bindings = Vec::new();
-    bindings.extend(
-        configuration
-            .vars
-            .into_iter()
-            .map(|(name, text)| Binding::PlainText { name, text }),
+    let mut worker_metadata = configuration.worker.metadata(
+        "worker.js".into(),
+        DebugMetadata {
+            build_id,
+            source_maps,
+        },
     );
-    bindings.extend(
-        configuration
-            .d1_databases
-            .into_iter()
-            .map(|database| Binding::D1 {
-                name: database.binding,
-                database_name: database.database_name,
-                database_id: database.database_id,
-            }),
-    );
-    bindings.extend(
-        configuration
-            .r2_buckets
-            .into_iter()
-            .map(|bucket| Binding::R2Bucket {
-                name: bucket.binding,
-                bucket_name: bucket.bucket_name,
-            }),
-    );
-    bindings.extend(configuration.kv_namespaces.into_iter().map(|namespace| {
-        Binding::KvNamespace {
-            name: namespace.binding,
-            id: namespace.id,
-        }
-    }));
+    let bindings = &mut worker_metadata.bindings;
     bindings.extend(
         configuration
             .queues
@@ -498,60 +438,60 @@ async fn publish(
     let metadata = WorkerMetadata {
         crons: configuration.triggers.crons,
         queue_consumers: configuration.queues.consumers,
-        debug: Some(DebugMetadata {
-            build_id,
-            source_maps,
-        }),
-        main_module: "worker.js".into(),
-        compatibility_date: configuration.compatibility_date,
-        compatibility_flags: configuration.compatibility_flags,
-        bindings,
+        worker: worker_metadata,
         assets: WorkerAssets {
             upload_session: session.id,
             binding: configuration.assets.binding,
         },
     };
-    let request_id = Uuid::new_v4();
-    // Retry only this immutable publish, always with the same request ID and content.
-    for attempt in 0..3 {
-        let mut form = Form::new()
-            .text("metadata", serde_json::to_string(&metadata)?)
-            .part(
-                "worker.js",
-                Part::bytes(worker.clone())
-                    .file_name("worker.js")
-                    .mime_str("application/javascript+module")?,
-            );
-        for (name, bytes) in &map_uploads {
-            form = form.part(
-                name.clone(),
-                Part::bytes(bytes.clone())
-                    .file_name(name.clone())
-                    .mime_str("application/source-map+json")?,
-            );
+    let mut modules = vec![("worker.js".into(), ModuleType::Esm, worker)];
+    modules.extend(
+        map_uploads
+            .into_iter()
+            .map(|(name, bytes)| (name, ModuleType::Sourcemap, bytes)),
+    );
+    let deployment = upload::publish(
+        api,
+        credentials,
+        &format!("/apps/{app}/worker"),
+        &metadata,
+        &modules,
+    )
+    .await?;
+    Ok(DeploymentResult {
+        deployment,
+        url: app_url,
+    })
+}
+
+pub(crate) struct SourceMaps {
+    pub source_maps: BTreeMap<String, String>,
+    pub uploads: BTreeMap<String, Vec<u8>>,
+}
+
+pub(crate) fn collect_source_maps(
+    worker_size: usize,
+    map_files: impl IntoIterator<Item = (String, PathBuf)>,
+) -> Result<SourceMaps> {
+    let mut source_maps = BTreeMap::new();
+    let mut map_uploads = BTreeMap::new();
+    let mut upload_size = worker_size;
+    for (generated, path) in map_files {
+        let bytes = std::fs::read(path)?;
+        upload_size += bytes.len();
+        if bytes.len() > 20 * 1024 * 1024 || upload_size > 95 * 1024 * 1024 {
+            return Err(Error::invalid(
+                "Worker and source maps exceed the deployment limit".into(),
+            ));
         }
-        let token = auth::access_token(api, credentials).await?;
-        let sent = api
-            .authenticated(Method::PUT, &format!("/apps/{app}/worker"), &token)
-            .header("idempotency-key", request_id.to_string())
-            .multipart(form)
-            .send()
-            .await;
-        match sent {
-            Ok(response) if response.status().is_server_error() && attempt < 2 => {}
-            Ok(response) => {
-                let deployment = json(response).await?;
-                return Ok(DeploymentResult {
-                    deployment,
-                    url: app_url,
-                });
-            }
-            Err(_) if attempt < 2 => {}
-            Err(error) => return Err(error.into()),
-        }
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        let name = format!("map-{}.map", platform_core::sha256(&bytes));
+        source_maps.insert(generated, name.clone());
+        map_uploads.insert(name, bytes);
     }
-    Err(Error::invalid("Deployment upload failed".into()))
+    Ok(SourceMaps {
+        source_maps,
+        uploads: map_uploads,
+    })
 }
 
 pub(crate) struct Bundle {
@@ -566,6 +506,16 @@ pub(crate) async fn bundle(
     output: &Path,
     node_compat: bool,
 ) -> Result<Bundle> {
+    // Canonical Windows paths use the verbatim \\?\ prefix. Mixing those with
+    // esbuild's working directory makes source maps contain absolute file URLs.
+    let entry = Path::new(".").join(
+        entry
+            .strip_prefix(project)
+            .map_err(|_| Error::invalid("Worker entry must be inside its project".into()))?,
+    );
+    let relative_output = output
+        .strip_prefix(project)
+        .map_err(|_| Error::invalid("Worker output must be inside its project".into()))?;
     let mut command = Command::new(executable);
     command
         .arg(entry)
@@ -582,10 +532,13 @@ pub(crate) async fn bundle(
             "--log-level=warning",
             "--sourcemap=external",
         ])
-        .arg(format!("--outfile={}", output.join("worker.js").display()))
+        .arg(format!(
+            "--outfile={}",
+            relative_output.join("worker.js").display()
+        ))
         .arg(format!(
             "--metafile={}",
-            output.join("metadata.json").display()
+            relative_output.join("metadata.json").display()
         ))
         .current_dir(project)
         .kill_on_drop(true);

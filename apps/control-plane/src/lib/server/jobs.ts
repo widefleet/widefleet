@@ -20,7 +20,7 @@ import {
 } from "./schema.ts";
 import { ensureFleetRuntime, loadRuntime, runtimeReference } from "./runtime-releases.ts";
 import { decryptSecret } from "./secret-encryption.ts";
-import { connectorReference, loadConnector } from "./connector-package.ts";
+import { connectorReference, loadConnector, loadConnectorArtifact } from "./connector-package.ts";
 import { lockFleet } from "./fleets.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import { transact, type Transaction } from "./transactions.ts";
@@ -327,6 +327,19 @@ export const createJobService = (
         ),
       });
     }),
+  connectorTelemetry: (agentId: string, jobId: string, leaseToken: string) =>
+    transact(database, async (transaction) => {
+      const lease = await leasedJob(transaction, agentId, jobId, leaseToken);
+
+      if (lease.isErr()) return lease;
+
+      return Result.ok(
+        z
+          .array(connectorReference)
+          .parse(lease.value.connectors)
+          .map((reference) => ({ fleetId: lease.value.fleetId, name: reference.name })),
+      );
+    }),
   artifact: (agentId: string, jobId: string, leaseToken: string) =>
     transact(database, async (transaction) => {
       const lease = await leasedJob(transaction, agentId, jobId, leaseToken);
@@ -358,6 +371,74 @@ export const createJobService = (
           modules: record.artifact.modules,
         }),
       );
+    }),
+  module: (
+    agentId: string,
+    jobId: string,
+    leaseToken: string,
+    hash: string,
+    connector: string | null,
+  ) =>
+    transact(database, async (transaction) => {
+      const lease = await leasedJob(transaction, agentId, jobId, leaseToken);
+
+      if (lease.isErr()) return lease;
+      let scope: string;
+      let modules: z.infer<typeof contract.storedModule>[];
+
+      if (connector !== null) {
+        const reference = z
+          .array(connectorReference)
+          .parse(lease.value.connectors)
+          .find((entry) => entry.name === connector);
+
+        if (!reference)
+          return Result.err(
+            new InvalidOperation({
+              code: "NOT_FOUND",
+              message: "Connector is not part of this job",
+            }),
+          );
+        const artifact = await loadConnectorArtifact(storage, reference);
+
+        if (artifact.fleetId !== lease.value.fleetId)
+          return Result.err(
+            new InvalidOperation({
+              code: "NOT_FOUND",
+              message: "Connector artifact belongs to another fleet",
+            }),
+          );
+        scope = `connectors/${artifact.fleetId}/${artifact.release.name}`;
+        modules = artifact.release.modules;
+      } else {
+        if (!lease.value.deploymentId)
+          return Result.err(
+            new InvalidOperation({ code: "NOT_FOUND", message: "This job has no artifact" }),
+          );
+
+        const [record] = await transaction
+          .select({ artifact: artifacts })
+          .from(deployments)
+          .innerJoin(artifacts, eq(deployments.artifactId, artifacts.id))
+          .where(eq(deployments.id, lease.value.deploymentId));
+
+        if (!record)
+          return Result.err(
+            new InvalidOperation({ code: "NOT_FOUND", message: "Artifact not found" }),
+          );
+        scope = `apps/${record.artifact.appId}`;
+        modules = contract.artifact.shape.modules.parse(record.artifact.modules);
+      }
+
+      if (!modules.some((module) => module.sha256 === hash))
+        return Result.err(
+          new InvalidOperation({ code: "NOT_FOUND", message: "Module is not part of this job" }),
+        );
+      const stored = await storage.get(`${scope}/modules/${hash}`);
+
+      if (stored.isErr()) throw stored.error;
+
+      return Result.ok(stored.value);
     }),
   migrationArtifact: (agentId: string, jobId: string, leaseToken: string, checksum: string) =>
     transact(database, async (transaction) => {

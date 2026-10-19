@@ -1,8 +1,8 @@
-import { moduleName, workerMetadata } from "@platform/contracts";
+import { moduleName } from "@platform/contracts";
 import { Result } from "better-result";
 import { z } from "zod";
 import { InvalidOperation } from "./errors.ts";
-import type { WorkerModule } from "./uploads.ts";
+import type { WorkerModule } from "./worker-modules.ts";
 
 export const readBody = (request: Request, limit: number) =>
   Result.tryPromise({
@@ -70,12 +70,18 @@ const moduleType = z
     }
   });
 
-export const parseWorkerUpload = (request: Request) =>
+export const parseWorkerUpload = <T>(request: Request, metadataSchema: z.ZodType<T>) =>
   Result.gen(async function* () {
     const bytes = yield* Result.await(readBody(request, 100 * 1024 * 1024));
 
     return Result.tryPromise({
       try: async () => {
+        if (
+          request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !==
+          "multipart/form-data"
+        )
+          throw new Error("Worker uploads require multipart/form-data");
+
         const form = await new Response(bytes, {
           headers: { "content-type": request.headers.get("content-type") ?? "" },
         }).formData();
@@ -86,8 +92,9 @@ export const parseWorkerUpload = (request: Request) =>
         const value = metadataPart[0];
         const metadataText = value instanceof File ? await value.text() : z.string().parse(value);
 
-        if (metadataText.length > 64 * 1024) throw new Error("Metadata is too large");
-        const metadata = workerMetadata.parse(JSON.parse(metadataText));
+        if (new TextEncoder().encode(metadataText).byteLength > 64 * 1024)
+          throw new Error("Metadata is too large");
+        const metadata = metadataSchema.parse(JSON.parse(metadataText));
         const modules: WorkerModule[] = [];
 
         for (const [name, part] of form.entries()) {

@@ -1,99 +1,65 @@
 import { describe, expect, it } from "vitest";
-import { z } from "zod";
 import {
-  connectorMigrations,
-  connectorServiceBinding,
-  connectorUpload,
-  validateHostedConnector,
-} from "../src/lib/server/cloudflare-connector-package.ts";
-import { connectorFixture } from "./cloudflare-connector.fixture.ts";
+  validateConnectorPackage,
+  uploadedConnector,
+} from "../src/lib/server/connector-package.ts";
+import { validateConnectorSecret } from "../src/lib/server/connector-package.ts";
+import {
+  connectorFixture,
+  connectorFiles,
+  connectorModule,
+} from "./cloudflare-connector.fixture.ts";
+import { connectorDebugFixture } from "./cloudflare-connector.fixture.ts";
 
-describe("Hosted connector packages", () => {
-  it("checks the shared secret limit before uploading native bindings", () => {
-    const upload = (value: string) =>
-      connectorUpload(
-        "operation",
-        "connector-worker",
-        connectorFixture(),
-        [],
-        { API_KEY: value },
-        null,
-      );
+const validate = (release: ReturnType<typeof connectorFixture>) =>
+  uploadedConnector(release.name, release.metadata, connectorFiles(release)).unwrap();
 
-    expect(() => upload("é".repeat(2500))).not.toThrow();
-    expect(() => upload("é".repeat(2501))).toThrow("5000 UTF-8 bytes");
-    expect(() => upload("x".repeat(5001))).toThrow("5000 UTF-8 bytes");
-    expect(() => upload("")).toThrow();
-  });
-  it("uploads original code, native secrets, and a private service entrypoint together", async () => {
-    const release = connectorFixture();
-
-    const form = connectorUpload(
-      "operation",
-      "connector-worker",
-      release,
-      [],
-      { API_KEY: "synthetic-only" },
-      null,
+describe("Dynamic connector packages", () => {
+  it("validates source maps and their references with the same module rules as apps", () => {
+    expect(() => validate(connectorDebugFixture())).not.toThrow();
+    const missing = connectorDebugFixture();
+    missing.modules = missing.modules.filter((module) => module.type !== "sourcemap");
+    expect(() => validate(missing)).toThrow("does not match");
+    const unreferenced = connectorDebugFixture();
+    delete unreferenced.metadata.debug;
+    expect(() => validate(unreferenced)).toThrow("does not match");
+    const invalid = connectorDebugFixture();
+    invalid.modules = invalid.modules.map((module) =>
+      module.type === "sourcemap" ? connectorModule(module.name, module.type, "{}") : module,
     );
-
-    const metadata = z
-      .object({ main_module: z.string(), bindings: z.array(z.record(z.string(), z.json())) })
-      .parse(JSON.parse(z.string().parse(form.get("metadata"))));
-
-    expect(metadata.bindings).toContainEqual({
-      type: "secret_text",
-      name: "WIDEFLEET_SECRET_API_KEY",
-      text: "synthetic-only",
-    });
-    expect(metadata.bindings).toContainEqual({
-      type: "service",
-      name: "WIDEFLEET_SECRETS",
-      service: "connector-worker",
-      entrypoint: "WIDEFLEET_SECRET_READER",
-    });
-    expect(metadata.bindings).not.toContainEqual(
-      expect.objectContaining({ type: "plain_text", text: "synthetic-only" }),
-    );
-    const module = form.get("connector.js");
-
-    if (!(module instanceof Blob)) throw new Error("Missing connector module");
-    expect(await module.text()).toBe(release.modules[0]?.source);
+    expect(() => validate(invalid)).toThrow("Invalid source-map JSON");
+    const main = connectorDebugFixture();
+    main.metadata.main_module = "connector.js.map";
+    expect(() => validate(main)).toThrow("main ES module");
   });
-  it("scopes services to installations and maps only the default entrypoint", () => {
-    const first = connectorServiceBinding("fleet-a", "erp", "default");
-    const second = connectorServiceBinding("fleet-b", "erp", "default");
-    expect(first.service).not.toBe(second.service);
-    expect(first.name).not.toBe(second.name);
-    expect(first.entrypoint).toBe("WIDEFLEET_CONNECTOR");
-    expect(connectorServiceBinding("fleet-a", "erp", "Reader")).toMatchObject({
-      service: first.service,
-      entrypoint: "Reader",
-    });
+  it("checks UTF-8 secret limits before publication", () => {
+    expect(() => validateConnectorSecret("é".repeat(2500))).not.toThrow();
+
+    for (const value of ["é".repeat(2501), "x".repeat(5001), ""])
+      expect(() => validateConnectorSecret(value)).toThrow();
   });
-  it("applies only new Durable Object migrations and rejects missing history", () => {
+  it("reserves bootstrap modules and accepts facet classes without native migrations", () => {
     const release = connectorFixture();
-    release.configuration.migrations.push({ tag: "v2", new_sqlite_classes: ["Other"] });
-    expect(connectorMigrations(release, "v1")).toEqual({
-      old_tag: "v1",
-      new_tag: "v2",
-      steps: [{ new_sqlite_classes: ["Other"] }],
-    });
-    expect(connectorMigrations(release, "v2")).toBeUndefined();
-    expect(() => connectorMigrations(release, "unknown")).toThrow("migration history");
-    release.configuration.migrations.push({ tag: "v2", new_sqlite_classes: [] });
-    expect(() => validateHostedConnector(release, [])).toThrow("unique tags");
+    release.modules[0] = {
+      ...release.modules[0],
+      type: "esm",
+      size: 0,
+      sha256: "0".repeat(64),
+      name: "__widefleet_connector.js",
+    };
+    expect(() => validateConnectorPackage(release, [])).toThrow();
+    expect(() => validateConnectorPackage(connectorFixture(), [])).not.toThrow();
   });
-  it("counts variables and secrets against the native per-worker limit", () => {
+  it("counts variables and secrets against the connector environment limit", () => {
     const release = connectorFixture();
     expect(() =>
-      validateHostedConnector(
+      validateConnectorPackage(
         release,
         Array.from({ length: 127 }, (_, i) => `SECRET_${i}`),
       ),
     ).not.toThrow();
     expect(() =>
-      validateHostedConnector(
+      validateConnectorPackage(
         release,
         Array.from({ length: 128 }, (_, i) => `SECRET_${i}`),
       ),

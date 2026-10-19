@@ -6,6 +6,7 @@ use platform_core::{
 };
 use reqwest::{Method, Url};
 use serde::Deserialize;
+use std::collections::BTreeMap;
 
 #[derive(Deserialize)]
 struct Credentials {
@@ -31,6 +32,17 @@ pub async fn destination(
     let Some(credentials) = credentials else {
         return Ok(None);
     };
+    Ok(Some(TelemetryDestination {
+        url: destination_url(
+            api,
+            configuration,
+            &format!("/api/v1/telemetry/{}", job.app_id()?),
+        )?,
+        token: credentials.token,
+    }))
+}
+
+fn destination_url(api: &Api, configuration: &Configuration, path: &str) -> Result<String> {
     let origin = configuration
         .runtime_platform_url
         .as_deref()
@@ -45,9 +57,42 @@ pub async fn destination(
     {
         return Err(Error::invalid("Use an HTTPS runtime platform origin; HTTP is allowed only for a local HTTP installation".into()));
     }
-    url.set_path(&format!("/api/v1/telemetry/{}", job.app_id()?));
-    Ok(Some(TelemetryDestination {
-        url: url.to_string(),
-        token: credentials.token,
-    }))
+    url.set_path(path);
+    Ok(url.to_string())
+}
+
+pub async fn connector_destinations(
+    api: &Api,
+    configuration: &Configuration,
+    job: &Job,
+) -> Result<BTreeMap<String, TelemetryDestination>> {
+    let credentials: BTreeMap<String, Option<Credentials>> = json(
+        api.authenticated(
+            Method::GET,
+            &format!("/agent/jobs/{}/connector-telemetry", job.id),
+            &configuration.token,
+        )
+        .query(&[("leaseToken", job.lease_token)])
+        .send()
+        .await?,
+    )
+    .await?;
+    credentials
+        .into_iter()
+        .filter_map(|(name, credential)| credential.map(|credential| (name, credential)))
+        .map(|(name, credential)| {
+            let url = destination_url(
+                api,
+                configuration,
+                &format!("/api/v1/telemetry/connectors/{}/{}", job.fleet_id, name),
+            )?;
+            Ok((
+                name,
+                TelemetryDestination {
+                    url,
+                    token: credential.token,
+                },
+            ))
+        })
+        .collect()
 }

@@ -23,14 +23,21 @@ export type ParentEnvironment = {
   WIDEFLEET_LOADER: WorkerLoader;
   WIDEFLEET_PACKAGES: R2Bucket;
   WIDEFLEET_CONTROL_TOKEN: string;
+  WIDEFLEET_CONNECTOR_KEY: string;
   WIDEFLEET_CONFIGURATION: string;
+  WIDEFLEET_CONNECTORS: DurableObjectNamespace<import("./connector-catalog.ts").ConnectorCatalog>;
+  WIDEFLEET_CONNECTOR_STATE: DurableObjectNamespace<
+    import("./connector-state.ts").ConnectorSupervisor
+  >;
   [name: string]:
     | NativeBindings[keyof NativeBindings]
     | string
     | Fetcher
     | WorkerLoader
     | Workflow<import("./workflow-protocol.ts").Start>
-    | DurableObjectNamespace<import("./workflow-catalog.ts").WorkflowCatalog>;
+    | DurableObjectNamespace<import("./workflow-catalog.ts").WorkflowCatalog>
+    | DurableObjectNamespace<import("./connector-catalog.ts").ConnectorCatalog>
+    | DurableObjectNamespace<import("./connector-state.ts").ConnectorSupervisor>;
 };
 
 export type BindingProperties = { name: string };

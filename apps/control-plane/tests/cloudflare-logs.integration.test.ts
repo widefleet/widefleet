@@ -6,7 +6,7 @@ import { cloudflareLogRecords } from "@platform/app-runtime/logs";
 import { createCloudflareLogs } from "../src/lib/server/cloudflare-logs.ts";
 import { createTelemetry } from "../src/lib/server/telemetry.ts";
 import { createStorage } from "../src/lib/server/storage.ts";
-import { apps, artifacts, deployments } from "../src/lib/server/schema.ts";
+import { apps, artifacts, connectors, deployments } from "../src/lib/server/schema.ts";
 import { InvalidOperation, TelemetryUnavailable } from "../src/lib/server/errors.ts";
 import { seedDeployment } from "./cloudflare-deployment.fixture.ts";
 import { createTestEnvironment } from "./environment.ts";
@@ -73,6 +73,12 @@ describe("Cloudflare logs through the shared authorized service", () => {
   beforeAll(async () => {
     environment = await createTestEnvironment();
     fixture = await seedDeployment(environment.database.db);
+    await environment.database.db.insert(connectors).values({
+      fleetId: fixture.fleetId,
+      name: "fixture-connector",
+      package: {},
+      jobId: crypto.randomUUID(),
+    });
     await environment.database.db.insert(deployments).values({
       id: fixture.deploymentId,
       appId: fixture.appId,
@@ -139,6 +145,46 @@ describe("Cloudflare logs through the shared authorized service", () => {
     }
 
     expect(requests).toHaveLength(0);
+  });
+
+  it("authorizes connector logs separately and scopes the backend to fleet, connector and version", async () => {
+    const version = crypto.randomUUID();
+    const input = contract.connectorLogQuery.parse({ name: "fixture-connector", version });
+    const denied = await telemetry.queryConnector(principal, input);
+    expect(denied.isErr() && denied.error).toMatchObject({ code: "FORBIDDEN" });
+    expect(requests).toHaveLength(0);
+
+    const source = cloudflareLogRecords(
+      {
+        logs: [{ timestamp: now, level: "info", message: ["connector message"] }],
+        exceptions: [],
+        eventTimestamp: now,
+        outcome: "ok",
+        truncated: false,
+      },
+      { fleetId: fixture.fleetId, connector: input.name, connectorVersion: version },
+      now + 1000,
+    )[0];
+
+    events = [{ ...logEvent(fixture.appId, fixture.deploymentId), source }];
+    const page = (await telemetry.queryConnector({ ...principal, admin: true }, input)).unwrap();
+    expect(page.entries[0]).toMatchObject({
+      message: "connector message",
+      connectorVersion: version,
+      deploymentId: null,
+    });
+    expect(requests[0]?.parameters.filters).toEqual(
+      expect.arrayContaining([
+        { key: "fleetId", type: "string", operation: "eq", value: fixture.fleetId },
+        { key: "connector", type: "string", operation: "eq", value: input.name },
+        { key: "record.connectorVersion", type: "string", operation: "eq", value: version },
+      ]),
+    );
+    const appQuery = await query();
+    expect(appQuery.isErr() && appQuery.error).toBeInstanceOf(TelemetryUnavailable);
+    events = [logEvent(fixture.appId, fixture.deploymentId)];
+    const foreign = await telemetry.queryConnector({ ...principal, admin: true }, input);
+    expect(foreign.isErr() && foreign.error).toBeInstanceOf(TelemetryUnavailable);
   });
 
   it("scopes every query to this installation's runtime and authorized app", async () => {

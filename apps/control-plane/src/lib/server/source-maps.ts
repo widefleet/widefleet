@@ -1,9 +1,14 @@
 import { TraceMap, originalPositionFor } from "@jridgewell/trace-mapping";
 import * as contract from "@platform/contracts";
 import { and, eq, sql } from "drizzle-orm";
-import type { z } from "zod";
+import { z } from "zod";
 import type { Database } from "./database.ts";
-import { artifacts } from "./schema.ts";
+import { artifacts, cloudflareOperations, jobs } from "./schema.ts";
+import {
+  connectorReference,
+  loadConnectorArtifact,
+  connectorModuleScope,
+} from "./connector-package.ts";
 import type { ArtifactStorage } from "./storage.ts";
 
 const generatedLocation = (file: string, browser: boolean) => {
@@ -18,38 +23,109 @@ const generatedLocation = (file: string, browser: boolean) => {
   return file.slice(file.lastIndexOf("/") + 1);
 };
 
-export const createSymbolicator = (database: Database, storage: ArtifactStorage, appId: string) => {
-  const releases = new Map<string, z.infer<typeof contract.artifact> | null>();
-  const maps = new Map<string, TraceMap | null>();
-  let downloaded = 0;
+const appSymbols = async (database: Database, appId: string, buildId: string) => {
+  const [record] = await database
+    .select()
+    .from(artifacts)
+    .where(
+      and(
+        eq(artifacts.appId, appId),
+        sql`${artifacts.metadata}->'debug'->>'build_id' = ${buildId}`,
+      ),
+    )
+    .limit(1);
 
-  const resolve = async (log: z.infer<typeof contract.runtimeLog>) => {
-    if (!log.stack || !log.buildId) return log;
+  if (!record) return null;
 
-    let release = releases.get(log.buildId);
+  const release = contract.artifact.parse({
+    id: record.id,
+    appId: record.appId,
+    metadata: record.metadata,
+    modules: record.modules,
+    manifest: record.manifest,
+  });
 
-    if (release === undefined) {
-      const [record] = await database
+  return {
+    debug: release.metadata.debug,
+    modules: release.modules,
+    scope: `apps/${appId}`,
+  };
+};
+
+const connectorSymbols = async (
+  database: Database,
+  storage: ArtifactStorage,
+  target: { fleetId: string; name: string },
+  version: string,
+) => {
+  const [job] = await database
+    .select()
+    .from(jobs)
+    .where(and(eq(jobs.id, version), eq(jobs.fleetId, target.fleetId)))
+    .limit(1);
+
+  const [operation] = job
+    ? []
+    : await database
         .select()
-        .from(artifacts)
+        .from(cloudflareOperations)
         .where(
           and(
-            eq(artifacts.appId, appId),
-            sql`${artifacts.metadata}->'debug'->>'build_id' = ${log.buildId}`,
+            eq(cloudflareOperations.id, version),
+            eq(cloudflareOperations.fleetId, target.fleetId),
           ),
         )
         .limit(1);
 
-      release = record
-        ? contract.artifact.parse({
-            id: record.id,
-            appId: record.appId,
-            metadata: record.metadata,
-            manifest: record.manifest,
-            modules: record.modules,
-          })
-        : null;
-      releases.set(log.buildId, release);
+  // Runtime upgrades can prepare several connectors under the runtime job's version.
+  const references = job
+    ? [job.connector, ...z.array(z.unknown()).parse(job.connectors)]
+    : [operation?.result];
+
+  const reference = references
+    .map((value) => connectorReference.safeParse(value).data)
+    .find((value) => value?.name === target.name);
+
+  if (!reference) return null;
+
+  try {
+    const { fleetId, release } = await loadConnectorArtifact(storage, reference);
+
+    if (fleetId !== target.fleetId) return null;
+
+    return {
+      debug: release.metadata.debug,
+      modules: release.modules,
+      scope: connectorModuleScope(fleetId, release.name),
+    };
+  } catch {
+    // Unavailable debug artifacts must not hide the original runtime error.
+    return null;
+  }
+};
+
+export const createSymbolicator = (
+  database: Database,
+  storage: ArtifactStorage,
+  target: { appId: string } | { fleetId: string; name: string },
+) => {
+  const releases = new Map<string, Awaited<ReturnType<typeof appSymbols>>>();
+  const maps = new Map<string, TraceMap | null>();
+  let downloaded = 0;
+
+  const resolve = async (log: z.infer<typeof contract.runtimeLog>) => {
+    const version = "appId" in target ? log.buildId : log.connectorVersion;
+
+    if (!log.stack || !version) return log;
+
+    let release = releases.get(version);
+
+    if (release === undefined) {
+      release =
+        "appId" in target
+          ? await appSymbols(database, target.appId, version)
+          : await connectorSymbols(database, storage, target, version);
+      releases.set(version, release);
     }
 
     const frames: z.infer<typeof contract.stackFrame>[] = [];
@@ -64,7 +140,7 @@ export const createSymbolicator = (database: Database, storage: ArtifactStorage,
       const file = generatedLocation(match[1], log.source === "browser");
       const generatedLine = Number(match[2]);
       const generatedColumn = Number(match[3]);
-      const mapName = release?.metadata.debug?.source_maps[file];
+      const mapName = release?.debug?.source_maps[file];
 
       const module = release?.modules.find(
         (entry) => entry.name === mapName && entry.type === "sourcemap",
@@ -72,12 +148,12 @@ export const createSymbolicator = (database: Database, storage: ArtifactStorage,
 
       let map = module ? maps.get(module.sha256) : null;
 
-      if (module && map === undefined) {
+      if (release && module && map === undefined) {
         map = null;
 
         if (downloaded + module.size <= 32 * 1024 * 1024) {
           downloaded += module.size;
-          const bytes = await storage.get(`apps/${appId}/modules/${module.sha256}`);
+          const bytes = await storage.get(`${release.scope}/modules/${module.sha256}`);
 
           if (bytes.isOk()) {
             try {

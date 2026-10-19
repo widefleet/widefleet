@@ -1,7 +1,8 @@
+import { esbuildBinary } from "../../../tools/cli-tools.ts";
 import * as contract from "@platform/contracts";
 import { execFile } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -29,12 +30,22 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       createdAt: "2026-10-01T00:00:00.000Z",
     });
 
-    const requests: { path: string; method: string; authorization: string; body: string }[] = [];
+    const requests: {
+      path: string;
+      method: string;
+      authorization: string;
+      contentType: string;
+      requestId: string;
+      body: string;
+    }[] = [];
+
     let directory: string;
     let origin: string;
+    let executable: string;
     let outcome = "active";
     let rejected = false;
     let superseded = false;
+    let uploadFailures = 0;
 
     const server = createServer((request, response) => {
       let body = "";
@@ -46,6 +57,8 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
           path: request.url ?? "",
           method: request.method ?? "",
           authorization: request.headers.authorization ?? "",
+          contentType: request.headers["content-type"] ?? "",
+          requestId: String(request.headers["idempotency-key"] ?? ""),
           body,
         });
         response.setHeader("content-type", "application/json");
@@ -92,6 +105,12 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
               }),
             );
         } else if (request.url?.startsWith("/api/v1/connectors/erp")) {
+          if (request.method === "PUT" && uploadFailures-- > 0) {
+            response.writeHead(503).end(JSON.stringify({ message: "Synthetic transient failure" }));
+
+            return;
+          }
+
           if (rejected && request.method !== "GET")
             response
               .writeHead(403)
@@ -125,6 +144,33 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
 
     beforeAll(async () => {
       directory = await mkdtemp(join(tmpdir(), "widefleet-connector-cli-"));
+      const installation = join(directory, "installation");
+      await mkdir(installation);
+      executable = join(installation, process.platform === "win32" ? "widefleet.exe" : "widefleet");
+      await copyFile(
+        process.env["CLI_BINARY"] ??
+          fileURLToPath(
+            new URL(
+              `../../../target/debug/widefleet${process.platform === "win32" ? ".exe" : ""}`,
+              import.meta.url,
+            ),
+          ),
+        executable,
+      );
+      await copyFile(
+        esbuildBinary(),
+        join(installation, process.platform === "win32" ? "esbuild.exe" : "esbuild"),
+      );
+
+      const version = (await execute(executable, ["--version"])).stdout
+        .trim()
+        .replace(/^widefleet /, "");
+
+      const esbuildVersion = (await execute(esbuildBinary(), ["--version"])).stdout.trim();
+      await writeFile(
+        join(installation, "release.json"),
+        JSON.stringify({ format: 1, version, esbuild_version: esbuildVersion }),
+      );
       await writeFile(join(directory, "wrangler.jsonc"), JSON.stringify({ name: app.slug }));
       server.listen(0, "127.0.0.1");
       await once(server, "listening");
@@ -135,6 +181,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       outcome = "active";
       rejected = false;
       superseded = false;
+      uploadFailures = 0;
     });
     afterAll(async () => {
       await new Promise<void>((resolve, reject) =>
@@ -144,24 +191,94 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     });
 
     const command = (...args: string[]) =>
-      execute(
-        process.env["CLI_BINARY"] ??
-          fileURLToPath(
-            new URL(
-              `../../../target/debug/widefleet${process.platform === "win32" ? ".exe" : ""}`,
-              import.meta.url,
-            ),
-          ),
-        args,
-        {
-          cwd: directory,
-          timeout: 10000,
-          env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: "normal-credential" },
-        },
-      );
+      execute(executable, args, {
+        cwd: directory,
+        timeout: 10000,
+        env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: "normal-credential" },
+      });
 
     const cli = (...args: string[]) => command("connector", ...args);
 
+    it("deploys the bundled source map and reuses the build identity for unchanged code", async () => {
+      await writeFile(
+        join(directory, "worker.ts"),
+        `import { WorkerEntrypoint } from 'cloudflare:workers';
+export default class Connector extends WorkerEntrypoint {
+  fail(): never { throw new Error('mapped fixture'); }
+}`,
+      );
+      await writeFile(
+        join(directory, "connector.jsonc"),
+        JSON.stringify({
+          name: "erp",
+          main: "worker.ts",
+          compatibility_date: "2026-10-01",
+        }),
+      );
+      uploadFailures = 1;
+      await cli("deploy", "--config", "connector.jsonc", "--no-wait");
+      expect(requests).toHaveLength(2);
+      const requestId = z.uuid().parse(requests[0]?.requestId);
+      expect(requests[1]?.requestId).toBe(requestId);
+
+      const uploadedParts = await Promise.all(
+        requests.map(async (request) => {
+          const form = await new Response(request.body, {
+            headers: { "content-type": request.contentType },
+          }).formData();
+
+          return Promise.all(
+            [...form].map(async ([name, part]) => [
+              name,
+              part instanceof File ? await part.text() : part,
+            ]),
+          );
+        }),
+      );
+
+      expect(uploadedParts[0]).toEqual(uploadedParts[1]);
+
+      const readUpload = async () => {
+        const request = requests.at(-1);
+        expect(request?.contentType).toMatch(/^multipart\/form-data; boundary=/);
+
+        const form = await new Response(request?.body, {
+          headers: { "content-type": request?.contentType ?? "" },
+        }).formData();
+
+        const metadata = contract.connectorUploadMetadata.parse(
+          JSON.parse(z.string().parse(form.get("metadata"))),
+        );
+
+        const modules = [];
+
+        for (const [name, file] of form.entries()) {
+          if (name === "metadata") continue;
+          const part = z.instanceof(File).parse(file);
+          modules.push({ name, type: part.type, source: await part.text() });
+        }
+
+        return { metadata, modules };
+      };
+
+      const release = await readUpload();
+      const map = release.modules.find((module) => module.type === "application/source-map+json");
+      expect(map).toBeDefined();
+      expect(release.metadata.debug?.source_maps).toEqual({ "worker.js": map?.name });
+      expect(JSON.parse(map?.source ?? "")).toMatchObject({
+        version: 3,
+        sources: ["../worker.ts"],
+        sourcesContent: [expect.stringContaining("fail(): never")],
+      });
+      expect(
+        release.modules.find((module) => module.type === "application/javascript+module")?.source,
+      ).not.toContain("sourceMappingURL");
+      await cli("deploy", "--config", "connector.jsonc", "--no-wait");
+      const repeated = await readUpload();
+      expect(requests.at(-1)?.requestId).not.toBe(requestId);
+      expect(repeated.metadata.debug?.build_id).toBe(release.metadata.debug?.build_id);
+      expect(repeated.modules).toEqual(release.modules);
+    });
     it("browses the catalog and reads serving app resources without mutations", async () => {
       expect(JSON.parse((await cli("catalog")).stdout)).toEqual([
         { name: "erp", entrypoints: ["default"] },

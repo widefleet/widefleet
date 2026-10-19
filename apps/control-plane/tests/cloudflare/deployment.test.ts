@@ -1,5 +1,4 @@
 import { runtimeIdentity } from "../runtime-identity.ts";
-import { connectorServiceBinding } from "../../src/lib/server/cloudflare-connector-package.ts";
 import { connectorReference } from "../../src/lib/server/connector-package.ts";
 import { connectorFixture } from "../cloudflare-connector.fixture.ts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -626,8 +625,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         `
       import runtime, { RuntimeManagement as BaseManagement } from './runtime.js';
       import {WorkerEntrypoint} from 'cloudflare:workers';
-      export class WIDEFLEET_CONNECTOR extends WorkerEntrypoint { #value = 'default-connector'; read() { return this.#value; } }
-      export class Reader extends WorkerEntrypoint { read() { return 'named-connector'; } }
+      export class ConnectorGateway extends WorkerEntrypoint { invoke(method, args) { if (method !== 'read' || args.length) throw new Error('Unexpected fixture RPC'); return this.ctx.props.entrypoint === 'Reader' ? 'named-connector' : 'default-connector'; } }
       import {createConnectorService} from ${JSON.stringify(server + "connectors.ts")};
       import {prepareConnector} from ${JSON.stringify(server + "connector-changes.ts")};
       import {lockFleet} from ${JSON.stringify(server + "fleets.ts")};
@@ -903,15 +901,6 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
               service: "widefleet-deployment-test",
               entrypoint: "RuntimeManagement",
             },
-            ...["default", "Reader"].map((entrypoint) => {
-              const binding = connectorServiceBinding(first.fleetId, "app-connector", entrypoint);
-
-              return {
-                binding: binding.name,
-                service: "widefleet-deployment-test",
-                entrypoint: binding.entrypoint,
-              };
-            }),
           ],
           worker_loaders: [{ binding: "WIDEFLEET_LOADER" }],
           r2_buckets: [
@@ -1197,7 +1186,9 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       );
     }, 40_000);
 
-    it("recovers activation after a SQL failure and a workerd restart", async () => {
+    it("recovers activation after a SQL failure and a workerd restart", async ({
+      onTestFinished,
+    }) => {
       const entry = await seedDeployment(environment.database.db, {
         appId: first.appId,
         source: deploymentSource.replace("deployed fixture", "second version"),
@@ -1212,6 +1203,11 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       await environment.database.db.execute(
         sql`CREATE TRIGGER fixture_receipt BEFORE UPDATE ON deployment FOR EACH ROW EXECUTE FUNCTION fixture_reject_receipt()`,
       );
+      onTestFinished(async () => {
+        await environment.database.db.execute(
+          sql`DROP TRIGGER IF EXISTS fixture_receipt ON deployment`,
+        );
+      });
       await dispatch(entry);
       await expect
         .poll(async () => (await host(entry.hostname))?.body, { timeout: 30_000, interval: 100 })
@@ -1274,7 +1270,9 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       expect(status).toBeDefined();
     }, 100_000);
 
-    it("keeps other apps independent and restarts failed activation only on an explicit command", async () => {
+    it("keeps other apps independent and restarts failed activation only on an explicit command", async ({
+      onTestFinished,
+    }) => {
       const entry = await seedDeployment(environment.database.db, {
         appId: first.appId,
         source: deploymentSource.replace("deployed fixture", "third version"),
@@ -1292,6 +1290,11 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       await environment.database.db.execute(
         sql`CREATE TRIGGER fixture_receipt BEFORE UPDATE ON deployment FOR EACH ROW EXECUTE FUNCTION fixture_reject_receipt()`,
       );
+      onTestFinished(async () => {
+        await environment.database.db.execute(
+          sql`DROP TRIGGER IF EXISTS fixture_receipt ON deployment`,
+        );
+      });
       await dispatch(entry, "fast-retries");
       await expect
         .poll(
@@ -2088,7 +2091,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         await bindConnector(entry.appId, "ERP", null);
         expect(await host(entry.hostname)).toBeNull();
         const replacement = connectorFixture(reference.name);
-        replacement.entrypoints = ["default"];
+        replacement.metadata.entrypoints = ["default"];
 
         const prepare = () =>
           worker.fetch("http://fixture/prepare-connector", {
@@ -2538,7 +2541,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       const before = runtimeUploads;
       runtimeUploadMode = "rejected";
       const selected = await selectRuntime(runtimeRelease("99.3.0"));
-      await expect.poll(runtimeStatus).toMatchObject({
+      await expect.poll(runtimeStatus, { timeout: 15000 }).toMatchObject({
         activeVersion: "99.2.0",
         state: "failed",
         message: "Cloudflare rejected the runtime update (HTTP 400)",
@@ -2548,7 +2551,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       const retried = await selectRuntime({ version: "99.3.0" });
       expect(retried.jobId).not.toBe(selected.jobId);
       await expect
-        .poll(runtimeStatus)
+        .poll(runtimeStatus, { timeout: 15000 })
         .toMatchObject({ activeVersion: "99.3.0", state: "succeeded" });
     }, 20000);
 

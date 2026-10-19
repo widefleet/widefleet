@@ -1,7 +1,6 @@
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
 import { and, eq, gt, sql } from "drizzle-orm";
-import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { checkCapabilityNames } from "./connectors.ts";
@@ -15,19 +14,7 @@ import type { HostedExecution } from "./deployment-execution.ts";
 import { artifacts, deployments, uploadSessions } from "./schema.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import { transact, type Transaction } from "./transactions.ts";
-
-const sourceMapFile = z.object({
-  version: z.literal(3),
-  sources: z.array(z.string()).max(100_000),
-  names: z.array(z.string()),
-  mappings: z.string(),
-});
-
-export type WorkerModule = {
-  name: string;
-  type: z.infer<typeof contract.storedModule>["type"];
-  bytes: Uint8Array;
-};
+import { prepareModules, storeModules, type WorkerModule } from "./worker-modules.ts";
 
 const getSession = async (
   transaction: Transaction,
@@ -161,61 +148,7 @@ export const createUploadService = (
             });
         }
 
-        if (
-          !modules.some((module) => module.name === metadata.main_module && module.type === "esm")
-        ) {
-          return yield* new InvalidOperation({
-            code: "BAD_REQUEST",
-            message: "The main ES module is missing",
-          });
-        }
-
-        if (new Set(modules.map((module) => module.name)).size !== modules.length) {
-          return yield* new InvalidOperation({
-            code: "BAD_REQUEST",
-            message: "Duplicate worker module names",
-          });
-        }
-
-        const sourceMaps = new Set(Object.values(metadata.debug?.source_maps ?? {}));
-
-        if (
-          sourceMaps.size !== modules.filter((module) => module.type === "sourcemap").length ||
-          [...sourceMaps].some(
-            (name) =>
-              !modules.some((module) => module.name === name && module.type === "sourcemap"),
-          )
-        ) {
-          return yield* new InvalidOperation({
-            code: "BAD_REQUEST",
-            message: "Source-map metadata does not match the uploaded maps",
-          });
-        }
-
-        for (const module of modules) {
-          if (module.type !== "sourcemap") continue;
-
-          const parsed = Result.try(() =>
-            sourceMapFile.parse(JSON.parse(new TextDecoder().decode(module.bytes))),
-          );
-
-          if (parsed.isErr())
-            return yield* new InvalidOperation({
-              code: "BAD_REQUEST",
-              message: "Invalid source-map JSON",
-            });
-        }
-
-        const storedModules = contract.artifact.shape.modules
-          .parse(
-            modules.map((module) => ({
-              name: module.name,
-              type: module.type,
-              size: module.bytes.byteLength,
-              sha256: createHash("sha256").update(module.bytes).digest("hex"),
-            })),
-          )
-          .sort((left, right) => left.name.localeCompare(right.name));
+        const storedModules = yield* prepareModules(metadata.main_module, modules, metadata.debug);
 
         const artifactId = session.id;
 
@@ -285,16 +218,7 @@ export const createUploadService = (
           );
         }
 
-        for (const module of modules) {
-          const checksum = createHash("sha256").update(module.bytes).digest("hex");
-          yield* Result.await(
-            storage.put(
-              `apps/${appId}/modules/${checksum}`,
-              module.bytes,
-              "application/octet-stream",
-            ),
-          );
-        }
+        yield* Result.await(storeModules(storage, `apps/${appId}`, modules));
 
         await transaction.insert(artifacts).values({
           id: artifactId,

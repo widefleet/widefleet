@@ -46,9 +46,20 @@ async fn event(api: &Api, configuration: &Configuration, job: &Job, message: &st
 
 async fn recover(docker: &Docker, configuration: &Configuration, job: &Job) -> Result<()> {
     if let Some(recovery) = fleet::recover(configuration, job).await? {
-        if recovery.reload {
+        if recovery.reload || !recovery.connectors.is_empty() {
             let address = docker::ensure(docker, configuration).await?;
-            docker::reload(docker, &configuration.runtime_container, &address).await?;
+            if recovery.reload {
+                docker::reload(docker, &configuration.runtime_container, &address).await?;
+            }
+        }
+        for connector in recovery.connectors {
+            docker::connector_request(
+                docker,
+                &configuration.runtime_container,
+                &recovery.token,
+                &connector,
+            )
+            .await?;
         }
         for queue in recovery.wake {
             docker::wake_queue(docker, configuration, job, &queue).await?;
@@ -160,18 +171,44 @@ async fn execute(
     } else {
         None
     };
+    if matches!(job.kind, JobKind::Connector | JobKind::Runtime) {
+        for connector in &packages.connectors {
+            if std::path::Path::new(&connector.name).components().count() != 1
+                || connector.name == "."
+                || connector.name == ".."
+            {
+                return Err(Error::invalid("Unsafe connector name".into()));
+            }
+            artifact::fetch_modules(
+                api,
+                &configuration.token,
+                job,
+                &connector.modules,
+                &connector.metadata.worker.main_module,
+                &temporary.path().join("connectors").join(&connector.name),
+                Some(&connector.name),
+            )
+            .await?;
+        }
+    }
     let telemetry = if artifact.is_none() {
         None
     } else {
         telemetry::destination(api, configuration, job).await?
     };
-    let prepared = fleet::prepare(
+    let connector_telemetry = if packages.connectors.is_empty() {
+        Default::default()
+    } else {
+        telemetry::connector_destinations(api, configuration, job).await?
+    };
+    let mut prepared = fleet::prepare(
         configuration,
         job,
         artifact,
         &packages,
         temporary.path(),
         telemetry,
+        connector_telemetry,
     )
     .await?;
     let activation = async {
@@ -183,7 +220,7 @@ async fn execute(
                 "Publishing the shared fleet's native configuration",
             )
             .await?;
-            fleet::publish(configuration, job, &packages, temporary.path()).await?;
+            fleet::publish(configuration, job, temporary.path()).await?;
         }
         let address = docker::ensure(docker, configuration).await?;
         if prepared.changed {
@@ -197,6 +234,16 @@ async fn execute(
             &packages.runtime.version,
         )
         .await?;
+        for connector in &prepared.connectors {
+            let activation = docker::connector_request(
+                docker,
+                &configuration.runtime_container,
+                &prepared.token,
+                connector,
+            )
+            .await?;
+            prepared.activations.push(activation);
+        }
         for app in &prepared.probes {
             docker::check_candidate(
                 docker,

@@ -190,7 +190,9 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
         ],
         manifest: {},
         nativeBindings: { DB: "DB", FILES: "FILES", KV: "KV" },
-        capabilities: { OBSERVE: "OBSERVE" },
+        capabilities: {
+          OBSERVE: { fleetId: crypto.randomUUID(), connector: "observe", entrypoint: "default" },
+        },
         capabilityRevision: 1,
         network: { revision: 1, policy: { backend: [delayedOrigin], browser: [] } },
       };
@@ -216,8 +218,8 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
             } }), { headers: { 'content-type': 'application/json' } });
           }
         }
-        export class Observe extends WorkerEntrypoint {
-          async record(id, label) { return (await fetch(${JSON.stringify(observeOrigin)} + '/record?' + new URLSearchParams({ id, label }))).json(); }
+        export class ConnectorGateway extends WorkerEntrypoint {
+          async invoke(method, [id, label]) { return (await fetch(${JSON.stringify(observeOrigin)} + '/record?' + new URLSearchParams({ id, label }))).json(); }
         }
         export default { async fetch(request, env, ctx) {
           const incoming = new URL(request.url);
@@ -297,7 +299,6 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
               service: "adapter-probe",
               entrypoint: "WorkflowSessions",
             },
-            { binding: "OBSERVE", service: "adapter-probe", entrypoint: "Observe" },
           ],
           workflows: [
             { binding: "WIDEFLEET_WORKFLOWS", name: "widefleet-apps", class_name: "AppWorkflow" },

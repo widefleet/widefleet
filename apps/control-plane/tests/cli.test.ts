@@ -269,6 +269,19 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         return;
       }
 
+      if (request.url?.startsWith("/api/v1/connectors/erp/logs?")) {
+        response.end(
+          JSON.stringify({
+            entries: [],
+            nextCursor: null,
+            receivedThrough: "1000",
+            since: "2026-10-19T00:00:00Z",
+          }),
+        );
+
+        return;
+      }
+
       if (
         (request.method === "PUT" && request.url === "/api/v1/apps/by-name/fixture") ||
         (request.method === "GET" && request.url === `/api/v1/apps/${app.id}`)
@@ -387,6 +400,21 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         timeout: 15_000,
         env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken },
       });
+
+    it("reads connector logs without resolving an app and sends the selected version", async () => {
+      const version = crypto.randomUUID();
+
+      const result = await execute(
+        join(state, "installation", executableName),
+        ["logs", "--connector", "erp", "--since", "15m", "--version", version, "--json"],
+        { env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken } },
+      );
+
+      expect(result.stdout).toBe("");
+      expect(requests).toEqual([
+        `GET /api/v1/connectors/erp/logs?since=15m&limit=100&version=${version}`,
+      ]);
+    });
 
     it.each([
       [
@@ -743,7 +771,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       expect(result.stderr).toContain("Synthetic preview failure");
     });
 
-    it("uses the ordinary credential for runtime status and rollback and reports activation failure", async () => {
+    it("uses the ordinary credential for runtime status and rollback", async () => {
       const runtimeCli = (...args: string[]) =>
         execute(join(state, "installation", executableName), ["runtime", ...args], {
           env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken },
@@ -756,10 +784,18 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         state: "succeeded",
       });
       expect(requests).toContain("POST /api/v1/runtime/rollback");
+    });
+
+    it("reports runtime activation failure", async () => {
       outcome = "failed";
-      expect((await failure(runtimeCli("rollback", "0.1.0"))).stderr).toContain(
-        "Runtime readiness failed",
+
+      const result = await failure(
+        execute(join(state, "installation", executableName), ["runtime", "rollback", "0.1.0"], {
+          env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken },
+        }),
       );
+
+      expect(result.stderr).toContain("Runtime readiness failed");
     });
 
     it("exports settings and requires explicit acknowledgement of the server's restart plan", async () => {

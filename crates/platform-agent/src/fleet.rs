@@ -1,11 +1,11 @@
 use crate::config::Configuration;
 use futures_util::TryStreamExt;
-use object_store::{ObjectStore, ObjectStoreExt, path::Path as ObjectPath};
+use object_store::{ObjectStore, ObjectStoreExt, PutMode, PutOptions, path::Path as ObjectPath};
 use platform_core::{
     Error, Result,
     model::{
-        Artifact, Binding, ConnectorPackage, Job, JobKind, PublishedApp, ReleaseModule,
-        RuntimePackages,
+        Artifact, Binding, Job, JobKind, Module, ModuleType, PublishedApp, PublishedCapability,
+        ReleaseModule, RuntimePackages,
     },
     sha256,
 };
@@ -33,11 +33,76 @@ fn resource(owner: &str, kind: &str, name: &str) -> String {
     )
 }
 
-fn capability(connector: &str, entrypoint: &str) -> String {
-    format!(
-        "C_{}",
-        &sha256(format!("{connector}/{entrypoint}").as_bytes())[..40]
-    )
+fn native_resource(
+    owner: &str,
+    binding: &Binding,
+) -> Option<(String, &'static str, String, Value)> {
+    let (name, kind, logical) = match binding {
+        Binding::PlainText { .. } | Binding::Workflow { .. } => return None,
+        Binding::D1 {
+            name,
+            database_name,
+            database_id,
+        } => (name, "d1", database_id.as_ref().unwrap_or(database_name)),
+        Binding::R2Bucket { name, bucket_name } => (name, "r2", bucket_name),
+        Binding::KvNamespace { name, id } => (name, "kv", id),
+        Binding::Queue { name, queue } => (name, "queue", queue),
+    };
+    let id = resource(owner, kind, logical);
+    let native = format!("B_{id}");
+    let (field, config) = match kind {
+        "d1" => (
+            "d1_databases",
+            json!({ "binding": native, "database_name": id, "database_id": id }),
+        ),
+        "r2" => (
+            "r2_buckets",
+            json!({ "binding": native, "bucket_name": id }),
+        ),
+        "kv" => ("kv_namespaces", json!({ "binding": native, "id": id })),
+        "queue" => ("queues", json!({ "binding": native, "queue": id })),
+        _ => unreachable!(),
+    };
+    Some((name.clone(), field, native, config))
+}
+
+async fn publish_modules(
+    store: &Arc<dyn ObjectStore>,
+    job: &Job,
+    scope: &str,
+    modules: &[Module],
+    directory: &Path,
+) -> Result<()> {
+    for module in modules {
+        if matches!(module.kind, ModuleType::Sourcemap) {
+            continue;
+        }
+        let bytes = tokio::fs::read(directory.join(&module.name)).await?;
+        if bytes.len() as u64 != module.size || sha256(&bytes) != module.sha256 {
+            return Err(Error::invalid(
+                "Worker module checksum or size mismatch".into(),
+            ));
+        }
+        let key = ObjectPath::from(package_key(
+            job,
+            &format!("{scope}/modules/{}", module.sha256),
+        ));
+        match store
+            .put_opts(
+                &key,
+                bytes.into(),
+                PutOptions {
+                    mode: PutMode::Create,
+                    ..Default::default()
+                },
+            )
+            .await
+        {
+            Ok(_) | Err(object_store::Error::AlreadyExists { .. }) => {}
+            Err(error) => return Err(storage_error(error)),
+        }
+    }
+    Ok(())
 }
 
 fn native_crons(crons: &BTreeMap<String, BTreeSet<String>>) -> Vec<&str> {
@@ -50,41 +115,6 @@ fn native_crons(crons: &BTreeMap<String, BTreeSet<String>>) -> Vec<&str> {
     } else {
         crons.keys().map(String::as_str).collect()
     }
-}
-
-fn validate_connector_classes(connectors: &[ConnectorPackage]) -> Result<()> {
-    let mut owners = BTreeMap::new();
-    for connector in connectors {
-        for binding in connector
-            .configuration
-            .pointer("/durable_objects/bindings")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-        {
-            let class = binding
-                .get("class_name")
-                .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    Error::invalid("Invalid connector Durable Object declaration".into())
-                })?;
-            if class == "WidefleetWorkflowCatalog" {
-                return Err(Error::invalid(
-                    "Durable Object class WidefleetWorkflowCatalog is reserved for the app runtime"
-                        .into(),
-                ));
-            }
-            if let Some(owner) = owners.insert(class, &connector.name)
-                && owner != &connector.name
-            {
-                return Err(Error::invalid(format!(
-                    "Durable Object class {class} is declared by both {owner} and {}; selected connector packages must use unique class names",
-                    connector.name
-                )));
-            }
-        }
-    }
-    Ok(())
 }
 
 async fn read(store: &Arc<dyn ObjectStore>, key: &str) -> Result<Option<Vec<u8>>> {
@@ -113,6 +143,8 @@ pub struct Prepared {
     pub token: String,
     pub app: Option<PublishedApp>,
     pub probes: Vec<PublishedApp>,
+    pub connectors: Vec<Value>,
+    pub activations: Vec<Value>,
     digest: String,
     packages: RuntimePackages,
 }
@@ -124,8 +156,8 @@ pub async fn prepare(
     packages: &RuntimePackages,
     directory: &Path,
     telemetry: Option<platform_core::model::TelemetryDestination>,
+    connector_telemetry: BTreeMap<String, platform_core::model::TelemetryDestination>,
 ) -> Result<Prepared> {
-    validate_connector_classes(&packages.connectors)?;
     if packages.runtime.protocol != 1
         || packages.runtime.auth != 1
         || packages.runtime.celld != crate::native::VERSION
@@ -163,17 +195,19 @@ pub async fn prepare(
         .iter()
         .flat_map(|connector| {
             connector
+                .metadata
                 .entrypoints
                 .iter()
-                .map(|entrypoint| capability(&connector.name, entrypoint))
+                .map(|entrypoint| (connector.name.clone(), entrypoint.clone()))
         })
         .collect();
     for app in &current {
-        if app
-            .capabilities
-            .values()
-            .any(|binding| !capabilities.contains(binding))
-        {
+        if app.capabilities.values().any(|binding| {
+            !capabilities.contains(&(
+                binding.grant.connector.clone(),
+                binding.grant.entrypoint.clone(),
+            ))
+        }) {
             return Err(Error::invalid(format!(
                 "Activate binding revocations for {} before removing connector entrypoints",
                 app.hostname
@@ -203,13 +237,14 @@ pub async fn prepare(
     if let Some(app) = &mut candidate {
         if let Some(snapshot) = &job.capabilities {
             for (name, grant) in &snapshot.grants {
-                let native = capability(&grant.connector, &grant.entrypoint);
-                if !capabilities.contains(&native)
+                let capability = (grant.connector.clone(), grant.entrypoint.clone());
+                if !capabilities.contains(&capability)
                     || name.starts_with("WIDEFLEET_")
                     || name == &app.artifact.metadata.assets.binding
                     || app
                         .artifact
                         .metadata
+                        .worker
                         .bindings
                         .iter()
                         .any(|binding| binding.name() == name)
@@ -218,23 +253,23 @@ pub async fn prepare(
                         "Connector binding {name} is unavailable or collides with another binding"
                     )));
                 }
-                app.capabilities.insert(name.clone(), native);
+                app.capabilities.insert(
+                    name.clone(),
+                    PublishedCapability {
+                        fleet_id: job.fleet_id,
+                        grant: grant.clone(),
+                    },
+                );
             }
         }
-        for module in &app.artifact.modules {
-            if matches!(module.kind, platform_core::model::ModuleType::Sourcemap) {
-                continue;
-            }
-            put(
-                &store,
-                &package_key(
-                    job,
-                    &format!("apps/{}/modules/{}", job.app_id()?, module.sha256),
-                ),
-                tokio::fs::read(directory.join(&module.name)).await?,
-            )
-            .await?;
-        }
+        publish_modules(
+            &store,
+            job,
+            &format!("apps/{}", app.artifact.app_id),
+            &app.artifact.modules,
+            directory,
+        )
+        .await?;
         for (path, entry) in &app.artifact.manifest {
             put(
                 &store,
@@ -290,6 +325,7 @@ pub async fn prepare(
         && current.iter().chain(retained.iter()).any(|app| {
             app.artifact
                 .metadata
+                .worker
                 .bindings
                 .iter()
                 .any(|binding| matches!(binding, Binding::Workflow { .. }))
@@ -312,41 +348,24 @@ pub async fn prepare(
     let active_versions: BTreeSet<_> = current.iter().map(|app| app.version).collect();
     for app in current.iter_mut().chain(retained.iter_mut()) {
         let owner = app.artifact.app_id.to_string();
-        for binding in &app.artifact.metadata.bindings {
-            let (name, kind, id) = match binding {
-                Binding::PlainText { .. } | Binding::Workflow { .. } => continue,
-                Binding::D1 {
-                    name,
-                    database_name,
-                    database_id,
-                } => (name, "d1", database_id.as_ref().unwrap_or(database_name)),
-                Binding::R2Bucket { name, bucket_name } => (name, "r2", bucket_name),
-                Binding::KvNamespace { name, id } => (name, "kv", id),
-                Binding::Queue { name, queue } => (name, "queue", queue),
-            };
-            let id = resource(&owner, kind, id);
-            let native = format!("B_{id}");
-            app.native_bindings.insert(name.clone(), native.clone());
-            match kind {
-                "d1" => {
-                    databases.insert(
-                        native.clone(),
-                        json!({ "binding": native, "database_name": id, "database_id": id }),
-                    );
+        for binding in &app.artifact.metadata.worker.bindings {
+            if let Some((name, field, native, config)) = native_resource(&owner, binding) {
+                app.native_bindings.insert(name, native.clone());
+                match field {
+                    "d1_databases" => {
+                        databases.insert(native, config);
+                    }
+                    "r2_buckets" => {
+                        buckets.insert(native, config);
+                    }
+                    "kv_namespaces" => {
+                        namespaces.insert(native, config);
+                    }
+                    "queues" => {
+                        producers.insert(native, config);
+                    }
+                    _ => unreachable!(),
                 }
-                "r2" => {
-                    buckets.insert(
-                        native.clone(),
-                        json!({ "binding": native, "bucket_name": id }),
-                    );
-                }
-                "kv" => {
-                    namespaces.insert(native.clone(), json!({ "binding": native, "id": id }));
-                }
-                "queue" => {
-                    producers.insert(native.clone(), json!({ "binding": native, "queue": id }));
-                }
-                _ => unreachable!(),
             }
         }
         if !active_versions.contains(&app.version) {
@@ -407,89 +426,84 @@ pub async fn prepare(
         "AUTH_CONFIG".into(),
         json!({ "binding": "AUTH_CONFIG", "id": "widefleet-auth" }),
     );
-    let mut services = Vec::new();
-    let mut connector_configurations = Vec::new();
+    // Keep connector resources bound across code changes, including calls using
+    // earlier immutable snapshots. Connector removal is a separate operation.
+    let resource_key = format!("{}/connector-resources.json", prefix(job));
+    let mut connector_resources: BTreeMap<String, BTreeMap<String, Value>> =
+        read(&store, &resource_key)
+            .await?
+            .map(|bytes| serde_json::from_slice(&bytes))
+            .transpose()?
+            .unwrap_or_default();
+    let mut connector_preparations = Vec::new();
     for connector in &packages.connectors {
         if connector.protocol != 1 {
             return Err(Error::invalid(
                 "Unsupported connector package protocol".into(),
             ));
         }
-        let project = directory.join(format!("connector-{}", connector.name));
-        tokio::fs::create_dir_all(&project).await?;
-        write_modules(&project, &connector.modules).await?;
-        let mut config = connector.configuration.clone();
-        config["name"] = json!(format!("cap-{}", connector.name));
-        config["main"] = json!(connector.main);
-        config["no_bundle"] = json!(true);
-        config["services"] = json!([{
-            "binding": "WIDEFLEET_SECRETS",
-            "service": format!("secrets-{}", connector.name),
-        }]);
-
-        // Keep platform code and credentials in their own Worker. Connector
-        // bundles remain byte-for-byte intact, including private JS bindings.
-        let secret_project = directory.join(format!("secrets-{}", connector.name));
-        let secret_source = include_str!("connector-secrets.js");
-        let secret_config = json!({
-            "name": format!("secrets-{}", connector.name),
-            "main": "worker.js",
-            "no_bundle": true,
-            "compatibility_date": "2026-10-01",
-            "vars": packages.connector_secrets.get(&connector.name).cloned().unwrap_or_default(),
-        });
-        tokio::fs::create_dir_all(&secret_project).await?;
-        tokio::fs::write(secret_project.join("worker.js"), secret_source).await?;
-        tokio::fs::write(
-            secret_project.join("wrangler.json"),
-            serde_json::to_vec_pretty(&secret_config)?,
-        )
-        .await?;
-        for (field, identity) in [
-            ("d1_databases", "database_name"),
-            ("r2_buckets", "bucket_name"),
-            ("kv_namespaces", "id"),
-        ] {
-            if let Some(bindings) = config.get_mut(field).and_then(Value::as_array_mut) {
-                for binding in bindings {
-                    let name = binding
-                        .get(identity)
-                        .and_then(Value::as_str)
-                        .ok_or_else(|| Error::invalid("Invalid connector resource".into()))?;
-                    let id = resource(&format!("connector:{}", connector.name), field, name);
-                    binding[identity] = json!(id);
-                    if field == "d1_databases" {
-                        binding["database_id"] = json!(id);
-                    }
-                }
+        let mut native_bindings = BTreeMap::new();
+        for binding in &connector.metadata.worker.bindings {
+            if let Some((name, field, native, config)) =
+                native_resource(&format!("connector:{}", connector.name), binding)
+            {
+                native_bindings.insert(name, native.clone());
+                connector_resources
+                    .entry(field.into())
+                    .or_default()
+                    .insert(native, config);
             }
         }
-        tokio::fs::write(
-            project.join("wrangler.json"),
-            serde_json::to_vec_pretty(&config)?,
-        )
-        .await?;
-        // Include generated configuration and platform code in activation
-        // identity, so an agent update cannot reuse an obsolete secret Worker.
-        connector_configurations.push(json!([config, secret_config, secret_source]));
-        for entrypoint in &connector.entrypoints {
-            services.push(json!({ "binding": capability(&connector.name, entrypoint), "service": format!("cap-{}", connector.name), "entrypoint": entrypoint }));
+        // App operations only use the already active connector versions. Connector
+        // changes prepare snapshots before the recovery journal commits activation.
+        if matches!(job.kind, JobKind::Connector | JobKind::Runtime) {
+            publish_modules(
+                &store,
+                job,
+                &format!("connectors/{}/{}", job.fleet_id, connector.name),
+                &connector.modules,
+                &directory.join("connectors").join(&connector.name),
+            )
+            .await?;
+            connector_preparations.push(json!({
+                "action": "prepare", "fleetId": job.fleet_id, "version": job.id,
+                "release": connector, "nativeBindings": native_bindings,
+                "secrets": packages.connector_secrets.get(&connector.name).cloned().unwrap_or_default(),
+                "telemetry": connector_telemetry.get(&connector.name),
+            }));
         }
     }
+    for (field, resources) in &connector_resources {
+        match field.as_str() {
+            "d1_databases" => databases.extend(resources.clone()),
+            "r2_buckets" => buckets.extend(resources.clone()),
+            "kv_namespaces" => namespaces.extend(resources.clone()),
+            _ => {
+                return Err(Error::invalid(
+                    "Invalid connector resource inventory".into(),
+                ));
+            }
+        }
+    }
+    put(
+        &store,
+        &resource_key,
+        serde_json::to_vec(&connector_resources)?,
+    )
+    .await?;
     let project = directory.join("runtime");
     tokio::fs::create_dir_all(&project).await?;
     write_modules(&project, &packages.runtime.modules).await?;
-    let mut config = platform_agent::runtime::configuration(&packages.runtime, &token)?;
+    let connector_key =
+        platform_agent::runtime::connector_key(store.as_ref(), job.fleet_id).await?;
+    let mut config =
+        platform_agent::runtime::configuration(&packages.runtime, &token, &connector_key)?;
     config["vars"]["WIDEFLEET_CONFIGURATION"] = json!(serde_json::to_string(
         &json!({ "crons": crons, "queues": queues })
     )?);
     config["d1_databases"] = json!(databases.values().collect::<Vec<_>>());
     config["r2_buckets"] = json!(buckets.values().collect::<Vec<_>>());
     config["kv_namespaces"] = json!(namespaces.values().collect::<Vec<_>>());
-    config["services"]
-        .as_array_mut()
-        .ok_or_else(|| Error::invalid("Invalid service configuration".into()))?
-        .extend(services);
     config["triggers"] = json!({ "crons": native_crons(&crons) });
     config["queues"] = json!({ "producers": producers.values().collect::<Vec<_>>(), "consumers": consumers.values().collect::<Vec<_>>() });
     tokio::fs::write(
@@ -512,11 +526,9 @@ pub async fn prepare(
         )
         .await?;
     }
-    let digest = sha256(&serde_json::to_vec(&json!([
-        config,
-        packages,
-        connector_configurations
-    ]))?);
+    // Connector code and secrets are activated by the loader, independently of
+    // the native runtime deployment. Only resource/configuration changes reload it.
+    let digest = sha256(&serde_json::to_vec(&json!([config, packages.runtime]))?);
     let changed = read(&store, &format!("{}/installed", prefix(job)))
         .await?
         .as_deref()
@@ -545,7 +557,12 @@ pub async fn prepare(
         token,
         app: candidate,
         digest,
-        packages: packages.clone(),
+        packages: RuntimePackages {
+            connector_secrets: BTreeMap::new(),
+            ..packages.clone()
+        },
+        connectors: connector_preparations,
+        activations: Vec::new(),
     })
 }
 
@@ -568,12 +585,7 @@ async fn write_modules(directory: &Path, modules: &[ReleaseModule]) -> Result<()
     Ok(())
 }
 
-pub async fn publish(
-    configuration: &Configuration,
-    job: &Job,
-    packages: &RuntimePackages,
-    directory: &Path,
-) -> Result<()> {
+pub async fn publish(configuration: &Configuration, job: &Job, directory: &Path) -> Result<()> {
     let storage = configuration.storage.resolve()?;
     let staging = format!("{}/staging/{}", prefix(job), job.id);
     let store = storage.object_store()?;
@@ -599,17 +611,7 @@ pub async fn publish(
             }
         }
     }
-    let mut projects: Vec<_> = packages
-        .connectors
-        .iter()
-        .flat_map(|connector| {
-            [
-                directory.join(format!("secrets-{}", connector.name)),
-                directory.join(format!("connector-{}", connector.name)),
-            ]
-        })
-        .collect();
-    projects.push(directory.join("runtime"));
+    let projects = vec![directory.join("runtime")];
     let mut pointers = stage(configuration, job, projects).await?;
     let runtime = directory.join("runtime");
     let next = if runtime.join("validation.json").try_exists()? {
@@ -743,11 +745,15 @@ struct Pending {
     app: Option<PublishedApp>,
     digest: Option<String>,
     packages: Option<RuntimePackages>,
+    #[serde(default)]
+    connectors: Vec<Value>,
 }
 
 pub struct Recovery {
     pub reload: bool,
     pub wake: Vec<String>,
+    pub connectors: Vec<Value>,
+    pub token: String,
 }
 
 // Leave the journal durable until the caller has reloaded the running node.
@@ -782,6 +788,7 @@ pub async fn recover(configuration: &Configuration, job: &Job) -> Result<Option<
             if app
                 .artifact
                 .metadata
+                .worker
                 .bindings
                 .iter()
                 .any(|binding| matches!(binding, Binding::Workflow { .. }))
@@ -843,6 +850,17 @@ pub async fn recover(configuration: &Configuration, job: &Job) -> Result<Option<
             && read(&store, &format!("{}/deploy/current.json", prefix(job)))
                 .await?
                 .is_some(),
+        connectors: if pending.validated {
+            pending.connectors
+        } else {
+            Vec::new()
+        },
+        token: String::from_utf8(
+            read(&store, &format!("{}/control-token", prefix(job)))
+                .await?
+                .ok_or_else(|| Error::invalid("Runtime control token is missing".into()))?,
+        )
+        .map_err(|error| Error::invalid(error.to_string()))?,
         wake: if pending.validated {
             pending.wake
         } else {
@@ -880,6 +898,7 @@ pub async fn migration_database(
     let identity = app
         .artifact
         .metadata
+        .worker
         .bindings
         .iter()
         .find_map(|binding| match binding {
@@ -912,7 +931,7 @@ pub async fn commit(configuration: &Configuration, job: &Job, prepared: &Prepare
         }
         None => (BTreeMap::new(), Vec::new()),
     };
-    put(&store, &format!("{}/pending.json", prefix(job)), serde_json::to_vec(&json!({ "previous": {}, "next": next, "wake": wake, "validated": true, "app": prepared.app, "digest": prepared.digest, "packages": prepared.packages }))?).await
+    put(&store, &format!("{}/pending.json", prefix(job)), serde_json::to_vec(&json!({ "previous": {}, "next": next, "wake": wake, "validated": true, "app": prepared.app, "digest": prepared.digest, "packages": prepared.packages, "connectors": prepared.activations }))?).await
 }
 
 pub async fn detach(configuration: &Configuration, job: &Job) -> Result<Option<RuntimePackages>> {
@@ -952,7 +971,7 @@ pub async fn remove(configuration: &Configuration, job: &Job) -> Result<()> {
         if app.artifact.app_id != job.app_id()? {
             continue;
         }
-        for binding in app.artifact.metadata.bindings {
+        for binding in app.artifact.metadata.worker.bindings {
             if let Binding::R2Bucket { bucket_name, .. } = binding {
                 let id = resource(&job.app_id()?.to_string(), "r2", &bucket_name);
                 prefixes.insert(format!("{}/r2/{id}/", prefix(job)));
@@ -995,38 +1014,4 @@ pub async fn workflow_control(configuration: &Configuration, job: &Job) -> Resul
     Ok(Some(
         String::from_utf8(token).map_err(|error| Error::invalid(error.to_string()))?,
     ))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rejects_class_reuse_across_selected_connectors_but_allows_local_aliases() {
-        let connector = |name: &str, class: &str| ConnectorPackage {
-            protocol: 1,
-            name: name.into(),
-            main: "worker.js".into(),
-            modules: Vec::new(),
-            entrypoints: vec!["default".into()],
-            configuration: json!({ "durable_objects": { "bindings": [
-                { "name": "STATE", "class_name": class },
-                { "name": "ALIAS", "class_name": class }
-            ] } }),
-        };
-        assert!(
-            validate_connector_classes(&[
-                connector("erp", "ErpState"),
-                connector("crm", "CrmState")
-            ])
-            .is_ok()
-        );
-        let result = validate_connector_classes(&[
-            connector("erp", "SharedState"),
-            connector("crm", "SharedState"),
-        ]);
-        assert!(
-            matches!(result, Err(error) if error.to_string().contains("SharedState is declared by both erp and crm"))
-        );
-    }
 }

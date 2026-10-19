@@ -1,7 +1,7 @@
 use platform_core::{
     Error, Result, asset_hash,
     http::{Api, json},
-    model::{Artifact, Job, ModuleType},
+    model::{Artifact, Job, Module, ModuleType},
     sha256,
 };
 use reqwest::Method;
@@ -28,42 +28,16 @@ pub async fn fetch(api: &Api, token: &str, job: &Job, directory: &Path) -> Resul
             "Artifact does not belong to this deployment job".into(),
         ));
     }
-    let mut names = BTreeSet::new();
-    for module in &artifact.modules {
-        // Source maps remain private deployment artifacts, never runtime modules or assets.
-        if matches!(module.kind, ModuleType::Sourcemap) {
-            continue;
-        }
-        if Path::new(&module.name).components().count() != 1
-            || !Path::new(&module.name)
-                .components()
-                .all(|part| matches!(part, Component::Normal(_)))
-            || !names.insert(&module.name)
-        {
-            return Err(Error::invalid(
-                "Unsafe or duplicate worker module name".into(),
-            ));
-        }
-        let bytes = download(
-            api,
-            token,
-            job,
-            "modules",
-            &module.sha256,
-            module.size,
-            20 * 1024 * 1024,
-        )
-        .await?;
-        if sha256(&bytes) != module.sha256 {
-            return Err(Error::invalid("Worker module checksum mismatch".into()));
-        }
-        tokio::fs::write(directory.join(&module.name), bytes).await?;
-    }
-    if !artifact.modules.iter().any(|module| {
-        module.name == artifact.metadata.main_module && matches!(module.kind, ModuleType::Esm)
-    }) {
-        return Err(Error::invalid("Main worker module is missing".into()));
-    }
+    fetch_modules(
+        api,
+        token,
+        job,
+        &artifact.modules,
+        &artifact.metadata.worker.main_module,
+        directory,
+        None,
+    )
+    .await?;
     let public = directory.join("public");
     tokio::fs::create_dir_all(&public).await?;
     for (name, entry) in &artifact.manifest {
@@ -105,6 +79,71 @@ pub async fn fetch(api: &Api, token: &str, job: &Job, directory: &Path) -> Resul
     Ok(artifact)
 }
 
+pub(crate) async fn fetch_modules(
+    api: &Api,
+    token: &str,
+    job: &Job,
+    modules: &[Module],
+    main: &str,
+    directory: &Path,
+    connector: Option<&str>,
+) -> Result<()> {
+    tokio::fs::create_dir_all(directory).await?;
+    let mut names = BTreeSet::new();
+    for module in modules {
+        // Source maps remain private deployment artifacts, never runtime modules or assets.
+        if matches!(module.kind, ModuleType::Sourcemap) {
+            continue;
+        }
+        if Path::new(&module.name).components().count() != 1
+            || !Path::new(&module.name)
+                .components()
+                .all(|part| matches!(part, Component::Normal(_)))
+            || !names.insert(&module.name)
+        {
+            return Err(Error::invalid(
+                "Unsafe or duplicate worker module name".into(),
+            ));
+        }
+        let bytes =
+            download_module(api, token, job, &module.sha256, module.size, connector).await?;
+        if sha256(&bytes) != module.sha256 {
+            return Err(Error::invalid("Worker module checksum mismatch".into()));
+        }
+        tokio::fs::write(directory.join(&module.name), bytes).await?;
+    }
+    if !modules
+        .iter()
+        .any(|module| module.name == main && matches!(module.kind, ModuleType::Esm))
+    {
+        return Err(Error::invalid("Main worker module is missing".into()));
+    }
+    Ok(())
+}
+
+async fn download_module(
+    api: &Api,
+    token: &str,
+    job: &Job,
+    hash: &str,
+    expected: u64,
+    connector: Option<&str>,
+) -> Result<Vec<u8>> {
+    download_scoped(
+        api,
+        token,
+        job,
+        Download {
+            kind: "modules",
+            hash,
+            expected,
+            limit: 20 * 1024 * 1024,
+            connector,
+        },
+    )
+    .await
+}
+
 pub(crate) async fn download(
     api: &Api,
     token: &str,
@@ -114,6 +153,42 @@ pub(crate) async fn download(
     expected: u64,
     limit: u64,
 ) -> Result<Vec<u8>> {
+    download_scoped(
+        api,
+        token,
+        job,
+        Download {
+            kind,
+            hash,
+            expected,
+            limit,
+            connector: None,
+        },
+    )
+    .await
+}
+
+struct Download<'a> {
+    kind: &'a str,
+    hash: &'a str,
+    expected: u64,
+    limit: u64,
+    connector: Option<&'a str>,
+}
+
+async fn download_scoped(
+    api: &Api,
+    token: &str,
+    job: &Job,
+    download: Download<'_>,
+) -> Result<Vec<u8>> {
+    let Download {
+        kind,
+        hash,
+        expected,
+        limit,
+        connector,
+    } = download;
     if expected > limit || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(Error::invalid("Invalid artifact object metadata".into()));
     }
@@ -124,6 +199,12 @@ pub(crate) async fn download(
             token,
         )
         .query(&[("leaseToken", job.lease_token)])
+        .query(
+            &connector
+                .map(|name| ("connector", name))
+                .into_iter()
+                .collect::<Vec<_>>(),
+        )
         .send()
         .await?
         .error_for_status()?;

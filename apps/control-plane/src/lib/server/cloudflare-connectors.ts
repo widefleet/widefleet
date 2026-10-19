@@ -1,19 +1,24 @@
+import { operationId } from "./deployment-execution.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
 import { administrator, connectorStatus, prepareConnector } from "./connector-changes.ts";
-import { connectorReference, loadConnector, validateConnectorSecret } from "./connector-package.ts";
+import {
+  connectorReference,
+  connectorChecksum,
+  loadConnector,
+  validateConnectorSecret,
+  validateConnectorPackage,
+} from "./connector-package.ts";
 import { acceptCloudflareWorkflow } from "./cloudflare-admission.ts";
 import { connectorCommand, deploymentWorkflowCommand } from "./cloudflare-connector-command.ts";
-import { validateHostedConnector } from "./cloudflare-connector-package.ts";
 import type { CloudflareBindings } from "./cloudflare-config.ts";
 import type { Database } from "./database.ts";
 import type { HostedExecution } from "./deployment-execution.ts";
 import { DatabaseUnavailable, InvalidOperation, StorageUnavailable } from "./errors.ts";
 import { defaultFleet, lockFleet } from "./fleets.ts";
-import { loadPackage } from "./package-storage.ts";
 import { cloudflareOperations, connectors } from "./schema.ts";
 import { encryptSecret } from "./secret-encryption.ts";
 import type { ArtifactStorage } from "./storage.ts";
@@ -52,14 +57,11 @@ export const registerCloudflareConnector = (
     let reference: z.infer<typeof connectorReference>;
 
     if (command.change.kind === "deploy") {
-      const release = contract.connectorPackage.parse(
-        await loadPackage(storage, command.change.checksum),
-      );
+      const release = await loadConnector(storage, command.change);
 
       if (release.name !== command.change.name)
         throw new Error("Connector package identity mismatch");
       reference = (await prepareConnector(transaction, storage, fleet, release)).reference;
-      validateHostedConnector(release, Object.keys(reference.secrets));
     } else {
       const [existing] = await transaction
         .select()
@@ -78,7 +80,7 @@ export const registerCloudflareConnector = (
         secrets: Object.fromEntries(secrets),
         secretRevision: previous.secretRevision + 1,
       };
-      validateHostedConnector(
+      validateConnectorPackage(
         await loadConnector(storage, reference),
         Object.keys(reference.secrets),
       );
@@ -198,30 +200,43 @@ export const createCloudflareConnectors = (
 
   return {
     status: (current) => cloudflareConnectorStatus(bindings, current),
-    deploy: async (principal, release) => {
+    deploy: async (principal, release, modules, requestId) => {
       const prepared = await transact(database, async (transaction) => {
         administrator(principal);
         const fleet = await lockFleet(transaction, (await defaultFleet(transaction)).id);
 
-        const { reference, existing } = await prepareConnector(
-          transaction,
-          storage,
-          fleet,
-          release,
-        );
+        const id = operationId(`connectors/${fleet.id}/${release.name}`, requestId);
 
-        validateHostedConnector(release, Object.keys(reference.secrets));
+        const [previous] = await transaction
+          .select()
+          .from(cloudflareOperations)
+          .where(eq(cloudflareOperations.id, id));
 
-        const current = existing
-          ? await cloudflareConnectorStatus(bindings, await connectorStatus(transaction, existing))
-          : null;
+        const checksum = connectorChecksum(fleet.id, release);
+        let current = null;
 
-        return Result.ok({
-          fleetId: fleet.id,
-          checksum: reference.checksum,
-          current:
-            current?.checksum === reference.checksum && current.state !== "failed" ? current : null,
-        });
+        if (previous) {
+          const original = connectorReference.parse(previous.result);
+
+          const [existing] = await transaction
+            .select()
+            .from(connectors)
+            .where(and(eq(connectors.fleetId, fleet.id), eq(connectors.name, release.name)));
+
+          if (original.checksum !== checksum || !existing)
+            throw new InvalidOperation({
+              code: "CONFLICT",
+              message: "The request ID already refers to another artifact",
+            });
+          current = await cloudflareConnectorStatus(
+            bindings,
+            await connectorStatus(transaction, { ...existing, package: original, jobId: id }),
+          );
+        } else {
+          await prepareConnector(transaction, storage, fleet, release, modules);
+        }
+
+        return Result.ok({ id, fleetId: fleet.id, checksum, current });
       });
 
       if (prepared.isErr()) return prepared;
@@ -230,7 +245,7 @@ export const createCloudflareConnectors = (
 
       return admit({
         kind: "connector",
-        id: crypto.randomUUID(),
+        id: prepared.value.id,
         fleetId: prepared.value.fleetId,
         createdAt: new Date().toISOString(),
         actor: principal,
@@ -258,7 +273,7 @@ export const createCloudflareConnectors = (
 
         if (value === null) names.delete(secret);
         else names.add(secret);
-        validateHostedConnector(await loadConnector(storage, reference), [...names]);
+        validateConnectorPackage(await loadConnector(storage, reference), [...names]);
 
         return Result.ok({
           fleetId: fleet.id,

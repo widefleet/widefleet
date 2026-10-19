@@ -1,10 +1,12 @@
 import type { TraceItem } from "@cloudflare/workers-types";
-import { runtimeLog } from "@platform/contracts";
+import { runtimeLog, appSlug } from "@platform/contracts";
 import { z } from "zod";
 
 export const cloudflareLog = z.object({
   widefleetLog: z.literal(1),
-  appId: z.uuid(),
+  appId: z.uuid().nullable(),
+  fleetId: z.uuid().nullable().default(null),
+  connector: appSlug.nullable().default(null),
   eventTime: z.number(),
   receivedTime: z.number(),
   severity: z.number(),
@@ -42,7 +44,9 @@ const consoleText = (message: z.infer<ReturnType<typeof z.json>>[]) =>
 
 export const cloudflareLogRecords = (
   event: Pick<TraceItem, "logs" | "exceptions" | "eventTimestamp" | "outcome" | "truncated">,
-  props: { appId: string; deploymentId: string; buildId: string | null },
+  props:
+    | { appId: string; deploymentId: string; buildId: string | null }
+    | { fleetId: string; connector: string; connectorVersion: string },
   receivedTime = Date.now(),
 ) => {
   const logs = event.logs.map((log) => {
@@ -52,7 +56,8 @@ export const cloudflareLogRecords = (
   });
 
   const request = logs.find((log) => log.parsed?.kind === "request")?.parsed;
-  const requestId = request?.requestId ?? crypto.randomUUID();
+  const app = "appId" in props;
+  const requestId = (app ? request?.requestId : null) ?? crypto.randomUUID();
 
   const make = (
     message: string,
@@ -61,11 +66,13 @@ export const cloudflareLogRecords = (
     parsed?: z.infer<typeof report>,
     failure?: { stack?: string },
   ) => {
-    const browser = parsed?.source === "browser";
+    const browser = app && parsed?.source === "browser";
 
     const output = cloudflareLog.parse({
       widefleetLog: 1,
-      appId: props.appId,
+      appId: app ? props.appId : null,
+      fleetId: app ? null : props.fleetId,
+      connector: app ? null : props.connector,
       eventTime: timestamp,
       receivedTime,
       severity: { debug: 5, info: 9, warn: 13, error: 17 }[level],
@@ -73,15 +80,16 @@ export const cloudflareLogRecords = (
         timestamp: new Date(timestamp).toISOString(),
         receivedAt: String(BigInt(receivedTime) * 1000n),
         level,
-        source: failure ? "runtime" : (parsed?.source ?? "server"),
+        source: failure ? "runtime" : ((app ? parsed?.source : undefined) ?? "server"),
         kind: failure ? "span_error" : (parsed?.kind ?? "log"),
         message: parsed?.message ?? message,
         stack: failure?.stack ?? parsed?.stack ?? (/\n\s*at\s/.test(message) ? message : null),
         // Only the loader may attribute a server record to a deployed version.
         // Browser reports retain their build; an open tab may run an older one.
-        buildId: browser ? parsed.buildId : props.buildId,
-        deploymentId: browser ? null : props.deploymentId,
-        requestId: parsed?.requestId ?? requestId,
+        buildId: browser ? parsed.buildId : app ? props.buildId : null,
+        deploymentId: app && !browser ? props.deploymentId : null,
+        connectorVersion: app ? null : props.connectorVersion,
+        requestId: (app ? parsed?.requestId : null) ?? requestId,
         traceId: parsed?.traceId ?? request?.traceId ?? null,
         spanId: parsed?.spanId ?? request?.spanId ?? null,
         route: parsed?.route ?? request?.route ?? null,

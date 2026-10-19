@@ -59,5 +59,6 @@ jobs:
           PLATFORM_ENCRYPTION_KEY: ${{ secrets.PLATFORM_ENCRYPTION_KEY }}
           APP_COOKIE_SECRET: ${{ secrets.APP_COOKIE_SECRET }}
           WIDEFLEET_CONTROL_TOKEN: ${{ secrets.WIDEFLEET_CONTROL_TOKEN }}
+          WIDEFLEET_CONNECTOR_KEY: ${{ secrets.WIDEFLEET_CONNECTOR_KEY }}
           PLATFORM_BOOTSTRAP: ${{ secrets.PLATFORM_BOOTSTRAP }}
         run: pnpm --filter @platform/control-plane exec node tools/deploy-hosted.ts "../../infra/hosted/$INSTALLATION.json"

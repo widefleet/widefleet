@@ -11,8 +11,11 @@ import { binaryPaths, binarySchemas } from "./openapi-binary.ts";
 import { DirectoryUnavailable } from "./directory.ts";
 import { InvalidOperation, TelemetryNotConfigured, TelemetryUnavailable } from "./errors.ts";
 import { createInstallationOwner, readInstallation } from "./installation-store.ts";
+import { uploadedConnector } from "./connector-package.ts";
+import { administrator } from "./connector-changes.ts";
+import { connectorLogService } from "./telemetry.ts";
 
-const settingsOperation = async <T>(operation: () => Promise<T>) => {
+const apiOperation = async <T>(operation: () => Promise<T>) => {
   try {
     return await operation();
   } catch (cause) {
@@ -79,6 +82,13 @@ export const createApi = (runtime: Runtime) => {
     }
   });
 
+  const authenticateWrite = async (request: Request) => {
+    const principal = unwrap(await runtime.identity.authenticate(request, "platform:write"));
+    runtime.reporting.active(principal.id);
+
+    return principal;
+  };
+
   const read = base.use(async ({ context, next }) => {
     const principal = unwrap(await runtime.identity.authenticate(context.request, "platform:read"));
 
@@ -89,11 +99,7 @@ export const createApi = (runtime: Runtime) => {
   });
 
   const write = base.use(async ({ context, next }) => {
-    const principal = unwrap(
-      await runtime.identity.authenticate(context.request, "platform:write"),
-    );
-
-    runtime.reporting.active(principal.id);
+    const principal = await authenticateWrite(context.request);
 
     return next({ context: { principal } });
   });
@@ -126,7 +132,7 @@ export const createApi = (runtime: Runtime) => {
     reporting: read
       .route({ method: "GET", path: "/reporting" })
       .output(contract.reportingStatus)
-      .handler(({ context }) => settingsOperation(() => runtime.reporting.read(context.principal))),
+      .handler(({ context }) => apiOperation(() => runtime.reporting.read(context.principal))),
     reportingStatus: read
       .route({ method: "GET", path: "/reporting/status" })
       .output(contract.reportingPreferences)
@@ -134,15 +140,13 @@ export const createApi = (runtime: Runtime) => {
     reportingPreview: read
       .route({ method: "GET", path: "/reporting/preview" })
       .output(z.json())
-      .handler(({ context }) =>
-        settingsOperation(() => runtime.reporting.preview(context.principal)),
-      ),
+      .handler(({ context }) => apiOperation(() => runtime.reporting.preview(context.principal))),
     updateReporting: write
       .route({ method: "PUT", path: "/reporting" })
       .input(contract.reportingPreferences)
       .output(contract.reportingStatus)
       .handler(({ context, input }) =>
-        settingsOperation(() => runtime.reporting.update(context.principal, input)),
+        apiOperation(() => runtime.reporting.update(context.principal, input)),
       ),
     browserError: write
       .route({ method: "POST", path: "/reporting/errors" })
@@ -188,12 +192,12 @@ export const createApi = (runtime: Runtime) => {
       .handler(async ({ context, input }) =>
         unwrap(await runtime.connectors.read(context.principal, input.name)),
       ),
-    connectorDeploy: write
-      .route({ method: "PUT", path: "/connectors/{name}" })
-      .input(contract.connectorPackage)
-      .output(contract.connectorStatus)
+    connectorLogs: read
+      .route({ method: "GET", path: "/connectors/{name}/logs" })
+      .input(contract.connectorLogQuery)
+      .output(contract.logPage)
       .handler(async ({ context, input }) =>
-        unwrap(await runtime.connectors.deploy(context.principal, input)),
+        unwrap(await runtime.telemetry.queryConnector(context.principal, input)),
       ),
     connectorSecrets: read
       .route({ method: "GET", path: "/connectors/{name}/secrets" })
@@ -344,25 +348,25 @@ export const createApi = (runtime: Runtime) => {
         if (origin !== runtime.configuration.PLATFORM_URL)
           throw new ORPCError("FORBIDDEN", { message: "A same-origin setup request is required" });
 
-        return settingsOperation(() => createInstallationOwner(runtime.database.db, input));
+        return apiOperation(() => createInstallationOwner(runtime.database.db, input));
       }),
     getSettings: read
       .route({ method: "GET", path: "/settings" })
       .output(contract.settingsView)
-      .handler(({ context }) => settingsOperation(() => runtime.settings.read(context.principal))),
+      .handler(({ context }) => apiOperation(() => runtime.settings.read(context.principal))),
     planSettings: write
       .route({ method: "POST", path: "/settings/plan" })
       .input(contract.settingsInput)
       .output(contract.settingsPlan)
       .handler(({ context, input }) =>
-        settingsOperation(() => runtime.settings.plan(context.principal, input)),
+        apiOperation(() => runtime.settings.plan(context.principal, input)),
       ),
     updateSettings: write
       .route({ method: "PUT", path: "/settings" })
       .input(contract.settingsUpdate)
       .output(contract.settingsView)
       .handler(({ context, input }) =>
-        settingsOperation(() =>
+        apiOperation(() =>
           runtime.settings.update(
             context.principal,
             input,
@@ -375,7 +379,7 @@ export const createApi = (runtime: Runtime) => {
       .input(z.object({ enabled: z.boolean() }))
       .output(contract.settingsView)
       .handler(({ context, input }) =>
-        settingsOperation(() =>
+        apiOperation(() =>
           runtime.settings.setExternalManagement(context.principal, input.enabled),
         ),
       ),
@@ -383,7 +387,7 @@ export const createApi = (runtime: Runtime) => {
       .route({ method: "POST", path: "/settings/complete" })
       .output(contract.settingsView)
       .handler(({ context }) =>
-        settingsOperation(() =>
+        apiOperation(() =>
           runtime.settings.complete(context.principal, runtime.auth, context.request.headers),
         ),
       ),
@@ -626,6 +630,22 @@ export const createApi = (runtime: Runtime) => {
 
         return runtime.telemetry.credentials(artifact.appId);
       }),
+    connectorTelemetryCredentials: agent
+      .route({ method: "GET", path: "/agent/jobs/{jobId}/connector-telemetry" })
+      .input(leaseInput)
+      .output(z.record(contract.appSlug, contract.telemetryCredentials))
+      .handler(async ({ context, input }) => {
+        const targets = unwrap(
+          await runtime.jobs.connectorTelemetry(context.agent.id, input.jobId, input.leaseToken),
+        );
+
+        return Object.fromEntries(
+          targets.map((target) => [
+            target.name,
+            runtime.telemetry.credentials(connectorLogService(target)),
+          ]),
+        );
+      }),
   };
 
   const handler = new OpenAPIHandler(router);
@@ -633,12 +653,25 @@ export const createApi = (runtime: Runtime) => {
 
   const dispatch = async (request: Request) => {
     const url = new URL(request.url);
+
+    const connectorTelemetry =
+      /^\/api\/v1\/telemetry\/connectors\/([^/]+)\/([^/]+)\/v1\/logs$/.exec(url.pathname);
+
+    if (connectorTelemetry && request.method === "POST")
+      return runtime.telemetry.ingest(
+        request,
+        {
+          fleetId: contract.identifier.parse(connectorTelemetry[1]),
+          name: contract.appSlug.parse(connectorTelemetry[2]),
+        },
+        "logs",
+      );
     const telemetry = /^\/api\/v1\/telemetry\/([^/]+)\/v1\/(logs|traces)$/.exec(url.pathname);
 
     if (telemetry && request.method === "POST")
       return runtime.telemetry.ingest(
         request,
-        contract.identifier.parse(telemetry[1]),
+        { appId: contract.identifier.parse(telemetry[1]) },
         z.enum(["logs", "traces"]).parse(telemetry[2]),
       );
 
@@ -661,13 +694,40 @@ export const createApi = (runtime: Runtime) => {
         },
       });
 
+      const paths = { ...document.paths };
+
+      for (const [path, methods] of Object.entries(binaryPaths))
+        paths[path] = { ...paths[path], ...methods };
+
       return Response.json({
         ...document,
-        paths: { ...document.paths, ...binaryPaths },
+        paths,
         components: {
           ...document.components,
           schemas: { ...document.components?.schemas, ...binarySchemas },
         },
+      });
+    }
+
+    const connectorUpload = /^\/api\/v1\/connectors\/([^/]+)$/.exec(url.pathname);
+
+    if (connectorUpload && request.method === "PUT") {
+      const principal = await authenticateWrite(request);
+      const name = contract.appSlug.parse(connectorUpload[1]);
+
+      return apiOperation(async () => {
+        administrator(principal);
+        const key = idempotencyKey(request);
+
+        const { metadata, modules } = unwrap(
+          await parseWorkerUpload(request, contract.connectorUploadMetadata),
+        );
+
+        const release = unwrap(uploadedConnector(name, metadata, modules));
+
+        return Response.json(
+          unwrap(await runtime.connectors.deploy(principal, release, modules, key)),
+        );
       });
     }
 
@@ -676,12 +736,15 @@ export const createApi = (runtime: Runtime) => {
     );
 
     if (upload && request.method === "PUT") {
-      const principal = unwrap(await runtime.identity.authenticate(request, "platform:write"));
+      const principal = await authenticateWrite(request);
       const appId = contract.identifier.parse(upload[1]);
 
       if (upload[2] === "worker") {
         const key = idempotencyKey(request);
-        const { metadata, modules } = unwrap(await parseWorkerUpload(request));
+
+        const { metadata, modules } = unwrap(
+          await parseWorkerUpload(request, contract.workerMetadata),
+        );
 
         return Response.json(
           unwrap(await runtime.uploads.publish(principal, appId, metadata, modules, key)),
@@ -724,17 +787,28 @@ export const createApi = (runtime: Runtime) => {
         });
       }
 
+      if (download[2] === "modules") {
+        const name = url.searchParams.get("connector");
+
+        const bytes = unwrap(
+          await runtime.jobs.module(
+            agent.id,
+            jobId,
+            leaseToken,
+            contract.checksum.parse(download[3]),
+            name === null ? null : contract.appSlug.parse(name),
+          ),
+        );
+
+        return new Response(Buffer.from(bytes), {
+          headers: { "content-type": "application/octet-stream", "cache-control": "no-store" },
+        });
+      }
+
       const artifact = unwrap(await runtime.jobs.artifact(agent.id, jobId, leaseToken));
 
-      const hash =
-        download[2] === "assets"
-          ? contract.assetHash.parse(download[3])
-          : contract.checksum.parse(download[3]);
-
-      const allowed =
-        download[2] === "assets"
-          ? Object.values(artifact.manifest).some((entry) => entry.hash === hash)
-          : artifact.modules.some((module) => module.sha256 === hash);
+      const hash = contract.assetHash.parse(download[3]);
+      const allowed = Object.values(artifact.manifest).some((entry) => entry.hash === hash);
 
       if (!allowed) throw new ORPCError("NOT_FOUND");
 

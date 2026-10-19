@@ -1,5 +1,51 @@
 import { createHash } from "node:crypto";
 import { connectorPackage } from "@platform/contracts";
+import type { z } from "zod";
+
+const moduleBytes = new Map<string, Uint8Array>();
+
+export const connectorModule = (
+  name: string,
+  type: z.infer<typeof connectorPackage>["modules"][number]["type"],
+  source: string | Uint8Array,
+) => {
+  const bytes = source instanceof Uint8Array ? source : new TextEncoder().encode(source);
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  moduleBytes.set(sha256, bytes);
+
+  return { name, type, sha256, size: bytes.byteLength };
+};
+
+export const connectorFiles = (release: z.infer<typeof connectorPackage>) =>
+  release.modules.map((module) => {
+    const bytes = moduleBytes.get(module.sha256);
+
+    if (!bytes) throw new Error("Missing connector fixture module");
+
+    return { name: module.name, type: module.type, bytes };
+  });
+
+export const connectorUploadForm = (release: z.infer<typeof connectorPackage>) => {
+  const form = new FormData();
+  form.set("metadata", JSON.stringify(release.metadata));
+
+  const mime = {
+    esm: "application/javascript+module",
+    sourcemap: "application/source-map+json",
+    text: "text/plain",
+    wasm: "application/wasm",
+    data: "application/octet-stream",
+  };
+
+  for (const module of connectorFiles(release))
+    form.append(
+      module.name,
+      new Blob([new Uint8Array(module.bytes)], { type: mime[module.type] }),
+      module.name,
+    );
+
+  return form;
+};
 
 export const connectorSource = `
 import {WorkerEntrypoint, DurableObject} from "cloudflare:workers";
@@ -29,19 +75,39 @@ export const connectorFixture = (name = "fixture-connector", source = connectorS
   connectorPackage.parse({
     protocol: 1,
     name,
-    main: "connector.js",
-    modules: [
-      { name: "connector.js", source, sha256: createHash("sha256").update(source).digest("hex") },
-    ],
-    entrypoints: ["default", "Reader"],
-    configuration: {
+    modules: [connectorModule("connector.js", "esm", source)],
+    metadata: {
+      main_module: "connector.js",
+      entrypoints: ["default", "Reader"],
       compatibility_date: "2026-10-01",
       compatibility_flags: ["nodejs_compat"],
-      vars: { LABEL: "fixture" },
-      d1_databases: [{ binding: "DB", database_name: "data" }],
-      r2_buckets: [{ binding: "BUCKET", bucket_name: "files" }],
-      kv_namespaces: [{ binding: "KV", id: "cache" }],
-      durable_objects: { bindings: [{ name: "COUNTER", class_name: "Counter" }] },
-      migrations: [{ tag: "v1", new_sqlite_classes: ["Counter"] }],
+      bindings: [
+        { type: "plain_text", name: "LABEL", text: "fixture" },
+        { type: "d1", name: "DB", database_name: "data" },
+        { type: "r2_bucket", name: "BUCKET", bucket_name: "files" },
+        { type: "kv_namespace", name: "KV", id: "cache" },
+      ],
+      durable_objects: [{ name: "COUNTER", class_name: "Counter" }],
     },
   });
+
+export const connectorDebugFixture = (name = "fixture-connector") => {
+  const release = connectorFixture(name);
+
+  const source = JSON.stringify({
+    version: 3,
+    sources: ["src/connector.ts"],
+    names: ["inspect"],
+    mappings: "AAAAA",
+    sourcesContent: ["throw new Error('connector fixture');"],
+  });
+
+  release.modules.push(connectorModule("connector.js.map", "sourcemap", source));
+  release.modules.sort((left, right) => left.name.localeCompare(right.name));
+  release.metadata.debug = {
+    build_id: "connector-fixture-build",
+    source_maps: { "connector.js": "connector.js.map" },
+  };
+
+  return release;
+};

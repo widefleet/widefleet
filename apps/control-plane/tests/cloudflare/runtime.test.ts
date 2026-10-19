@@ -64,7 +64,9 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
     ],
     manifest: { "/asset.txt": { hash: assetHash, size: Buffer.byteLength(asset) } },
     nativeBindings: { DB: "DB", KV: "KV", FILES: "FILES", JOBS: "JOBS" },
-    capabilities: { CONNECTOR: "CONNECTOR" },
+    capabilities: {
+      CONNECTOR: { fleetId: crypto.randomUUID(), connector: "fixture", entrypoint: "default" },
+    },
     capabilityRevision: 1,
     network: { revision: 1, policy: { backend: ["https://allowed.example.test"], browser: [] } },
   });
@@ -220,9 +222,13 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
             service: "widefleet-runtime-test",
             entrypoint: "RuntimeManagement",
           },
-          { binding: "CONNECTOR", service: "widefleet-runtime-test", entrypoint: "Connector" },
         ],
         workflows: [
+          {
+            binding: "PAUSE_WORKFLOW",
+            name: "pause-workflow",
+            class_name: "PauseWorkflow",
+          },
           {
             binding: "WIDEFLEET_WORKFLOWS",
             name: "app-workflows",
@@ -616,6 +622,21 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
         { label: "second", attempt: 1 },
       ]);
     await expect.poll(() => json(path), { timeout: 15_000 }).toMatchObject({ status: "complete" });
+  }, 35_000);
+
+  it("does not execute failure-recording steps while a native workflow is paused", async () => {
+    const path = `/fixture/pause-workflow?id=${crypto.randomUUID()}`;
+    await json(path, { method: "POST" });
+    await expect.poll(() => json(path), { timeout: 15_000 }).toMatchObject({ started: true });
+    await json(`${path}&action=pause`, { method: "PUT" });
+    await expect
+      .poll(() => json(path), { timeout: 15_000 })
+      .toMatchObject({ status: "paused", caught: true });
+    expect(await json(path)).toMatchObject({ failed: false });
+    await json(`${path}&action=resume`, { method: "PUT" });
+    await expect
+      .poll(() => json(path), { timeout: 15_000 })
+      .toMatchObject({ status: "complete", output: "recovered", failed: false });
   }, 35_000);
 
   it("restores a caught terminal error after restarting workerd", async () => {

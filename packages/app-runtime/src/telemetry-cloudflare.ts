@@ -3,7 +3,7 @@ import { cloudflareLogRecords } from "./cloudflare-logs.ts";
 
 export class CloudflareTelemetry extends WorkerEntrypoint<
   {},
-  { appId: string; deploymentId: string; buildId: string | null }
+  Parameters<typeof cloudflareLogRecords>[1]
 > {
   override tail(events: TraceItem[]) {
     for (const event of events)
