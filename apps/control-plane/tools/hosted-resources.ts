@@ -28,16 +28,9 @@ export const provisionHostedResources = async (
     auth = await cloudflare.findNamespace(names.auth);
   }
 
-  // The existing Hyperdrive owns the application's database credentials. The
-  // deployment role's DATABASE_URL must never replace that connection.
-  await wrangler([
-    "hyperdrive",
-    "update",
-    installation.hyperdriveId,
-    "--caching-disabled",
-    "--sslmode",
-    "verify-full",
-  ]);
+  // Preserve the existing Hyperdrive's credentials and TLS configuration.
+  // Custom verify modes require an uploaded CA; setup only manages caching.
+  await wrangler(["hyperdrive", "update", installation.hyperdriveId, "--caching-disabled"]);
 
   if (!auth) throw new Error("The created Auth KV namespace could not be found");
 

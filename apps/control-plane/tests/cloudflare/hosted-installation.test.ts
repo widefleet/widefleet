@@ -1,6 +1,8 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { once } from "node:events";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +11,7 @@ import { Result } from "better-result";
 import { eq, sql } from "drizzle-orm";
 import { runtimeRelease } from "@platform/contracts";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { createTestEnvironment } from "../environment.ts";
 import { initializeCloudflareFleet } from "../../src/lib/server/fleets.ts";
 import { createCloudflareProvisioner } from "../../src/lib/server/cloudflare-provisioning.ts";
@@ -76,8 +79,6 @@ describe("Hosted resource provisioning", () => {
       "update",
       installation.hyperdriveId,
       "--caching-disabled",
-      "--sslmode",
-      "verify-full",
     ]);
     const settingsUpdate = writes[2];
     writes.length = 0;
@@ -99,6 +100,81 @@ describe("Hosted resource provisioning", () => {
     ).rejects.toThrow("HTTP 503");
     expect(writes).toBe(0);
   });
+
+  it("updates only caching through Wrangler, preserving Hyperdrive connection and TLS settings", async () => {
+    const updates: unknown[] = [];
+
+    const api = createServer((request, response) => {
+      const handle = async () => {
+        let body = "";
+
+        for await (const chunk of request) body += String(chunk);
+
+        if (
+          request.method !== "PATCH" ||
+          request.url !== `/accounts/${ids.account}/hyperdrive/configs/${installation.hyperdriveId}`
+        )
+          throw new Error(`Unexpected request: ${request.method} ${request.url}`);
+
+        updates.push(JSON.parse(body));
+        response.setHeader("content-type", "application/json");
+        response.end(JSON.stringify({ success: true, result: { id: installation.hyperdriveId } }));
+      };
+
+      handle().catch(() => {
+        response.statusCode = 500;
+        response.end();
+      });
+    });
+
+    const directory = await mkdtemp(join(tmpdir(), "widefleet-hosted-hyperdrive-"));
+
+    try {
+      api.listen(0, "127.0.0.1");
+      await once(api, "listening");
+      const port = z.object({ port: z.number() }).parse(api.address()).port;
+      const path = join(directory, "account.json");
+      await writeFile(path, JSON.stringify({ account_id: ids.account }));
+
+      const cloudflare = createCloudflareProvisioner(configuration, async (input, init) => {
+        const request = new Request(input, init);
+        const pathname = new URL(request.url).pathname;
+        expect(request.method).toBe("GET");
+
+        if (pathname.endsWith("/r2/buckets/fixture-artifacts"))
+          return Response.json({ success: true, result: { name: "fixture-artifacts" } });
+
+        if (pathname.endsWith("/storage/kv/namespaces"))
+          return Response.json({
+            success: true,
+            result: [{ id: ids.auth, title: "fixture-auth" }],
+          });
+
+        throw new Error(`Unexpected request: ${pathname}`);
+      });
+
+      await provisionHostedResources(installation, cloudflare, async (args) => {
+        await promisify(execFile)("pnpm", ["exec", "wrangler", ...args, "--config", path], {
+          cwd: fileURLToPath(new URL("../../", import.meta.url)),
+          env: {
+            ...process.env,
+            CI: "true",
+            CLOUDFLARE_API_TOKEN: "synthetic-hyperdrive-token",
+            CLOUDFLARE_API_BASE_URL: `http://127.0.0.1:${port}`,
+            WRANGLER_SEND_METRICS: "false",
+          },
+          timeout: 15_000,
+        });
+      });
+
+      expect(updates).toEqual([{ caching: { disabled: true } }]);
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        api.close((error) => (error ? reject(error) : resolve())),
+      );
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
 
   it("bundles the generated runtime configuration offline with app bindings retained", async () => {
     const configs = await hostedConfigurations(installation, ids);
