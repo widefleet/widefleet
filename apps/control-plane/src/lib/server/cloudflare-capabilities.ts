@@ -2,7 +2,6 @@ import * as contract from "@platform/contracts";
 import { and, eq } from "drizzle-orm";
 import type { z } from "zod";
 import { connectorReference } from "./connector-package.ts";
-import { connectorServiceBinding } from "./cloudflare-connector-package.ts";
 import { InvalidOperation } from "./errors.ts";
 import { connectors } from "./schema.ts";
 import type { Transaction } from "./transactions.ts";
@@ -12,8 +11,7 @@ export const resolveCloudflareCapabilities = async (
   fleetId: string,
   grants: z.infer<typeof contract.capabilityGrants>,
 ) => {
-  const bindings: ReturnType<typeof connectorServiceBinding>[] = [];
-  const capabilities: Record<string, string> = {};
+  const capabilities: Record<string, z.infer<typeof contract.publishedCapability>> = {};
 
   for (const [name, grant] of Object.entries(grants)) {
     const [record] = await transaction
@@ -32,11 +30,8 @@ export const resolveCloudflareCapabilities = async (
         code: "CONFLICT",
         message: "Deploy the connector entrypoint successfully before binding it",
       });
-    const binding = connectorServiceBinding(fleetId, grant.connector, grant.entrypoint);
-    capabilities[name] = binding.name;
-
-    if (!bindings.some((existing) => existing.name === binding.name)) bindings.push(binding);
+    capabilities[name] = { ...grant, fleetId };
   }
 
-  return { bindings, capabilities };
+  return capabilities;
 };

@@ -306,7 +306,13 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
           assetFiles.map((asset) => [asset.path, { hash: asset.hash, size: asset.text.length }]),
         ),
         nativeBindings: { DB: "DB", FILES: "FILES", KV: "KV", JOBS: "JOBS" },
-        capabilities: { UPSTREAM: "CANCELLATION" },
+        capabilities: {
+          UPSTREAM: {
+            fleetId: crypto.randomUUID(),
+            connector: "cancellation",
+            entrypoint: "default",
+          },
+        },
         telemetry: { url: telemetryOrigin, token: "fixture-telemetry-only" },
         network: {
           revision: 1,
@@ -347,7 +353,7 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
           }
         }
         export * from './runtime.js';
-        export class Cancellation extends WorkerEntrypoint {
+        export class ConnectorGateway extends WorkerEntrypoint {
           fetch(request) {
             return nativeFetch(${JSON.stringify(cancellationOrigin)} + new URL(request.url).search, { signal: request.signal });
           }
@@ -425,9 +431,7 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
             }),
           },
           worker_loaders: [{ binding: "WIDEFLEET_LOADER" }],
-          services: [
-            { binding: "CANCELLATION", service: "dynamic-fixture", entrypoint: "Cancellation" },
-          ],
+          services: [],
           d1_databases: [{ binding: "DB", database_name: "fixture" }],
           r2_buckets: [
             { binding: "FILES", bucket_name: "fixture" },

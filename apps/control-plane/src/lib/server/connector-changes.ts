@@ -8,7 +8,7 @@ import { InvalidOperation } from "./errors.ts";
 import { lockFleet, requireAgentExecution } from "./fleets.ts";
 import type { Principal } from "./identity.ts";
 import { savePackage } from "./package-storage.ts";
-import { connectorReference, validateConnectorEnvironment } from "./connector-package.ts";
+import { connectorReference, validateConnectorPackage } from "./connector-package.ts";
 import {
   apps,
   artifacts,
@@ -108,25 +108,11 @@ export const prepareConnector = async (
 
   const existing = inventory.find((entry) => entry.name === release.name);
   const previous = existing ? connectorReference.parse(existing.package) : null;
-  validateConnectorEnvironment(release.configuration, Object.keys(previous?.secrets ?? {}));
+  validateConnectorPackage(release, Object.keys(previous?.secrets ?? {}));
 
   const classes = release.configuration.durable_objects.bindings.map(
     (binding) => binding.class_name,
   );
-
-  const otherClasses = inventory
-    .filter((entry) => entry.name !== release.name)
-    .flatMap((entry) =>
-      [entry.package, entry.appliedPackage].flatMap((reference) =>
-        reference ? connectorReference.parse(reference).classes : [],
-      ),
-    );
-
-  if (fleet.executor === "agent" && classes.some((name) => otherClasses.includes(name)))
-    throw new InvalidOperation({
-      code: "CONFLICT",
-      message: "celld requires Durable Object class names to be unique within the fleet",
-    });
 
   const resourceNames = [
     ...Object.keys(release.configuration.vars),

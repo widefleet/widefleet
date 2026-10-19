@@ -267,11 +267,6 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               capabilities.grants,
             );
 
-            if (resolved.bindings.length)
-              await withCloudflareDatabase(bindings, ({ db: resources }) =>
-                updateCloudflareBindings(resources, provisioner, resolved.bindings),
-              );
-
             const selected = {
               id: record.id,
               appId: app.id,
@@ -281,7 +276,7 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               hostname: app.hostname,
               deploymentId: command.kind === "deploy" ? command.id : serving?.deploymentId,
               network,
-              capabilities: resolved.capabilities,
+              capabilities: resolved,
               capabilityRevision: capabilities.revision,
               nativeBindings: command.kind === "deploy" ? nativeBindings : serving?.nativeBindings,
             };

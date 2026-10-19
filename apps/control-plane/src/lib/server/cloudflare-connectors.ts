@@ -4,10 +4,14 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
 import { administrator, connectorStatus, prepareConnector } from "./connector-changes.ts";
-import { connectorReference, loadConnector, validateConnectorSecret } from "./connector-package.ts";
+import {
+  connectorReference,
+  loadConnector,
+  validateConnectorSecret,
+  validateConnectorPackage,
+} from "./connector-package.ts";
 import { acceptCloudflareWorkflow } from "./cloudflare-admission.ts";
 import { connectorCommand, deploymentWorkflowCommand } from "./cloudflare-connector-command.ts";
-import { validateHostedConnector } from "./cloudflare-connector-package.ts";
 import type { CloudflareBindings } from "./cloudflare-config.ts";
 import type { Database } from "./database.ts";
 import type { HostedExecution } from "./deployment-execution.ts";
@@ -59,7 +63,6 @@ export const registerCloudflareConnector = (
       if (release.name !== command.change.name)
         throw new Error("Connector package identity mismatch");
       reference = (await prepareConnector(transaction, storage, fleet, release)).reference;
-      validateHostedConnector(release, Object.keys(reference.secrets));
     } else {
       const [existing] = await transaction
         .select()
@@ -78,7 +81,7 @@ export const registerCloudflareConnector = (
         secrets: Object.fromEntries(secrets),
         secretRevision: previous.secretRevision + 1,
       };
-      validateHostedConnector(
+      validateConnectorPackage(
         await loadConnector(storage, reference),
         Object.keys(reference.secrets),
       );
@@ -210,8 +213,6 @@ export const createCloudflareConnectors = (
           release,
         );
 
-        validateHostedConnector(release, Object.keys(reference.secrets));
-
         const current = existing
           ? await cloudflareConnectorStatus(bindings, await connectorStatus(transaction, existing))
           : null;
@@ -258,7 +259,7 @@ export const createCloudflareConnectors = (
 
         if (value === null) names.delete(secret);
         else names.add(secret);
-        validateHostedConnector(await loadConnector(storage, reference), [...names]);
+        validateConnectorPackage(await loadConnector(storage, reference), [...names]);
 
         return Result.ok({
           fleetId: fleet.id,

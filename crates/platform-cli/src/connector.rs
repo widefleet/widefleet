@@ -45,7 +45,7 @@ enum Command {
     List,
     /// Inspect one connector by name.
     Show { name: String },
-    /// Grant an app a native RPC binding to an installed connector.
+    /// Grant an app an RPC binding to an installed connector.
     Bind {
         connector: String,
         #[arg(long = "as")]
@@ -241,7 +241,7 @@ async fn package(config: &Path) -> Result<ConnectorPackage> {
     let object = configuration
         .as_object_mut()
         .ok_or_else(|| Error::invalid("Expected a Wrangler configuration object".into()))?;
-    for key in ["name", "main", "$schema", "no_bundle"] {
+    for key in ["name", "main", "$schema", "no_bundle", "migrations"] {
         object.remove(key);
     }
     Ok(ConnectorPackage {

@@ -3,6 +3,7 @@ import { workflowInstanceId } from "@platform/contracts";
 import type { WorkflowBinding, InstanceInput } from "./workflow-catalog.ts";
 import { installFetch } from "./fetch.ts";
 import { env } from "cloudflare:workers";
+import "./connector-bindings.ts";
 import { config } from "./config.ts";
 import * as z from "zod";
 import type {

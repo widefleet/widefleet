@@ -64,7 +64,9 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
     ],
     manifest: { "/asset.txt": { hash: assetHash, size: Buffer.byteLength(asset) } },
     nativeBindings: { DB: "DB", KV: "KV", FILES: "FILES", JOBS: "JOBS" },
-    capabilities: { CONNECTOR: "CONNECTOR" },
+    capabilities: {
+      CONNECTOR: { fleetId: crypto.randomUUID(), connector: "fixture", entrypoint: "default" },
+    },
     capabilityRevision: 1,
     network: { revision: 1, policy: { backend: ["https://allowed.example.test"], browser: [] } },
   });
@@ -220,7 +222,6 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
             service: "widefleet-runtime-test",
             entrypoint: "RuntimeManagement",
           },
-          { binding: "CONNECTOR", service: "widefleet-runtime-test", entrypoint: "Connector" },
         ],
         workflows: [
           {

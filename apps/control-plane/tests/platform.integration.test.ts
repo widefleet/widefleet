@@ -2321,7 +2321,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       secondValue,
     );
   });
-  it("reserves applied Durable Object classes when a replacement deployment fails", async () => {
+  it("scopes Durable Object class names to their connector across failed replacements", async () => {
     const source = "export default { fetch() { return new Response('fixture'); } }";
 
     const release = contract.connectorPackage.parse({
@@ -2380,9 +2380,9 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     );
 
     const contender = { ...release, name: "class-contender" };
-    expect((await json("/connectors/class-contender", "PUT", contender)).status).toBe(409);
+    expect((await json("/connectors/class-contender", "PUT", contender)).status).toBe(200);
     await finish(pending.jobId, "failed");
-    expect((await json("/connectors/class-contender", "PUT", contender)).status).toBe(409);
+    expect((await json("/connectors/class-contender", "PUT", contender)).status).toBe(200);
 
     const retry = contract.connectorStatus.parse(
       await (await json("/connectors/class-owner", "PUT", replacement)).json(),

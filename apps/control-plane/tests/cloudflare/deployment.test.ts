@@ -1,5 +1,4 @@
 import { runtimeIdentity } from "../runtime-identity.ts";
-import { connectorServiceBinding } from "../../src/lib/server/cloudflare-connector-package.ts";
 import { connectorReference } from "../../src/lib/server/connector-package.ts";
 import { connectorFixture } from "../cloudflare-connector.fixture.ts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -626,8 +625,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         `
       import runtime, { RuntimeManagement as BaseManagement } from './runtime.js';
       import {WorkerEntrypoint} from 'cloudflare:workers';
-      export class WIDEFLEET_CONNECTOR extends WorkerEntrypoint { #value = 'default-connector'; read() { return this.#value; } }
-      export class Reader extends WorkerEntrypoint { read() { return 'named-connector'; } }
+      export class ConnectorGateway extends WorkerEntrypoint { invoke(method, args) { if (method !== 'read' || args.length) throw new Error('Unexpected fixture RPC'); return this.ctx.props.entrypoint === 'Reader' ? 'named-connector' : 'default-connector'; } }
       import {createConnectorService} from ${JSON.stringify(server + "connectors.ts")};
       import {prepareConnector} from ${JSON.stringify(server + "connector-changes.ts")};
       import {lockFleet} from ${JSON.stringify(server + "fleets.ts")};
@@ -903,15 +901,6 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
               service: "widefleet-deployment-test",
               entrypoint: "RuntimeManagement",
             },
-            ...["default", "Reader"].map((entrypoint) => {
-              const binding = connectorServiceBinding(first.fleetId, "app-connector", entrypoint);
-
-              return {
-                binding: binding.name,
-                service: "widefleet-deployment-test",
-                entrypoint: binding.entrypoint,
-              };
-            }),
           ],
           worker_loaders: [{ binding: "WIDEFLEET_LOADER" }],
           r2_buckets: [

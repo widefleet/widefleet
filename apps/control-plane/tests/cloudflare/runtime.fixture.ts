@@ -153,8 +153,8 @@ for (const level of ['log', 'debug', 'info', 'warn', 'error']) {
   };
 }
 
-export class Connector extends WorkerEntrypoint {
-  add(a, b) { return a + b; }
+export class ConnectorGateway extends WorkerEntrypoint {
+  invoke(method, [a, b]) { return a + b; }
 }
 
 // Only the parent's final transport is replaced. Child fetches still cross the

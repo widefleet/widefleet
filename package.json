@@ -9,7 +9,7 @@
     "lint:fix": "oxlint --type-aware --fix .",
     "format": "oxfmt --write .",
     "format:check": "oxfmt --check .",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p crates/platform-agent/tsconfig.json && pnpm -r --if-present typecheck",
+    "typecheck": "tsc --noEmit && pnpm -r --if-present typecheck",
     "check": "pnpm --filter @platform/app-runtime build && pnpm typecheck && pnpm format:check && pnpm lint",
     "build": "pnpm -r --if-present build",
     "package:cli": "node tools/package-cli.ts",

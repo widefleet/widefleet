@@ -83,7 +83,7 @@ enum Command {
     Network(network::Options),
     /// Manage app access groups inherited automatically by every preview.
     Access(access::Options),
-    /// Deploy IT connectors and manage native RPC bindings.
+    /// Deploy IT connectors and manage their app bindings.
     Connector(connector::Options),
     /// Show app connectors and resources from the active deployment.
     Connections(connections::Options),

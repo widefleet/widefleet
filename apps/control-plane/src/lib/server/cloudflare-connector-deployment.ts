@@ -1,25 +1,21 @@
 import type { CloudflareWorkersModule } from "@cloudflare/workers-types";
+import { connectorActivation, connectorManagement } from "@platform/contracts";
 import { Result } from "better-result";
 import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
-import { isDeepStrictEqual } from "node:util";
 import { createArtifactStorage } from "./artifact-storage.ts";
 import type { CloudflareBindings } from "./cloudflare-config.ts";
 import { withCloudflareDatabase } from "./cloudflare-database.ts";
 import { registerCloudflareConnector } from "./cloudflare-connectors.ts";
 import type { connectorCommand } from "./cloudflare-connector-command.ts";
-import {
-  connectorWorkerName,
-  connectorUpload,
-  provisionConnectorResources,
-} from "./cloudflare-connector-package.ts";
+import { provisionConnectorResources } from "./cloudflare-connector-package.ts";
 import { connectorReference, loadConnector } from "./connector-package.ts";
-import { CloudflareApiError, createCloudflareProvisioner } from "./cloudflare-provisioning.ts";
-import { updateCloudflareSubscription } from "./cloudflare-subscription-updates.ts";
+import { createCloudflareProvisioner } from "./cloudflare-provisioning.ts";
+import { updateCloudflareBindings } from "./cloudflare-binding-updates.ts";
 import { retryable } from "./cloudflare-deployment.ts";
 import { InvalidOperation } from "./errors.ts";
 import { lockFleet } from "./fleets.ts";
-import { cloudflareOperations, cloudflareSubscriptionUpdates, connectors } from "./schema.ts";
+import { cloudflareOperations, connectors } from "./schema.ts";
 import { decryptSecret } from "./secret-encryption.ts";
 import { createR2Storage } from "./storage/r2.ts";
 import { transact } from "./transactions.ts";
@@ -47,6 +43,26 @@ export const createCloudflareConnectorDeployment = (
 
   const storage = createArtifactStorage(createR2Storage(bindings.ARTIFACTS));
 
+  const manage = async (input: z.infer<typeof connectorManagement>) => {
+    if (!bindings.APP_RUNTIME) throw new Error("App runtime is not configured");
+
+    const response = await bindings.APP_RUNTIME.fetch(
+      "https://runtime.internal/.well-known/widefleet/connectors",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(input),
+      },
+    );
+
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw new Error("Runtime could not complete connector activation");
+    }
+
+    return z.object({ result: connectorActivation }).parse(await response.json()).result;
+  };
+
   const reference = (command: z.infer<typeof connectorCommand>) =>
     withCloudflareDatabase(bindings, async ({ db }) => {
       const [record] = await db
@@ -64,20 +80,23 @@ export const createCloudflareConnectorDeployment = (
       withCloudflareDatabase(bindings, async ({ db }) => {
         (await registerCloudflareConnector(db, storage, command)).unwrap();
       }),
-    provision: async (command: z.infer<typeof connectorCommand>) =>
-      provisionConnectorResources(
+    provision: async (command: z.infer<typeof connectorCommand>) => {
+      const prepared = await provisionConnectorResources(
         provisioner,
         command.fleetId,
         await loadConnector(storage, await reference(command)),
-      ),
-    activate: (
-      command: z.infer<typeof connectorCommand>,
-      resources: Awaited<ReturnType<typeof provisionConnectorResources>>,
-    ) =>
+      );
+
+      await withCloudflareDatabase(bindings, ({ db }) =>
+        updateCloudflareBindings(db, provisioner, prepared.resources),
+      );
+
+      return prepared.nativeBindings;
+    },
+    activate: (command: z.infer<typeof connectorCommand>, nativeBindings: Record<string, string>) =>
       withCloudflareDatabase(bindings, async ({ db }) =>
         (
           await transact(db, async (transaction) => {
-            // The same lock serializes desired edits, connector activation and app grants.
             await lockFleet(transaction, command.fleetId);
 
             const [record] = await transaction
@@ -97,147 +116,23 @@ export const createCloudflareConnectorDeployment = (
               });
             const selected = connectorReference.parse(record.package);
             const release = await loadConnector(storage, selected);
+            const secrets: Record<string, string> = {};
 
-            const workerName = connectorWorkerName(command.fleetId, selected.name);
-            let deployedVersion: string | null = null;
+            for (const [name, ciphertext] of Object.entries(selected.secrets))
+              secrets[name] = await decryptSecret(bindings.PLATFORM_ENCRYPTION_KEY, ciphertext);
 
-            const readVersion = async () => {
-              try {
-                const current = z
-                  .object({
-                    annotations: z.object({ "workers/tag": z.uuid() }),
-                  })
-                  .parse(
-                    await provisioner.call("read connector Worker settings", () =>
-                      provisioner.client.workers.scripts.scriptAndVersionSettings.get(
-                        workerName,
-                        provisioner.account,
-                      ),
-                    ),
-                  );
+            // Plaintext only crosses the private management binding. The runtime encrypts
+            // the immutable snapshot; Workflow results and SQL receipts contain IDs only.
+            const prepared = await manage({
+              action: "prepare",
+              fleetId: command.fleetId,
+              version: command.id,
+              release,
+              nativeBindings,
+              secrets,
+            });
 
-                deployedVersion = current.annotations["workers/tag"];
-
-                return deployedVersion;
-              } catch (error) {
-                if (error instanceof CloudflareApiError && error.status === 404) return null;
-                throw error;
-              }
-            };
-
-            let upload: FormData | undefined;
-
-            await withCloudflareDatabase(bindings, ({ db: reservations }) =>
-              updateCloudflareSubscription(
-                reservations,
-                `${configuration.CLOUDFLARE_ACCOUNT_ID}/connector/${workerName}`,
-                z.string().nullable(),
-                readVersion,
-                async () => {
-                  if (deployedVersion) {
-                    // The native annotation identifies the live package even when its
-                    // upload acknowledgement or SQL activation receipt was lost.
-                    const [deployed] = await transaction
-                      .select()
-                      .from(cloudflareOperations)
-                      .where(
-                        and(
-                          eq(cloudflareOperations.id, deployedVersion),
-                          eq(cloudflareOperations.fleetId, command.fleetId),
-                        ),
-                      );
-
-                    const previous = connectorReference.parse(deployed?.result);
-
-                    if (previous.name !== selected.name)
-                      throw new Error("Deployed connector identity mismatch");
-
-                    const history = (await loadConnector(storage, previous)).configuration
-                      .migrations;
-
-                    if (
-                      !isDeepStrictEqual(
-                        history,
-                        release.configuration.migrations.slice(0, history.length),
-                      )
-                    )
-                      throw new InvalidOperation({
-                        code: "CONFLICT",
-                        message: "Deployed connector migrations cannot be changed or removed",
-                      });
-                  }
-
-                  let migrationTag: string | null = null;
-
-                  try {
-                    const service = z
-                      .object({
-                        default_environment: z.object({
-                          script: z.object({ migration_tag: z.string().nullish() }),
-                        }),
-                      })
-                      .parse(
-                        (
-                          await provisioner.call("read connector migration tag", () =>
-                            // The SDK has no Workers Services method. Its generic transport
-                            // retains the same timeout, authentication and error handling.
-                            provisioner.client.get<{ result: unknown }>(
-                              `/accounts/${encodeURIComponent(configuration.CLOUDFLARE_ACCOUNT_ID)}/workers/services/${encodeURIComponent(workerName)}`,
-                            ),
-                          )
-                        ).result,
-                      );
-
-                    migrationTag = service.default_environment.script.migration_tag ?? null;
-                  } catch (error) {
-                    if (!(error instanceof CloudflareApiError) || error.status !== 404) throw error;
-                  }
-
-                  const secrets: Record<string, string> = {};
-
-                  for (const [name, ciphertext] of Object.entries(selected.secrets))
-                    secrets[name] = await decryptSecret(
-                      bindings.PLATFORM_ENCRYPTION_KEY,
-                      ciphertext,
-                    );
-                  // Code, configuration and secrets become active in one upload. Plaintext never
-                  // leaves this invocation as a Workflow step result or operation-history value.
-                  upload = connectorUpload(
-                    command.id,
-                    workerName,
-                    release,
-                    resources,
-                    secrets,
-                    migrationTag,
-                  );
-
-                  return command.id;
-                },
-                async () => {
-                  if (!upload) throw new Error("Connector upload was not prepared");
-                  const body = Object.fromEntries(upload);
-                  await provisioner.call("upload connector Worker", () =>
-                    provisioner.client.workers.scripts.update(
-                      workerName,
-                      { ...provisioner.account, metadata: {} },
-                      { body, headers: { "content-type": null } },
-                    ),
-                  );
-                },
-              ),
-            );
-            // The default module always returns 404, including before these URL settings apply.
-            await provisioner.call("disable connector public URLs", () =>
-              provisioner.client.workers.scripts.subdomain.create(
-                workerName,
-                {
-                  ...provisioner.account,
-                  enabled: false,
-                  previews_enabled: false,
-                },
-                { headers: { "Cloudflare-Workers-Script-Api-Date": "2025-08-01" } },
-              ),
-            );
+            await manage({ action: "activate", ...prepared });
             await transaction
               .update(connectors)
               .set({ appliedPackage: selected })
@@ -255,27 +150,9 @@ export const createCloudflareConnectorDeployment = (
       ),
     fail: (command: z.infer<typeof connectorCommand>, error: string) =>
       withCloudflareDatabase(bindings, async ({ db }) => {
-        const workerName = connectorWorkerName(command.fleetId, command.change.name);
-
-        const [state] = await db
-          .select()
-          .from(cloudflareSubscriptionUpdates)
-          .where(
-            eq(
-              cloudflareSubscriptionUpdates.scope,
-              `${configuration.CLOUDFLARE_ACCOUNT_ID}/connector/${workerName}`,
-            ),
-          );
-
-        const pending = state?.pending ? z.object({ id: z.string() }).parse(state.pending) : null;
-
-        const message = pending
-          ? `Cloudflare connector update ${pending.id} is unconfirmed. Further changes to this connector are blocked until its outcome is verified.`
-          : error;
-
         await db
           .update(cloudflareOperations)
-          .set({ finishedAt: new Date(), error: message })
+          .set({ finishedAt: new Date(), error })
           .where(
             and(eq(cloudflareOperations.id, command.id), isNull(cloudflareOperations.finishedAt)),
           );

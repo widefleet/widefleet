@@ -251,10 +251,18 @@ pub struct PublishedApp {
     pub native_bindings: BTreeMap<String, String>,
     pub network: NetworkSnapshot,
     #[serde(default)]
-    pub capabilities: BTreeMap<String, String>,
+    pub capabilities: BTreeMap<String, PublishedCapability>,
     #[serde(default)]
     pub capability_revision: u64,
     pub telemetry: Option<TelemetryDestination>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishedCapability {
+    pub fleet_id: Uuid,
+    #[serde(flatten)]
+    pub grant: CapabilityGrant,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

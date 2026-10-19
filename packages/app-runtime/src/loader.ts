@@ -14,6 +14,13 @@ import { appKey, readApp } from "./catalog.ts";
 import type { WorkflowRunner } from "./workflow-runner.ts";
 import type { Events } from "./events.ts";
 import type { ParentEnvironment, PublishedApp, Json } from "./types.ts";
+import { manageConnector } from "./connector-catalog.ts";
+
+export { ConnectorCatalog, ConnectorGateway } from "./connector-catalog.ts";
+
+export { ConnectorSecrets } from "./connector-code.ts";
+
+export { ConnectorState, ConnectorSupervisor } from "./connector-state.ts";
 
 export { Database, KeyValue, Producer } from "./storage.ts";
 
@@ -163,6 +170,9 @@ const manageRuntime = async (
   if (url.pathname === "/.well-known/widefleet/runtime") {
     return Response.json({ runtimeVersion: WIDEFLEET_RUNTIME_VERSION });
   }
+
+  if (url.pathname === "/.well-known/widefleet/connectors")
+    return manageConnector(request, environment);
 
   if (url.pathname === "/.well-known/widefleet/workflows") {
     if (request.method !== "POST") return new Response(null, { status: 403 });

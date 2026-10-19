@@ -838,7 +838,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     await agent();
   }, 120000);
 
-  it("deploys an independent connector project with direct native RPC, durable state and safe revocation", async () => {
+  it("deploys an independent dynamic connector with RPC, durable state and safe revocation", async () => {
     const project = join(state, "independent connector");
     await mkdir(project);
 
@@ -994,17 +994,16 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       secretFile,
       "--no-wait",
     );
-    await expect(agent(undefined, undefined, failedPublisher)).rejects.toThrow(
-      "Synthetic secret publication failure",
-    );
+    // Secret-only updates must never invoke the native publisher.
+    await agent(undefined, undefined, failedPublisher);
     expect(await secretProbe()).toEqual({
-      connector: { value: "synthetic-first-key" },
+      connector: { value: "synthetic-rejected-key" },
       exposed: false,
     });
     expect(JSON.parse((await cli("connector", "show", "erp-fixture")).stdout)).toMatchObject({
-      state: "failed",
+      state: "succeeded",
       secretRevision: 2,
-      appliedSecretRevision: 1,
+      appliedSecretRevision: 2,
     });
     await setSecret("synthetic-rotated-key");
     expect(await secretProbe()).toEqual({

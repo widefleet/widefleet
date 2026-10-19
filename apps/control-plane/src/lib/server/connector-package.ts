@@ -1,7 +1,7 @@
 import * as contract from "@platform/contracts";
 import { z } from "zod";
 import { InvalidOperation, StorageUnavailable } from "./errors.ts";
-import { loadPackage } from "./package-storage.ts";
+import { loadPackage, verifyModules } from "./package-storage.ts";
 import type { ArtifactStorage } from "./storage.ts";
 
 export const connectorReference = z.strictObject({
@@ -43,6 +43,20 @@ export const validateConnectorEnvironment = (
     throw new InvalidOperation({
       code: "BAD_REQUEST",
       message: "Connectors support at most 128 variables and secrets combined",
+    });
+};
+
+export const validateConnectorPackage = (
+  release: z.infer<typeof contract.connectorPackage>,
+  secretNames: string[],
+) => {
+  verifyModules(release);
+  validateConnectorEnvironment(release.configuration, secretNames);
+
+  if (release.modules.some((module) => module.name.startsWith("__widefleet_")))
+    throw new InvalidOperation({
+      code: "BAD_REQUEST",
+      message: "Connector module name is reserved",
     });
 };
 

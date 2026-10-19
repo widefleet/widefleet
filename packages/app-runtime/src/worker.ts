@@ -53,14 +53,8 @@ export const workerCode = async (
     }
   }
 
-  for (const [name, nativeName] of Object.entries(app.capabilities)) {
-    const capability = environment[nativeName];
-
-    if (!capability) throw new Error("Granted connector is not installed");
-    // SAFETY: Capability names refer exclusively to native service bindings
-    // selected by administrators. celld preserves their native RPC surface.
-    bindings.set(name, capability as Fetcher);
-  }
+  for (const [name, grant] of Object.entries(app.capabilities))
+    bindings.set(`WIDEFLEET_CONNECTOR_${name}`, context.exports.ConnectorGateway({ props: grant }));
 
   const modules = new Map<string, string | WorkerLoaderModule>();
 
@@ -101,7 +95,7 @@ export const workerCode = async (
   );
   modules.set(
     "__widefleet_bindings.js",
-    `const WIDEFLEET_CONFIGURATION = ${JSON.stringify({ metadata: app.metadata })};\n${WIDEFLEET_BINDINGS_SOURCE}`,
+    `const WIDEFLEET_CONFIGURATION = ${JSON.stringify({ metadata: app.metadata, capabilities: Object.keys(app.capabilities) })};\n${WIDEFLEET_BINDINGS_SOURCE}`,
   );
   modules.set("__widefleet_events.js", WIDEFLEET_EVENTS_SOURCE);
 

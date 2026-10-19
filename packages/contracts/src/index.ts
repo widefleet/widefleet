@@ -330,17 +330,11 @@ export const connectorConfiguration = z.strictObject({
       bindings: z.array(
         z.strictObject({
           name: bindingName,
-          class_name: bindingName.refine(
-            (name) => name !== "WidefleetWorkflowCatalog",
-            "Platform Durable Object class is reserved",
-          ),
+          class_name: bindingName,
         }),
       ),
     })
     .default({ bindings: [] }),
-  migrations: z
-    .array(z.strictObject({ tag: z.string().min(1), new_sqlite_classes: z.array(bindingName) }))
-    .default([]),
 });
 
 export const connectorPackage = z.strictObject({
@@ -398,6 +392,27 @@ export const capabilityGrant = z.strictObject({
 
 export const capabilityGrants = z.record(bindingName, capabilityGrant);
 
+export const publishedCapability = capabilityGrant.extend({ fleetId: identifier });
+
+export const connectorPreparation = z.strictObject({
+  fleetId: identifier,
+  version: identifier,
+  release: connectorPackage,
+  nativeBindings: z.record(bindingName, bindingName),
+  secrets: z.record(connectorSecretName, connectorSecretValue),
+});
+
+export const connectorActivation = z.strictObject({
+  fleetId: identifier,
+  name: appSlug,
+  version: identifier,
+});
+
+export const connectorManagement = z.discriminatedUnion("action", [
+  connectorPreparation.extend({ action: z.literal("prepare") }),
+  connectorActivation.extend({ action: z.literal("activate") }),
+]);
+
 export const capabilitySnapshot = z.strictObject({
   revision: z.number().int().nonnegative(),
   grants: capabilityGrants,
@@ -453,7 +468,7 @@ export const runtimeUpdate = z.strictObject({ version: runtimeVersion });
 
 export const publishedApp = artifact.extend({
   network: networkSnapshot,
-  capabilities: z.record(bindingName, bindingName).default({}),
+  capabilities: z.record(bindingName, publishedCapability).default({}),
   capabilityRevision: z.number().int().nonnegative().default(0),
   version: identifier,
   deploymentId: identifier,

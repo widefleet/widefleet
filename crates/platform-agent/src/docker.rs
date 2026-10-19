@@ -8,6 +8,7 @@ use platform_core::{
 use serde::Deserialize;
 use serde_json::{Value, json as value};
 use std::time::Duration;
+use tokio::io::AsyncWriteExt;
 
 fn docker_error(error: bollard::errors::Error) -> Error {
     Error::invalid(format!("Docker operation failed: {error}"))
@@ -114,7 +115,7 @@ pub async fn execute_output(
     container: &str,
     command: Vec<String>,
 ) -> Result<Vec<u8>> {
-    execute_with_environment(docker, container, command, Vec::new()).await
+    execute_with_environment(docker, container, command, Vec::new(), None).await
 }
 
 pub async fn execute_native(
@@ -136,6 +137,7 @@ pub async fn execute_native(
         &configuration.runtime_container,
         command,
         environment,
+        None,
     )
     .await
 }
@@ -145,12 +147,14 @@ async fn execute_with_environment(
     container: &str,
     command: Vec<String>,
     environment: Vec<String>,
+    stdin: Option<Vec<u8>>,
 ) -> Result<Vec<u8>> {
     let exec = docker
         .create_exec(
             container,
             ExecConfig {
                 user: Some("0".into()),
+                attach_stdin: Some(stdin.is_some()),
                 attach_stdout: Some(true),
                 attach_stderr: Some(true),
                 cmd: Some(command),
@@ -162,11 +166,18 @@ async fn execute_with_environment(
         .map_err(docker_error)?;
     let mut bytes = Vec::new();
     let mut errors = Vec::new();
-    if let StartExecResults::Attached { mut output, .. } = docker
+    if let StartExecResults::Attached {
+        mut output,
+        mut input,
+    } = docker
         .start_exec(&exec.id, None)
         .await
         .map_err(docker_error)?
     {
+        if let Some(body) = stdin {
+            input.write_all(&body).await?;
+            input.shutdown().await?;
+        }
         while let Some(message) = output.next().await {
             match message.map_err(docker_error)? {
                 LogOutput::StdErr { message } => errors.extend_from_slice(&message),
@@ -366,6 +377,43 @@ pub async fn remove(configuration: &Configuration, job: &Job) -> Result<()> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error.into()),
     }
+}
+
+pub async fn connector_request(
+    docker: &Docker,
+    container: &str,
+    token: &str,
+    request: &Value,
+) -> Result<Value> {
+    let bytes = execute_with_environment(
+        docker,
+        container,
+        vec![
+            "curl".into(),
+            "--silent".into(),
+            "--show-error".into(),
+            "--fail-with-body".into(),
+            "--max-time".into(),
+            "60".into(),
+            "-H".into(),
+            format!("Authorization: Bearer {token}"),
+            "-H".into(),
+            "Content-Type: application/json".into(),
+            "--data-binary".into(),
+            "@-".into(),
+            "http://127.0.0.1:8080/.well-known/widefleet/connectors".into(),
+        ],
+        Vec::new(),
+        Some(serde_json::to_vec(request)?),
+    )
+    .await?;
+    let response: Value = serde_json::from_slice(&bytes)?;
+    let mut result = response
+        .get("result")
+        .cloned()
+        .ok_or_else(|| Error::invalid("Connector runtime returned no result".into()))?;
+    result["action"] = value!("activate");
+    Ok(result)
 }
 
 pub async fn workflow_request(

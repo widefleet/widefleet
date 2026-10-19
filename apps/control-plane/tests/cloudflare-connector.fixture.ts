@@ -42,6 +42,5 @@ export const connectorFixture = (name = "fixture-connector", source = connectorS
       r2_buckets: [{ binding: "BUCKET", bucket_name: "files" }],
       kv_namespaces: [{ binding: "KV", id: "cache" }],
       durable_objects: { bindings: [{ name: "COUNTER", class_name: "Counter" }] },
-      migrations: [{ tag: "v1", new_sqlite_classes: ["Counter"] }],
     },
   });
