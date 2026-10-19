@@ -77,7 +77,7 @@ widefleet connector show erp
 
 The CLI bundles TypeScript/JavaScript and installed dependencies, discovers exported entrypoints, uploads the code and private source maps, and waits for activation. `--config PATH` selects another Wrangler file; `--no-wait` returns after queuing. Build progress uses stderr; `--json` or redirected stdout returns structured results. Run any project-specific code generation before deployment.
 
-Each artifact is immutable and identified by its content checksum. PostgreSQL stores references and deployment status; Object Storage stores code and configuration. Repeating an unchanged successful or pending deployment reuses it; repeating a failed deployment retries. To restore previous code, deploy the previous source checkout. This does not reverse data changes. A newer concurrent deployment is reported explicitly if it supersedes a waiting command.
+Each artifact is immutable and identified by its content checksum. PostgreSQL stores references and deployment status; Object Storage stores code and configuration. Apps and connectors use the same upload retry rules: a CLI invocation keeps one request ID across automatic network/server retries, so a lost response does not create another deployment. Running the command again creates a new deployment attempt, including after a failed activation. To restore previous code, deploy the previous source checkout. This does not reverse data changes. A newer concurrent deployment is reported explicitly if it supersedes a waiting command.
 
 ## Connector secrets
 
@@ -119,7 +119,7 @@ Changes activate the connector's currently desired code and a fixed snapshot of 
 
 ### Storage and recovery
 
-Like apps, connector artifacts and runtime versions reference immutable modules stored by checksum. Code and private source maps use the same module validation and storage rules as apps: up to 32 runtime modules and 500 maps, with at most 20 MiB per file. Secret-only changes reuse those modules; each runtime version snapshot contains configuration, module references and encrypted secrets instead of another copy of the code. Source maps are excluded from executable runtime modules.
+Like apps, connector artifacts and runtime versions reference immutable modules stored by checksum. Code and private source maps use the same module validation and storage rules as apps: up to 32 runtime modules and 500 maps, with at most 20 MiB per file. Secret-only changes reuse those modules; each runtime version snapshot contains configuration, module references and encrypted secrets instead of another copy of the code. Both deployment paths transfer module files separately from the manifest and verify their declared sizes and SHA-256 checksums. Source maps stay in the control-plane artifact store and are excluded from executable runtime modules.
 
 The control plane encrypts values using the installation encryption key and stores the ciphertexts in connector activation snapshots in PostgreSQL. Desired, applied and queued snapshots own their secret values independently of login settings and credential cleanup. Source artifacts contain no managed secret values. The active deployment agent, or the hosted deployment operation on Cloudflare, sends the selected values through the runtime's private management interface. Restore PostgreSQL together with the same installation key.
 
@@ -172,7 +172,7 @@ A binding can be saved before the app's first deployment. Otherwise changes wait
 
 ## Resources and activation
 
-Connector configuration supports `vars`, D1, R2, KV and local Durable Object bindings. Resources belong to the connector, independently of similarly named app resources or another connector's resources. A connector does not inherit the loader's storage, administrative token or Worker Loader binding. Its normal outbound networking is independent of the user app's network allowlist; trusted connector code must enforce its own business restrictions.
+Connector configuration supports `vars`, D1, R2, KV and local Durable Object bindings. Apps and connectors normalize variables and storage resources into the same binding types and use the same provisioning and runtime adapters. Both allow up to 32 ordinary bindings, including variables and storage bindings; each variable value is limited to 16,384 characters. The additional connector secret limit remains 128 variables and secrets combined. Resources belong to the connector, independently of similarly named app resources or another connector's resources. A connector does not inherit the loader's storage, administrative token or Worker Loader binding. Its normal outbound networking is independent of the user app's network allowlist; trusted connector code must enforce its own business restrictions.
 
 An optional Wrangler `database_id` selects D1's logical identity, falling back to `database_name`. Widefleet scopes that identity to the connector and provisions the native resource. App binding-name conflicts are checked against active apps and queued/running app deployments.
 
@@ -211,26 +211,29 @@ The OpenAPI document includes connector artifact schemas and normal OAuth authen
 
 Binding updates are atomic and do not require a caller-supplied revision. Connector deployment, administrative status listing and grant changes require administrator access. Members can browse the connector catalog; app collaborators can read their app's connections and bindings. CLI users select names and project context; IDs remain API identifiers.
 
-Connector uploads use the same `multipart/form-data` format as app Worker uploads: one JSON `metadata` field and one file part per module, with each part named after its module. The connector name comes from the URL. Metadata contains `protocol`, `main`, `entrypoints`, `configuration` and optional `debug`; it does not contain `name`, module sources or checksums. The server computes module checksums from the uploaded bytes. JSON-only connector uploads are rejected.
+Connector uploads use the same `multipart/form-data` format as app Worker uploads: one JSON `metadata` field and one file part per module, with each part named after its module. The connector name comes from the URL. Both use `main_module`, `compatibility_date`, optional `compatibility_flags`, normalized `bindings` and optional `debug`. Connector metadata adds `entrypoints` and optional `durable_objects`; app metadata adds assets and event configuration. Metadata contains no connector name, module sources or checksums. The server computes module checksums from the uploaded bytes. JSON-only connector uploads are rejected.
 
 For a connector bundled as `worker.js` with only a default export, create `metadata.json`:
 
 ```json
 {
-  "protocol": 1,
-  "main": "worker.js",
-  "entrypoints": ["default"],
-  "configuration": { "compatibility_date": "2026-10-01" }
+  "main_module": "worker.js",
+  "compatibility_date": "2026-10-01",
+  "entrypoints": ["default"]
 }
 ```
 
 With `PLATFORM_URL` set to the installation URL and `PLATFORM_ACCESS_TOKEN` to an administrator token with `platform:write`, upload it:
 
 ```sh
+REQUEST_ID="$(node -e 'console.log(require("node:crypto").randomUUID())')"
 curl --fail-with-body --request PUT "$PLATFORM_URL/api/v1/connectors/erp" \
   --header "Authorization: Bearer $PLATFORM_ACCESS_TOKEN" \
+  --header "Idempotency-Key: $REQUEST_ID" \
   --form 'metadata=@metadata.json;type=application/json' \
   --form 'worker.js=@worker.js;type=application/javascript+module'
 ```
 
-The response contains the deployment status; read `GET /api/v1/connectors/erp` until activation succeeds or fails. For private source maps, add file parts with MIME type `application/source-map+json` and reference them through `debug.source_maps`, with a `debug.build_id`. Both upload paths enforce 64 KiB of UTF-8 metadata, 20 MiB per file, 100 MiB per complete request, at most 32 runtime modules and 500 source maps. Connectors accept JavaScript modules and source maps. Correct a rejected upload before retrying; repeating an unchanged pending or successful deployment returns its existing status.
+The response contains the deployment status; read `GET /api/v1/connectors/erp` until activation succeeds or fails. For private source maps, add file parts with MIME type `application/source-map+json` and reference them through `debug.source_maps`, with a `debug.build_id`. Both upload paths enforce 64 KiB of UTF-8 metadata, 20 MiB per file, 100 MiB per complete request, at most 32 runtime modules and 500 source maps. Both upload endpoints accept ES modules (`application/javascript+module`), Wasm (`application/wasm`), text (`text/plain`), binary data (`application/octet-stream`) and private source maps. celld 0.6.2 loads ES modules and Wasm but rejects separate text/data modules; local workerd loads all four runtime module types. This runtime restriction applies equally to apps and connectors.
+
+`Idempotency-Key` must be a UUID. Reuse it with the same upload when retrying a lost response: the API returns that request’s deployment even if a newer one exists, without changing the desired version. Different content under the same key returns `409`. Use a new key after correcting an upload or to retry a failed activation. The CLI manages these keys automatically.

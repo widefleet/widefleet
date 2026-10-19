@@ -29,6 +29,12 @@ This reference compares Widefleet with Cloudflare's hosted platform, its local
 
 Sources: [celld Dynamic Workers](https://github.com/denoland/celld/blob/v0.6.1/docs/services/dynamic-workers.md), [celld RPC und Streams](https://github.com/denoland/celld/blob/v0.6.1/docs/cloudflare-compat.md#rpc), [native Stream-Übertragung](https://github.com/denoland/celld/blob/v0.6.1/crates/celld/js/harness.js#L3580), [KV](https://github.com/denoland/celld/blob/v0.6.1/docs/services/kv.md), [R2](https://github.com/denoland/celld/blob/v0.6.1/docs/services/r2.md), [D1](https://github.com/denoland/celld/blob/v0.6.1/docs/services/d1.md), [Cloudflare Dynamic-Worker-Limits](https://developers.cloudflare.com/dynamic-workers/platform/limits/), [Cloudflare RPC](https://developers.cloudflare.com/workers/runtime-apis/rpc/), [Cloudflare Egress](https://developers.cloudflare.com/dynamic-workers/usage/egress-control/), [Dynamic-Worker-Observability](https://developers.cloudflare.com/dynamic-workers/usage/observability/), [Cloudflare KV](https://developers.cloudflare.com/kv/concepts/how-kv-works/), [Cloudflare D1](https://developers.cloudflare.com/d1/worker-api/d1-database/#dump).
 
+The shared app/connector module-loader tests on **celld 0.6.2** and local workerd
+also verify ES modules and Wasm. celld rejects separate text and binary data
+modules with “must be a string or wasm bytes”; workerd loads them. Widefleet uses
+the same module representation for apps and connectors and preserves this native
+restriction.
+
 ## Widefleet implementation limits
 
 Widefleet integrates the native runtime as follows:
