@@ -506,6 +506,16 @@ pub(crate) async fn bundle(
     output: &Path,
     node_compat: bool,
 ) -> Result<Bundle> {
+    // Canonical Windows paths use the verbatim \\?\ prefix. Mixing those with
+    // esbuild's working directory makes source maps contain absolute file URLs.
+    let entry = Path::new(".").join(
+        entry
+            .strip_prefix(project)
+            .map_err(|_| Error::invalid("Worker entry must be inside its project".into()))?,
+    );
+    let relative_output = output
+        .strip_prefix(project)
+        .map_err(|_| Error::invalid("Worker output must be inside its project".into()))?;
     let mut command = Command::new(executable);
     command
         .arg(entry)
@@ -522,10 +532,13 @@ pub(crate) async fn bundle(
             "--log-level=warning",
             "--sourcemap=external",
         ])
-        .arg(format!("--outfile={}", output.join("worker.js").display()))
+        .arg(format!(
+            "--outfile={}",
+            relative_output.join("worker.js").display()
+        ))
         .arg(format!(
             "--metafile={}",
-            output.join("metadata.json").display()
+            relative_output.join("metadata.json").display()
         ))
         .current_dir(project)
         .kill_on_drop(true);

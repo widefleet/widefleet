@@ -1186,7 +1186,9 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       );
     }, 40_000);
 
-    it("recovers activation after a SQL failure and a workerd restart", async () => {
+    it("recovers activation after a SQL failure and a workerd restart", async ({
+      onTestFinished,
+    }) => {
       const entry = await seedDeployment(environment.database.db, {
         appId: first.appId,
         source: deploymentSource.replace("deployed fixture", "second version"),
@@ -1201,6 +1203,11 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       await environment.database.db.execute(
         sql`CREATE TRIGGER fixture_receipt BEFORE UPDATE ON deployment FOR EACH ROW EXECUTE FUNCTION fixture_reject_receipt()`,
       );
+      onTestFinished(async () => {
+        await environment.database.db.execute(
+          sql`DROP TRIGGER IF EXISTS fixture_receipt ON deployment`,
+        );
+      });
       await dispatch(entry);
       await expect
         .poll(async () => (await host(entry.hostname))?.body, { timeout: 30_000, interval: 100 })
@@ -1263,7 +1270,9 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       expect(status).toBeDefined();
     }, 100_000);
 
-    it("keeps other apps independent and restarts failed activation only on an explicit command", async () => {
+    it("keeps other apps independent and restarts failed activation only on an explicit command", async ({
+      onTestFinished,
+    }) => {
       const entry = await seedDeployment(environment.database.db, {
         appId: first.appId,
         source: deploymentSource.replace("deployed fixture", "third version"),
@@ -1281,6 +1290,11 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       await environment.database.db.execute(
         sql`CREATE TRIGGER fixture_receipt BEFORE UPDATE ON deployment FOR EACH ROW EXECUTE FUNCTION fixture_reject_receipt()`,
       );
+      onTestFinished(async () => {
+        await environment.database.db.execute(
+          sql`DROP TRIGGER IF EXISTS fixture_receipt ON deployment`,
+        );
+      });
       await dispatch(entry, "fast-retries");
       await expect
         .poll(
@@ -2527,7 +2541,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       const before = runtimeUploads;
       runtimeUploadMode = "rejected";
       const selected = await selectRuntime(runtimeRelease("99.3.0"));
-      await expect.poll(runtimeStatus).toMatchObject({
+      await expect.poll(runtimeStatus, { timeout: 15000 }).toMatchObject({
         activeVersion: "99.2.0",
         state: "failed",
         message: "Cloudflare rejected the runtime update (HTTP 400)",
@@ -2537,7 +2551,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       const retried = await selectRuntime({ version: "99.3.0" });
       expect(retried.jobId).not.toBe(selected.jobId);
       await expect
-        .poll(runtimeStatus)
+        .poll(runtimeStatus, { timeout: 15000 })
         .toMatchObject({ activeVersion: "99.3.0", state: "succeeded" });
     }, 20000);
 

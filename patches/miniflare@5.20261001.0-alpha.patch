@@ -1,5 +1,5 @@
 diff --git a/dist/src/workers/workflows/binding.worker.js b/dist/src/workers/workflows/binding.worker.js
-index 10d57caf4257c13e1292912c292b55366ea2df19..0d1dfda0af779e1d991ee5228185fe59ef97cedb 100644
+index 10d57caf4257c13e1292912c292b55366ea2df19..b82794681076c68e86bc2cbf8a7f6d767931f26e 100644
 --- a/dist/src/workers/workflows/binding.worker.js
 +++ b/dist/src/workers/workflows/binding.worker.js
 @@ -2614,7 +2614,10 @@ var defaultConfig = {
@@ -14,3 +14,15 @@ index 10d57caf4257c13e1292912c292b55366ea2df19..0d1dfda0af779e1d991ee5228185fe59
          }
          await this.#state.storage.put(stepStateKey, stepState);
          let willRetry = stepState.attemptedCount <= config.retries.limit, priorityQueueHash = `${cacheKey}-${stepState.attemptedCount}`, retryDelayMs, delayFailure;
+@@ -2917,7 +2920,10 @@ var ENGINE_TIMEOUT = r("5 minutes"), latestGracePeriodTimestamp, GracePeriodSema
+         resolveCallback: resolve,
+         rejectCallback: reject
+       });
+-    }), this.#counter == 0 && (latestGracePeriodTimestamp = void 0), this.#counter += 1;
++    });
++    if (_engine.pauseController.signal.aborted)
++      throw new Error(ABORT_REASONS.USER_PAUSE);
++    this.#counter == 0 && (latestGracePeriodTimestamp = void 0), this.#counter += 1;
+   }
+   async release(engine) {
+     if (this.#counter = Math.max(this.#counter - 1, 0), this.#counter == 0) {

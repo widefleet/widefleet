@@ -141,7 +141,7 @@ export default {
 
 export const parentSource = `
 import runtime from './runtime.js';
-import { WorkerEntrypoint } from 'cloudflare:workers';
+import { WorkerEntrypoint, WorkflowEntrypoint } from 'cloudflare:workers';
 import { connect } from 'cloudflare:sockets';
 export * from './runtime.js';
 const logRecords = [];
@@ -155,6 +155,25 @@ for (const level of ['log', 'debug', 'info', 'warn', 'error']) {
 
 export class ConnectorGateway extends WorkerEntrypoint {
   invoke(method, [a, b]) { return a + b; }
+}
+
+export class PauseWorkflow extends WorkflowEntrypoint {
+  async run(event, step) {
+    const key = 'pause:' + event.instanceId;
+    try {
+      await step.do('started', () => this.env.KV.put(key + ':started', 'true'));
+      await step.waitForEvent('continue', { type: 'continue', timeout: '5 minutes' });
+      return 'recovered';
+    } catch (error) {
+      try {
+        await step.do('record-failure', () => this.env.KV.put(key + ':failed', 'true'));
+      } finally {
+        // Observe that the catch has settled before checking for forbidden side effects.
+        await this.env.KV.put(key + ':caught', 'true');
+      }
+      throw error;
+    }
+  }
 }
 
 // Only the parent's final transport is replaced. Child fetches still cross the
@@ -180,6 +199,23 @@ export default {
       return env.RUNTIME_MANAGEMENT.fetch(request);
     }
     if (url.pathname === '/fixture/logs') return Response.json(logRecords);
+    if (url.pathname === '/fixture/pause-workflow') {
+      const id = url.searchParams.get('id');
+      const instance = request.method === 'POST'
+        ? await env.PAUSE_WORKFLOW.create({ id })
+        : await env.PAUSE_WORKFLOW.get(id);
+      if (request.method === 'PUT') {
+        if (url.searchParams.get('action') === 'pause') await instance.pause();
+        else {
+          await instance.resume();
+          await instance.sendEvent({ type: 'continue', payload: null });
+        }
+      }
+      const state = await instance.status();
+      for (const name of ['started', 'failed', 'caught'])
+        state[name] = await env.KV.get('pause:' + id + ':' + name) === 'true';
+      return Response.json(state);
+    }
     if (url.pathname === '/fixture/tcp') {
       const socket = connect(url.searchParams.get('address'));
       await socket.opened;
