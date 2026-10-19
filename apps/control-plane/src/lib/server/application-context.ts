@@ -1,15 +1,11 @@
-import { z } from "zod";
-
 // This context is resolved from authenticated membership, never accepted as request input.
 // Background commands retain it so opening a fresh database cannot widen app access.
-export const applicationContext = z.object({
-  fleetId: z.uuid(),
-  organizationId: z.string().min(1),
-  admin: z.boolean(),
-});
+export { applicationContext } from "@platform/contracts";
 
-export type FleetSelector = (input: {
-  userId: string;
-  request: Request;
-  activeOrganizationId: string | null;
-}) => Promise<string>;
+// Candidates already belong to the authenticated user. Admission may only narrow them.
+export type FleetAccess = {
+  filterFleets: (
+    candidates: readonly { id: string; organizationId: string }[],
+  ) => Promise<string[]>;
+  defaultOrganizationId?: string;
+};

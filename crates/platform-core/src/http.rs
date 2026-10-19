@@ -1,4 +1,5 @@
 use crate::{Error, Result};
+use reqwest::header::HeaderValue;
 use reqwest::{Client, Method, RequestBuilder, Response, Url};
 use serde::de::DeserializeOwned;
 use std::time::Duration;
@@ -7,6 +8,7 @@ use std::time::Duration;
 pub struct Api {
     pub origin: Url,
     pub client: Client,
+    organization: Option<HeaderValue>,
 }
 
 impl Api {
@@ -30,7 +32,26 @@ impl Api {
             .timeout(Duration::from_secs(60))
             .user_agent(concat!("app-platform/", env!("CARGO_PKG_VERSION")))
             .build()?;
-        Ok(Self { origin, client })
+        Ok(Self {
+            origin,
+            client,
+            organization: None,
+        })
+    }
+
+    pub fn with_organization(mut self, organization: Option<&str>) -> Result<Self> {
+        self.organization = organization
+            .map(|id| {
+                if id.is_empty() || id.len() > 128 || id.trim() != id {
+                    return Err(Error::invalid(
+                        "Use a non-empty organization ID of at most 128 characters".into(),
+                    ));
+                }
+                HeaderValue::from_str(id)
+                    .map_err(|_| Error::invalid("Invalid organization ID".into()))
+            })
+            .transpose()?;
+        Ok(self)
     }
 
     pub fn origin_text(&self) -> String {
@@ -44,8 +65,13 @@ impl Api {
     }
 
     pub fn authenticated(&self, method: Method, path: &str, token: &str) -> RequestBuilder {
-        self.request(method, &format!("/api/v1{path}"))
-            .bearer_auth(token)
+        let request = self
+            .request(method, &format!("/api/v1{path}"))
+            .bearer_auth(token);
+        match &self.organization {
+            Some(organization) => request.header("x-widefleet-organization", organization),
+            None => request,
+        }
     }
 }
 

@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { createLocalJWKSet, jwtVerify } from "jose";
 import { z } from "zod";
 import { apiResource } from "./auth-options.ts";
-import { member, user } from "./auth-schema.ts";
+import { member, user, organization, session as sessions } from "./auth-schema.ts";
 import {
   installationOrganizationId,
   organizationRole,
@@ -12,13 +12,13 @@ import {
 import type { Authentication } from "./auth.ts";
 import type { Configuration } from "./config.ts";
 import type { Database } from "./database.ts";
-import type { FleetSelector } from "./application-context.ts";
+import type { FleetAccess } from "./application-context.ts";
 import { defaultFleet } from "./fleets.ts";
 import { fleets } from "./schema.ts";
 import { DatabaseUnavailable } from "./errors.ts";
 
 export class AuthenticationFailed extends TaggedError("AuthenticationFailed")<{
-  code: "UNAUTHORIZED" | "FORBIDDEN";
+  code: "UNAUTHORIZED" | "FORBIDDEN" | "ORGANIZATION_REQUIRED";
   message: string;
 }> {}
 
@@ -28,80 +28,93 @@ export const createIdentityService = (
   auth: Authentication,
   database: Database,
   configuration: Configuration,
-  selectFleet: FleetSelector = async () => (await defaultFleet(database)).id,
+  access: FleetAccess = {
+    filterFleets: async () => [(await defaultFleet(database)).id],
+    defaultOrganizationId: installationOrganizationId,
+  },
 ) => {
-  const resolveUser = (userId: string, request: Request, activeOrganizationId: string | null) =>
-    Result.gen(async function* () {
-      const fleetId = yield* Result.await(
-        Result.tryPromise({
-          try: () => selectFleet({ userId, request, activeOrganizationId }),
-          catch: (cause) =>
-            cause instanceof AuthenticationFailed
-              ? cause
-              : new DatabaseUnavailable({ message: "Could not resolve application access", cause }),
-        }),
-      );
+  const memberships = (userId: string) =>
+    Result.tryPromise({
+      try: async () => {
+        const records = await database
+          .select({
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            role: member.role,
+            organizationId: organization.id,
+            organizationName: organization.name,
+            organizationSlug: organization.slug,
+            fleetId: fleets.id,
+          })
+          .from(user)
+          .innerJoin(member, eq(member.userId, user.id))
+          .innerJoin(organization, eq(organization.id, member.organizationId))
+          .innerJoin(fleets, eq(fleets.organizationId, organization.id))
+          .where(eq(user.id, userId))
+          .orderBy(organization.name, organization.id, fleets.id);
 
-      const [record] = yield* Result.await(
-        Result.tryPromise({
-          try: () =>
-            database
-              .select({
-                id: user.id,
-                name: user.name,
-                email: user.email,
-                role: member.role,
-                organizationId: member.organizationId,
-              })
-              .from(user)
-              .innerJoin(fleets, eq(fleets.id, fleetId))
-              .innerJoin(
-                member,
-                and(eq(member.userId, user.id), eq(member.organizationId, fleets.organizationId)),
-              )
-              .where(eq(user.id, userId)),
-          catch: (cause) =>
-            new DatabaseUnavailable({ message: "Could not read current user permissions", cause }),
-        }),
-      );
+        const admitted = new Set(
+          await access.filterFleets(
+            records.map((record) => ({
+              id: record.fleetId,
+              organizationId: record.organizationId,
+            })),
+          ),
+        );
 
-      if (!record) {
-        return yield* new AuthenticationFailed({
-          code: "UNAUTHORIZED",
-          message: "An active organization membership is required",
+        // An extension can narrow membership access, never grant membership itself.
+        return records.flatMap((record) => {
+          const role = organizationRole.safeParse(record.role);
+
+          return admitted.has(record.fleetId) && role.success
+            ? [{ ...record, role: role.data }]
+            : [];
         });
-      }
+      },
+      catch: (cause) =>
+        new DatabaseUnavailable({ message: "Could not read organization access", cause }),
+    });
 
-      const role = organizationRole.safeParse(record.role);
+  const resolveUser = (userId: string, organizationId: string | null) =>
+    Result.gen(async function* () {
+      if (organizationId === null)
+        return yield* new AuthenticationFailed({
+          code: "ORGANIZATION_REQUIRED",
+          message:
+            "Select an organization. API clients must send X-Widefleet-Organization; CLI users can pass --organization ID.",
+        });
 
-      if (!role.success)
+      const records = yield* Result.await(memberships(userId));
+      const matching = records.filter((record) => record.organizationId === organizationId);
+      const record = matching[0];
+
+      // Organization selection is intentionally unambiguous. Multiple execution fleets
+      // need an explicit selection contract before they can be used here.
+      if (!record || matching.length !== 1)
         return yield* new AuthenticationFailed({
           code: "FORBIDDEN",
-          message: "An active organization membership is required",
+          message: "This organization is unavailable or you are no longer a member",
         });
+
+      const admin = organizationRoles[record.role].authorize({ agent: ["manage"] }).success;
 
       return Result.ok({
         id: record.id,
         name: record.name,
         email: record.email,
-        role: role.data,
-        // Installation administration never follows an unrelated organization role.
-        admin:
-          record.organizationId === installationOrganizationId &&
-          organizationRoles[role.data].authorize({ agent: ["manage"] }).success,
+        role: record.role,
+        admin: record.organizationId === installationOrganizationId && admin,
         application: {
-          fleetId,
+          fleetId: record.fleetId,
           organizationId: record.organizationId,
-          admin: organizationRoles[role.data].authorize({ agent: ["manage"] }).success,
+          admin,
         },
-        creator: organizationRoles[role.data].authorize({ app: ["create"] }).success,
+        creator: organizationRoles[record.role].authorize({ app: ["create"] }).success,
       });
     });
 
-  const authenticate = (
-    request: Request,
-    scope: "platform:read" | "platform:write" | "network:manage",
-  ) =>
+  const verify = (request: Request, scope: "platform:read" | "platform:write" | "network:manage") =>
     Result.gen(async function* () {
       const authorization = request.headers.get("authorization");
 
@@ -142,7 +155,21 @@ export const createIdentityService = (
           });
         }
 
-        return resolveUser(verified.sub, request, null);
+        const [current] = yield* Result.await(
+          Result.tryPromise({
+            try: () => database.select({ id: user.id }).from(user).where(eq(user.id, verified.sub)),
+            catch: (cause) =>
+              new DatabaseUnavailable({ message: "Could not verify the current user", cause }),
+          }),
+        );
+
+        if (!current)
+          return yield* new AuthenticationFailed({
+            code: "UNAUTHORIZED",
+            message: "The user no longer exists",
+          });
+
+        return Result.ok({ userId: current.id, sessionId: null, activeOrganizationId: null });
       }
 
       if (
@@ -170,10 +197,81 @@ export const createIdentityService = (
         });
       }
 
-      return resolveUser(session.user.id, request, session.session.activeOrganizationId ?? null);
+      return Result.ok({
+        userId: session.user.id,
+        sessionId: session.session.id,
+        activeOrganizationId: session.session.activeOrganizationId ?? null,
+      });
     });
 
-  return { authenticate };
+  const authenticate = (
+    request: Request,
+    scope: "platform:read" | "platform:write" | "network:manage",
+  ) =>
+    Result.gen(async function* () {
+      const verified = yield* Result.await(verify(request, scope));
+
+      return resolveUser(
+        verified.userId,
+        request.headers.get("x-widefleet-organization") ??
+          verified.activeOrganizationId ??
+          access.defaultOrganizationId ??
+          null,
+      );
+    });
+
+  const organizations = (request: Request) =>
+    Result.gen(async function* () {
+      const verified = yield* Result.await(verify(request, "platform:read"));
+      const records = yield* Result.await(memberships(verified.userId));
+
+      const choices = records.filter(
+        (record) =>
+          records.filter((other) => other.organizationId === record.organizationId).length === 1,
+      );
+
+      return Result.ok(
+        choices.map((record) => ({
+          id: record.organizationId,
+          name: record.organizationName,
+          slug: record.organizationSlug,
+          role: record.role,
+        })),
+      );
+    });
+
+  const selectOrganization = (request: Request, organizationId: string) =>
+    Result.gen(async function* () {
+      const verified = yield* Result.await(verify(request, "platform:write"));
+      const principal = yield* Result.await(resolveUser(verified.userId, organizationId));
+
+      if (verified.sessionId) {
+        const sessionId = verified.sessionId;
+
+        const updated = yield* Result.await(
+          Result.tryPromise({
+            try: () =>
+              database
+                .update(sessions)
+                .set({ activeOrganizationId: organizationId })
+                .where(and(eq(sessions.id, sessionId), eq(sessions.userId, verified.userId)))
+                .returning({ id: sessions.id }),
+            catch: (cause) =>
+              new DatabaseUnavailable({ message: "Could not save organization selection", cause }),
+          }),
+        );
+
+        if (!updated.length)
+          return yield* new AuthenticationFailed({
+            code: "UNAUTHORIZED",
+            message: "Sign in to continue",
+          });
+      }
+
+      return Result.ok(principal);
+    });
+
+  return { authenticate, organizations, selectOrganization };
 };
 
 export type IdentityService = ReturnType<typeof createIdentityService>;

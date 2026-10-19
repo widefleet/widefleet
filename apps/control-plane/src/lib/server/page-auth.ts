@@ -2,6 +2,29 @@ import { error, redirect } from "@sveltejs/kit";
 import type { DatabaseUnavailable, InvalidOperation, StorageUnavailable } from "./errors.ts";
 import { getRuntime } from "./runtime.ts";
 import { readInstallation } from "./installation-store.ts";
+import { AuthenticationFailed } from "./identity.ts";
+
+export const identityFailure = (
+  cause: AuthenticationFailed | DatabaseUnavailable,
+  request: Request,
+): never => {
+  if (cause._tag === "DatabaseUnavailable") error(503, "Sign-in is temporarily unavailable.");
+
+  if (cause.code === "ORGANIZATION_REQUIRED") redirect(303, "/organizations");
+
+  if (cause.code === "FORBIDDEN") error(403, cause.message);
+  const url = new URL(request.url);
+  redirect(303, `/sign-in?next=${encodeURIComponent(url.pathname + url.search)}`);
+};
+
+export const pageOrganizations = async (request: Request) => {
+  const runtime = await getRuntime();
+  const result = await runtime.identity.organizations(request);
+
+  if (result.isErr()) return identityFailure(result.error, request);
+
+  return result.value;
+};
 
 export const pagePrincipal = async (request: Request, write = false) => {
   const runtime = await getRuntime();
@@ -19,14 +42,13 @@ export const pagePrincipal = async (request: Request, write = false) => {
     return result.value;
   }
 
-  if (result.error._tag === "DatabaseUnavailable")
-    error(503, "Sign-in is temporarily unavailable.");
+  // A stale selection can be repaired without signing out of a valid session.
+  if (result.error._tag === "AuthenticationFailed" && result.error.code === "FORBIDDEN" && !write) {
+    await pageOrganizations(request);
+    redirect(303, "/organizations");
+  }
 
-  if (result.error.code === "FORBIDDEN")
-    error(403, "You do not have permission to perform this action.");
-
-  const url = new URL(request.url);
-  redirect(303, `/sign-in?next=${encodeURIComponent(url.pathname + url.search)}`);
+  return identityFailure(result.error, request);
 };
 
 const operationStatus = { NOT_FOUND: 404, FORBIDDEN: 403, CONFLICT: 409, BAD_REQUEST: 400 };

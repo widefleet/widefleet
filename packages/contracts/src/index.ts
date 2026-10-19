@@ -16,6 +16,8 @@ export * from "./app-access.ts";
 
 export * from "./directory.ts";
 
+export * from "./organizations.ts";
+
 export * from "./reporting.ts";
 
 export const protocolVersion = 1;

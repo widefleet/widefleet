@@ -40,6 +40,9 @@ use uuid::Uuid;
 struct Arguments {
     #[arg(long, env = "PLATFORM_URL", global = true)]
     url: Option<String>,
+    /// Select an organization by ID. List available IDs with `widefleet organizations`.
+    #[arg(long, env = "PLATFORM_ORGANIZATION", global = true)]
+    organization: Option<String>,
     /// Use this CLI configuration file instead of the user and managed defaults.
     #[arg(long, env = "PLATFORM_CONFIG_FILE", global = true)]
     config_file: Option<PathBuf>,
@@ -65,6 +68,8 @@ enum Command {
     Login(auth::LoginOptions),
     Logout,
     Whoami,
+    /// List organizations available to the signed-in account.
+    Organizations,
     /// List visible applications.
     Apps,
     /// Discover listed apps or publish and withdraw your app's catalog listing.
@@ -186,7 +191,7 @@ async fn run(args: Arguments) -> Result<()> {
             },
         }
     };
-    let api = Api::new(&origin)?;
+    let api = Api::new(&origin)?.with_organization(args.organization.as_deref())?;
     let credentials = auth::Credentials::new(args.session_file);
     match args.command {
         Command::Login(options) => {
@@ -217,6 +222,14 @@ async fn run(args: Arguments) -> Result<()> {
     let token = auth::access_token(&api, &credentials).await?;
     let grant = matches!(&args.command, Command::Grant { .. });
     match args.command {
+        Command::Organizations => print_json(
+            &json::<Value>(
+                api.authenticated(Method::GET, "/organizations", &token)
+                    .send()
+                    .await?,
+            )
+            .await?,
+        ),
         Command::Logs(options) => logs::run(&api, &credentials, options).await,
         Command::Migrations(options) => migrations::run(&api, &credentials, options).await,
         Command::Workflows(options) => workflows::run(&api, &credentials, options).await,
@@ -342,10 +355,7 @@ async fn run(args: Arguments) -> Result<()> {
                 .map_err(|()| platform_core::Error::invalid("Invalid platform origin".into()))?
                 .extend(["api", "v1", "apps", &app.to_string(), "creators", &user]);
             let response = api
-                .client
-                .request(method, url)
-                .header("origin", api.origin_text())
-                .bearer_auth(&token)
+                .authenticated(method, url.path().trim_start_matches("/api/v1"), &token)
                 .json(&value!({}))
                 .send()
                 .await?;
@@ -371,6 +381,7 @@ async fn main() {
         Command::Login(_) => "login",
         Command::Logout => "logout",
         Command::Whoami => "whoami",
+        Command::Organizations => "organizations",
         Command::Apps => "apps",
         Command::Catalog(_) => "catalog",
         Command::Groups(_) => "groups",

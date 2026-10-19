@@ -6,4 +6,6 @@
   let { data, children }: { data: LayoutData; children: Snippet } = $props();
 </script>
 
-<Workspace principal={data.principal}>{@render children()}</Workspace>
+<Workspace principal={data.principal} organizations={data.organizations}
+  >{@render children()}</Workspace
+>
