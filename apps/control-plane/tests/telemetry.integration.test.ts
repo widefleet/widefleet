@@ -1,3 +1,4 @@
+import { connectorDebugFixture } from "./cloudflare-connector.fixture.ts";
 import { createWorkflowService } from "../src/lib/server/workflows.ts";
 import { createMigrationService } from "../src/lib/server/migrations.ts";
 import { createConnectorService } from "../src/lib/server/connectors.ts";
@@ -28,7 +29,7 @@ import { createJobService } from "../src/lib/server/jobs.ts";
 import { createStorage } from "../src/lib/server/storage.ts";
 import { createUploadService } from "../src/lib/server/uploads.ts";
 import { createTelemetry, connectorLogService } from "../src/lib/server/telemetry.ts";
-import { agents, artifacts, connectors, deployments } from "../src/lib/server/schema.ts";
+import { agents, artifacts, deployments } from "../src/lib/server/schema.ts";
 
 const execute = promisify(execFile);
 
@@ -367,10 +368,20 @@ describe.runIf(process.env["RUN_TELEMETRY_TESTS"] === "1")(
 
       if (!agent) throw new Error("Missing fixture agent");
       const target = { fleetId: agent.fleetId, name: "logging-fixture" };
-      const version = crypto.randomUUID();
-      await environment.database.db
-        .insert(connectors)
-        .values({ ...target, package: {}, jobId: crypto.randomUUID() });
+      const headers = new Headers(adminHeaders);
+      headers.set("origin", origin);
+      headers.set("content-type", "application/json");
+
+      const deployed = await api(
+        new Request(`${origin}/api/v1/connectors/${target.name}`, {
+          method: "PUT",
+          headers,
+          body: JSON.stringify(connectorDebugFixture(target.name)),
+        }),
+      );
+
+      expect(deployed.status).toBe(200);
+      const version = contract.connectorStatus.parse(await deployed.json()).jobId;
 
       const body = JSON.stringify({
         resourceLogs: [
@@ -393,6 +404,7 @@ describe.runIf(process.env["RUN_TELEMETRY_TESTS"] === "1")(
                         source: "server",
                         kind: "log",
                         message: "connector-otlp-fixture",
+                        stack: "Error: connector fixture\n    at inspect (connector.js:1:1)",
                         connectorVersion: version,
                       }),
                     },
@@ -441,6 +453,7 @@ describe.runIf(process.env["RUN_TELEMETRY_TESTS"] === "1")(
             expect.arrayContaining([
               expect.objectContaining({
                 message: "connector-otlp-fixture",
+                frames: [expect.objectContaining({ file: "src/connector.ts", line: 1, column: 1 })],
                 connectorVersion: version,
                 deploymentId: null,
                 traceId: trace,

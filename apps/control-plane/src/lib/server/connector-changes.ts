@@ -7,8 +7,11 @@ import { managedApp } from "./apps.ts";
 import { InvalidOperation } from "./errors.ts";
 import { lockFleet, requireAgentExecution } from "./fleets.ts";
 import type { Principal } from "./identity.ts";
-import { savePackage } from "./package-storage.ts";
-import { connectorReference, validateConnectorPackage } from "./connector-package.ts";
+import {
+  connectorReference,
+  validateConnectorPackage,
+  saveConnector,
+} from "./connector-package.ts";
 import {
   apps,
   artifacts,
@@ -193,7 +196,7 @@ export const prepareConnector = async (
           });
   }
 
-  const checksum = await savePackage(storage, release);
+  const checksum = await saveConnector(storage, fleet.id, release);
 
   const reference = connectorReference.parse({
     secrets: previous?.secrets ?? {},

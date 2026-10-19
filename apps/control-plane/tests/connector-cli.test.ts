@@ -1,7 +1,8 @@
+import { esbuildBinary } from "../../../tools/cli-tools.ts";
 import * as contract from "@platform/contracts";
 import { execFile } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -32,6 +33,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     const requests: { path: string; method: string; authorization: string; body: string }[] = [];
     let directory: string;
     let origin: string;
+    let executable: string;
     let outcome = "active";
     let rejected = false;
     let superseded = false;
@@ -125,6 +127,33 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
 
     beforeAll(async () => {
       directory = await mkdtemp(join(tmpdir(), "widefleet-connector-cli-"));
+      const installation = join(directory, "installation");
+      await mkdir(installation);
+      executable = join(installation, process.platform === "win32" ? "widefleet.exe" : "widefleet");
+      await copyFile(
+        process.env["CLI_BINARY"] ??
+          fileURLToPath(
+            new URL(
+              `../../../target/debug/widefleet${process.platform === "win32" ? ".exe" : ""}`,
+              import.meta.url,
+            ),
+          ),
+        executable,
+      );
+      await copyFile(
+        esbuildBinary(),
+        join(installation, process.platform === "win32" ? "esbuild.exe" : "esbuild"),
+      );
+
+      const version = (await execute(executable, ["--version"])).stdout
+        .trim()
+        .replace(/^widefleet /, "");
+
+      const esbuildVersion = (await execute(esbuildBinary(), ["--version"])).stdout.trim();
+      await writeFile(
+        join(installation, "release.json"),
+        JSON.stringify({ format: 1, version, esbuild_version: esbuildVersion }),
+      );
       await writeFile(join(directory, "wrangler.jsonc"), JSON.stringify({ name: app.slug }));
       server.listen(0, "127.0.0.1");
       await once(server, "listening");
@@ -144,24 +173,48 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     });
 
     const command = (...args: string[]) =>
-      execute(
-        process.env["CLI_BINARY"] ??
-          fileURLToPath(
-            new URL(
-              `../../../target/debug/widefleet${process.platform === "win32" ? ".exe" : ""}`,
-              import.meta.url,
-            ),
-          ),
-        args,
-        {
-          cwd: directory,
-          timeout: 10000,
-          env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: "normal-credential" },
-        },
-      );
+      execute(executable, args, {
+        cwd: directory,
+        timeout: 10000,
+        env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: "normal-credential" },
+      });
 
     const cli = (...args: string[]) => command("connector", ...args);
 
+    it("deploys the bundled source map and reuses the build identity for unchanged code", async () => {
+      await writeFile(
+        join(directory, "worker.ts"),
+        `import { WorkerEntrypoint } from 'cloudflare:workers';
+export default class Connector extends WorkerEntrypoint {
+  fail(): never { throw new Error('mapped fixture'); }
+}`,
+      );
+      await writeFile(
+        join(directory, "connector.jsonc"),
+        JSON.stringify({
+          name: "erp",
+          main: "worker.ts",
+          compatibility_date: "2026-10-01",
+        }),
+      );
+      await cli("deploy", "--config", "connector.jsonc", "--no-wait");
+      const release = contract.connectorPackage.parse(JSON.parse(requests.at(-1)?.body ?? ""));
+      const map = release.modules.find((module) => module.type === "sourcemap");
+      expect(map).toBeDefined();
+      expect(release.debug?.source_maps).toEqual({ "worker.js": map?.name });
+      expect(JSON.parse(map?.source ?? "")).toMatchObject({
+        version: 3,
+        sources: ["../worker.ts"],
+        sourcesContent: [expect.stringContaining("fail(): never")],
+      });
+      expect(release.modules.find((module) => module.type === "esm")?.source).not.toContain(
+        "sourceMappingURL",
+      );
+      await cli("deploy", "--config", "connector.jsonc", "--no-wait");
+      const repeated = contract.connectorPackage.parse(JSON.parse(requests.at(-1)?.body ?? ""));
+      expect(repeated.debug?.build_id).toBe(release.debug?.build_id);
+      expect(repeated.modules).toEqual(release.modules);
+    });
     it("browses the catalog and reads serving app resources without mutations", async () => {
       expect(JSON.parse((await cli("catalog")).stdout)).toEqual([
         { name: "erp", entrypoints: ["default"] },

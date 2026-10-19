@@ -306,7 +306,18 @@ pub struct ConnectorPackage {
     pub protocol: u32,
     pub name: String,
     pub main: String,
-    pub modules: Vec<ReleaseModule>,
+    pub modules: Vec<ConnectorModule>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug: Option<DebugMetadata>,
     pub entrypoints: Vec<String>,
     pub configuration: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ConnectorModule {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub kind: ModuleType,
+    pub source: String,
+    pub sha256: String,
 }

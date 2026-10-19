@@ -643,6 +643,44 @@ export default { async fetch(request, env, ctx) {
       expect(updated).toHaveLength(2);
       expect(updated).toEqual(expect.arrayContaining(z.array(z.json()).parse(original)));
     });
+    it("keeps source maps outside the executable module graph", async () => {
+      const candidate = release("mapped", "mapped-fixture");
+
+      const source = JSON.stringify({
+        version: 3,
+        sources: ["private-connector-source.ts"],
+        names: [],
+        mappings: "AAAA",
+      });
+
+      candidate.debug = {
+        build_id: "mapped-fixture",
+        source_maps: { "worker.js": "worker.js.map" },
+      };
+      candidate.modules.push({
+        name: "worker.js.map",
+        type: "sourcemap",
+        source,
+        sha256: hash(source),
+      });
+
+      const result = z.object({ result: connectorActivation }).parse(
+        await json("/fixture/manage", {
+          action: "prepare",
+          fleetId,
+          version: crypto.randomUUID(),
+          release: candidate,
+          nativeBindings,
+          secrets: {},
+          telemetry: null,
+        }),
+      );
+
+      await activate(result.result);
+      expect(
+        z.array(z.json()).parse(await json("/fixture/modules?name=mapped-fixture")),
+      ).toHaveLength(2);
+    });
     it("rejects corrupt or missing modules while secret reads use only the snapshot", async () => {
       const name = "integrity-fixture";
       const first = await prepare("integrity-v1", "integrity-secret", name);
@@ -936,7 +974,12 @@ export default { async fetch(request, env, ctx) {
     });
     it("rejects bad code and stale activations, and chooses one concurrent winner", async () => {
       const bad = release("broken");
-      bad.modules[0] = { name: "worker.js", source: "export !!!", sha256: hash("export !!!") };
+      bad.modules[0] = {
+        type: "esm",
+        name: "worker.js",
+        source: "export !!!",
+        sha256: hash("export !!!"),
+      };
       expect(
         (
           await request("/fixture/manage", {

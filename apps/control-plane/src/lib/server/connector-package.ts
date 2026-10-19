@@ -1,7 +1,8 @@
 import * as contract from "@platform/contracts";
 import { z } from "zod";
 import { InvalidOperation, StorageUnavailable } from "./errors.ts";
-import { loadPackage, verifyModules } from "./package-storage.ts";
+import { loadPackage, storePackage, verifyModules } from "./package-storage.ts";
+import { prepareModules, storeModules } from "./worker-modules.ts";
 import type { ArtifactStorage } from "./storage.ts";
 
 export const connectorReference = z.strictObject({
@@ -46,11 +47,21 @@ export const validateConnectorEnvironment = (
     });
 };
 
+const connectorModules = (release: z.infer<typeof contract.connectorPackage>) =>
+  release.modules.map(({ source, name, type }) => ({
+    name,
+    type,
+    bytes: new TextEncoder().encode(source),
+  }));
+
 export const validateConnectorPackage = (
   release: z.infer<typeof contract.connectorPackage>,
   secretNames: string[],
 ) => {
   verifyModules(release);
+  const prepared = prepareModules(release.main, connectorModules(release), release.debug);
+
+  if (prepared.isErr()) throw prepared.error;
   validateConnectorEnvironment(release.configuration, secretNames);
 
   if (release.modules.some((module) => module.name.startsWith("__widefleet_")))
@@ -60,14 +71,71 @@ export const validateConnectorPackage = (
     });
 };
 
+const connectorArtifact = z.strictObject({
+  fleetId: contract.identifier,
+  release: contract.storedConnectorPackage,
+});
+
+export const connectorModuleScope = (fleetId: string, name: string) =>
+  `connectors/${fleetId}/${name}`;
+
+export const saveConnector = async (
+  storage: ArtifactStorage,
+  fleetId: string,
+  release: z.infer<typeof contract.connectorPackage>,
+) => {
+  verifyModules(release);
+  const modules = connectorModules(release);
+  const prepared = prepareModules(release.main, modules, release.debug);
+
+  if (prepared.isErr()) throw prepared.error;
+  const stored = await storeModules(storage, connectorModuleScope(fleetId, release.name), modules);
+
+  if (stored.isErr()) throw stored.error;
+
+  const artifact = connectorArtifact.parse({
+    fleetId,
+    release: { ...release, modules: prepared.value },
+  });
+
+  return storePackage(storage, Buffer.from(JSON.stringify(artifact)));
+};
+
+export const loadConnectorArtifact = async (
+  storage: ArtifactStorage,
+  reference: Pick<z.infer<typeof connectorReference>, "checksum" | "name">,
+) => {
+  const value = connectorArtifact.parse(await loadPackage(storage, reference.checksum));
+
+  if (value.release.name !== reference.name)
+    throw new StorageUnavailable({ message: "Connector artifact identity mismatch", cause: null });
+
+  return value;
+};
+
 export const loadConnector = async (
   storage: ArtifactStorage,
-  reference: z.infer<typeof connectorReference>,
+  reference: Pick<z.infer<typeof connectorReference>, "checksum" | "name">,
 ) => {
-  const value = contract.connectorPackage.parse(await loadPackage(storage, reference.checksum));
+  const { fleetId, release } = await loadConnectorArtifact(storage, reference);
+  const modules = [];
 
-  if (value.name !== reference.name)
-    throw new StorageUnavailable({ message: "Connector artifact identity mismatch", cause: null });
+  for (const module of release.modules) {
+    const bytes = await storage.get(
+      `${connectorModuleScope(fleetId, release.name)}/modules/${module.sha256}`,
+    );
+
+    if (bytes.isErr()) throw bytes.error;
+    modules.push({
+      name: module.name,
+      type: module.type,
+      sha256: module.sha256,
+      source: new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes.value),
+    });
+  }
+
+  const value = { ...release, modules };
+  verifyModules(value);
 
   return value;
 };

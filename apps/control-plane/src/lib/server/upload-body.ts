@@ -2,7 +2,7 @@ import { moduleName, workerMetadata } from "@platform/contracts";
 import { Result } from "better-result";
 import { z } from "zod";
 import { InvalidOperation } from "./errors.ts";
-import type { WorkerModule } from "./uploads.ts";
+import type { WorkerModule } from "./worker-modules.ts";
 
 export const readBody = (request: Request, limit: number) =>
   Result.tryPromise({

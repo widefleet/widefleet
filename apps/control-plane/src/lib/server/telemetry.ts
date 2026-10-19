@@ -263,10 +263,7 @@ export const createTelemetry = (
             throw new InvalidOperation({ code: "NOT_FOUND", message: "Connector not found" });
         }
 
-        const symbolicate =
-          "appId" in input
-            ? createSymbolicator(database, storage, input.appId)
-            : async (entry: z.infer<typeof contract.runtimeLog>) => entry;
+        const symbolicate = createSymbolicator(database, storage, input);
 
         const { cursor, ...filters } = input;
         const filter = signature(JSON.stringify(filters));

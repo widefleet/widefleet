@@ -164,8 +164,26 @@
             Version <code>{entry.connectorVersion ?? "Unknown"}</code> · {entry.source} · {entry.kind}
           </p>
           {#if entry.requestId}<p>Request <code>{entry.requestId}</code></p>{/if}
-          {#if entry.stack}<pre
-              class="overflow-auto whitespace-pre-wrap wrap-anywhere">{entry.stack}</pre>{/if}
+          {#if entry.frames.some((frame) => frame.file)}
+            <ol class="space-y-1 font-mono">
+              {#each entry.frames as frame}
+                <li class="wrap-anywhere">
+                  {frame.name ? `${frame.name} · ` : ""}{frame.file ??
+                    frame.generatedFile}:{frame.line ?? frame.generatedLine}:{frame.column ??
+                    frame.generatedColumn}
+                </li>
+              {/each}
+            </ol>
+            {#if entry.stack}
+              <details>
+                <summary class="cursor-pointer">Generated stack</summary>
+                <pre
+                  class="mt-2 overflow-auto whitespace-pre-wrap wrap-anywhere">{entry.stack}</pre>
+              </details>
+            {/if}
+          {:else if entry.stack}
+            <pre class="overflow-auto whitespace-pre-wrap wrap-anywhere">{entry.stack}</pre>
+          {/if}
         </div>
       </details>
     {/each}

@@ -360,21 +360,10 @@ async fn publish(
     let assets = collect_assets(&assets_root)?;
     let mut map_files = assets.source_maps.clone();
     map_files.insert("worker.js".into(), temporary.path().join("worker.js.map"));
-    let mut source_maps = BTreeMap::new();
-    let mut map_uploads = BTreeMap::new();
-    let mut upload_size = worker.len();
-    for (generated, path) in map_files {
-        let bytes = std::fs::read(path)?;
-        upload_size += bytes.len();
-        if bytes.len() > 20 * 1024 * 1024 || upload_size > 95 * 1024 * 1024 {
-            return Err(Error::invalid(
-                "Worker and source maps exceed the deployment limit".into(),
-            ));
-        }
-        let name = format!("map-{}.map", platform_core::sha256(&bytes));
-        source_maps.insert(generated, name.clone());
-        map_uploads.insert(name, bytes);
-    }
+    let SourceMaps {
+        source_maps,
+        uploads: map_uploads,
+    } = collect_source_maps(worker.len(), map_files)?;
     let build_id = build_version(&assets_root)?;
     let app = match target {
         Target::Preview(preview) => preview.resolve(api, credentials).await?,
@@ -552,6 +541,36 @@ async fn publish(
         tokio::time::sleep(Duration::from_secs(2)).await;
     }
     Err(Error::invalid("Deployment upload failed".into()))
+}
+
+pub(crate) struct SourceMaps {
+    pub source_maps: BTreeMap<String, String>,
+    pub uploads: BTreeMap<String, Vec<u8>>,
+}
+
+pub(crate) fn collect_source_maps(
+    worker_size: usize,
+    map_files: impl IntoIterator<Item = (String, PathBuf)>,
+) -> Result<SourceMaps> {
+    let mut source_maps = BTreeMap::new();
+    let mut map_uploads = BTreeMap::new();
+    let mut upload_size = worker_size;
+    for (generated, path) in map_files {
+        let bytes = std::fs::read(path)?;
+        upload_size += bytes.len();
+        if bytes.len() > 20 * 1024 * 1024 || upload_size > 95 * 1024 * 1024 {
+            return Err(Error::invalid(
+                "Worker and source maps exceed the deployment limit".into(),
+            ));
+        }
+        let name = format!("map-{}.map", platform_core::sha256(&bytes));
+        source_maps.insert(generated, name.clone());
+        map_uploads.insert(name, bytes);
+    }
+    Ok(SourceMaps {
+        source_maps,
+        uploads: map_uploads,
+    })
 }
 
 pub(crate) struct Bundle {

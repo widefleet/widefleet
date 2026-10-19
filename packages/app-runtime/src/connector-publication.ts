@@ -1,7 +1,7 @@
 import {
   connectorPreparation,
   connectorActivation,
-  storedModule,
+  storedConnectorPackage,
   checksum,
 } from "@platform/contracts";
 import { z } from "zod";
@@ -12,9 +12,7 @@ export const connectorGeneration = connectorActivation.extend({
 });
 
 export const connectorSnapshot = connectorPreparation.omit({ secrets: true }).extend({
-  release: connectorPreparation.shape.release.extend({
-    modules: z.array(storedModule.extend({ type: z.literal("esm") })).min(1),
-  }),
+  release: storedConnectorPackage,
   ciphertext: z.string(),
   fingerprint: checksum,
   previous: z.string().nullable(),

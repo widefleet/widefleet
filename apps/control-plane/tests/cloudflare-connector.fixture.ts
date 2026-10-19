@@ -44,3 +44,28 @@ export const connectorFixture = (name = "fixture-connector", source = connectorS
       durable_objects: { bindings: [{ name: "COUNTER", class_name: "Counter" }] },
     },
   });
+
+export const connectorDebugFixture = (name = "fixture-connector") => {
+  const release = connectorFixture(name);
+
+  const source = JSON.stringify({
+    version: 3,
+    sources: ["src/connector.ts"],
+    names: ["inspect"],
+    mappings: "AAAAA",
+    sourcesContent: ["throw new Error('connector fixture');"],
+  });
+
+  release.modules.push({
+    name: "connector.js.map",
+    type: "sourcemap",
+    source,
+    sha256: createHash("sha256").update(source).digest("hex"),
+  });
+  release.debug = {
+    build_id: "connector-fixture-build",
+    source_maps: { "connector.js": "connector.js.map" },
+  };
+
+  return release;
+};

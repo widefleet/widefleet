@@ -60,7 +60,6 @@ export class ConnectorCatalog extends DurableObject<ParentEnvironment> {
           ...release,
           modules: release.modules.map(({ source, ...module }) => ({
             ...module,
-            type: "esm",
             size: new TextEncoder().encode(source).byteLength,
           })),
         },

@@ -3,7 +3,7 @@ use clap::{Args, Subcommand};
 use platform_core::{
     Error, Result,
     http::{Api, json},
-    model::{CapabilityGrant, ConnectorPackage, ReleaseModule},
+    model::{CapabilityGrant, ConnectorModule, ConnectorPackage, DebugMetadata, ModuleType},
     sha256,
 };
 use reqwest::Method;
@@ -224,6 +224,13 @@ async fn package(config: &Path) -> Result<ConnectorPackage> {
     if !bundled.exports.iter().any(|name| name == "default") {
         return Err(Error::invalid("celld requires a default Worker export; export your WorkerEntrypoint class as default, or provide a default fetch handler alongside named entrypoints".into()));
     }
+    if bundled.source.len() > 20 * 1024 * 1024 {
+        return Err(Error::invalid("Worker exceeds 20 MiB".into()));
+    }
+    let maps = deploy::collect_source_maps(
+        bundled.source.len(),
+        [("worker.js".into(), temporary.path().join("worker.js.map"))],
+    )?;
     let source =
         String::from_utf8(bundled.source).map_err(|error| Error::invalid(error.to_string()))?;
     let classes: BTreeSet<_> = configuration
@@ -244,16 +251,31 @@ async fn package(config: &Path) -> Result<ConnectorPackage> {
     for key in ["name", "main", "$schema", "no_bundle", "migrations"] {
         object.remove(key);
     }
+    let mut modules = vec![ConnectorModule {
+        name: "worker.js".into(),
+        kind: ModuleType::Esm,
+        sha256: sha256(source.as_bytes()),
+        source,
+    }];
+    for (name, bytes) in maps.uploads {
+        modules.push(ConnectorModule {
+            name,
+            kind: ModuleType::Sourcemap,
+            sha256: sha256(&bytes),
+            source: String::from_utf8(bytes).map_err(|error| Error::invalid(error.to_string()))?,
+        });
+    }
+    let build_id = sha256(&serde_json::to_vec(&modules)?);
     Ok(ConnectorPackage {
         protocol: 1,
         name,
         main: "worker.js".into(),
         entrypoints,
-        modules: vec![ReleaseModule {
-            name: "worker.js".into(),
-            sha256: sha256(source.as_bytes()),
-            source,
-        }],
+        modules,
+        debug: Some(DebugMetadata {
+            build_id,
+            source_maps: maps.source_maps,
+        }),
         configuration,
     })
 }

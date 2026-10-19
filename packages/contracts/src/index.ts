@@ -341,12 +341,27 @@ export const connectorPackage = z.strictObject({
   protocol: z.literal(1),
   name: appSlug,
   main: moduleName,
-  modules: runtimeRelease.shape.modules,
+  modules: z
+    .array(
+      runtimeRelease.shape.modules.element.extend({
+        type: z.enum(["esm", "sourcemap"]).default("esm"),
+      }),
+    )
+    .min(1)
+    .max(532),
+  debug: debugMetadata.optional(),
   entrypoints: z
     .array(bindingName)
     .min(1)
     .refine((names) => names.includes("default"), "celld requires a default Worker export"),
   configuration: connectorConfiguration,
+});
+
+export const storedConnectorPackage = connectorPackage.extend({
+  modules: z
+    .array(storedModule.extend({ type: z.enum(["esm", "sourcemap"]) }))
+    .min(1)
+    .max(532),
 });
 
 export const connectorSecretName = bindingName.refine(

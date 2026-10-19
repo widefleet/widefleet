@@ -17,7 +17,6 @@ import type { Database } from "./database.ts";
 import type { HostedExecution } from "./deployment-execution.ts";
 import { DatabaseUnavailable, InvalidOperation, StorageUnavailable } from "./errors.ts";
 import { defaultFleet, lockFleet } from "./fleets.ts";
-import { loadPackage } from "./package-storage.ts";
 import { cloudflareOperations, connectors } from "./schema.ts";
 import { encryptSecret } from "./secret-encryption.ts";
 import type { ArtifactStorage } from "./storage.ts";
@@ -56,9 +55,7 @@ export const registerCloudflareConnector = (
     let reference: z.infer<typeof connectorReference>;
 
     if (command.change.kind === "deploy") {
-      const release = contract.connectorPackage.parse(
-        await loadPackage(storage, command.change.checksum),
-      );
+      const release = await loadConnector(storage, command.change);
 
       if (release.name !== command.change.name)
         throw new Error("Connector package identity mismatch");
