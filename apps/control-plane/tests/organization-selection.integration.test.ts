@@ -9,7 +9,7 @@ import { app } from "@platform/contracts";
 import { and, eq } from "drizzle-orm";
 import { createTestEnvironment } from "./environment.ts";
 import { member, organization, session } from "../src/lib/server/auth-schema.ts";
-import { fleets } from "../src/lib/server/schema.ts";
+import { apps, fleets } from "../src/lib/server/schema.ts";
 import { createRuntime } from "../src/lib/server/runtime-services.ts";
 import { createStorage } from "../src/lib/server/storage.ts";
 import { createApi } from "../src/lib/server/api.ts";
@@ -139,6 +139,98 @@ describe("Organization discovery and selection", () => {
       { id: beta, name: "Beta", slug: "beta", role: "member" },
     ]);
     expect((await api(request("/organizations", { headers: {} }))).status).toBe(401);
+  });
+
+  it.each(["session", "token"])(
+    "automatically uses the only admitted organization for %s reads and writes",
+    async (authentication) => {
+      const [fleet] = await environment.database.db
+        .select()
+        .from(fleets)
+        .where(eq(fleets.organizationId, alpha));
+
+      if (!fleet) throw new Error("Missing organization fixture fleet");
+      admitted.clear();
+      admitted.add(fleet.id);
+      const selectedHeaders = new Headers(headers);
+
+      if (authentication === "token") {
+        selectedHeaders.delete("cookie");
+        const { token } = await accessToken("platform:read platform:write");
+        selectedHeaders.set("authorization", `Bearer ${token}`);
+      }
+
+      expect(await (await api(request("/me", { headers: selectedHeaders }))).json()).toMatchObject({
+        admin: false,
+        application: { organizationId: alpha, admin: true },
+      });
+
+      const created = await api(
+        request(`/apps/by-name/automatic-${authentication}`, {
+          method: "PUT",
+          headers: selectedHeaders,
+          body: "{}",
+        }),
+      );
+
+      expect(created.ok).toBe(true);
+      const createdApp = app.parse(await created.json());
+
+      try {
+        expect(createdApp.hostname).toBe(`automatic-${authentication}.alpha.example.test`);
+
+        for (const organizationId of [beta, hidden, "unknown", ""]) {
+          selectedHeaders.set("x-widefleet-organization", organizationId);
+          expect((await api(request("/apps", { headers: selectedHeaders }))).status).toBe(403);
+        }
+      } finally {
+        await environment.database.db.delete(apps).where(eq(apps.id, createdApp.id));
+      }
+    },
+  );
+
+  it("rejects a stale browser write when the automatically available organization changes", async () => {
+    const records = await environment.database.db.select().from(fleets);
+    const alphaFleet = records.find((record) => record.organizationId === alpha);
+    const betaFleet = records.find((record) => record.organizationId === beta);
+
+    if (!alphaFleet || !betaFleet) throw new Error("Missing organization fixture fleets");
+    admitted.clear();
+    admitted.add(alphaFleet.id);
+    expect(
+      (await runtime.identity.authenticate(request("/apps"), "platform:write", alpha)).isOk(),
+    ).toBe(true);
+    admitted.clear();
+    admitted.add(betaFleet.id);
+    expect(
+      await runtime.identity.authenticate(request("/apps"), "platform:write", alpha),
+    ).toMatchObject({ error: { code: "CONFLICT" } });
+    admitted.clear();
+    expect((await api(request("/apps"))).status).toBe(403);
+  });
+
+  it("only automatically selects organizations with one available fleet", async () => {
+    const fleetId = crypto.randomUUID();
+    await environment.database.db.insert(fleets).values({
+      id: fleetId,
+      name: fleetId,
+      organizationId: beta,
+    });
+    admitted.add(fleetId);
+
+    try {
+      expect(await (await api(request("/organizations"))).json()).toEqual([
+        { id: alpha, name: "Alpha", slug: "alpha", role: "admin" },
+      ]);
+      expect(await (await api(request("/me"))).json()).toMatchObject({
+        application: { organizationId: alpha },
+      });
+      headers.set("x-widefleet-organization", beta);
+      expect((await api(request("/me"))).status).toBe(403);
+    } finally {
+      await environment.database.db.delete(fleets).where(eq(fleets.id, fleetId));
+      admitted.delete(fleetId);
+    }
   });
 
   it("persists a browser selection and scopes same-named app operations after switching", async () => {
@@ -358,6 +450,19 @@ describe("Organization discovery and selection", () => {
           code: 1,
           stdout: "",
         });
+        await environment.database.db
+          .delete(member)
+          .where(and(eq(member.userId, userId), eq(member.organizationId, beta)));
+        const automatic = await execute(binary, ["whoami"], options);
+        expect(JSON.parse(automatic.stdout)).toMatchObject({
+          application: { organizationId: alpha, admin: true },
+        });
+        const listed = await execute(binary, ["apps"], options);
+        expect(z.array(app).parse(JSON.parse(listed.stdout))).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ hostname: "shared-name.alpha.example.test" }),
+          ]),
+        );
       } finally {
         await new Promise<void>((resolve, reject) =>
           server.close((error) => (error ? reject(error) : resolve())),

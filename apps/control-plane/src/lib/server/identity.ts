@@ -64,13 +64,20 @@ export const createIdentityService = (
         );
 
         // An extension can narrow membership access, never grant membership itself.
-        return records.flatMap((record) => {
+        const eligible = records.flatMap((record) => {
           const role = organizationRole.safeParse(record.role);
 
           return admitted.has(record.fleetId) && role.success
             ? [{ ...record, role: role.data }]
             : [];
         });
+
+        // Multiple execution fleets need an explicit selection contract. Discovery
+        // and automatic selection must agree on which organizations are available.
+        return eligible.filter(
+          (record) =>
+            eligible.filter((other) => other.organizationId === record.organizationId).length === 1,
+        );
       },
       catch: (cause) =>
         new DatabaseUnavailable({ message: "Could not read organization access", cause }),
@@ -78,19 +85,22 @@ export const createIdentityService = (
 
   const resolveUser = (userId: string, organizationId: string | null) =>
     Result.gen(async function* () {
-      if (organizationId === null)
+      const records = yield* Result.await(memberships(userId));
+
+      const matching =
+        organizationId === null
+          ? records
+          : records.filter((record) => record.organizationId === organizationId);
+
+      if (organizationId === null && matching.length !== 1)
         return yield* new AuthenticationFailed({
           code: "ORGANIZATION_REQUIRED",
           message:
             "Select an organization. API clients must send X-Widefleet-Organization; CLI users can pass --organization ID.",
         });
 
-      const records = yield* Result.await(memberships(userId));
-      const matching = records.filter((record) => record.organizationId === organizationId);
       const record = matching[0];
 
-      // Organization selection is intentionally unambiguous. Multiple execution fleets
-      // need an explicit selection contract before they can be used here.
       if (!record || matching.length !== 1)
         return yield* new AuthenticationFailed({
           code: "FORBIDDEN",
@@ -218,15 +228,20 @@ export const createIdentityService = (
         access.defaultOrganizationId ??
         null;
 
+      const principal = yield* Result.await(resolveUser(verified.userId, organizationId));
+
       // A rendered browser form carries its displayed organization. Never reinterpret
       // that form using a selection changed by another tab in the same session.
-      if (expectedOrganizationId !== undefined && expectedOrganizationId !== organizationId)
+      if (
+        expectedOrganizationId !== undefined &&
+        expectedOrganizationId !== principal.application.organizationId
+      )
         return yield* new AuthenticationFailed({
           code: "CONFLICT",
           message: "Your organization selection changed. Reload this page before making changes.",
         });
 
-      return resolveUser(verified.userId, organizationId);
+      return Result.ok(principal);
     });
 
   const organizations = (request: Request) =>
@@ -234,13 +249,8 @@ export const createIdentityService = (
       const verified = yield* Result.await(verify(request, "platform:read"));
       const records = yield* Result.await(memberships(verified.userId));
 
-      const choices = records.filter(
-        (record) =>
-          records.filter((other) => other.organizationId === record.organizationId).length === 1,
-      );
-
       return Result.ok(
-        choices.map((record) => ({
+        records.map((record) => ({
           id: record.organizationId,
           name: record.organizationName,
           slug: record.organizationSlug,

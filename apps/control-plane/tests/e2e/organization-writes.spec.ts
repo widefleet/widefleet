@@ -2,7 +2,7 @@ import { expect, test, type Browser } from "@playwright/test";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { member, organization, session } from "../../src/lib/server/auth-schema.ts";
 import { apps, fleets } from "../../src/lib/server/schema.ts";
 import { createTestEnvironment } from "../environment.ts";
@@ -126,6 +126,37 @@ const organizationSession = async (browser: Browser, javaScriptEnabled: boolean)
 };
 
 for (const javaScriptEnabled of [true, false]) {
+  test(`creates an app in the only organization without visiting the chooser (JavaScript ${javaScriptEnabled})`, async ({
+    browser,
+  }) => {
+    const { person, alpha, beta, context } = await organizationSession(browser, javaScriptEnabled);
+    await environment.database.db
+      .delete(member)
+      .where(and(eq(member.userId, person.id), eq(member.organizationId, beta)));
+
+    try {
+      const page = await context.newPage();
+      await page.goto("/apps/new");
+      await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}/apps/new`);
+      await expect(page.getByRole("link", { name: "Choose organization: Alpha" })).toBeVisible();
+      await page.getByLabel("App name", { exact: true }).fill("Automatic organization");
+      const slug = `automatic-${javaScriptEnabled}`;
+      await page.getByLabel("URL slug").fill(slug);
+      await page.getByRole("button", { name: "Create app", exact: true }).click();
+      await expect(page).toHaveURL(/\/apps\/[a-f0-9-]+$/);
+
+      const records = await environment.database.db
+        .select({ organizationId: fleets.organizationId })
+        .from(apps)
+        .innerJoin(fleets, eq(apps.fleetId, fleets.id))
+        .where(eq(apps.slug, slug));
+
+      expect(records).toEqual([{ organizationId: alpha }]);
+    } finally {
+      await context.close();
+    }
+  });
+
   test(`rejects an old tab's app creation after another tab switches organizations (JavaScript ${javaScriptEnabled})`, async ({
     browser,
   }) => {
