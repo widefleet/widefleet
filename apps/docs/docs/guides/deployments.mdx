@@ -1,7 +1,7 @@
 ---
 title: Deployments
 description: Preview changes, publish an app update and recover from a failed deployment.
-lastModified: 2026-10-12
+lastModified: 2026-10-20
 ---
 
 Use this guide after [deploying your first app](/getting-started/installation).
@@ -27,9 +27,12 @@ Previews start with their own empty databases and file storage. On builds suppor
 app access groups, they inherit the parent's rule. Configure network permissions
 and connector grants separately for each preview.
 
-Preview URLs use an extra hostname label, such as `review.notes.apps.example.com`.
-The operator must provide DNS and TLS for that hostname. A successful deployment
-confirms app activation; initial certificate issuance may still be pending.
+The installation determines the preview's address. Standard installations use an
+extra hostname label; fleets with a hostname suffix use a flat address. See
+[preview addresses](/reference/previews#organization-addresses) for examples and
+required builds. The operator must provide DNS and TLS for the returned hostname.
+A successful deployment confirms app activation; initial certificate issuance may
+still be pending.
 
 ## Publish the update
 
@@ -66,7 +69,7 @@ installation's telemetry services.
 | Local build fails               | Run `pnpm check` and `pnpm build`, fix the reported error, then retry.                |
 | Deployment remains queued       | Ask the operator to check the registered agent and its availability.                  |
 | Activation fails                | Read the deployment events. A rejected update retains the previously serving version. |
-| Preview has a certificate error | Ask the operator to check that DNS and TLS cover the nested preview hostname.         |
+| Preview has a certificate error | Ask the operator to check that DNS and TLS cover the returned preview hostname.       |
 | An external request is denied   | Check `widefleet network` for the selected app or preview; grants are separate.       |
 
 ## Roll back code

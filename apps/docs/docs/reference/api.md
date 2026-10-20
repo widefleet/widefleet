@@ -68,6 +68,12 @@ an administrator to grant access.
 4. Upload the Worker as multipart data to `/api/v1/apps/{appId}/worker` with a UUID `Idempotency-Key` header. Include one JSON `metadata` field and file parts named after their modules.
 5. Follow the app's deployment history and events from queueing through successful activation by the agent.
 
+Use the returned `hostname` and `url`; do not derive addresses from the app slug or
+organization name. Fleet hostname suffixes can place apps and named previews
+under the shared app domain. See [preview addresses](/reference/previews#organization-addresses)
+for naming and required builds. Occupied complete hostnames return `409 CONFLICT`;
+invalid or overlong hostnames return `400 BAD_REQUEST` before app creation.
+
 Upload sessions expire after one hour. Repeating an identical publish within its valid session returns the original deployment. A session's Worker content is immutable. Asset hashes follow Wrangler's BLAKE3 algorithm over base64 content plus the case-sensitive file extension; modules use SHA-256. Preview apps have separate identities and artifact prefixes.
 
 Rollback queues a retained code artifact from the same app while preserving its current database and files. Deletion marks the app unwritable and queues teardown after earlier jobs; management records and artifacts are removed after the agent confirms teardown.
