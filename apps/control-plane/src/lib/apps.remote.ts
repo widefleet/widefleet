@@ -5,6 +5,7 @@ import {
   createAgentInput,
   createAppInput,
   identifier,
+  organizationSelection,
   rollbackInput,
 } from "@platform/contracts";
 import { z } from "zod";
@@ -29,27 +30,32 @@ export const getAppDetails = query(appQuery, async ({ appId, search }) => {
 
 export const createApp = form(
   createAppInput.extend({
+    ...organizationSelection.shape,
     parentId: z
       .union([identifier, z.literal("")])
       .optional()
       .transform((value) => value || null),
   }),
-  async (input) => {
-    const { runtime, principal } = await remoteContext(true);
+  async ({ organizationId, ...input }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
     const app = formValue(await runtime.apps.create(principal, input));
     await getApps().refresh();
     redirect(303, `/apps/${app.id}`);
   },
 );
 
-export const registerAgent = form(createAgentInput, async (input) => {
-  const { runtime, principal } = await remoteContext(true);
-  const result = formValue(await runtime.agents.create(principal, input));
+export const registerAgent = form(
+  createAgentInput.extend(organizationSelection.shape),
+  async ({ organizationId, ...input }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
+    const result = formValue(await runtime.agents.create(principal, input));
 
-  return { agentToken: result.token, agentName: result.agent.name };
-});
+    return { agentToken: result.token, agentName: result.agent.name };
+  },
+);
 
 const accessInput = appQuery.extend({
+  ...organizationSelection.shape,
   id: z.string().max(300).optional(),
   userId: z.string().min(1).max(128),
 });
@@ -66,24 +72,29 @@ const refreshAccess = async (appId: string, search: string) => {
   return { saved: true };
 };
 
-export const grantAccess = form(accessInput, async ({ appId, userId, search }) => {
-  const { runtime, principal } = await remoteContext(true);
+export const grantAccess = form(accessInput, async ({ appId, userId, search, organizationId }) => {
+  const { runtime, principal } = await remoteContext({ organizationId });
   formValue(await runtime.apps.grant(principal, appId, userId));
 
   return refreshAccess(appId, search);
 });
 
-export const revokeAccess = form(accessInput, async ({ appId, userId, search }) => {
-  const { runtime, principal } = await remoteContext(true);
+export const revokeAccess = form(accessInput, async ({ appId, userId, search, organizationId }) => {
+  const { runtime, principal } = await remoteContext({ organizationId });
   formValue(await runtime.apps.revoke(principal, appId, userId));
 
   return refreshAccess(appId, search);
 });
 
 export const rollbackApp = form(
-  appQuery.extend({ ...rollbackInput.shape, id: identifier.optional(), requestId: identifier }),
-  async ({ appId, artifactId, requestId, search }) => {
-    const { runtime, principal } = await remoteContext(true);
+  appQuery.extend({
+    ...organizationSelection.shape,
+    ...rollbackInput.shape,
+    id: identifier.optional(),
+    requestId: identifier,
+  }),
+  async ({ appId, artifactId, requestId, search, organizationId }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
     formValue(await runtime.apps.rollback(principal, appId, artifactId, requestId));
     await getAppDetails({ appId, search }).refresh();
 
@@ -95,13 +106,14 @@ export const rollbackApp = form(
 
 export const removeApp = form(
   appPath.extend({
+    ...organizationSelection.shape,
     confirmed: z
       .boolean()
       .optional()
       .refine((value) => value === true, "Please confirm permanent deletion."),
   }),
-  async ({ appId }) => {
-    const { runtime, principal } = await remoteContext(true);
+  async ({ appId, organizationId }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
     formValue(await runtime.apps.remove(principal, appId));
     await getApps().refresh();
     redirect(303, "/");

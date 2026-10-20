@@ -5,17 +5,20 @@ import { DatabaseUnavailable, InvalidOperation, StorageUnavailable } from "./err
 import { pageFailure } from "./page-auth.ts";
 import { getRuntime } from "./runtime.ts";
 
-export const remoteContext = async (write = false) => {
+export const remoteContext = async (write?: { organizationId: string }) => {
   const { request } = getRequestEvent();
   const runtime = await getRuntime();
 
   const principal = await runtime.identity.authenticate(
     request,
     write ? "platform:write" : "platform:read",
+    write?.organizationId,
   );
 
   if (principal.isErr()) {
     if (principal.error instanceof DatabaseUnavailable) return pageFailure(principal.error);
+
+    if (principal.error.code === "CONFLICT") error(409, principal.error.message);
     error(principal.error.code === "UNAUTHORIZED" ? 401 : 403, principal.error.message);
   }
 

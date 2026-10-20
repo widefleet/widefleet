@@ -17,6 +17,7 @@
   import type { organizationChoice } from "@platform/contracts";
   import type { Principal } from "#server/identity";
   import { authClient } from "#lib/auth-client";
+  import { setWorkspaceContext } from "#lib/workspace-context";
   import { Button } from "#shadcn/components/ui/button/index.js";
   import * as DropdownMenu from "#shadcn/components/ui/dropdown-menu/index.js";
   import Brand from "./Brand.svelte";
@@ -31,6 +32,12 @@
     organizations: z.infer<typeof organizationChoice>[];
     children: Snippet;
   } = $props();
+
+  setWorkspaceContext({
+    get organizationId() {
+      return principal.application.organizationId;
+    },
+  });
 
   const organizationName = $derived(
     organizations.find((organization) => organization.id === principal.application.organizationId)

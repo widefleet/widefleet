@@ -1,4 +1,5 @@
 <script lang="ts">
+  import OrganizationField from "#shadcn/OrganizationField.svelte";
   import { tick } from "svelte";
   import { getAgents, disableAgent } from "#lib/agents.remote";
   import { registerAgent } from "#lib/apps.remote";
@@ -107,6 +108,7 @@
           {#if agent.enabled}<details class="mt-4 pl-12">
               <summary class="text-muted-foreground text-xs">Disable agent</summary>
               <form {...disable} class="mt-3 space-y-3">
+                <OrganizationField field={disable.fields.organizationId} />
                 <input {...disable.fields.agentId.as("hidden", agent.id)} />
                 <p class="text-muted-foreground text-xs leading-5">
                   This agent will no longer receive new jobs. Make sure another agent is available.
@@ -141,6 +143,7 @@
     })}
     class="mt-5 max-w-md space-y-4"
   >
+    <OrganizationField field={registerAgent.fields.organizationId} />
     <FormIssues issues={registerAgent.fields.allIssues()} />
     <div class="space-y-2">
       <Label for="agentName">Agent name</Label><Input

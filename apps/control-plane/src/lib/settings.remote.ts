@@ -1,6 +1,11 @@
 import { command, getRequestEvent, query } from "$app/server";
 import { error } from "@sveltejs/kit";
-import { settingsInput, settingsUpdate, setupOwner } from "@platform/contracts";
+import {
+  settingsInput,
+  settingsUpdate,
+  setupOwner,
+  organizationSelection,
+} from "@platform/contracts";
 import { z } from "zod";
 import { createInstallationOwner } from "#server/installation-store";
 import { remoteContext, remoteOperation } from "#server/remote-support";
@@ -13,29 +18,35 @@ export const getSettings = query(async () => {
   return remoteOperation(() => readSettingsAccount(runtime, principal, request.headers));
 });
 
-export const planSettings = command(settingsInput, async (input) => {
-  const { runtime, principal } = await remoteContext(true);
+export const planSettings = command(
+  settingsInput.extend(organizationSelection.shape),
+  async ({ organizationId, ...input }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
 
-  return remoteOperation(() => runtime.settings.plan(principal, input));
-});
+    return remoteOperation(() => runtime.settings.plan(principal, input));
+  },
+);
 
-export const updateSettings = command(settingsUpdate, async (input) => {
-  const { runtime, principal } = await remoteContext(true);
-  await remoteOperation(() => runtime.settings.update(principal, input, true));
-  await getSettings().refresh();
-});
+export const updateSettings = command(
+  settingsUpdate.extend(organizationSelection.shape),
+  async ({ organizationId, ...input }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
+    await remoteOperation(() => runtime.settings.update(principal, input, true));
+    await getSettings().refresh();
+  },
+);
 
 export const setExternalManagement = command(
-  z.object({ enabled: z.boolean() }),
-  async ({ enabled }) => {
-    const { runtime, principal } = await remoteContext(true);
+  organizationSelection.extend({ enabled: z.boolean() }),
+  async ({ enabled, organizationId }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
     await remoteOperation(() => runtime.settings.setExternalManagement(principal, enabled));
     await getSettings().refresh();
   },
 );
 
-export const completeSetup = command(async () => {
-  const { runtime, principal, request } = await remoteContext(true);
+export const completeSetup = command(organizationSelection, async (input) => {
+  const { runtime, principal, request } = await remoteContext(input);
   await remoteOperation(() => runtime.settings.complete(principal, runtime.auth, request.headers));
   await getSettings().refresh();
 });

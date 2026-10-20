@@ -1,4 +1,5 @@
 <script lang="ts">
+  import OrganizationField from "#shadcn/OrganizationField.svelte";
   import { getAppDetails, grantAccess, revokeAccess } from "#lib/apps.remote";
   import FormIssues from "#shadcn/FormIssues.svelte";
   import { Button } from "#shadcn/components/ui/button/index.js";
@@ -61,6 +62,7 @@
             })}
             class="space-y-2"
           >
+            <OrganizationField field={revoke.fields.organizationId} />
             <input {...revoke.fields.appId.as("hidden", data.app.id)} /><input
               {...revoke.fields.search.as("hidden", search)}
             /><input {...revoke.fields.userId.as("hidden", person.userId)} /><FormIssues
@@ -118,6 +120,7 @@
               })}
               class="space-y-2"
             >
+              <OrganizationField field={grant.fields.organizationId} />
               <input {...grant.fields.appId.as("hidden", data.app.id)} /><input
                 {...grant.fields.search.as("hidden", search)}
               /><input {...grant.fields.userId.as("hidden", person.userId)} /><FormIssues

@@ -1,5 +1,6 @@
 import { form, getRequestEvent, query } from "$app/server";
 import { redirect } from "@sveltejs/kit";
+import { organizationSelection } from "@platform/contracts";
 import { z } from "zod";
 import { changeMemberRole, listMembers, memberRoleInput } from "#server/members";
 import { formValue, queryValue, remoteContext, remoteOperation } from "#server/remote-support";
@@ -21,6 +22,7 @@ export const getMembers = query(memberQuery, async ({ search, page }) => {
 
 export const setMemberRole = form(
   memberRoleInput.extend({
+    ...organizationSelection.shape,
     search: memberQuery.shape.search.default(""),
     page: z
       .string()
@@ -29,8 +31,8 @@ export const setMemberRole = form(
       .transform(Number)
       .pipe(memberQuery.shape.page),
   }),
-  async ({ memberId, role, search, page }) => {
-    const { runtime, principal, request } = await remoteContext(true);
+  async ({ memberId, role, search, page, organizationId }) => {
+    const { runtime, principal, request } = await remoteContext({ organizationId });
     formValue(
       await remoteOperation(() =>
         changeMemberRole(runtime.auth, principal, request.headers, { memberId, role }),

@@ -17,14 +17,24 @@
       ? "Nothing here yet."
       : page.status === 403
         ? "You don't have access to this page."
-        : "Something went wrong."}
+        : page.status === 409
+          ? "This action could not be completed."
+          : "Something went wrong."}
   </h1>
   <p class="text-muted-foreground mt-3 text-sm leading-6">
     {page.status === 404
       ? "This page does not exist or you don't have access to it. Find your available apps in the overview."
       : page.status === 403
         ? "Contact an administrator if you need access to this page."
-        : "Please try again. If the problem continues, contact an administrator."}
+        : page.status === 409
+          ? page.error?.message
+          : "Please try again. If the problem continues, contact an administrator."}
   </p>
-  <Button href="/" variant="outline" class="mt-6"><ArrowLeft />Back to overview</Button>
+  {#if page.status === 409}
+    <Button href={page.url.pathname} data-sveltekit-reload variant="outline" class="mt-6">
+      Reload page
+    </Button>
+  {:else}
+    <Button href="/" variant="outline" class="mt-6"><ArrowLeft />Back to overview</Button>
+  {/if}
 </AuthLayout>

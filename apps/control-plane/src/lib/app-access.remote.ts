@@ -1,6 +1,12 @@
 import { form, getRequestEvent, query } from "$app/server";
 import { error, invalid, redirect } from "@sveltejs/kit";
-import { appAccessChange, appAccessGroups, appPath, groupSearch } from "@platform/contracts";
+import {
+  appAccessChange,
+  appAccessGroups,
+  appPath,
+  groupSearch,
+  organizationSelection,
+} from "@platform/contracts";
 import { z } from "zod";
 import { formValue, queryValue, remoteContext } from "#server/remote-support";
 
@@ -12,6 +18,7 @@ export const getAppAccess = query(appPath, async ({ appId }) => {
 
 export const changeAppAccess = form(
   appPath.extend({
+    ...organizationSelection.shape,
     id: z.string().max(300).optional(),
     revision: appAccessChange.shape.revision,
     groups: z
@@ -25,8 +32,8 @@ export const changeAppAccess = form(
       )
       .pipe(appAccessGroups),
   }),
-  async ({ appId, revision, groups }) => {
-    const { runtime, principal } = await remoteContext(true);
+  async ({ appId, revision, groups, organizationId }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
     formValue(await runtime.appAccess.change(principal, appId, { revision, groups }));
     await getAppAccess({ appId }).refresh();
 

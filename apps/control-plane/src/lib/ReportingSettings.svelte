@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { getWorkspaceContext } from "#lib/workspace-context";
   import { untrack } from "svelte";
   import { reportingStatus } from "@platform/contracts";
   import { z } from "zod";
@@ -7,6 +8,8 @@
   import { Switch } from "#shadcn/components/ui/switch/index.js";
   import Feedback from "#shadcn/components/Feedback.svelte";
   import { getReportingPreview, updateReporting } from "#lib/reporting.remote";
+
+  const workspace = getWorkspaceContext();
 
   let { initial }: { initial: z.infer<typeof reportingStatus> } = $props();
 
@@ -33,7 +36,7 @@
     failed = false;
 
     try {
-      status = await updateReporting({ usage, crashes });
+      status = await updateReporting({ usage, crashes, organizationId: workspace.organizationId });
       usage = status.effective.usage;
       crashes = status.effective.crashes;
       message = "Telemetry settings saved.";

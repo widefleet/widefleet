@@ -1,4 +1,5 @@
 <script lang="ts">
+  import OrganizationField from "#shadcn/OrganizationField.svelte";
   import { onMount, untrack } from "svelte";
   import { changeAppAccess, getAppAccess, searchAccessGroups } from "#lib/app-access.remote";
   import { warnBeforeLeaving } from "#lib/unsaved-changes";
@@ -165,6 +166,7 @@
         })}
         class="space-y-4 rounded-xl border p-5 sm:p-6"
       >
+        <OrganizationField field={editor.fields.organizationId} />
         <input {...editor.fields.appId.as("hidden", appId)} />
         <input {...editor.fields.revision.as("hidden", draft?.revision ?? data.revision)} />
         <div class="space-y-2">

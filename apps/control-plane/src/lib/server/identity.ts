@@ -18,7 +18,7 @@ import { fleets } from "./schema.ts";
 import { DatabaseUnavailable } from "./errors.ts";
 
 export class AuthenticationFailed extends TaggedError("AuthenticationFailed")<{
-  code: "UNAUTHORIZED" | "FORBIDDEN" | "ORGANIZATION_REQUIRED";
+  code: "UNAUTHORIZED" | "FORBIDDEN" | "ORGANIZATION_REQUIRED" | "CONFLICT";
   message: string;
 }> {}
 
@@ -207,17 +207,26 @@ export const createIdentityService = (
   const authenticate = (
     request: Request,
     scope: "platform:read" | "platform:write" | "network:manage",
+    expectedOrganizationId?: string,
   ) =>
     Result.gen(async function* () {
       const verified = yield* Result.await(verify(request, scope));
 
-      return resolveUser(
-        verified.userId,
+      const organizationId =
         request.headers.get("x-widefleet-organization") ??
-          verified.activeOrganizationId ??
-          access.defaultOrganizationId ??
-          null,
-      );
+        verified.activeOrganizationId ??
+        access.defaultOrganizationId ??
+        null;
+
+      // A rendered browser form carries its displayed organization. Never reinterpret
+      // that form using a selection changed by another tab in the same session.
+      if (expectedOrganizationId !== undefined && expectedOrganizationId !== organizationId)
+        return yield* new AuthenticationFailed({
+          code: "CONFLICT",
+          message: "Your organization selection changed. Reload this page before making changes.",
+        });
+
+      return resolveUser(verified.userId, organizationId);
     });
 
   const organizations = (request: Request) =>

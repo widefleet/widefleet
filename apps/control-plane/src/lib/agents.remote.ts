@@ -1,5 +1,5 @@
 import { form, query } from "$app/server";
-import { identifier } from "@platform/contracts";
+import { identifier, organizationSelection } from "@platform/contracts";
 import { z } from "zod";
 import { formValue, queryValue, remoteContext } from "#server/remote-support";
 
@@ -10,9 +10,9 @@ export const getAgents = query(async () => {
 });
 
 export const disableAgent = form(
-  z.object({ agentId: identifier, id: identifier.optional() }),
-  async ({ agentId }) => {
-    const { runtime, principal } = await remoteContext(true);
+  z.object({ ...organizationSelection.shape, agentId: identifier, id: identifier.optional() }),
+  async ({ agentId, organizationId }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
     formValue(await runtime.agents.disable(principal, agentId));
     await getAgents().refresh();
 

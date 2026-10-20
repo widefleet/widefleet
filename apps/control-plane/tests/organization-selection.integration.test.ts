@@ -169,6 +169,36 @@ describe("Organization discovery and selection", () => {
     headers.delete("x-widefleet-organization");
   });
 
+  it("rejects a stale browser organization before issuing a write principal", async () => {
+    await runtime.identity.selectOrganization(request("/organization"), alpha);
+    expect(
+      (await runtime.identity.authenticate(request("/apps"), "platform:write", alpha)).isOk(),
+    ).toBe(true);
+    await runtime.identity.selectOrganization(request("/organization"), beta);
+
+    const stale = await runtime.identity.authenticate(request("/apps"), "platform:write", alpha);
+    expect(stale.isErr()).toBe(true);
+
+    if (stale.isErr()) {
+      expect(stale.error).toMatchObject({ code: "CONFLICT" });
+      expect(stale.error.message).toContain("Reload this page");
+    }
+
+    expect(
+      (await runtime.identity.authenticate(request("/apps"), "platform:write", beta)).unwrap()
+        .application.organizationId,
+    ).toBe(beta);
+    expect(
+      (await runtime.identity.authenticate(request("/apps"), "platform:write", "")).isErr(),
+    ).toBe(true);
+    await environment.database.db
+      .delete(member)
+      .where(and(eq(member.userId, userId), eq(member.organizationId, beta)));
+    expect(
+      (await runtime.identity.authenticate(request("/apps"), "platform:write", beta)).isErr(),
+    ).toBe(true);
+  });
+
   it("rejects foreign selections and cross-origin changes without replacing the current selection", async () => {
     await runtime.identity.selectOrganization(request("/organization"), beta);
 

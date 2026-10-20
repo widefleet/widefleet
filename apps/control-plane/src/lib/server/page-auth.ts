@@ -12,6 +12,8 @@ export const identityFailure = (
 
   if (cause.code === "ORGANIZATION_REQUIRED") redirect(303, "/organizations");
 
+  if (cause.code === "CONFLICT") error(409, cause.message);
+
   if (cause.code === "FORBIDDEN") error(403, cause.message);
   const url = new URL(request.url);
   redirect(303, `/sign-in?next=${encodeURIComponent(url.pathname + url.search)}`);

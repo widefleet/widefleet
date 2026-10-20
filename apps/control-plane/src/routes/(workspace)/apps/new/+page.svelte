@@ -1,4 +1,5 @@
 <script lang="ts">
+  import OrganizationField from "#shadcn/OrganizationField.svelte";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
   import GitBranch from "@lucide/svelte/icons/git-branch";
@@ -28,6 +29,7 @@
     description="Give your app a name and an address. Then publish its first version."
   />
   <form {...createApp} class="mt-8 space-y-6">
+    <OrganizationField field={createApp.fields.organizationId} />
     <FormIssues issues={createApp.fields.allIssues()} />
     <div class="space-y-2">
       <Label for="displayName">App name</Label><Input

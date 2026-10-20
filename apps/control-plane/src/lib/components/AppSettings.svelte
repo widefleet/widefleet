@@ -1,4 +1,5 @@
 <script lang="ts">
+  import OrganizationField from "#shadcn/OrganizationField.svelte";
   import { getAppDetails, removeApp } from "#lib/apps.remote";
   import { setCatalogListing } from "#lib/catalog.remote";
   import FormIssues from "#shadcn/FormIssues.svelte";
@@ -32,6 +33,7 @@
             : "This app is not listed in the catalog yet."}
         </p>
         {#if data.access.canManage}<form {...setCatalogListing} class="space-y-3">
+            <OrganizationField field={setCatalogListing.fields.organizationId} />
             <input {...setCatalogListing.fields.appId.as("hidden", app.id)} />
             <input {...setCatalogListing.fields.search.as("hidden", search)} />
             <input
@@ -67,6 +69,7 @@
     <details class="mt-5">
       <summary class="text-sm font-medium">Permanently delete app</summary>
       <form {...removeApp} class="mt-4 space-y-4">
+        <OrganizationField field={removeApp.fields.organizationId} />
         <input {...removeApp.fields.appId.as("hidden", app.id)} /><FormIssues
           issues={removeApp.fields.allIssues()}
         /><label class="flex items-start gap-3 text-sm leading-6"
