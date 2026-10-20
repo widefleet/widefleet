@@ -59,24 +59,26 @@ export const validateConnectorPackage = (
 };
 
 const connectorArtifact = z.strictObject({
-  fleetId: contract.identifier,
+  organizationId: contract.organizationIdentifier,
   release: contract.connectorPackage,
 });
 
-const artifactBytes = (fleetId: string, release: z.infer<typeof contract.connectorPackage>) =>
-  Buffer.from(JSON.stringify(connectorArtifact.parse({ fleetId, release })));
+const artifactBytes = (
+  organizationId: string,
+  release: z.infer<typeof contract.connectorPackage>,
+) => Buffer.from(JSON.stringify(connectorArtifact.parse({ organizationId, release })));
 
 export const connectorChecksum = (
-  fleetId: string,
+  organizationId: string,
   release: z.infer<typeof contract.connectorPackage>,
-) => createHash("sha256").update(artifactBytes(fleetId, release)).digest("hex");
+) => createHash("sha256").update(artifactBytes(organizationId, release)).digest("hex");
 
-export const connectorModuleScope = (fleetId: string, name: string) =>
-  `connectors/${fleetId}/${name}`;
+export const connectorModuleScope = (organizationId: string, name: string) =>
+  `connectors/${organizationId}/${name}`;
 
 export const saveConnector = async (
   storage: ArtifactStorage,
-  fleetId: string,
+  organizationId: string,
   release: z.infer<typeof contract.connectorPackage>,
   modules?: WorkerModule[],
 ) => {
@@ -93,14 +95,14 @@ export const saveConnector = async (
 
     const stored = await storeModules(
       storage,
-      connectorModuleScope(fleetId, release.name),
+      connectorModuleScope(organizationId, release.name),
       modules,
     );
 
     if (stored.isErr()) throw stored.error;
   }
 
-  return storePackage(storage, artifactBytes(fleetId, release));
+  return storePackage(storage, artifactBytes(organizationId, release));
 };
 
 export const loadConnectorArtifact = async (

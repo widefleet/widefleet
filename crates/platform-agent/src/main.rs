@@ -2,9 +2,9 @@ mod access;
 mod artifact;
 mod config;
 mod docker;
+mod execution;
 #[cfg(test)]
 mod execution_tests;
-mod fleet;
 mod migrations;
 mod native;
 mod reporting;
@@ -45,7 +45,7 @@ async fn event(api: &Api, configuration: &Configuration, job: &Job, message: &st
 }
 
 async fn recover(docker: &Docker, configuration: &Configuration, job: &Job) -> Result<()> {
-    if let Some(recovery) = fleet::recover(configuration, job).await? {
+    if let Some(recovery) = execution::recover(configuration, job).await? {
         if recovery.reload || !recovery.connectors.is_empty() {
             let address = docker::ensure(docker, configuration).await?;
             if recovery.reload {
@@ -64,7 +64,7 @@ async fn recover(docker: &Docker, configuration: &Configuration, job: &Job) -> R
         for queue in recovery.wake {
             docker::wake_queue(docker, configuration, job, &queue).await?;
         }
-        fleet::finish_recovery(configuration, job).await?;
+        execution::finish_recovery(configuration, job).await?;
     }
     Ok(())
 }
@@ -86,7 +86,7 @@ async fn execute(
             .map(|entries| Some(value!({ "migrations": entries })));
     }
     if matches!(job.kind, JobKind::Workflows) {
-        let token = fleet::workflow_control(configuration, job)
+        let token = execution::workflow_control(configuration, job)
             .await?
             .ok_or_else(|| {
                 Error::invalid(
@@ -119,7 +119,7 @@ async fn execute(
             "Removing this app and its owned files from the shared fleet",
         )
         .await?;
-        if let Some(token) = fleet::workflow_control(configuration, job).await? {
+        if let Some(token) = execution::workflow_control(configuration, job).await? {
             docker::ensure(docker, configuration).await?;
             loop {
                 let result = docker::workflow_request(
@@ -140,9 +140,9 @@ async fn execute(
         }
         docker::remove(configuration, job).await?;
         access::remove(configuration, job).await?;
-        let Some(packages) = fleet::detach(configuration, job).await? else {
+        let Some(packages) = execution::detach(configuration, job).await? else {
             // An app can be deleted before any native fleet installation succeeds.
-            return fleet::remove(configuration, job).await.map(|()| None);
+            return execution::remove(configuration, job).await.map(|()| None);
         };
         packages
     } else {
@@ -201,7 +201,7 @@ async fn execute(
     } else {
         telemetry::connector_destinations(api, configuration, job).await?
     };
-    let mut prepared = fleet::prepare(
+    let mut prepared = execution::prepare(
         configuration,
         job,
         artifact,
@@ -220,7 +220,7 @@ async fn execute(
                 "Publishing the shared fleet's native configuration",
             )
             .await?;
-            fleet::publish(configuration, job, temporary.path()).await?;
+            execution::publish(configuration, job, temporary.path()).await?;
         }
         let address = docker::ensure(docker, configuration).await?;
         if prepared.changed {
@@ -268,10 +268,10 @@ async fn execute(
         recover(docker, configuration, job).await?;
         return Err(error);
     }
-    fleet::commit(configuration, job, &prepared).await?;
+    execution::commit(configuration, job, &prepared).await?;
     recover(docker, configuration, job).await?;
     if matches!(job.kind, JobKind::Delete) {
-        fleet::remove(configuration, job).await?;
+        execution::remove(configuration, job).await?;
     }
     Ok(None)
 }

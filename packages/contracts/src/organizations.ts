@@ -1,6 +1,12 @@
 import { z } from "zod";
 
-export const organizationSelection = z.object({ organizationId: z.string().min(1).max(128) });
+export const organizationIdentifier = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[a-zA-Z0-9_-]+$/);
+
+export const organizationSelection = z.object({ organizationId: organizationIdentifier });
 
 export const organizationChoice = z.object({
   id: z.string(),
@@ -9,9 +15,8 @@ export const organizationChoice = z.object({
   role: z.enum(["owner", "admin", "member"]),
 });
 
-export const applicationContext = z.object({
-  fleetId: z.uuid(),
-  organizationId: z.string().min(1),
+export const applicationContext = z.strictObject({
+  organizationId: organizationIdentifier,
   admin: z.boolean(),
 });
 

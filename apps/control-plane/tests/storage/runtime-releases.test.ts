@@ -6,9 +6,9 @@ import { readFile } from "node:fs/promises";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   createRuntimeReleaseService,
-  ensureFleetRuntime,
+  ensureOrganizationRuntime,
 } from "../../src/lib/server/runtime-releases.ts";
-import { fleets, jobs, runtimeReleases } from "../../src/lib/server/schema.ts";
+import { organizationRuntimes, jobs, runtimeReleases } from "../../src/lib/server/schema.ts";
 import { transact } from "../../src/lib/server/transactions.ts";
 import { createTestEnvironment } from "../environment.ts";
 import { createStorageTestEnvironment } from "./environment.ts";
@@ -21,7 +21,7 @@ describe("Runtime installation with PostgreSQL and Azure Blob Storage", () => {
   const source = "export default {};";
 
   const release = contract.runtimeRelease.parse({
-    protocol: 1,
+    protocol: 2,
     auth: 1,
     version: "99.0.0",
     celld: "0.6.2",
@@ -41,7 +41,6 @@ describe("Runtime installation with PostgreSQL and Azure Blob Storage", () => {
     admin: true,
     creator: true,
     application: {
-      fleetId: "00000000-0000-4000-8000-000000000001",
       organizationId: "widefleet",
       admin: false,
     },
@@ -61,7 +60,7 @@ describe("Runtime installation with PostgreSQL and Azure Blob Storage", () => {
   beforeEach(async () => {
     await environment.database.db.delete(jobs);
     await environment.database.db
-      .update(fleets)
+      .update(organizationRuntimes)
       .set({ runtime: null, appliedRuntime: null, runtimeJobId: null });
     await environment.database.db.delete(runtimeReleases);
     fixture = await createStorageTestEnvironment("azure");
@@ -77,7 +76,7 @@ describe("Runtime installation with PostgreSQL and Azure Blob Storage", () => {
     await environment?.close();
   });
 
-  it("installs only the requested release on an empty fleet", async () => {
+  it("installs only the requested release on an empty execution", async () => {
     expect((await releases.install(principal(), release)).unwrap()).toMatchObject({
       desiredVersion: release.version,
       activeVersion: null,
@@ -109,16 +108,16 @@ describe("Runtime installation with PostgreSQL and Azure Blob Storage", () => {
     expect(await environment.database.db.select().from(runtimeReleases)).toHaveLength(1);
 
     const queued = await environment.database.db.select().from(jobs);
-    const [fleet] = await environment.database.db.select().from(fleets);
+    const [execution] = await environment.database.db.select().from(organizationRuntimes);
 
     expect(queued).toHaveLength(3);
 
     for (const job of queued) expect(job.runtime).toEqual({ version: release.version, checksum });
-    expect(queued.some((job) => job.id === fleet?.runtimeJobId)).toBe(true);
-    expect(fleet?.runtime).toEqual({ version: release.version, checksum });
+    expect(queued.some((job) => job.id === execution?.runtimeJobId)).toBe(true);
+    expect(execution?.runtime).toEqual({ version: release.version, checksum });
   });
 
-  it("installs the bundled version explicitly with a single upload on an empty fleet", async () => {
+  it("installs the bundled version explicitly with a single upload on an empty execution", async () => {
     const bundled = await bundledRelease();
     const submitted = (await releases.install(principal(), bundled)).unwrap();
 
@@ -146,7 +145,7 @@ describe("Runtime installation with PostgreSQL and Azure Blob Storage", () => {
       expect(fixture.objects.get(key)).toEqual(bytes);
       expect(await environment.database.db.select().from(runtimeReleases)).toHaveLength(0);
       expect(await environment.database.db.select().from(jobs)).toHaveLength(0);
-      expect(await environment.database.db.select().from(fleets)).toMatchObject([
+      expect(await environment.database.db.select().from(organizationRuntimes)).toMatchObject([
         { runtime: null, runtimeJobId: null },
       ]);
     } finally {
@@ -171,7 +170,7 @@ describe("Runtime installation with PostgreSQL and Azure Blob Storage", () => {
     expect(fixture.objects.size).toBe(0);
     expect(await environment.database.db.select().from(runtimeReleases)).toHaveLength(0);
     expect(await environment.database.db.select().from(jobs)).toHaveLength(0);
-    expect(await environment.database.db.select().from(fleets)).toMatchObject([
+    expect(await environment.database.db.select().from(organizationRuntimes)).toMatchObject([
       { runtime: null, runtimeJobId: null },
     ]);
   });
@@ -201,7 +200,7 @@ describe("Runtime installation with PostgreSQL and Azure Blob Storage", () => {
     expect(await environment.database.db.select().from(jobs)).toHaveLength(1);
   });
 
-  it("does not install the bundled release as a side effect of rolling back an empty fleet", async () => {
+  it("does not install the bundled release as a side effect of rolling back an empty execution", async () => {
     const bundled = await bundledRelease();
     const failed = await releases.rollback(principal(), { version: bundled.version });
 
@@ -213,12 +212,14 @@ describe("Runtime installation with PostgreSQL and Azure Blob Storage", () => {
   });
 
   it("still bootstraps the bundled runtime for app jobs and reuses it during explicit installation", async () => {
-    const [fleet] = await environment.database.db.select().from(fleets);
+    const [execution] = await environment.database.db.select().from(organizationRuntimes);
 
-    if (!fleet) throw new Error("Missing default fleet");
+    if (!execution) throw new Error("Missing default execution");
 
     const initialized = await transact(environment.database.db, async (transaction) =>
-      Result.ok(await ensureFleetRuntime(transaction, fixture.storage, fleet.id)),
+      Result.ok(
+        await ensureOrganizationRuntime(transaction, fixture.storage, execution.organizationId),
+      ),
     );
 
     const bundled = await bundledRelease();

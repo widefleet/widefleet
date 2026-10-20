@@ -5,7 +5,6 @@ use platform_core::{Error, Result, model::RuntimeRelease};
 use serde::Deserialize;
 use serde_json::json;
 use std::{net::ToSocketAddrs, os::unix::process::CommandExt, path::PathBuf, process::Command};
-use uuid::Uuid;
 
 #[derive(Parser)]
 struct Options {
@@ -32,7 +31,7 @@ struct Options {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Installation {
-    fleet_id: Uuid,
+    organization_id: String,
     control_token: String,
 }
 
@@ -65,7 +64,7 @@ async fn main() -> Result<()> {
         .or(options.storage.google_credentials.clone());
     let storage = options.storage.resolve()?;
     let store = storage.object_store()?;
-    let prefix = format!("fleets/{}", installation.fleet_id);
+    let prefix = format!("organizations/{}", installation.organization_id);
     let key = format!("{prefix}/control-token");
     match read(store.as_ref(), key.clone()).await? {
         Some(value) if value != installation.control_token.as_bytes() => {
@@ -92,7 +91,8 @@ async fn main() -> Result<()> {
     {
         let release: RuntimeRelease =
             serde_json::from_slice(&tokio::fs::read(&options.release).await?)?;
-        let connector_key = runtime::connector_key(store.as_ref(), installation.fleet_id).await?;
+        let connector_key =
+            runtime::connector_key(store.as_ref(), &installation.organization_id).await?;
         let config = runtime::configuration(&release, &installation.control_token, &connector_key)?;
         let directory = tempfile::tempdir()?;
         for module in &release.modules {
@@ -111,7 +111,7 @@ async fn main() -> Result<()> {
         let status = tokio::process::Command::new(&options.celld)
             .arg("deploy")
             .arg(directory.path())
-            .args(storage.arguments(installation.fleet_id, false))
+            .args(storage.arguments(&installation.organization_id, false))
             .envs(storage.environment(false))
             .status()
             .await?;
@@ -120,11 +120,11 @@ async fn main() -> Result<()> {
         }
     }
 
-    let arguments = storage.arguments(installation.fleet_id, false);
+    let arguments = storage.arguments(&installation.organization_id, false);
     tokio::fs::write(
         "/state/runtime.json",
         serde_json::to_vec(&json!({
-            "fleetId": installation.fleet_id, "arguments": arguments,
+            "organizationId": installation.organization_id, "arguments": arguments,
             "azureAccount": std::env::var("AZURE_STORAGE_ACCOUNT_NAME").ok(),
         }))?,
     )

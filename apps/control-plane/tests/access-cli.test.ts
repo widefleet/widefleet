@@ -19,7 +19,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App access CLI", () => {
     displayName: "Inventory",
     catalogListed: false,
     parentId: null,
-    fleetId: "00000000-0000-4000-8000-000000000002",
+    organizationId: "00000000-0000-4000-8000-000000000002",
     hostname: "inventory.apps.localhost",
     url: "https://inventory.apps.localhost/",
     state: "active",

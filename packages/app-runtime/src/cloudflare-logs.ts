@@ -1,3 +1,4 @@
+import { organizationIdentifier } from "@platform/contracts";
 import type { TraceItem } from "@cloudflare/workers-types";
 import { runtimeLog, appSlug } from "@platform/contracts";
 import { z } from "zod";
@@ -5,7 +6,7 @@ import { z } from "zod";
 export const cloudflareLog = z.object({
   widefleetLog: z.literal(1),
   appId: z.uuid().nullable(),
-  fleetId: z.uuid().nullable().default(null),
+  organizationId: organizationIdentifier.nullable().default(null),
   connector: appSlug.nullable().default(null),
   eventTime: z.number(),
   receivedTime: z.number(),
@@ -46,7 +47,7 @@ export const cloudflareLogRecords = (
   event: Pick<TraceItem, "logs" | "exceptions" | "eventTimestamp" | "outcome" | "truncated">,
   props:
     | { appId: string; deploymentId: string; buildId: string | null }
-    | { fleetId: string; connector: string; connectorVersion: string },
+    | { organizationId: string; connector: string; connectorVersion: string },
   receivedTime = Date.now(),
 ) => {
   const logs = event.logs.map((log) => {
@@ -71,7 +72,7 @@ export const cloudflareLogRecords = (
     const output = cloudflareLog.parse({
       widefleetLog: 1,
       appId: app ? props.appId : null,
-      fleetId: app ? null : props.fleetId,
+      organizationId: app ? null : props.organizationId,
       connector: app ? null : props.connector,
       eventTime: timestamp,
       receivedTime,

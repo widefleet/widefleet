@@ -15,7 +15,7 @@ import { createSymbolicator } from "../src/lib/server/source-maps.ts";
 
 describe("Private connector debug artifacts", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
-  let fleetId: string;
+  let organizationId: string;
   const objects = new Map<string, Uint8Array>();
   const reads: string[] = [];
 
@@ -43,7 +43,7 @@ describe("Private connector debug artifacts", () => {
 
   beforeAll(async () => {
     environment = await createTestEnvironment();
-    fleetId = (await seedDeployment(environment.database.db)).fleetId;
+    organizationId = (await seedDeployment(environment.database.db)).organizationId;
   });
   afterAll(async () => {
     await environment.close();
@@ -53,7 +53,13 @@ describe("Private connector debug artifacts", () => {
     "resolves historical %s versions without downloading code or using the current release",
     async (kind) => {
       const release = connectorDebugFixture(`debug-${kind}`);
-      const checksum = await saveConnector(storage, fleetId, release, connectorFiles(release));
+
+      const checksum = await saveConnector(
+        storage,
+        organizationId,
+        release,
+        connectorFiles(release),
+      );
 
       const reference = connectorReference.parse({
         name: release.name,
@@ -67,7 +73,7 @@ describe("Private connector debug artifacts", () => {
       if (kind === "cloudflare") {
         await environment.database.db.insert(cloudflareOperations).values({
           id: version,
-          fleetId,
+          organizationId,
           command: {},
           targets: [],
           result: reference,
@@ -76,7 +82,7 @@ describe("Private connector debug artifacts", () => {
       } else {
         await environment.database.db.insert(jobs).values({
           id: version,
-          fleetId,
+          organizationId,
           kind,
           connector: kind === "connector" ? reference : null,
           connectors: kind === "runtime" ? [reference] : [],
@@ -88,13 +94,13 @@ describe("Private connector debug artifacts", () => {
       expect(artifact.release.modules.every((module) => !("source" in module))).toBe(true);
       expect(await loadConnector(storage, reference)).toEqual(release);
       const keys = [...objects.keys()].sort();
-      expect(await saveConnector(storage, fleetId, release, connectorFiles(release))).toBe(
+      expect(await saveConnector(storage, organizationId, release, connectorFiles(release))).toBe(
         checksum,
       );
       expect([...objects.keys()].sort()).toEqual(keys);
 
       reads.length = 0;
-      const target = { fleetId, name: release.name };
+      const target = { organizationId, name: release.name };
       const resolve = createSymbolicator(environment.database.db, storage, target);
 
       const log = contract.runtimeLog.parse({
@@ -129,7 +135,7 @@ describe("Private connector debug artifacts", () => {
 
       for (const other of [
         { ...target, name: "another-connector" },
-        { ...target, fleetId: crypto.randomUUID() },
+        { ...target, organizationId: crypto.randomUUID() },
       ]) {
         const wrong = await createSymbolicator(environment.database.db, storage, other)(log);
         expect(wrong.frames[0]?.file).toBeNull();
@@ -138,7 +144,7 @@ describe("Private connector debug artifacts", () => {
       const map = release.modules.find((module) => module.type === "sourcemap");
 
       if (!map) throw new Error("Missing fixture map");
-      const key = `connectors/${fleetId}/${release.name}/modules/${map.sha256}`;
+      const key = `connectors/${organizationId}/${release.name}/modules/${map.sha256}`;
 
       for (const bytes of [Buffer.from("invalid JSON"), null]) {
         if (bytes) objects.set(key, bytes);

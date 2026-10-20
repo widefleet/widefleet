@@ -11,11 +11,11 @@ import { apps, jobs } from "./schema.ts";
 import { transact, type Transaction } from "./transactions.ts";
 
 // Include legacy descendants too. New previews can only belong to original apps.
-const descendants = (appId: string, fleetId: string) => sql`${apps.id} in (
+const descendants = (appId: string, organizationId: string) => sql`${apps.id} in (
   with recursive previews as (
-    select id from app where parent_id = ${appId} and fleet_id = ${fleetId}
+    select id from app where parent_id = ${appId} and organization_id = ${organizationId}
     union
-    select app.id from app join previews on app.parent_id = previews.id where app.fleet_id = ${fleetId}
+    select app.id from app join previews on app.parent_id = previews.id where app.organization_id = ${organizationId}
   ) select id from previews
 )`;
 
@@ -44,7 +44,7 @@ const present = async (
     : await transaction
         .select()
         .from(apps)
-        .where(and(descendants(app.id, app.fleetId), ne(apps.state, "deleting")))
+        .where(and(descendants(app.id, app.organizationId), ne(apps.state, "deleting")))
         .orderBy(apps.hostname);
 
   return contract.appAccessState.parse({
@@ -136,7 +136,7 @@ export const applyAccessChange = async (
       accessRevision: revision,
       accessError: null,
     })
-    .where(and(descendants(app.id, app.fleetId), ne(apps.state, "deleting")))
+    .where(and(descendants(app.id, app.organizationId), ne(apps.state, "deleting")))
     .returning();
 
   for (const target of enqueue ? [updated, ...previews] : []) {
@@ -144,7 +144,7 @@ export const applyAccessChange = async (
     await transaction.insert(jobs).values({
       id: crypto.randomUUID(),
       appId: target.id,
-      fleetId: target.fleetId,
+      organizationId: target.organizationId,
       kind: "configure",
     });
   }

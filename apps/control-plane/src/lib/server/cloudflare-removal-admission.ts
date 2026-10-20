@@ -2,8 +2,8 @@ import { Result } from "better-result";
 import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { managedApp, lockAppDescendants } from "./apps.ts";
-import { lockFleet } from "./fleets.ts";
-import { apps, cloudflareOperations, fleets } from "./schema.ts";
+import { lockOrganizationRuntime } from "./organization-runtime.ts";
+import { apps, cloudflareOperations, organizationRuntimes } from "./schema.ts";
 import { transact } from "./transactions.ts";
 import type { Database } from "./database.ts";
 import type { Principal } from "./identity.ts";
@@ -23,21 +23,26 @@ export const registerCloudflareRemoval = (
 ) =>
   transact(database, async (transaction) => {
     const [scope] = await transaction
-      .select({ fleetId: apps.fleetId })
+      .select({ organizationId: apps.organizationId })
       .from(apps)
-      .where(and(eq(apps.id, command.appId), eq(apps.fleetId, command.actor.application.fleetId)));
+      .where(
+        and(
+          eq(apps.id, command.appId),
+          eq(apps.organizationId, command.actor.application.organizationId),
+        ),
+      );
 
-    if (scope) await lockFleet(transaction, scope.fleetId);
+    if (scope) await lockOrganizationRuntime(transaction, scope.organizationId);
     const access = await managedApp(transaction, command.actor, command.appId);
 
     if (access.isErr()) return access;
 
-    const [fleet] = await transaction
+    const [execution] = await transaction
       .select()
-      .from(fleets)
-      .where(eq(fleets.id, access.value.fleetId));
+      .from(organizationRuntimes)
+      .where(eq(organizationRuntimes.organizationId, access.value.organizationId));
 
-    if (fleet?.executor !== "cloudflare")
+    if (execution?.executor !== "cloudflare")
       throw new InvalidOperation({
         code: "CONFLICT",
         message: "This installation does not use Cloudflare execution",
@@ -63,10 +68,10 @@ export const registerCloudflareRemoval = (
       .toReversed()
       .map(({ id, hostname }) => ({ id, hostname }));
 
-    if (descendants.some((app) => app.fleetId !== fleet.id))
+    if (descendants.some((app) => app.organizationId !== execution.organizationId))
       throw new InvalidOperation({
         code: "CONFLICT",
-        message: "App previews belong to another fleet",
+        message: "App previews belong to another organization",
       });
 
     await transaction
@@ -102,12 +107,12 @@ export const createCloudflareRemoval =
 
             if (access.isErr()) return access;
 
-            const [fleet] = await transaction
+            const [execution] = await transaction
               .select()
-              .from(fleets)
-              .where(eq(fleets.id, access.value.fleetId));
+              .from(organizationRuntimes)
+              .where(eq(organizationRuntimes.organizationId, access.value.organizationId));
 
-            if (fleet?.executor !== "cloudflare")
+            if (execution?.executor !== "cloudflare")
               throw new InvalidOperation({
                 code: "CONFLICT",
                 message: "This installation does not use Cloudflare execution",

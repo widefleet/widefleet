@@ -18,7 +18,7 @@ export const workflowApp = async (start: Start, environment: ParentEnvironment) 
         const active = current.capabilities[name];
 
         return (
-          active?.fleetId === grant.fleetId &&
+          active?.organizationId === grant.organizationId &&
           active.connector === grant.connector &&
           active.entrypoint === grant.entrypoint
         );

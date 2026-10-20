@@ -5,11 +5,15 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { Database } from "./database.ts";
 import { InvalidOperation, StorageUnavailable } from "./errors.ts";
-import { defaultFleet, lockFleet, requireAgentExecution } from "./fleets.ts";
+import {
+  installationRuntime,
+  lockOrganizationRuntime,
+  requireAgentExecution,
+} from "./organization-runtime.ts";
 import { loadPackage, savePackage, verifyModules } from "./package-storage.ts";
 import type { Principal } from "./identity.ts";
 import type { HostedExecution } from "./deployment-execution.ts";
-import { fleets, jobs, runtimeReleases } from "./schema.ts";
+import { organizationRuntimes, jobs, runtimeReleases } from "./schema.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import { transact, type Transaction } from "./transactions.ts";
 
@@ -62,14 +66,14 @@ export const loadRuntime = async (
   return { runtime };
 };
 
-export const ensureFleetRuntime = async (
+export const ensureOrganizationRuntime = async (
   transaction: Transaction,
   storage: ArtifactStorage,
-  fleetId: string,
+  organizationId: string,
 ) => {
-  const fleet = await lockFleet(transaction, fleetId);
+  const execution = await lockOrganizationRuntime(transaction, organizationId);
 
-  if (fleet.runtime) return runtimeReference.parse(fleet.runtime);
+  if (execution.runtime) return runtimeReference.parse(execution.runtime);
 
   const { default: bundled } = await import("@platform/app-runtime/release", {
     with: { type: "json" },
@@ -78,7 +82,10 @@ export const ensureFleetRuntime = async (
   const release = contract.runtimeRelease.parse(bundled);
 
   const reference = await saveRuntime(transaction, storage, release);
-  await transaction.update(fleets).set({ runtime: reference }).where(eq(fleets.id, fleet.id));
+  await transaction
+    .update(organizationRuntimes)
+    .set({ runtime: reference })
+    .where(eq(organizationRuntimes.organizationId, execution.organizationId));
 
   return reference;
 };
@@ -92,20 +99,20 @@ const administrator = (principal: Principal) => {
 };
 
 const status = async (transaction: Transaction) => {
-  const target = await defaultFleet(transaction);
-  const fleet = await lockFleet(transaction, target.id);
-  const selected = fleet.runtime ? runtimeReference.parse(fleet.runtime) : null;
+  const target = await installationRuntime(transaction);
+  const execution = await lockOrganizationRuntime(transaction, target.organizationId);
+  const selected = execution.runtime ? runtimeReference.parse(execution.runtime) : null;
 
-  const [job] = fleet.runtimeJobId
-    ? await transaction.select().from(jobs).where(eq(jobs.id, fleet.runtimeJobId))
+  const [job] = execution.runtimeJobId
+    ? await transaction.select().from(jobs).where(eq(jobs.id, execution.runtimeJobId))
     : [];
 
-  const active = fleet.appliedRuntime ? runtimeReference.parse(fleet.appliedRuntime) : null;
+  const active = execution.appliedRuntime ? runtimeReference.parse(execution.appliedRuntime) : null;
   const result = z.object({ message: z.string() }).safeParse(job?.result);
 
   return contract.runtimeStatus.parse({
     desiredVersion: selected?.version ?? null,
-    jobId: fleet.runtimeJobId,
+    jobId: execution.runtimeJobId,
     activeVersion: active?.version ?? null,
     state: job?.state ?? (active ? "succeeded" : "pending"),
     message: result.success ? result.data.message : null,
@@ -126,9 +133,9 @@ export const createRuntimeReleaseService = (
   ) =>
     transact(database, async (transaction) => {
       administrator(principal);
-      const target = await defaultFleet(transaction);
-      await lockFleet(transaction, target.id);
-      await requireAgentExecution(transaction, target.id, "Runtime updates");
+      const target = await installationRuntime(transaction);
+      await lockOrganizationRuntime(transaction, target.organizationId);
+      await requireAgentExecution(transaction, target.organizationId, "Runtime updates");
       let reference;
 
       if ("modules" in input) {
@@ -152,15 +159,15 @@ export const createRuntimeReleaseService = (
       const id = crypto.randomUUID();
       await transaction.insert(jobs).values({
         id,
-        fleetId: target.id,
+        organizationId: target.organizationId,
         kind: "runtime",
         runtime: reference,
         rollback: !("modules" in input),
       });
       await transaction
-        .update(fleets)
+        .update(organizationRuntimes)
         .set({ runtime: reference, runtimeJobId: id })
-        .where(eq(fleets.id, target.id));
+        .where(eq(organizationRuntimes.organizationId, target.organizationId));
 
       return Result.ok(await status(transaction));
     });

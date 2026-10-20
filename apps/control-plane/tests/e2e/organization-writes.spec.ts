@@ -7,7 +7,7 @@ import { workerMetadata } from "@platform/contracts";
 import { member, organization, session } from "../../src/lib/server/auth-schema.ts";
 import {
   apps,
-  fleets,
+  organizationRuntimes,
   connectors,
   artifacts,
   deployments,
@@ -137,9 +137,7 @@ const organizationSession = async (browser: Browser, javaScriptEnabled: boolean)
     await environment.database.db
       .insert(organization)
       .values({ id, name, slug: id, createdAt: new Date() });
-    await environment.database.db.insert(fleets).values({
-      id: crypto.randomUUID(),
-      name: id,
+    await environment.database.db.insert(organizationRuntimes).values({
       organizationId: id,
       appHostnameSuffix: id,
     });
@@ -233,9 +231,12 @@ for (const javaScriptEnabled of [true, false]) {
       }
 
       const records = await environment.database.db
-        .select({ connector: connectors, organizationId: fleets.organizationId })
+        .select({ connector: connectors, organizationId: organizationRuntimes.organizationId })
         .from(connectors)
-        .innerJoin(fleets, eq(connectors.fleetId, fleets.id))
+        .innerJoin(
+          organizationRuntimes,
+          eq(connectors.organizationId, organizationRuntimes.organizationId),
+        )
         .where(eq(connectors.name, release.name));
 
       for (const id of [alpha, beta]) {
@@ -263,12 +264,15 @@ for (const javaScriptEnabled of [true, false]) {
         .update(connectors)
         .set({ appliedPackage: record.connector.package })
         .where(
-          and(eq(connectors.fleetId, record.connector.fleetId), eq(connectors.name, release.name)),
+          and(
+            eq(connectors.organizationId, record.connector.organizationId),
+            eq(connectors.name, release.name),
+          ),
         );
       const appId = crypto.randomUUID();
       await environment.database.db.insert(apps).values({
         id: appId,
-        fleetId: record.connector.fleetId,
+        organizationId: record.connector.organizationId,
         ownerId: person.id,
         slug: "connector-browser",
         displayName: "Connector browser",
@@ -334,12 +338,12 @@ for (const javaScriptEnabled of [true, false]) {
     const { person, alpha, context } = await organizationSession(browser, javaScriptEnabled);
 
     try {
-      const [fleet] = await environment.database.db
+      const [execution] = await environment.database.db
         .select()
-        .from(fleets)
-        .where(eq(fleets.organizationId, alpha));
+        .from(organizationRuntimes)
+        .where(eq(organizationRuntimes.organizationId, alpha));
 
-      if (!fleet) throw new Error("Missing organization fixture fleet");
+      if (!execution) throw new Error("Missing organization fixture execution");
       const appId = crypto.randomUUID();
       const artifactId = crypto.randomUUID();
       const deploymentId = crypto.randomUUID();
@@ -347,7 +351,7 @@ for (const javaScriptEnabled of [true, false]) {
       // A failed removal leaves the old serving snapshot in place.
       await environment.database.db.insert(apps).values({
         id: appId,
-        fleetId: fleet.id,
+        organizationId: execution.organizationId,
         ownerId: person.id,
         slug: "retry-removal",
         displayName: "Retry removal",
@@ -397,7 +401,11 @@ for (const javaScriptEnabled of [true, false]) {
       });
       const queued = await environment.database.db.select().from(jobs).where(eq(jobs.appId, appId));
       expect(queued).toHaveLength(1);
-      expect(queued[0]).toMatchObject({ fleetId: fleet.id, kind: "configure", state: "queued" });
+      expect(queued[0]).toMatchObject({
+        organizationId: execution.organizationId,
+        kind: "configure",
+        state: "queued",
+      });
 
       // Simulate the agent confirming the removal.
       await environment.database.db
@@ -436,9 +444,12 @@ for (const javaScriptEnabled of [true, false]) {
       await expect(page).toHaveURL(/\/apps\/[a-f0-9-]+$/);
 
       const records = await environment.database.db
-        .select({ organizationId: fleets.organizationId })
+        .select({ organizationId: organizationRuntimes.organizationId })
         .from(apps)
-        .innerJoin(fleets, eq(apps.fleetId, fleets.id))
+        .innerJoin(
+          organizationRuntimes,
+          eq(apps.organizationId, organizationRuntimes.organizationId),
+        )
         .where(eq(apps.slug, slug));
 
       expect(records).toEqual([{ organizationId: alpha }]);
@@ -498,9 +509,12 @@ for (const javaScriptEnabled of [true, false]) {
       await expect(first).toHaveURL(/\/apps\/[a-f0-9-]+$/);
 
       const records = await environment.database.db
-        .select({ organizationId: fleets.organizationId })
+        .select({ organizationId: organizationRuntimes.organizationId })
         .from(apps)
-        .innerJoin(fleets, eq(apps.fleetId, fleets.id))
+        .innerJoin(
+          organizationRuntimes,
+          eq(apps.organizationId, organizationRuntimes.organizationId),
+        )
         .where(eq(apps.slug, slug));
 
       expect(records).toEqual([{ organizationId: beta }]);
@@ -521,16 +535,16 @@ for (const javaScriptEnabled of [true, false]) {
           .set({ activeOrganizationId })
           .where(eq(session.userId, person.id));
 
-        const [fleet] = await environment.database.db
+        const [execution] = await environment.database.db
           .select()
-          .from(fleets)
-          .where(eq(fleets.organizationId, alpha));
+          .from(organizationRuntimes)
+          .where(eq(organizationRuntimes.organizationId, alpha));
 
-        if (!fleet) throw new Error("Missing organization fixture fleet");
+        if (!execution) throw new Error("Missing organization fixture execution");
         const appId = crypto.randomUUID();
         await environment.database.db.insert(apps).values({
           id: appId,
-          fleetId: fleet.id,
+          organizationId: execution.organizationId,
           ownerId: person.id,
           slug: "linked-app",
           displayName: "Linked app",

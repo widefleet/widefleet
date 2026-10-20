@@ -263,7 +263,7 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
             // sufficient here; unrelated apps can activate concurrently.
             const resolved = await resolveCloudflareCapabilities(
               transaction,
-              app.fleetId,
+              app.organizationId,
               capabilities.grants,
             );
 

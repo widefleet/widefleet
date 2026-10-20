@@ -13,9 +13,13 @@ import { runtimeRelease } from "@platform/contracts";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createTestEnvironment } from "../environment.ts";
-import { initializeCloudflareFleet } from "../../src/lib/server/fleets.ts";
+import { initializeCloudflareRuntime } from "../../src/lib/server/organization-runtime.ts";
 import { createCloudflareProvisioner } from "../../src/lib/server/cloudflare-provisioning.ts";
-import { cloudflareRuntimeBindings, fleets, runtimeReleases } from "../../src/lib/server/schema.ts";
+import {
+  cloudflareRuntimeBindings,
+  organizationRuntimes,
+  runtimeReleases,
+} from "../../src/lib/server/schema.ts";
 import { CloudflareBindingUpdatePending } from "../../src/lib/server/cloudflare-binding-updates.ts";
 import { deployHostedRuntime } from "../../tools/hosted-runtime.ts";
 import { hostedConfigurations, hostedInstallation } from "../../tools/hosted-configuration.ts";
@@ -243,7 +247,7 @@ describe("Hosted infrastructure deployment coordination", () => {
   const source = "export default { fetch() { return new Response('fixture'); } }";
 
   const release = runtimeRelease.parse({
-    protocol: 1,
+    protocol: 2,
     auth: 1,
     workflows: 1,
     cloudflare: 1,
@@ -276,7 +280,7 @@ describe("Hosted infrastructure deployment coordination", () => {
 
   beforeAll(async () => {
     environment = await createTestEnvironment();
-    const initialized = await initializeCloudflareFleet(environment.database.db);
+    const initialized = await initializeCloudflareRuntime(environment.database.db);
 
     if (initialized.isErr()) throw initialized.error;
   });
@@ -286,7 +290,7 @@ describe("Hosted infrastructure deployment coordination", () => {
     await environment.database.db.delete(cloudflareRuntimeBindings);
     await environment.database.db.delete(runtimeReleases);
     await environment.database.db
-      .update(fleets)
+      .update(organizationRuntimes)
       .set({ runtime: null, appliedRuntime: null, runtimeJobId: null });
   });
   afterAll(async () => {
@@ -320,8 +324,8 @@ describe("Hosted infrastructure deployment coordination", () => {
     expect(deployments).toBe(1);
     const [state] = await environment.database.db.select().from(cloudflareRuntimeBindings);
     expect(state?.pending).toBeNull();
-    const [fleet] = await environment.database.db.select().from(fleets);
-    expect(fleet?.appliedRuntime).toMatchObject({ version: release.version });
+    const [execution] = await environment.database.db.select().from(organizationRuntimes);
+    expect(execution?.appliedRuntime).toMatchObject({ version: release.version });
     expect(saved.size).toBe(1);
   });
 
@@ -331,9 +335,9 @@ describe("Hosted infrastructure deployment coordination", () => {
         throw new Error("fixture deployment failed");
       }),
     ).rejects.toThrow("fixture deployment failed");
-    const [fleet] = await environment.database.db.select().from(fleets);
-    expect(fleet?.runtime).toBeNull();
-    expect(fleet?.appliedRuntime).toBeNull();
+    const [execution] = await environment.database.db.select().from(organizationRuntimes);
+    expect(execution?.runtime).toBeNull();
+    expect(execution?.appliedRuntime).toBeNull();
     expect(await environment.database.db.select().from(runtimeReleases)).toHaveLength(0);
   });
 

@@ -4,7 +4,7 @@ import { getRuntime } from "../../src/lib/server/runtime-node.ts";
 import { createRequestRuntime } from "../../src/lib/server/runtime-services.ts";
 
 // This test-only entrypoint admits fixture memberships through the public extension
-// contract. The standard Node entrypoint retains its default-fleet policy.
+// contract. The standard Node entrypoint retains its default-execution policy.
 export const handle: Handle = ({ event, resolve }) => {
   event.locals.runtime = createRequestRuntime(async () => {
     const runtime = await getRuntime();
@@ -12,7 +12,7 @@ export const handle: Handle = ({ event, resolve }) => {
     return {
       ...runtime,
       identity: createIdentityService(runtime.auth, runtime.database.db, runtime.configuration, {
-        filterFleets: async (candidates) => candidates.map((candidate) => candidate.id),
+        filterOrganizations: async (candidates) => candidates.map((candidate) => candidate.id),
       }),
     };
   });

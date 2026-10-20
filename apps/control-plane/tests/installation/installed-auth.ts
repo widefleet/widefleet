@@ -33,7 +33,7 @@ export const installedAuth = async () => {
   const client = `${name}-client`;
   const volume = `${name}-state`;
   const image = process.env["PLATFORM_RUNTIME_IMAGE"] ?? "widefleet-runtime:setup-check";
-  const fleetId = randomUUID();
+  const organizationId = randomUUID();
   const controlToken = `test-runtime-control-${randomUUID()}`;
   let trustedProvider = false;
 
@@ -218,7 +218,7 @@ export const installedAuth = async () => {
       "-ec",
       'umask 077; printf "%s" "$1" > /runtime-config/installation.json; printf "%s" "$2" > /runtime-config/control-token; chown -R 1000:1000 /runtime-config',
       "fixture",
-      JSON.stringify({ fleetId, controlToken }),
+      JSON.stringify({ organizationId, controlToken }),
       controlToken,
     );
 
@@ -259,7 +259,7 @@ export const installedAuth = async () => {
       await s3.send(
         new PutObjectCommand({
           Bucket: name,
-          Key: `fleets/${fleetId}/r2/widefleet-packages/${key}`,
+          Key: `organizations/${organizationId}/r2/widefleet-packages/${key}`,
           Body: body,
         }),
       );

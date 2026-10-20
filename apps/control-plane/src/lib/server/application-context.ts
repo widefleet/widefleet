@@ -3,9 +3,7 @@
 export { applicationContext } from "@platform/contracts";
 
 // Candidates already belong to the authenticated user. Admission may only narrow them.
-export type FleetAccess = {
-  filterFleets: (
-    candidates: readonly { id: string; organizationId: string }[],
-  ) => Promise<string[]>;
+export type OrganizationAccess = {
+  filterOrganizations: (candidates: readonly { id: string }[]) => Promise<string[]>;
   defaultOrganizationId?: string;
 };

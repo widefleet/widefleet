@@ -6,7 +6,7 @@ import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
 import { managedApp } from "./apps.ts";
 import { InvalidOperation } from "./errors.ts";
-import { lockApplicationFleet, requireAgentExecution } from "./fleets.ts";
+import { lockOrganizationRuntime, requireAgentExecution } from "./organization-runtime.ts";
 import type { Principal } from "./identity.ts";
 import {
   connectorReference,
@@ -20,7 +20,7 @@ import {
   deployments,
   jobs,
   cloudflareOperations,
-  type fleets,
+  type organizationRuntimes,
 } from "./schema.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import type { Transaction } from "./transactions.ts";
@@ -110,14 +110,14 @@ export const bindingState = (app: typeof apps.$inferSelect) =>
 export const prepareConnector = async (
   transaction: Transaction,
   storage: ArtifactStorage,
-  fleet: typeof fleets.$inferSelect,
+  execution: typeof organizationRuntimes.$inferSelect,
   release: z.infer<typeof contract.connectorPackage>,
   modules?: WorkerModule[],
 ) => {
   const inventory = await transaction
     .select()
     .from(connectors)
-    .where(eq(connectors.fleetId, fleet.id));
+    .where(eq(connectors.organizationId, execution.organizationId));
 
   const existing = inventory.find((entry) => entry.name === release.name);
   const previous = existing ? connectorReference.parse(existing.package) : null;
@@ -126,7 +126,7 @@ export const prepareConnector = async (
   const consumers = await transaction
     .select({ capabilities: apps.capabilities, applied: apps.appliedCapabilities })
     .from(apps)
-    .where(eq(apps.fleetId, fleet.id));
+    .where(eq(apps.organizationId, execution.organizationId));
 
   for (const consumer of consumers)
     for (const grant of [
@@ -156,7 +156,7 @@ export const prepareConnector = async (
       ),
   );
 
-  if (fleet.executor === "cloudflare" && removesEntrypoint) {
+  if (execution.executor === "cloudflare" && removesEntrypoint) {
     // An activation can publish grants before its SQL receipt commits. Keep those
     // grants protected until a later confirmed revision proves their revocation.
     const unconfirmed = await transaction
@@ -165,7 +165,7 @@ export const prepareConnector = async (
       .innerJoin(apps, eq(apps.id, cloudflareOperations.appId))
       .where(
         and(
-          eq(apps.fleetId, fleet.id),
+          eq(apps.organizationId, execution.organizationId),
           sql`${cloudflareOperations.command}->>'kind' = 'capabilities'`,
           sql`(${cloudflareOperations.result}->>'revision')::integer > COALESCE(${apps.appliedCapabilityRevision}, -1)`,
         ),
@@ -184,7 +184,7 @@ export const prepareConnector = async (
           });
   }
 
-  const checksum = await saveConnector(storage, fleet.id, release, modules);
+  const checksum = await saveConnector(storage, execution.organizationId, release, modules);
 
   const reference = connectorReference.parse({
     secrets: previous?.secrets ?? {},
@@ -209,15 +209,15 @@ export const validateCapabilityChange = async (
   connectorAdministrator(principal);
 
   const [target] = await transaction
-    .select({ fleetId: apps.fleetId })
+    .select({ organizationId: apps.organizationId })
     .from(apps)
-    .where(and(eq(apps.id, appId), eq(apps.fleetId, principal.application.fleetId)));
+    .where(and(eq(apps.id, appId), eq(apps.organizationId, principal.application.organizationId)));
 
   if (!target) throw new InvalidOperation({ code: "NOT_FOUND", message: "App not found" });
   // Match claim/deploy lock order, so concurrent connector updates and grants agree.
-  await lockApplicationFleet(transaction, principal.application);
+  await lockOrganizationRuntime(transaction, principal.application.organizationId);
 
-  if (enqueue) await requireAgentExecution(transaction, target.fleetId, "Connectors");
+  if (enqueue) await requireAgentExecution(transaction, target.organizationId, "Connectors");
   const access = await managedApp(transaction, principal, appId);
 
   if (access.isErr()) return access;
@@ -231,7 +231,12 @@ export const validateCapabilityChange = async (
     const [record] = await transaction
       .select()
       .from(connectors)
-      .where(and(eq(connectors.fleetId, app.fleetId), eq(connectors.name, grant.connector)));
+      .where(
+        and(
+          eq(connectors.organizationId, app.organizationId),
+          eq(connectors.name, grant.connector),
+        ),
+      );
 
     // Failed or pending replacement code must not become a new capability.
     const active = record?.appliedPackage ? connectorReference.parse(record.appliedPackage) : null;
@@ -301,7 +306,7 @@ export const applyCapabilityChange = async (
     await transaction.insert(jobs).values({
       id: crypto.randomUUID(),
       appId: app.id,
-      fleetId: app.fleetId,
+      organizationId: app.organizationId,
       kind: "configure",
     });
 

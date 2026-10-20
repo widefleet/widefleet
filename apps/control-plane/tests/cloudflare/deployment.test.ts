@@ -26,7 +26,7 @@ import {
 } from "../cloudflare-deployment.fixture.ts";
 import { cloudflareRemovalId } from "../../src/lib/server/cloudflare-removal-command.ts";
 import { user } from "../../src/lib/server/auth-schema.ts";
-import { initializeCloudflareFleet } from "../../src/lib/server/fleets.ts";
+import { initializeCloudflareRuntime } from "../../src/lib/server/organization-runtime.ts";
 import { createCloudflareAppSignIn } from "../../src/lib/server/app-sign-in-cloudflare.ts";
 import { createAppService } from "../../src/lib/server/apps.ts";
 import {
@@ -38,7 +38,7 @@ import {
   cloudflareRuntimeBindings,
   deployments,
   jobs,
-  fleets,
+  organizationRuntimes,
 } from "../../src/lib/server/schema.ts";
 
 const resourceName = (appId: string, kind: string, name: string) =>
@@ -609,11 +609,11 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         largeGroups[0] ?? "",
       ]);
       environment = await createTestEnvironment();
-      (await initializeCloudflareFleet(environment.database.db)).unwrap();
+      (await initializeCloudflareRuntime(environment.database.db)).unwrap();
       await environment.database.db
-        .update(fleets)
+        .update(organizationRuntimes)
         .set({ appHostnameSuffix: "fixture" })
-        .where(eq(fleets.id, environment.application.fleetId));
+        .where(eq(organizationRuntimes.organizationId, environment.application.organizationId));
 
       const applications = createAppService(environment.database.db, {
         ...environment.configuration,
@@ -684,7 +684,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       export class ConnectorGateway extends WorkerEntrypoint { invoke(method, args) { if (method !== 'read' || args.length) throw new Error('Unexpected fixture RPC'); return this.ctx.props.entrypoint === 'Reader' ? 'named-connector' : 'default-connector'; } }
       import {createConnectorService} from ${JSON.stringify(server + "connectors.ts")};
       import {prepareConnector} from ${JSON.stringify(server + "connector-changes.ts")};
-      import {lockFleet} from ${JSON.stringify(server + "fleets.ts")};
+      import {lockOrganizationRuntime} from ${JSON.stringify(server + "organization-runtime.ts")};
       import { createCloudflareDeployment } from ${JSON.stringify(server + "cloudflare-deployment.ts")};
       import { createCloudflareEvents } from ${JSON.stringify(server + "cloudflare-events.ts")};
       import { createCloudflareProvisioner } from ${JSON.stringify(server + "cloudflare-provisioning.ts")};
@@ -748,8 +748,8 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           const input = await request.json();
           try {
             await withCloudflareDatabase(env, ({db}) => db.transaction(async transaction => {
-              const fleet = await lockFleet(transaction, input.fleetId);
-              await prepareConnector(transaction, createArtifactStorage(createR2Storage(env.ARTIFACTS)), fleet, input.release);
+              const execution = await lockOrganizationRuntime(transaction, input.organizationId);
+              await prepareConnector(transaction, createArtifactStorage(createR2Storage(env.ARTIFACTS)), execution, input.release);
             }));
             return new Response(null, {status:204});
           } catch(error) {return Response.json({error:error.message}, {status:400});}
@@ -1165,7 +1165,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         id: appId,
         slug: `fixture-${appId}`,
         displayName: "Unstarted fixture",
-        fleetId: first.fleetId,
+        organizationId: first.organizationId,
         ownerId: "fixture-owner",
         hostname,
         accessRevision: 1,
@@ -2043,7 +2043,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       });
 
       await environment.database.db.insert(connectors).values({
-        fleetId: first.fleetId,
+        organizationId: first.organizationId,
         name: reference.name,
         package: reference,
         appliedPackage: reference,
@@ -2099,7 +2099,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         });
 
         await environment.database.db.insert(connectors).values({
-          fleetId: first.fleetId,
+          organizationId: first.organizationId,
           name: reference.name,
           package: reference,
           appliedPackage: reference,
@@ -2154,7 +2154,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         const prepare = () =>
           worker.fetch("http://fixture/prepare-connector", {
             method: "POST",
-            body: JSON.stringify({ fleetId: entry.fleetId, release: replacement }),
+            body: JSON.stringify({ organizationId: entry.organizationId, release: replacement }),
           });
 
         const safe = state === "saved" || state === "failed";
@@ -2568,7 +2568,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         .poll(runtimeStatus)
         .toMatchObject({ activeVersion: next.version, state: "succeeded" });
       expect(
-        (await environment.database.db.select().from(fleets))[0]?.appliedRuntime,
+        (await environment.database.db.select().from(organizationRuntimes))[0]?.appliedRuntime,
       ).toMatchObject({ version: next.version });
       expect(
         JSON.stringify({ bindings: [...settings], schedules, queues: [...queues], bindingTag }),
@@ -2704,16 +2704,16 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
     }, 20000);
 
     it("rejects a delayed first registration after a newer runtime update completes", async () => {
-      const [fleet] = await environment.database.db.select().from(fleets);
+      const [execution] = await environment.database.db.select().from(organizationRuntimes);
 
-      if (!fleet?.runtime) throw new Error("Runtime fixture is missing");
+      if (!execution?.runtime) throw new Error("Runtime fixture is missing");
 
       const delayed = {
         kind: "runtime",
         id: crypto.randomUUID(),
-        fleetId: fleet.id,
-        previousJobId: fleet.runtimeJobId,
-        runtime: fleet.runtime,
+        organizationId: execution.organizationId,
+        previousJobId: execution.runtimeJobId,
+        runtime: execution.runtime,
         actor: {
           id: "fixture-owner",
           admin: true,
@@ -2774,16 +2774,16 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         );
 
       await install("99.3.0");
-      const [fleet] = await environment.database.db.select().from(fleets);
+      const [execution] = await environment.database.db.select().from(organizationRuntimes);
 
-      if (!fleet?.runtime) throw new Error("Runtime fixture is missing");
+      if (!execution?.runtime) throw new Error("Runtime fixture is missing");
 
       const delayed = {
         kind: "runtime",
         id: crypto.randomUUID(),
-        fleetId: fleet.id,
-        previousJobId: fleet.runtimeJobId,
-        runtime: fleet.runtime,
+        organizationId: execution.organizationId,
+        previousJobId: execution.runtimeJobId,
+        runtime: execution.runtime,
         actor: {
           id: "fixture-owner",
           admin: true,
@@ -2830,7 +2830,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
 
       expect(await runtimeStatus()).toMatchObject({ state: "failed", activeVersion: "99.5.0" });
       expect(
-        (await environment.database.db.select().from(fleets))[0]?.appliedRuntime,
+        (await environment.database.db.select().from(organizationRuntimes))[0]?.appliedRuntime,
       ).toMatchObject({ version: "99.3.0" });
       const entry = await seedDeployment(environment.database.db, { bindings: [] });
       await seed(entry);

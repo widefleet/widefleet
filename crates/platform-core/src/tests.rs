@@ -7,7 +7,7 @@ fn app_json_preserves_catalog_listing_and_accepts_older_servers() -> crate::Resu
         "slug": "catalog-app",
         "displayName": "Catalog App",
         "parentId": null,
-        "fleetId": "00000000-0000-4000-8000-000000000002",
+        "organizationId": "00000000-0000-4000-8000-000000000002",
         "hostname": "catalog-app.apps.example.test",
         "url": "https://catalog-app.apps.example.test/",
         "createdAt": "2026-10-01T00:00:00.000Z",

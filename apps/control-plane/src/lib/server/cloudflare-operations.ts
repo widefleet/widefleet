@@ -1,5 +1,5 @@
 import { applyCapabilityChange } from "./connector-changes.ts";
-import { lockFleet } from "./fleets.ts";
+import { lockOrganizationRuntime } from "./organization-runtime.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
 import { and, eq } from "drizzle-orm";
@@ -10,14 +10,14 @@ import type { Database } from "./database.ts";
 import { deploymentCommand } from "./deployment-execution.ts";
 import { InvalidOperation } from "./errors.ts";
 import { applyNetworkChange } from "./network.ts";
-import { ensureFleetRuntime, runtimeReference } from "./runtime-releases.ts";
+import { ensureOrganizationRuntime, runtimeReference } from "./runtime-releases.ts";
 import {
   apps,
   artifacts,
   cloudflareOperations,
   deploymentEvents,
   deployments,
-  fleets,
+  organizationRuntimes,
 } from "./schema.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import { transact } from "./transactions.ts";
@@ -41,11 +41,11 @@ export const registerCloudflareOperation = (
   transact(database, (transaction) =>
     Result.gen(async function* () {
       const [scope] = await transaction
-        .select({ fleetId: apps.fleetId })
+        .select({ organizationId: apps.organizationId })
         .from(apps)
         .where(eq(apps.id, command.appId));
 
-      if (scope) await lockFleet(transaction, scope.fleetId);
+      if (scope) await lockOrganizationRuntime(transaction, scope.organizationId);
 
       const [app] = await transaction
         .select()
@@ -66,9 +66,12 @@ export const registerCloudflareOperation = (
 
       if (existing) return Result.ok(existing);
 
-      const [fleet] = await transaction.select().from(fleets).where(eq(fleets.id, app.fleetId));
+      const [execution] = await transaction
+        .select()
+        .from(organizationRuntimes)
+        .where(eq(organizationRuntimes.organizationId, app.organizationId));
 
-      if (!fleet || fleet.executor !== "cloudflare")
+      if (!execution || execution.executor !== "cloudflare")
         return yield* new InvalidOperation({
           code: "CONFLICT",
           message: "This installation does not use Cloudflare execution",
@@ -157,9 +160,9 @@ export const registerCloudflareOperation = (
         targetIds = [app.id, ...access.previews.map((preview) => preview.appId)];
       }
 
-      const runtime = fleet.appliedRuntime
-        ? runtimeReference.parse(fleet.appliedRuntime)
-        : await ensureFleetRuntime(transaction, storage, fleet.id);
+      const runtime = execution.appliedRuntime
+        ? runtimeReference.parse(execution.appliedRuntime)
+        : await ensureOrganizationRuntime(transaction, storage, execution.organizationId);
 
       const targets: z.infer<typeof operationTarget>[] = [];
 

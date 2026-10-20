@@ -1,4 +1,4 @@
-use crate::{artifact, config::Configuration, docker, fleet};
+use crate::{artifact, config::Configuration, docker, execution};
 use bollard::Docker;
 use platform_core::{
     Error, Result,
@@ -55,8 +55,8 @@ async fn execute(
         "execute".into(),
         "migration".into(),
         "--file".into(),
-        format!("/agent-state/{}/{name}/query.sql", job.fleet_id),
-        format!("/agent-state/{}/{name}", job.fleet_id),
+        format!("/agent-state/{}/{name}/query.sql", job.organization_id),
+        format!("/agent-state/{}/{name}", job.organization_id),
         "--json".into(),
     ];
     if cancelled.load(Ordering::Relaxed) {
@@ -95,11 +95,11 @@ pub async fn run(
     }
     let mut request: Request = serde_json::from_slice(&bytes)?;
     request.validate()?;
-    let database = fleet::migration_database(configuration, job, &request).await?;
-    tokio::fs::create_dir_all(configuration.state.join(job.fleet_id.to_string())).await?;
+    let database = execution::migration_database(configuration, job, &request).await?;
+    tokio::fs::create_dir_all(configuration.state.join(&job.organization_id)).await?;
     let temporary = tempfile::Builder::new()
         .prefix("migrations-")
-        .tempdir_in(configuration.state.join(job.fleet_id.to_string()))?;
+        .tempdir_in(configuration.state.join(&job.organization_id))?;
     tokio::fs::write(temporary.path().join("wrangler.jsonc"), serde_json::to_vec(&json!({
         "name": "migration", "d1_databases": [{ "binding": "DB", "database_name": "migration", "database_id": database }],
     }))?).await?;

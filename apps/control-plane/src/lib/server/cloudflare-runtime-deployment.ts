@@ -14,9 +14,9 @@ import {
 } from "./cloudflare-runtime-package.ts";
 import { registerCloudflareRuntime } from "./cloudflare-runtime-releases.ts";
 import { InvalidOperation } from "./errors.ts";
-import { lockFleet } from "./fleets.ts";
+import { lockOrganizationRuntime } from "./organization-runtime.ts";
 import { loadRuntime } from "./runtime-releases.ts";
-import { cloudflareOperations, fleets } from "./schema.ts";
+import { cloudflareOperations, organizationRuntimes } from "./schema.ts";
 import { createR2Storage } from "./storage/r2.ts";
 
 export const executeCloudflareRuntime = async (
@@ -63,8 +63,8 @@ export const executeCloudflareRuntime = async (
     try {
       await withCloudflareDatabase(bindings, ({ db }) =>
         db.transaction(async (transaction) => {
-          // Reuse the fleet lock used by runtime selection and connector changes.
-          const fleet = await lockFleet(transaction, command.fleetId);
+          // Reuse the execution lock used by runtime selection and connector changes.
+          const execution = await lockOrganizationRuntime(transaction, command.organizationId);
 
           const [operation] = await transaction
             .select()
@@ -75,7 +75,7 @@ export const executeCloudflareRuntime = async (
 
           if (operation.finishedAt && !operation.error) return;
 
-          if (fleet.runtimeJobId !== command.id)
+          if (execution.runtimeJobId !== command.id)
             throw new InvalidOperation({
               code: "CONFLICT",
               message: "A newer runtime update superseded this operation",
@@ -87,9 +87,9 @@ export const executeCloudflareRuntime = async (
             if (version !== command.runtime.version)
               throw new Error("The requested runtime version is not active");
             await transaction
-              .update(fleets)
+              .update(organizationRuntimes)
               .set({ appliedRuntime: command.runtime })
-              .where(eq(fleets.id, fleet.id));
+              .where(eq(organizationRuntimes.organizationId, execution.organizationId));
             await transaction
               .update(cloudflareOperations)
               .set({ finishedAt: new Date(), error: null })

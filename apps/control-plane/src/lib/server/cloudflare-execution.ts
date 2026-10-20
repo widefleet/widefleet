@@ -150,7 +150,7 @@ export const createCloudflareExecution = (
 
         await resolveCloudflareCapabilities(
           transaction,
-          app.fleetId,
+          app.organizationId,
           contract.capabilityGrants.parse(app.capabilities),
         );
 

@@ -17,7 +17,7 @@ import { hashAsset } from "../../src/lib/server/asset-hash.ts";
 import { eq } from "drizzle-orm";
 import { installation } from "../../src/lib/server/schema.ts";
 import { installationId, readInstallation } from "../../src/lib/server/installation-store.ts";
-import { initializeCloudflareFleet } from "../../src/lib/server/fleets.ts";
+import { initializeCloudflareRuntime } from "../../src/lib/server/organization-runtime.ts";
 import { createTestEnvironment } from "../environment.ts";
 import { observeOAuthResourceWrites } from "../oauth-resource-writes.ts";
 
@@ -32,7 +32,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
   beforeAll(async () => {
     environment = await createTestEnvironment(origin, "oidc");
     resourceWrites = await observeOAuthResourceWrites(environment.database.db);
-    (await initializeCloudflareFleet(environment.database.db)).unwrap();
+    (await initializeCloudflareRuntime(environment.database.db)).unwrap();
     directory = await mkdtemp(join(tmpdir(), "widefleet-cloudflare-"));
     const { unstable_dev, unstable_readConfig } = await import("wrangler");
 

@@ -308,7 +308,7 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
         nativeBindings: { DB: "DB", FILES: "FILES", KV: "KV", JOBS: "JOBS" },
         capabilities: {
           UPSTREAM: {
-            fleetId: crypto.randomUUID(),
+            organizationId: crypto.randomUUID(),
             connector: "cancellation",
             entrypoint: "default",
           },

@@ -40,7 +40,7 @@ import {
   apps,
   artifacts,
   deployments,
-  fleets,
+  organizationRuntimes,
   jobs,
   runtimeReleases,
   connectors,
@@ -62,7 +62,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
   let outsiderHeaders: Headers;
   let outsiderId: string;
   let agentId: string;
-  let fleetId: string;
+  let organizationId: string;
   let agentHeaders: Headers;
   const directoryRequests: URL[] = [];
   const reportedOperations: z.infer<typeof contract.reportingOperation>[] = [];
@@ -153,10 +153,10 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       .parse(await response.json());
 
     agentId = created.agent.id;
-    const [fleet] = await environment.database.db.select().from(fleets);
+    const [execution] = await environment.database.db.select().from(organizationRuntimes);
 
-    if (!fleet) throw new Error("Missing default fleet");
-    fleetId = fleet.id;
+    if (!execution) throw new Error("Missing default execution");
+    organizationId = execution.organizationId;
     agentHeaders = new Headers({ authorization: `Bearer ${created.token}` });
   });
 
@@ -284,7 +284,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     ).toBe(400);
   });
 
-  it("installs and rolls back runtime releases on an empty fleet through replaceable executors", async () => {
+  it("installs and rolls back runtime releases on an empty execution through replaceable executors", async () => {
     const release = contract.runtimeRelease.parse(
       JSON.parse(
         await readFile(new URL(import.meta.resolve("@platform/app-runtime/release")), "utf8"),
@@ -309,7 +309,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     );
 
     expect(claim).toMatchObject({
-      fleetId,
+      organizationId,
       appId: null,
       kind: "runtime",
       hostname: null,
@@ -349,7 +349,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     );
 
     expect(retry.id).toBe(claim.id);
-    expect(retry.fleetId).toBe(claim.fleetId);
+    expect(retry.organizationId).toBe(claim.organizationId);
     expect(
       (
         await json(
@@ -570,15 +570,15 @@ describe("Platform API with PostgreSQL and RustFS", () => {
   );
 
   it("keeps app identity independent of agent registration and replacement", async () => {
-    const app = await createApp("stable-fleet");
-    expect(app.fleetId).toBe(fleetId);
-    expect(app.fleetId).not.toBe(agentId);
+    const app = await createApp("stable-execution");
+    expect(app.organizationId).toBe(organizationId);
+    expect(app.organizationId).not.toBe(agentId);
 
     const registration = z
       .object({ agent: contract.agent, token: z.string() })
       .parse(await (await json("/agents", "POST", { name: "Replacement executor" })).json());
 
-    expect((await createApp("same-fleet")).fleetId).toBe(fleetId);
+    expect((await createApp("same-execution")).organizationId).toBe(organizationId);
     await json(`/agents/${registration.agent.id}`, "DELETE");
     expect(contract.app.parse(await (await json(`/apps/${app.id}`, "GET")).json())).toEqual(app);
   });
@@ -627,7 +627,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
 
     const app = contract.app.parse(resolved[0]);
     expect(resolved[1]?.id).toBe(app.id);
-    expect(app.fleetId).toBe(fleetId);
+    expect(app.organizationId).toBe(organizationId);
     expect((await json("/apps/by-name/named-app", "PUT", {}, outsiderHeaders)).status).toBe(404);
     expect((await json("/apps/by-name/member-named-app", "PUT", {}, outsiderHeaders)).status).toBe(
       200,
@@ -951,7 +951,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     ).toBe(404);
   });
 
-  it("serializes jobs per fleet, fences expired leases, and preserves retry acknowledgments after hard deletion", async () => {
+  it("serializes jobs per execution, fences expired leases, and preserves retry acknowledgments after hard deletion", async () => {
     // Drain the earlier upload test's independent app before checking this app's queue.
     let pending = contract.job
       .nullable()
@@ -1217,7 +1217,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     await environment.database.db.insert(jobs).values({
       id: crypto.randomUUID(),
       appId: parent.id,
-      fleetId: parent.fleetId,
+      organizationId: parent.organizationId,
       kind: "delete",
     });
 
@@ -1361,7 +1361,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     const result = await transact(environment.database.db, async (transaction) => {
       await transaction
         .insert(agents)
-        .values({ id, fleetId, name: "Aborted agent", tokenHash: crypto.randomUUID() });
+        .values({ id, organizationId, name: "Aborted agent", tokenHash: crypto.randomUUID() });
 
       return Result.err(new InvalidOperation({ code: "CONFLICT", message: "Abort after write" }));
     });
@@ -1979,7 +1979,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     expect(retry.state).toBe("saved");
   });
   it("deploys connectors with ordinary admin credentials and changes individual app bindings atomically", async () => {
-    // Complete earlier API-only fixtures before checking this fleet's job order.
+    // Complete earlier API-only fixtures before checking this execution's job order.
     while (true) {
       const pending = contract.job
         .nullable()
@@ -2542,7 +2542,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     expect(preview).toMatchObject({
       hostname: `review.${parent.hostname}`,
       parentId: parent.id,
-      fleetId: parent.fleetId,
+      organizationId: parent.organizationId,
     });
     expect(preview.url).toBe(`https://review.${parent.hostname}/`);
     expect(preview.id).not.toBe(parent.id);

@@ -11,7 +11,7 @@ pub struct App {
     #[serde(default)]
     pub catalog_listed: bool,
     pub parent_id: Option<Uuid>,
-    pub fleet_id: Uuid,
+    pub organization_id: String,
     pub hostname: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
@@ -186,7 +186,7 @@ pub enum JobKind {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Job {
-    pub fleet_id: Uuid,
+    pub organization_id: String,
     pub id: Uuid,
     pub kind: JobKind,
     pub migration: Option<crate::migrations::ArtifactReference>,
@@ -266,7 +266,7 @@ pub struct PublishedApp {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublishedCapability {
-    pub fleet_id: Uuid,
+    pub organization_id: String,
     #[serde(flatten)]
     pub grant: CapabilityGrant,
 }

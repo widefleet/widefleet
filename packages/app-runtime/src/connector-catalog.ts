@@ -18,9 +18,13 @@ import { loadConnectorWorker } from "./connector-code.ts";
 import { invokeConnector, type ConnectorValue } from "./connector-rpc.ts";
 import type { ParentEnvironment } from "./types.ts";
 
-export const connectorCatalog = (environment: ParentEnvironment, fleetId: string, name: string) =>
+export const connectorCatalog = (
+  environment: ParentEnvironment,
+  organizationId: string,
+  name: string,
+) =>
   environment.WIDEFLEET_CONNECTORS.get(
-    environment.WIDEFLEET_CONNECTORS.idFromName(JSON.stringify([fleetId, name])),
+    environment.WIDEFLEET_CONNECTORS.idFromName(JSON.stringify([organizationId, name])),
   );
 
 export class ConnectorCatalog extends DurableObject<ParentEnvironment> {
@@ -32,8 +36,8 @@ export class ConnectorCatalog extends DurableObject<ParentEnvironment> {
   }
   async prepare(input: z.infer<typeof connectorPreparation>) {
     const prepared = connectorPreparation.parse(input);
-    const { fleetId, version, release, secrets, nativeBindings, telemetry } = prepared;
-    const identity = { fleetId, version, name: release.name };
+    const { organizationId, version, release, secrets, nativeBindings, telemetry } = prepared;
+    const identity = { organizationId, version, name: release.name };
 
     const fingerprint = await digest(
       JSON.stringify({ release, nativeBindings, secrets, telemetry }),
@@ -42,7 +46,7 @@ export class ConnectorCatalog extends DurableObject<ParentEnvironment> {
     const active = await this.current();
 
     if (active && (await readConnector(this.env, active)).fingerprint === fingerprint)
-      return { fleetId: active.fleetId, name: active.name, version: active.version };
+      return { organizationId: active.organizationId, name: active.name, version: active.version };
 
     const existing = await this.env.WIDEFLEET_PACKAGES.get(connectorKey(identity));
     let snapshot;
@@ -53,7 +57,7 @@ export class ConnectorCatalog extends DurableObject<ParentEnvironment> {
       if (snapshot.fingerprint !== fingerprint) throw new Error("Connector version is immutable");
     } else {
       snapshot = connectorSnapshot.parse({
-        fleetId,
+        organizationId,
         version,
         release,
         nativeBindings,
@@ -118,8 +122,8 @@ export class ConnectorGateway extends WorkerEntrypoint<
   z.infer<typeof publishedCapability>
 > {
   async #target() {
-    const { fleetId, connector, entrypoint } = this.ctx.props;
-    const active = await connectorCatalog(this.env, fleetId, connector).current();
+    const { organizationId, connector, entrypoint } = this.ctx.props;
+    const active = await connectorCatalog(this.env, organizationId, connector).current();
 
     if (!active) throw new Error("Connector is not active");
     const snapshot = await readConnector(this.env, active);
@@ -147,16 +151,20 @@ export const manageConnector = async (request: Request, environment: ParentEnvir
 
     if (input.action === "prepare") {
       const { action: _action, ...preparation } = input;
-      result = await connectorCatalog(environment, input.fleetId, input.release.name).prepare(
-        preparation,
-      );
+      result = await connectorCatalog(
+        environment,
+        input.organizationId,
+        input.release.name,
+      ).prepare(preparation);
     } else {
       const { action: _action, ...activation } = input;
-      result = await connectorCatalog(environment, input.fleetId, input.name).activate(activation);
+      result = await connectorCatalog(environment, input.organizationId, input.name).activate(
+        activation,
+      );
     }
 
     return Response.json({
-      result: { fleetId: result.fleetId, name: result.name, version: result.version },
+      result: { organizationId: result.organizationId, name: result.name, version: result.version },
     });
   } catch (error) {
     return Response.json(

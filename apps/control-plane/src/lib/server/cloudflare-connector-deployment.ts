@@ -15,7 +15,7 @@ import { createCloudflareProvisioner } from "./cloudflare-provisioning.ts";
 import { updateCloudflareBindings } from "./cloudflare-binding-updates.ts";
 import { retryable } from "./cloudflare-deployment.ts";
 import { InvalidOperation } from "./errors.ts";
-import { lockApplicationFleet } from "./fleets.ts";
+import { lockOrganizationRuntime } from "./organization-runtime.ts";
 import type { DatabaseExecutor } from "./database.ts";
 import { cloudflareOperations, connectors } from "./schema.ts";
 import { decryptSecret } from "./secret-encryption.ts";
@@ -72,7 +72,7 @@ export const createCloudflareConnectorDeployment = (
       .where(
         and(
           eq(cloudflareOperations.id, command.id),
-          eq(cloudflareOperations.fleetId, command.fleetId),
+          eq(cloudflareOperations.organizationId, command.organizationId),
         ),
       );
 
@@ -93,7 +93,7 @@ export const createCloudflareConnectorDeployment = (
     provision: async (command: z.infer<typeof connectorCommand>) => {
       const prepared = await provisionConnectorResources(
         provisioner,
-        command.fleetId,
+        command.organizationId,
         await loadConnector(
           storage,
           await withCloudflareDatabase(bindings, ({ db }) => accepted(db, command)),
@@ -110,7 +110,7 @@ export const createCloudflareConnectorDeployment = (
       withCloudflareDatabase(bindings, async ({ db }) =>
         (
           await transact(db, async (transaction) => {
-            await lockApplicationFleet(transaction, command.actor.application);
+            await lockOrganizationRuntime(transaction, command.actor.application.organizationId);
             await accepted(transaction, command);
 
             const [record] = await transaction
@@ -118,7 +118,7 @@ export const createCloudflareConnectorDeployment = (
               .from(connectors)
               .where(
                 and(
-                  eq(connectors.fleetId, command.fleetId),
+                  eq(connectors.organizationId, command.organizationId),
                   eq(connectors.name, command.change.name),
                 ),
               );
@@ -139,7 +139,7 @@ export const createCloudflareConnectorDeployment = (
             // the immutable snapshot; Workflow results and SQL receipts contain IDs only.
             const prepared = await manage({
               action: "prepare",
-              fleetId: command.fleetId,
+              organizationId: command.organizationId,
               version: command.id,
               release,
               nativeBindings,
@@ -152,7 +152,10 @@ export const createCloudflareConnectorDeployment = (
               .update(connectors)
               .set({ appliedPackage: selected })
               .where(
-                and(eq(connectors.fleetId, command.fleetId), eq(connectors.name, selected.name)),
+                and(
+                  eq(connectors.organizationId, command.organizationId),
+                  eq(connectors.name, selected.name),
+                ),
               );
             await transaction
               .update(cloudflareOperations)
@@ -171,7 +174,7 @@ export const createCloudflareConnectorDeployment = (
           .where(
             and(
               eq(cloudflareOperations.id, command.id),
-              eq(cloudflareOperations.fleetId, command.fleetId),
+              eq(cloudflareOperations.organizationId, command.organizationId),
               eq(cloudflareOperations.command, command),
               isNull(cloudflareOperations.finishedAt),
             ),

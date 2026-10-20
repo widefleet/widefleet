@@ -15,13 +15,11 @@ import {
 } from "drizzle-orm/pg-core";
 import { organization, user } from "./auth-schema.ts";
 
-export const fleets = pgTable(
-  "fleet",
+export const organizationRuntimes = pgTable(
+  "organization_runtime",
   {
-    id: uuid().primaryKey().defaultRandom(),
-    name: text().notNull().unique(),
     organizationId: text("organization_id")
-      .notNull()
+      .primaryKey()
       .references(() => organization.id),
     appHostnameSuffix: text("app_hostname_suffix").unique(),
     executor: text({ enum: ["agent", "cloudflare"] })
@@ -32,9 +30,9 @@ export const fleets = pgTable(
     runtimeJobId: uuid("runtime_job_id"),
   },
   (table) => [
-    check("fleet_executor_check", sql`${table.executor} IN ('agent', 'cloudflare')`),
+    check("organization_runtime_executor_check", sql`${table.executor} IN ('agent', 'cloudflare')`),
     check(
-      "fleet_app_hostname_suffix_check",
+      "organization_runtime_hostname_suffix_check",
       sql`${table.appHostnameSuffix} ~ '^[a-z0-9]+(-[a-z0-9]+)*$' AND length(${table.appHostnameSuffix}) <= 61`,
     ),
   ],
@@ -59,22 +57,22 @@ export const cloudflareRuntimeBindings = pgTable("cloudflare_runtime_bindings", 
 export const connectors = pgTable(
   "connector",
   {
-    fleetId: uuid("fleet_id")
+    organizationId: text("organization_id")
       .notNull()
-      .references(() => fleets.id),
+      .references(() => organization.id),
     name: text().notNull(),
     package: jsonb().notNull(),
     appliedPackage: jsonb("applied_package"),
     jobId: uuid("job_id").notNull(),
   },
-  (table) => [primaryKey({ columns: [table.fleetId, table.name] })],
+  (table) => [primaryKey({ columns: [table.organizationId, table.name] })],
 );
 
 export const agents = pgTable("agent", {
   id: uuid().primaryKey(),
-  fleetId: uuid("fleet_id")
+  organizationId: text("organization_id")
     .notNull()
-    .references(() => fleets.id),
+    .references(() => organization.id),
   name: text().notNull(),
   tokenHash: text("token_hash").notNull().unique(),
   enabled: boolean().notNull().default(true),
@@ -90,9 +88,9 @@ export const apps = pgTable(
     displayName: text("display_name").notNull(),
     catalogListed: boolean("catalog_listed").notNull().default(false),
     parentId: uuid("parent_id"),
-    fleetId: uuid("fleet_id")
+    organizationId: text("organization_id")
       .notNull()
-      .references(() => fleets.id),
+      .references(() => organization.id),
     ownerId: text("owner_id").notNull(),
     hostname: text().notNull().unique(),
     state: text({ enum: ["created", "active", "deleting"] })
@@ -116,7 +114,7 @@ export const apps = pgTable(
   },
   (table) => [
     index("app_parent_idx").on(table.parentId),
-    uniqueIndex("app_fleet_slug_unique").on(table.fleetId, table.slug),
+    uniqueIndex("app_organization_slug_unique").on(table.organizationId, table.slug),
   ],
 );
 
@@ -186,9 +184,9 @@ export const jobs = pgTable(
     id: uuid().primaryKey(),
     sequence: bigint({ mode: "number" }).generatedAlwaysAsIdentity().unique(),
     appId: uuid("app_id").references(() => apps.id, { onDelete: "cascade" }),
-    fleetId: uuid("fleet_id")
+    organizationId: text("organization_id")
       .notNull()
-      .references(() => fleets.id),
+      .references(() => organization.id),
     agentId: uuid("agent_id").references(() => agents.id),
     deploymentId: uuid("deployment_id").references(() => deployments.id),
     kind: text({
@@ -214,7 +212,7 @@ export const jobs = pgTable(
     result: jsonb(),
   },
   (table) => [
-    index("job_fleet_state_idx").on(table.fleetId, table.state, table.sequence),
+    index("job_organization_state_idx").on(table.organizationId, table.state, table.sequence),
     index("job_app_capability_snapshot_idx").on(
       table.appId,
       table.deploymentId,
@@ -232,7 +230,9 @@ export const cloudflareOperations = pgTable(
   {
     id: uuid().primaryKey(),
     appId: uuid("app_id").references(() => apps.id, { onDelete: "cascade" }),
-    fleetId: uuid("fleet_id").references(() => fleets.id, { onDelete: "cascade" }),
+    organizationId: text("organization_id").references(() => organization.id, {
+      onDelete: "cascade",
+    }),
     sequence: bigint({ mode: "number" }).generatedAlwaysAsIdentity().unique(),
     command: jsonb().notNull(),
     targets: jsonb().notNull(),
@@ -244,7 +244,7 @@ export const cloudflareOperations = pgTable(
   (table) => [
     check(
       "cloudflare_operation_scope_check",
-      sql`num_nonnulls(${table.appId}, ${table.fleetId}) = 1`,
+      sql`num_nonnulls(${table.appId}, ${table.organizationId}) = 1`,
     ),
   ],
 );

@@ -67,7 +67,7 @@ export const workerTails = (
   context: Pick<ExecutionContext, "exports">,
   identity:
     | { appId: string; deploymentId: string; buildId: string | null }
-    | { fleetId: string; connector: string; connectorVersion: string },
+    | { organizationId: string; connector: string; connectorVersion: string },
   destination: { url: string; token: string } | null,
 ) =>
   environment["WIDEFLEET_LOGS"] === "cloudflare"

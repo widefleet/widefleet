@@ -2,7 +2,14 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { createTestEnvironment } from "./environment.ts";
 import { member, organization } from "../src/lib/server/auth-schema.ts";
-import { apps, appGrants, fleets, jobs, connectors, agents } from "../src/lib/server/schema.ts";
+import {
+  apps,
+  appGrants,
+  organizationRuntimes,
+  jobs,
+  connectors,
+  agents,
+} from "../src/lib/server/schema.ts";
 import { createIdentityService } from "../src/lib/server/identity.ts";
 import { createAppService } from "../src/lib/server/apps.ts";
 import { createAppAccessService } from "../src/lib/server/app-access.ts";
@@ -23,16 +30,13 @@ describe("Mandatory application context", () => {
 
   const scope = async (label: string) => {
     const organizationId = crypto.randomUUID();
-    const fleetId = crypto.randomUUID();
     await environment.database.db.insert(organization).values({
       id: organizationId,
       name: label,
       slug: label,
       createdAt: new Date(),
     });
-    await environment.database.db.insert(fleets).values({
-      id: fleetId,
-      name: label,
+    await environment.database.db.insert(organizationRuntimes).values({
       organizationId,
       appHostnameSuffix: label,
     });
@@ -53,7 +57,7 @@ describe("Mandatory application context", () => {
       environment.auth,
       environment.database.db,
       environment.configuration,
-      { filterFleets: async (candidates) => candidates.map((candidate) => candidate.id) },
+      { filterOrganizations: async (candidates) => candidates.map((candidate) => candidate.id) },
     );
 
     const authenticate = () =>
@@ -64,7 +68,6 @@ describe("Mandatory application context", () => {
 
     return {
       organizationId,
-      fleetId,
       person,
       headers,
       authenticate,
@@ -93,8 +96,8 @@ describe("Mandatory application context", () => {
       reporting: environment.reporting,
       storage: createStorage(environment.configuration),
       encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
-      fleetAccess: {
-        filterFleets: async (candidates) => candidates.map((candidate) => candidate.id),
+      organizationAccess: {
+        filterOrganizations: async (candidates) => candidates.map((candidate) => candidate.id),
       },
     })();
 
@@ -110,7 +113,7 @@ describe("Mandatory application context", () => {
       });
 
       await environment.database.db.insert(connectors).values({
-        fleetId: target.fleetId,
+        organizationId: target.organizationId,
         name: "erp",
         package: reference,
         appliedPackage: reference,
@@ -118,7 +121,7 @@ describe("Mandatory application context", () => {
       });
       await environment.database.db.insert(agents).values({
         id: crypto.randomUUID(),
-        fleetId: target.fleetId,
+        organizationId: target.organizationId,
         name: target === first ? "First agent" : "Second agent",
         tokenHash: crypto.randomUUID(),
       });
@@ -131,7 +134,7 @@ describe("Mandatory application context", () => {
     expect(await current.agents.create(first.principal, { name: "Forbidden" })).toMatchObject({
       error: { code: "FORBIDDEN" },
     });
-    // Even installation administration cannot mutate an agent outside its selected fleet.
+    // Even installation administration cannot mutate an agent outside its selected organization.
     expect(
       await current.agents.disable({ ...second.principal, admin: true }, listing[0]?.id ?? ""),
     ).toMatchObject({ error: { code: "NOT_FOUND" } });
@@ -154,7 +157,7 @@ describe("Mandatory application context", () => {
       expect((await api(request(path))).status).toBe(403);
   });
 
-  it("allows the same name in separate fleets and scopes administrator, owner and grant access", async () => {
+  it("allows the same name in separate organizations and scopes administrator, owner and grant access", async () => {
     const input = { slug: "notes", displayName: "Notes", parentId: null };
 
     const [a, b] = await Promise.all([
@@ -173,7 +176,7 @@ describe("Mandatory application context", () => {
     });
     expect(first.principal).toMatchObject({ admin: false, application: { admin: true } });
 
-    // Neither ownership nor an incorrectly imported grant may widen the fleet boundary.
+    // Neither ownership nor an incorrectly imported grant may widen the organization boundary.
     await environment.database.db
       .update(apps)
       .set({ ownerId: first.person.id })
@@ -255,7 +258,7 @@ describe("Mandatory application context", () => {
     expect((await service.list(first.principal)).unwrap()).toHaveLength(2);
   });
 
-  it("reserves complete hostnames atomically across different fleet suffixes", async () => {
+  it("reserves complete hostnames atomically across different organization suffixes", async () => {
     const combined = await scope("first-second");
 
     const outcomes = await Promise.all([
@@ -363,22 +366,22 @@ describe("Mandatory application context", () => {
         }).success,
       ).toBe(false);
       await environment.database.db
-        .update(fleets)
+        .update(organizationRuntimes)
         .set({ executor: "cloudflare" })
-        .where(eq(fleets.id, first.fleetId));
+        .where(eq(organizationRuntimes.organizationId, first.organizationId));
       expect(
         (await registerCloudflareRemoval(background.db, { ...command, appId: own.id })).unwrap(),
       ).toEqual([{ id: own.id, hostname: own.hostname }]);
     } finally {
       await environment.database.db
-        .update(fleets)
+        .update(organizationRuntimes)
         .set({ executor: "agent" })
-        .where(eq(fleets.id, first.fleetId));
+        .where(eq(organizationRuntimes.organizationId, first.organizationId));
       await background.close();
     }
   });
 
-  it("refuses a cross-fleet legacy preview tree without partially changing either app", async () => {
+  it("refuses a cross-organization legacy preview tree without partially changing either app", async () => {
     const input = { slug: "tree", displayName: "Tree", parentId: null };
     const parent = (await service.create(first.principal, input)).unwrap();
     const foreign = (await service.create(second.principal, input)).unwrap();

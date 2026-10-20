@@ -85,7 +85,7 @@ fn docker_exec(
 
 fn job() -> Result<Job> {
     Ok(serde_json::from_value(value!({
-        "fleetId": uuid::Uuid::new_v4(), "id": uuid::Uuid::new_v4(),
+        "organizationId": uuid::Uuid::new_v4(), "id": uuid::Uuid::new_v4(),
         "kind": "migrations", "attempt": 1, "leaseToken": uuid::Uuid::new_v4(),
         "leaseUntil": "2099-01-01T00:00:00Z"
     }))?)

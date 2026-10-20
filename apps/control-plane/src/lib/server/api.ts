@@ -669,7 +669,7 @@ export const createApi = (runtime: Runtime) => {
       return runtime.telemetry.ingest(
         request,
         {
-          fleetId: contract.identifier.parse(connectorTelemetry[1]),
+          organizationId: contract.organizationIdentifier.parse(connectorTelemetry[1]),
           name: contract.appSlug.parse(connectorTelemetry[2]),
         },
         "logs",

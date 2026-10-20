@@ -84,7 +84,10 @@ pub async fn connector_destinations(
             let url = destination_url(
                 api,
                 configuration,
-                &format!("/api/v1/telemetry/connectors/{}/{}", job.fleet_id, name),
+                &format!(
+                    "/api/v1/telemetry/connectors/{}/{}",
+                    job.organization_id, name
+                ),
             )?;
             Ok((
                 name,

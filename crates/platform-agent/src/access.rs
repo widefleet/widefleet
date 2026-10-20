@@ -194,7 +194,7 @@ mod tests {
     #[test]
     fn publishes_exact_group_names_and_rejects_ambiguous_groups() -> Result<()> {
         let mut job: Job = serde_json::from_value(json!({
-            "id": uuid::Uuid::new_v4(), "fleetId": uuid::Uuid::new_v4(), "appId": uuid::Uuid::new_v4(),
+            "id": uuid::Uuid::new_v4(), "organizationId": uuid::Uuid::new_v4(), "appId": uuid::Uuid::new_v4(),
             "kind": "configure", "hostname": "review.notes.apps.example.test", "attempt": 1,
             "leaseToken": uuid::Uuid::new_v4(), "leaseUntil": "2099-01-01T00:00:00Z",
             "access": { "revision": 7, "groups": ["team&allowed_groups=other", "engineering"] }

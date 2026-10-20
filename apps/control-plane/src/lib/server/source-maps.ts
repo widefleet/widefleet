@@ -55,13 +55,13 @@ const appSymbols = async (database: Database, appId: string, buildId: string) =>
 const connectorSymbols = async (
   database: Database,
   storage: ArtifactStorage,
-  target: { fleetId: string; name: string },
+  target: { organizationId: string; name: string },
   version: string,
 ) => {
   const [job] = await database
     .select()
     .from(jobs)
-    .where(and(eq(jobs.id, version), eq(jobs.fleetId, target.fleetId)))
+    .where(and(eq(jobs.id, version), eq(jobs.organizationId, target.organizationId)))
     .limit(1);
 
   const [operation] = job
@@ -72,7 +72,7 @@ const connectorSymbols = async (
         .where(
           and(
             eq(cloudflareOperations.id, version),
-            eq(cloudflareOperations.fleetId, target.fleetId),
+            eq(cloudflareOperations.organizationId, target.organizationId),
           ),
         )
         .limit(1);
@@ -89,14 +89,14 @@ const connectorSymbols = async (
   if (!reference) return null;
 
   try {
-    const { fleetId, release } = await loadConnectorArtifact(storage, reference);
+    const { organizationId, release } = await loadConnectorArtifact(storage, reference);
 
-    if (fleetId !== target.fleetId) return null;
+    if (organizationId !== target.organizationId) return null;
 
     return {
       debug: release.metadata.debug,
       modules: release.modules,
-      scope: connectorModuleScope(fleetId, release.name),
+      scope: connectorModuleScope(organizationId, release.name),
     };
   } catch {
     // Unavailable debug artifacts must not hide the original runtime error.
@@ -107,7 +107,7 @@ const connectorSymbols = async (
 export const createSymbolicator = (
   database: Database,
   storage: ArtifactStorage,
-  target: { appId: string } | { fleetId: string; name: string },
+  target: { appId: string } | { organizationId: string; name: string },
 ) => {
   const releases = new Map<string, Awaited<ReturnType<typeof appSymbols>>>();
   const maps = new Map<string, TraceMap | null>();

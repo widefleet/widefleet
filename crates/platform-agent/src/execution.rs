@@ -21,7 +21,7 @@ fn storage_error(error: object_store::Error) -> Error {
     Error::invalid(format!("Fleet storage operation failed: {error}"))
 }
 fn prefix(job: &Job) -> String {
-    format!("fleets/{}", job.fleet_id)
+    format!("organizations/{}", job.organization_id)
 }
 fn package_key(job: &Job, key: &str) -> String {
     format!("{}/r2/widefleet-packages/{key}", prefix(job))
@@ -158,7 +158,7 @@ pub async fn prepare(
     telemetry: Option<platform_core::model::TelemetryDestination>,
     connector_telemetry: BTreeMap<String, platform_core::model::TelemetryDestination>,
 ) -> Result<Prepared> {
-    if packages.runtime.protocol != 1
+    if packages.runtime.protocol != 2
         || packages.runtime.auth != 1
         || packages.runtime.celld != crate::native::VERSION
     {
@@ -256,7 +256,7 @@ pub async fn prepare(
                 app.capabilities.insert(
                     name.clone(),
                     PublishedCapability {
-                        fleet_id: job.fleet_id,
+                        organization_id: job.organization_id.clone(),
                         grant: grant.clone(),
                     },
                 );
@@ -332,7 +332,7 @@ pub async fn prepare(
         })
     {
         return Err(Error::invalid(
-            "This fleet requires an app runtime with Workflow protocol 1".into(),
+            "This organization requires an app runtime with Workflow protocol 1".into(),
         ));
     }
     let mut databases = BTreeMap::new();
@@ -460,13 +460,13 @@ pub async fn prepare(
             publish_modules(
                 &store,
                 job,
-                &format!("connectors/{}/{}", job.fleet_id, connector.name),
+                &format!("connectors/{}/{}", job.organization_id, connector.name),
                 &connector.modules,
                 &directory.join("connectors").join(&connector.name),
             )
             .await?;
             connector_preparations.push(json!({
-                "action": "prepare", "fleetId": job.fleet_id, "version": job.id,
+                "action": "prepare", "organizationId": job.organization_id, "version": job.id,
                 "release": connector, "nativeBindings": native_bindings,
                 "secrets": packages.connector_secrets.get(&connector.name).cloned().unwrap_or_default(),
                 "telemetry": connector_telemetry.get(&connector.name),
@@ -495,7 +495,7 @@ pub async fn prepare(
     tokio::fs::create_dir_all(&project).await?;
     write_modules(&project, &packages.runtime.modules).await?;
     let connector_key =
-        platform_agent::runtime::connector_key(store.as_ref(), job.fleet_id).await?;
+        platform_agent::runtime::connector_key(store.as_ref(), &job.organization_id).await?;
     let mut config =
         platform_agent::runtime::configuration(&packages.runtime, &token, &connector_key)?;
     config["vars"]["WIDEFLEET_CONFIGURATION"] = json!(serde_json::to_string(
@@ -692,7 +692,7 @@ async fn stage(
                 command.env_remove(key);
             }
         }
-        let mut arguments = storage.arguments(job.fleet_id, false);
+        let mut arguments = storage.arguments(&job.organization_id, false);
         arguments[1] = format!("{}/staging/{}", arguments[1], job.id);
         let output = command
             .arg("deploy")

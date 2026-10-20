@@ -192,7 +192,11 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
         manifest: {},
         nativeBindings: { DB: "DB", FILES: "FILES", KV: "KV" },
         capabilities: {
-          OBSERVE: { fleetId: crypto.randomUUID(), connector: "observe", entrypoint: "default" },
+          OBSERVE: {
+            organizationId: crypto.randomUUID(),
+            connector: "observe",
+            entrypoint: "default",
+          },
         },
         capabilityRevision: 1,
         network: { revision: 1, policy: { backend: [delayedOrigin], browser: [] } },

@@ -10,7 +10,7 @@ import {
   initializeInstallation,
   readInstallation,
 } from "../src/lib/server/installation-store.ts";
-import { initializeCloudflareFleet } from "../src/lib/server/fleets.ts";
+import { initializeCloudflareRuntime } from "../src/lib/server/organization-runtime.ts";
 import { initializeOrganization } from "../src/lib/server/organization.ts";
 import { createSettingsService } from "../src/lib/server/settings.ts";
 import { z } from "zod";
@@ -26,9 +26,9 @@ try {
   await migrate(database.db, {
     migrationsFolder: fileURLToPath(new URL("../migrations", import.meta.url)),
   });
-  const fleet = await initializeCloudflareFleet(database.db);
+  const execution = await initializeCloudflareRuntime(database.db);
 
-  if (fleet.isErr()) throw fleet.error;
+  if (execution.isErr()) throw execution.error;
   await initializeOrganization(database.db);
   await initializeInstallation(database.db);
   await registerCli(database.db, configuration);
