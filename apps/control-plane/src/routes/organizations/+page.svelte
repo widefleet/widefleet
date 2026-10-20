@@ -48,7 +48,7 @@
           try {
             await submit();
             // A full navigation drops cached queries and forms from the previous organization.
-            if (selection.result?.selected) window.location.assign("/");
+            if (selection.result?.selected) window.location.assign(selection.result.next);
           } catch {
             message = "Could not select this organization. Refresh the page and try again.";
           } finally {
@@ -57,6 +57,7 @@
         })}
       >
         <input {...selection.fields.organizationId.as("hidden", organization.id)} />
+        <input {...selection.fields.next.as("hidden", data.next)} />
         <Button
           type="submit"
           variant="outline"

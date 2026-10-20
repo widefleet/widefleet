@@ -112,7 +112,7 @@ test("selects an organization, repairs stale selection and explains removed acce
     .set({ activeOrganizationId: "unavailable" })
     .where(eq(authSession.userId, person.id));
   await page.goto("/");
-  await expect(page).toHaveURL("http://localhost:25430/organizations");
+  await expect(page).toHaveURL("http://localhost:25430/organizations?next=%2F");
   await page.getByRole("button", { name: "Widefleet Member" }).click();
   await expect(page).toHaveURL("http://localhost:25430/");
   await environment.database.db.delete(member).where(eq(member.userId, person.id));

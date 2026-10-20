@@ -4,13 +4,18 @@ import { getRuntime } from "./runtime.ts";
 import { readInstallation } from "./installation-store.ts";
 import { AuthenticationFailed } from "./identity.ts";
 
+const chooseOrganization = (request: Request): never => {
+  const url = new URL(request.url);
+  redirect(303, `/organizations?next=${encodeURIComponent(url.pathname + url.search)}`);
+};
+
 export const identityFailure = (
   cause: AuthenticationFailed | DatabaseUnavailable,
   request: Request,
 ): never => {
   if (cause._tag === "DatabaseUnavailable") error(503, "Sign-in is temporarily unavailable.");
 
-  if (cause.code === "ORGANIZATION_REQUIRED") redirect(303, "/organizations");
+  if (cause.code === "ORGANIZATION_REQUIRED") chooseOrganization(request);
 
   if (cause.code === "CONFLICT") error(409, cause.message);
 
@@ -47,7 +52,7 @@ export const pagePrincipal = async (request: Request, write = false) => {
   // A stale selection can be repaired without signing out of a valid session.
   if (result.error._tag === "AuthenticationFailed" && result.error.code === "FORBIDDEN" && !write) {
     await pageOrganizations(request);
-    redirect(303, "/organizations");
+    chooseOrganization(request);
   }
 
   return identityFailure(result.error, request);
