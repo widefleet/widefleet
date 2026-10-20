@@ -1498,6 +1498,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
   }, 180_000);
 
   it("deploys KV, queues and cron and recovers interrupted event activation", async () => {
+    const publicationMessage = "Publishing the shared fleet's native configuration";
     appDirectory = join(state, "capabilities app");
     await mkdir(join(appDirectory, "public"), { recursive: true });
     await cp(join(root, "packages/app-runtime/fixtures/app.ts"), join(appDirectory, "worker.ts"));
@@ -1530,7 +1531,8 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     );
     const app = await createApp("capabilities");
     await cli("deploy", app.id, "--skip-build", "--no-wait");
-    await agent();
+    const initial = await agent();
+    expect(initial.stdout + initial.stderr).toContain(publicationMessage);
 
     const read = async (path: string) =>
       z.json().parse(JSON.parse((await appRequest(app.id, "GET", path)).stdout));
@@ -1774,9 +1776,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     await writeFile(join(appDirectory, "wrangler.jsonc"), JSON.stringify(config));
     await cli("deploy", app.id, "--skip-build", "--no-wait");
     const recovered = await agent();
-    expect(recovered.stdout + recovered.stderr).not.toContain(
-      "Publishing the shared execution's native configuration",
-    );
+    expect(recovered.stdout + recovered.stderr).not.toContain(publicationMessage);
     expect(await read("/fixture/pending-resource")).toBe(false);
     await manageRuntime("/runtime", currentPackages.runtime);
     await agent();

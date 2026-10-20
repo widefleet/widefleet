@@ -165,7 +165,7 @@ describe.runIf(process.env["RUN_IMAGE_TESTS"] === "1")("release container images
       ]);
 
       const installation = z
-        .object({ organizationId: z.uuid(), controlToken: z.string() })
+        .object({ organizationId: contract.organizationIdentifier, controlToken: z.string() })
         .parse(JSON.parse(installed.stdout));
 
       await execute("docker", [
