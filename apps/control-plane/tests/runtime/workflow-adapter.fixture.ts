@@ -152,12 +152,25 @@ export class AppWorkflow extends WorkflowEntrypoint {
       return result;
     }
     if (mode === 'reordered-fetch' || mode === 'reordered-timer') {
+      const earlier = Promise.withResolvers();
       const values = await Promise.all(['left', 'right'].map(async (branch, index) => {
         const response = await fetch(event.payload.url + '?' + new URLSearchParams({ id, branch, mode }));
-        const { delay } = await response.json();
-        if (mode === 'reordered-timer') await new Promise(resolve => setTimeout(resolve, delay));
-        const first = await step.do(branch, () => record(branch, (index + 1) * 10));
-        return step.do(branch + '-next', () => record(branch + '-next', first + 1));
+        const { attempt, first } = await response.json();
+        if (!first) await earlier.promise;
+        if (mode === 'reordered-timer') await new Promise(resolve => setTimeout(resolve, 20));
+        const marker = new URL('/record', event.payload.url);
+        marker.search = new URLSearchParams({ id, label: 'entered:' + attempt + ':' + branch }).toString();
+        await (await fetch(marker)).json();
+        const pending = step.do(branch, () => record(branch, (index + 1) * 10));
+        // On replay, release the other branch after registration, before waiting
+        // for its result: the engine must deliver the original left result first.
+        if (first && attempt > 1) earlier.resolve();
+        const value = await pending;
+        const result = await step.do(branch + '-next', () => record(branch + '-next', value + 1));
+        // On the initial run, finish the left chain before allowing the right.
+        // Wall-clock delays cannot guarantee this on a busy runner.
+        if (first && attempt === 1) earlier.resolve();
+        return result;
       }));
       await step.waitForEvent('continue', { type: 'continue', timeout: '5 minutes' });
       return step.do('finish', () => record('finish', values));
