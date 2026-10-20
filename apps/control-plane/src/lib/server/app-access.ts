@@ -11,11 +11,11 @@ import { apps, jobs } from "./schema.ts";
 import { transact, type Transaction } from "./transactions.ts";
 
 // Include legacy descendants too. New previews can only belong to original apps.
-const descendants = (appId: string) => sql`${apps.id} in (
+const descendants = (appId: string, fleetId: string) => sql`${apps.id} in (
   with recursive previews as (
-    select id from app where parent_id = ${appId}
+    select id from app where parent_id = ${appId} and fleet_id = ${fleetId}
     union
-    select app.id from app join previews on app.parent_id = previews.id
+    select app.id from app join previews on app.parent_id = previews.id where app.fleet_id = ${fleetId}
   ) select id from previews
 )`;
 
@@ -36,7 +36,7 @@ const status = (app: typeof apps.$inferSelect) =>
 
 const present = async (
   transaction: Transaction,
-  principal: Pick<Principal, "id" | "admin">,
+  principal: Pick<Principal, "id" | "admin" | "application">,
   app: typeof apps.$inferSelect,
 ) => {
   const previews = app.parentId
@@ -44,13 +44,14 @@ const present = async (
     : await transaction
         .select()
         .from(apps)
-        .where(and(descendants(app.id), ne(apps.state, "deleting")))
+        .where(and(descendants(app.id, app.fleetId), ne(apps.state, "deleting")))
         .orderBy(apps.hostname);
 
   return contract.appAccessState.parse({
     ...status(app),
     inheritedFrom: app.parentId,
-    canManage: app.parentId === null && (principal.admin || app.ownerId === principal.id),
+    canManage:
+      app.parentId === null && (principal.application.admin || app.ownerId === principal.id),
     previews: previews.map((preview) => ({
       ...status(preview),
       appId: preview.id,
@@ -61,7 +62,7 @@ const present = async (
 
 export const validateAccessChange = async (
   transaction: Transaction,
-  principal: Pick<Principal, "id" | "admin">,
+  principal: Pick<Principal, "id" | "admin" | "application">,
   appId: string,
   input: z.infer<typeof contract.appAccessChange>,
 ) => {
@@ -70,7 +71,7 @@ export const validateAccessChange = async (
   if (access.isErr()) return access;
   const app = access.value;
 
-  if (app.parentId !== null || (!principal.admin && app.ownerId !== principal.id))
+  if (app.parentId !== null || (!principal.application.admin && app.ownerId !== principal.id))
     return Result.err(
       new InvalidOperation({
         code: "FORBIDDEN",
@@ -96,7 +97,7 @@ export const validateAccessChange = async (
 
 export const applyAccessChange = async (
   transaction: Transaction,
-  principal: Pick<Principal, "id" | "admin">,
+  principal: Pick<Principal, "id" | "admin" | "application">,
   appId: string,
   input: z.infer<typeof contract.appAccessChange>,
   enqueue = true,
@@ -126,7 +127,7 @@ export const applyAccessChange = async (
 
   // Materialize inheritance atomically. Creation locks the parent before
   // copying these values, so a concurrent preview cannot miss an update.
-  await lockAppDescendants(transaction, app.id);
+  await lockAppDescendants(transaction, app);
 
   const previews = await transaction
     .update(apps)
@@ -135,7 +136,7 @@ export const applyAccessChange = async (
       accessRevision: revision,
       accessError: null,
     })
-    .where(and(descendants(app.id), ne(apps.state, "deleting")))
+    .where(and(descendants(app.id, app.fleetId), ne(apps.state, "deleting")))
     .returning();
 
   for (const target of enqueue ? [updated, ...previews] : []) {
@@ -152,7 +153,7 @@ export const applyAccessChange = async (
 };
 
 export const createAppAccessService = (database: Database, execution?: HostedExecution) => ({
-  read: (principal: Pick<Principal, "id" | "admin">, appId: string) =>
+  read: (principal: Pick<Principal, "id" | "admin" | "application">, appId: string) =>
     transact(database, async (transaction) => {
       const access = await managedApp(transaction, principal, appId);
 
@@ -161,7 +162,7 @@ export const createAppAccessService = (database: Database, execution?: HostedExe
       return Result.ok(await present(transaction, principal, access.value));
     }),
   change: (
-    principal: Pick<Principal, "id" | "admin">,
+    principal: Pick<Principal, "id" | "admin" | "application">,
     appId: string,
     input: z.infer<typeof contract.appAccessChange>,
   ) =>

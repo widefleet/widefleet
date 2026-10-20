@@ -192,7 +192,7 @@ export const prepareConnector = async (
 
 export const validateCapabilityChange = async (
   transaction: Transaction,
-  principal: Pick<Principal, "id" | "admin">,
+  principal: Pick<Principal, "id" | "admin" | "application">,
   appId: string,
   name: string,
   grant: z.infer<typeof contract.capabilityGrant> | null,
@@ -203,7 +203,7 @@ export const validateCapabilityChange = async (
   const [target] = await transaction
     .select({ fleetId: apps.fleetId })
     .from(apps)
-    .where(eq(apps.id, appId));
+    .where(and(eq(apps.id, appId), eq(apps.fleetId, principal.application.fleetId)));
 
   if (!target) throw new InvalidOperation({ code: "NOT_FOUND", message: "App not found" });
   // Match claim/deploy lock order, so concurrent connector updates and grants agree.
@@ -262,7 +262,7 @@ export const validateCapabilityChange = async (
 
 export const applyCapabilityChange = async (
   transaction: Transaction,
-  principal: Pick<Principal, "id" | "admin">,
+  principal: Pick<Principal, "id" | "admin" | "application">,
   appId: string,
   name: string,
   grant: z.infer<typeof contract.capabilityGrant> | null,

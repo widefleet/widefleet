@@ -28,6 +28,7 @@ pub struct Target {
     display_name: String,
     name: String,
     hostname: String,
+    flat_hostname: String,
 }
 
 fn valid_name(name: &str) -> bool {
@@ -135,6 +136,7 @@ pub async fn run(api: &Api, credentials: &auth::Credentials, options: Options) -
             slug,
             display_name: format!("{} ({name})", parent.slug),
             hostname: format!("{name}.{}", parent.hostname),
+            flat_hostname: format!("{name}-{}", parent.hostname),
             name,
         }),
         options.deployment,
@@ -184,10 +186,10 @@ impl Target {
         if app.state == "deleting" {
             return Err(Error::invalid("The preview is being deleted".into()));
         }
-        if app.hostname != self.hostname {
+        if app.hostname != self.hostname && app.hostname != self.flat_hostname {
             return Err(Error::invalid(format!(
-                "The preview does not use {}. Choose another --name for an existing legacy preview, or upgrade the management server; no code was uploaded",
-                self.hostname
+                "The preview does not use {} or {}. Choose another --name for an existing legacy preview, or upgrade the management server; no code was uploaded",
+                self.hostname, self.flat_hostname
             )));
         }
         eprintln!("Deploying preview {} ({})", app.slug, app.id);

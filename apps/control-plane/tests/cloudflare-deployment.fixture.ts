@@ -52,6 +52,10 @@ export const seedDeployment = async (
     })
     .onConflictDoNothing();
 
+  const [record] = await database.select().from(apps).where(eq(apps.id, appId));
+
+  if (!record) throw new Error("Missing deployment fixture app");
+
   const artifact = contract.artifact.parse({
     id: crypto.randomUUID(),
     appId,
@@ -93,11 +97,11 @@ export const seedDeployment = async (
 
   return {
     appId,
-    hostname,
+    hostname: record.hostname,
     artifact,
     command,
     deploymentId: command.id,
-    fleetId: fleet.id,
+    fleetId: record.fleetId,
     source,
   };
 };

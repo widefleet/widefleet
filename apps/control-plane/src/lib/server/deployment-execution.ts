@@ -1,3 +1,4 @@
+import { applicationContext } from "./application-context.ts";
 import type { WorkerModule } from "./worker-modules.ts";
 import * as contract from "@platform/contracts";
 import { createHash } from "node:crypto";
@@ -6,7 +7,11 @@ import type { DatabaseUnavailable, InvalidOperation, StorageUnavailable } from "
 import { z } from "zod";
 import type { Principal } from "./identity.ts";
 
-export const deploymentActor = z.object({ id: z.string().min(1), admin: z.boolean() });
+export const deploymentActor = z.object({
+  id: z.string().min(1),
+  admin: z.boolean(),
+  application: applicationContext,
+});
 
 const command = z.object({
   id: z.uuid(),

@@ -27,7 +27,7 @@ const present = (app: typeof apps.$inferSelect) =>
 
 export const validateNetworkChange = async (
   transaction: Transaction,
-  principal: Pick<Principal, "id" | "admin">,
+  principal: Pick<Principal, "id" | "admin" | "application">,
   appId: string,
 ) => {
   const access = await managedApp(transaction, principal, appId);
@@ -35,7 +35,7 @@ export const validateNetworkChange = async (
   if (access.isErr()) return access;
   const app = access.value;
 
-  if (!principal.admin && app.ownerId !== principal.id)
+  if (!principal.application.admin && app.ownerId !== principal.id)
     return Result.err(
       new InvalidOperation({
         code: "FORBIDDEN",
@@ -53,7 +53,7 @@ export const validateNetworkChange = async (
 
 export const applyNetworkChange = async (
   transaction: Transaction,
-  principal: Pick<Principal, "id" | "admin">,
+  principal: Pick<Principal, "id" | "admin" | "application">,
   appId: string,
   input: z.infer<typeof contract.networkChange>,
   enqueue = true,
@@ -100,7 +100,7 @@ export const applyNetworkChange = async (
 };
 
 export const createNetworkService = (database: Database, execution?: HostedExecution) => ({
-  read: (principal: Pick<Principal, "id" | "admin">, appId: string) =>
+  read: (principal: Pick<Principal, "id" | "admin" | "application">, appId: string) =>
     transact(database, async (transaction) => {
       const app = await managedApp(transaction, principal, appId);
 
@@ -109,7 +109,7 @@ export const createNetworkService = (database: Database, execution?: HostedExecu
       return Result.ok(present(app.value));
     }),
   change: (
-    principal: Pick<Principal, "id" | "admin">,
+    principal: Pick<Principal, "id" | "admin" | "application">,
     appId: string,
     input: z.infer<typeof contract.networkChange>,
   ) =>

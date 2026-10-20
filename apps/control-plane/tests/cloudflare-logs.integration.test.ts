@@ -18,6 +18,11 @@ const principal = {
   role: "member",
   admin: false,
   creator: true,
+  application: {
+    fleetId: "00000000-0000-4000-8000-000000000001",
+    organizationId: "widefleet",
+    admin: false,
+  },
 } satisfies Parameters<ReturnType<typeof createTelemetry>["query"]>[0];
 
 const configuration = {
@@ -72,6 +77,7 @@ describe("Cloudflare logs through the shared authorized service", () => {
 
   beforeAll(async () => {
     environment = await createTestEnvironment();
+    principal.application.fleetId = environment.application.fleetId;
     fixture = await seedDeployment(environment.database.db);
     await environment.database.db.insert(connectors).values({
       fleetId: fixture.fleetId,

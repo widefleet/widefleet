@@ -13,13 +13,17 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
-import { user } from "./auth-schema.ts";
+import { organization, user } from "./auth-schema.ts";
 
 export const fleets = pgTable(
   "fleet",
   {
     id: uuid().primaryKey().defaultRandom(),
     name: text().notNull().unique(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id),
+    appHostnameSuffix: text("app_hostname_suffix").unique(),
     executor: text({ enum: ["agent", "cloudflare"] })
       .notNull()
       .default("agent"),
@@ -27,7 +31,13 @@ export const fleets = pgTable(
     appliedRuntime: jsonb("applied_runtime"),
     runtimeJobId: uuid("runtime_job_id"),
   },
-  (table) => [check("fleet_executor_check", sql`${table.executor} IN ('agent', 'cloudflare')`)],
+  (table) => [
+    check("fleet_executor_check", sql`${table.executor} IN ('agent', 'cloudflare')`),
+    check(
+      "fleet_app_hostname_suffix_check",
+      sql`${table.appHostnameSuffix} ~ '^[a-z0-9]+(-[a-z0-9]+)*$' AND length(${table.appHostnameSuffix}) <= 61`,
+    ),
+  ],
 );
 
 export const runtimeReleases = pgTable("runtime_release", {
@@ -76,7 +86,7 @@ export const apps = pgTable(
   "app",
   {
     id: uuid().primaryKey(),
-    slug: text().notNull().unique(),
+    slug: text().notNull(),
     displayName: text("display_name").notNull(),
     catalogListed: boolean("catalog_listed").notNull().default(false),
     parentId: uuid("parent_id"),
@@ -104,7 +114,10 @@ export const apps = pgTable(
     capabilityError: text("capability_error"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [index("app_parent_idx").on(table.parentId)],
+  (table) => [
+    index("app_parent_idx").on(table.parentId),
+    uniqueIndex("app_fleet_slug_unique").on(table.fleetId, table.slug),
+  ],
 );
 
 export const appGrants = pgTable(

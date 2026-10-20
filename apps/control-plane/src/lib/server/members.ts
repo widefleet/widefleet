@@ -26,7 +26,12 @@ export const listMembers = async (
 
   return Result.tryPromise({
     try: async () => {
-      const members = await findMembers(database, search, (page - 1) * 50);
+      const members = await findMembers(
+        database,
+        installationOrganizationId,
+        search,
+        (page - 1) * 50,
+      );
 
       return {
         members: members

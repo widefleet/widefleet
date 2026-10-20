@@ -28,6 +28,7 @@ import { cloudflareRemovalId } from "../../src/lib/server/cloudflare-removal-com
 import { user } from "../../src/lib/server/auth-schema.ts";
 import { initializeCloudflareFleet } from "../../src/lib/server/fleets.ts";
 import { createCloudflareAppSignIn } from "../../src/lib/server/app-sign-in-cloudflare.ts";
+import { createAppService } from "../../src/lib/server/apps.ts";
 import {
   apps,
   appGrants,
@@ -511,7 +512,12 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
     ) => {
       const response = await worker.fetch("http://fixture/start", {
         method: "POST",
-        body: JSON.stringify({ kind, appId, actor: { id: "fixture-owner", admin: false }, input }),
+        body: JSON.stringify({
+          kind,
+          appId,
+          actor: { id: "fixture-owner", admin: false, application: environment.application },
+          input,
+        }),
       });
 
       expect(response.status).toBe(200);
@@ -575,7 +581,11 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           appId,
           name,
           grant,
-          actor: { id: "fixture-owner", admin: true },
+          actor: {
+            id: "fixture-owner",
+            admin: true,
+            application: { ...environment.application, admin: true },
+          },
         }),
       });
 
@@ -600,8 +610,54 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       ]);
       environment = await createTestEnvironment();
       (await initializeCloudflareFleet(environment.database.db)).unwrap();
-      first = await seedDeployment(environment.database.db);
-      preview = await seedDeployment(environment.database.db, { groups: largeGroups });
+      await environment.database.db
+        .update(fleets)
+        .set({ appHostnameSuffix: "fixture" })
+        .where(eq(fleets.id, environment.application.fleetId));
+
+      const applications = createAppService(environment.database.db, {
+        ...environment.configuration,
+        APP_DOMAIN: "example.test",
+      });
+
+      const principal = {
+        id: "fixture-owner",
+        name: "Fixture",
+        email: "fixture@example.test",
+        role: "admin" as const,
+        admin: true,
+        creator: true,
+        application: { ...environment.application, admin: true },
+      };
+
+      const parentApp = (
+        await applications.create(principal, {
+          slug: "notes",
+          displayName: "Notes",
+          parentId: null,
+        })
+      ).unwrap();
+
+      const previewApp = (
+        await applications.create(principal, {
+          slug: "notes-review",
+          displayName: "Review",
+          parentId: parentApp.id,
+          previewName: "review",
+        })
+      ).unwrap();
+
+      first = await seedDeployment(environment.database.db, { appId: parentApp.id });
+      preview = await seedDeployment(environment.database.db, { appId: previewApp.id });
+
+      for (const [id, groups] of [
+        [parentApp.id, ["engineering"]],
+        [previewApp.id, largeGroups],
+      ] as const)
+        await environment.database.db
+          .update(apps)
+          .set({ accessRevision: 1, accessGroups: [...groups] })
+          .where(eq(apps.id, id));
       delayed = await seedDeployment(environment.database.db);
       lostResponse = await seedDeployment(environment.database.db);
 
@@ -683,7 +739,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
               get: id => env.DEPLOYMENTS.get(id),
             };
             const service = createRuntimeReleaseService(db, storage, createCloudflareExecution({...env, DEPLOYMENTS:deployments}, db, storage));
-            const principal = {id:'fixture-owner',admin:!url.searchParams.has('nonadmin')};
+            const principal = {id:'fixture-owner',admin:!url.searchParams.has('nonadmin'), application: {...${JSON.stringify(environment.application)}, admin:!url.searchParams.has('nonadmin')}};
             return input === null ? service.read(principal) : 'modules' in input ? service.install(principal,input) : service.rollback(principal,input);
           });
           return Response.json(result.isErr() ? {error:result.error.message} : result.value, {status:result.isErr()?400:200});
@@ -745,7 +801,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           const operations = input.unavailable ? { create(){throw new Error('Unavailable');}, get(){throw new Error('Unavailable');} } : env.APP_OPERATIONS;
           const result = await withCloudflareDatabase(env, async ({db}) => {
             const execution = createCloudflareExecution({...env,APP_OPERATIONS:operations}, db, createArtifactStorage(createR2Storage(env.ARTIFACTS)));
-            return createAppService(db, readCloudflareConfiguration(env), execution).remove({id:input.actor ?? 'fixture-owner',admin:false}, input.appId);
+            return createAppService(db, readCloudflareConfiguration(env), execution).remove({id:input.actor ?? 'fixture-owner',admin:false, application:${JSON.stringify(environment.application)}}, input.appId);
           });
           return Response.json(result.isErr() ? {error:result.error.message} : result.value, {status:result.isErr()?400:200});
         }
@@ -790,7 +846,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
             const operations = input.expired ? { create(){throw new Error('Expired native operation must not be recreated');}, get(){throw new Error('Expired native operation must not be read');} } : env.APP_OPERATIONS;
             const execution = createCloudflareExecution({...env,APP_OPERATIONS:operations}, db, storage);
             const service = input.kind === 'migrations' ? createMigrationService(db, storage, execution) : createWorkflowService(db, execution);
-            const principal = { id: input.actor ?? 'fixture-owner', admin: false, creator: true, name: 'Fixture', email: 'fixture@example.test', role: 'creator' };
+            const principal = { id: input.actor ?? 'fixture-owner', admin: false, creator: true, name: 'Fixture', email: 'fixture@example.test', role: 'member', application:${JSON.stringify(environment.application)} };
             if (input.read) return service.read(principal, input.appId, input.id);
             return service.create(principal, input.appId, input.id, input.request);
           });
@@ -803,12 +859,12 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         if (url.hostname === 'fixture' && url.pathname === '/history') {
           const result = await withCloudflareDatabase(env, async ({ db }) => {
             const executor = createCloudflareExecution(env, db, createArtifactStorage(createR2Storage(env.ARTIFACTS)));
-            return createAppService(db, readCloudflareConfiguration(env), executor).history({ id: 'fixture-owner', admin: true }, url.searchParams.get('appId'));
+            return createAppService(db, readCloudflareConfiguration(env), executor).history({ id: 'fixture-owner', admin: true, application: {...${JSON.stringify(environment.application)}, admin:true} }, url.searchParams.get('appId'));
           });
           return Response.json(result.unwrap());
         }
         if (url.hostname === 'fixture' && url.pathname === '/connections') {
-          const result = await withCloudflareDatabase(env, async ({db}) => createConnectorService(db, createArtifactStorage(createR2Storage(env.ARTIFACTS)), env.PLATFORM_ENCRYPTION_KEY).connections({id:'fixture-owner', admin:true}, url.searchParams.get('appId')));
+          const result = await withCloudflareDatabase(env, async ({db}) => createConnectorService(db, createArtifactStorage(createR2Storage(env.ARTIFACTS)), env.PLATFORM_ENCRYPTION_KEY).connections({id:'fixture-owner', admin:true, application: {...${JSON.stringify(environment.application)}, admin:true}}, url.searchParams.get('appId')));
           return Response.json(result.unwrap());
         }
         if (url.hostname === 'fixture' && url.pathname === '/host') {
@@ -966,6 +1022,8 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
     });
 
     it("provisions, verifies and activates apps with isolated native D1/R2 data", async () => {
+      expect(first.hostname).toBe("notes-fixture.example.test");
+      expect(preview.hostname).toBe("review-notes-fixture.example.test");
       await Promise.all([dispatch(first), dispatch(preview)]);
       await completed(first.command.id);
       await completed(preview.command.id);
@@ -1119,7 +1177,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         id,
         appId,
         kind: "network",
-        actor: { id: "fixture-owner", admin: false },
+        actor: { id: "fixture-owner", admin: false, application: environment.application },
         input: { target: "backend", action: "allow", origins: ["https://example.com"] },
         createdAt: new Date().toISOString(),
       };
@@ -1844,7 +1902,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
               id: first.command.id,
               appId: preview.appId,
               createdAt: new Date().toISOString(),
-              actor: { id: "fixture-owner", admin: false },
+              actor: { id: "fixture-owner", admin: false, application: environment.application },
               kind: "workflows",
               request: { action: "list", workflow: "example" },
             }),
@@ -2656,7 +2714,11 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         fleetId: fleet.id,
         previousJobId: fleet.runtimeJobId,
         runtime: fleet.runtime,
-        actor: { id: "fixture-owner", admin: true },
+        actor: {
+          id: "fixture-owner",
+          admin: true,
+          application: { ...environment.application, admin: true },
+        },
         createdAt: new Date().toISOString(),
         rollback: true,
       };
@@ -2722,7 +2784,11 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         fleetId: fleet.id,
         previousJobId: fleet.runtimeJobId,
         runtime: fleet.runtime,
-        actor: { id: "fixture-owner", admin: true },
+        actor: {
+          id: "fixture-owner",
+          admin: true,
+          application: { ...environment.application, admin: true },
+        },
         createdAt: new Date().toISOString(),
         rollback: true,
       };

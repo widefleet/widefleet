@@ -96,7 +96,7 @@ describe("Cloudflare operation history", () => {
       kind: "access",
       id: crypto.randomUUID(),
       appId: first.appId,
-      actor: { id: "fixture-owner", admin: false },
+      actor: { id: "fixture-owner", admin: false, application: environment.application },
       input: { revision: 1, groups: ["support"] },
       createdAt: new Date().toISOString(),
     });
@@ -136,7 +136,7 @@ describe("Cloudflare operation history", () => {
         kind: "access",
         id: crypto.randomUUID(),
         appId: entry.appId,
-        actor: { id: actor, admin: false },
+        actor: { id: actor, admin: false, application: environment.application },
         input: { revision, groups: [] },
         createdAt: new Date().toISOString(),
       });
@@ -200,7 +200,11 @@ describe("Cloudflare operation history", () => {
       kind: "capabilities",
       id: crypto.randomUUID(),
       appId: entry.appId,
-      actor: { id: "fixture-owner", admin: true },
+      actor: {
+        id: "fixture-owner",
+        admin: true,
+        application: { ...environment.application, admin: true },
+      },
       name: "ERP",
       grant: { connector: reference.name, entrypoint: "Reader" },
       createdAt: new Date().toISOString(),

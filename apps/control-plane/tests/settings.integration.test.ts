@@ -32,6 +32,7 @@ describe("Platform setup and managed settings", () => {
 
   const principal = () => ({
     ...environment.owner,
+    application: { ...environment.application, admin: true },
     role: "owner" as const,
     admin: true,
     creator: true,

@@ -1,10 +1,14 @@
 import { and, asc, eq, ilike, or } from "drizzle-orm";
-import { installationOrganizationId } from "../organization.ts";
 import { member, user } from "./auth-schema.ts";
 import type { Database } from "./database.ts";
 import type { Transaction } from "./transactions.ts";
 
-export const findMembers = (database: Database | Transaction, search: string, offset = 0) => {
+export const findMembers = (
+  database: Database | Transaction,
+  organizationId: string,
+  search: string,
+  offset = 0,
+) => {
   const pattern = `%${search.replaceAll(/[%_\\]/g, "\\$&")}%`;
 
   return database
@@ -19,7 +23,7 @@ export const findMembers = (database: Database | Transaction, search: string, of
     .innerJoin(user, eq(user.id, member.userId))
     .where(
       and(
-        eq(member.organizationId, installationOrganizationId),
+        eq(member.organizationId, organizationId),
         or(ilike(user.name, pattern), ilike(user.email, pattern)),
       ),
     )

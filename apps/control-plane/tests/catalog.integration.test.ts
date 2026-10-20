@@ -15,11 +15,18 @@ describe("App catalog", () => {
     await environment.users.saveUser(record);
     await environment.linkMicrosoftUser(record.id);
 
-    return { ...record, role: "member" as const, admin: false, creator: true };
+    return {
+      ...record,
+      application: environment.application,
+      role: "member" as const,
+      admin: false,
+      creator: true,
+    };
   };
 
   const admin = () => ({
     ...environment.owner,
+    application: { ...environment.application, admin: true },
     role: "owner" as const,
     admin: true,
     creator: true,
@@ -57,10 +64,10 @@ describe("App catalog", () => {
     const app = await createApp("team-notes");
     expect(app.catalogListed).toBe(false);
     await activate(app.id);
-    expect((await service.catalog()).unwrap()).toEqual([]);
+    expect((await service.catalog(colleague)).unwrap()).toEqual([]);
 
     (await service.setCatalogListing(creator, app.id, true)).unwrap();
-    expect((await service.catalog()).unwrap()).toEqual([
+    expect((await service.catalog(colleague)).unwrap()).toEqual([
       {
         id: app.id,
         displayName: "team-notes",
@@ -79,7 +86,7 @@ describe("App catalog", () => {
     });
 
     (await service.setCatalogListing(creator, app.id, false)).unwrap();
-    expect((await service.catalog()).unwrap()).toEqual([]);
+    expect((await service.catalog(colleague)).unwrap()).toEqual([]);
   });
 
   it("lets administrators change listings but rejects ordinary app collaborators", async () => {
@@ -89,15 +96,15 @@ describe("App catalog", () => {
     expect(await service.setCatalogListing(colleague, app.id, true)).toMatchObject({
       error: { code: "FORBIDDEN" },
     });
-    expect((await service.catalog()).unwrap()).toEqual([]);
+    expect((await service.catalog(colleague)).unwrap()).toEqual([]);
 
     (await service.setCatalogListing(admin(), app.id, true)).unwrap();
     expect(await service.setCatalogListing(colleague, app.id, false)).toMatchObject({
       error: { code: "FORBIDDEN" },
     });
-    expect((await service.catalog()).unwrap()).toHaveLength(1);
+    expect((await service.catalog(colleague)).unwrap()).toHaveLength(1);
     (await service.setCatalogListing(admin(), app.id, false)).unwrap();
-    expect((await service.catalog()).unwrap()).toEqual([]);
+    expect((await service.catalog(colleague)).unwrap()).toEqual([]);
   });
 
   it.each([
@@ -125,7 +132,7 @@ describe("App catalog", () => {
       .update(apps)
       .set({ catalogListed: true })
       .where(eq(apps.id, app.id));
-    expect((await service.catalog()).unwrap()).toEqual([]);
+    expect((await service.catalog(colleague)).unwrap()).toEqual([]);
     (await service.setCatalogListing(creator, app.id, false)).unwrap();
   });
 
@@ -134,7 +141,7 @@ describe("App catalog", () => {
     await activate(app.id);
     (await service.setCatalogListing(creator, app.id, true)).unwrap();
     await activate(app.id);
-    expect((await service.catalog()).unwrap()).toHaveLength(1);
+    expect((await service.catalog(colleague)).unwrap()).toHaveLength(1);
 
     const preview = (
       await service.create(creator, {
@@ -146,9 +153,9 @@ describe("App catalog", () => {
 
     expect(preview.catalogListed).toBe(false);
     await activate(preview.id);
-    expect((await service.catalog()).unwrap()).toHaveLength(1);
+    expect((await service.catalog(colleague)).unwrap()).toHaveLength(1);
 
     (await service.remove(creator, app.id)).unwrap();
-    expect((await service.catalog()).unwrap()).toEqual([]);
+    expect((await service.catalog(colleague)).unwrap()).toEqual([]);
   });
 });

@@ -6,9 +6,9 @@ import { getAppDetails } from "#lib/apps.remote";
 import { formValue, queryValue, remoteContext } from "#server/remote-support";
 
 export const getCatalog = query(async () => {
-  const { runtime } = await remoteContext();
+  const { runtime, principal } = await remoteContext();
 
-  return queryValue(await runtime.apps.catalog());
+  return queryValue(await runtime.apps.catalog(principal));
 });
 
 export const setCatalogListing = form(
