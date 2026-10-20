@@ -69,35 +69,17 @@ role checks apply to browser, CLI and API operations, including direct app IDs.
 
 ### Manage a connector in the browser
 
-1. Open **Connectors** in the selected organization and choose **Deploy connector**.
-2. Enter its name, select a connector upload-metadata JSON file and select the
-   bundled module files. Uploading an existing name updates its code and preserves
-   its secrets. Use the CLI to bundle a source project and its dependencies.
-3. On the connector page, use **Refresh status** to check activation, **Deploy
-   update** to replace its bundle, or **View logs** to inspect runtime output.
-4. Under **Secrets**, add or replace a value, or remove an existing name. Values
+Deploy or update connectors from their source projects with the
+[CLI deployment workflow](#deploy-from-a-project). The browser manages existing
+connectors:
+
+1. Open **Connectors** in the selected organization and choose **Manage connector**
+   for the connector you want to inspect.
+2. Use **Refresh status** to check activation or **View logs** to inspect runtime
+   output.
+3. Under **Secrets**, add or replace a value, or remove an existing name. Values
    are never returned by status queries or failed form responses. Secret values
    are limited to 5000 UTF-8 bytes in this unreleased version.
-
-For a bundle consisting of `worker.js` with a default Worker export and no resource
-bindings, the upload-metadata file is:
-
-```json
-{
-  "main_module": "worker.js",
-  "compatibility_date": "2026-10-01",
-  "entrypoints": ["default"],
-  "bindings": [],
-  "durable_objects": []
-}
-```
-
-Select `worker.js` as a bundled module. Browser upload uses each file’s name;
-module names must match imports and metadata. It treats `.js` and `.mjs` as ES
-modules, `.map` as source maps, `.wasm` as WebAssembly, `.txt` as text, and other
-files as binary data. Use the CLI or multipart API for bundles requiring nested
-module paths. The complete `ConnectorUploadMetadata` schema is available in the
-installation’s OpenAPI document.
 
 To assign a connector, open an app’s **Connections** tab, then **Browse
 connectors**. Under **Add or replace a connection**, choose the connector, enter
