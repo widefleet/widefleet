@@ -33,7 +33,9 @@ for a token it validates the selection for that call without saving a preference
 Token clients must continue sending the selection header on subsequent requests.
 
 The browser choice belongs to the session and is shared by tabs using that session.
-After switching organizations, reload other open workspace tabs before continuing.
+Browser writes carry the organization displayed in their workspace. If another tab
+changes the session's selection, a stale form or command is rejected before writing.
+Reload the affected page to load the selected organization before submitting the change again.
 Use separate browser sessions if you need to work in two organizations concurrently.
 
 `GET /api/v1/me` returns the selected context under `application`:
