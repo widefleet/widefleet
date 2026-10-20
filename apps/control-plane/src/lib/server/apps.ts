@@ -1,7 +1,7 @@
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
 import { and, desc, eq, exists, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
-import type { z } from "zod";
+import { z } from "zod";
 import type { Configuration } from "./config.ts";
 import type { Database } from "./database.ts";
 import { member, user } from "./auth-schema.ts";
@@ -248,8 +248,11 @@ const provisionApp = (
 
     if (fleet.organizationId !== principal.application.organizationId)
       throw new InvalidOperation({ code: "NOT_FOUND", message: "Fleet not found" });
-    const domain = fleet.appDomain ?? configuration.APP_DOMAIN;
-    let hostname = `${input.slug}.${domain}`;
+
+    const hostnameFor = (slug: string) =>
+      `${slug}${fleet.appHostnameSuffix === null ? "" : `-${fleet.appHostnameSuffix}`}.${configuration.APP_DOMAIN}`;
+
+    let hostname = hostnameFor(input.slug);
     let accessGroups: string[] = [];
     let accessRevision = 0;
 
@@ -284,7 +287,7 @@ const provisionApp = (
       if (input.previewName !== undefined) {
         if (
           parent.value.parentId !== null ||
-          parent.value.hostname !== `${parent.value.slug}.${domain}`
+          parent.value.hostname !== hostnameFor(parent.value.slug)
         )
           return Result.err(
             new InvalidOperation({
@@ -293,17 +296,18 @@ const provisionApp = (
             }),
           );
 
-        hostname = `${input.previewName}.${parent.value.hostname}`;
-
-        if (hostname.length > 253)
-          return Result.err(
-            new InvalidOperation({
-              code: "BAD_REQUEST",
-              message: "The preview hostname exceeds the DNS length limit",
-            }),
-          );
+        // A suffixed fleet shares one wildcard domain for apps and named previews.
+        hostname = `${input.previewName}${fleet.appHostnameSuffix === null ? "." : "-"}${parent.value.hostname}`;
       }
     }
+
+    if (!z.hostname().safeParse(hostname).success || !URL.canParse(`https://${hostname}`))
+      return Result.err(
+        new InvalidOperation({
+          code: "BAD_REQUEST",
+          message: "The app hostname is invalid or exceeds DNS length limits",
+        }),
+      );
 
     const [record] = await transaction
       .insert(apps)

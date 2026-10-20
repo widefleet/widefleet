@@ -33,7 +33,7 @@ describe("Mandatory application context", () => {
       id: fleetId,
       name: label,
       organizationId,
-      appDomain: `${label}.example.test`,
+      appHostnameSuffix: label,
     });
     const person = environment.users.createUser({ name: label, email: `${label}@example.test` });
     await environment.users.saveUser(person);
@@ -92,8 +92,8 @@ describe("Mandatory application context", () => {
       service.create(second.principal, input),
     ]);
 
-    expect(a.unwrap().hostname).toBe("notes.first.example.test");
-    expect(b.unwrap().hostname).toBe("notes.second.example.test");
+    expect(a.unwrap().hostname).toBe("notes-first.apps.localhost");
+    expect(b.unwrap().hostname).toBe("notes-second.apps.localhost");
     expect((await service.list(first.principal)).unwrap().map((app) => app.id)).toEqual([
       a.unwrap().id,
     ]);
@@ -147,6 +147,95 @@ describe("Mandatory application context", () => {
     });
     const directory = (await service.access(first.principal, a.unwrap().id, "second")).unwrap();
     expect(directory.candidates).toEqual([]);
+  });
+
+  it("keeps named previews in the same flat namespace and rejects occupied hostnames", async () => {
+    const input = { slug: "notes", displayName: "Notes", parentId: null };
+    const parent = (await service.create(first.principal, input)).unwrap();
+    const other = (await service.create(second.principal, input)).unwrap();
+
+    const previewInput = {
+      slug: "notes-review",
+      displayName: "Review",
+      parentId: parent.id,
+      previewName: "review",
+    };
+
+    const preview = (await service.create(first.principal, previewInput)).unwrap();
+
+    const otherPreview = (
+      await service.create(second.principal, { ...previewInput, parentId: other.id })
+    ).unwrap();
+
+    expect(preview.hostname).toBe("review-notes-first.apps.localhost");
+    expect(preview.url).toBe("https://review-notes-first.apps.localhost/");
+    expect(otherPreview.hostname).toBe("review-notes-second.apps.localhost");
+    expect(await service.get(second.principal, preview.id)).toMatchObject({
+      error: { code: "NOT_FOUND" },
+    });
+    expect(
+      await service.create(second.principal, { ...previewInput, slug: "foreign-preview" }),
+    ).toMatchObject({ error: { code: "NOT_FOUND" } });
+    expect(
+      await service.create(first.principal, { ...previewInput, slug: "different-preview" }),
+    ).toMatchObject({ error: { code: "CONFLICT" } });
+    expect(await service.create(first.principal, { ...input, slug: "review-notes" })).toMatchObject(
+      { error: { code: "CONFLICT" } },
+    );
+    expect((await service.list(first.principal)).unwrap()).toHaveLength(2);
+  });
+
+  it("reserves complete hostnames atomically across different fleet suffixes", async () => {
+    const combined = await scope("first-second");
+
+    const outcomes = await Promise.all([
+      service.create(combined.principal, { slug: "notes", displayName: "Notes", parentId: null }),
+      service.create(second.principal, {
+        slug: "notes-first",
+        displayName: "Other notes",
+        parentId: null,
+      }),
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome.isOk())).toHaveLength(1);
+    expect(outcomes.filter((outcome) => outcome.isErr())).toMatchObject([
+      { error: { code: "CONFLICT" } },
+    ]);
+    const records = await environment.database.db.select().from(apps);
+    expect(records).toHaveLength(1);
+    expect(records[0]?.hostname).toBe("notes-first-second.apps.localhost");
+  });
+
+  it("enforces the DNS label limit for flat apps and previews before writing", async () => {
+    const boundary = await scope("a".repeat(14));
+    const overflow = await scope("a".repeat(15));
+    const input = { slug: "n".repeat(48), displayName: "Notes", parentId: null };
+    const full = (await service.create(boundary.principal, input)).unwrap();
+    expect(full.hostname.split(".")[0]).toHaveLength(63);
+    expect(await service.create(overflow.principal, input)).toMatchObject({
+      error: { code: "BAD_REQUEST" },
+    });
+    expect((await service.list(overflow.principal)).unwrap()).toEqual([]);
+
+    const parent = (await service.create(first.principal, input)).unwrap();
+
+    const previewInput = {
+      slug: "boundary-preview",
+      displayName: "Review",
+      parentId: parent.id,
+      previewName: "r".repeat(8),
+    };
+
+    const preview = (await service.create(first.principal, previewInput)).unwrap();
+    expect(preview.hostname.split(".")[0]).toHaveLength(63);
+    expect(
+      await service.create(first.principal, {
+        ...previewInput,
+        slug: "overflow-preview",
+        previewName: "r".repeat(9),
+      }),
+    ).toMatchObject({ error: { code: "BAD_REQUEST" } });
+    expect((await service.list(first.principal)).unwrap()).toHaveLength(2);
   });
 
   it("rechecks membership and role when selecting a scope with an existing session", async () => {

@@ -28,6 +28,7 @@ import { cloudflareRemovalId } from "../../src/lib/server/cloudflare-removal-com
 import { user } from "../../src/lib/server/auth-schema.ts";
 import { initializeCloudflareFleet } from "../../src/lib/server/fleets.ts";
 import { createCloudflareAppSignIn } from "../../src/lib/server/app-sign-in-cloudflare.ts";
+import { createAppService } from "../../src/lib/server/apps.ts";
 import {
   apps,
   appGrants,
@@ -609,8 +610,54 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       ]);
       environment = await createTestEnvironment();
       (await initializeCloudflareFleet(environment.database.db)).unwrap();
-      first = await seedDeployment(environment.database.db);
-      preview = await seedDeployment(environment.database.db, { groups: largeGroups });
+      await environment.database.db
+        .update(fleets)
+        .set({ appHostnameSuffix: "fixture" })
+        .where(eq(fleets.id, environment.application.fleetId));
+
+      const applications = createAppService(environment.database.db, {
+        ...environment.configuration,
+        APP_DOMAIN: "example.test",
+      });
+
+      const principal = {
+        id: "fixture-owner",
+        name: "Fixture",
+        email: "fixture@example.test",
+        role: "admin" as const,
+        admin: true,
+        creator: true,
+        application: { ...environment.application, admin: true },
+      };
+
+      const parentApp = (
+        await applications.create(principal, {
+          slug: "notes",
+          displayName: "Notes",
+          parentId: null,
+        })
+      ).unwrap();
+
+      const previewApp = (
+        await applications.create(principal, {
+          slug: "notes-review",
+          displayName: "Review",
+          parentId: parentApp.id,
+          previewName: "review",
+        })
+      ).unwrap();
+
+      first = await seedDeployment(environment.database.db, { appId: parentApp.id });
+      preview = await seedDeployment(environment.database.db, { appId: previewApp.id });
+
+      for (const [id, groups] of [
+        [parentApp.id, ["engineering"]],
+        [previewApp.id, largeGroups],
+      ] as const)
+        await environment.database.db
+          .update(apps)
+          .set({ accessRevision: 1, accessGroups: [...groups] })
+          .where(eq(apps.id, id));
       delayed = await seedDeployment(environment.database.db);
       lostResponse = await seedDeployment(environment.database.db);
 
@@ -975,6 +1022,8 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
     });
 
     it("provisions, verifies and activates apps with isolated native D1/R2 data", async () => {
+      expect(first.hostname).toBe("notes-fixture.example.test");
+      expect(preview.hostname).toBe("review-notes-fixture.example.test");
       await Promise.all([dispatch(first), dispatch(preview)]);
       await completed(first.command.id);
       await completed(preview.command.id);

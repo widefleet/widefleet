@@ -159,7 +159,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
             id: queued.artifactId,
             expiresAt: finishedAt,
             missing: [],
-            url: preview.url,
+            url: storedPreview?.url ?? preview.url,
           }),
         );
 
@@ -723,6 +723,20 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       expect(result.stderr).toContain("Preview access denied");
       expect(createdPreviews).toEqual([]);
       expect(requests.every((request) => request.startsWith("GET "))).toBe(true);
+    });
+
+    it("reuses a flat named preview and prints the URL assigned by the server", async () => {
+      storedPreview = {
+        ...preview,
+        hostname: `review-${parent.hostname}`,
+        url: `https://review-${parent.hostname}/`,
+      };
+      const result = await previewCli("--name", "review", "--skip-build", "--no-wait", "--json");
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        appId: preview.id,
+        url: storedPreview.url,
+      });
+      expect(requests).toContain(`PUT /api/v1/apps/${preview.id}/worker`);
     });
 
     it("refuses a legacy flat preview instead of publishing at the wrong hostname", async () => {
