@@ -20,7 +20,7 @@ import {
   ListObjectsV2Command,
   DeleteObjectsCommand,
 } from "@aws-sdk/client-s3";
-import { connectorFixture, connectorFiles } from "../cloudflare-connector.fixture.ts";
+import { connectorFixture, connectorUploadForm } from "../cloudflare-connector.fixture.ts";
 import { connectorReference } from "../../src/lib/server/connector-package.ts";
 import { decryptSecret } from "../../src/lib/server/secret-encryption.ts";
 import { createTestEnvironment } from "../environment.ts";
@@ -187,30 +187,18 @@ for (const javaScriptEnabled of [true, false]) {
       ] as const) {
         await page.goto("/organizations");
         await page.getByRole("button", { name: new RegExp(`^${label} admin$`, "i") }).click();
-        await page.goto("/connectors");
-        await page.getByRole("link", { name: "Deploy connector", exact: true }).click();
-        await page.getByLabel("Connector name", { exact: true }).fill(release.name);
-        await page.getByLabel("Upload metadata", { exact: true }).setInputFiles({
-          name: "metadata.json",
-          mimeType: "application/json",
-          buffer: Buffer.from(JSON.stringify(release.metadata)),
-        });
-        await page.getByLabel("Bundled modules", { exact: true }).setInputFiles(
-          connectorFiles(release).map((file) => ({
-            name: file.name,
-            mimeType: "application/javascript",
-            buffer: Buffer.from(file.bytes),
-          })),
-        );
-        await expect(page.getByLabel("Connector name", { exact: true })).toHaveValue(release.name);
-        await page.getByRole("button", { name: "Deploy connector", exact: true }).click();
-        await expect(page).toHaveURL(new RegExp(`/connectors/${release.name}\\?submitted=1$`));
-        await expect(page.getByText("No version is active yet.")).toBeVisible();
-        await page.getByRole("link", { name: "Deploy update", exact: true }).click();
-        await expect(page.getByRole("heading", { name: "Deploy connector" })).toBeVisible();
-        await expect(page.getByLabel("Connector name", { exact: true })).toHaveValue(release.name);
 
-        await page.getByRole("link", { name: "All connectors", exact: true }).click();
+        const deployed = await context.request.put(`/api/v1/connectors/${release.name}`, {
+          headers: {
+            origin: environment.configuration.PLATFORM_URL,
+            "x-widefleet-organization": id,
+            "idempotency-key": crypto.randomUUID(),
+          },
+          multipart: connectorUploadForm(release),
+        });
+
+        expect(deployed.status()).toBe(200);
+        await page.goto("/connectors");
         await expect(
           page.getByRole("link", { name: "Manage connector", exact: true }),
         ).toBeVisible();
@@ -218,6 +206,7 @@ for (const javaScriptEnabled of [true, false]) {
         await page.getByRole("link", { name: "Manage connector", exact: true }).click();
 
         await expect(page.getByRole("heading", { name: release.name, exact: true })).toBeVisible();
+        await expect(page.getByText("No version is active yet.")).toBeVisible();
         await page.getByLabel("Secret name", { exact: true }).fill("WIDEFLEET_DENIED");
         await page.getByLabel("Secret value", { exact: true }).fill("redacted-test-secret");
 
@@ -328,16 +317,9 @@ for (const javaScriptEnabled of [true, false]) {
         .set({ role: "member" })
         .where(and(eq(member.userId, person.id), eq(member.organizationId, beta)));
 
-      for (const path of [
-        "/connectors/-/deploy",
-        `/connectors/${release.name}`,
-        `/connectors/${release.name}/logs`,
-      ])
+      for (const path of [`/connectors/${release.name}`, `/connectors/${release.name}/logs`])
         expect((await second.goto(path))?.status()).toBe(403);
       await second.goto("/connectors");
-      await expect(second.getByRole("link", { name: "Deploy connector", exact: true })).toHaveCount(
-        0,
-      );
       await expect(second.getByRole("link", { name: "Manage connector", exact: true })).toHaveCount(
         0,
       );

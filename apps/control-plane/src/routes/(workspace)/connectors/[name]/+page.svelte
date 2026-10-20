@@ -71,9 +71,6 @@
         "none"}
     </p>
     <div class="flex flex-wrap gap-2">
-      <Button href={`/connectors/-/deploy?name=${data.name}`} variant="outline" size="sm"
-        >Deploy update</Button
-      >
       <Button href={`/connectors/${data.name}/logs`} variant="outline" size="sm">View logs</Button>
     </div>
   </section>

@@ -106,7 +106,6 @@
     </p>
   </div>
   <div class="flex items-center gap-3">
-    {#if data.admin}<Button href="/connectors/-/deploy">Deploy connector</Button>{/if}
     <Badge variant="secondary" class="font-normal"
       >{catalog.length} {catalog.length === 1 ? "connector" : "connectors"}</Badge
     >

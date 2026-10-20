@@ -1,11 +1,9 @@
 import { form, getRequestEvent, query } from "$app/server";
-import { invalid, redirect } from "@sveltejs/kit";
+import { redirect } from "@sveltejs/kit";
 import { z } from "zod";
 import * as contract from "@platform/contracts";
-import { formValue, queryValue, remoteContext, remoteOperation } from "#server/remote-support";
+import { formValue, queryValue, remoteContext } from "#server/remote-support";
 import { pageFailure } from "#server/page-auth";
-import { connectorAdministrator } from "#server/connector-changes";
-import { uploadedConnector } from "#server/connector-package";
 
 export const getConnectorLogs = query(contract.connectorLogQuery, async (input) => {
   const { runtime, principal } = await remoteContext();
@@ -99,60 +97,5 @@ export const removeConnectorBinding = form(
     if (!getRequestEvent().isRemoteRequest) redirect(303, `/connectors?app=${appId}&submitted=1`);
 
     return { submitted: true };
-  },
-);
-
-export const deployConnector = form(
-  contract.organizationSelection.extend({
-    name: contract.appSlug,
-    metadata: z
-      .file()
-      .min(1)
-      .max(64 * 1024),
-    modules: z
-      .array(z.file().max(20 * 1024 * 1024))
-      .min(1)
-      .max(532),
-    requestId: contract.identifier,
-  }),
-  async ({ name, metadata, modules, organizationId, requestId }) => {
-    const { runtime, principal } = await remoteContext({ organizationId });
-    await remoteOperation(async () => {
-      connectorAdministrator(principal);
-    });
-    let parsed: unknown;
-
-    try {
-      parsed = JSON.parse(await metadata.text());
-    } catch {
-      invalid("The metadata file must contain valid JSON.");
-    }
-
-    const configuration = contract.connectorUploadMetadata.safeParse(parsed);
-
-    if (!configuration.success)
-      invalid("The metadata file is not valid connector upload metadata.");
-
-    // The file picker preserves module bytes; deployment validation is shared with the API.
-    const files = await Promise.all(
-      modules.map(async (file) => ({
-        name: file.name,
-        type: /\.(m?js)$/.test(file.name)
-          ? ("esm" as const)
-          : file.name.endsWith(".map")
-            ? ("sourcemap" as const)
-            : file.name.endsWith(".wasm")
-              ? ("wasm" as const)
-              : file.name.endsWith(".txt")
-                ? ("text" as const)
-                : ("data" as const),
-        bytes: new Uint8Array(await file.arrayBuffer()),
-      })),
-    );
-
-    const release = formValue(uploadedConnector(name, configuration.data, files));
-    formValue(await runtime.connectors.deploy(principal, release, files, requestId));
-    await getConnectorCatalog().refresh();
-    redirect(303, `/connectors/${name}?submitted=1`);
   },
 );
