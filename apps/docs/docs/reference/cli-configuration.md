@@ -29,7 +29,7 @@ widefleet --organization ORGANIZATION_ID whoami
 widefleet --organization ORGANIZATION_ID apps
 ```
 
-`whoami` includes the selected organization and fleet under `application`.
+`whoami` includes the selected organization under `application.organizationId`.
 `application.admin` grants application and connector administration within that scope;
 the top-level `admin` field represents installation administration.
 
