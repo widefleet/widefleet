@@ -42,11 +42,18 @@ Reload the affected page to load the selected organization before submitting the
 Use separate browser sessions if you need to work in two organizations concurrently.
 
 `GET /api/v1/me` returns the selected context under `application`:
-`fleetId`, `organizationId` and `admin`. The nested `admin` field applies to app
+`fleetId`, `organizationId` and `admin`. The nested `admin` field applies to app and connector
 administration within that scope. The top-level `admin` field remains installation
 administration. Connector catalogs and deployment-agent discovery are scoped to
-the selected fleet; the central company directory is available only in its own
-installation organization.
+the selected fleet. Connector deployment, updates, secrets, app binding changes,
+status and logs require an administrator of the selected organization and stay
+within its fleet. Same-named connectors in other organizations are independent.
+Deployment-agent administration, runtime upgrades and installation settings still
+require installation administration. The central company directory is available
+only in its own installation organization.
+
+See [connector management](/guides/connectors#manage-connectors-in-an-organization)
+for the browser flow and connector API endpoints.
 
 Use [CLI organization selection](/reference/cli-configuration#select-an-organization)
 for equivalent CLI commands. If a browser selection becomes unavailable, the
