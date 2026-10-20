@@ -12,6 +12,6 @@ The [agent's queue wake-up code](../crates/platform-agent/src/docker.rs) explain
 
 An empty Cron list can remove celld's reserved Cron class while its previous alarm still exists. With connector Durable Objects still active, the original failure repeatedly attempted restoration until local storage filled.
 
-The [native schedule construction](../crates/platform-agent/src/fleet.rs) explains why Widefleet retains an impossible calendar expression when no app has a Cron. Keep the old Cron cell in the upgrade test and reactivate it after removing the final subscription, so the test verifies alarm cleanup rather than only the new configuration.
+The [native schedule construction](../crates/platform-agent/src/execution.rs) explains why Widefleet retains an impossible calendar expression when no app has a Cron. Keep the old Cron cell in the upgrade test and reactivate it after removing the final subscription, so the test verifies alarm cleanup rather than only the new configuration.
 
 Both cases are covered by the [deployment suite](../apps/control-plane/tests/runtime/deployment.test.ts). Run it using the [runtime test setup](development.md#local-verification) before removing either workaround.

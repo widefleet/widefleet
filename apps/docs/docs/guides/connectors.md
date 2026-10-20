@@ -53,7 +53,7 @@ connector logs. Members can browse the catalog and inspect apps they can access.
 Installation settings, runtime upgrades and deployment-agent administration remain
 operator responsibilities.
 
-Connector names are unique within an organization’s fleet. Two organizations may
+Connector names are unique within an organization. Two organizations may
 both deploy `erp`; their code, secrets, activation jobs and app bindings remain
 separate. Select the organization in the workspace header or use
 [CLI organization selection](/reference/cli-configuration#select-an-organization):

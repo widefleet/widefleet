@@ -1,10 +1,10 @@
 ---
 title: Application runtime
 description: Runtime versions, activation, recovery, storage and supported app APIs.
-lastModified: 2026-10-12
+lastModified: 2026-10-20
 ---
 
-One default celld fleet runs the installation's apps and previews as separate Dynamic Workers. The installer manages one node. Fleet identity is stored in PostgreSQL and remains unchanged when an executor is registered, disabled or replaced. A replacement executor reuses the same Docker host, persistent node state, routing directory and fleet storage.
+The installation's celld runtime runs apps and previews as separate Dynamic Workers. The installer manages one node. In the unreleased organization ownership model, apps, connectors and agents belong directly to an organization with one execution configuration. Registering, disabling or replacing an agent does not change that ownership. A replacement agent reuses the same Docker host, persistent node state, routing directory and runtime storage.
 
 ## Versions and updates
 
@@ -19,17 +19,31 @@ widefleet runtime rollback PREVIOUS_VERSION
 
 Use the normal login with administrator membership and `platform:read platform:write`. `status` reports the selected version, last acknowledged active version, latest update state and stored versions. Update and rollback wait for the executor's result; `--no-wait` returns after queueing. Failed activation returns a nonzero exit status. Rollback selects an already stored version without downloading it again. A newer submitted update stops an older CLI waiter with an explicit message.
 
-The control plane keeps package bytes in Object Storage and only checksums/version references in PostgreSQL. Published versions are immutable. The installed package, app snapshots and native deployment are persisted in fleet storage. A runtime update has its own fleet job and works before any app exists, installing only the requested release. Rollback requires a previously installed release. The first app deployment can initialize the runtime from the release bundled with the control-plane distribution; later control-plane upgrades do not silently change an existing fleet's selected runtime.
+The control plane keeps package bytes in Object Storage and only checksums/version references in PostgreSQL. Published versions are immutable. The installed package, app snapshots and native deployment are persisted in fleet storage. A runtime update has its own organization job and works before any app exists, installing only the requested release. Rollback requires a previously installed release. The first app deployment can initialize the runtime from the release bundled with the control-plane distribution; later control-plane upgrades do not silently change an organization's selected runtime.
 
 If an update returns `409: Runtime versions are immutable`, the installation already stores different bytes under that version. This can happen when a source checkout builds a modified runtime without changing its version, including changes to bundled license notices. Use a matching published platform build or a newly versioned runtime release; do not overwrite stored packages or edit their checksums. `runtime rollback` selects the installation's existing package, not the download from GitHub.
 
-Platform 0.3.2 bundles app runtime 0.2.2, using installation protocol 1 for celld 0.6.2. The control plane and agent require that celld version in runtime packages. Workflow support additionally requires a deployment agent that provisions Workflow protocol 1 bindings. A compatible loader/adapter update within installed capabilities needs no Rust rebuild; a new installation protocol or celld binary requires a separately reviewed platform update.
+The unreleased organization ownership build requires runtime installation protocol 2 for celld 0.6.2. Control plane, agent and runtime must be updated together; runtime packages using protocol 1 are rejected. Workflow support additionally requires a deployment agent that provisions Workflow protocol 1 bindings. A compatible loader/adapter update within installed capabilities needs no Rust rebuild; a new installation protocol or celld binary requires a separately reviewed platform update.
 
 Runtime 0.2.1 forwards incoming HTTP request cancellation explicitly to the loaded app. If the client disconnects before response headers, the app's `request.signal` is aborted. App code must pass that signal to any downstream requests it wants to cancel, for example `env.SERVICE.fetch(url, { signal: request.signal })`. A timeout after a fetch has returned still needs explicit cancellation of the response body.
 
+## Organization ownership upgrade
+
+This change is unreleased. Migration `0021_organization_ownership` transfers existing
+resource ownership, runtime settings and stored operation contexts to the organization.
+It preserves PostgreSQL records and removes the separate fleet identity. Multiple old
+fleets belonging to one organization are ambiguous and are not merged automatically.
+
+The migration does not move object storage or local node state, rewrite immutable
+connector artifacts, or change parameters already accepted by Cloudflare Workflows.
+It therefore does not provide an in-place upgrade for an already serving runtime.
+Keep existing state intact until it has been explicitly migrated or the development
+installation can be recreated. A successful database migration alone is not proof
+that an old runtime can resume serving.
+
 ## Activation and recovery
 
-App code is selected through immutable snapshots. The loader binds only the app's declared D1, R2, KV, Queue, asset and plain-text resources. Equal resource names in different apps resolve to different native resources. Previews use the same fleet with their own app identity and data. Resources are created only when declared.
+App code is selected through immutable snapshots. The loader binds only the app's declared D1, R2, KV, Queue, asset and plain-text resources. Equal resource names in different apps resolve to different native resources. Previews belong to the same organization with their own app identity and data. Resources are created only when declared.
 
 An app-code update can select a new snapshot without a native reload. Changes to native resources, event subscriptions or runtime code also publish and reload celld configuration. The installer validates the candidate before publishing its host reference. Runtime updates evaluate every published app snapshot before acceptance. Requests already using an older snapshot can finish on it. Native reloads retain the old generation during transition; long-lived connections remain subject to celld's generation drain behavior.
 

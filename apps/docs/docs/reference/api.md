@@ -42,12 +42,12 @@ Reload the affected page to load the selected organization before submitting the
 Use separate browser sessions if you need to work in two organizations concurrently.
 
 `GET /api/v1/me` returns the selected context under `application`:
-`fleetId`, `organizationId` and `admin`. The nested `admin` field applies to app and connector
+`organizationId` and `admin`. The nested `admin` field applies to app and connector
 administration within that scope. The top-level `admin` field remains installation
 administration. Connector catalogs and deployment-agent discovery are scoped to
-the selected fleet. Connector deployment, updates, secrets, app binding changes,
+the selected organization. Connector deployment, updates, secrets, app binding changes,
 status and logs require an administrator of the selected organization and stay
-within its fleet. Same-named connectors in other organizations are independent.
+within that organization. Same-named connectors in other organizations are independent.
 Deployment-agent administration, runtime upgrades and installation settings still
 require installation administration. The central company directory is available
 only in its own installation organization.
@@ -62,14 +62,14 @@ an administrator to grant access.
 
 ## Publish an app
 
-1. Resolve or create the configured name with `PUT /api/v1/apps/by-name/{slug}`. The server checks permissions and assigns the deployment host on creation. Names are unique within the selected application fleet. Explicit `POST /api/v1/apps` remains available for previews and administrative scripts.
+1. Resolve or create the configured name with `PUT /api/v1/apps/by-name/{slug}`. The server checks permissions and assigns the deployment host on creation. Names are unique within the selected organization. Explicit `POST /api/v1/apps` remains available for previews and administrative scripts.
 2. Submit an asset manifest to `/api/v1/apps/{appId}/assets-upload-session`.
 3. Upload each missing hash to the returned session's asset endpoint. The API verifies both bytes and declared size.
 4. Upload the Worker as multipart data to `/api/v1/apps/{appId}/worker` with a UUID `Idempotency-Key` header. Include one JSON `metadata` field and file parts named after their modules.
 5. Follow the app's deployment history and events from queueing through successful activation by the agent.
 
 Use the returned `hostname` and `url`; do not derive addresses from the app slug or
-organization name. Fleet hostname suffixes can place apps and named previews
+organization name. Organization hostname suffixes can place apps and named previews
 under the shared app domain. See [preview addresses](/reference/previews#organization-addresses)
 for naming and required builds. Occupied complete hostnames return `409 CONFLICT`;
 invalid or overlong hostnames return `400 BAD_REQUEST` before app creation.

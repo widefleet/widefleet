@@ -1,7 +1,7 @@
 ---
 title: Storage backends
 description: Configure artifact and fleet storage, credentials and existing data.
-lastModified: 2026-10-12
+lastModified: 2026-10-20
 ---
 
 The control plane and deployment agent support S3-compatible storage, Azure Blob Storage and Google Cloud Storage. S3 remains the default when the provider variables are omitted. The default Compose installation uses RustFS. Maintained [Compose service selections](/self-hosting/external-services) connect the same installation to existing external S3, Azure Blob or GCS resources. See [initialization and existing data](#initialization-and-existing-data) when changing storage.
@@ -12,7 +12,7 @@ The control plane and deployment agent support S3-compatible storage, Azure Blob
 | Azure Blob           | Azure Blob SDK           | Native `az://` through celld |
 | Google Cloud Storage | Google Cloud Storage SDK | Native `gs://` through celld |
 
-The control plane stores uploaded modules and assets. The agent publishes them into a separate fleet bucket/container, where celld also persists D1 and R2 data. App artifacts use `apps/<app-id>/`; runtime packages use `packages/sha256/<checksum>.json`. Fleet state uses `fleets/<fleet-id>/`, independently of executor registration. App-owned resource identities include the app UUID, so equal resource names in two apps stay separate. PostgreSQL holds runtime versions and checksums, not package bodies. App code and the CLI upload contract are independent of the selected backend. PostgreSQL and local runtime state still require their own storage.
+The control plane stores uploaded modules and assets. The agent publishes them into a separate fleet bucket/container, where celld also persists D1 and R2 data. App artifacts use `apps/<app-id>/`; runtime packages use `packages/sha256/<checksum>.json`. In the unreleased organization ownership model, runtime state uses `organizations/<organization-id>/`, independently of executor registration. See the [upgrade boundary](/reference/runtime#organization-ownership-upgrade) before updating an existing runtime. App-owned resource identities include the app UUID, so equal resource names in two apps stay separate. PostgreSQL holds runtime versions and checksums, not package bodies. App code and the CLI upload contract are independent of the selected backend. PostgreSQL and local runtime state still require their own storage.
 
 ## Control plane configuration
 

@@ -30,15 +30,15 @@ Previews start with their own empty D1, R2, KV and Queue resources. Plain-text v
 
 ## Organization addresses
 
-This section describes unreleased fleet hostname suffixes and requires matching
+This section describes unreleased organization hostname suffixes and requires matching
 CLI and control-plane builds containing that capability.
 
-An installation can assign a stable hostname suffix to a fleet. With suffix `acme`
+An installation can assign a stable hostname suffix to an organization. With suffix `acme`
 and `APP_DOMAIN=apps.example.com`, an app named `notes` has address
 `notes-acme.apps.example.com`; its named preview `review` has address
 `review-notes-acme.apps.example.com`. Both use one label below the shared app domain,
 so its `*.apps.example.com` certificate covers both. Renaming the organization does
-not change the stored fleet suffix.
+not change the stored organization suffix.
 
 The combined app or preview label must fit the DNS limit of 63 characters. If the
 server rejects an address as too long, choose a shorter app or preview name.
