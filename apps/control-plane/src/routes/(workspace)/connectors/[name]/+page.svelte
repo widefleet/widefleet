@@ -4,6 +4,7 @@
   import FormIssues from "#shadcn/FormIssues.svelte";
   import { Button } from "#shadcn/components/ui/button/index.js";
   import { Input } from "#shadcn/components/ui/input/index.js";
+  import { Textarea } from "#shadcn/components/ui/textarea/index.js";
   import { Label } from "#shadcn/components/ui/label/index.js";
   import { Badge } from "#shadcn/components/ui/badge/index.js";
   import Feedback from "#shadcn/components/Feedback.svelte";
@@ -70,7 +71,7 @@
         "none"}
     </p>
     <div class="flex flex-wrap gap-2">
-      <Button href={`/connectors/new?name=${data.name}`} variant="outline" size="sm"
+      <Button href={`/connectors/-/deploy?name=${data.name}`} variant="outline" size="sm"
         >Deploy update</Button
       >
       <Button href={`/connectors/${data.name}/logs`} variant="outline" size="sm">View logs</Button>
@@ -122,11 +123,14 @@
       </div>
       <div class="space-y-2">
         <Label for="secret-value">Secret value</Label>
-        <Input
+        <Textarea
           id="secret-value"
-          {...setConnectorSecret.fields._value.as("password")}
+          {...setConnectorSecret.fields._value.as("text")}
           required
-          autocomplete="new-password"
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck={false}
+          rows={4}
         />
       </div>
       <Button type="submit" disabled={setConnectorSecret.pending > 0}>Save secret</Button>

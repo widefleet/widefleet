@@ -164,11 +164,11 @@ const organizationSession = async (browser: Browser, javaScriptEnabled: boolean)
 };
 
 for (const javaScriptEnabled of [true, false]) {
-  test(`manages organization connectors and rejects stale secret changes (JavaScript ${javaScriptEnabled})`, async ({
+  test(`manages connectors named new, preserves multiline secrets and rejects stale changes (JavaScript ${javaScriptEnabled})`, async ({
     browser,
   }) => {
     const { person, alpha, beta, context } = await organizationSession(browser, javaScriptEnabled);
-    const release = connectorFixture("shared-browser");
+    const release = connectorFixture("new");
 
     try {
       const page = await context.newPage();
@@ -198,6 +198,19 @@ for (const javaScriptEnabled of [true, false]) {
         await page.getByRole("button", { name: "Deploy connector", exact: true }).click();
         await expect(page).toHaveURL(new RegExp(`/connectors/${release.name}\\?submitted=1$`));
         await expect(page.getByText("No version is active yet.")).toBeVisible();
+        await page.getByRole("link", { name: "Deploy update", exact: true }).click();
+        await expect(page.getByRole("heading", { name: "Deploy connector" })).toBeVisible();
+        await expect(page.getByLabel("Connector name", { exact: true })).toHaveValue(release.name);
+
+        if (javaScriptEnabled) {
+          await page.getByRole("link", { name: "All connectors", exact: true }).click();
+          await page.getByRole("button", { name: /^new / }).click();
+          await page.getByRole("link", { name: "Manage connector", exact: true }).click();
+        } else {
+          await page.goto(`/connectors/${release.name}`);
+        }
+
+        await expect(page.getByRole("heading", { name: release.name, exact: true })).toBeVisible();
         await page.getByLabel("Secret name", { exact: true }).fill("WIDEFLEET_DENIED");
         await page.getByLabel("Secret value", { exact: true }).fill("redacted-test-secret");
 
@@ -212,7 +225,9 @@ for (const javaScriptEnabled of [true, false]) {
           page.getByText("Reserved connector secret name", { exact: true }),
         ).toBeVisible();
         await page.getByLabel("Secret name", { exact: true }).fill("API_KEY");
-        await page.getByLabel("Secret value", { exact: true }).fill(`secret-${id}`);
+        await page
+          .getByLabel("Secret value", { exact: true })
+          .fill(`first-line\n\nsecret-${id}\n  final-line  \n`);
         await page.getByRole("button", { name: "Save secret", exact: true }).click();
         await expect(
           page.getByRole("button", { name: "Remove API_KEY", exact: true }),
@@ -232,12 +247,15 @@ for (const javaScriptEnabled of [true, false]) {
 
         if (!record) throw new Error("Missing browser connector");
         const reference = connectorReference.parse(record.connector.package);
+        // Native HTML forms normalize textarea line endings to CRLF.
         expect(
-          await decryptSecret(
-            environment.environment.PLATFORM_ENCRYPTION_KEY,
-            reference.secrets["API_KEY"] ?? "",
-          ),
-        ).toBe(`secret-${id}`);
+          (
+            await decryptSecret(
+              environment.environment.PLATFORM_ENCRYPTION_KEY,
+              reference.secrets["API_KEY"] ?? "",
+            )
+          ).replaceAll("\r\n", "\n"),
+        ).toBe(`first-line\n\nsecret-${id}\n  final-line  \n`);
       }
 
       const record = records.find((row) => row.organizationId === alpha);
@@ -304,7 +322,7 @@ for (const javaScriptEnabled of [true, false]) {
         .where(and(eq(member.userId, person.id), eq(member.organizationId, beta)));
 
       for (const path of [
-        "/connectors/new",
+        "/connectors/-/deploy",
         `/connectors/${release.name}`,
         `/connectors/${release.name}/logs`,
       ])
