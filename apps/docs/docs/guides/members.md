@@ -35,8 +35,9 @@ the last owner cannot be removed or demoted. Owner and admin roles in the instal
 these roles grant administration only within that organization.
 
 Removing an inviter or changing their role to `member` cancels their pending invitations.
-Changing an owner to `admin` leaves those invitations pending, including owner invitations;
-an owner must cancel any that should no longer be accepted.
+Changing an owner to `admin` cancels their pending owner invitations; member and admin
+invitations remain valid. Only owners can replace an existing owner invitation, including
+when inviting that recipient with a lower role.
 
 The same operations are available in the CLI:
 
