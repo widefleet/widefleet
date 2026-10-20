@@ -1,7 +1,7 @@
 ---
 title: Members and company sign-in
 description: Accept invitations, manage organization membership and link an optional company account.
-lastModified: 2026-10-20
+lastModified: 2026-10-21
 ---
 
 Use this flow on an installation with email delivery and organization invitations enabled.
@@ -15,6 +15,11 @@ does not create access.
 2. Enter the six-digit code from the sign-in email. The code expires after five minutes
    and allows three attempts; request a new code if it expires.
 3. Review the organization and role, enter your name when prompted, and accept.
+
+Repeated sign-in or code-delivery requests can return HTTP `429`. Wait for the
+delay in the response's `X-Retry-After` header before trying again. The three failed
+attempts allowed for each email code are checked separately from request limits,
+including when requests come from different IP addresses.
 
 The organization is now available in the workspace. Invitations expire after seven
 days. An expired or canceled invitation needs a new invitation from an administrator.

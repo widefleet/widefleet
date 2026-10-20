@@ -1,7 +1,7 @@
 ---
 title: Single-host installation
 description: Install, configure, upgrade and recover a company installation.
-lastModified: 2026-10-20
+lastModified: 2026-10-21
 ---
 
 This Compose deployment is the reference installation. Use Linux x86-64, Docker Engine 29.8.1, Docker Compose 2.20.0 or newer (including v5), and a checkout of the matching release. Published images contain the required runtime and setup tools; the operator host needs no Node, pnpm or Rust installation. The operator owns DNS, certificates, identity-provider registrations, backups and upgrades. Commands below change the selected installation; choose its environment file deliberately.
@@ -47,6 +47,12 @@ All users admitted to the management client become Members and can create apps. 
 Management uses Better Auth's verified Generic OAuth integration. Entra accounts use the verified `oid`; generic OIDC accounts use `sub` within an issuer-specific namespace. Linking requires the logged-in administrator's explicit action; matching email addresses do not silently link accounts.
 
 Known runtime limitation: celld `0.6.2` drops incoming header values containing non-ASCII bytes. Display names can therefore be empty in Workers; the stable user identifier remains available for authorization.
+
+For unreleased organization sign-in builds, the Node control plane uses Better Auth's
+in-memory request limiter. Counters are per process, reset on restart, and do not use
+PostgreSQL. Requests from the same IP share an endpoint's limit; users behind a shared
+proxy can therefore affect each other. A `429` response includes an `X-Retry-After`
+delay. The per-email-code attempt limit remains in the stored verification record.
 
 ### Automated first setup
 
