@@ -40,10 +40,15 @@ Browser organization changes do not change the CLI target. The CLI sends the
 selection on every API request, including uploads and deployment polling.
 
 A standard installation uses its own organization when no selection is supplied.
-An installation that requires a choice returns `ORGANIZATION_REQUIRED` until you
-select one. An unavailable organization or removed membership fails with `403`;
-the CLI never switches to another organization automatically. Run
-`widefleet organizations` again and choose an available ID, or ask your
+Otherwise, if exactly one organization is available, commands such as
+`widefleet deploy` use it automatically without `--organization`. With several
+available organizations, select one explicitly; without a choice, the server
+returns `ORGANIZATION_REQUIRED`. With no available organizations, ask an
+administrator to grant access.
+
+An explicitly selected organization that is unavailable or whose membership was
+removed fails with `403`; that selection is never replaced by another organization.
+Run `widefleet organizations` again and choose an available ID, or ask your
 administrator to restore access.
 
 ## Inspect or change the URL

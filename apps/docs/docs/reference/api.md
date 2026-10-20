@@ -21,20 +21,23 @@ For API requests, send `X-Widefleet-Organization: ORGANIZATION_ID` using an ID f
 that response. Selection does not grant access: the server checks current
 membership and role on each request. The header takes precedence over a browser
 session's active organization. Without either, a standard installation uses its
-own organization; installations that require a choice return
-`403 ORGANIZATION_REQUIRED`. An invalid or unavailable explicit selection fails
-with `403` and never falls back to another organization.
+own organization. Otherwise, exactly one available organization is selected
+automatically; multiple available organizations require an explicit choice.
+With no available organization or no choice among several, requests return
+`403 ORGANIZATION_REQUIRED`. An invalid or unavailable explicit or saved selection
+fails with `403` and never falls back to another organization.
 
 Browser users choose an organization at `/organizations` or follow the organization
 name in the workspace header. `PUT /api/v1/organization` accepts
 `{ "organizationId": "ORGANIZATION_ID" }` and requires `platform:write` or a
 same-origin browser request. For a browser session it saves the active organization;
 for a token it validates the selection for that call without saving a preference.
-Token clients must continue sending the selection header on subsequent requests.
+Token clients must keep sending the header to retain an explicit target on later requests.
 
 The browser choice belongs to the session and is shared by tabs using that session.
 Browser writes carry the organization displayed in their workspace. If another tab
 changes the session's selection, a stale form or command is rejected before writing.
+This also protects forms when the only automatically available organization changes.
 Reload the affected page to load the selected organization before submitting the change again.
 Use separate browser sessions if you need to work in two organizations concurrently.
 
