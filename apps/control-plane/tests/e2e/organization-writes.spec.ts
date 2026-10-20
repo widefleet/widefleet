@@ -284,7 +284,7 @@ for (const javaScriptEnabled of [true, false]) {
         ownerId: person.id,
         slug: "connector-browser",
         displayName: "Connector browser",
-        hostname: `connector-browser.${alpha}.example.test`,
+        hostname: `connector-browser-${alpha}.apps.localhost`,
       });
       await page.goto("/organizations");
       await page.getByRole("button", { name: /^Alpha admin$/i }).click();
@@ -370,7 +370,7 @@ for (const javaScriptEnabled of [true, false]) {
         ownerId: person.id,
         slug: "retry-removal",
         displayName: "Retry removal",
-        hostname: `retry-removal.${alpha}.example.test`,
+        hostname: `retry-removal-${alpha}.apps.localhost`,
         state: "active",
         activeDeploymentId: deploymentId,
         capabilities: {},

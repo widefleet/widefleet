@@ -94,7 +94,7 @@ describe("Organization connector management", () => {
       id: fleetId,
       name: id,
       organizationId: id,
-      appDomain: `${id}.example.test`,
+      appHostnameSuffix: id,
       executor,
     });
 
