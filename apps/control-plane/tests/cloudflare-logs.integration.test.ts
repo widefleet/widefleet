@@ -19,7 +19,6 @@ const principal = {
   admin: false,
   creator: true,
   application: {
-    fleetId: "00000000-0000-4000-8000-000000000001",
     organizationId: "widefleet",
     admin: false,
   },
@@ -77,10 +76,10 @@ describe("Cloudflare logs through the shared authorized service", () => {
 
   beforeAll(async () => {
     environment = await createTestEnvironment();
-    principal.application.fleetId = environment.application.fleetId;
+    principal.application.organizationId = environment.application.organizationId;
     fixture = await seedDeployment(environment.database.db);
     await environment.database.db.insert(connectors).values({
-      fleetId: fixture.fleetId,
+      organizationId: fixture.organizationId,
       name: "fixture-connector",
       package: {},
       jobId: crypto.randomUUID(),
@@ -153,7 +152,7 @@ describe("Cloudflare logs through the shared authorized service", () => {
     expect(requests).toHaveLength(0);
   });
 
-  it("authorizes connector logs separately and scopes the backend to fleet, connector and version", async () => {
+  it("authorizes connector logs separately and scopes the backend to execution, connector and version", async () => {
     const version = crypto.randomUUID();
     const input = contract.connectorLogQuery.parse({ name: "fixture-connector", version });
     const denied = await telemetry.queryConnector(principal, input);
@@ -168,7 +167,7 @@ describe("Cloudflare logs through the shared authorized service", () => {
         outcome: "ok",
         truncated: false,
       },
-      { fleetId: fixture.fleetId, connector: input.name, connectorVersion: version },
+      { organizationId: fixture.organizationId, connector: input.name, connectorVersion: version },
       now + 1000,
     )[0];
 
@@ -188,7 +187,7 @@ describe("Cloudflare logs through the shared authorized service", () => {
     });
     expect(requests[0]?.parameters.filters).toEqual(
       expect.arrayContaining([
-        { key: "fleetId", type: "string", operation: "eq", value: fixture.fleetId },
+        { key: "organizationId", type: "string", operation: "eq", value: fixture.organizationId },
         { key: "connector", type: "string", operation: "eq", value: input.name },
         { key: "record.connectorVersion", type: "string", operation: "eq", value: version },
       ]),

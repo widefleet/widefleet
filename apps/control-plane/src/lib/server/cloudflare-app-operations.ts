@@ -11,7 +11,7 @@ import type { Principal } from "./identity.ts";
 import { DatabaseUnavailable, InvalidOperation, StorageUnavailable } from "./errors.ts";
 import { acceptCloudflareWorkflow } from "./cloudflare-admission.ts";
 import { cloudflareAppOperation } from "./cloudflare-app-operation-command.ts";
-import { cloudflareOperations, fleets } from "./schema.ts";
+import { cloudflareOperations, organizationRuntimes } from "./schema.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import { transact } from "./transactions.ts";
 
@@ -24,12 +24,12 @@ export const registerCloudflareAppOperation = (
 
     if (access.isErr()) return access;
 
-    const [fleet] = await transaction
+    const [execution] = await transaction
       .select()
-      .from(fleets)
-      .where(eq(fleets.id, access.value.fleetId));
+      .from(organizationRuntimes)
+      .where(eq(organizationRuntimes.organizationId, access.value.organizationId));
 
-    if (fleet?.executor !== "cloudflare")
+    if (execution?.executor !== "cloudflare")
       throw new InvalidOperation({
         code: "CONFLICT",
         message: "This installation does not use Cloudflare execution",

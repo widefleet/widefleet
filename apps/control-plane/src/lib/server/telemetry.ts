@@ -9,7 +9,7 @@ import type { Configuration } from "./config.ts";
 import type { Database } from "./database.ts";
 import { InvalidOperation, TelemetryNotConfigured, TelemetryUnavailable } from "./errors.ts";
 import type { Principal } from "./identity.ts";
-import { apps, artifacts, connectors, deployments, fleets } from "./schema.ts";
+import { apps, artifacts, connectors, deployments, organizationRuntimes } from "./schema.ts";
 import { connectorAdministrator } from "./connector-changes.ts";
 import { createSymbolicator } from "./source-maps.ts";
 import type { ArtifactStorage } from "./storage.ts";
@@ -49,14 +49,17 @@ const badRequest = (message: string) => new InvalidOperation({ code: "BAD_REQUES
 
 const nullable = (value: string) => value || null;
 
-const connectorTarget = z.object({ fleetId: contract.identifier, name: contract.appSlug });
+const connectorTarget = z.object({
+  organizationId: contract.organizationIdentifier,
+  name: contract.appSlug,
+});
 
 export const connectorLogService = (target: z.infer<typeof connectorTarget>) =>
-  `connector:${target.fleetId}:${target.name}`;
+  `connector:${target.organizationId}:${target.name}`;
 
 export const runtimeLogQuery = z.union([
   contract.logQuery,
-  contract.connectorLogQuery.extend({ fleetId: contract.identifier }),
+  contract.connectorLogQuery.extend({ organizationId: contract.organizationIdentifier }),
 ]);
 
 const maxRange = 30 * 86_400_000;
@@ -184,7 +187,12 @@ export const createTelemetry = (
           : await database
               .select({ id: connectors.name })
               .from(connectors)
-              .where(and(eq(connectors.fleetId, target.fleetId), eq(connectors.name, target.name)))
+              .where(
+                and(
+                  eq(connectors.organizationId, target.organizationId),
+                  eq(connectors.name, target.name),
+                ),
+              )
               .limit(1);
 
       if (!source) return new Response("Telemetry source is unavailable", { status: 403 });
@@ -212,7 +220,7 @@ export const createTelemetry = (
             "content-type": contentType,
             "x-widefleet-service-id": service,
             "x-widefleet-app-id": "appId" in target ? target.appId : "",
-            "x-widefleet-fleet-id": "appId" in target ? "" : target.fleetId,
+            "x-widefleet-organization-id": "appId" in target ? "" : target.organizationId,
             "x-widefleet-connector": "appId" in target ? "" : target.name,
           },
           signal: AbortSignal.timeout(8000),
@@ -253,13 +261,18 @@ export const createTelemetry = (
         } else {
           connectorAdministrator(principal);
 
-          if (input.fleetId !== principal.application.fleetId)
+          if (input.organizationId !== principal.application.organizationId)
             throw new InvalidOperation({ code: "NOT_FOUND", message: "Connector not found" });
 
           const [connector] = await database
             .select({ name: connectors.name })
             .from(connectors)
-            .where(and(eq(connectors.fleetId, input.fleetId), eq(connectors.name, input.name)))
+            .where(
+              and(
+                eq(connectors.organizationId, input.organizationId),
+                eq(connectors.name, input.name),
+              ),
+            )
             .limit(1);
 
           if (!connector)
@@ -524,20 +537,19 @@ export const createTelemetry = (
       try: async () => {
         connectorAdministrator(principal);
 
-        const [fleet] = await database
-          .select({ id: fleets.id })
-          .from(fleets)
-          .where(
-            and(
-              eq(fleets.id, principal.application.fleetId),
-              eq(fleets.organizationId, principal.application.organizationId),
-            ),
-          )
+        const [execution] = await database
+          .select({ organizationId: organizationRuntimes.organizationId })
+          .from(organizationRuntimes)
+          .where(eq(organizationRuntimes.organizationId, principal.application.organizationId))
           .limit(1);
 
-        if (!fleet) throw new InvalidOperation({ code: "NOT_FOUND", message: "Fleet not found" });
+        if (!execution)
+          throw new InvalidOperation({
+            code: "NOT_FOUND",
+            message: "Organization runtime not found",
+          });
 
-        return { ...input, fleetId: fleet.id };
+        return { ...input, organizationId: execution.organizationId };
       },
       catch: (cause) =>
         cause instanceof InvalidOperation

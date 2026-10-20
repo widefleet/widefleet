@@ -16,7 +16,7 @@ import {
   validateCloudflareRuntime,
 } from "../src/lib/server/cloudflare-runtime-package.ts";
 import { createDatabase } from "../src/lib/server/database.ts";
-import { initializeCloudflareFleet } from "../src/lib/server/fleets.ts";
+import { initializeCloudflareRuntime } from "../src/lib/server/organization-runtime.ts";
 import { initializeInstallation, readInstallation } from "../src/lib/server/installation-store.ts";
 import { StorageUnavailable } from "../src/lib/server/errors.ts";
 import {
@@ -152,7 +152,7 @@ const write = async (name: string, contents: string) => {
 try {
   console.info(`Preparing Hosted installation ${installation.name}`);
   await migrate(database.db, { migrationsFolder: resolve(controlDirectory, "migrations") });
-  const initialized = await initializeCloudflareFleet(database.db);
+  const initialized = await initializeCloudflareRuntime(database.db);
 
   if (initialized.isErr()) throw initialized.error;
   await initializeInstallation(database.db);

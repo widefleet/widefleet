@@ -27,9 +27,9 @@ processors:
         action: upsert
         from_context: metadata.x-widefleet-app-id
         default_value: rejected
-      - key: widefleet.fleet_id
+      - key: widefleet.organization_id
         action: upsert
-        from_context: metadata.x-widefleet-fleet-id
+        from_context: metadata.x-widefleet-organization-id
         default_value: ""
       - key: widefleet.connector
         action: upsert

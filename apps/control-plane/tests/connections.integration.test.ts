@@ -108,14 +108,14 @@ describe("Connector discovery and app connections", () => {
     await environment.database.db.insert(connectors).values([
       {
         name: "erp",
-        fleetId: app.fleetId,
+        organizationId: app.organizationId,
         jobId: crypto.randomUUID(),
         package: reference,
         appliedPackage: { ...reference, entrypoints: ["default", "OldReader"] },
       },
       {
         name: "pending",
-        fleetId: app.fleetId,
+        organizationId: app.organizationId,
         jobId: crypto.randomUUID(),
         package: { ...reference, name: "pending" },
       },
@@ -207,7 +207,7 @@ describe("Connector discovery and app connections", () => {
         {
           id: crypto.randomUUID(),
           appId: app.id,
-          fleetId: app.fleetId,
+          organizationId: app.organizationId,
           deploymentId,
           kind: "deploy",
           state: "succeeded",
@@ -216,7 +216,7 @@ describe("Connector discovery and app connections", () => {
         {
           id: crypto.randomUUID(),
           appId: app.id,
-          fleetId: app.fleetId,
+          organizationId: app.organizationId,
           deploymentId,
           kind: "configure",
           state: "failed",
@@ -225,7 +225,7 @@ describe("Connector discovery and app connections", () => {
         {
           id: crypto.randomUUID(),
           appId: app.id,
-          fleetId: app.fleetId,
+          organizationId: app.organizationId,
           kind: "configure",
           state: "succeeded",
           capabilities: { revision: 2, grants: {} },
@@ -283,21 +283,21 @@ describe("Connector discovery and app connections", () => {
     await environment.database.db.insert(jobs).values({
       id: crypto.randomUUID(),
       appId: app.id,
-      fleetId: app.fleetId,
+      organizationId: app.organizationId,
       deploymentId,
       kind: "deploy",
       state: "succeeded",
       capabilities: { revision: 1, grants: active },
     });
     await environment.database.db.execute(sql`
-      INSERT INTO job (id, app_id, fleet_id, kind, state, capabilities)
-      SELECT gen_random_uuid(), ${other.id}::uuid, ${app.fleetId}::uuid, 'configure', 'succeeded',
+      INSERT INTO job (id, app_id, organization_id, kind, state, capabilities)
+      SELECT gen_random_uuid(), ${other.id}::uuid, ${app.organizationId}::text, 'configure', 'succeeded',
         jsonb_build_object('revision', history.revision, 'grants', '{}'::jsonb)
       FROM generate_series(1, 10000) AS history(revision)
     `);
     await environment.database.db.execute(sql`
-      INSERT INTO job (id, app_id, fleet_id, deployment_id, kind, state, capabilities)
-      SELECT gen_random_uuid(), ${app.id}::uuid, ${app.fleetId}::uuid, ${deploymentId}::uuid,
+      INSERT INTO job (id, app_id, organization_id, deployment_id, kind, state, capabilities)
+      SELECT gen_random_uuid(), ${app.id}::uuid, ${app.organizationId}::text, ${deploymentId}::uuid,
         'configure', 'failed', jsonb_build_object('revision', 2, 'grants', '{}'::jsonb)
       FROM generate_series(1, 2000)
     `);

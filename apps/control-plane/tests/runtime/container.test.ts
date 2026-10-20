@@ -29,7 +29,7 @@ describe.runIf(process.env["RUN_IMAGE_TESTS"] === "1")("release container images
     const name = `image-test-${suffix}`;
     const runtimeName = `${name}-runtime`;
     const artifactBucket = `image-artifacts-${suffix}`;
-    const fleetBucket = `image-fleets-${suffix}`;
+    const fleetBucket = `image-runtimes-${suffix}`;
     const databaseUrl = new URL(environment.environment.DATABASE_URL);
     databaseUrl.hostname = "postgres";
     databaseUrl.port = "5432";
@@ -165,7 +165,7 @@ describe.runIf(process.env["RUN_IMAGE_TESTS"] === "1")("release container images
       ]);
 
       const installation = z
-        .object({ fleetId: z.uuid(), controlToken: z.string() })
+        .object({ organizationId: contract.organizationIdentifier, controlToken: z.string() })
         .parse(JSON.parse(installed.stdout));
 
       await execute("docker", [
@@ -317,7 +317,7 @@ describe.runIf(process.env["RUN_IMAGE_TESTS"] === "1")("release container images
         ),
       );
 
-      expect(app.fleetId).toBe(installation.fleetId);
+      expect(app.organizationId).toBe(installation.organizationId);
 
       const session = contract.uploadSession.parse(
         await request(

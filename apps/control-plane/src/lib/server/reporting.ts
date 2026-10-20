@@ -8,7 +8,7 @@ import type { Configuration } from "./config.ts";
 import type { Database } from "./database.ts";
 import type { Principal } from "./identity.ts";
 import { InvalidOperation } from "./errors.ts";
-import { agents, apps, connectors, fleets, installation } from "./schema.ts";
+import { agents, apps, connectors, organizationRuntimes, installation } from "./schema.ts";
 
 const projectToken = "phc_AdQ4DSNi7QHqvTVqhTGNFUNa5YxkiwLddL46KFSPvkML";
 
@@ -166,7 +166,9 @@ export const createReporting = (
       })
       .from(apps);
 
-    const [fleetCount] = await database.select({ count: count() }).from(fleets);
+    const [organizationCount] = await database
+      .select({ count: count() })
+      .from(organizationRuntimes);
 
     const [agentCount] = await database
       .select({ count: count() })
@@ -176,9 +178,9 @@ export const createReporting = (
     const [connectorCount] = await database.select({ count: count() }).from(connectors);
 
     const runtimeRows = await database
-      .selectDistinct({ runtime: fleets.appliedRuntime })
-      .from(fleets)
-      .where(isNotNull(fleets.appliedRuntime))
+      .selectDistinct({ runtime: organizationRuntimes.appliedRuntime })
+      .from(organizationRuntimes)
+      .where(isNotNull(organizationRuntimes.appliedRuntime))
       .limit(21);
 
     const runtimeVersions: string[] = [];
@@ -202,7 +204,7 @@ export const createReporting = (
       tls: configuration.TLS_MODE,
       app_logging: configuration.CLICKHOUSE_URL !== undefined,
       ...applicationCounts,
-      fleets: fleetCount?.count ?? 0,
+      organizations: organizationCount?.count ?? 0,
       agents: agentCount?.count ?? 0,
       connectors: connectorCount?.count ?? 0,
       active_management_users: activeUsers.size,

@@ -131,7 +131,7 @@ describe("App removal trees", () => {
     await environment.database.db.insert(jobs).values({
       id: crypto.randomUUID(),
       appId: parent.id,
-      fleetId: parent.fleetId,
+      organizationId: parent.organizationId,
       kind: "delete",
     });
     (await service.remove(creator, parent.id)).unwrap();

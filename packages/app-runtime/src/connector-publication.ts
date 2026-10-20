@@ -12,8 +12,8 @@ export const connectorSnapshot = connectorPreparation.omit({ secrets: true }).ex
   previous: z.string().nullable(),
 });
 
-export const connectorScope = (identity: { fleetId: string; name: string }) =>
-  `connectors/${identity.fleetId}/${identity.name}`;
+export const connectorScope = (identity: { organizationId: string; name: string }) =>
+  `connectors/${identity.organizationId}/${identity.name}`;
 
 export const connectorKey = (identity: z.infer<typeof connectorActivation>) =>
   `${connectorScope(identity)}/versions/${identity.version}.json`;
@@ -90,7 +90,7 @@ export const readConnector = async (
   const snapshot = connectorSnapshot.parse(await object.json());
 
   if (
-    snapshot.fleetId !== identity.fleetId ||
+    snapshot.organizationId !== identity.organizationId ||
     snapshot.release.name !== identity.name ||
     snapshot.version !== identity.version
   )

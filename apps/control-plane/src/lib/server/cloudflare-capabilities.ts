@@ -8,7 +8,7 @@ import type { Transaction } from "./transactions.ts";
 
 export const resolveCloudflareCapabilities = async (
   transaction: Transaction,
-  fleetId: string,
+  organizationId: string,
   grants: z.infer<typeof contract.capabilityGrants>,
 ) => {
   const capabilities: Record<string, z.infer<typeof contract.publishedCapability>> = {};
@@ -17,7 +17,9 @@ export const resolveCloudflareCapabilities = async (
     const [record] = await transaction
       .select()
       .from(connectors)
-      .where(and(eq(connectors.fleetId, fleetId), eq(connectors.name, grant.connector)));
+      .where(
+        and(eq(connectors.organizationId, organizationId), eq(connectors.name, grant.connector)),
+      );
 
     const active = record?.appliedPackage ? connectorReference.parse(record.appliedPackage) : null;
 
@@ -30,7 +32,7 @@ export const resolveCloudflareCapabilities = async (
         code: "CONFLICT",
         message: "Deploy the connector entrypoint successfully before binding it",
       });
-    capabilities[name] = { ...grant, fleetId };
+    capabilities[name] = { ...grant, organizationId };
   }
 
   return capabilities;

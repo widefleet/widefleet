@@ -1,6 +1,7 @@
 export { appEventConfiguration } from "./app-events.ts";
 
 import { z } from "zod";
+import { organizationIdentifier } from "./organizations.ts";
 import { appAccessSnapshot } from "./app-access.ts";
 import { networkSnapshot } from "./network.ts";
 import { migrationEntry } from "./migrations.ts";
@@ -48,7 +49,7 @@ export const app = z.strictObject({
   displayName: z.string(),
   catalogListed: z.boolean(),
   parentId: identifier.nullable(),
-  fleetId: identifier,
+  organizationId: organizationIdentifier,
   hostname: z.string(),
   url: z.url(),
   createdAt: z.iso.datetime(),
@@ -271,7 +272,7 @@ export const artifact = z.strictObject({
 // The release is independent of the agent executable. Protocol changes, rather
 // than JavaScript changes, determine whether an installer update is necessary.
 export const runtimeRelease = z.strictObject({
-  protocol: z.literal(1),
+  protocol: z.literal(2),
   auth: z.literal(1),
   version: z.string().regex(/^[0-9]+\.[0-9]+\.[0-9]+$/),
   celld: z.literal("0.6.2"),
@@ -383,10 +384,12 @@ export const capabilityGrant = z.strictObject({
 
 export const capabilityGrants = z.record(bindingName, capabilityGrant);
 
-export const publishedCapability = capabilityGrant.extend({ fleetId: identifier });
+export const publishedCapability = capabilityGrant.extend({
+  organizationId: organizationIdentifier,
+});
 
 export const connectorPreparation = z.strictObject({
-  fleetId: identifier,
+  organizationId: organizationIdentifier,
   version: identifier,
   release: connectorPackage,
   nativeBindings: z.record(bindingName, bindingName),
@@ -398,7 +401,7 @@ export const connectorPreparation = z.strictObject({
 });
 
 export const connectorActivation = z.strictObject({
-  fleetId: identifier,
+  organizationId: organizationIdentifier,
   name: appSlug,
   version: identifier,
 });
@@ -497,7 +500,7 @@ export const migrationArtifact = z.strictObject({
 
 export const job = z.strictObject({
   id: identifier,
-  fleetId: identifier,
+  organizationId: organizationIdentifier,
   kind: z.enum([
     "deploy",
     "runtime",

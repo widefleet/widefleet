@@ -8,7 +8,7 @@ import { InvalidOperation } from "./errors.ts";
 import type { Principal } from "./identity.ts";
 import { agents } from "./schema.ts";
 import { transact } from "./transactions.ts";
-import { lockFleet } from "./fleets.ts";
+import { lockOrganizationRuntime } from "./organization-runtime.ts";
 
 const presentAgent = (record: typeof agents.$inferSelect) =>
   contract.agent.parse({
@@ -34,7 +34,7 @@ export const createAgentService = (database: Database) => ({
           await transaction
             .select()
             .from(agents)
-            .where(eq(agents.fleetId, principal.application.fleetId))
+            .where(eq(agents.organizationId, principal.application.organizationId))
             .orderBy(agents.name)
         ).map(presentAgent),
       );
@@ -49,9 +49,12 @@ export const createAgentService = (database: Database) => ({
           }),
         );
 
-      const fleet = await lockFleet(transaction, principal.application.fleetId);
+      const execution = await lockOrganizationRuntime(
+        transaction,
+        principal.application.organizationId,
+      );
 
-      if (fleet.executor !== "agent")
+      if (execution.executor !== "agent")
         throw new InvalidOperation({
           code: "CONFLICT",
           message: "Cloudflare executes this installation's jobs without an agent",
@@ -64,7 +67,7 @@ export const createAgentService = (database: Database) => ({
         .values({
           id: crypto.randomUUID(),
           name: input.name,
-          fleetId: fleet.id,
+          organizationId: execution.organizationId,
           tokenHash: createHash("sha256").update(token).digest("hex"),
         })
         .returning();
@@ -86,7 +89,12 @@ export const createAgentService = (database: Database) => ({
       const [record] = await transaction
         .update(agents)
         .set({ enabled: false })
-        .where(and(eq(agents.id, agentId), eq(agents.fleetId, principal.application.fleetId)))
+        .where(
+          and(
+            eq(agents.id, agentId),
+            eq(agents.organizationId, principal.application.organizationId),
+          ),
+        )
         .returning();
 
       if (!record)

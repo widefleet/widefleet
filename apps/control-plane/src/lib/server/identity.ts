@@ -12,9 +12,8 @@ import {
 import type { Authentication } from "./auth.ts";
 import type { Configuration } from "./config.ts";
 import type { Database } from "./database.ts";
-import type { FleetAccess } from "./application-context.ts";
-import { defaultFleet } from "./fleets.ts";
-import { fleets } from "./schema.ts";
+import type { OrganizationAccess } from "./application-context.ts";
+import { organizationRuntimes } from "./schema.ts";
 import { DatabaseUnavailable } from "./errors.ts";
 
 export class AuthenticationFailed extends TaggedError("AuthenticationFailed")<{
@@ -28,8 +27,8 @@ export const createIdentityService = (
   auth: Authentication,
   database: Database,
   configuration: Configuration,
-  access: FleetAccess = {
-    filterFleets: async () => [(await defaultFleet(database)).id],
+  access: OrganizationAccess = {
+    filterOrganizations: async () => [installationOrganizationId],
     defaultOrganizationId: installationOrganizationId,
   },
 ) => {
@@ -45,39 +44,30 @@ export const createIdentityService = (
             organizationId: organization.id,
             organizationName: organization.name,
             organizationSlug: organization.slug,
-            fleetId: fleets.id,
           })
           .from(user)
           .innerJoin(member, eq(member.userId, user.id))
           .innerJoin(organization, eq(organization.id, member.organizationId))
-          .innerJoin(fleets, eq(fleets.organizationId, organization.id))
+          .innerJoin(organizationRuntimes, eq(organizationRuntimes.organizationId, organization.id))
           .where(eq(user.id, userId))
-          .orderBy(organization.name, organization.id, fleets.id);
+          .orderBy(organization.name, organization.id);
 
         const admitted = new Set(
-          await access.filterFleets(
+          await access.filterOrganizations(
             records.map((record) => ({
-              id: record.fleetId,
-              organizationId: record.organizationId,
+              id: record.organizationId,
             })),
           ),
         );
 
         // An extension can narrow membership access, never grant membership itself.
-        const eligible = records.flatMap((record) => {
+        return records.flatMap((record) => {
           const role = organizationRole.safeParse(record.role);
 
-          return admitted.has(record.fleetId) && role.success
+          return admitted.has(record.organizationId) && role.success
             ? [{ ...record, role: role.data }]
             : [];
         });
-
-        // Multiple execution fleets need an explicit selection contract. Discovery
-        // and automatic selection must agree on which organizations are available.
-        return eligible.filter(
-          (record) =>
-            eligible.filter((other) => other.organizationId === record.organizationId).length === 1,
-        );
       },
       catch: (cause) =>
         new DatabaseUnavailable({ message: "Could not read organization access", cause }),
@@ -116,7 +106,6 @@ export const createIdentityService = (
         role: record.role,
         admin: record.organizationId === installationOrganizationId && admin,
         application: {
-          fleetId: record.fleetId,
           organizationId: record.organizationId,
           admin,
         },

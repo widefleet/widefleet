@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import type { z } from "zod";
 import { deploymentCommand } from "../src/lib/server/deployment-execution.ts";
 import type { Database } from "../src/lib/server/database.ts";
-import { apps, artifacts, fleets } from "../src/lib/server/schema.ts";
+import { apps, artifacts, organizationRuntimes } from "../src/lib/server/schema.ts";
 
 export const deploymentSource = `export default { async fetch(request, env) {
   if (new URL(request.url).pathname === '/resources') {
@@ -33,9 +33,13 @@ export const seedDeployment = async (
 ) => {
   const appId = options.appId ?? crypto.randomUUID();
   const source = options.source ?? deploymentSource;
-  const [fleet] = await database.select().from(fleets).where(eq(fleets.name, "default"));
 
-  if (!fleet) throw new Error("Missing default fleet");
+  const [execution] = await database
+    .select()
+    .from(organizationRuntimes)
+    .where(eq(organizationRuntimes.organizationId, "widefleet"));
+
+  if (!execution) throw new Error("Missing default execution");
 
   const hostname = `fixture-${appId}.example.test`;
   await database
@@ -44,7 +48,7 @@ export const seedDeployment = async (
       id: appId,
       slug: `fixture-${appId}`,
       displayName: "Deployment fixture",
-      fleetId: fleet.id,
+      organizationId: execution.organizationId,
       ownerId: "fixture-owner",
       hostname,
       accessRevision: 1,
@@ -101,7 +105,7 @@ export const seedDeployment = async (
     artifact,
     command,
     deploymentId: command.id,
-    fleetId: record.fleetId,
+    organizationId: record.organizationId,
     source,
   };
 };

@@ -89,12 +89,15 @@ export const applyNetworkChange = async (
 
   if (!updated) throw new Error("Network update returned no row");
 
-  // Resolve the serving deployment at claim time, after earlier fleet jobs.
+  // Resolve the serving deployment at claim time, after earlier execution jobs.
   // Changing permissions must never select an outdated code version.
   if (enqueue)
-    await transaction
-      .insert(jobs)
-      .values({ id: crypto.randomUUID(), appId, fleetId: app.fleetId, kind: "configure" });
+    await transaction.insert(jobs).values({
+      id: crypto.randomUUID(),
+      appId,
+      organizationId: app.organizationId,
+      kind: "configure",
+    });
 
   return Result.ok(present(updated));
 };

@@ -82,7 +82,7 @@
           ><Switch id="report-usage" bind:checked={usage} disabled={status.managed.usage || busy} />
         </div>
         <p class="text-muted-foreground mt-3 text-xs leading-6">
-          App, fleet and preview counts, the number of active workspace users, features used,
+          App, organization and preview counts, the number of active workspace users, features used,
           deployment results and durations, plus version, operating system, storage, sign-in and TLS
           settings.
         </p>

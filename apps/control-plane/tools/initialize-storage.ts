@@ -11,7 +11,7 @@ const provider = process.env["FLEET_STORAGE_PROVIDER"] ?? "s3";
 
 if (provider !== configuration.ARTIFACT_STORAGE_PROVIDER) {
   throw new Error(
-    "This initialization tool requires matching artifact and fleet storage providers",
+    "This initialization tool requires matching artifact and execution storage providers",
   );
 }
 
@@ -31,7 +31,7 @@ switch (configuration.ARTIFACT_STORAGE_PROVIDER) {
         }
       }
 
-      console.info("Artifact and fleet buckets initialized");
+      console.info("Artifact and execution buckets initialized");
     } finally {
       client.destroy();
     }
@@ -49,7 +49,7 @@ switch (configuration.ARTIFACT_STORAGE_PROVIDER) {
       }
     }
 
-    console.info("Existing artifact and fleet containers verified");
+    console.info("Existing artifact and execution containers verified");
     break;
   }
 
@@ -61,7 +61,7 @@ switch (configuration.ARTIFACT_STORAGE_PROVIDER) {
       await client.bucket(name).getMetadata();
     }
 
-    console.info("Existing artifact and fleet buckets verified");
+    console.info("Existing artifact and execution buckets verified");
     break;
   }
 }

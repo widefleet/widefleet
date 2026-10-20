@@ -20,15 +20,15 @@ export class ConnectorState extends WorkerEntrypoint<
   z.infer<typeof connectorActivation> & { className: string }
 > {
   async #target(objectId: string) {
-    const { fleetId, name, version, className } = this.ctx.props;
-    const generation = await connectorCatalog(this.env, fleetId, name).generation(version);
+    const { organizationId, name, version, className } = this.ctx.props;
+    const generation = await connectorCatalog(this.env, organizationId, name).generation(version);
     const identity = { ...generation, className, objectId };
     const namespace = this.env.WIDEFLEET_CONNECTOR_STATE;
 
     return {
       identity,
       stub: namespace.get(
-        namespace.idFromName(JSON.stringify([fleetId, name, className, objectId])),
+        namespace.idFromName(JSON.stringify([organizationId, name, className, objectId])),
       ),
     };
   }

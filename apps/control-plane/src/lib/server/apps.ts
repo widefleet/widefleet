@@ -10,7 +10,7 @@ import { InvalidOperation } from "./errors.ts";
 import type { Principal } from "./identity.ts";
 import { appGrants, apps, artifacts, deploymentEvents, deployments, jobs } from "./schema.ts";
 import { transact, type Transaction } from "./transactions.ts";
-import { lockApplicationFleet, requireAgentExecution } from "./fleets.ts";
+import { lockOrganizationRuntime, requireAgentExecution } from "./organization-runtime.ts";
 import { operationId, type HostedExecution } from "./deployment-execution.ts";
 
 export const appVisibility = (
@@ -18,7 +18,7 @@ export const appVisibility = (
   principal: Pick<Principal, "id" | "application">,
 ) =>
   and(
-    eq(apps.fleetId, principal.application.fleetId),
+    eq(apps.organizationId, principal.application.organizationId),
     principal.application.admin
       ? sql`true`
       : or(
@@ -53,7 +53,7 @@ export const managedApp = async (
 // to child, including access inheritance and removal of a legacy preview subtree.
 export const lockAppDescendants = async (
   transaction: Transaction,
-  root: Pick<typeof apps.$inferSelect, "id" | "fleetId">,
+  root: Pick<typeof apps.$inferSelect, "id" | "organizationId">,
 ) => {
   let parents = [root.id];
   const descendants = [];
@@ -66,10 +66,10 @@ export const lockAppDescendants = async (
       .orderBy(apps.id)
       .for("update");
 
-    if (level.some((app) => app.fleetId !== root.fleetId))
+    if (level.some((app) => app.organizationId !== root.organizationId))
       throw new InvalidOperation({
         code: "CONFLICT",
-        message: "App previews belong to another fleet",
+        message: "App previews belong to another organization",
       });
     descendants.push(...level);
     parents = level.map((app) => app.id);
@@ -96,12 +96,12 @@ export const enqueueAppRemoval = async (
         pending.map((app) => app.id),
       ),
     );
-  // Existing work finishes first; descendants are torn down before their parents per fleet.
+  // Existing work finishes first; descendants are torn down before their parents per organization.
   await transaction.insert(jobs).values(
     pending.toReversed().map((app) => ({
       id: crypto.randomUUID(),
       appId: app.id,
-      fleetId: app.fleetId,
+      organizationId: app.organizationId,
       kind: "delete" as const,
     })),
   );
@@ -121,7 +121,7 @@ export const presentApp = (record: typeof apps.$inferSelect, configuration: Conf
     displayName: record.displayName,
     catalogListed: record.catalogListed,
     parentId: record.parentId,
-    fleetId: record.fleetId,
+    organizationId: record.organizationId,
     hostname: record.hostname,
     url: appUrl(record.hostname, configuration.APP_HTTPS_PORT),
     state: record.state,
@@ -190,7 +190,7 @@ export const enqueueDeployment = async (
   await transaction.insert(jobs).values({
     id: crypto.randomUUID(),
     appId: record.id,
-    fleetId: record.fleetId,
+    organizationId: record.organizationId,
     deploymentId,
     kind: "deploy",
     rollback,
@@ -211,13 +211,18 @@ const provisionApp = (
 ) =>
   transact(database, async (transaction) => {
     await transaction.execute(
-      sql`select pg_advisory_xact_lock(hashtextextended(${JSON.stringify([principal.application.fleetId, input.slug])}, 0))`,
+      sql`select pg_advisory_xact_lock(hashtextextended(${JSON.stringify([principal.application.organizationId, input.slug])}, 0))`,
     );
 
     const [duplicate] = await transaction
       .select({ id: apps.id })
       .from(apps)
-      .where(and(eq(apps.fleetId, principal.application.fleetId), eq(apps.slug, input.slug)));
+      .where(
+        and(
+          eq(apps.organizationId, principal.application.organizationId),
+          eq(apps.slug, input.slug),
+        ),
+      );
 
     if (!principal.creator && (mode === "create" || !duplicate))
       return Result.err(
@@ -244,10 +249,13 @@ const provisionApp = (
       return Result.ok(presentApp(existing.value, configuration));
     }
 
-    const fleet = await lockApplicationFleet(transaction, principal.application);
+    const execution = await lockOrganizationRuntime(
+      transaction,
+      principal.application.organizationId,
+    );
 
     const hostnameFor = (slug: string) =>
-      `${slug}${fleet.appHostnameSuffix === null ? "" : `-${fleet.appHostnameSuffix}`}.${configuration.APP_DOMAIN}`;
+      `${slug}${execution.appHostnameSuffix === null ? "" : `-${execution.appHostnameSuffix}`}.${configuration.APP_DOMAIN}`;
 
     let hostname = hostnameFor(input.slug);
     let accessGroups: string[] = [];
@@ -293,8 +301,8 @@ const provisionApp = (
             }),
           );
 
-        // A suffixed fleet shares one wildcard domain for apps and named previews.
-        hostname = `${input.previewName}${fleet.appHostnameSuffix === null ? "." : "-"}${parent.value.hostname}`;
+        // A suffixed execution shares one wildcard domain for apps and named previews.
+        hostname = `${input.previewName}${execution.appHostnameSuffix === null ? "." : "-"}${parent.value.hostname}`;
       }
     }
 
@@ -315,7 +323,7 @@ const provisionApp = (
         parentId: input.parentId,
         accessGroups,
         accessRevision,
-        fleetId: fleet.id,
+        organizationId: execution.organizationId,
         ownerId: principal.id,
         hostname,
       })
@@ -345,7 +353,7 @@ export const createAppService = (
         .from(apps)
         .where(
           and(
-            eq(apps.fleetId, principal.application.fleetId),
+            eq(apps.organizationId, principal.application.organizationId),
             eq(apps.catalogListed, true),
             isNull(apps.parentId),
             eq(apps.state, "active"),
@@ -511,7 +519,7 @@ export const createAppService = (
 
       if (access.isErr()) return access;
 
-      await requireAgentExecution(transaction, access.value.fleetId, "App removal");
+      await requireAgentExecution(transaction, access.value.organizationId, "App removal");
       await enqueueAppRemoval(transaction, access.value);
 
       return Result.ok({ accepted: true });

@@ -1,7 +1,8 @@
+import { organization } from "../src/lib/server/auth-schema.ts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { inArray } from "drizzle-orm";
-import { fleets } from "../src/lib/server/schema.ts";
+import { organizationRuntimes } from "../src/lib/server/schema.ts";
 import { createReporting } from "../src/lib/server/reporting.ts";
 import { createTestEnvironment } from "./environment.ts";
 
@@ -28,7 +29,6 @@ describe("Installation reporting with synthetic PostHog transport", () => {
     admin: true,
     creator: true,
     application: {
-      fleetId: "00000000-0000-4000-8000-000000000001",
       organizationId: "widefleet",
       admin: true,
     },
@@ -186,27 +186,31 @@ describe("Installation reporting with synthetic PostHog transport", () => {
     await limited.close();
   });
 
-  it("keeps all 20 runtime versions when unused fleets also exist", async () => {
+  it("keeps all 20 runtime versions when unused organization runtimes also exist", async () => {
+    const ids = Array.from({ length: 21 }, () => crypto.randomUUID());
+    await environment.database.db
+      .insert(organization)
+      .values(ids.map((id) => ({ id, name: id, slug: id, createdAt: new Date() })));
+
     const records = await environment.database.db
-      .insert(fleets)
-      .values([
-        { name: "unused-reporting-fixture", organizationId: "widefleet", appliedRuntime: null },
-        ...Array.from({ length: 20 }, (_, index) => ({
-          name: `reporting-version-${index}`,
-          organizationId: "widefleet",
-          appliedRuntime: { version: `1.0.${index}`, checksum: "a".repeat(64) },
+      .insert(organizationRuntimes)
+      .values(
+        ids.map((organizationId, index) => ({
+          organizationId,
+          appliedRuntime:
+            index === 0 ? null : { version: `1.0.${index}`, checksum: "a".repeat(64) },
         })),
-      ])
-      .returning({ id: fleets.id });
+      )
+      .returning({ id: organizationRuntimes.organizationId });
 
     try {
       const preview = await reporter.preview(owner);
       expect(preview.properties.runtime_versions).toHaveLength(20);
       expect(preview.properties.runtime_versions_capped).toBe(false);
     } finally {
-      await environment.database.db.delete(fleets).where(
+      await environment.database.db.delete(organizationRuntimes).where(
         inArray(
-          fleets.id,
+          organizationRuntimes.organizationId,
           records.map((record) => record.id),
         ),
       );

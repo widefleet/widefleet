@@ -15,8 +15,8 @@ import { createTestEnvironment } from "../environment.ts";
 import { connectorFixture, connectorFiles } from "../cloudflare-connector.fixture.ts";
 import runtimeRelease from "@platform/app-runtime/release" with { type: "json" };
 import { cloudflareResourceName } from "../../src/lib/server/cloudflare-provisioning.ts";
-import { initializeCloudflareFleet } from "../../src/lib/server/fleets.ts";
-import { cloudflareOperations, fleets, jobs } from "../../src/lib/server/schema.ts";
+import { initializeCloudflareRuntime } from "../../src/lib/server/organization-runtime.ts";
+import { cloudflareOperations, organizationRuntimes, jobs } from "../../src/lib/server/schema.ts";
 
 const runtimeSettings = z.object({
   annotations: z.object({ "workers/tag": z.string() }).optional(),
@@ -28,7 +28,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
   let directory: string;
   let worker: Unstable_DevWorker;
   let origin = "";
-  let fleetId = "";
+  let organizationId = "";
   let patches = 0;
   let settings: z.infer<typeof runtimeSettings> = { bindings: [] };
   const databases = new Map<string, string>();
@@ -166,19 +166,19 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
           { binding: "ARTIFACTS", bucket_name: "artifacts" },
           { binding: "WIDEFLEET_PACKAGES", bucket_name: "artifacts" },
           ...[release.name, "second-connector"].map((name) => ({
-            binding: `B_${cloudflareResourceName(`${fleetId}/connector/${name}`, "r2", "files")}`,
+            binding: `B_${cloudflareResourceName(`${organizationId}/connector/${name}`, "r2", "files")}`,
             bucket_name: `files-${name}`,
           })),
         ],
         d1_databases: [release.name, "second-connector"].map((name) => ({
-          binding: `B_${cloudflareResourceName(`${fleetId}/connector/${name}`, "d1", "data")}`,
+          binding: `B_${cloudflareResourceName(`${organizationId}/connector/${name}`, "d1", "data")}`,
           database_name: `data-${name}`,
           database_id: name,
         })),
         kv_namespaces: [
           { binding: "TEST_CONTROL", id: "test-control" },
           ...[release.name, "second-connector"].map((name) => ({
-            binding: `B_${cloudflareResourceName(`${fleetId}/connector/${name}`, "kv", "cache")}`,
+            binding: `B_${cloudflareResourceName(`${organizationId}/connector/${name}`, "kv", "cache")}`,
             id: name,
           })),
         ],
@@ -270,11 +270,11 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
 
   beforeAll(async () => {
     environment = await createTestEnvironment();
-    (await initializeCloudflareFleet(environment.database.db)).unwrap();
-    const [fleet] = await environment.database.db.select().from(fleets);
+    (await initializeCloudflareRuntime(environment.database.db)).unwrap();
+    const [execution] = await environment.database.db.select().from(organizationRuntimes);
 
-    if (!fleet) throw new Error("Missing fixture fleet");
-    fleetId = fleet.id;
+    if (!execution) throw new Error("Missing fixture execution");
+    organizationId = execution.organizationId;
     directory = await mkdtemp(join(tmpdir(), "widefleet-connectors-workerd-"));
     api.listen(0, "127.0.0.1");
     await once(api, "listening");
@@ -312,10 +312,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
       export default {async fetch(request, env, ctx) {
         const url = new URL(request.url);
         const name = url.searchParams.get('connector') ?? ${JSON.stringify(release.name)};
-        const props = {fleetId: url.searchParams.get('fleet') ?? ${JSON.stringify(fleetId)}, connector:name, entrypoint:'default'};
+        const props = {organizationId: url.searchParams.get('execution') ?? ${JSON.stringify(organizationId)}, connector:name, entrypoint:'default'};
         const gateway = () => ctx.exports.ConnectorGateway({props});
         if (url.pathname === '/fault') { await env.TEST_CONTROL.put('lose-response', 'yes'); return Response.json(true); }
-        if (url.pathname === '/active') return Response.json(await env.WIDEFLEET_CONNECTORS.get(env.WIDEFLEET_CONNECTORS.idFromName(JSON.stringify([props.fleetId, name]))).current());
+        if (url.pathname === '/active') return Response.json(await env.WIDEFLEET_CONNECTORS.get(env.WIDEFLEET_CONNECTORS.idFromName(JSON.stringify([props.organizationId, name]))).current());
         if (url.pathname === '/native') {
           try { return Response.json({result: await gateway().invoke('inspect', []), named: await ctx.exports.ConnectorGateway({props:{...props,entrypoint:'Reader'}}).invoke('read', [])}); }
           catch (error) { return Response.json({error: error.message}, {status: 400}); }
@@ -649,14 +649,13 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
 
     for (const name of ["alpha", "beta"]) {
       const organizationId = crypto.randomUUID();
-      const id = crypto.randomUUID();
       await environment.database.db
         .insert(organization)
         .values({ id: organizationId, name, slug: organizationId, createdAt: new Date() });
       await environment.database.db
-        .insert(fleets)
-        .values({ id, name: id, organizationId, executor: "cloudflare" });
-      scopes.push({ fleetId: id, organizationId, admin: true });
+        .insert(organizationRuntimes)
+        .values({ organizationId, executor: "cloudflare" });
+      scopes.push({ organizationId, admin: true });
     }
 
     const scoped = connectorFixture(
@@ -743,7 +742,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
       expect(
         await (
           await worker.fetch(
-            `http://fixture/secret?connector=${scoped.name}&fleet=${application.fleetId}&name=API_KEY`,
+            `http://fixture/secret?connector=${scoped.name}&execution=${application.organizationId}&name=API_KEY`,
           )
         ).json(),
       ).toBe(application.organizationId);

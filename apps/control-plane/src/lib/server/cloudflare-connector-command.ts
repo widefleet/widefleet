@@ -1,3 +1,4 @@
+import { organizationIdentifier } from "@platform/contracts";
 import * as contract from "@platform/contracts";
 import { z } from "zod";
 import { deploymentActor, deploymentCommand } from "./deployment-execution.ts";
@@ -6,7 +7,7 @@ import { cloudflareRuntimeCommand } from "./cloudflare-runtime-command.ts";
 export const connectorCommand = z.object({
   kind: z.literal("connector"),
   id: z.uuid(),
-  fleetId: z.uuid(),
+  organizationId: organizationIdentifier,
   createdAt: z.iso.datetime(),
   actor: deploymentActor,
   change: z.discriminatedUnion("kind", [

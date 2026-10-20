@@ -270,11 +270,11 @@ impl StorageOptions {
 impl FleetStorage {
     pub fn verify_runtime(
         &self,
-        app_id: Uuid,
+        organization_id: &str,
         arguments: &[String],
         environment: &[String],
     ) -> Result<()> {
-        for expected in self.arguments(app_id, true).as_chunks::<2>().0 {
+        for expected in self.arguments(organization_id, true).as_chunks::<2>().0 {
             if !arguments.windows(2).any(|actual| actual == expected) {
                 return Err(invalid(
                     "The existing app uses different fleet storage; migrate its data and runtime explicitly before changing storage configuration",
@@ -292,16 +292,16 @@ impl FleetStorage {
         Ok(())
     }
 
-    pub fn bucket_url(&self, app_id: Uuid) -> String {
+    pub fn bucket_url(&self, organization_id: &str) -> String {
         let (scheme, bucket) = match self {
             Self::S3 { bucket, .. } => ("s3", bucket),
             Self::Azure { container, .. } => ("az", container),
             Self::Gcs { bucket, .. } => ("gs", bucket),
         };
-        format!("{scheme}://{bucket}/fleets/{app_id}")
+        format!("{scheme}://{bucket}/organizations/{organization_id}")
     }
-    pub fn arguments(&self, app_id: Uuid, runtime: bool) -> Vec<String> {
-        let mut args = vec!["--bucket".into(), self.bucket_url(app_id)];
+    pub fn arguments(&self, organization_id: &str, runtime: bool) -> Vec<String> {
+        let mut args = vec!["--bucket".into(), self.bucket_url(organization_id)];
         if let Self::S3 {
             endpoint,
             runtime_endpoint,

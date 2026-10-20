@@ -10,14 +10,14 @@ import { seedDeployment } from "./cloudflare-deployment.fixture.ts";
 import { createArtifactStorage } from "../src/lib/server/artifact-storage.ts";
 import { registerCloudflareOperation } from "../src/lib/server/cloudflare-operations.ts";
 import { deploymentCommand } from "../src/lib/server/deployment-execution.ts";
-import { initializeCloudflareFleet } from "../src/lib/server/fleets.ts";
+import { initializeCloudflareRuntime } from "../src/lib/server/organization-runtime.ts";
 import {
   apps,
   agents,
   connectors,
   cloudflareOperations,
   deployments,
-  fleets,
+  organizationRuntimes,
   jobs,
 } from "../src/lib/server/schema.ts";
 import { createJobService } from "../src/lib/server/jobs.ts";
@@ -49,7 +49,7 @@ describe("Cloudflare operation history", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
   beforeAll(async () => {
     environment = await createTestEnvironment();
-    (await initializeCloudflareFleet(environment.database.db)).unwrap();
+    (await initializeCloudflareRuntime(environment.database.db)).unwrap();
   });
   beforeEach(async () => {
     await environment.database.db.delete(apps);
@@ -151,12 +151,12 @@ describe("Cloudflare operation history", () => {
     expect(app?.accessGroups).toEqual(["engineering"]);
   });
 
-  it("prevents agents from claiming hosted work and refuses conversion of an occupied fleet", async () => {
+  it("prevents agents from claiming hosted work and refuses conversion of an occupied execution", async () => {
     const entry = await seedDeployment(environment.database.db);
     const agentId = crypto.randomUUID();
     await environment.database.db.insert(agents).values({
       id: agentId,
-      fleetId: entry.fleetId,
+      organizationId: entry.organizationId,
       name: "Fixture",
       tokenHash: crypto.randomUUID(),
     });
@@ -167,16 +167,16 @@ describe("Cloudflare operation history", () => {
       ),
     ).toMatchObject({ error: { code: "CONFLICT" } });
     await environment.database.db
-      .update(fleets)
+      .update(organizationRuntimes)
       .set({ executor: "agent" })
-      .where(eq(fleets.id, entry.fleetId));
-    expect(await initializeCloudflareFleet(environment.database.db)).toMatchObject({
+      .where(eq(organizationRuntimes.organizationId, entry.organizationId));
+    expect(await initializeCloudflareRuntime(environment.database.db)).toMatchObject({
       error: { code: "CONFLICT" },
     });
     await environment.database.db
-      .update(fleets)
+      .update(organizationRuntimes)
       .set({ executor: "cloudflare" })
-      .where(eq(fleets.id, entry.fleetId));
+      .where(eq(organizationRuntimes.organizationId, entry.organizationId));
   });
   it("protects a published grant whose SQL activation receipt was lost", async () => {
     const entry = await seedDeployment(environment.database.db);
@@ -189,7 +189,7 @@ describe("Cloudflare operation history", () => {
     });
 
     await environment.database.db.insert(connectors).values({
-      fleetId: entry.fleetId,
+      organizationId: entry.organizationId,
       name: reference.name,
       package: reference,
       appliedPackage: reference,
@@ -220,15 +220,18 @@ describe("Cloudflare operation history", () => {
 
     const prepare = () =>
       transact(environment.database.db, async (transaction) => {
-        const [fleet] = await transaction.select().from(fleets).where(eq(fleets.id, entry.fleetId));
+        const [execution] = await transaction
+          .select()
+          .from(organizationRuntimes)
+          .where(eq(organizationRuntimes.organizationId, entry.organizationId));
 
-        if (!fleet) throw new Error("Missing fixture fleet");
+        if (!execution) throw new Error("Missing fixture execution");
 
         return Result.ok(
           await prepareConnector(
             transaction,
             storage,
-            fleet,
+            execution,
             replacement,
             connectorFiles(replacement),
           ),

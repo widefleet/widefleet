@@ -5,7 +5,7 @@ import { Result } from "better-result";
 import { and, eq } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import type { z } from "zod";
-import { requireAgentExecution } from "./fleets.ts";
+import { requireAgentExecution } from "./organization-runtime.ts";
 import { managedApp } from "./apps.ts";
 import type { Database } from "./database.ts";
 import { InvalidOperation } from "./errors.ts";
@@ -46,7 +46,7 @@ export const createMigrationService = (
       if (access.isErr()) return access;
       const app = access.value;
 
-      if (!execution) await requireAgentExecution(transaction, app.fleetId, "D1 migrations");
+      if (!execution) await requireAgentExecution(transaction, app.organizationId, "D1 migrations");
       // Parsing fixes object key order so equivalent requests produce the same artifact.
       const bytes = Buffer.from(JSON.stringify(contract.migrationRequest.parse(input)));
 
@@ -166,7 +166,7 @@ export const createMigrationService = (
         .insert(jobs)
         .values({
           id: requestId,
-          fleetId: app.fleetId,
+          organizationId: app.organizationId,
           appId,
           kind: "migrations",
           migration: reference,

@@ -48,7 +48,7 @@ export class Telemetry extends WorkerEntrypoint<
   {},
   { url: string; token: string } & (
     | { deploymentId: string; buildId: string | null }
-    | { fleetId: string; connector: string; connectorVersion: string }
+    | { organizationId: string; connector: string; connectorVersion: string }
   )
 > {
   private body(

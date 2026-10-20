@@ -28,7 +28,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       displayName: "Server App",
       catalogListed: false,
       parentId: null,
-      fleetId: "00000000-0000-4000-8000-000000000002",
+      organizationId: "00000000-0000-4000-8000-000000000002",
       hostname: "server-app.apps.localhost",
       url: "https://server-app.apps.localhost:25453/",
       createdAt: "2026-10-01T00:00:00.000Z",

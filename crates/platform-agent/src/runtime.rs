@@ -5,8 +5,8 @@ use uuid::Uuid;
 
 // Persist independently of access credentials. Concurrent bootstrap/agent starts
 // must agree on one key; replacing it would make published snapshots unreadable.
-pub async fn connector_key(store: &dyn ObjectStore, fleet_id: Uuid) -> Result<String> {
-    let path = Path::from(format!("fleets/{fleet_id}/connector-key"));
+pub async fn connector_key(store: &dyn ObjectStore, organization_id: &str) -> Result<String> {
+    let path = Path::from(format!("organizations/{organization_id}/connector-key"));
     let failure =
         |error: object_store::Error| Error::invalid(format!("Runtime key storage failed: {error}"));
     let missing = match store.head(&path).await {
@@ -53,7 +53,7 @@ pub async fn connector_key(store: &dyn ObjectStore, fleet_id: Uuid) -> Result<St
 }
 
 pub fn configuration(release: &RuntimeRelease, token: &str, connector_key: &str) -> Result<Value> {
-    if release.protocol != 1 || release.auth != 1 || release.celld != "0.6.2" {
+    if release.protocol != 2 || release.auth != 1 || release.celld != "0.6.2" {
         return Err(Error::invalid(
             "Unsupported runtime installation protocol or celld version".into(),
         ));
@@ -84,18 +84,18 @@ mod tests {
     #[tokio::test]
     async fn concurrent_starts_reuse_one_independent_encryption_key() -> platform_core::Result<()> {
         let store = object_store::memory::InMemory::new();
-        let fleet = uuid::Uuid::new_v4();
+        let organization = "test-organization";
         let (first, second) = tokio::join!(
-            super::connector_key(&store, fleet),
-            super::connector_key(&store, fleet)
+            super::connector_key(&store, organization),
+            super::connector_key(&store, organization)
         );
         let first = first?;
         assert_eq!(first, second?);
         assert_eq!(first.len(), 64);
-        assert_eq!(first, super::connector_key(&store, fleet).await?);
+        assert_eq!(first, super::connector_key(&store, organization).await?);
         assert_ne!(
             first,
-            super::connector_key(&store, uuid::Uuid::new_v4()).await?
+            super::connector_key(&store, "other-organization").await?
         );
         Ok(())
     }

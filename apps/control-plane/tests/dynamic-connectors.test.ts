@@ -27,7 +27,7 @@ const hash = (source: string | Uint8Array) => createHash("sha256").update(source
 
 const token = "dynamic-connector-fixture-control-token-never-deploy";
 
-const fleetId = "11111111-1111-4111-8111-111111111111";
+const organizationId = "11111111-1111-4111-8111-111111111111";
 
 const connectorSource = (version: string) => `
 import { WorkerEntrypoint, DurableObject } from 'cloudflare:workers';
@@ -371,7 +371,7 @@ describe.runIf(process.env["RUN_CONNECTOR_TESTS"] === "1").each(["celld", "worke
     const stage = async (candidate: z.infer<typeof connectorPackage>) => {
       for (const module of connectorFiles(candidate)) {
         if (module.type === "sourcemap") continue;
-        const key = `connectors/${fleetId}/${candidate.name}/modules/${hash(module.bytes)}`;
+        const key = `connectors/${organizationId}/${candidate.name}/modules/${hash(module.bytes)}`;
 
         const response = await (hosted ? hosted.fetch : fetch)(
           `${origin}/fixture/module?key=${encodeURIComponent(key)}`,
@@ -395,7 +395,7 @@ describe.runIf(process.env["RUN_CONNECTOR_TESTS"] === "1").each(["celld", "worke
         z.object({ result: connectorActivation }).parse(
           await json("/fixture/manage", {
             action: "prepare",
-            fleetId,
+            organizationId,
             version: crypto.randomUUID(),
             release: candidate,
             nativeBindings: resources,
@@ -498,9 +498,9 @@ describe.runIf(process.env["RUN_CONNECTOR_TESTS"] === "1").each(["celld", "worke
         manifest: {},
         nativeBindings: {},
         capabilities: {
-          CONNECTOR: { fleetId, connector: "fixture", entrypoint: "default" },
-          READER: { fleetId, connector: "fixture", entrypoint: "Reader" },
-          SECOND: { fleetId, connector: "second", entrypoint: "default" },
+          CONNECTOR: { organizationId, connector: "fixture", entrypoint: "default" },
+          READER: { organizationId, connector: "fixture", entrypoint: "Reader" },
+          SECOND: { organizationId, connector: "second", entrypoint: "default" },
         },
         network: { revision: 1, policy: { backend: [], browser: [] } },
       });
@@ -547,7 +547,7 @@ export default { async fetch(request, env, ctx) {
     return Response.json(values);
   }
   if (url.pathname === '/fixture/modules') {
-    const listing = await env.WIDEFLEET_PACKAGES.list({prefix:'connectors/${fleetId}/' + url.searchParams.get('name') + '/modules/'});
+    const listing = await env.WIDEFLEET_PACKAGES.list({prefix:'connectors/${organizationId}/' + url.searchParams.get('name') + '/modules/'});
     return Response.json(listing.objects.map(object => ({key:object.key, etag:object.etag, uploaded:object.uploaded.toISOString()})));
   }
   if (url.pathname === '/fixture/module') {
@@ -721,7 +721,7 @@ export default { async fetch(request, env, ctx) {
       const result = z.object({ result: connectorActivation }).parse(
         await json("/fixture/manage", {
           action: "prepare",
-          fleetId,
+          organizationId,
           version: crypto.randomUUID(),
           release: candidate,
           nativeBindings,
@@ -739,7 +739,7 @@ export default { async fetch(request, env, ctx) {
       const name = "integrity-fixture";
       const first = await prepare("integrity-v1", "integrity-secret", name);
       const source = connectorSource("integrity-v1");
-      const key = `connectors/${fleetId}/${name}/modules/${hash(source)}`;
+      const key = `connectors/${organizationId}/${name}/modules/${hash(source)}`;
 
       const overwrite = (source: string | null) =>
         (hosted ? hosted.fetch : fetch)(`${origin}/fixture/module`, {
@@ -751,7 +751,7 @@ export default { async fetch(request, env, ctx) {
 
       const input = {
         action: "prepare" as const,
-        fleetId,
+        organizationId,
         version: crypto.randomUUID(),
         release: release("integrity-v1", name),
         nativeBindings,
@@ -1034,7 +1034,7 @@ export default { async fetch(request, env, ctx) {
         (
           await request("/fixture/manage", {
             action: "prepare",
-            fleetId,
+            organizationId,
             version: crypto.randomUUID(),
             release: bad,
             nativeBindings,
@@ -1084,7 +1084,7 @@ export default { async fetch(request, env, ctx) {
         z.object({ result: connectorActivation }).parse(
           await json("/fixture/manage", {
             action: "prepare",
-            fleetId,
+            organizationId,
             version: crypto.randomUUID(),
             nativeBindings,
             secrets: {},
@@ -1124,7 +1124,7 @@ export default { async fetch(request, env, ctx) {
         await vi.waitFor(() => {
           const record = hosted?.getLogs().find((entry) => entry.message.includes("widefleetLog"));
           expect(record?.message).toContain(latest.version);
-          expect(record?.message).toContain(fleetId);
+          expect(record?.message).toContain(organizationId);
           expect(record?.message).toContain("object-handler");
         });
       },
@@ -1153,7 +1153,7 @@ export default { async fetch(request, env, ctx) {
         z.object({ result: connectorActivation }).parse(
           await json("/fixture/manage", {
             action: "prepare",
-            fleetId,
+            organizationId,
             version: crypto.randomUUID(),
             nativeBindings,
             secrets: {},
@@ -1175,7 +1175,7 @@ export default { async fetch(request, env, ctx) {
 
           const response = await request("/fixture/manage", {
             action: "prepare",
-            fleetId,
+            organizationId,
             version: crypto.randomUUID(),
             release: candidate,
             nativeBindings,

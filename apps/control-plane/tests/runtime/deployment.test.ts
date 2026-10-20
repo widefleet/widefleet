@@ -2,7 +2,7 @@ import { runtimeIdentity } from "../runtime-identity.ts";
 import { chromium } from "@playwright/test";
 import { build } from "esbuild";
 import { and, eq } from "drizzle-orm";
-import { fleets, jobs } from "../../src/lib/server/schema.ts";
+import { organizationRuntimes, jobs } from "../../src/lib/server/schema.ts";
 import { createHash } from "node:crypto";
 import {
   CreateBucketCommand,
@@ -53,7 +53,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
   let accessToken: string;
   let managementHeaders: Headers;
   let agentToken: string;
-  let fleetId: string;
+  let organizationId: string;
   let dockerHost: string;
   let proxy: ReturnType<typeof createServer>;
   const createdApps: string[] = [];
@@ -232,25 +232,25 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     });
     proxy.listen(proxyPort, "127.0.0.1");
     await once(proxy, "listening");
-    const [fleet] = await environment.database.db.select().from(fleets);
+    const [execution] = await environment.database.db.select().from(organizationRuntimes);
 
-    if (!fleet) throw new Error("Missing fleet");
-    fleetId = fleet.id;
+    if (!execution) throw new Error("Missing execution");
+    organizationId = execution.organizationId;
     identity = await runtimeIdentity("apps.localhost", ["finance"], ["engineering"]);
-    await mkdir(join(state, fleetId), { recursive: true });
+    await mkdir(join(state, organizationId), { recursive: true });
     await writeFile(
       join(state, "installation.json"),
-      JSON.stringify({ fleetId, controlToken: runtimeControlToken }),
+      JSON.stringify({ organizationId, controlToken: runtimeControlToken }),
     );
     await writeFile(
       join(environment.environment.PLATFORM_RUNTIME_DIRECTORY, "control-token"),
       runtimeControlToken,
     );
-    await execute("docker", ["network", "create", `platform-fleet-${fleetId}`]);
+    await execute("docker", ["network", "create", `platform-execution-${organizationId}`]);
     await execute("docker", [
       "network",
       "connect",
-      `platform-fleet-${fleetId}`,
+      `platform-execution-${organizationId}`,
       "internal-app-platform-test-rustfs-1",
     ]);
     await startRuntime();
@@ -325,7 +325,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
         installed,
         "--strip-components=1",
       ]);
-      cliExecutable = join(state, "widefleet");
+      cliExecutable = join(state, "widefleet-cli");
       await symlink(join(installed, "widefleet"), cliExecutable);
     }
   }, 120_000);
@@ -339,8 +339,8 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       );
 
     // Remove only app IDs created by this isolated fixture, including partial failures.
-    if (fleetId) {
-      const name = `platform-fleet-${fleetId}`;
+    if (organizationId) {
+      const name = `platform-execution-${organizationId}`;
       await execute("docker", ["rm", "-f", name]).catch(() => undefined);
       await execute("docker", [
         "network",
@@ -385,14 +385,14 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       "run",
       "-d",
       "--name",
-      `platform-fleet-${fleetId}`,
+      `platform-execution-${organizationId}`,
       "--user=0",
       "--network",
-      `platform-fleet-${fleetId}`,
+      `platform-execution-${organizationId}`,
       "--publish",
       "127.0.0.1::8080",
       "--volume",
-      `${state}/${fleetId}:/state`,
+      `${state}/${organizationId}:/state`,
       "--volume",
       `${state}:/agent-state:ro`,
       "--volume",
@@ -407,7 +407,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       "FLEET_S3_SECRET_ACCESS_KEY=local-tests-only",
       image,
     ]);
-    runtimeOrigin = `http://${(await execute("docker", ["port", `platform-fleet-${fleetId}`, "8080/tcp"])).stdout.trim()}`;
+    runtimeOrigin = `http://${(await execute("docker", ["port", `platform-execution-${organizationId}`, "8080/tcp"])).stdout.trim()}`;
     await vi.waitFor(
       async () =>
         expect(
@@ -434,12 +434,12 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
   };
 
   const agent = async (
-    runtimeContainer = `platform-fleet-${fleetId}`,
+    runtimeContainer = `platform-execution-${organizationId}`,
     platformUrl = environment.configuration.PLATFORM_URL,
     celld = join(root, ".tools/celld"),
     edge?: { proxy: string; auth: string },
   ) => {
-    runtimeOrigin = `http://${(await execute("docker", ["port", `platform-fleet-${fleetId}`, "8080/tcp"])).stdout.trim()}`;
+    runtimeOrigin = `http://${(await execute("docker", ["port", `platform-execution-${organizationId}`, "8080/tcp"])).stdout.trim()}`;
 
     const operation = execute(join(root, "target/debug/platform-agent"), ["--once"], {
       cwd: root,
@@ -478,7 +478,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
             "logs",
             "--tail",
             "100",
-            `platform-fleet-${fleetId}`,
+            `platform-execution-${organizationId}`,
           ]);
 
           return `${id}:\n${result.stdout}\n${result.stderr}`;
@@ -597,7 +597,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
   const appRequest = (appId: string, method = "GET", path = "/") =>
     execute("docker", [
       "exec",
-      `platform-fleet-${fleetId}`,
+      `platform-execution-${organizationId}`,
       "curl",
       "--silent",
       "--show-error",
@@ -697,7 +697,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     const before = await s3.send(
       new GetObjectCommand({
         Bucket: environment.configuration.S3_BUCKET,
-        Key: `fleets/${fleetId}/deploy/current.json`,
+        Key: `organizations/${organizationId}/deploy/current.json`,
       }),
     );
 
@@ -710,7 +710,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     const after = await s3.send(
       new GetObjectCommand({
         Bucket: environment.configuration.S3_BUCKET,
-        Key: `fleets/${fleetId}/deploy/current.json`,
+        Key: `organizations/${organizationId}/deploy/current.json`,
       }),
     );
 
@@ -734,7 +734,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       state: "succeeded",
     });
     expect(createdApps).toHaveLength(0);
-    const container = `platform-fleet-${fleetId}`;
+    const container = `platform-execution-${organizationId}`;
     const first = (await execute("docker", ["inspect", "--format", "{{.Id}}", container])).stdout;
 
     const replacement = z
@@ -790,7 +790,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     const current = await installed();
 
     // Runtime health and the first app pass, but the second app cannot load.
-    // Accepting only the first snapshot would publish a broken fleet release.
+    // Accepting only the first snapshot would publish a broken execution release.
     const broken = await wrappedRuntime(
       "0.1.99",
       `
@@ -812,7 +812,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     const [activation] = await environment.database.db
       .select()
       .from(jobs)
-      .where(and(eq(jobs.fleetId, fleetId), eq(jobs.state, "queued")));
+      .where(and(eq(jobs.organizationId, organizationId), eq(jobs.state, "queued")));
 
     expect(activation?.appId).toBeNull();
     expect(activation?.kind).toBe("runtime");
@@ -820,7 +820,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     expect(await appState(healthy.id)).toMatchObject({ version: "healthy" });
     expect(await appState(app.id)).toMatchObject({ version: "before", count: 1 });
     await stopServer();
-    await execute("docker", ["restart", `platform-fleet-${fleetId}`]);
+    await execute("docker", ["restart", `platform-execution-${organizationId}`]);
     await vi.waitFor(
       async () => expect(await appState(app.id)).toMatchObject({ version: "before", count: 1 }),
       { timeout: 45000 },
@@ -919,7 +919,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       appliedRevision: 0,
       grants: {},
     });
-    const container = `platform-fleet-${fleetId}`;
+    const container = `platform-execution-${organizationId}`;
 
     const previous = (await execute("docker", ["inspect", "--format", "{{.Id}}", container]))
       .stdout;
@@ -1236,7 +1236,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     createdApps.push(app.id);
     hostnames.set(app.id, app.hostname);
     expect(app.slug).toBe("independent-app");
-    expect(app.fleetId).toBe(fleetId);
+    expect(app.organizationId).toBe(organizationId);
     await agent();
 
     const history = z
@@ -1248,7 +1248,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     const curl = (...args: string[]) =>
       execute("docker", [
         "exec",
-        `platform-fleet-${fleetId}`,
+        `platform-execution-${organizationId}`,
         "curl",
         "--silent",
         "--show-error",
@@ -1274,7 +1274,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       "base64",
     );
 
-    await writeFile(join(state, fleetId, "photo.png"), pixel);
+    await writeFile(join(state, organizationId, "photo.png"), pixel);
 
     const saved = await curl(
       "--form",
@@ -1302,7 +1302,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     );
 
     expect(fetched.stdout).toBe("200");
-    expect(await readFile(join(state, fleetId, "saved.png"))).toEqual(pixel);
+    expect(await readFile(join(state, organizationId, "saved.png"))).toEqual(pixel);
 
     // A fresh checkout with the same name updates the same app without a local ID binding.
     const checkout = join(state, "fresh checkout");
@@ -1358,7 +1358,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
 
     const previewPage = await execute("docker", [
       "exec",
-      `platform-fleet-${fleetId}`,
+      `platform-execution-${organizationId}`,
       "curl",
       "--silent",
       "--show-error",
@@ -1498,6 +1498,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
   }, 180_000);
 
   it("deploys KV, queues and cron and recovers interrupted event activation", async () => {
+    const publicationMessage = "Publishing the shared fleet's native configuration";
     appDirectory = join(state, "capabilities app");
     await mkdir(join(appDirectory, "public"), { recursive: true });
     await cp(join(root, "packages/app-runtime/fixtures/app.ts"), join(appDirectory, "worker.ts"));
@@ -1530,7 +1531,8 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     );
     const app = await createApp("capabilities");
     await cli("deploy", app.id, "--skip-build", "--no-wait");
-    await agent();
+    const initial = await agent();
+    expect(initial.stdout + initial.stderr).toContain(publicationMessage);
 
     const read = async (path: string) =>
       z.json().parse(JSON.parse((await appRequest(app.id, "GET", path)).stdout));
@@ -1557,7 +1559,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       const attachment = await s3.send(
         new GetObjectCommand({
           Bucket: environment.configuration.S3_BUCKET,
-          Key: `fleets/${fleetId}/deploy/queues/${identity}/consumer.json`,
+          Key: `organizations/${organizationId}/deploy/queues/${identity}/consumer.json`,
         }),
       );
 
@@ -1591,7 +1593,9 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
 
     await manageRuntime("/runtime", await wrappedRuntime("0.1.98", wrapper));
     await agent();
-    const marker = (name: string) => `fleets/${fleetId}/r2/widefleet-packages/_fixture/${name}`;
+
+    const marker = (name: string) =>
+      `organizations/${organizationId}/r2/widefleet-packages/_fixture/${name}`;
 
     const hold = () =>
       s3.send(
@@ -1677,7 +1681,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       const attachment = await s3.send(
         new GetObjectCommand({
           Bucket: environment.configuration.S3_BUCKET,
-          Key: `fleets/${fleetId}/deploy/queues/${identity}/consumer.json`,
+          Key: `organizations/${organizationId}/deploy/queues/${identity}/consumer.json`,
         }),
       );
 
@@ -1699,19 +1703,25 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
 
       const info = await execute("docker", [
         "exec",
-        `platform-fleet-${fleetId}`,
+        `platform-execution-${organizationId}`,
         "celld",
         "queue",
         "info",
         identity,
         "--bucket",
-        `s3://${environment.configuration.S3_BUCKET}/fleets/${fleetId}`,
+        `s3://${environment.configuration.S3_BUCKET}/organizations/${organizationId}`,
         "--endpoint",
         "http://internal-app-platform-test-rustfs-1:9000",
         "--json",
       ]);
 
-      const logs = await execute("docker", ["logs", "--tail", "100", `platform-fleet-${fleetId}`]);
+      const logs = await execute("docker", [
+        "logs",
+        "--tail",
+        "100",
+        `platform-execution-${organizationId}`,
+      ]);
+
       throw new Error(`Queue state: ${info.stdout}\n${logs.stdout}\n${logs.stderr}`, { cause });
     }
 
@@ -1766,9 +1776,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     await writeFile(join(appDirectory, "wrangler.jsonc"), JSON.stringify(config));
     await cli("deploy", app.id, "--skip-build", "--no-wait");
     const recovered = await agent();
-    expect(recovered.stdout + recovered.stderr).not.toContain(
-      "Publishing the shared fleet's native configuration",
-    );
+    expect(recovered.stdout + recovered.stderr).not.toContain(publicationMessage);
     expect(await read("/fixture/pending-resource")).toBe(false);
     await manageRuntime("/runtime", currentPackages.runtime);
     await agent();
@@ -1790,7 +1798,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     const detached = await s3.send(
       new GetObjectCommand({
         Bucket: environment.configuration.S3_BUCKET,
-        Key: `fleets/${fleetId}/deploy/queues/${identity}/consumer.json`,
+        Key: `organizations/${organizationId}/deploy/queues/${identity}/consumer.json`,
       }),
     );
 
@@ -1803,7 +1811,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     // celld otherwise retries restoration until local storage fills up.
     const retired = await execute("docker", [
       "exec",
-      `platform-fleet-${fleetId}`,
+      `platform-execution-${organizationId}`,
       "curl",
       "--silent",
       "--show-error",
@@ -1814,7 +1822,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       "/dev/null",
       "--write-out",
       "%{http_code}",
-      `http://platform-fleet-${fleetId}:8081/do/.cron:widefleet`,
+      `http://platform-execution-${organizationId}:8081/do/.cron:widefleet`,
     ]);
 
     expect(retired.stdout).toBe("204");
@@ -1868,7 +1876,9 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
             },
             services: {
               "browser-fixture": {
-                loadBalancer: { servers: [{ url: `http://platform-fleet-${fleetId}:8080` }] },
+                loadBalancer: {
+                  servers: [{ url: `http://platform-execution-${organizationId}:8080` }],
+                },
               },
             },
             routers: {
@@ -1897,7 +1907,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
         "--name",
         edgeName,
         "--network",
-        `platform-fleet-${fleetId}`,
+        `platform-execution-${organizationId}`,
         "--publish",
         "127.0.0.1::8443",
         "--volume",
@@ -2082,7 +2092,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     const nativeBefore = await s3.send(
       new GetObjectCommand({
         Bucket: environment.configuration.S3_BUCKET,
-        Key: `fleets/${fleetId}/deploy/current.json`,
+        Key: `organizations/${organizationId}/deploy/current.json`,
       }),
     );
 
@@ -2105,7 +2115,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     const nativeAfter = await s3.send(
       new GetObjectCommand({
         Bucket: environment.configuration.S3_BUCKET,
-        Key: `fleets/${fleetId}/deploy/current.json`,
+        Key: `organizations/${organizationId}/deploy/current.json`,
       }),
     );
 
@@ -2155,10 +2165,10 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       policy: { backend: ["https://api.example.test"] },
     });
     expect(await readFile(join(state, "routes", `platform-app-${app.id}.yaml`), "utf8")).toContain(
-      `http://platform-fleet-${fleetId}:8080`,
+      `http://platform-execution-${organizationId}:8080`,
     );
     await stopServer();
-    await execute("docker", ["restart", `platform-fleet-${fleetId}`]);
+    await execute("docker", ["restart", `platform-execution-${organizationId}`]);
     await expect
       .poll(
         async () => {
@@ -2196,7 +2206,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     await s3.send(
       new PutObjectCommand({
         Bucket: environment.configuration.S3_BUCKET,
-        Key: `fleets/${fleetId}/r2/widefleet-packages/versions/${unrelated.id}/unreadable.json`,
+        Key: `organizations/${organizationId}/r2/widefleet-packages/versions/${unrelated.id}/unreadable.json`,
         Body: "unrelated history fixture",
       }),
     );
@@ -2214,7 +2224,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       "deleting",
     );
     await agent();
-    const packages = `fleets/${fleetId}/r2/widefleet-packages`;
+    const packages = `organizations/${organizationId}/r2/widefleet-packages`;
 
     for (const target of [app, preview]) {
       for (const prefix of [
@@ -2224,7 +2234,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
         `${packages}/versions/${target.id}/`,
         ...["files", "replacement"].map(
           (bucket) =>
-            `fleets/${fleetId}/r2/r${createHash("sha256").update(`${target.id}/r2/${bucket}`).digest("hex").slice(0, 40)}/`,
+            `organizations/${organizationId}/r2/r${createHash("sha256").update(`${target.id}/r2/${bucket}`).digest("hex").slice(0, 40)}/`,
         ),
       ]) {
         expect(
@@ -2575,7 +2585,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
         "--name",
         edgeName,
         "--network",
-        `platform-fleet-${fleetId}`,
+        `platform-execution-${organizationId}`,
         "--publish",
         "127.0.0.1::8443",
         "--volume",
@@ -2752,7 +2762,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
 
     const retainedVersions = {
       Bucket: environment.configuration.S3_BUCKET,
-      Prefix: `fleets/${fleetId}/r2/widefleet-packages/workflow-versions/${app.id}/`,
+      Prefix: `organizations/${organizationId}/r2/widefleet-packages/workflow-versions/${app.id}/`,
     };
 
     expect((await s3.send(new ListObjectsV2Command(retainedVersions))).KeyCount).toBe(1);
@@ -2830,12 +2840,12 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       await browser.close();
     }
 
-    await execute("docker", ["restart", `platform-fleet-${fleetId}`]);
+    await execute("docker", ["restart", `platform-execution-${organizationId}`]);
     await operation("pause", "example", "retained-instance");
     expect(await operation("status", "example", "retained-instance")).toMatchObject({
       status: "paused",
     });
-    await execute("docker", ["rm", "-f", `platform-fleet-${fleetId}`]);
+    await execute("docker", ["rm", "-f", `platform-execution-${organizationId}`]);
     await startRuntime();
     await operation("resume", "example", "retained-instance");
     await writeFile(
@@ -2882,7 +2892,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     expect((await appRequest(app.id)).stdout).toBe("new code");
     expect((await s3.send(new ListObjectsV2Command(retainedVersions))).KeyCount).toBe(1);
     await cli("delete", app.id, "--yes");
-    await execute("docker", ["restart", `platform-fleet-${fleetId}`]);
+    await execute("docker", ["restart", `platform-execution-${organizationId}`]);
     await agent();
     await expect(appRequest(app.id)).rejects.toThrow();
     expect((await s3.send(new ListObjectsV2Command(retainedVersions))).KeyCount).toBe(0);
@@ -2920,7 +2930,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
         await s3.send(
           new ListObjectsV2Command({
             Bucket: environment.configuration.S3_BUCKET,
-            Prefix: `fleets/${fleetId}/r2/widefleet-packages/workflow-versions/${app.id}/`,
+            Prefix: `organizations/${organizationId}/r2/widefleet-packages/workflow-versions/${app.id}/`,
           }),
         )
       ).KeyCount,
@@ -2952,7 +2962,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     await manageRuntime("/runtime", original);
     await agent();
     await cli("delete", app.id, "--yes");
-    await execute("docker", ["rm", "-f", `platform-fleet-${fleetId}`]);
+    await execute("docker", ["rm", "-f", `platform-execution-${organizationId}`]);
     await startRuntime();
     await agent();
     await expect(appRequest(app.id)).rejects.toThrow();

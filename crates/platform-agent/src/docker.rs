@@ -32,7 +32,7 @@ pub async fn verify_storage(
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct Installed {
-        fleet_id: uuid::Uuid,
+        organization_id: String,
         arguments: Vec<String>,
         azure_account: Option<String>,
     }
@@ -44,9 +44,9 @@ pub async fn verify_storage(
         )
         .await?,
     )?;
-    if installed.fleet_id != job.fleet_id {
+    if installed.organization_id != job.organization_id {
         return Err(Error::invalid(
-            "The runtime belongs to a different fleet".into(),
+            "The runtime belongs to a different organization".into(),
         ));
     }
     let environment = installed
@@ -55,7 +55,7 @@ pub async fn verify_storage(
         .into_iter()
         .collect::<Vec<_>>();
     configuration.storage.resolve()?.verify_runtime(
-        job.fleet_id,
+        &job.organization_id,
         &installed.arguments,
         &environment,
     )
@@ -125,7 +125,7 @@ pub async fn execute_native(
     mut command: Vec<String>,
 ) -> Result<Vec<u8>> {
     let storage = configuration.storage.resolve()?;
-    command.extend(storage.arguments(job.fleet_id, true));
+    command.extend(storage.arguments(&job.organization_id, true));
     // Docker exec does not inherit environment added by the container entrypoint.
     let environment = storage
         .environment(true)

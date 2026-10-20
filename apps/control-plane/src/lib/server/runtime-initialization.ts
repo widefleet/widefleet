@@ -1,3 +1,4 @@
+import { organizationIdentifier } from "@platform/contracts";
 import { createAppSignIn } from "./app-sign-in-node.ts";
 import { bootstrapConfiguration } from "@platform/contracts";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
@@ -19,7 +20,7 @@ import {
 } from "./installation-store.ts";
 import { initializeOrganization } from "./organization.ts";
 import { createSettingsService } from "./settings.ts";
-import { defaultFleet } from "./fleets.ts";
+import { installationRuntime } from "./organization-runtime.ts";
 import { z } from "zod";
 
 const readBootstrap = async (configuration: Configuration) => {
@@ -45,7 +46,7 @@ export const prepareInstallation = async (
     await initializeOrganization(database.db);
     await initializeInstallation(database.db);
 
-    const fleet = await database.db.transaction(defaultFleet);
+    const execution = await database.db.transaction(installationRuntime);
     const path = join(configuration.PLATFORM_RUNTIME_DIRECTORY, "installation.json");
     const existing = await readOptionalFile(path);
 
@@ -56,13 +57,19 @@ export const prepareInstallation = async (
 
     if (existing !== null) {
       const installed = z
-        .object({ fleetId: z.uuid(), controlToken: z.string() })
+        .object({ organizationId: organizationIdentifier, controlToken: z.string() })
         .parse(JSON.parse(existing));
 
-      if (installed.fleetId !== fleet.id || installed.controlToken !== controlToken)
+      if (
+        installed.organizationId !== execution.organizationId ||
+        installed.controlToken !== controlToken
+      )
         throw new Error("Runtime configuration belongs to a different installation");
     } else {
-      await writePrivateFile(path, JSON.stringify({ fleetId: fleet.id, controlToken }));
+      await writePrivateFile(
+        path,
+        JSON.stringify({ organizationId: execution.organizationId, controlToken }),
+      );
     }
 
     return { keys, configuration, database };

@@ -1,4 +1,4 @@
-import type { FleetAccess } from "./application-context.ts";
+import type { OrganizationAccess } from "./application-context.ts";
 import { createAuthentication } from "./auth.ts";
 import { createIdentityService } from "./identity.ts";
 import { createAppService } from "./apps.ts";
@@ -30,7 +30,7 @@ export const createRuntime = ({
   encryptionKey,
   execution,
   hostedLogs,
-  fleetAccess,
+  organizationAccess,
 }: {
   configuration: Configuration & { BETTER_AUTH_SECRET: string };
   database: ReturnType<typeof createDatabase>;
@@ -39,7 +39,7 @@ export const createRuntime = ({
   reporting: ReturnType<typeof createReporting>;
   encryptionKey: string;
   execution?: HostedExecution;
-  fleetAccess?: FleetAccess;
+  organizationAccess?: OrganizationAccess;
   hostedLogs?: ReturnType<typeof createCloudflareLogs>;
 }) => {
   const services = {
@@ -77,7 +77,7 @@ export const createRuntime = ({
       ownerId,
       settingsRevision,
       auth,
-      identity: createIdentityService(auth, database.db, active, fleetAccess),
+      identity: createIdentityService(auth, database.db, active, organizationAccess),
       directory: createDirectory(active),
     };
   };

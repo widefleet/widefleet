@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { decryptConnectorSecrets, encryptConnectorSecrets } from "./connector-publication.ts";
 
-const identity = { fleetId: crypto.randomUUID(), name: "fixture", version: crypto.randomUUID() };
+const identity = {
+  organizationId: crypto.randomUUID(),
+  name: "fixture",
+  version: crypto.randomUUID(),
+};
 
 describe("Connector snapshot encryption", () => {
   it("keeps secrets readable when the control token changes", async () => {

@@ -69,7 +69,7 @@ export const createCloudflareLogs =
       ...("appId" in input
         ? [leaf("appId", "eq", input.appId)]
         : [
-            leaf("fleetId", "eq", input.fleetId),
+            leaf("organizationId", "eq", input.organizationId),
             leaf("connector", "eq", input.name),
             ...(input.version ? [leaf("record.connectorVersion", "eq", input.version)] : []),
           ]),
@@ -158,7 +158,7 @@ export const createCloudflareLogs =
         ("appId" in input
           ? event.source.appId !== input.appId
           : event.source.appId !== null ||
-            event.source.fleetId !== input.fleetId ||
+            event.source.organizationId !== input.organizationId ||
             event.source.connector !== input.name) ||
         event.$workers.scriptName !== bindings.APP_RUNTIME_NAME
       )

@@ -18,7 +18,7 @@ import type { CloudflareBindings } from "./cloudflare-config.ts";
 import type { Database } from "./database.ts";
 import type { HostedExecution } from "./deployment-execution.ts";
 import { DatabaseUnavailable, InvalidOperation, StorageUnavailable } from "./errors.ts";
-import { lockApplicationFleet } from "./fleets.ts";
+import { lockOrganizationRuntime } from "./organization-runtime.ts";
 import { cloudflareOperations, connectors } from "./schema.ts";
 import { encryptSecret } from "./secret-encryption.ts";
 import type { ArtifactStorage } from "./storage.ts";
@@ -32,11 +32,15 @@ export const registerCloudflareConnector = (
   transact(database, async (transaction) => {
     connectorAdministrator(command.actor);
 
-    if (command.fleetId !== command.actor.application.fleetId)
-      throw new InvalidOperation({ code: "NOT_FOUND", message: "Fleet not found" });
-    const fleet = await lockApplicationFleet(transaction, command.actor.application);
+    if (command.organizationId !== command.actor.application.organizationId)
+      throw new InvalidOperation({ code: "NOT_FOUND", message: "Organization not found" });
 
-    if (fleet.executor !== "cloudflare")
+    const execution = await lockOrganizationRuntime(
+      transaction,
+      command.actor.application.organizationId,
+    );
+
+    if (execution.executor !== "cloudflare")
       throw new InvalidOperation({
         code: "CONFLICT",
         message: "This installation does not use Cloudflare execution",
@@ -64,12 +68,17 @@ export const registerCloudflareConnector = (
 
       if (release.name !== command.change.name)
         throw new Error("Connector package identity mismatch");
-      reference = (await prepareConnector(transaction, storage, fleet, release)).reference;
+      reference = (await prepareConnector(transaction, storage, execution, release)).reference;
     } else {
       const [existing] = await transaction
         .select()
         .from(connectors)
-        .where(and(eq(connectors.fleetId, fleet.id), eq(connectors.name, command.change.name)));
+        .where(
+          and(
+            eq(connectors.organizationId, execution.organizationId),
+            eq(connectors.name, command.change.name),
+          ),
+        );
 
       if (!existing)
         throw new InvalidOperation({ code: "NOT_FOUND", message: "Connector not found" });
@@ -93,7 +102,7 @@ export const registerCloudflareConnector = (
       .insert(cloudflareOperations)
       .values({
         id: command.id,
-        fleetId: fleet.id,
+        organizationId: execution.organizationId,
         command,
         targets: [],
         result: reference,
@@ -104,9 +113,14 @@ export const registerCloudflareConnector = (
     if (!operation) throw new Error("Connector operation history returned no row");
     await transaction
       .insert(connectors)
-      .values({ fleetId: fleet.id, name: reference.name, package: reference, jobId: command.id })
+      .values({
+        organizationId: execution.organizationId,
+        name: reference.name,
+        package: reference,
+        jobId: command.id,
+      })
       .onConflictDoUpdate({
-        target: [connectors.fleetId, connectors.name],
+        target: [connectors.organizationId, connectors.name],
         set: { package: reference, jobId: command.id },
       });
 
@@ -171,7 +185,7 @@ export const createCloudflareConnectors = (
               .from(connectors)
               .where(
                 and(
-                  eq(connectors.fleetId, command.fleetId),
+                  eq(connectors.organizationId, command.organizationId),
                   eq(connectors.name, command.change.name),
                 ),
               );
@@ -206,16 +220,20 @@ export const createCloudflareConnectors = (
     deploy: async (principal, release, modules, requestId) => {
       const prepared = await transact(database, async (transaction) => {
         connectorAdministrator(principal);
-        const fleet = await lockApplicationFleet(transaction, principal.application);
 
-        const id = operationId(`connectors/${fleet.id}/${release.name}`, requestId);
+        const execution = await lockOrganizationRuntime(
+          transaction,
+          principal.application.organizationId,
+        );
+
+        const id = operationId(`connectors/${execution.organizationId}/${release.name}`, requestId);
 
         const [previous] = await transaction
           .select()
           .from(cloudflareOperations)
           .where(eq(cloudflareOperations.id, id));
 
-        const checksum = connectorChecksum(fleet.id, release);
+        const checksum = connectorChecksum(execution.organizationId, release);
         let current = null;
 
         if (previous) {
@@ -224,7 +242,12 @@ export const createCloudflareConnectors = (
           const [existing] = await transaction
             .select()
             .from(connectors)
-            .where(and(eq(connectors.fleetId, fleet.id), eq(connectors.name, release.name)));
+            .where(
+              and(
+                eq(connectors.organizationId, execution.organizationId),
+                eq(connectors.name, release.name),
+              ),
+            );
 
           if (original.checksum !== checksum || !existing)
             throw new InvalidOperation({
@@ -236,10 +259,10 @@ export const createCloudflareConnectors = (
             await connectorStatus(transaction, { ...existing, package: original, jobId: id }),
           );
         } else {
-          await prepareConnector(transaction, storage, fleet, release, modules);
+          await prepareConnector(transaction, storage, execution, release, modules);
         }
 
-        return Result.ok({ id, fleetId: fleet.id, checksum, current });
+        return Result.ok({ id, organizationId: execution.organizationId, checksum, current });
       });
 
       if (prepared.isErr()) return prepared;
@@ -249,7 +272,7 @@ export const createCloudflareConnectors = (
       return admit({
         kind: "connector",
         id: prepared.value.id,
-        fleetId: prepared.value.fleetId,
+        organizationId: prepared.value.organizationId,
         createdAt: new Date().toISOString(),
         actor: principal,
         change: { kind: "deploy", name: release.name, checksum: prepared.value.checksum },
@@ -262,12 +285,17 @@ export const createCloudflareConnectors = (
 
         if (value !== null) validateConnectorSecret(value);
 
-        const fleet = await lockApplicationFleet(transaction, principal.application);
+        const execution = await lockOrganizationRuntime(
+          transaction,
+          principal.application.organizationId,
+        );
 
         const [record] = await transaction
           .select()
           .from(connectors)
-          .where(and(eq(connectors.fleetId, fleet.id), eq(connectors.name, name)));
+          .where(
+            and(eq(connectors.organizationId, execution.organizationId), eq(connectors.name, name)),
+          );
 
         if (!record)
           throw new InvalidOperation({ code: "NOT_FOUND", message: "Connector not found" });
@@ -279,7 +307,7 @@ export const createCloudflareConnectors = (
         validateConnectorPackage(await loadConnector(storage, reference), [...names]);
 
         return Result.ok({
-          fleetId: fleet.id,
+          organizationId: execution.organizationId,
           ciphertext:
             value === null ? null : await encryptSecret(bindings.PLATFORM_ENCRYPTION_KEY, value),
         });
@@ -290,7 +318,7 @@ export const createCloudflareConnectors = (
       return admit({
         kind: "connector",
         id: crypto.randomUUID(),
-        fleetId: prepared.value.fleetId,
+        organizationId: prepared.value.organizationId,
         createdAt: new Date().toISOString(),
         actor: principal,
         change: { kind: "secret", name, secret, ciphertext: prepared.value.ciphertext },

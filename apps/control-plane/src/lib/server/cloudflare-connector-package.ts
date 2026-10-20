@@ -4,6 +4,10 @@ import type { createCloudflareProvisioner } from "./cloudflare-provisioning.ts";
 
 export const provisionConnectorResources = (
   provisioner: ReturnType<typeof createCloudflareProvisioner>,
-  fleetId: string,
+  organizationId: string,
   release: z.infer<typeof contract.connectorPackage>,
-) => provisioner.provisionWorker(`${fleetId}/connector/${release.name}`, release.metadata.bindings);
+) =>
+  provisioner.provisionWorker(
+    `${organizationId}/connector/${release.name}`,
+    release.metadata.bindings,
+  );

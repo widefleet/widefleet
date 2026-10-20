@@ -29,23 +29,26 @@ fn gcs() -> StorageOptions {
 #[test]
 fn preserves_s3_defaults_and_distinct_agent_and_runtime_endpoints() -> Result<()> {
     let storage = s3().resolve()?;
-    let app = Uuid::nil();
+    let organization = "test-organization";
     assert_eq!(
-        storage.bucket_url(app),
-        format!("s3://fleet-test/fleets/{app}")
+        storage.bucket_url(organization),
+        format!("s3://fleet-test/organizations/{organization}")
     );
     assert_eq!(
-        storage.arguments(app, false),
+        storage.arguments(organization, false),
         [
             "--bucket",
-            &storage.bucket_url(app),
+            &storage.bucket_url(organization),
             "--endpoint",
             "http://localhost:9000",
             "--region",
             "us-east-1"
         ]
     );
-    assert_eq!(storage.arguments(app, true)[3], "http://storage:9000");
+    assert_eq!(
+        storage.arguments(organization, true)[3],
+        "http://storage:9000"
+    );
     assert_eq!(storage.environment(false), storage.environment(true));
     assert!(storage.credential_mount().is_none());
     assert!(storage.object_store().is_ok());
@@ -56,14 +59,14 @@ fn preserves_s3_defaults_and_distinct_agent_and_runtime_endpoints() -> Result<()
 fn cloud_backends_use_native_bucket_schemes_without_s3_flags_or_keys() -> Result<()> {
     for (options, scheme) in [(azure(), "az"), (gcs(), "gs")] {
         let storage = options.resolve()?;
-        let expected = format!("{scheme}://fleet-test/fleets/{}", Uuid::nil());
+        let expected = format!("{scheme}://fleet-test/organizations/test-organization");
         assert_eq!(
-            storage.arguments(Uuid::nil(), false),
+            storage.arguments("test-organization", false),
             ["--bucket", &expected]
         );
         assert_eq!(
-            storage.arguments(Uuid::nil(), false),
-            storage.arguments(Uuid::nil(), true)
+            storage.arguments("test-organization", false),
+            storage.arguments("test-organization", true)
         );
         assert!(
             !storage
@@ -171,12 +174,16 @@ fn azure_workload_identity_mounts_the_live_token_file() -> Result<()> {
 #[test]
 fn rejects_provider_bucket_endpoint_and_account_changes_for_existing_apps() -> Result<()> {
     let original = s3().resolve()?;
-    let args = original.arguments(Uuid::nil(), true);
-    assert!(original.verify_runtime(Uuid::nil(), &args, &[]).is_ok());
+    let args = original.arguments("test-organization", true);
+    assert!(
+        original
+            .verify_runtime("test-organization", &args, &[])
+            .is_ok()
+    );
     assert!(
         azure()
             .resolve()?
-            .verify_runtime(Uuid::nil(), &args, &[])
+            .verify_runtime("test-organization", &args, &[])
             .is_err()
     );
     let mut changed = s3();
@@ -184,7 +191,7 @@ fn rejects_provider_bucket_endpoint_and_account_changes_for_existing_apps() -> R
     assert!(
         changed
             .resolve()?
-            .verify_runtime(Uuid::nil(), &args, &[])
+            .verify_runtime("test-organization", &args, &[])
             .is_err()
     );
     changed = s3();
@@ -192,15 +199,15 @@ fn rejects_provider_bucket_endpoint_and_account_changes_for_existing_apps() -> R
     assert!(
         changed
             .resolve()?
-            .verify_runtime(Uuid::nil(), &args, &[])
+            .verify_runtime("test-organization", &args, &[])
             .is_err()
     );
     let original = azure().resolve()?;
-    let args = original.arguments(Uuid::nil(), true);
+    let args = original.arguments("test-organization", true);
     assert!(
         original
             .verify_runtime(
-                Uuid::nil(),
+                "test-organization",
                 &args,
                 &["AZURE_STORAGE_ACCOUNT_NAME=testaccount".into()]
             )
@@ -209,7 +216,7 @@ fn rejects_provider_bucket_endpoint_and_account_changes_for_existing_apps() -> R
     assert!(
         original
             .verify_runtime(
-                Uuid::nil(),
+                "test-organization",
                 &args,
                 &["AZURE_STORAGE_ACCOUNT_NAME=differentaccount".into()]
             )

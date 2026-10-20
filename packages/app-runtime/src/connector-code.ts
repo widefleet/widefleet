@@ -15,8 +15,8 @@ export const connectorCode = async (
   environment: ParentEnvironment,
   context: Pick<ExecutionContext, "exports">,
 ) => {
-  const { release, fleetId, version } = snapshot;
-  const identity = { fleetId, name: release.name, version };
+  const { release, organizationId, version } = snapshot;
+  const identity = { organizationId, name: release.name, version };
   const configuration = release.metadata;
 
   const worker = await workerDefinition(
@@ -27,7 +27,7 @@ export const connectorCode = async (
       nativeBindings: snapshot.nativeBindings,
       objects: configuration.durable_objects.map((binding) => ({
         ...binding,
-        scope: JSON.stringify([fleetId, release.name, binding.class_name]),
+        scope: JSON.stringify([organizationId, release.name, binding.class_name]),
       })),
     },
     environment,
@@ -102,7 +102,7 @@ export class WIDEFLEET_READY extends workers.WorkerEntrypoint {
     tails: workerTails(
       environment,
       context,
-      { fleetId, connector: release.name, connectorVersion: version },
+      { organizationId, connector: release.name, connectorVersion: version },
       snapshot.telemetry,
     ),
   };
@@ -114,13 +114,13 @@ export const loadConnectorWorker = (
   context: Pick<ExecutionContext, "exports">,
 ) =>
   environment.WIDEFLEET_LOADER.get(
-    `connector:${snapshot.fleetId}:${snapshot.release.name}:${snapshot.version}`,
+    `connector:${snapshot.organizationId}:${snapshot.release.name}:${snapshot.version}`,
     () => connectorCode(snapshot, environment, context),
   );
 
 export class ConnectorSecrets extends WorkerEntrypoint<
   ParentEnvironment,
-  { fleetId: string; name: string; version: string }
+  { organizationId: string; name: string; version: string }
 > {
   async get(name: string) {
     connectorSecretName.parse(name);

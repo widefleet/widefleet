@@ -21,7 +21,7 @@ import { member, organization } from "../src/lib/server/auth-schema.ts";
 import {
   apps,
   connectors,
-  fleets,
+  organizationRuntimes,
   jobs,
   cloudflareOperations,
   agents,
@@ -72,8 +72,8 @@ describe("Organization connector management", () => {
       reporting: environment.reporting,
       storage,
       encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
-      fleetAccess: {
-        filterFleets: async (candidates) => candidates.map((candidate) => candidate.id),
+      organizationAccess: {
+        filterOrganizations: async (candidates) => candidates.map((candidate) => candidate.id),
       },
     })();
   });
@@ -83,16 +83,14 @@ describe("Organization connector management", () => {
 
   const scope = async (executor: "agent" | "cloudflare" = "agent") => {
     const id = crypto.randomUUID();
-    const fleetId = crypto.randomUUID();
+    const organizationId = id;
     await environment.database.db.insert(organization).values({
       id,
       name: id,
       slug: id,
       createdAt: new Date(),
     });
-    await environment.database.db.insert(fleets).values({
-      id: fleetId,
-      name: id,
+    await environment.database.db.insert(organizationRuntimes).values({
       organizationId: id,
       appHostnameSuffix: id,
       executor,
@@ -124,7 +122,7 @@ describe("Organization connector management", () => {
 
     expect(principal).toMatchObject({
       admin: false,
-      application: { admin: true, fleetId, organizationId: id },
+      application: { admin: true, organizationId },
     });
     const api = createApi(runtime);
 
@@ -142,7 +140,7 @@ describe("Organization connector management", () => {
       return api(new Request(`${environment.configuration.PLATFORM_URL}/api/v1${path}`, options));
     };
 
-    return { principal, request, fleetId };
+    return { principal, request, organizationId };
   };
 
   it("creates and updates same-named connectors and secrets only in the selected organization", async () => {
@@ -192,7 +190,7 @@ describe("Organization connector management", () => {
       const [record] = await environment.database.db
         .select()
         .from(connectors)
-        .where(eq(connectors.fleetId, target.fleetId));
+        .where(eq(connectors.organizationId, target.organizationId));
 
       const reference = connectorReference.parse(record?.package);
       expect(
@@ -207,8 +205,8 @@ describe("Organization connector management", () => {
             .select()
             .from(jobs)
             .where(eq(jobs.id, listing[0]?.jobId ?? ""))
-        )[0]?.fleetId,
-      ).toBe(target.fleetId);
+        )[0]?.organizationId,
+      ).toBe(target.organizationId);
     }
 
     const updated = connectorFixture("shared", `${connectorSource}\n// updated`);
@@ -263,20 +261,79 @@ describe("Organization connector management", () => {
         const agentId = crypto.randomUUID();
         await environment.database.db.insert(agents).values({
           id: agentId,
-          fleetId: target.fleetId,
+          organizationId: target.organizationId,
           name: "Scoped fixture agent",
           tokenHash: crypto.randomUUID(),
         });
         const job = (await worker.claim(agentId)).unwrap();
         expect(job).toMatchObject({
           id: published.jobId,
-          fleetId: target.fleetId,
+          organizationId: target.organizationId,
           kind: "connector",
         });
       }
     } finally {
       await background.close();
     }
+  });
+
+  it("serializes agents within an organization while other organizations keep progressing", async () => {
+    const first = await scope();
+    const second = await scope();
+    const release = connectorFixture("ordered");
+
+    for (const target of [first, second])
+      (
+        await runtime.connectors.deploy(
+          target.principal,
+          release,
+          connectorFiles(release),
+          crypto.randomUUID(),
+        )
+      ).unwrap();
+
+    const firstAgent = crypto.randomUUID();
+    const replacementAgent = crypto.randomUUID();
+    const secondAgent = crypto.randomUUID();
+
+    await environment.database.db.insert(agents).values(
+      (
+        [
+          [firstAgent, first.organizationId],
+          [replacementAgent, first.organizationId],
+          [secondAgent, second.organizationId],
+        ] as const
+      ).map(([id, organizationId]) => ({
+        id,
+        organizationId,
+        name: "Synthetic deployment agent",
+        tokenHash: crypto.randomUUID(),
+      })),
+    );
+
+    const worker = createJobService(
+      environment.database.db,
+      storage,
+      environment.environment.PLATFORM_ENCRYPTION_KEY,
+    );
+
+    const claimed = (await worker.claim(firstAgent)).unwrap();
+    expect(claimed).toMatchObject({ organizationId: first.organizationId });
+    expect((await worker.claim(replacementAgent)).unwrap()).toBeNull();
+    expect((await worker.claim(secondAgent)).unwrap()).toMatchObject({
+      organizationId: second.organizationId,
+    });
+
+    if (!claimed) throw new Error("Expected a claimed job");
+
+    await environment.database.db
+      .update(jobs)
+      .set({ leaseUntil: new Date(0) })
+      .where(eq(jobs.id, claimed.id));
+
+    const replacement = (await worker.claim(replacementAgent)).unwrap();
+    expect(replacement).toMatchObject({ id: claimed.id, organizationId: first.organizationId });
+    expect(replacement?.leaseToken).not.toBe(claimed.leaseToken);
   });
 
   it("restricts bindings to local apps and denies members even when they own an app", async () => {
@@ -303,7 +360,12 @@ describe("Organization connector management", () => {
       await environment.database.db
         .update(connectors)
         .set({ appliedPackage: record.package })
-        .where(and(eq(connectors.fleetId, record.fleetId), eq(connectors.name, record.name)));
+        .where(
+          and(
+            eq(connectors.organizationId, record.organizationId),
+            eq(connectors.name, record.name),
+          ),
+        );
 
     const makeApp = async (target: typeof first) =>
       (
@@ -360,7 +422,7 @@ describe("Organization connector management", () => {
     expect((await first.request("/connector-catalog")).status).toBe(200);
   });
 
-  it("uses the selected fleet for logs and rejects an explicitly foreign log target before querying storage", async () => {
+  it("uses the selected organization for logs and rejects an explicitly foreign log target before querying storage", async () => {
     const first = await scope();
     const second = await scope();
     const release = connectorFixture("logs");
@@ -381,8 +443,8 @@ describe("Organization connector management", () => {
       storage,
       environment.configuration,
       async (input) => {
-        if (!("fleetId" in input)) throw new Error("Expected connector logs");
-        seen.push(input.fleetId);
+        if (!("organizationId" in input)) throw new Error("Expected connector logs");
+        seen.push(input.organizationId);
 
         return { entries: [], offset: undefined };
       },
@@ -390,9 +452,9 @@ describe("Organization connector management", () => {
 
     const input = contract.connectorLogQuery.parse({ name: "logs" });
     (await telemetry.queryConnector(first.principal, input)).unwrap();
-    expect(seen).toEqual([first.fleetId]);
+    expect(seen).toEqual([first.organizationId]);
     expect(
-      await telemetry.query(first.principal, { ...input, fleetId: second.fleetId }),
+      await telemetry.query(first.principal, { ...input, organizationId: second.organizationId }),
     ).toMatchObject({ error: { code: "NOT_FOUND" } });
     expect(
       await telemetry.queryConnector(
@@ -400,19 +462,25 @@ describe("Organization connector management", () => {
         input,
       ),
     ).toMatchObject({ error: { code: "FORBIDDEN" } });
-    expect(seen).toEqual([first.fleetId]);
+    expect(seen).toEqual([first.organizationId]);
   });
 
-  it("validates organization, fleet and admin scope again when a Workflow opens a fresh database connection", async () => {
+  it("validates organization, execution and admin scope again when a Workflow opens a fresh database connection", async () => {
     const first = await scope("cloudflare");
     const second = await scope("cloudflare");
     const release = connectorFixture("background");
-    const checksum = await saveConnector(storage, first.fleetId, release, connectorFiles(release));
+
+    const checksum = await saveConnector(
+      storage,
+      first.organizationId,
+      release,
+      connectorFiles(release),
+    );
 
     const command = connectorCommand.parse({
       kind: "connector",
       id: crypto.randomUUID(),
-      fleetId: first.fleetId,
+      organizationId: first.organizationId,
       actor: first.principal,
       createdAt: new Date().toISOString(),
       change: { kind: "deploy", name: release.name, checksum },
@@ -422,7 +490,7 @@ describe("Organization connector management", () => {
 
     try {
       for (const forged of [
-        { ...command, fleetId: second.fleetId },
+        { ...command, organizationId: second.organizationId },
         {
           ...command,
           actor: {
@@ -456,15 +524,21 @@ describe("Organization connector management", () => {
         await registerCloudflareConnector(background.db, storage, command)
       ).unwrap();
 
-      expect(accepted.fleetId).toBe(first.fleetId);
+      expect(accepted.organizationId).toBe(first.organizationId);
       expect((await registerCloudflareConnector(background.db, storage, command)).unwrap().id).toBe(
         accepted.id,
       );
       expect(
-        await background.db.select().from(connectors).where(eq(connectors.fleetId, second.fleetId)),
+        await background.db
+          .select()
+          .from(connectors)
+          .where(eq(connectors.organizationId, second.organizationId)),
       ).toEqual([]);
       expect(
-        await background.db.select().from(apps).where(eq(apps.fleetId, second.fleetId)),
+        await background.db
+          .select()
+          .from(apps)
+          .where(eq(apps.organizationId, second.organizationId)),
       ).toEqual([]);
     } finally {
       await background.close();
@@ -498,13 +572,23 @@ describe("Organization connector management", () => {
         const [record] = await environment.database.db
           .select()
           .from(connectors)
-          .where(and(eq(connectors.fleetId, target.fleetId), eq(connectors.name, release.name)));
+          .where(
+            and(
+              eq(connectors.organizationId, target.organizationId),
+              eq(connectors.name, release.name),
+            ),
+          );
 
         if (!record) throw new Error("Missing CLI connector");
         await environment.database.db
           .update(connectors)
           .set({ appliedPackage: record.package })
-          .where(and(eq(connectors.fleetId, target.fleetId), eq(connectors.name, release.name)));
+          .where(
+            and(
+              eq(connectors.organizationId, target.organizationId),
+              eq(connectors.name, release.name),
+            ),
+          );
         appIds.push(
           (
             await runtime.apps.create(target.principal, {

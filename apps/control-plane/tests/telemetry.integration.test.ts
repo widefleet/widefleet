@@ -367,7 +367,7 @@ describe.runIf(process.env["RUN_TELEMETRY_TESTS"] === "1")(
         .where(eq(agents.id, agentId));
 
       if (!agent) throw new Error("Missing fixture agent");
-      const target = { fleetId: agent.fleetId, name: "logging-fixture" };
+      const target = { organizationId: agent.organizationId, name: "logging-fixture" };
       const headers = new Headers(adminHeaders);
       headers.set("origin", origin);
       headers.delete("content-type");
@@ -420,7 +420,7 @@ describe.runIf(process.env["RUN_TELEMETRY_TESTS"] === "1")(
       const submit = (token: string) =>
         api(
           new Request(
-            `${origin}/api/v1/telemetry/connectors/${target.fleetId}/${target.name}/v1/logs`,
+            `${origin}/api/v1/telemetry/connectors/${target.organizationId}/${target.name}/v1/logs`,
             {
               method: "POST",
               headers: {

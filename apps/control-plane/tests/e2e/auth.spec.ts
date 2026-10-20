@@ -13,7 +13,7 @@ import {
   artifacts,
   connectors,
   deployments,
-  fleets,
+  organizationRuntimes,
   jobs,
 } from "../../src/lib/server/schema.ts";
 import { apiResource, cliClientId } from "../../src/lib/server/auth-options.ts";
@@ -128,12 +128,12 @@ test("restricts connector logs to administrators and explains missing telemetry"
   page,
   context,
 }) => {
-  const [fleet] = await environment.database.db
+  const [execution] = await environment.database.db
     .select()
-    .from(fleets)
-    .where(eq(fleets.name, "default"));
+    .from(organizationRuntimes)
+    .where(eq(organizationRuntimes.organizationId, "widefleet"));
 
-  if (!fleet) throw new Error("Missing fixture fleet");
+  if (!execution) throw new Error("Missing fixture execution");
 
   const reference = connectorReference.parse({
     name: "logging-fixture",
@@ -143,7 +143,7 @@ test("restricts connector logs to administrators and explains missing telemetry"
   });
 
   await environment.database.db.insert(connectors).values({
-    fleetId: fleet.id,
+    organizationId: execution.organizationId,
     name: reference.name,
     package: reference,
     appliedPackage: reference,
@@ -185,7 +185,12 @@ test("restricts connector logs to administrators and explains missing telemetry"
   } finally {
     await environment.database.db
       .delete(connectors)
-      .where(and(eq(connectors.fleetId, fleet.id), eq(connectors.name, reference.name)));
+      .where(
+        and(
+          eq(connectors.organizationId, execution.organizationId),
+          eq(connectors.name, reference.name),
+        ),
+      );
   }
 });
 
@@ -242,14 +247,14 @@ test("shows connector discovery and serving app connections to a member", async 
   await environment.database.db.insert(connectors).values([
     {
       name: "erp",
-      fleetId: record.fleetId,
+      organizationId: record.organizationId,
       jobId: crypto.randomUUID(),
       package: reference,
       appliedPackage: reference,
     },
     {
       name: "warehouse",
-      fleetId: record.fleetId,
+      organizationId: record.organizationId,
       jobId: crypto.randomUUID(),
       package: { ...reference, name: "warehouse" },
     },
@@ -294,7 +299,7 @@ test("shows connector discovery and serving app connections to a member", async 
   await environment.database.db.insert(jobs).values({
     id: crypto.randomUUID(),
     appId: record.id,
-    fleetId: record.fleetId,
+    organizationId: record.organizationId,
     deploymentId,
     kind: "deploy",
     state: "succeeded",

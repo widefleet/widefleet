@@ -14,14 +14,14 @@ import {
   artifacts,
   deploymentEvents,
   deployments,
-  fleets,
+  organizationRuntimes,
   jobReceipts,
   jobs,
 } from "./schema.ts";
-import { ensureFleetRuntime, loadRuntime, runtimeReference } from "./runtime-releases.ts";
+import { ensureOrganizationRuntime, loadRuntime, runtimeReference } from "./runtime-releases.ts";
 import { decryptSecret } from "./secret-encryption.ts";
 import { connectorReference, loadConnector, loadConnectorArtifact } from "./connector-package.ts";
-import { lockFleet } from "./fleets.ts";
+import { lockOrganizationRuntime } from "./organization-runtime.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import { transact, type Transaction } from "./transactions.ts";
 
@@ -89,9 +89,9 @@ export const createJobService = (
         .where(and(eq(agents.id, agentId), eq(agents.enabled, true)));
 
       if (!agent) throw new InvalidOperation({ code: "FORBIDDEN", message: "Agent is disabled" });
-      const fleet = await lockFleet(transaction, agent.fleetId);
+      const execution = await lockOrganizationRuntime(transaction, agent.organizationId);
 
-      if (fleet.executor === "cloudflare")
+      if (execution.executor === "cloudflare")
         throw new InvalidOperation({
           code: "CONFLICT",
           message: "Cloudflare execution does not accept agent job claims",
@@ -105,7 +105,7 @@ export const createJobService = (
         .leftJoin(deployments, eq(jobs.deploymentId, deployments.id))
         .where(
           and(
-            eq(jobs.fleetId, agent.fleetId),
+            eq(jobs.organizationId, agent.organizationId),
             or(
               eq(jobs.state, "queued"),
               and(eq(jobs.state, "running"), lt(jobs.leaseUntil, sql`now()`)),
@@ -116,7 +116,7 @@ export const createJobService = (
                 .from(earlier)
                 .where(
                   and(
-                    eq(earlier.fleetId, jobs.fleetId),
+                    eq(earlier.organizationId, jobs.organizationId),
                     lt(earlier.sequence, jobs.sequence),
                     inArray(earlier.state, ["queued", "running"]),
                   ),
@@ -191,7 +191,7 @@ export const createJobService = (
       const installed = await transaction
         .select()
         .from(connectors)
-        .where(eq(connectors.fleetId, fleet.id));
+        .where(eq(connectors.organizationId, execution.organizationId));
 
       let selectedConnectors = installed.flatMap((entry) =>
         entry.appliedPackage ? [connectorReference.parse(entry.appliedPackage)] : [],
@@ -210,9 +210,9 @@ export const createJobService = (
       const selectedRuntime =
         candidate.job.kind === "runtime"
           ? runtimeReference.parse(candidate.job.runtime)
-          : fleet.appliedRuntime
-            ? runtimeReference.parse(fleet.appliedRuntime)
-            : await ensureFleetRuntime(transaction, storage, fleet.id);
+          : execution.appliedRuntime
+            ? runtimeReference.parse(execution.appliedRuntime)
+            : await ensureOrganizationRuntime(transaction, storage, execution.organizationId);
 
       const [claimed] = await transaction
         .update(jobs)
@@ -249,7 +249,7 @@ export const createJobService = (
       return Result.ok(
         contract.job.parse({
           id: claimed.id,
-          fleetId: claimed.fleetId,
+          organizationId: claimed.organizationId,
           kind: claimed.kind,
           migration: claimed.migration,
           workflow: claimed.workflow,
@@ -337,7 +337,10 @@ export const createJobService = (
         z
           .array(connectorReference)
           .parse(lease.value.connectors)
-          .map((reference) => ({ fleetId: lease.value.fleetId, name: reference.name })),
+          .map((reference) => ({
+            organizationId: lease.value.organizationId,
+            name: reference.name,
+          })),
       );
     }),
   artifact: (agentId: string, jobId: string, leaseToken: string) =>
@@ -401,14 +404,14 @@ export const createJobService = (
           );
         const artifact = await loadConnectorArtifact(storage, reference);
 
-        if (artifact.fleetId !== lease.value.fleetId)
+        if (artifact.organizationId !== lease.value.organizationId)
           return Result.err(
             new InvalidOperation({
               code: "NOT_FOUND",
-              message: "Connector artifact belongs to another fleet",
+              message: "Connector artifact belongs to another organization",
             }),
           );
-        scope = `connectors/${artifact.fleetId}/${artifact.release.name}`;
+        scope = `connectors/${artifact.organizationId}/${artifact.release.name}`;
         modules = artifact.release.modules;
       } else {
         if (!lease.value.deploymentId)
@@ -531,9 +534,9 @@ export const createJobService = (
             lease.kind !== "workflows"
           ) {
             await transaction
-              .update(fleets)
+              .update(organizationRuntimes)
               .set({ appliedRuntime: lease.runtime })
-              .where(eq(fleets.id, lease.fleetId));
+              .where(eq(organizationRuntimes.organizationId, lease.organizationId));
           }
 
           if (lease.kind === "connector" && result.outcome === "succeeded") {
@@ -542,7 +545,10 @@ export const createJobService = (
               .update(connectors)
               .set({ appliedPackage: reference })
               .where(
-                and(eq(connectors.fleetId, lease.fleetId), eq(connectors.name, reference.name)),
+                and(
+                  eq(connectors.organizationId, lease.organizationId),
+                  eq(connectors.name, reference.name),
+                ),
               );
           }
 
@@ -608,9 +614,9 @@ export const createJobService = (
 
           if (result.outcome === "succeeded") {
             await transaction
-              .update(fleets)
+              .update(organizationRuntimes)
               .set({ appliedRuntime: lease.runtime })
-              .where(eq(fleets.id, lease.fleetId));
+              .where(eq(organizationRuntimes.organizationId, lease.organizationId));
             await transaction
               .update(apps)
               .set({

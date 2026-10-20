@@ -62,7 +62,7 @@ await writeFile(new URL("loader.js", directory), source);
 await writeFile(
   new URL("release.json", directory),
   JSON.stringify({
-    protocol: 1,
+    protocol: 2,
     auth: 1,
     version,
     celld: "0.6.2",

@@ -15,9 +15,9 @@ import { administrator } from "./connector-changes.ts";
 import type { Database } from "./database.ts";
 import type { HostedExecution } from "./deployment-execution.ts";
 import { DatabaseUnavailable, InvalidOperation, StorageUnavailable } from "./errors.ts";
-import { defaultFleet, lockFleet } from "./fleets.ts";
+import { installationRuntime, lockOrganizationRuntime } from "./organization-runtime.ts";
 import { loadRuntime, runtimeReference, saveRuntime } from "./runtime-releases.ts";
-import { cloudflareOperations, fleets, runtimeReleases } from "./schema.ts";
+import { cloudflareOperations, organizationRuntimes, runtimeReleases } from "./schema.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import { transact } from "./transactions.ts";
 
@@ -28,9 +28,9 @@ export const registerCloudflareRuntime = (
 ) =>
   transact(database, async (transaction) => {
     administrator(command.actor);
-    const fleet = await lockFleet(transaction, command.fleetId);
+    const execution = await lockOrganizationRuntime(transaction, command.organizationId);
 
-    if (fleet.executor !== "cloudflare")
+    if (execution.executor !== "cloudflare")
       throw new InvalidOperation({
         code: "CONFLICT",
         message: "This installation does not use Cloudflare execution",
@@ -52,7 +52,7 @@ export const registerCloudflareRuntime = (
     }
 
     // A delayed first registration must not replace a selection made since preparation.
-    if (fleet.runtimeJobId !== command.previousJobId)
+    if (execution.runtimeJobId !== command.previousJobId)
       throw new InvalidOperation({
         code: "CONFLICT",
         message: "A newer runtime update superseded this operation",
@@ -66,7 +66,7 @@ export const registerCloudflareRuntime = (
       .insert(cloudflareOperations)
       .values({
         id: command.id,
-        fleetId: fleet.id,
+        organizationId: execution.organizationId,
         command,
         targets: [],
         result: command.runtime,
@@ -76,9 +76,9 @@ export const registerCloudflareRuntime = (
 
     if (!record) throw new Error("Runtime operation history is missing");
     await transaction
-      .update(fleets)
+      .update(organizationRuntimes)
       .set({ runtime: command.runtime, runtimeJobId: command.id })
-      .where(eq(fleets.id, fleet.id));
+      .where(eq(organizationRuntimes.organizationId, execution.organizationId));
 
     return Result.ok(record);
   });
@@ -90,17 +90,22 @@ export const createCloudflareRuntimeReleases = (
 ): HostedExecution["runtime"] => {
   const status = async (command?: z.infer<typeof cloudflareRuntimeCommand>) => {
     const saved = await transact(database, async (transaction) => {
-      const fleet = await defaultFleet(transaction);
-      const id = command?.id ?? fleet.runtimeJobId;
+      const execution = await installationRuntime(transaction);
+      const id = command?.id ?? execution.runtimeJobId;
 
       const selected =
-        command?.runtime ?? (fleet.runtime ? runtimeReference.parse(fleet.runtime) : null);
+        command?.runtime ?? (execution.runtime ? runtimeReference.parse(execution.runtime) : null);
 
       const [operation] = id
         ? await transaction
             .select()
             .from(cloudflareOperations)
-            .where(and(eq(cloudflareOperations.id, id), eq(cloudflareOperations.fleetId, fleet.id)))
+            .where(
+              and(
+                eq(cloudflareOperations.id, id),
+                eq(cloudflareOperations.organizationId, execution.organizationId),
+              ),
+            )
         : [];
 
       return Result.ok({
@@ -178,7 +183,11 @@ export const createCloudflareRuntimeReleases = (
           administrator(principal);
 
           const prepared = await transact(database, async (transaction) => {
-            const fleet = await lockFleet(transaction, (await defaultFleet(transaction)).id);
+            const execution = await lockOrganizationRuntime(
+              transaction,
+              (await installationRuntime(transaction)).organizationId,
+            );
+
             let reference;
 
             if ("modules" in input) {
@@ -203,8 +212,8 @@ export const createCloudflareRuntimeReleases = (
             }
 
             return Result.ok({
-              fleetId: fleet.id,
-              previousJobId: fleet.runtimeJobId,
+              organizationId: execution.organizationId,
+              previousJobId: execution.runtimeJobId,
               runtime: reference,
             });
           });

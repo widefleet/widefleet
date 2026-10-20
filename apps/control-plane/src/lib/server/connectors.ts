@@ -16,7 +16,7 @@ import { managedApp } from "./apps.ts";
 import type { Database } from "./database.ts";
 import { InvalidOperation } from "./errors.ts";
 import { encryptSecret } from "./secret-encryption.ts";
-import { lockApplicationFleet, requireAgentExecution } from "./fleets.ts";
+import { lockOrganizationRuntime, requireAgentExecution } from "./organization-runtime.ts";
 import type { Principal } from "./identity.ts";
 import {
   connectorReference,
@@ -52,7 +52,7 @@ export const createConnectorService = (
       const records = await transaction
         .select()
         .from(connectors)
-        .where(eq(connectors.fleetId, principal.application.fleetId))
+        .where(eq(connectors.organizationId, principal.application.organizationId))
         .orderBy(connectors.name);
 
       return Result.ok(
@@ -158,13 +158,20 @@ export const createConnectorService = (
           connectorAdministrator(principal);
 
           if (value !== null) validateConnectorSecret(value);
-          const target = await lockApplicationFleet(transaction, principal.application);
-          await requireAgentExecution(transaction, target.id, "Connectors");
+
+          const target = await lockOrganizationRuntime(
+            transaction,
+            principal.application.organizationId,
+          );
+
+          await requireAgentExecution(transaction, target.organizationId, "Connectors");
 
           const [existing] = await transaction
             .select()
             .from(connectors)
-            .where(and(eq(connectors.fleetId, target.id), eq(connectors.name, name)));
+            .where(
+              and(eq(connectors.organizationId, target.organizationId), eq(connectors.name, name)),
+            );
 
           if (!existing)
             throw new InvalidOperation({ code: "NOT_FOUND", message: "Connector not found" });
@@ -186,14 +193,19 @@ export const createConnectorService = (
           };
 
           const id = crypto.randomUUID();
-          await transaction
-            .insert(jobs)
-            .values({ id, fleetId: target.id, kind: "connector", connector: next });
+          await transaction.insert(jobs).values({
+            id,
+            organizationId: target.organizationId,
+            kind: "connector",
+            connector: next,
+          });
 
           const [record] = await transaction
             .update(connectors)
             .set({ package: next, jobId: id })
-            .where(and(eq(connectors.fleetId, target.id), eq(connectors.name, name)))
+            .where(
+              and(eq(connectors.organizationId, target.organizationId), eq(connectors.name, name)),
+            )
             .returning();
 
           if (!record) throw new Error("Connector secret update returned no row");
@@ -203,12 +215,11 @@ export const createConnectorService = (
   list: (principal: Principal) =>
     transact(database, async (transaction) => {
       connectorAdministrator(principal);
-      const fleet = principal.application;
 
       const records = await transaction
         .select()
         .from(connectors)
-        .where(eq(connectors.fleetId, fleet.fleetId))
+        .where(eq(connectors.organizationId, principal.application.organizationId))
         .orderBy(connectors.name);
 
       return Result.ok(
@@ -218,12 +229,16 @@ export const createConnectorService = (
   read: (principal: Principal, name: string) =>
     transact(database, async (transaction) => {
       connectorAdministrator(principal);
-      const fleet = principal.application;
 
       const [record] = await transaction
         .select()
         .from(connectors)
-        .where(and(eq(connectors.fleetId, fleet.fleetId), eq(connectors.name, name)));
+        .where(
+          and(
+            eq(connectors.organizationId, principal.application.organizationId),
+            eq(connectors.name, name),
+          ),
+        );
 
       if (!record)
         throw new InvalidOperation({ code: "NOT_FOUND", message: "Connector not found" });
@@ -240,10 +255,15 @@ export const createConnectorService = (
       ? execution.connectors.deploy(principal, release, modules, requestId)
       : transact(database, async (transaction) => {
           connectorAdministrator(principal);
-          const target = await lockApplicationFleet(transaction, principal.application);
-          await requireAgentExecution(transaction, target.id, "Connectors");
 
-          const id = operationId(`connectors/${target.id}/${release.name}`, requestId);
+          const target = await lockOrganizationRuntime(
+            transaction,
+            principal.application.organizationId,
+          );
+
+          await requireAgentExecution(transaction, target.organizationId, "Connectors");
+
+          const id = operationId(`connectors/${target.organizationId}/${release.name}`, requestId);
           const [previous] = await transaction.select().from(jobs).where(eq(jobs.id, id));
 
           if (previous) {
@@ -252,9 +272,14 @@ export const createConnectorService = (
             const [existing] = await transaction
               .select()
               .from(connectors)
-              .where(and(eq(connectors.fleetId, target.id), eq(connectors.name, release.name)));
+              .where(
+                and(
+                  eq(connectors.organizationId, target.organizationId),
+                  eq(connectors.name, release.name),
+                ),
+              );
 
-            const checksum = connectorChecksum(target.id, release);
+            const checksum = connectorChecksum(target.organizationId, release);
 
             if (original.checksum !== checksum || previous.kind !== "connector" || !existing)
               throw new InvalidOperation({
@@ -279,15 +304,23 @@ export const createConnectorService = (
             modules,
           );
 
-          await transaction
-            .insert(jobs)
-            .values({ id, fleetId: target.id, kind: "connector", connector: reference });
+          await transaction.insert(jobs).values({
+            id,
+            organizationId: target.organizationId,
+            kind: "connector",
+            connector: reference,
+          });
 
           const [record] = await transaction
             .insert(connectors)
-            .values({ fleetId: target.id, name: release.name, package: reference, jobId: id })
+            .values({
+              organizationId: target.organizationId,
+              name: release.name,
+              package: reference,
+              jobId: id,
+            })
             .onConflictDoUpdate({
-              target: [connectors.fleetId, connectors.name],
+              target: [connectors.organizationId, connectors.name],
               set: { package: reference, jobId: id },
             })
             .returning();

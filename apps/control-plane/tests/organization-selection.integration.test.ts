@@ -15,7 +15,7 @@ import { CreateBucketCommand, DeleteBucketCommand } from "@aws-sdk/client-s3";
 import { createS3Client, createS3Storage } from "../src/lib/server/storage/s3.ts";
 import { createTestEnvironment } from "./environment.ts";
 import { member, organization, session } from "../src/lib/server/auth-schema.ts";
-import { apps, fleets } from "../src/lib/server/schema.ts";
+import { apps, organizationRuntimes } from "../src/lib/server/schema.ts";
 import { createRuntime } from "../src/lib/server/runtime-services.ts";
 import { createStorage } from "../src/lib/server/storage.ts";
 import { createApi } from "../src/lib/server/api.ts";
@@ -76,14 +76,12 @@ describe("Organization discovery and selection", () => {
       await environment.database.db
         .insert(organization)
         .values({ id, name, slug: name.toLowerCase(), createdAt: new Date() });
-      const fleetId = crypto.randomUUID();
-      await environment.database.db.insert(fleets).values({
-        id: fleetId,
+      const organizationId = id;
+      await environment.database.db.insert(organizationRuntimes).values({
         organizationId: id,
-        name: id,
         appHostnameSuffix: name.toLowerCase(),
       });
-      admitted.add(fleetId);
+      admitted.add(organizationId);
 
       if (id !== hidden)
         await environment.database.db.insert(member).values({
@@ -103,16 +101,16 @@ describe("Organization discovery and selection", () => {
       storage: createStorage(environment.configuration),
       encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
       // Returning an unrelated admitted ID must not turn it into a membership.
-      fleetAccess: { filterFleets: async () => [...admitted] },
+      organizationAccess: { filterOrganizations: async () => [...admitted] },
     })();
     api = createApi(runtime);
   });
 
   beforeEach(async () => {
-    const records = await environment.database.db.select().from(fleets);
+    const records = await environment.database.db.select().from(organizationRuntimes);
     admitted.clear();
 
-    for (const record of records) admitted.add(record.id);
+    for (const record of records) admitted.add(record.organizationId);
     headers.delete("x-widefleet-organization");
     await environment.database.db
       .update(session)
@@ -151,14 +149,14 @@ describe("Organization discovery and selection", () => {
   it.each(["session", "token"])(
     "automatically uses the only admitted organization for %s reads and writes",
     async (authentication) => {
-      const [fleet] = await environment.database.db
+      const [execution] = await environment.database.db
         .select()
-        .from(fleets)
-        .where(eq(fleets.organizationId, alpha));
+        .from(organizationRuntimes)
+        .where(eq(organizationRuntimes.organizationId, alpha));
 
-      if (!fleet) throw new Error("Missing organization fixture fleet");
+      if (!execution) throw new Error("Missing organization fixture execution");
       admitted.clear();
-      admitted.add(fleet.id);
+      admitted.add(execution.organizationId);
       const selectedHeaders = new Headers(headers);
 
       if (authentication === "token") {
@@ -197,18 +195,19 @@ describe("Organization discovery and selection", () => {
   );
 
   it("rejects a stale browser write when the automatically available organization changes", async () => {
-    const records = await environment.database.db.select().from(fleets);
-    const alphaFleet = records.find((record) => record.organizationId === alpha);
-    const betaFleet = records.find((record) => record.organizationId === beta);
+    const records = await environment.database.db.select().from(organizationRuntimes);
+    const alphaRuntime = records.find((record) => record.organizationId === alpha);
+    const betaRuntime = records.find((record) => record.organizationId === beta);
 
-    if (!alphaFleet || !betaFleet) throw new Error("Missing organization fixture fleets");
+    if (!alphaRuntime || !betaRuntime)
+      throw new Error("Missing organization fixture runtime configurations");
     admitted.clear();
-    admitted.add(alphaFleet.id);
+    admitted.add(alphaRuntime.organizationId);
     expect(
       (await runtime.identity.authenticate(request("/apps"), "platform:write", alpha)).isOk(),
     ).toBe(true);
     admitted.clear();
-    admitted.add(betaFleet.id);
+    admitted.add(betaRuntime.organizationId);
     expect(
       await runtime.identity.authenticate(request("/apps"), "platform:write", alpha),
     ).toMatchObject({ error: { code: "CONFLICT" } });
@@ -216,28 +215,11 @@ describe("Organization discovery and selection", () => {
     expect((await api(request("/apps"))).status).toBe(403);
   });
 
-  it("only automatically selects organizations with one available fleet", async () => {
-    const fleetId = crypto.randomUUID();
-    await environment.database.db.insert(fleets).values({
-      id: fleetId,
-      name: fleetId,
-      organizationId: beta,
-    });
-    admitted.add(fleetId);
-
-    try {
-      expect(await (await api(request("/organizations"))).json()).toEqual([
-        { id: alpha, name: "Alpha", slug: "alpha", role: "admin" },
-      ]);
-      expect(await (await api(request("/me"))).json()).toMatchObject({
-        application: { organizationId: alpha },
-      });
-      headers.set("x-widefleet-organization", beta);
-      expect((await api(request("/me"))).status).toBe(403);
-    } finally {
-      await environment.database.db.delete(fleets).where(eq(fleets.id, fleetId));
-      admitted.delete(fleetId);
-    }
+  it("allows only one execution configuration per organization", async () => {
+    await expect(
+      environment.database.db.insert(organizationRuntimes).values({ organizationId: beta }),
+    ).rejects.toThrow();
+    expect((await api(request("/organizations"))).status).toBe(200);
   });
 
   it("persists a browser selection and scopes same-named app operations after switching", async () => {
@@ -573,7 +555,7 @@ describe("Organization discovery and selection", () => {
             ),
           ).toMatchObject({
             parentId: fixture.id,
-            fleetId: fixture.fleetId,
+            organizationId: fixture.organizationId,
             hostname: "review-cli-selection-alpha.apps.localhost",
           });
         }
@@ -597,7 +579,7 @@ describe("Organization discovery and selection", () => {
     30_000,
   );
 
-  it("keeps default installations restricted to their own fleet even for multi-organization users", async () => {
+  it("keeps default installations restricted to their own execution even for multi-organization users", async () => {
     const identity = createIdentityService(
       environment.auth,
       environment.database.db,
