@@ -6,7 +6,7 @@ import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
 import { managedApp } from "./apps.ts";
 import { InvalidOperation } from "./errors.ts";
-import { lockFleet, requireAgentExecution } from "./fleets.ts";
+import { lockApplicationFleet, requireAgentExecution } from "./fleets.ts";
 import type { Principal } from "./identity.ts";
 import {
   connectorReference,
@@ -30,6 +30,14 @@ export const administrator = (principal: Pick<Principal, "admin">) => {
     throw new InvalidOperation({
       code: "FORBIDDEN",
       message: "Administrator permission is required",
+    });
+};
+
+export const connectorAdministrator = (principal: Pick<Principal, "application">) => {
+  if (!principal.application.admin)
+    throw new InvalidOperation({
+      code: "FORBIDDEN",
+      message: "Organization administrator permission is required",
     });
 };
 
@@ -198,7 +206,7 @@ export const validateCapabilityChange = async (
   grant: z.infer<typeof contract.capabilityGrant> | null,
   enqueue: boolean,
 ) => {
-  administrator(principal);
+  connectorAdministrator(principal);
 
   const [target] = await transaction
     .select({ fleetId: apps.fleetId })
@@ -207,7 +215,7 @@ export const validateCapabilityChange = async (
 
   if (!target) throw new InvalidOperation({ code: "NOT_FOUND", message: "App not found" });
   // Match claim/deploy lock order, so concurrent connector updates and grants agree.
-  await lockFleet(transaction, target.fleetId);
+  await lockApplicationFleet(transaction, principal.application);
 
   if (enqueue) await requireAgentExecution(transaction, target.fleetId, "Connectors");
   const access = await managedApp(transaction, principal, appId);

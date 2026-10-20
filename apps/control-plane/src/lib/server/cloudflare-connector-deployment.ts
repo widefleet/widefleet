@@ -3,6 +3,7 @@ import { connectorActivation, connectorManagement } from "@platform/contracts";
 import { Result } from "better-result";
 import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
+import { isDeepStrictEqual } from "node:util";
 import { createArtifactStorage } from "./artifact-storage.ts";
 import type { CloudflareBindings } from "./cloudflare-config.ts";
 import { withCloudflareDatabase } from "./cloudflare-database.ts";
@@ -14,7 +15,8 @@ import { createCloudflareProvisioner } from "./cloudflare-provisioning.ts";
 import { updateCloudflareBindings } from "./cloudflare-binding-updates.ts";
 import { retryable } from "./cloudflare-deployment.ts";
 import { InvalidOperation } from "./errors.ts";
-import { lockFleet } from "./fleets.ts";
+import { lockApplicationFleet } from "./fleets.ts";
+import type { DatabaseExecutor } from "./database.ts";
 import { cloudflareOperations, connectors } from "./schema.ts";
 import { decryptSecret } from "./secret-encryption.ts";
 import { createR2Storage } from "./storage/r2.ts";
@@ -63,17 +65,25 @@ export const createCloudflareConnectorDeployment = (
     return z.object({ result: connectorActivation }).parse(await response.json()).result;
   };
 
-  const reference = (command: z.infer<typeof connectorCommand>) =>
-    withCloudflareDatabase(bindings, async ({ db }) => {
-      const [record] = await db
-        .select()
-        .from(cloudflareOperations)
-        .where(eq(cloudflareOperations.id, command.id));
+  const accepted = async (db: DatabaseExecutor, command: z.infer<typeof connectorCommand>) => {
+    const [record] = await db
+      .select()
+      .from(cloudflareOperations)
+      .where(
+        and(
+          eq(cloudflareOperations.id, command.id),
+          eq(cloudflareOperations.fleetId, command.fleetId),
+        ),
+      );
 
-      if (!record) throw new Error("Connector operation history is missing");
+    if (!record || !isDeepStrictEqual(record.command, command))
+      throw new InvalidOperation({
+        code: "CONFLICT",
+        message: "Connector command does not match its accepted operation",
+      });
 
-      return connectorReference.parse(record.result);
-    });
+    return connectorReference.parse(record.result);
+  };
 
   return {
     register: (command: z.infer<typeof connectorCommand>) =>
@@ -84,7 +94,10 @@ export const createCloudflareConnectorDeployment = (
       const prepared = await provisionConnectorResources(
         provisioner,
         command.fleetId,
-        await loadConnector(storage, await reference(command)),
+        await loadConnector(
+          storage,
+          await withCloudflareDatabase(bindings, ({ db }) => accepted(db, command)),
+        ),
       );
 
       await withCloudflareDatabase(bindings, ({ db }) =>
@@ -97,7 +110,8 @@ export const createCloudflareConnectorDeployment = (
       withCloudflareDatabase(bindings, async ({ db }) =>
         (
           await transact(db, async (transaction) => {
-            await lockFleet(transaction, command.fleetId);
+            await lockApplicationFleet(transaction, command.actor.application);
+            await accepted(transaction, command);
 
             const [record] = await transaction
               .select()
@@ -155,7 +169,12 @@ export const createCloudflareConnectorDeployment = (
           .update(cloudflareOperations)
           .set({ finishedAt: new Date(), error })
           .where(
-            and(eq(cloudflareOperations.id, command.id), isNull(cloudflareOperations.finishedAt)),
+            and(
+              eq(cloudflareOperations.id, command.id),
+              eq(cloudflareOperations.fleetId, command.fleetId),
+              eq(cloudflareOperations.command, command),
+              isNull(cloudflareOperations.finishedAt),
+            ),
           );
       }),
   };

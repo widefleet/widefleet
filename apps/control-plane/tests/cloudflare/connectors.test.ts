@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { eq } from "drizzle-orm";
+import { connectorCommand } from "../../src/lib/server/cloudflare-connector-command.ts";
+import { organization } from "../../src/lib/server/auth-schema.ts";
 import { z } from "zod";
 import * as contract from "@platform/contracts";
 import type { Unstable_DevWorker } from "wrangler";
@@ -210,7 +212,11 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
   };
 
   const command = async (
-    input: { admin?: boolean; requestId?: string } & (
+    input: {
+      admin?: boolean;
+      requestId?: string;
+      application?: z.infer<typeof contract.applicationContext>;
+    } & (
       | { kind: "deploy"; release: z.infer<typeof contract.connectorPackage> }
       | { kind: "secret"; name: string; secret: string; value: string | null }
       | { kind: "read"; name: string }
@@ -295,6 +301,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
         }
       }
       export {DeploymentWorkflow} from ${JSON.stringify(workflow)};
+      import {createCloudflareConnectorDeployment} from ${JSON.stringify(server + "cloudflare-connector-deployment.ts")};
       import {withCloudflareDatabase} from ${JSON.stringify(server + "cloudflare-database.ts")};
       import {createCloudflareExecution} from ${JSON.stringify(server + "cloudflare-execution.ts")};
       import {createConnectorService} from ${JSON.stringify(server + "connectors.ts")};
@@ -305,7 +312,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
       export default {async fetch(request, env, ctx) {
         const url = new URL(request.url);
         const name = url.searchParams.get('connector') ?? ${JSON.stringify(release.name)};
-        const props = {fleetId: ${JSON.stringify(fleetId)}, connector:name, entrypoint:'default'};
+        const props = {fleetId: url.searchParams.get('fleet') ?? ${JSON.stringify(fleetId)}, connector:name, entrypoint:'default'};
         const gateway = () => ctx.exports.ConnectorGateway({props});
         if (url.pathname === '/fault') { await env.TEST_CONTROL.put('lose-response', 'yes'); return Response.json(true); }
         if (url.pathname === '/active') return Response.json(await env.WIDEFLEET_CONNECTORS.get(env.WIDEFLEET_CONNECTORS.idFromName(JSON.stringify([props.fleetId, name]))).current());
@@ -318,6 +325,16 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
           catch (error) { return Response.json({error: error.message}, {status: 400}); }
         }
         if (url.pathname === '/status') return Response.json(await (await env.DEPLOYMENTS.get(url.searchParams.get('id'))).status());
+        if (url.pathname === '/replay') {
+          const input = await request.json();
+          const runner = createCloudflareConnectorDeployment(env);
+          try {
+            if (input.action === 'provision') await runner.provision(input.command);
+            else if (input.action === 'activate') await runner.activate(input.command, {});
+            else await runner.fail(input.command, 'Synthetic failure');
+            return Response.json(true);
+          } catch (error) { return Response.json({error: error.message}, {status:400}); }
+        }
         if (url.pathname === '/command') {
           const input = await request.json();
           const workflow = {get: id => env.DEPLOYMENTS.get(id), async create(options) {
@@ -329,7 +346,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
             const storage = createArtifactStorage(createR2Storage(env.ARTIFACTS));
             const execution = createCloudflareExecution({...env, DEPLOYMENTS: workflow}, db, storage);
             const service = createConnectorService(db, storage, env.PLATFORM_ENCRYPTION_KEY, execution);
-            const actor = {id: 'fixture-admin', admin: input.admin !== false, creator: true, name: 'Fixture', email: 'fixture@example.test', role: 'admin', application: {...${JSON.stringify(environment.application)}, admin:input.admin !== false}};
+            const actor = {id: 'fixture-admin', admin: input.application ? false : input.admin !== false, creator: true, name: 'Fixture', email: 'fixture@example.test', role: 'admin', application: input.application ?? {...${JSON.stringify(environment.application)}, admin:input.admin !== false}};
             if (input.kind === 'deploy') return service.deploy(actor, input.release, input.modules.map(module => ({...module, bytes: new Uint8Array(module.bytes)})), input.requestId);
             if (input.kind === 'secret') return service.setSecret(actor, input.name, input.secret, input.value);
             if (input.kind === 'read') return service.read(actor, input.name);
@@ -626,5 +643,126 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
     expect(await command({ kind: "read", name: initial.name })).toMatchObject({
       jobId: second.jobId,
     });
+  });
+  it("activates same-named connectors and secrets independently for organization admins", async () => {
+    const scopes = [];
+
+    for (const name of ["alpha", "beta"]) {
+      const organizationId = crypto.randomUUID();
+      const id = crypto.randomUUID();
+      await environment.database.db
+        .insert(organization)
+        .values({ id: organizationId, name, slug: organizationId, createdAt: new Date() });
+      await environment.database.db
+        .insert(fleets)
+        .values({ id, name: id, organizationId, executor: "cloudflare" });
+      scopes.push({ fleetId: id, organizationId, admin: true });
+    }
+
+    const scoped = connectorFixture(
+      "shared-scope",
+      `import {WorkerEntrypoint} from "cloudflare:workers"; export default class extends WorkerEntrypoint { secret(name) { return this.env.WIDEFLEET_SECRETS.get(name); } }`,
+    );
+
+    scoped.metadata.bindings = [];
+    scoped.metadata.durable_objects = [];
+    scoped.metadata.entrypoints = ["default"];
+    const requestId = crypto.randomUUID();
+    const operations = [];
+
+    for (const application of scopes) {
+      const published = contract.connectorStatus.parse(
+        await command({ kind: "deploy", release: scoped, requestId, application }),
+      );
+
+      operations.push(published.jobId);
+      await completed(published.jobId);
+
+      const secret = contract.connectorStatus.parse(
+        await command({
+          kind: "secret",
+          name: scoped.name,
+          secret: "API_KEY",
+          value: application.organizationId,
+          application,
+        }),
+      );
+
+      await completed(secret.jobId);
+    }
+
+    expect(new Set(operations).size).toBe(2);
+
+    const [accepted] = await environment.database.db
+      .select()
+      .from(cloudflareOperations)
+      .where(eq(cloudflareOperations.id, operations[0] ?? ""));
+
+    if (!accepted) throw new Error("Missing accepted organization connector operation");
+    const original = connectorCommand.parse(accepted.command);
+    const forged = { ...original, actor: { ...original.actor, application: scopes[1] } };
+    const beforeReplay = requests.length;
+
+    for (const action of ["provision", "activate"]) {
+      const response = await worker.fetch("http://fixture/replay", {
+        method: "POST",
+        body: JSON.stringify({ action, command: forged }),
+      });
+
+      expect(response.status).toBe(400);
+    }
+
+    expect(requests).toHaveLength(beforeReplay);
+    // An admission failure must not mark a different accepted operation as failed.
+    await environment.database.db
+      .update(cloudflareOperations)
+      .set({ finishedAt: null })
+      .where(eq(cloudflareOperations.id, accepted.id));
+    expect(
+      (
+        await worker.fetch("http://fixture/replay", {
+          method: "POST",
+          body: JSON.stringify({ action: "fail", command: forged }),
+        })
+      ).status,
+    ).toBe(200);
+
+    const [unmodified] = await environment.database.db
+      .select()
+      .from(cloudflareOperations)
+      .where(eq(cloudflareOperations.id, accepted.id));
+
+    expect(unmodified?.finishedAt).toBeNull();
+    expect(unmodified?.error).toBeNull();
+    await environment.database.db
+      .update(cloudflareOperations)
+      .set({ finishedAt: accepted.finishedAt })
+      .where(eq(cloudflareOperations.id, accepted.id));
+
+    for (const application of scopes) {
+      expect(
+        await (
+          await worker.fetch(
+            `http://fixture/secret?connector=${scoped.name}&fleet=${application.fleetId}&name=API_KEY`,
+          )
+        ).json(),
+      ).toBe(application.organizationId);
+
+      const listed = contract.connectorStatus
+        .array()
+        .parse(await command({ kind: "list", application }));
+
+      expect(listed.map((item) => item.name)).toEqual([scoped.name]);
+      await command(
+        {
+          kind: "secret",
+          name: scoped.name,
+          secret: "API_KEY",
+          value: "denied",
+          application: { ...application, admin: false },
+        },
+        400,
+      );
+    }
   });
 });

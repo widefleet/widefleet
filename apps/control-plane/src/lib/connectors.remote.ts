@@ -1,9 +1,13 @@
-import { query } from "$app/server";
-import { appPath, connectorLogQuery } from "@platform/contracts";
-import { queryValue, remoteContext } from "#server/remote-support";
+import { form, getRequestEvent, query } from "$app/server";
+import { invalid, redirect } from "@sveltejs/kit";
+import { z } from "zod";
+import * as contract from "@platform/contracts";
+import { formValue, queryValue, remoteContext, remoteOperation } from "#server/remote-support";
 import { pageFailure } from "#server/page-auth";
+import { connectorAdministrator } from "#server/connector-changes";
+import { uploadedConnector } from "#server/connector-package";
 
-export const getConnectorLogs = query(connectorLogQuery, async (input) => {
+export const getConnectorLogs = query(contract.connectorLogQuery, async (input) => {
   const { runtime, principal } = await remoteContext();
   const result = await runtime.telemetry.queryConnector(principal, input);
 
@@ -22,8 +26,133 @@ export const getConnectorCatalog = query(async () => {
   return queryValue(await runtime.connectors.catalog(principal));
 });
 
-export const getAppConnections = query(appPath, async ({ appId }) => {
+export const getAppConnections = query(contract.appPath, async ({ appId }) => {
   const { runtime, principal } = await remoteContext();
 
   return queryValue(await runtime.connectors.connections(principal, appId));
 });
+
+export const getConnector = query(contract.appSlug, async (name) => {
+  const { runtime, principal } = await remoteContext();
+
+  return queryValue(await runtime.connectors.read(principal, name));
+});
+
+export const setConnectorSecret = form(
+  contract.connectorSecretPath.extend({
+    ...contract.organizationSelection.shape,
+    // SvelteKit omits underscore-prefixed fields from failed form responses.
+    _value: contract.connectorSecretValue,
+  }),
+  async ({ name, secret, _value, organizationId }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
+    formValue(await runtime.connectors.setSecret(principal, name, secret, _value));
+    await getConnector(name).refresh();
+    // Always navigate away from the submitted secret, including without JavaScript.
+    redirect(303, `/connectors/${name}?submitted=1`);
+  },
+);
+
+export const deleteConnectorSecret = form(
+  contract.connectorSecretPath.extend({
+    ...contract.organizationSelection.shape,
+    id: z.string().max(160).optional(),
+  }),
+  async ({ name, secret, organizationId }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
+    formValue(await runtime.connectors.setSecret(principal, name, secret, null));
+    await getConnector(name).refresh();
+
+    if (!getRequestEvent().isRemoteRequest) redirect(303, `/connectors/${name}?submitted=1`);
+
+    return { submitted: true };
+  },
+);
+
+export const changeConnectorBinding = form(
+  contract.capabilityPath.extend({
+    ...contract.organizationSelection.shape,
+    connector: contract.appSlug,
+    entrypoint: contract.capabilityGrant.shape.entrypoint,
+  }),
+  async ({ appId, binding, connector, entrypoint, organizationId }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
+    formValue(await runtime.connectors.bind(principal, appId, binding, { connector, entrypoint }));
+    await getAppConnections({ appId }).refresh();
+
+    if (!getRequestEvent().isRemoteRequest) redirect(303, `/connectors?app=${appId}&submitted=1`);
+
+    return { submitted: true };
+  },
+);
+
+export const removeConnectorBinding = form(
+  contract.capabilityPath.extend({
+    ...contract.organizationSelection.shape,
+    id: z.string().max(160).optional(),
+  }),
+  async ({ appId, binding, organizationId }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
+    formValue(await runtime.connectors.bind(principal, appId, binding, null));
+    await getAppConnections({ appId }).refresh();
+
+    if (!getRequestEvent().isRemoteRequest) redirect(303, `/connectors?app=${appId}&submitted=1`);
+
+    return { submitted: true };
+  },
+);
+
+export const deployConnector = form(
+  contract.organizationSelection.extend({
+    name: contract.appSlug,
+    metadata: z
+      .file()
+      .min(1)
+      .max(64 * 1024),
+    modules: z
+      .array(z.file().max(20 * 1024 * 1024))
+      .min(1)
+      .max(532),
+    requestId: contract.identifier,
+  }),
+  async ({ name, metadata, modules, organizationId, requestId }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
+    await remoteOperation(async () => {
+      connectorAdministrator(principal);
+    });
+    let parsed: unknown;
+
+    try {
+      parsed = JSON.parse(await metadata.text());
+    } catch {
+      invalid("The metadata file must contain valid JSON.");
+    }
+
+    const configuration = contract.connectorUploadMetadata.safeParse(parsed);
+
+    if (!configuration.success)
+      invalid("The metadata file is not valid connector upload metadata.");
+
+    // The file picker preserves module bytes; deployment validation is shared with the API.
+    const files = await Promise.all(
+      modules.map(async (file) => ({
+        name: file.name,
+        type: /\.(m?js)$/.test(file.name)
+          ? ("esm" as const)
+          : file.name.endsWith(".map")
+            ? ("sourcemap" as const)
+            : file.name.endsWith(".wasm")
+              ? ("wasm" as const)
+              : file.name.endsWith(".txt")
+                ? ("text" as const)
+                : ("data" as const),
+        bytes: new Uint8Array(await file.arrayBuffer()),
+      })),
+    );
+
+    const release = formValue(uploadedConnector(name, configuration.data, files));
+    formValue(await runtime.connectors.deploy(principal, release, files, requestId));
+    await getConnectorCatalog().refresh();
+    redirect(303, `/connectors/${name}?submitted=1`);
+  },
+);

@@ -173,7 +173,14 @@ describe("Cloudflare logs through the shared authorized service", () => {
     )[0];
 
     events = [{ ...logEvent(fixture.appId, fixture.deploymentId), source }];
-    const page = (await telemetry.queryConnector({ ...principal, admin: true }, input)).unwrap();
+
+    const page = (
+      await telemetry.queryConnector(
+        { ...principal, application: { ...principal.application, admin: true } },
+        input,
+      )
+    ).unwrap();
+
     expect(page.entries[0]).toMatchObject({
       message: "connector message",
       connectorVersion: version,
@@ -189,7 +196,12 @@ describe("Cloudflare logs through the shared authorized service", () => {
     const appQuery = await query();
     expect(appQuery.isErr() && appQuery.error).toBeInstanceOf(TelemetryUnavailable);
     events = [logEvent(fixture.appId, fixture.deploymentId)];
-    const foreign = await telemetry.queryConnector({ ...principal, admin: true }, input);
+
+    const foreign = await telemetry.queryConnector(
+      { ...principal, application: { ...principal.application, admin: true } },
+      input,
+    );
+
     expect(foreign.isErr() && foreign.error).toBeInstanceOf(TelemetryUnavailable);
   });
 

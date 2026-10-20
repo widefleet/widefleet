@@ -4,7 +4,17 @@ import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { and, eq } from "drizzle-orm";
 import { member, organization, session } from "../../src/lib/server/auth-schema.ts";
-import { apps, fleets } from "../../src/lib/server/schema.ts";
+import { apps, fleets, connectors } from "../../src/lib/server/schema.ts";
+import {
+  S3Client,
+  CreateBucketCommand,
+  DeleteBucketCommand,
+  ListObjectsV2Command,
+  DeleteObjectsCommand,
+} from "@aws-sdk/client-s3";
+import { connectorFixture, connectorFiles } from "../cloudflare-connector.fixture.ts";
+import { connectorReference } from "../../src/lib/server/connector-package.ts";
+import { decryptSecret } from "../../src/lib/server/secret-encryption.ts";
 import { createTestEnvironment } from "../environment.ts";
 
 let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
@@ -13,10 +23,23 @@ let server: ReturnType<typeof spawn>;
 
 let logs = "";
 
+let storage: S3Client;
+
 test.setTimeout(60_000);
 
 test.beforeAll(async () => {
   environment = await createTestEnvironment();
+  environment.environment.S3_BUCKET = `test-${crypto.randomUUID()}`;
+  storage = new S3Client({
+    endpoint: "http://localhost:25400",
+    region: "us-east-1",
+    forcePathStyle: true,
+    credentials: {
+      accessKeyId: environment.environment.S3_ACCESS_KEY_ID,
+      secretAccessKey: environment.environment.S3_SECRET_ACCESS_KEY,
+    },
+  });
+  await storage.send(new CreateBucketCommand({ Bucket: environment.environment.S3_BUCKET }));
   server = spawn(
     process.execPath,
     [
@@ -64,6 +87,21 @@ test.afterAll(async () => {
     server.kill("SIGTERM");
     await exited;
     clearTimeout(timeout);
+  }
+
+  if (storage) {
+    const Bucket = environment.environment.S3_BUCKET;
+    const contents = await storage.send(new ListObjectsV2Command({ Bucket }));
+
+    if (contents.Contents?.length)
+      await storage.send(
+        new DeleteObjectsCommand({
+          Bucket,
+          Delete: { Objects: contents.Contents.map(({ Key }) => ({ Key: Key ?? "" })) },
+        }),
+      );
+    await storage.send(new DeleteBucketCommand({ Bucket }));
+    storage.destroy();
   }
 
   await environment?.close();
@@ -126,6 +164,163 @@ const organizationSession = async (browser: Browser, javaScriptEnabled: boolean)
 };
 
 for (const javaScriptEnabled of [true, false]) {
+  test(`manages organization connectors and rejects stale secret changes (JavaScript ${javaScriptEnabled})`, async ({
+    browser,
+  }) => {
+    const { person, alpha, beta, context } = await organizationSession(browser, javaScriptEnabled);
+    const release = connectorFixture("shared-browser");
+
+    try {
+      const page = await context.newPage();
+
+      for (const [id, label] of [
+        [alpha, "Alpha"],
+        [beta, "Beta"],
+      ] as const) {
+        await page.goto("/organizations");
+        await page.getByRole("button", { name: new RegExp(`^${label} admin$`, "i") }).click();
+        await page.goto("/connectors");
+        await page.getByRole("link", { name: "Deploy connector", exact: true }).click();
+        await page.getByLabel("Connector name", { exact: true }).fill(release.name);
+        await page.getByLabel("Upload metadata", { exact: true }).setInputFiles({
+          name: "metadata.json",
+          mimeType: "application/json",
+          buffer: Buffer.from(JSON.stringify(release.metadata)),
+        });
+        await page.getByLabel("Bundled modules", { exact: true }).setInputFiles(
+          connectorFiles(release).map((file) => ({
+            name: file.name,
+            mimeType: "application/javascript",
+            buffer: Buffer.from(file.bytes),
+          })),
+        );
+        await expect(page.getByLabel("Connector name", { exact: true })).toHaveValue(release.name);
+        await page.getByRole("button", { name: "Deploy connector", exact: true }).click();
+        await expect(page).toHaveURL(new RegExp(`/connectors/${release.name}\\?submitted=1$`));
+        await expect(page.getByText("No version is active yet.")).toBeVisible();
+        await page.getByLabel("Secret name", { exact: true }).fill("WIDEFLEET_DENIED");
+        await page.getByLabel("Secret value", { exact: true }).fill("redacted-test-secret");
+
+        const rejected = page.waitForResponse(
+          (response) =>
+            response.request().method() === "POST" && response.url().includes("setConnectorSecret"),
+        );
+
+        await page.getByRole("button", { name: "Save secret", exact: true }).click();
+        expect(await (await rejected).text()).not.toContain("redacted-test-secret");
+        await expect(
+          page.getByText("Reserved connector secret name", { exact: true }),
+        ).toBeVisible();
+        await page.getByLabel("Secret name", { exact: true }).fill("API_KEY");
+        await page.getByLabel("Secret value", { exact: true }).fill(`secret-${id}`);
+        await page.getByRole("button", { name: "Save secret", exact: true }).click();
+        await expect(
+          page.getByRole("button", { name: "Remove API_KEY", exact: true }),
+        ).toBeVisible();
+        await expect(page.getByLabel("Secret value", { exact: true })).toHaveValue("");
+        expect(await page.content()).not.toContain(`secret-${id}`);
+      }
+
+      const records = await environment.database.db
+        .select({ connector: connectors, organizationId: fleets.organizationId })
+        .from(connectors)
+        .innerJoin(fleets, eq(connectors.fleetId, fleets.id))
+        .where(eq(connectors.name, release.name));
+
+      for (const id of [alpha, beta]) {
+        const record = records.find((row) => row.organizationId === id);
+
+        if (!record) throw new Error("Missing browser connector");
+        const reference = connectorReference.parse(record.connector.package);
+        expect(
+          await decryptSecret(
+            environment.environment.PLATFORM_ENCRYPTION_KEY,
+            reference.secrets["API_KEY"] ?? "",
+          ),
+        ).toBe(`secret-${id}`);
+      }
+
+      const record = records.find((row) => row.organizationId === alpha);
+
+      if (!record) throw new Error("Missing first connector");
+      // Simulate the native agent's successful activation; real Cloudflare activation
+      // is covered by the workerd suite.
+      await environment.database.db
+        .update(connectors)
+        .set({ appliedPackage: record.connector.package })
+        .where(
+          and(eq(connectors.fleetId, record.connector.fleetId), eq(connectors.name, release.name)),
+        );
+      const appId = crypto.randomUUID();
+      await environment.database.db.insert(apps).values({
+        id: appId,
+        fleetId: record.connector.fleetId,
+        ownerId: person.id,
+        slug: "connector-browser",
+        displayName: "Connector browser",
+        hostname: `connector-browser.${alpha}.example.test`,
+      });
+      await page.goto("/organizations");
+      await page.getByRole("button", { name: /^Alpha admin$/i }).click();
+      await page.goto(`/connectors?app=${appId}`);
+      await page.getByLabel("Connector", { exact: true }).selectOption(release.name);
+      await page.getByLabel("Entrypoint", { exact: true }).fill("Reader");
+      await page.getByLabel("Binding name", { exact: true }).fill("ERP");
+      await page.getByRole("button", { name: "Save connection", exact: true }).click();
+      await expect(page.getByRole("button", { name: "Disconnect ERP", exact: true })).toBeVisible();
+      expect(
+        (await environment.database.db.select().from(apps).where(eq(apps.id, appId)))[0]
+          ?.capabilities,
+      ).toEqual({ ERP: { connector: release.name, entrypoint: "Reader" } });
+      await page.getByRole("button", { name: "Disconnect ERP", exact: true }).click();
+      await expect(page.getByRole("button", { name: "Disconnect ERP", exact: true })).toHaveCount(
+        0,
+      );
+      await page.goto(`/connectors/${release.name}`);
+      await page.getByRole("button", { name: "Remove API_KEY", exact: true }).click();
+      await expect(page.getByText("No secrets configured.")).toBeVisible();
+      await page.getByLabel("Secret name", { exact: true }).fill("STALE");
+      await page.getByLabel("Secret value", { exact: true }).fill("stale-secret");
+      const second = await context.newPage();
+      await second.goto("/organizations");
+      await second.getByRole("button", { name: /^Beta admin$/i }).click();
+      await page.getByRole("button", { name: "Save secret", exact: true }).click();
+      await expect(
+        page.getByText(
+          "Your organization selection changed. Reload this page before making changes.",
+        ),
+      ).toBeVisible();
+
+      const unchanged = await environment.database.db
+        .select()
+        .from(connectors)
+        .where(eq(connectors.name, release.name));
+
+      for (const item of unchanged)
+        expect(connectorReference.parse(item.package).secrets).not.toHaveProperty("STALE");
+      await environment.database.db
+        .update(member)
+        .set({ role: "member" })
+        .where(and(eq(member.userId, person.id), eq(member.organizationId, beta)));
+
+      for (const path of [
+        "/connectors/new",
+        `/connectors/${release.name}`,
+        `/connectors/${release.name}/logs`,
+      ])
+        expect((await second.goto(path))?.status()).toBe(403);
+      await second.goto("/connectors");
+      await expect(second.getByRole("link", { name: "Deploy connector", exact: true })).toHaveCount(
+        0,
+      );
+      await expect(second.getByRole("link", { name: "Manage connector", exact: true })).toHaveCount(
+        0,
+      );
+    } finally {
+      await context.close();
+    }
+  });
+
   test(`creates an app in the only organization without visiting the chooser (JavaScript ${javaScriptEnabled})`, async ({
     browser,
   }) => {

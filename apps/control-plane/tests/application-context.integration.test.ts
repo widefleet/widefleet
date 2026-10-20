@@ -146,7 +146,6 @@ describe("Mandatory application context", () => {
     expect(await (await api(request("/agents"))).json()).toEqual(listing);
 
     for (const path of [
-      "/connectors",
       "/runtime",
       "/settings",
       "/reporting",

@@ -4,7 +4,7 @@ import { Result } from "better-result";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
-import { administrator, connectorStatus, prepareConnector } from "./connector-changes.ts";
+import { connectorAdministrator, connectorStatus, prepareConnector } from "./connector-changes.ts";
 import {
   connectorReference,
   connectorChecksum,
@@ -18,7 +18,7 @@ import type { CloudflareBindings } from "./cloudflare-config.ts";
 import type { Database } from "./database.ts";
 import type { HostedExecution } from "./deployment-execution.ts";
 import { DatabaseUnavailable, InvalidOperation, StorageUnavailable } from "./errors.ts";
-import { defaultFleet, lockFleet } from "./fleets.ts";
+import { lockApplicationFleet } from "./fleets.ts";
 import { cloudflareOperations, connectors } from "./schema.ts";
 import { encryptSecret } from "./secret-encryption.ts";
 import type { ArtifactStorage } from "./storage.ts";
@@ -30,8 +30,11 @@ export const registerCloudflareConnector = (
   command: z.infer<typeof connectorCommand>,
 ) =>
   transact(database, async (transaction) => {
-    administrator(command.actor);
-    const fleet = await lockFleet(transaction, command.fleetId);
+    connectorAdministrator(command.actor);
+
+    if (command.fleetId !== command.actor.application.fleetId)
+      throw new InvalidOperation({ code: "NOT_FOUND", message: "Fleet not found" });
+    const fleet = await lockApplicationFleet(transaction, command.actor.application);
 
     if (fleet.executor !== "cloudflare")
       throw new InvalidOperation({
@@ -202,8 +205,8 @@ export const createCloudflareConnectors = (
     status: (current) => cloudflareConnectorStatus(bindings, current),
     deploy: async (principal, release, modules, requestId) => {
       const prepared = await transact(database, async (transaction) => {
-        administrator(principal);
-        const fleet = await lockFleet(transaction, (await defaultFleet(transaction)).id);
+        connectorAdministrator(principal);
+        const fleet = await lockApplicationFleet(transaction, principal.application);
 
         const id = operationId(`connectors/${fleet.id}/${release.name}`, requestId);
 
@@ -254,12 +257,12 @@ export const createCloudflareConnectors = (
     },
     setSecret: async (principal, name, secret, value) => {
       const prepared = await transact(database, async (transaction) => {
-        administrator(principal);
+        connectorAdministrator(principal);
         contract.connectorSecretName.parse(secret);
 
         if (value !== null) validateConnectorSecret(value);
 
-        const fleet = await lockFleet(transaction, (await defaultFleet(transaction)).id);
+        const fleet = await lockApplicationFleet(transaction, principal.application);
 
         const [record] = await transaction
           .select()

@@ -11,12 +11,12 @@ export const load: PageServerLoad = async ({ request, url, setHeaders }) => {
   await getConnectorCatalog();
   const selected = url.searchParams.get("app");
 
-  if (!selected) return { app: null, admin: principal.admin };
+  if (!selected) return { app: null, admin: principal.application.admin };
   const appId = identifier.safeParse(selected);
 
   if (!appId.success) error(400, "Invalid app identifier.");
   const details = await getAppDetails({ appId: appId.data });
   await getAppConnections({ appId: appId.data });
 
-  return { app: details.app, admin: principal.admin };
+  return { app: details.app, admin: principal.application.admin };
 };

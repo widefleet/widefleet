@@ -10,7 +10,7 @@ import type { Database } from "./database.ts";
 import { InvalidOperation, TelemetryNotConfigured, TelemetryUnavailable } from "./errors.ts";
 import type { Principal } from "./identity.ts";
 import { apps, artifacts, connectors, deployments, fleets } from "./schema.ts";
-import { administrator } from "./connector-changes.ts";
+import { connectorAdministrator } from "./connector-changes.ts";
 import { createSymbolicator } from "./source-maps.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import { readBody } from "./upload-body.ts";
@@ -251,7 +251,10 @@ export const createTelemetry = (
 
           if (!app) throw new InvalidOperation({ code: "NOT_FOUND", message: "App not found" });
         } else {
-          administrator(principal);
+          connectorAdministrator(principal);
+
+          if (input.fleetId !== principal.application.fleetId)
+            throw new InvalidOperation({ code: "NOT_FOUND", message: "Connector not found" });
 
           const [connector] = await database
             .select({ name: connectors.name })
@@ -519,12 +522,17 @@ export const createTelemetry = (
   ) => {
     const target = await Result.tryPromise({
       try: async () => {
-        administrator(principal);
+        connectorAdministrator(principal);
 
         const [fleet] = await database
           .select({ id: fleets.id })
           .from(fleets)
-          .where(eq(fleets.name, "default"))
+          .where(
+            and(
+              eq(fleets.id, principal.application.fleetId),
+              eq(fleets.organizationId, principal.application.organizationId),
+            ),
+          )
           .limit(1);
 
         if (!fleet) throw new InvalidOperation({ code: "NOT_FOUND", message: "Fleet not found" });
