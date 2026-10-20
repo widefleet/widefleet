@@ -30,8 +30,13 @@ You can now [deploy an app](/guides/deployments) or open a shared app from the c
 
 Owners and administrators use **Members** to invite people, cancel pending invitations,
 change roles and remove members. Only owners can grant or change the owner role, and
-the last owner cannot be removed or demoted. Changing a role does not grant installation
-administration. Removing or demoting an inviter also cancels their pending invitations.
+the last owner cannot be removed or demoted. Owner and admin roles in the installation's
+`widefleet` organization also grant installation administration. In other organizations,
+these roles grant administration only within that organization.
+
+Removing an inviter or changing their role to `member` cancels their pending invitations.
+Changing an owner to `admin` leaves those invitations pending, including owner invitations;
+an owner must cancel any that should no longer be accepted.
 
 The same operations are available in the CLI:
 
@@ -86,8 +91,11 @@ Without company group claims, leave group restrictions empty: that allows the
 organization members admitted by Widefleet, never anonymous visitors. With company
 SSO, an empty group list allows users admitted by the app's IdP registration; restrict
 that registration to the intended users. Nonempty rules require matching group claims.
-Membership or IdP changes do not immediately revoke an already issued app cookie;
-they take effect at the next sign-in, within the one-hour session lifetime.
+Changes to organization membership or to users and groups at the IdP do not immediately
+revoke an already issued app cookie; new sessions reflect them at the next sign-in,
+within the one-hour session lifetime. Changing the provider configuration or app client ID
+in Widefleet invalidates existing app sessions as soon as the new configuration is active.
+Rotating only the IdP client secret preserves existing sessions.
 
 If settings are saved but app sign-in is unavailable, check their activation status
 and the displayed callback registration. Retry publication after resolving the error.
