@@ -376,6 +376,19 @@ describe("Organization discovery and selection", () => {
     "uses the real CLI to discover organizations and select API access per command",
     async () => {
       const { token } = await accessToken("platform:read platform:write");
+      const fixtureHeaders = new Headers(headers);
+      fixtureHeaders.set("x-widefleet-organization", alpha);
+
+      const created = await api(
+        request("/apps/by-name/cli-selection", {
+          method: "PUT",
+          headers: fixtureHeaders,
+          body: "{}",
+        }),
+      );
+
+      expect(created.ok).toBe(true);
+      const fixture = app.parse(await created.json());
 
       const server = createServer((incoming, outgoing) => {
         const forwarded = new Headers();
@@ -458,15 +471,12 @@ describe("Organization discovery and selection", () => {
           application: { organizationId: alpha, admin: true },
         });
         const listed = await execute(binary, ["apps"], options);
-        expect(z.array(app).parse(JSON.parse(listed.stdout))).toEqual(
-          expect.arrayContaining([
-            expect.objectContaining({ hostname: "shared-name.alpha.example.test" }),
-          ]),
-        );
+        expect(z.array(app).parse(JSON.parse(listed.stdout))).toContainEqual(fixture);
       } finally {
         await new Promise<void>((resolve, reject) =>
           server.close((error) => (error ? reject(error) : resolve())),
         );
+        await environment.database.db.delete(apps).where(eq(apps.id, fixture.id));
       }
     },
   );
