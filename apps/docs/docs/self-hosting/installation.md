@@ -13,8 +13,14 @@ Docker 29.8.1 is the tested host baseline, pinned in CI. Its network address all
 ## Infrastructure and first start
 
 For unreleased organization sign-in builds, settings and encrypted credentials are
-scoped to the selected organization. The migration preserves the existing installation's
-settings and secret references in its `widefleet` organization. Upgrade the control plane,
+scoped to the selected organization. Before upgrading a serving installation from fleet
+ownership, complete and verify an explicit runtime-state migration first. See the
+[organization ownership upgrade requirements](/reference/runtime#organization-ownership-upgrade)
+for its scope.
+The database migration preserves the existing installation's settings and secret references
+in its `widefleet` organization, but does not move object storage or local node state.
+Updating components or redeploying apps alone cannot migrate that state.
+After completing the state migration, upgrade the control plane,
 agent and runtime together; register the newly displayed app callback URL
 (`https://auth.APP_DOMAIN/oauth2/widefleet/callback` for the installation organization),
 reapply sign-in settings and redeploy existing apps to publish their organization-bound
@@ -209,6 +215,10 @@ Only ports 80 and 443 are published. PostgreSQL, object storage and runtime oper
 The reference installation is designed for trusted company app creators. Its installation-wide storage credentials are passed to celld, not to app Worker bindings. The runtime has a read-only root filesystem and a persistent writable node-state directory. No additional platform CPU, memory or request-concurrency limits are imposed.
 
 ## Upgrade deliberately
+
+When moving from fleet ownership to the unreleased organization ownership build, complete
+the [state migration requirements](/reference/runtime#organization-ownership-upgrade)
+before recreating services or redeploying existing apps.
 
 Container publication does not change a running installation. Select the intended source checkout and matching image manifest, back up the deployment, pull its images and recreate the affected services. The control plane applies its schema at startup. Preserve the keys and runtime volumes; selecting an older image does not reverse a schema change. Recreate Traefik for changes to static TLS configuration or ACME environment.
 
