@@ -121,7 +121,7 @@ describe("Connector discovery and app connections", () => {
       },
     ]);
 
-    expect((await service.catalog()).unwrap()).toEqual([
+    expect((await service.catalog(creator)).unwrap()).toEqual([
       { name: "erp", entrypoints: ["default"] },
       { name: "pending", entrypoints: [] },
     ]);

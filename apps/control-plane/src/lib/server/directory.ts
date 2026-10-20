@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { Configuration } from "./config.ts";
 import type { Principal } from "./identity.ts";
 import { InvalidOperation } from "./errors.ts";
+import { installationOrganizationId } from "../organization.ts";
 
 export class DirectoryUnavailable extends TaggedError("DirectoryUnavailable")<{
   message: string;
@@ -138,6 +139,14 @@ export const createDirectory = (configuration: Configuration, request: typeof fe
   return {
     search: (principal: Principal, input: z.infer<typeof groupSearch>) =>
       Result.gen(async function* () {
+        // These credentials belong to the installation's company directory.
+        // Other organizations require their own directory configuration.
+        if (principal.application.organizationId !== installationOrganizationId)
+          return yield* new InvalidOperation({
+            code: "FORBIDDEN",
+            message: "Company group search is not available for this organization",
+          });
+
         if (!principal.creator && !principal.admin)
           return yield* new InvalidOperation({
             code: "FORBIDDEN",

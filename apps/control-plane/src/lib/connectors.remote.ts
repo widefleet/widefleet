@@ -17,9 +17,9 @@ export const getConnectorLogs = query(connectorLogQuery, async (input) => {
 });
 
 export const getConnectorCatalog = query(async () => {
-  const { runtime } = await remoteContext();
+  const { runtime, principal } = await remoteContext();
 
-  return queryValue(await runtime.connectors.catalog());
+  return queryValue(await runtime.connectors.catalog(principal));
 });
 
 export const getAppConnections = query(appPath, async ({ appId }) => {
