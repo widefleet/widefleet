@@ -210,13 +210,12 @@ for (const javaScriptEnabled of [true, false]) {
         await expect(page.getByRole("heading", { name: "Deploy connector" })).toBeVisible();
         await expect(page.getByLabel("Connector name", { exact: true })).toHaveValue(release.name);
 
-        if (javaScriptEnabled) {
-          await page.getByRole("link", { name: "All connectors", exact: true }).click();
-          await page.getByRole("button", { name: /^new / }).click();
-          await page.getByRole("link", { name: "Manage connector", exact: true }).click();
-        } else {
-          await page.goto(`/connectors/${release.name}`);
-        }
+        await page.getByRole("link", { name: "All connectors", exact: true }).click();
+        await expect(
+          page.getByRole("link", { name: "Manage connector", exact: true }),
+        ).toBeVisible();
+        await expect(page.getByRole("link", { name: "View logs", exact: true })).toBeVisible();
+        await page.getByRole("link", { name: "Manage connector", exact: true }).click();
 
         await expect(page.getByRole("heading", { name: release.name, exact: true })).toBeVisible();
         await page.getByLabel("Secret name", { exact: true }).fill("WIDEFLEET_DENIED");

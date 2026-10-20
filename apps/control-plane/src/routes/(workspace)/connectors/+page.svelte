@@ -258,22 +258,18 @@
             >
           </span>
         </Accordion.Trigger>
+        {#if data.admin}
+          <div class="flex flex-wrap gap-2 pb-4">
+            <Button href={`/connectors/${entry.name}`} variant="outline" size="sm"
+              >Manage connector</Button
+            >
+            <Button href={`/connectors/${entry.name}/logs`} variant="outline" size="sm"
+              >View logs</Button
+            >
+          </div>
+        {/if}
         <Accordion.Content>
           <div class="border-t pt-4 pb-1">
-            {#if data.admin}
-              <Button
-                href={`/connectors/${entry.name}`}
-                variant="outline"
-                size="sm"
-                class="mr-2 mb-4">Manage connector</Button
-              >
-              <Button
-                href={`/connectors/${entry.name}/logs`}
-                variant="outline"
-                size="sm"
-                class="mb-4">View logs</Button
-              >
-            {/if}
             {#if entry.entrypoints.length}
               <p class="text-muted-foreground mb-3 text-xs">Available entrypoints</p>
               <div class="flex flex-wrap gap-2">
