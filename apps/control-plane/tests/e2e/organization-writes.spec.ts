@@ -95,7 +95,7 @@ const organizationSession = async (browser: Browser, javaScriptEnabled: boolean)
       id: crypto.randomUUID(),
       name: id,
       organizationId: id,
-      appDomain: `${id}.example.test`,
+      appHostnameSuffix: id,
     });
     await environment.database.db.insert(member).values({
       id: crypto.randomUUID(),
@@ -152,6 +152,17 @@ for (const javaScriptEnabled of [true, false]) {
         .where(eq(apps.slug, slug));
 
       expect(records).toEqual([{ organizationId: alpha }]);
+      await expect(
+        page.getByText(`${slug}-${alpha}.apps.localhost`, { exact: true }),
+      ).toBeVisible();
+      await page.getByRole("link", { name: "Create preview", exact: true }).click();
+      await page.getByLabel("App name", { exact: true }).fill("Review");
+      await page.getByLabel("URL slug").fill(`${slug}-review`);
+      await page.getByRole("button", { name: "Create app", exact: true }).click();
+      await expect(page).toHaveURL(/\/apps\/[a-f0-9-]+$/);
+      await expect(
+        page.getByText(`${slug}-review-${alpha}.apps.localhost`, { exact: true }),
+      ).toBeVisible();
     } finally {
       await context.close();
     }
@@ -233,7 +244,7 @@ for (const javaScriptEnabled of [true, false]) {
           ownerId: person.id,
           slug: "linked-app",
           displayName: "Linked app",
-          hostname: `linked-app.${alpha}.example.test`,
+          hostname: `linked-app-${alpha}.apps.localhost`,
         });
         const destination = `/apps/${appId}?q=linked%20app&view=overview`;
         const page = await context.newPage();

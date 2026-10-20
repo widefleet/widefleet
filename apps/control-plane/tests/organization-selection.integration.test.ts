@@ -1,12 +1,18 @@
 import { execFile } from "node:child_process";
 import { createServer } from "node:http";
 import { once } from "node:events";
+import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { z } from "zod";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { app } from "@platform/contracts";
-import { and, eq } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
+import { esbuildBinary } from "../../../tools/cli-tools.ts";
+import { CreateBucketCommand, DeleteBucketCommand } from "@aws-sdk/client-s3";
+import { createS3Client, createS3Storage } from "../src/lib/server/storage/s3.ts";
 import { createTestEnvironment } from "./environment.ts";
 import { member, organization, session } from "../src/lib/server/auth-schema.ts";
 import { apps, fleets } from "../src/lib/server/schema.ts";
@@ -48,6 +54,7 @@ describe("Organization discovery and selection", () => {
 
   beforeAll(async () => {
     environment = await createTestEnvironment();
+    environment.configuration.S3_BUCKET = `test-${crypto.randomUUID()}`;
 
     const person = environment.users.createUser({
       name: "Switcher",
@@ -74,7 +81,7 @@ describe("Organization discovery and selection", () => {
         id: fleetId,
         organizationId: id,
         name: id,
-        appDomain: `${name.toLowerCase()}.example.test`,
+        appHostnameSuffix: name.toLowerCase(),
       });
       admitted.add(fleetId);
 
@@ -177,7 +184,7 @@ describe("Organization discovery and selection", () => {
       const createdApp = app.parse(await created.json());
 
       try {
-        expect(createdApp.hostname).toBe(`automatic-${authentication}.alpha.example.test`);
+        expect(createdApp.hostname).toBe(`automatic-${authentication}-alpha.apps.localhost`);
 
         for (const organizationId of [beta, hidden, "unknown", ""]) {
           selectedHeaders.set("x-widefleet-organization", organizationId);
@@ -247,14 +254,14 @@ describe("Organization discovery and selection", () => {
       await (await api(request("/apps", { method: "POST", body: JSON.stringify(input) }))).json(),
     );
 
-    expect(a).toMatchObject({ hostname: "shared-name.alpha.example.test" });
+    expect(a).toMatchObject({ hostname: "shared-name-alpha.apps.localhost" });
     expect((await select(beta)).status).toBe(200);
 
     const b = app.parse(
       await (await api(request("/apps", { method: "POST", body: JSON.stringify(input) }))).json(),
     );
 
-    expect(b).toMatchObject({ hostname: "shared-name.beta.example.test" });
+    expect(b).toMatchObject({ hostname: "shared-name-beta.apps.localhost" });
     expect(await (await api(request("/apps"))).json()).toEqual([b]);
     headers.set("x-widefleet-organization", alpha);
     expect(await (await api(request("/apps"))).json()).toEqual([a]);
@@ -373,7 +380,7 @@ describe("Organization discovery and selection", () => {
   });
 
   it.runIf(process.env["RUN_CLI_TESTS"] === "1")(
-    "uses the real CLI to discover organizations and select API access per command",
+    "uses the real CLI to select an organization, deploy and reuse flat previews",
     async () => {
       const { token } = await accessToken("platform:read platform:write");
       const fixtureHeaders = new Headers(headers);
@@ -391,17 +398,29 @@ describe("Organization discovery and selection", () => {
       const fixture = app.parse(await created.json());
 
       const server = createServer((incoming, outgoing) => {
-        const forwarded = new Headers();
+        const handle = async () => {
+          const forwarded = new Headers();
 
-        for (const [key, value] of Object.entries(incoming.headers))
-          if (value !== undefined)
-            forwarded.set(key, Array.isArray(value) ? value.join(", ") : value);
-        void api(request(incoming.url?.replace("/api/v1", "") ?? "/", { headers: forwarded }))
-          .then(async (response) => {
-            outgoing.writeHead(response.status, Object.fromEntries(response.headers));
-            outgoing.end(Buffer.from(await response.arrayBuffer()));
-          })
-          .catch(() => outgoing.writeHead(500).end());
+          for (const [key, value] of Object.entries(incoming.headers))
+            if (value !== undefined)
+              forwarded.set(key, Array.isArray(value) ? value.join(", ") : value);
+          const chunks: Uint8Array[] = [];
+
+          for await (const chunk of incoming) chunks.push(z.instanceof(Uint8Array).parse(chunk));
+
+          const response = await api(
+            request(incoming.url?.replace("/api/v1", "") ?? "/", {
+              method: incoming.method ?? "GET",
+              headers: forwarded,
+              body: chunks.length ? Buffer.concat(chunks) : null,
+            }),
+          );
+
+          outgoing.writeHead(response.status, Object.fromEntries(response.headers));
+          outgoing.end(Buffer.from(await response.arrayBuffer()));
+        };
+
+        void handle().catch(() => outgoing.writeHead(500).end());
       });
 
       server.listen(0, "127.0.0.1");
@@ -429,7 +448,12 @@ describe("Organization discovery and selection", () => {
           ),
         );
 
+      const directory = await mkdtemp(join(tmpdir(), "widefleet-organization-cli-"));
+      const s3 = createS3Client(environment.configuration);
+      const objects = createS3Storage(environment.configuration, s3);
+
       try {
+        await s3.send(new CreateBucketCommand({ Bucket: environment.configuration.S3_BUCKET }));
         const choices = await execute(binary, ["organizations"], options);
         expect(
           z
@@ -472,13 +496,105 @@ describe("Organization discovery and selection", () => {
         });
         const listed = await execute(binary, ["apps"], options);
         expect(z.array(app).parse(JSON.parse(listed.stdout))).toContainEqual(fixture);
+
+        const executableName = process.platform === "win32" ? "widefleet.exe" : "widefleet";
+        const installed = join(directory, executableName);
+        const esbuild = esbuildBinary();
+        await copyFile(binary, installed);
+        await copyFile(
+          esbuild,
+          join(directory, process.platform === "win32" ? "esbuild.exe" : "esbuild"),
+        );
+
+        const version = (await execute(binary, ["--version"])).stdout
+          .trim()
+          .replace(/^widefleet /, "");
+
+        const esbuildVersion = (await execute(esbuild, ["--version"])).stdout.trim();
+        await writeFile(
+          join(directory, "release.json"),
+          JSON.stringify({
+            format: 1,
+            version,
+            esbuild_version: esbuildVersion,
+          }),
+        );
+        await mkdir(join(directory, "public"));
+        await writeFile(
+          join(directory, "worker.js"),
+          'export default { fetch() { return new Response("fixture"); } };',
+        );
+        await writeFile(
+          join(directory, "wrangler.jsonc"),
+          JSON.stringify({
+            name: fixture.slug,
+            main: "worker.js",
+            compatibility_date: "2026-10-01",
+            assets: { directory: "public", binding: "ASSETS" },
+          }),
+        );
+
+        const deployment = await execute(
+          installed,
+          ["deploy", "--skip-build", "--no-wait", "--json"],
+          { ...options, cwd: directory },
+        );
+
+        expect(JSON.parse(deployment.stdout)).toMatchObject({
+          appId: fixture.id,
+          status: "queued",
+          url: "https://cli-selection-alpha.apps.localhost/",
+        });
+        let previewId: string | undefined;
+
+        for (const selection of [[], ["--organization", alpha]]) {
+          const result = await execute(
+            installed,
+            [...selection, "preview", "--name", "review", "--skip-build", "--no-wait", "--json"],
+            { ...options, cwd: directory },
+          );
+
+          const preview = z
+            .object({ appId: z.string(), url: z.string(), status: z.string() })
+            .parse(JSON.parse(result.stdout));
+
+          expect(preview).toMatchObject({
+            status: "queued",
+            url: "https://review-cli-selection-alpha.apps.localhost/",
+          });
+
+          if (previewId) expect(preview.appId).toBe(previewId);
+          previewId = preview.appId;
+          expect(
+            app.parse(
+              await (
+                await api(request(`/apps/${preview.appId}`, { headers: fixtureHeaders }))
+              ).json(),
+            ),
+          ).toMatchObject({
+            parentId: fixture.id,
+            fleetId: fixture.fleetId,
+            hostname: "review-cli-selection-alpha.apps.localhost",
+          });
+        }
       } finally {
         await new Promise<void>((resolve, reject) =>
           server.close((error) => (error ? reject(error) : resolve())),
         );
-        await environment.database.db.delete(apps).where(eq(apps.id, fixture.id));
+        await environment.database.db
+          .delete(apps)
+          .where(or(eq(apps.id, fixture.id), eq(apps.parentId, fixture.id)));
+        await rm(directory, { recursive: true, force: true });
+        const keys = [];
+
+        for await (const object of objects.list("")) keys.push(object.key);
+
+        if (keys.length) await objects.remove(keys);
+        await s3.send(new DeleteBucketCommand({ Bucket: environment.configuration.S3_BUCKET }));
+        s3.destroy();
       }
     },
+    30_000,
   );
 
   it("keeps default installations restricted to their own fleet even for multi-organization users", async () => {
