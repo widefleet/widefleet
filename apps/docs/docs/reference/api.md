@@ -48,9 +48,10 @@ administration. Connector catalogs and deployment-agent discovery are scoped to
 the selected organization. Connector deployment, updates, secrets, app binding changes,
 status and logs require an administrator of the selected organization and stay
 within that organization. Same-named connectors in other organizations are independent.
-Deployment-agent administration, runtime upgrades and installation settings still
-require installation administration. The central company directory is available
-only in its own installation organization.
+Deployment-agent administration, runtime upgrades and installation reporting still
+require installation administration. Identity settings and directory search use the
+selected organization's configuration. Organization owners and administrators can
+manage that configuration; a stored secret reference from another organization is rejected.
 
 See [connector management](/guides/connectors#manage-connectors-in-an-organization)
 for the browser flow and connector API endpoints.
@@ -59,6 +60,34 @@ Use [CLI organization selection](/reference/cli-configuration#select-an-organiza
 for equivalent CLI commands. If a browser selection becomes unavailable, the
 workspace returns to organization selection. With no available memberships, ask
 an administrator to grant access.
+
+## Members, invitations and account linking
+
+These endpoints require an unreleased build containing organization invitations.
+Reads require `platform:read`, writes require `platform:write`; browser requests use
+the same services with session authentication. Administrator operations use the
+selected organization and the owner restrictions described in [member management](/guides/members).
+
+| Endpoint                                         | Operation                                                         |
+| ------------------------------------------------ | ----------------------------------------------------------------- |
+| `GET /api/v1/members?search=&page=1`             | List members; returns `members` and `hasNext`.                    |
+| `PATCH /api/v1/members/{memberId}`               | Set `{ "role": "member" }`, `admin` or `owner`.                   |
+| `DELETE /api/v1/members/{memberId}`              | Remove a member.                                                  |
+| `GET /api/v1/invitations`                        | List invitations for organization administrators.                 |
+| `POST /api/v1/invitations`                       | Invite `{ "email": "person@example.com", "role": "member" }`.     |
+| `DELETE /api/v1/invitations/{invitationId}`      | Cancel a pending invitation.                                      |
+| `GET /api/v1/invitations/{invitationId}`         | Read an invitation addressed to the authenticated verified email. |
+| `POST /api/v1/invitations/{invitationId}/accept` | Accept it; body `{}` or `{ "name": "Your Name" }`.                |
+| `GET /api/v1/account`                            | Read your company-account link status and browser management URL. |
+
+Reading or accepting your own invitation does not require an existing membership or
+organization selection. A company-scoped sign-in cannot accept another organization's
+invitation. A global account name can only be changed through a Widefleet email session.
+Expired or processed invitations cannot be accepted again. Native Better Auth organization
+mutation endpoints are unavailable; use the shared API above.
+
+Company-account linking requires an explicit browser session and provider confirmation
+at the returned `accountUrl`. API tokens cannot silently attach an external account.
 
 ## Publish an app
 

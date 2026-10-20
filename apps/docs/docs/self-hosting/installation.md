@@ -1,7 +1,7 @@
 ---
 title: Single-host installation
 description: Install, configure, upgrade and recover a company installation.
-lastModified: 2026-10-12
+lastModified: 2026-10-20
 ---
 
 This Compose deployment is the reference installation. Use Linux x86-64, Docker Engine 29.8.1, Docker Compose 2.20.0 or newer (including v5), and a checkout of the matching release. Published images contain the required runtime and setup tools; the operator host needs no Node, pnpm or Rust installation. The operator owns DNS, certificates, identity-provider registrations, backups and upgrades. Commands below change the selected installation; choose its environment file deliberately.
@@ -11,6 +11,16 @@ This page describes local PostgreSQL, RustFS and operator-provided certificates.
 Docker 29.8.1 is the tested host baseline, pinned in CI. Its network address allocation supports the fleet's fixed app addresses; see the [29.x release notes](https://docs.docker.com/engine/release-notes/29/#2904).
 
 ## Infrastructure and first start
+
+For unreleased organization sign-in builds, settings and encrypted credentials are
+scoped to the selected organization. The migration preserves the existing installation's
+settings and secret references in its `widefleet` organization. Upgrade the control plane,
+agent and runtime together; register the newly displayed app callback URL
+(`https://auth.APP_DOMAIN/oauth2/widefleet/callback` for the installation organization),
+reapply sign-in settings and redeploy existing apps to publish their organization-bound
+auth routes. Existing app sessions and CLI tokens require a fresh sign-in.
+These builds also support [member invitations and optional company sign-in](/guides/members)
+when an email adapter is configured; the default self-hosted build does not add a mail service.
 
 Copy `infra/deployment.env.example` to a private file outside version control. Set the database/storage credentials, `PLATFORM_URL`, `APP_DOMAIN` and the absolute `PLATFORM_DATA_DIRECTORY`. The management hostname must be outside the app domain, for example `platform.example.test` and `*.apps.example.test`. Configure DNS and provide `${PLATFORM_DATA_DIRECTORY}/tls/fullchain.pem` and `privkey.pem`, or select [automatic HTTPS](/self-hosting/external-services#automatic-https-with-cloudflare).
 

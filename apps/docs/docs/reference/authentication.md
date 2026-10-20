@@ -1,10 +1,17 @@
 ---
 title: CLI authentication
 description: Credential stores, headless sessions, token renewal and external credentials.
-lastModified: 2026-10-12
+lastModified: 2026-10-20
 ---
 
 Use `widefleet login` to approve a device code in your browser. Login uses configured or saved platform details, or asks for your work email/domain to discover them. See [CLI configuration](/reference/cli-configuration). The default scopes are `platform:read platform:write`; select additional scopes explicitly when needed. Credentials use Keychain on macOS, Credential Manager on Windows, or Secret Service on Linux. The store must be available and unlocked; Linux also requires a session D-Bus.
+
+For unreleased organization sign-in builds, a CLI approved through company SSO retains
+that organization's authority through token refresh. Another organization selection
+cannot expand it. A Widefleet email login can access the account's admitted memberships.
+See [members and company sign-in](/guides/members) for linking and invitations.
+After upgrading to this authorization model, run `widefleet login` again: credentials
+issued without a recorded authentication context are rejected.
 
 ## Headless login
 

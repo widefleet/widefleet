@@ -6,6 +6,7 @@ export default defineMeta({
   pages: [
     "app-development",
     "applications",
+    "members",
     "deployments",
     "migrations",
     "workflows",

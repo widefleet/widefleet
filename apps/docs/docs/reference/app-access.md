@@ -1,13 +1,19 @@
 ---
 title: App access
 description: Group rules, permissions, activation and the app access API.
-lastModified: 2026-10-12
+lastModified: 2026-10-20
 ---
 
 Open an app in management and choose **Access → App access** to select which company
 groups may open it. App owners and organization administrators can change these
 rules. Management collaborators can inspect them but cannot change them.
 Management permissions do not bypass the running app's access rules.
+
+Unreleased organization sign-in builds apply these rules to the app's organization.
+Without a company IdP, Widefleet admits verified organization members and supplies no
+company group claims; use an empty group list for that mode. With company SSO, the
+app IdP registration determines who can authenticate. See [published app sign-in](/guides/members#opening-published-apps)
+for session lifetime, membership checks and control-plane availability.
 
 Each original app has one group list shared automatically with all its previews.
 A user needs membership in **any one** listed group. An empty
