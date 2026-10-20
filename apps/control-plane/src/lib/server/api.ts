@@ -36,6 +36,9 @@ const unwrap = <T, E extends { message: string }>(result: Result<T, E>) => {
     throw new ORPCError("TELEMETRY_NOT_CONFIGURED", { status: 503, message: error.message });
 
   if ("code" in error) {
+    if (error.code === "ORGANIZATION_REQUIRED")
+      throw new ORPCError("ORGANIZATION_REQUIRED", { status: 403, message: error.message });
+
     const code = z
       .enum(["UNAUTHORIZED", "FORBIDDEN", "NOT_FOUND", "CONFLICT", "BAD_REQUEST"])
       .safeParse(error.code);
@@ -129,6 +132,19 @@ export const createApi = (runtime: Runtime) => {
   const appAndDeployment = contract.appPath.extend({ deploymentId: contract.identifier });
 
   const router = {
+    organizations: base
+      .route({ method: "GET", path: "/organizations" })
+      .output(z.array(contract.organizationChoice))
+      .handler(async ({ context }) =>
+        unwrap(await runtime.identity.organizations(context.request)),
+      ),
+    selectOrganization: base
+      .route({ method: "PUT", path: "/organization" })
+      .input(contract.organizationSelection)
+      .output(contract.currentUser)
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.identity.selectOrganization(context.request, input.organizationId)),
+      ),
     reporting: read
       .route({ method: "GET", path: "/reporting" })
       .output(contract.reportingStatus)
@@ -400,15 +416,7 @@ export const createApi = (runtime: Runtime) => {
       ),
     me: read
       .route({ method: "GET", path: "/me" })
-      .output(
-        z.object({
-          id: z.string(),
-          name: z.string(),
-          email: z.string(),
-          admin: z.boolean(),
-          creator: z.boolean(),
-        }),
-      )
+      .output(contract.currentUser)
       .handler(({ context }) => context.principal),
     catalog: read
       .route({ method: "GET", path: "/catalog" })

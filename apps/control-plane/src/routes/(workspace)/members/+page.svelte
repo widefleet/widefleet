@@ -1,4 +1,5 @@
 <script lang="ts">
+  import OrganizationField from "#shadcn/OrganizationField.svelte";
   import { invalidate } from "$app/navigation";
   import { getMembers, setMemberRole } from "#lib/members.remote";
   import FormIssues from "#shadcn/FormIssues.svelte";
@@ -94,6 +95,7 @@
             aria-label={`Role for ${person.name}`}
             class="space-y-2"
           >
+            <OrganizationField field={roleForm.fields.organizationId} />
             <input {...roleForm.fields.memberId.as("hidden", person.id)} /><input
               {...roleForm.fields.search.as("hidden", route.search)}
             /><input {...roleForm.fields.page.as("hidden", String(route.page))} /><FormIssues

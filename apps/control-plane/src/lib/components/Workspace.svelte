@@ -13,14 +13,36 @@
   import LogOut from "@lucide/svelte/icons/log-out";
   import Menu from "@lucide/svelte/icons/menu";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import type { z } from "zod";
+  import type { organizationChoice } from "@platform/contracts";
   import type { Principal } from "#server/identity";
   import { authClient } from "#lib/auth-client";
+  import { setWorkspaceContext } from "#lib/workspace-context";
   import { Button } from "#shadcn/components/ui/button/index.js";
   import * as DropdownMenu from "#shadcn/components/ui/dropdown-menu/index.js";
   import Brand from "./Brand.svelte";
   import Feedback from "./Feedback.svelte";
 
-  let { principal, children }: { principal: Principal; children: Snippet } = $props();
+  let {
+    principal,
+    organizations,
+    children,
+  }: {
+    principal: Principal;
+    organizations: z.infer<typeof organizationChoice>[];
+    children: Snippet;
+  } = $props();
+
+  setWorkspaceContext({
+    get organizationId() {
+      return principal.application.organizationId;
+    },
+  });
+
+  const organizationName = $derived(
+    organizations.find((organization) => organization.id === principal.application.organizationId)
+      ?.name ?? "Organization",
+  );
 
   let signingOut = $state(false);
 
@@ -137,7 +159,7 @@
                 class="text-muted-foreground block text-[11px]"
                 >{principal.role === "owner"
                   ? "Owner"
-                  : principal.admin
+                  : principal.application.admin
                     ? "Administrator"
                     : "Member"}</span
               ></span
@@ -161,9 +183,13 @@
   >
     <header class="flex min-h-14 items-center justify-between gap-4 border-b px-5 sm:px-8">
       <div class="text-muted-foreground flex items-center gap-2 text-xs">
-        <span class="hidden sm:inline">Workspace</span><ChevronRight
-          class="hidden size-3 sm:block"
-        /><span class="text-foreground">{section}</span>
+        <a
+          href="/organizations"
+          aria-label={`Choose organization: ${organizationName}`}
+          class="hover:text-foreground max-w-40 truncate">{organizationName}</a
+        ><ChevronRight class="hidden size-3 sm:block" /><span class="text-foreground"
+          >{section}</span
+        >
       </div>
       <span class="text-muted-foreground hidden text-xs md:block">Widefleet</span>
       <details bind:open={mobileOpen} class="group relative md:hidden">

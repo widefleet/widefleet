@@ -1,4 +1,5 @@
 <script lang="ts">
+  import OrganizationField from "#shadcn/OrganizationField.svelte";
   import { getAppDetails, rollbackApp } from "#lib/apps.remote";
   import { Button } from "#shadcn/components/ui/button/index.js";
   import { Badge } from "#shadcn/components/ui/badge/index.js";
@@ -71,6 +72,7 @@
             {#if deployment.status === "succeeded" && deployment.id !== data.app.activeDeploymentId && data.app.state !== "deleting"}
               {@const rollback = rollbackApp.for(deployment.id)}
               <form {...rollback.enhance(submitRollback)} class="space-y-3">
+                <OrganizationField field={rollback.fields.organizationId} />
                 <input {...rollback.fields.appId.as("hidden", data.app.id)} /><input
                   {...rollback.fields.search.as("hidden", search)}
                 /><input

@@ -2,10 +2,10 @@ import type { PageServerLoad } from "./$types";
 import { redirect } from "@sveltejs/kit";
 import { getRuntime } from "#server/runtime";
 import { companyAccountProvider } from "#server/company-identity";
+import { localDestination } from "#server/navigation";
 
 export const load: PageServerLoad = async ({ url, setHeaders }) => {
   setHeaders({ "cache-control": "private, no-store" });
-  const next = url.searchParams.get("next") ?? "/";
   const runtime = await getRuntime();
 
   if (!runtime.ownerId) redirect(303, "/setup");
@@ -15,6 +15,6 @@ export const load: PageServerLoad = async ({ url, setHeaders }) => {
     provider: identity ? companyAccountProvider(identity) : null,
     label: identity?.provider.label ?? "Unternehmen",
     localPasswordEnabled: runtime.configuration.LOCAL_PASSWORD_ENABLED,
-    next: next.startsWith("/") && !next.startsWith("//") && !next.includes("\\") ? next : "/",
+    next: localDestination(url.searchParams.get("next")),
   };
 };

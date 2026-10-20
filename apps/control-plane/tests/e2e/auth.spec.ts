@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { app, artifact } from "@platform/contracts";
-import { member } from "../../src/lib/server/auth-schema.ts";
+import { member, session as authSession } from "../../src/lib/server/auth-schema.ts";
 import {
   agents,
   appGrants,
@@ -80,6 +80,48 @@ test.afterAll(async () => {
 test.afterEach(async ({ browserName }, info) => {
   if (info.status !== info.expectedStatus)
     await info.attach(`${browserName}-server-log`, { body: logs, contentType: "text/plain" });
+});
+
+test("selects an organization, repairs stale selection and explains removed access", async ({
+  page,
+  context,
+}) => {
+  const person = environment.users.createUser({
+    name: "Organization Reader",
+    email: "organization-reader@example.test",
+  });
+
+  await environment.users.saveUser(person);
+  await environment.linkMicrosoftUser(person.id);
+  const login = await environment.users.login({ userId: person.id });
+  await context.addCookies(
+    login.cookies.map((cookie) => ({
+      ...cookie,
+      domain: "localhost",
+      sameSite: "Lax",
+      secure: false,
+    })),
+  );
+  await page.goto("/organizations");
+  await expect(page.getByRole("heading", { name: "Choose an organization" })).toBeVisible();
+  await page.getByRole("button", { name: "Widefleet Member" }).click();
+  await expect(page).toHaveURL("http://localhost:25430/");
+  await expect(page.getByRole("link", { name: "Choose organization: Widefleet" })).toBeVisible();
+  await environment.database.db
+    .update(authSession)
+    .set({ activeOrganizationId: "unavailable" })
+    .where(eq(authSession.userId, person.id));
+  await page.goto("/");
+  await expect(page).toHaveURL("http://localhost:25430/organizations?next=%2F");
+  await page.getByRole("button", { name: "Widefleet Member" }).click();
+  await expect(page).toHaveURL("http://localhost:25430/");
+  await environment.database.db.delete(member).where(eq(member.userId, person.id));
+  await page.goto("/");
+  await expect(
+    page.getByText("Your account has no available organizations.", { exact: false }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await expect(page).toHaveURL("http://localhost:25430/sign-in");
 });
 
 test("restricts connector logs to administrators and explains missing telemetry", async ({
@@ -1447,7 +1489,8 @@ test("remote endpoints recheck sessions, roles, input and request origin", async
 
   await environment.database.db.delete(member).where(eq(member.userId, person.id));
   const expired = await context.request.get(queryUrl);
-  expect(await expired.json()).toMatchObject({ type: "error", error: { status: 401 } });
+  // The session remains valid, but its organization membership has been removed.
+  expect(await expired.json()).toMatchObject({ type: "error", error: { status: 403 } });
 });
 
 for (const javaScriptEnabled of [true, false]) {

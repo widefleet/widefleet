@@ -353,10 +353,11 @@ async fn publish(
                 .map_err(|()| Error::invalid("Invalid platform origin".into()))?
                 .extend(["api", "v1", "apps", "by-name", name]);
             let response = api
-                .client
-                .put(url)
-                .header("origin", api.origin_text())
-                .bearer_auth(&token)
+                .authenticated(
+                    Method::PUT,
+                    url.path().trim_start_matches("/api/v1"),
+                    &token,
+                )
                 .json(&value!({}))
                 .send()
                 .await?;

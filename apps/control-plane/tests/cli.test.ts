@@ -58,6 +58,8 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     });
 
     const requests: string[] = [];
+    const organizations: (string | string[] | undefined)[] = [];
+    let requiredOrganization: string | undefined;
     const catalogUpdates: z.infer<typeof contract.catalogListing>[] = [];
     const createdPreviews: z.infer<typeof contract.createAppInput>[] = [];
     let storedPreview: z.infer<typeof contract.app> | null = null;
@@ -75,6 +77,19 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     const server = createServer((request, response) => {
       request.resume();
       requests.push(`${request.method} ${request.url}`);
+      organizations.push(request.headers["x-widefleet-organization"]);
+
+      if (
+        requiredOrganization &&
+        request.headers["x-widefleet-organization"] !== requiredOrganization
+      ) {
+        response
+          .writeHead(403)
+          .end(JSON.stringify({ message: "Select the requested organization" }));
+
+        return;
+      }
+
       response.setHeader("content-type", "application/json");
 
       if (request.method === "GET" && request.url === "/api/v1/catalog") {
@@ -364,6 +379,8 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
 
     beforeEach(() => {
       requests.length = 0;
+      organizations.length = 0;
+      requiredOrganization = undefined;
       catalogUpdates.length = 0;
       outcome = "succeeded";
       accessToken = "synthetic-cli-token";
@@ -430,6 +447,8 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
 
       for (const args of [[], ["--follow"]]) {
         requests.length = 0;
+        organizations.length = 0;
+        requiredOrganization = undefined;
         await expect(
           execute(
             join(state, "installation", executableName),
@@ -835,6 +854,40 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       await settingsCli("external-management", "true");
       expect(requests).toContain("PUT /api/v1/settings/external-management");
     });
+
+    it.each(["flag", "environment"])(
+      "keeps organization selection through deployment by name via %s",
+      async (selection) => {
+        requiredOrganization = "deployment-organization";
+
+        const result = await execute(
+          join(state, "installation", executableName),
+          [
+            ...(selection === "flag" ? ["--organization", requiredOrganization] : []),
+            "deploy",
+            "--skip-build",
+            "--json",
+          ],
+          {
+            cwd: join(state, "project with spaces"),
+            timeout: 15_000,
+            env: {
+              ...process.env,
+              PLATFORM_URL: origin,
+              PLATFORM_ACCESS_TOKEN: accessToken,
+              PLATFORM_ORGANIZATION:
+                selection === "environment" ? requiredOrganization : "overridden-organization",
+            },
+          },
+        );
+
+        expect(JSON.parse(result.stdout)).toMatchObject({ status: "succeeded", appId: app.id });
+        expect(requests[0]).toBe("PUT /api/v1/apps/by-name/fixture");
+        expect(requests).toContain(`PUT /api/v1/apps/${app.id}/worker`);
+        expect(historyReads).toBe(2);
+        expect(organizations).toEqual(requests.map(() => requiredOrganization));
+      },
+    );
 
     it("prints the server's URL after successful activation and keeps build logs on stderr", async () => {
       const result = await cli();

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { getWorkspaceContext } from "#lib/workspace-context";
   import { onMount, tick, untrack } from "svelte";
   import { beforeNavigate } from "$app/navigation";
   import { page } from "$app/state";
@@ -29,6 +30,8 @@
   import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import type { PageData } from "./$types";
+
+  const workspace = getWorkspaceContext();
 
   let { data: route }: { data: PageData } = $props();
 
@@ -140,7 +143,11 @@
   };
 
   const apply = async (input: z.infer<typeof settingsInput>, acknowledgeRestart: boolean) => {
-    await updateSettings({ ...input, acknowledgeRestart });
+    await updateSettings({
+      ...input,
+      acknowledgeRestart,
+      organizationId: workspace.organizationId,
+    });
     const updated = await getSettings();
 
     if (updated.view.settings.identity) identity = $state.snapshot(updated.view.settings.identity);
@@ -164,7 +171,7 @@
         externallyManaged: view.settings.externallyManaged,
       });
 
-      const plan = await planSettings(input);
+      const plan = await planSettings({ ...input, organizationId: workspace.organizationId });
 
       if (plan.restartRequired) {
         pending = structuredClone(input);
@@ -209,7 +216,7 @@
     message = "";
 
     try {
-      await setExternalManagement({ enabled: !readonly });
+      await setExternalManagement({ enabled: !readonly, organizationId: workspace.organizationId });
     } catch (cause) {
       message = cause instanceof Error ? cause.message : "Could not apply the change.";
     } finally {
@@ -248,7 +255,7 @@
     message = "";
 
     try {
-      await completeSetup();
+      await completeSetup({ organizationId: workspace.organizationId });
     } catch (cause) {
       message = cause instanceof Error ? cause.message : "Could not complete setup.";
     } finally {

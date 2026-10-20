@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { getWorkspaceContext } from "#lib/workspace-context";
   import { onMount, untrack } from "svelte";
   import { workflowRequest } from "@platform/contracts";
   import { z } from "zod";
@@ -11,6 +12,8 @@
   import { NativeSelect } from "#shadcn/components/ui/native-select/index.js";
   import { Textarea } from "#shadcn/components/ui/textarea/index.js";
   import Feedback from "#shadcn/components/Feedback.svelte";
+
+  const workspace = getWorkspaceContext();
 
   let { appId }: { appId: string } = $props();
 
@@ -148,7 +151,13 @@
         fingerprint = next;
       }
 
-      const accepted = await manageWorkflow({ appId: currentAppId, requestId, request });
+      const accepted = await manageWorkflow({
+        appId: currentAppId,
+        requestId,
+        request,
+        organizationId: workspace.organizationId,
+      });
+
       app.rememberWorkflowOperation(currentAppId, accepted);
       // The operation is now accepted; leaving the page does not cancel it.
       submitted = draft;

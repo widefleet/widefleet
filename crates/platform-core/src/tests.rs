@@ -71,6 +71,32 @@ pub(crate) fn diagnostic_fixture() -> crate::Error {
     crate::Error::invalid("private native failure".into())
 }
 
+#[test]
+fn organization_selection_is_attached_to_api_requests_only() -> crate::Result<()> {
+    let api = Api::new("https://platform.example.test")?.with_organization(Some("org-alpha"))?;
+    let selected = api
+        .authenticated(reqwest::Method::GET, "/apps", "token")
+        .build()?;
+    assert_eq!(selected.headers()["x-widefleet-organization"], "org-alpha");
+    let login = api
+        .request(reqwest::Method::POST, "/api/auth/oauth2/token")
+        .build()?;
+    assert!(!login.headers().contains_key("x-widefleet-organization"));
+    for invalid in [
+        "",
+        " org-alpha",
+        "org-alpha\r\ninjected: value",
+        &"a".repeat(129),
+    ] {
+        assert!(
+            Api::new("https://platform.example.test")?
+                .with_organization(Some(invalid))
+                .is_err()
+        );
+    }
+    Ok(())
+}
+
 pub(crate) fn converted_diagnostic_fixture() -> crate::Result<()> {
     let failure: std::io::Result<()> = Err(std::io::Error::other("private I/O failure"));
     failure?;

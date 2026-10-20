@@ -46,13 +46,13 @@ describe("Mandatory application context", () => {
     });
     const headers = new Headers((await environment.users.login({ userId: person.id })).headers);
     headers.set("origin", environment.configuration.PLATFORM_URL);
-    headers.set("x-fixture-fleet", fleetId);
+    headers.set("x-widefleet-organization", organizationId);
 
     const identity = createIdentityService(
       environment.auth,
       environment.database.db,
       environment.configuration,
-      async ({ request }) => request.headers.get("x-fixture-fleet") ?? "",
+      { filterFleets: async (candidates) => candidates.map((candidate) => candidate.id) },
     );
 
     const authenticate = () =>
@@ -239,9 +239,9 @@ describe("Mandatory application context", () => {
   });
 
   it("rechecks membership and role when selecting a scope with an existing session", async () => {
-    first.headers.set("x-fixture-fleet", second.fleetId);
-    expect(await first.authenticate()).toMatchObject({ error: { code: "UNAUTHORIZED" } });
-    first.headers.set("x-fixture-fleet", first.fleetId);
+    first.headers.set("x-widefleet-organization", second.organizationId);
+    expect(await first.authenticate()).toMatchObject({ error: { code: "FORBIDDEN" } });
+    first.headers.set("x-widefleet-organization", first.organizationId);
     await environment.database.db
       .update(member)
       .set({ role: "member" })
@@ -337,7 +337,9 @@ describe("Mandatory application context", () => {
       reporting: environment.reporting,
       storage: createStorage(environment.configuration),
       encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
-      selectFleet: async ({ request }) => request.headers.get("x-fixture-fleet") ?? "",
+      fleetAccess: {
+        filterFleets: async (candidates) => candidates.map((candidate) => candidate.id),
+      },
     })();
 
     const api = createApi(runtime);

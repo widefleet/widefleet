@@ -140,12 +140,13 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
           const key = `${url.searchParams.get("id")}/${url.searchParams.get("branch")}`;
           const count = (fetchCounts.get(key) ?? 0) + 1;
           fetchCounts.set(key, count);
-          const delay = (url.searchParams.get("branch") === "left") === (count === 1) ? 20 : 200;
           response.setHeader("content-type", "application/json");
-          const complete = () => response.end(JSON.stringify({ delay }));
-
-          if (url.searchParams.get("mode") === "reordered-fetch") setTimeout(complete, delay);
-          else complete();
+          response.end(
+            JSON.stringify({
+              attempt: count,
+              first: (url.searchParams.get("branch") === "left") === (count === 1),
+            }),
+          );
 
           return;
         } else {
@@ -447,13 +448,19 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
       "matches replayed results to their steps when %s reverses parallel branches",
       async (mode) => {
         const id = await create(mode, { url: `${delayedOrigin}/reorder` });
+        const callbacks = () => labels(id).filter((label) => !label.startsWith("entered:"));
         await status(id, "waiting");
-        expect(labels(id)).toEqual(["left", "left-next", "right", "right-next"]);
+        expect(callbacks()).toEqual(["left", "left-next", "right", "right-next"]);
         await stop(true);
         await start();
         await call("continue", id);
         expect(await status(id, "complete")).toMatchObject({ output: [11, 21] });
-        expect(labels(id)).toEqual(["left", "left-next", "right", "right-next", "finish"]);
+        expect(callbacks()).toEqual(["left", "left-next", "right", "right-next", "finish"]);
+        expect(
+          labels(id)
+            .filter((label) => label.startsWith("entered:"))
+            .slice(0, 4),
+        ).toEqual(["entered:1:left", "entered:1:right", "entered:2:right", "entered:2:left"]);
         expect(fetchCounts.get(`${id}/left`)).toBeGreaterThanOrEqual(2);
         expect(fetchCounts.get(`${id}/right`)).toBeGreaterThanOrEqual(2);
       },
