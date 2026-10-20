@@ -1,5 +1,14 @@
 <script lang="ts">
-  import { getConnectorCatalog, getAppConnections } from "#lib/connectors.remote";
+  import {
+    getConnectorCatalog,
+    getAppConnections,
+    changeConnectorBinding,
+    removeConnectorBinding,
+  } from "#lib/connectors.remote";
+  import OrganizationField from "#shadcn/OrganizationField.svelte";
+  import FormIssues from "#shadcn/FormIssues.svelte";
+  import { Label } from "#shadcn/components/ui/label/index.js";
+  import { NativeSelect } from "#shadcn/components/ui/native-select/index.js";
   import { Input } from "#shadcn/components/ui/input/index.js";
   import { Button } from "#shadcn/components/ui/button/index.js";
   import { Badge } from "#shadcn/components/ui/badge/index.js";
@@ -91,8 +100,9 @@
   <div>
     <h1 class="text-2xl font-semibold tracking-tight">Connectors</h1>
     <p class="text-muted-foreground mt-2 max-w-xl text-sm leading-6">
-      Explore the integrations offered by your organization. Ask an administrator to connect one to
-      your app.
+      {data.admin
+        ? "Manage your organization’s integrations. Open an app’s connections to assign a connector."
+        : "Explore the integrations offered by your organization. Ask an organization administrator to connect one to your app."}
     </p>
   </div>
   <div class="flex items-center gap-3">
@@ -119,6 +129,96 @@
 {#if data.app}<p class="mt-5 text-sm">
     Showing connections for <span class="font-medium">{data.app.displayName}</span>.
   </p>{/if}
+{#if data.app && data.admin && connections}
+  <section class="mt-6 max-w-2xl space-y-5 rounded-xl border p-5" aria-labelledby="app-bindings">
+    <h2 id="app-bindings" class="text-sm font-medium">Connections for {data.app.displayName}</h2>
+    <p class="text-muted-foreground text-sm">
+      Status: {connections.connectors.state}. Saved changes become active after configuration
+      succeeds.
+    </p>
+    {#if connections.connectors.error}<Feedback kind="error"
+        >{connections.connectors.error}</Feedback
+      >{/if}
+    {#each Object.entries( { ...connections.activeConnectors, ...connections.connectors.grants } ) as [binding, grant] (binding)}
+      {@const remove = removeConnectorBinding.for(`${data.app.id}:${binding}`)}
+      {@const removing = !connections.connectors.grants[binding]}
+      {@const failed = connections.connectors.state === "failed"}
+      <div>
+        <form {...remove} class="flex flex-wrap items-center justify-between gap-3">
+          <OrganizationField field={remove.fields.organizationId} />
+          <input {...remove.fields.appId.as("hidden", data.app.id)} />
+          <input {...remove.fields.binding.as("hidden", binding)} />
+          <div class="space-y-2">
+            <p class="text-sm"><code>{binding}</code> → {grant.connector} · {grant.entrypoint}</p>
+            {#if removing}<Badge variant="outline"
+                >{failed ? "Removal failed" : "Removal pending"}</Badge
+              >{/if}
+          </div>
+          <Button
+            type="submit"
+            variant="outline"
+            size="sm"
+            disabled={remove.pending > 0 || (removing && !failed)}
+            >{removing
+              ? failed
+                ? `Retry removal ${binding}`
+                : `Removing ${binding}…`
+              : `Disconnect ${binding}`}</Button
+          >
+        </form>
+        <FormIssues issues={remove.fields.allIssues()} />
+      </div>
+    {/each}
+    <form {...changeConnectorBinding} class="space-y-4 border-t pt-5">
+      <OrganizationField field={changeConnectorBinding.fields.organizationId} />
+      <input {...changeConnectorBinding.fields.appId.as("hidden", data.app.id)} />
+      <FormIssues issues={changeConnectorBinding.fields.allIssues()} />
+      {#if changeConnectorBinding.result?.submitted}<Feedback kind="success"
+          >Connection change submitted.</Feedback
+        >{/if}
+      <h3 class="text-sm font-medium">Add or replace a connection</h3>
+      <div class="grid gap-4 sm:grid-cols-3">
+        <div class="space-y-2">
+          <Label for="binding-connector">Connector</Label>
+          <NativeSelect
+            id="binding-connector"
+            {...changeConnectorBinding.fields.connector.as("select")}
+            required
+            class="w-full"
+          >
+            <option value="">Select connector</option>
+            {#each catalog.filter((entry) => entry.entrypoints.length > 0) as entry (entry.name)}<option
+                value={entry.name}>{entry.name}</option
+              >{/each}
+          </NativeSelect>
+        </div>
+        <div class="space-y-2">
+          <Label for="binding-entrypoint">Entrypoint</Label>
+          <Input
+            id="binding-entrypoint"
+            name={changeConnectorBinding.fields.entrypoint.as("text").name}
+            aria-invalid={changeConnectorBinding.fields.entrypoint.as("text")["aria-invalid"]}
+            bind:value={
+              () => changeConnectorBinding.fields.entrypoint.value() ?? "default",
+              (value) => changeConnectorBinding.fields.entrypoint.set(value)
+            }
+            required
+          />
+        </div>
+        <div class="space-y-2">
+          <Label for="binding-name">Binding name</Label>
+          <Input
+            id="binding-name"
+            {...changeConnectorBinding.fields.binding.as("text")}
+            placeholder="ERP"
+            required
+          />
+        </div>
+      </div>
+      <Button type="submit" disabled={changeConnectorBinding.pending > 0}>Save connection</Button>
+    </form>
+  </section>
+{/if}
 {#if catalog.length > 0}
   <div class="relative mt-7 max-w-sm">
     <Search class="text-muted-foreground pointer-events-none absolute top-2.5 left-3 size-4" />
@@ -157,16 +257,18 @@
             >
           </span>
         </Accordion.Trigger>
+        {#if data.admin}
+          <div class="flex flex-wrap gap-2 pb-4">
+            <Button href={`/connectors/${entry.name}`} variant="outline" size="sm"
+              >Manage connector</Button
+            >
+            <Button href={`/connectors/${entry.name}/logs`} variant="outline" size="sm"
+              >View logs</Button
+            >
+          </div>
+        {/if}
         <Accordion.Content>
           <div class="border-t pt-4 pb-1">
-            {#if data.admin}
-              <Button
-                href={`/connectors/${entry.name}/logs`}
-                variant="outline"
-                size="sm"
-                class="mb-4">View logs</Button
-              >
-            {/if}
             {#if entry.entrypoints.length}
               <p class="text-muted-foreground mb-3 text-xs">Available entrypoints</p>
               <div class="flex flex-wrap gap-2">

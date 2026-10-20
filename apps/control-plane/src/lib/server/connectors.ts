@@ -2,7 +2,7 @@ import { operationId } from "./deployment-execution.ts";
 import type { WorkerModule } from "./worker-modules.ts";
 import type { HostedExecution } from "./deployment-execution.ts";
 import {
-  administrator,
+  connectorAdministrator,
   connectorStatus,
   bindingState,
   prepareConnector,
@@ -16,7 +16,7 @@ import { managedApp } from "./apps.ts";
 import type { Database } from "./database.ts";
 import { InvalidOperation } from "./errors.ts";
 import { encryptSecret } from "./secret-encryption.ts";
-import { defaultFleet, lockFleet, requireAgentExecution } from "./fleets.ts";
+import { lockApplicationFleet, requireAgentExecution } from "./fleets.ts";
 import type { Principal } from "./identity.ts";
 import {
   connectorReference,
@@ -155,11 +155,10 @@ export const createConnectorService = (
     execution
       ? execution.connectors.setSecret(principal, name, secret, value)
       : transact(database, async (transaction) => {
-          administrator(principal);
+          connectorAdministrator(principal);
 
           if (value !== null) validateConnectorSecret(value);
-          const target = await defaultFleet(transaction);
-          await lockFleet(transaction, target.id);
+          const target = await lockApplicationFleet(transaction, principal.application);
           await requireAgentExecution(transaction, target.id, "Connectors");
 
           const [existing] = await transaction
@@ -203,13 +202,13 @@ export const createConnectorService = (
         }),
   list: (principal: Principal) =>
     transact(database, async (transaction) => {
-      administrator(principal);
-      const fleet = await defaultFleet(transaction);
+      connectorAdministrator(principal);
+      const fleet = principal.application;
 
       const records = await transaction
         .select()
         .from(connectors)
-        .where(eq(connectors.fleetId, fleet.id))
+        .where(eq(connectors.fleetId, fleet.fleetId))
         .orderBy(connectors.name);
 
       return Result.ok(
@@ -218,13 +217,13 @@ export const createConnectorService = (
     }),
   read: (principal: Principal, name: string) =>
     transact(database, async (transaction) => {
-      administrator(principal);
-      const fleet = await defaultFleet(transaction);
+      connectorAdministrator(principal);
+      const fleet = principal.application;
 
       const [record] = await transaction
         .select()
         .from(connectors)
-        .where(and(eq(connectors.fleetId, fleet.id), eq(connectors.name, name)));
+        .where(and(eq(connectors.fleetId, fleet.fleetId), eq(connectors.name, name)));
 
       if (!record)
         throw new InvalidOperation({ code: "NOT_FOUND", message: "Connector not found" });
@@ -240,9 +239,8 @@ export const createConnectorService = (
     execution
       ? execution.connectors.deploy(principal, release, modules, requestId)
       : transact(database, async (transaction) => {
-          administrator(principal);
-          const target = await defaultFleet(transaction);
-          await lockFleet(transaction, target.id);
+          connectorAdministrator(principal);
+          const target = await lockApplicationFleet(transaction, principal.application);
           await requireAgentExecution(transaction, target.id, "Connectors");
 
           const id = operationId(`connectors/${target.id}/${release.name}`, requestId);

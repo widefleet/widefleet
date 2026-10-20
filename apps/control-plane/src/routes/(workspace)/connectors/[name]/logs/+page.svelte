@@ -93,7 +93,7 @@
   <div>
     <h1 class="text-2xl font-semibold tracking-tight">{data.name} logs</h1>
     <p class="text-muted-foreground mt-2 text-sm">
-      Runtime output across this connector’s versions. Administrator access only.
+      Runtime output across this connector’s versions. Organization administrator access only.
     </p>
   </div>
   <Button variant="outline" size="sm" onclick={refresh} disabled={refreshing}

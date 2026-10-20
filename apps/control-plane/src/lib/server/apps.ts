@@ -10,7 +10,7 @@ import { InvalidOperation } from "./errors.ts";
 import type { Principal } from "./identity.ts";
 import { appGrants, apps, artifacts, deploymentEvents, deployments, jobs } from "./schema.ts";
 import { transact, type Transaction } from "./transactions.ts";
-import { lockFleet, requireAgentExecution } from "./fleets.ts";
+import { lockApplicationFleet, requireAgentExecution } from "./fleets.ts";
 import { operationId, type HostedExecution } from "./deployment-execution.ts";
 
 export const appVisibility = (
@@ -244,10 +244,7 @@ const provisionApp = (
       return Result.ok(presentApp(existing.value, configuration));
     }
 
-    const fleet = await lockFleet(transaction, principal.application.fleetId);
-
-    if (fleet.organizationId !== principal.application.organizationId)
-      throw new InvalidOperation({ code: "NOT_FOUND", message: "Fleet not found" });
+    const fleet = await lockApplicationFleet(transaction, principal.application);
 
     const hostnameFor = (slug: string) =>
       `${slug}${fleet.appHostnameSuffix === null ? "" : `-${fleet.appHostnameSuffix}`}.${configuration.APP_DOMAIN}`;

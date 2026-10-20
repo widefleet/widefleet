@@ -12,7 +12,7 @@ import { DirectoryUnavailable } from "./directory.ts";
 import { InvalidOperation, TelemetryNotConfigured, TelemetryUnavailable } from "./errors.ts";
 import { createInstallationOwner, readInstallation } from "./installation-store.ts";
 import { uploadedConnector } from "./connector-package.ts";
-import { administrator } from "./connector-changes.ts";
+import { connectorAdministrator } from "./connector-changes.ts";
 import { connectorLogService } from "./telemetry.ts";
 
 const apiOperation = async <T>(operation: () => Promise<T>) => {
@@ -724,7 +724,7 @@ export const createApi = (runtime: Runtime) => {
       const name = contract.appSlug.parse(connectorUpload[1]);
 
       return apiOperation(async () => {
-        administrator(principal);
+        connectorAdministrator(principal);
         const key = idempotencyKey(request);
 
         const { metadata, modules } = unwrap(

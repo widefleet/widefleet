@@ -1,3 +1,4 @@
+import type { Principal } from "./identity.ts";
 import { Result } from "better-result";
 import type { Database, DatabaseExecutor } from "./database.ts";
 import { InvalidOperation } from "./errors.ts";
@@ -23,6 +24,18 @@ export const lockFleet = async (transaction: Transaction, fleetId: string) => {
     .for("no key update");
 
   if (!fleet) throw new InvalidOperation({ code: "NOT_FOUND", message: "Fleet not found" });
+
+  return fleet;
+};
+
+export const lockApplicationFleet = async (
+  transaction: Transaction,
+  context: Principal["application"],
+) => {
+  const fleet = await lockFleet(transaction, context.fleetId);
+
+  if (fleet.organizationId !== context.organizationId)
+    throw new InvalidOperation({ code: "NOT_FOUND", message: "Fleet not found" });
 
   return fleet;
 };
