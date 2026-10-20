@@ -3,8 +3,16 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { and, eq } from "drizzle-orm";
+import { workerMetadata } from "@platform/contracts";
 import { member, organization, session } from "../../src/lib/server/auth-schema.ts";
-import { apps, fleets, connectors } from "../../src/lib/server/schema.ts";
+import {
+  apps,
+  fleets,
+  connectors,
+  artifacts,
+  deployments,
+  jobs,
+} from "../../src/lib/server/schema.ts";
 import {
   S3Client,
   CreateBucketCommand,
@@ -334,6 +342,94 @@ for (const javaScriptEnabled of [true, false]) {
       await expect(second.getByRole("link", { name: "Manage connector", exact: true })).toHaveCount(
         0,
       );
+    } finally {
+      await context.close();
+    }
+  });
+
+  test(`retries a failed connector removal until activation succeeds (JavaScript ${javaScriptEnabled})`, async ({
+    browser,
+  }) => {
+    const { person, alpha, context } = await organizationSession(browser, javaScriptEnabled);
+
+    try {
+      const [fleet] = await environment.database.db
+        .select()
+        .from(fleets)
+        .where(eq(fleets.organizationId, alpha));
+
+      if (!fleet) throw new Error("Missing organization fixture fleet");
+      const appId = crypto.randomUUID();
+      const artifactId = crypto.randomUUID();
+      const deploymentId = crypto.randomUUID();
+      const applied = { revision: 1, grants: { ERP: { connector: "erp", entrypoint: "Reader" } } };
+      // A failed removal leaves the old serving snapshot in place.
+      await environment.database.db.insert(apps).values({
+        id: appId,
+        fleetId: fleet.id,
+        ownerId: person.id,
+        slug: "retry-removal",
+        displayName: "Retry removal",
+        hostname: `retry-removal.${alpha}.example.test`,
+        state: "active",
+        activeDeploymentId: deploymentId,
+        capabilities: {},
+        capabilityRevision: 2,
+        capabilityError: "Synthetic removal failure",
+        appliedCapabilities: applied,
+        appliedCapabilityRevision: 1,
+      });
+      await environment.database.db.insert(artifacts).values({
+        id: artifactId,
+        appId,
+        manifest: {},
+        modules: [],
+        metadata: workerMetadata.parse({
+          main_module: "worker.js",
+          compatibility_date: "2026-10-01",
+          bindings: [],
+          assets: { upload_session: crypto.randomUUID(), binding: "ASSETS" },
+        }),
+      });
+      await environment.database.db.insert(deployments).values({
+        id: deploymentId,
+        appId,
+        artifactId,
+        requestId: crypto.randomUUID(),
+        status: "succeeded",
+      });
+      const page = await context.newPage();
+      await page.goto("/organizations");
+      await page.getByRole("button", { name: /^Alpha admin$/i }).click();
+      await page.goto(`/connectors?app=${appId}`);
+      await expect(page.getByText("Removal failed", { exact: true })).toBeVisible();
+      await page.getByRole("button", { name: "Retry removal ERP", exact: true }).click();
+      await expect(page.getByText("Removal pending", { exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Removing ERP…", exact: true })).toBeDisabled();
+      const [retried] = await environment.database.db.select().from(apps).where(eq(apps.id, appId));
+      expect(retried).toMatchObject({
+        capabilities: {},
+        capabilityRevision: 2,
+        capabilityError: null,
+        appliedCapabilities: applied,
+        appliedCapabilityRevision: 1,
+      });
+      const queued = await environment.database.db.select().from(jobs).where(eq(jobs.appId, appId));
+      expect(queued).toHaveLength(1);
+      expect(queued[0]).toMatchObject({ fleetId: fleet.id, kind: "configure", state: "queued" });
+
+      // Simulate the agent confirming the removal.
+      await environment.database.db
+        .update(apps)
+        .set({ appliedCapabilityRevision: 2, appliedCapabilities: { revision: 2, grants: {} } })
+        .where(eq(apps.id, appId));
+      await environment.database.db
+        .update(jobs)
+        .set({ state: "succeeded" })
+        .where(eq(jobs.appId, appId));
+      await page.reload();
+      await expect(page.getByText("Removal pending", { exact: true })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: /ERP/ })).toHaveCount(0);
     } finally {
       await context.close();
     }

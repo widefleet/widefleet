@@ -140,16 +140,31 @@
     {#if connections.connectors.error}<Feedback kind="error"
         >{connections.connectors.error}</Feedback
       >{/if}
-    {#each Object.entries(connections.connectors.grants) as [binding, grant] (binding)}
+    {#each Object.entries( { ...connections.activeConnectors, ...connections.connectors.grants } ) as [binding, grant] (binding)}
       {@const remove = removeConnectorBinding.for(`${data.app.id}:${binding}`)}
+      {@const removing = !connections.connectors.grants[binding]}
+      {@const failed = connections.connectors.state === "failed"}
       <div>
         <form {...remove} class="flex flex-wrap items-center justify-between gap-3">
           <OrganizationField field={remove.fields.organizationId} />
           <input {...remove.fields.appId.as("hidden", data.app.id)} />
           <input {...remove.fields.binding.as("hidden", binding)} />
-          <p class="text-sm"><code>{binding}</code> → {grant.connector} · {grant.entrypoint}</p>
-          <Button type="submit" variant="outline" size="sm" disabled={remove.pending > 0}
-            >Disconnect {binding}</Button
+          <div class="space-y-2">
+            <p class="text-sm"><code>{binding}</code> → {grant.connector} · {grant.entrypoint}</p>
+            {#if removing}<Badge variant="outline"
+                >{failed ? "Removal failed" : "Removal pending"}</Badge
+              >{/if}
+          </div>
+          <Button
+            type="submit"
+            variant="outline"
+            size="sm"
+            disabled={remove.pending > 0 || (removing && !failed)}
+            >{removing
+              ? failed
+                ? `Retry removal ${binding}`
+                : `Removing ${binding}…`
+              : `Disconnect ${binding}`}</Button
           >
         </form>
         <FormIssues issues={remove.fields.allIssues()} />
