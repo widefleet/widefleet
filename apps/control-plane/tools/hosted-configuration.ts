@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseConfigFileTextToJson } from "typescript";
@@ -11,6 +12,7 @@ export const hostedInstallation = z
     platformUrl: runtimeConfigurationSchema.shape.PLATFORM_URL,
     appDomain: z.hostname(),
     appZone: z.hostname(),
+    emailFrom: z.email().optional(),
     hyperdriveId: z.string().regex(/^[a-f0-9]{32}$/),
   })
   .refine(
@@ -33,6 +35,47 @@ export const hostedResourceIds = z.object({
   auth: z.string().regex(/^[a-f0-9]{32}$/),
 });
 
+interface HostedEmailBindings {
+  send_email?: { name: string; allowed_sender_addresses: string[]; remote?: boolean }[];
+}
+
+export const hostedInitializationConfiguration = async (
+  installation: z.infer<typeof hostedInstallation>,
+  account: string,
+) => {
+  const email: HostedEmailBindings = {};
+  const vars: Record<string, string> = {};
+
+  if (installation.emailFrom) {
+    email.send_email = [
+      {
+        name: "EMAIL",
+        allowed_sender_addresses: [installation.emailFrom],
+        remote: true,
+      },
+    ];
+    vars["EMAIL_FROM"] = installation.emailFrom;
+  }
+
+  const control = await readWorkerConfiguration(fileURLToPath(new URL("../", import.meta.url)));
+
+  return {
+    name: `${installation.name}-initialize`,
+    account_id: hostedResourceIds.shape.account.parse(account),
+    compatibility_date: control.compatibility_date,
+    services: [
+      {
+        binding: "APP_RUNTIME",
+        service: hostedResourceNames(installation).runtime,
+        entrypoint: "RuntimeManagement",
+        remote: true,
+      },
+    ],
+    ...email,
+    vars,
+  };
+};
+
 const readWorkerConfiguration = async (directory: string) => {
   const path = resolve(directory, "wrangler.jsonc");
   const parsed = parseConfigFileTextToJson(path, await readFile(path, "utf8"));
@@ -46,6 +89,18 @@ const readWorkerConfiguration = async (directory: string) => {
       vars: z.record(z.string(), z.string()),
       assets: z.looseObject({ directory: z.string() }).optional(),
       workflows: z.array(z.looseObject({ name: z.string() })),
+      ratelimits: z
+        .array(
+          z.object({
+            name: z.string(),
+            namespace_id: z.string(),
+            simple: z.object({
+              limit: z.number(),
+              period: z.union([z.literal(10), z.literal(60)]),
+            }),
+          }),
+        )
+        .optional(),
     })
     .parse(parsed.config);
 
@@ -77,6 +132,16 @@ export const hostedConfigurations = async (
     service: names.runtime,
     entrypoint: "RuntimeManagement",
   };
+
+  const emailBindings: HostedEmailBindings = {};
+  const emailVariables: Record<string, string> = {};
+
+  if (installation.emailFrom) {
+    emailBindings.send_email = [
+      { name: "EMAIL", allowed_sender_addresses: [installation.emailFrom] },
+    ];
+    emailVariables["EMAIL_FROM"] = installation.emailFrom;
+  }
 
   return {
     runtime: {
@@ -114,22 +179,29 @@ export const hostedConfigurations = async (
       },
       routes: [{ pattern: new URL(installation.platformUrl).hostname, custom_domain: true }],
       workflows: workflows(control),
+      ratelimits: control.ratelimits?.map((binding) => ({
+        ...binding,
+        namespace_id: Number.parseInt(
+          createHash("sha256")
+            .update(`${names.controlPlane}:${binding.name}`)
+            .digest("hex")
+            .slice(0, 12),
+          16,
+        ).toString(),
+      })),
       services: [service],
+      ...emailBindings,
       vars: {
         ...control.vars,
         APP_RUNTIME_NAME: names.runtime,
         CLOUDFLARE_ACCOUNT_ID: ids.account,
         PLATFORM_URL: installation.platformUrl,
         APP_DOMAIN: installation.appDomain,
+        ...emailVariables,
       },
       hyperdrive: [{ binding: "HYPERDRIVE", id: installation.hyperdriveId }],
       r2_buckets: [{ binding: "ARTIFACTS", bucket_name: names.artifacts }],
     },
-    initialize: {
-      name: `${installation.name}-initialize`,
-      account_id: ids.account,
-      compatibility_date: control.compatibility_date,
-      services: [{ ...service, remote: true }],
-    },
+    initialize: await hostedInitializationConfiguration(installation, ids.account),
   };
 };

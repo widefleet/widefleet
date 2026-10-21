@@ -1,5 +1,5 @@
+import { createRuntimeExtension } from "#runtime-extension";
 import { createCloudflareEmail } from "./email-cloudflare.ts";
-import { cloudflareAuthRateLimit } from "./auth-rate-limit-cloudflare.ts";
 import { error } from "@sveltejs/kit";
 import { createArtifactStorage } from "./artifact-storage.ts";
 import { readCloudflareConfiguration, type CloudflareBindings } from "./cloudflare-config.ts";
@@ -11,13 +11,14 @@ import { createR2Storage } from "./storage/r2.ts";
 import { createCloudflareLogs } from "./cloudflare-logs.ts";
 import { createCloudflareExecution } from "./cloudflare-execution.ts";
 import { createCloudflareAppSignIn } from "./app-sign-in-cloudflare.ts";
+import { cloudflareAuthRateLimit } from "./auth-rate-limit-cloudflare.ts";
 
 export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
   const configuration = readCloudflareConfiguration(bindings);
   // A pool belongs to this request only; Hyperdrive owns pooling between requests.
   const database = createDatabase(configuration, 5);
-
-  const sendEmail = createCloudflareEmail(bindings);
+  const extension = createRuntimeExtension({ database: database.db, configuration });
+  const sendEmail = extension.sendEmail ?? createCloudflareEmail(bindings);
 
   const settings = createSettingsService(
     configuration,
@@ -32,6 +33,7 @@ export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
   const storage = createArtifactStorage(createR2Storage(bindings.ARTIFACTS));
 
   const options: Parameters<typeof createRuntime>[0] = {
+    ...extension,
     configuration,
     database,
     settings,

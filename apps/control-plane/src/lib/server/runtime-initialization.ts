@@ -1,3 +1,4 @@
+import { createRuntimeExtension } from "#runtime-extension";
 import { organizationIdentifier } from "@platform/contracts";
 import { createAppSignIn } from "./app-sign-in-node.ts";
 import { bootstrapConfiguration } from "@platform/contracts";
@@ -85,11 +86,14 @@ export const initializeRuntime = async (
   const { keys, configuration, database } = await prepareInstallation(input, migrationsFolder);
 
   try {
+    const extension = createRuntimeExtension({ database: database.db, configuration });
+
     const settings = createSettingsService(
       configuration,
       database.db,
       keys.encryption,
       (organizationId) => createAppSignIn(configuration, keys.cookie, organizationId),
+      Boolean(extension.sendEmail),
     );
 
     const state = await readInstallation(database.db);
@@ -116,7 +120,7 @@ export const initializeRuntime = async (
 
     await registerCli(database.db, configuration);
 
-    return { configuration, database, settings, encryptionKey: keys.encryption };
+    return { configuration, database, settings, encryptionKey: keys.encryption, extension };
   } catch (cause) {
     await database.close();
     throw cause;

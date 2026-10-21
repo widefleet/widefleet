@@ -13,7 +13,8 @@
   "imports": {
     "#lib/*": "./src/lib/*.ts",
     "#server/*": "./src/lib/server/*.ts",
-    "#shadcn/*": "./src/lib/*"
+    "#shadcn/*": "./src/lib/*",
+    "#runtime-extension": "./src/lib/server/runtime-extension.ts"
   },
   "exports": {
     "./application-context": "./src/lib/server/application-context.ts",
@@ -25,7 +26,15 @@
     "./authentication": "./src/lib/server/auth.ts",
     "./configuration": "./src/lib/server/config.ts",
     "./runtime": "./src/lib/server/runtime-services.ts",
-    "./migrations/*": "./migrations/*"
+    "./migrations/*": "./migrations/*",
+    "./runtime-extension": "./src/lib/server/runtime-extension.ts",
+    "./members": "./src/lib/server/members.ts",
+    "./settings": "./src/lib/server/settings.ts",
+    "./installation": "./src/lib/server/installation-store.ts",
+    "./app-sign-in-cloudflare": "./src/lib/server/app-sign-in-cloudflare.ts",
+    "./cloudflare-configuration": "./src/lib/server/cloudflare-config.ts",
+    "./tools/*": "./tools/*",
+    "./organization": "./src/lib/organization.ts"
   },
   "scripts": {
     "test:e2e": "playwright test",

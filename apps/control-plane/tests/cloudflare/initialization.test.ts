@@ -34,10 +34,16 @@ describe("Hosted installation initialization", () => {
   let directory: string;
   let bootstrapPath: string;
 
-  const initialize = (bootstrapFile?: string) =>
+  const initialize = (bootstrapFile?: string, configPath?: string) =>
     execute(process.execPath, ["tools/initialize-cloudflare.ts"], {
       cwd: fileURLToPath(new URL("../../", import.meta.url)),
-      env: { ...process.env, ...environment, PLATFORM_BOOTSTRAP_FILE: bootstrapFile },
+      env: {
+        ...process.env,
+        ...environment,
+        PLATFORM_BOOTSTRAP_FILE: bootstrapFile,
+        WIDEFLEET_INITIALIZE_CONFIG: configPath,
+        APP_COOKIE_SECRET: undefined,
+      },
       timeout: 15_000,
     });
 
@@ -113,6 +119,21 @@ describe("Hosted installation initialization", () => {
       },
     ]);
   }, 30_000);
+
+  it("requires app sign-in credentials for an email-enabled owner-only bootstrap", async () => {
+    const configPath = join(directory, "initialize.json");
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        name: "synthetic-initialization",
+        compatibility_date: "2026-10-01",
+        send_email: [{ name: "EMAIL" }],
+        vars: { EMAIL_FROM: "notifications@example.test" },
+      }),
+    );
+    await expect(initialize(bootstrapPath, configPath)).rejects.toThrow("APP_COOKIE_SECRET");
+    expect((await readInstallation(database.db)).ownerId).toBeNull();
+  });
 
   describe("Existing installation", () => {
     beforeEach(async () => {
