@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
+import { authControlPath } from "@platform/auth-proxy/publication";
+import { appLoginClientId, readAppLogin } from "../../src/lib/server/app-login-client.ts";
 import { account, oauthClient, oauthResource, user } from "../../src/lib/server/auth-schema.ts";
 import { cliScopes } from "../../src/lib/server/auth-options.ts";
 import { cloudflareConfigurationSchema } from "../../src/lib/server/cloudflare-config.ts";
@@ -34,7 +36,11 @@ describe("Hosted installation initialization", () => {
   let directory: string;
   let bootstrapPath: string;
 
-  const initialize = (bootstrapFile?: string, configPath?: string) =>
+  const initialize = (
+    bootstrapFile?: string,
+    configPath?: string,
+    overrides: NodeJS.ProcessEnv = {},
+  ) =>
     execute(process.execPath, ["tools/initialize-cloudflare.ts"], {
       cwd: fileURLToPath(new URL("../../", import.meta.url)),
       env: {
@@ -43,6 +49,8 @@ describe("Hosted installation initialization", () => {
         PLATFORM_BOOTSTRAP_FILE: bootstrapFile,
         WIDEFLEET_INITIALIZE_CONFIG: configPath,
         APP_COOKIE_SECRET: undefined,
+        WIDEFLEET_RUNTIME_EXTENSION: undefined,
+        ...overrides,
       },
       timeout: 15_000,
     });
@@ -134,6 +142,91 @@ describe("Hosted installation initialization", () => {
     await expect(initialize(bootstrapPath, configPath)).rejects.toThrow("APP_COOKIE_SECRET");
     expect((await readInstallation(database.db)).ownerId).toBeNull();
   });
+
+  const emailExtension = fileURLToPath(new URL("./email-extension.fixture.ts", import.meta.url));
+
+  it("requires app sign-in credentials when only the extension supplies email", async () => {
+    await expect(
+      initialize(bootstrapPath, undefined, { WIDEFLEET_RUNTIME_EXTENSION: emailExtension }),
+    ).rejects.toThrow("APP_COOKIE_SECRET");
+    expect((await readInstallation(database.db)).ownerId).toBeNull();
+  });
+
+  it.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
+    "publishes default app sign-in when only the extension supplies email",
+    async () => {
+      const { unstable_dev } = await import("wrangler");
+      const workerName = `initialize-${name}`;
+      const entry = join(directory, "runtime.ts");
+      await writeFile(
+        entry,
+        `import { manageAuthConfiguration } from ${JSON.stringify(fileURLToPath(import.meta.resolve("@platform/auth-proxy/worker")))};
+        export default { fetch: manageAuthConfiguration };`,
+      );
+      const runtimePath = join(directory, "runtime.json");
+      await writeFile(
+        runtimePath,
+        JSON.stringify({
+          name: workerName,
+          main: entry,
+          compatibility_date: "2026-10-01",
+          compatibility_flags: ["nodejs_compat"],
+          kv_namespaces: [{ binding: "AUTH_CONFIG", id: "auth-config" }],
+          vars: { WIDEFLEET_CONTROL_TOKEN: "local-initialization-control-key-never-deploy" },
+        }),
+      );
+      const configPath = join(directory, "initialize.json");
+      await writeFile(
+        configPath,
+        JSON.stringify({
+          name: `bootstrap-${name}`,
+          compatibility_date: "2026-10-01",
+          services: [{ binding: "APP_RUNTIME", service: workerName }],
+        }),
+      );
+
+      const worker = await unstable_dev(entry, {
+        config: runtimePath,
+        local: true,
+        persist: false,
+        ip: "127.0.0.1",
+        port: 0,
+        inspectorPort: 0,
+        logLevel: "error",
+        experimental: { disableExperimentalWarning: true, watch: false },
+      });
+
+      try {
+        const configurationUrl = `http://localhost${authControlPath}/organizations/widefleet/configuration`;
+        expect(await (await worker.fetch(configurationUrl)).json()).toMatchObject({
+          state: "waiting",
+        });
+        await initialize(bootstrapPath, configPath, {
+          WIDEFLEET_RUNTIME_EXTENSION: emailExtension,
+          APP_COOKIE_SECRET: Buffer.alloc(32, 1).toString("base64url"),
+        });
+        expect(await (await worker.fetch(configurationUrl)).json()).toMatchObject({
+          state: "active",
+        });
+        expect(
+          await readAppLogin(
+            database.db,
+            cloudflareConfigurationSchema.parse(environment),
+            environment.PLATFORM_ENCRYPTION_KEY,
+            "widefleet",
+          ),
+        ).toMatchObject({ management: { clientId: appLoginClientId("widefleet") } });
+        expect(await database.db.select().from(oauthClient)).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ clientId: appLoginClientId("widefleet"), disabled: false }),
+          ]),
+        );
+      } finally {
+        await worker.stop();
+      }
+    },
+    60_000,
+  );
 
   describe("Existing installation", () => {
     beforeEach(async () => {
