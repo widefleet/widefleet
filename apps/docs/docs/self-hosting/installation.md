@@ -17,8 +17,11 @@ scoped to the selected organization. Before upgrading a serving installation fro
 ownership, complete and verify an explicit runtime-state migration first. See the
 [organization ownership upgrade requirements](/reference/runtime#organization-ownership-upgrade)
 for its scope.
-The database migration preserves the existing installation's settings and secret references
-in its `widefleet` organization, but does not move object storage or local node state.
+The database migration preserves the installation settings under `widefleet`. Startup then
+moves the saved workspace SSO registration into the native provider store and removes the
+old editable identity document. The shared registration replaces the former separate app
+credentials, so register both callbacks on the saved workspace client. Directory credentials
+are retained. This does not move object storage or local node state.
 Updating components or redeploying apps alone cannot migrate that state.
 After completing the state migration, upgrade the control plane,
 agent and runtime together; register the newly displayed app callback URL
@@ -40,12 +43,12 @@ Configure company SSO, directory credentials and browser editability in **Settin
 After starting the containers, open `PLATFORM_URL`:
 
 1. Create the first administrator with a name, email and password.
-2. Choose Microsoft Entra or another OpenID Connect provider. The page shows both callback URLs before saving, so registrations can be created at the provider.
-3. Enter separate management and app-SSO client credentials. Enable group search only if needed.
+2. Enter the issuer URL and choose the app identity claims: Microsoft Entra for Entra object IDs and group handling, or OpenID Connect for standard subjects and configurable group claims. The page shows both callback URLs before saving.
+3. Register both callbacks in one IdP registration and enter its client ID and secret once. Enable directory search only if needed.
 4. Enter your company email domain and publish the DNS TXT record shown by **Get verification record**. Choose **Verify domain and sign in**, then authenticate with the same email as the first administrator. Widefleet links that account automatically and checks its administrator access. Verified SSO is now required for the organization.
 5. Complete setup. Password authentication is disabled server-side and local browser sessions and their refresh tokens are removed. Future sign-ins use company SSO.
 
-All users admitted to the management client become Members and can create apps. Restrict that client to intended app builders at the identity provider. Admission to the separate app client does not grant management membership. Apps enforce their own business permissions using the verified user and group context.
+In the installation organization, company sign-in automatically enrolls admitted users as Members who can create apps. Restrict the shared IdP registration to the intended company users. Customer organizations require a membership or invitation for control-plane access. Apps enforce their own access rules and business permissions using the verified user and group context.
 
 Management uses Better Auth's SSO plugin for OIDC discovery, callbacks, provider registration and DNS verification. Existing accounts with a matching email in the verified company domain are linked automatically, retaining their membership and role. Other email domains are rejected. See [company SSO activation](/guides/members#activate-company-sso) for CLI commands and provider replacement behavior.
 
@@ -70,24 +73,22 @@ Mount a JSON file read-only into the control-plane container and set `PLATFORM_B
   },
   "settings": {
     "externallyManaged": false,
-    "identity": {
+    "appIdentity": { "type": "entra" },
+    "directory": null,
+    "sso": {
+      "providerId": "company-widefleet",
       "domain": "example.com",
-      "provider": { "type": "entra", "tenantId": "00000000-0000-4000-8000-000000000001" },
-      "management": {
-        "clientId": "MANAGEMENT_CLIENT_ID",
-        "secret": { "type": "value", "value": "MANAGEMENT_CLIENT_SECRET" }
-      },
-      "apps": {
-        "clientId": "APP_CLIENT_ID",
-        "secret": { "type": "value", "value": "APP_CLIENT_SECRET" }
-      },
-      "directory": null
+      "issuer": "https://login.microsoftonline.com/00000000-0000-4000-8000-000000000001/v2.0",
+      "oidcConfig": {
+        "clientId": "COMPANY_CLIENT_ID",
+        "clientSecret": "COMPANY_CLIENT_SECRET"
+      }
     }
   }
 }
 ```
 
-`settings` is optional. Supply secret values as `{ "type": "value", "value": "..." }`; Widefleet encrypts them before writing them to PostgreSQL. A Compose override can mount the bootstrap file; it must not mount the host Docker socket into management.
+`settings` is optional. SSO credentials belong to the native provider configuration; directory credentials, when used, accept `{ "type": "value", "value": "..." }` secrets. Both are encrypted before storage. A Compose override can mount the bootstrap file; it must not mount the host Docker socket into management.
 
 For example, add this override to the selected Compose files (the source paths must already exist):
 
@@ -115,13 +116,19 @@ widefleet settings external-management true
 widefleet settings external-management false
 ```
 
-The CLI and external integrations use `GET/PUT /api/v1/settings`, `POST /api/v1/settings/plan` and `PUT /api/v1/settings/external-management`. The UI uses SvelteKit remote functions that call the same settings service. Administrator permission is required through either entry point. Exports contain secret references, never stored secret values; those references belong to this installation.
+The CLI and external integrations use `GET/PUT /api/v1/settings`, `POST /api/v1/settings/plan` and `PUT /api/v1/settings/external-management`. The UI uses SvelteKit remote functions that call the same settings service. Administrator permission is required through either entry point. Exports omit the SSO secret, which the native provider preserves when unchanged. Set `sso.oidcConfig.clientSecret` to replace it. Directory secrets are exported as references scoped to the selected organization. Stored secret values are never returned.
 
 External management makes the settings UI read-only; API/CLI writes and app management remain available. An administrator can turn browser editing back on.
 
-Settings are validated before saving. Changes to proxy options require acknowledgement of a restart; protected app requests can briefly fail, including for signed-in users. The UI presents **Save and restart** only for those changes. Client-secret replacement uses OAuth2 Proxy's secret-file support without restarting it. Activation status distinguishes saved settings from the configuration running in the proxy. Verify a company sign-in after changing identity settings.
+Settings are validated before saving. The shared runtime applies app sign-in configuration
+without restarting. Activation status distinguishes saved settings from a published
+configuration, and remains waiting while company-domain verification is pending. If
+publication fails, correct the runtime connection and save again. A future runtime requiring
+a restart must report it through the same plan and acknowledgement flow.
 
-The SSO image contains the pinned, unmodified OAuth2 Proxy binary and a small process supervisor. It validates candidate configuration and retains only the current active snapshot for restart/recovery. Its shared `app-auth` volume contains the runtime credentials needed to authenticate users and restart without management or PostgreSQL. Treat that volume as secret material. There is no configuration-version history.
+The app runtime keeps the published authentication configuration and validates company
+logins directly with the IdP. Company app sign-in does not contact the control plane or its
+PostgreSQL database. Protect and back up the runtime state containing those credentials.
 
 ### Secrets and administrator recovery
 
@@ -141,12 +148,12 @@ The command requires an existing Owner or Admin and prints a one-use link. It op
 
 **Enable group claims on the app-SSO registration before using group-based permissions in apps.** Widefleet forwards the group claims configured in Entra. Follow these steps to include them in app sign-ins:
 
-1. In the Microsoft Entra admin center, open **App registrations** and select the registration selected for **Published app sign-in**, not the management registration.
+1. In the Microsoft Entra admin center, open **App registrations** and select the shared Widefleet registration.
 2. Open **Token configuration → Add groups claim** and select the group types the apps need. For security-group permissions, select **Security groups** (`groupMembershipClaims: "SecurityGroup"`).
 3. Configure the **ID token** to emit **Group ID** in the `groups` claim. Keep object IDs rather than group names and do not select **Emit groups as role claims**: the current proxy reads `groups`.
 4. After a new app-SSO sign-in, verify that an intended group member receives the expected IDs in server-side `locals.user.groups`. The app implements its own authorization using these IDs. An app's management collaboration grants do not configure these claims.
 
-Entra limits JWT group claims to **200 group memberships per user**, including nested groups. Above that limit, it omits the entire group list and provides an overage indicator for a Microsoft Graph lookup; it does not return the first 200 groups. The generated Widefleet configuration uses OAuth2 Proxy's native Entra provider to resolve that indicator, including all result pages. Grant the app-SSO registration the delegated **User.Read** permission and consent to it. A failed overage lookup fails the login. Missing group claims without an overage indicator still become `locals.user.groups = []`, so an empty array does not establish that the user has no directory memberships. App authorization must require the expected group explicitly rather than grant access when the list is empty.
+Entra limits JWT group claims to **200 group memberships per user**, including nested groups. Above that limit, it omits the entire group list and provides an overage indicator for a Microsoft Graph lookup; it does not return the first 200 groups. The app runtime's Entra integration resolves that indicator, including all result pages. Grant the app-SSO registration the delegated **User.Read** permission and consent to it. A failed overage lookup fails the login. Missing group claims without an overage indicator still become `locals.user.groups = []`, so an empty array does not establish that the user has no directory memberships. App authorization must require the expected group explicitly rather than grant access when the list is empty.
 
 For large directories, **Groups assigned to the application** can restrict the emitted set to relevant groups assigned to the app-SSO enterprise application. This mode includes direct memberships only; nested memberships are not included. Choose it only if that matches the apps' permission model.
 
@@ -154,17 +161,17 @@ For large directories, **Groups assigned to the application** can restrict the e
 
 ### Generic OIDC
 
-Choose **OpenID Connect** in Settings, enter the issuer URL and a login-button label, then register the displayed management and app callback URLs. Management requests `openid profile email` and verifies ID tokens. Provider or client changes can produce different user subjects; link the replacement company account deliberately before retiring the former login.
+Choose **OpenID Connect** app identity claims in Settings, enter the issuer URL, then register both displayed callback URLs on the same client. Management requests `openid profile email` and verifies ID tokens. Changing the issuer or client identity while accounts are linked is rejected by the native SSO plugin.
 
-For apps, configure the IdP to include memberships in the ID token. The optional token fields select group, name and email claims; defaults are `groups`, `name` and `email`. The verified user identifier is `sub`. Some providers use different subjects for different clients, so management and app user IDs can differ. Generic OIDC uses the groups supplied in the token. Each app implements its own authorization.
+For apps, configure the IdP to include memberships in the ID token. The optional token fields select group, name and email claims; defaults are `groups`, `name` and `email`. The verified user identifier is `sub`. Generic OIDC uses the groups supplied in the token. Each app implements its own authorization.
 
 ### Optional group search
 
-For Entra, enable **Connect Microsoft Graph (optional)** in Settings to let authenticated app builders search company groups through `widefleet groups search "Einkauf" --json` or `GET /api/v1/groups?query=Einkauf`. API tokens require `platform:read`; the CLI uses the normal Widefleet login. Results contain the native group `id`, `name`, existing `description` and `source`, plus `hasMore` when the search should be narrowed. Graph is queried directly; no directory database or SCIM setup is required.
+For Entra, enable **Connect Microsoft Graph** in Settings to let authenticated app builders search company groups through `widefleet groups search "Einkauf" --json` or `GET /api/v1/groups?query=Einkauf`. API tokens require `platform:read`; the CLI uses the normal Widefleet login. Results contain the native group `id`, `name`, existing `description` and `source`, plus `hasMore` when the search should be narrowed. Graph is queried directly; no directory database or SCIM setup is required.
 
 Grant the directory registration Microsoft Graph **GroupMember.Read.All application permission**, with tenant admin consent. Enter the directory client ID and secret for a registration in the same tenant. The API can reuse an existing stored secret reference. This application permission is separate from the app-SSO registration's delegated `User.Read` permission for group overage. See Microsoft's [list groups API and permissions](https://learn.microsoft.com/en-us/graph/api/group-list?view=graph-rest-1.0).
 
-Search returns Entra object IDs, matching app tokens configured to emit Group ID. Choosing a group during development does not grant access to the app; its server-side code checks `locals.user.groups`. Directory credentials stay in the control plane. A directory outage makes search unavailable but does not affect app authentication, which uses the independently configured OAuth2 Proxy and IdP.
+Search returns Entra object IDs, matching app tokens configured to emit Group ID. Choosing a group during development does not grant access to the app; its server-side code checks `locals.user.groups`. Directory credentials stay in the control plane. A directory outage makes search unavailable but does not affect app authentication, which uses the published runtime configuration and IdP.
 
 ## Pull the release images
 

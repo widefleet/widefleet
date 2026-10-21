@@ -65,7 +65,7 @@ returns `FORBIDDEN` and leaves the invitation pending.
 
 An organization owner or administrator configures Entra or another OIDC provider in
 **Settings → Company sign-in**. Enter the company email domain, register the displayed
-management and app callback URLs, and supply separate client credentials. Save, choose
+workspace and app callback URLs in one IdP registration, and enter its client ID and secret once. Save, choose
 **Get verification record**, publish the displayed DNS TXT record, then choose
 **Verify domain and sign in**. DNS ownership is checked by Better Auth's SSO plugin.
 Until verification succeeds, the provider cannot authenticate users and an email-enabled
@@ -85,7 +85,7 @@ synchronize users or groups. The equivalent CLI flow is:
 ```sh
 widefleet settings get
 widefleet settings export > settings.json
-# Edit identity.domain, provider and client credentials in settings.json.
+# Edit sso.domain, sso.issuer and sso.oidcConfig in settings.json.
 widefleet settings plan --file settings.json
 widefleet settings apply --file settings.json
 widefleet settings domain-verification
@@ -103,12 +103,19 @@ through CLI refresh tokens. An email login can access memberships without active
 other companies with SSO require their own provider. A browser account switch while
 approving a CLI requires reloading the approval page.
 
-Replacing the provider, company domain or management client ID requires a new domain proof.
-It removes the old provider account links, ends company browser sessions and deletes their
-CLI refresh grants; issued API access tokens expire within five minutes. Other organizations'
-sessions remain intact. Rotating only the management client secret preserves domain proof
-and account links. Test the new login before completing self-hosted setup. The installation
-operator can use the [recovery procedure](/self-hosting/installation#secrets-and-administrator-recovery).
+The provider configuration is stored by Better Auth's SSO plugin. The settings export
+includes the editable native provider fields but omits its secret; applying that export
+preserves the saved secret. Set `sso.oidcConfig.clientSecret` to rotate it. The UI likewise
+keeps the saved secret when the field is blank. Directory secrets use organization-owned
+references and remain independent of company login credentials.
+
+Native SSO rejects changes to the issuer or client identity while provider accounts are
+linked. It does not silently delete those accounts to make an update succeed. Removing
+company SSO explicitly removes its provider account links and ends that organization's
+company sessions and CLI refresh grants; issued access tokens have a five-minute lifetime.
+A self-hosted installation requires another usable login before removal. Rotating only
+the secret preserves domain proof and account links. The installation operator can use
+the [recovery procedure](/self-hosting/installation#secrets-and-administrator-recovery).
 
 ## Opening published apps
 
@@ -136,7 +143,7 @@ direct company app login.
 These membership and IdP changes do not revoke an already issued app cookie; it remains
 valid until its one-hour lifetime ends. The next app sign-in checks Widefleet membership
 or the current IdP admission and group claims, according to the configured login mode.
-Changing the provider configuration or app client ID in Widefleet invalidates existing
+Changing the provider configuration or shared client ID in Widefleet invalidates existing
 app sessions as soon as the new configuration is active.
 Rotating only the IdP client secret preserves existing sessions.
 
