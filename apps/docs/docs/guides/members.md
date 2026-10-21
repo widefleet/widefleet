@@ -85,7 +85,31 @@ synchronize users or groups. The equivalent CLI flow is:
 ```sh
 widefleet settings get
 widefleet settings export > settings.json
-# Edit sso.domain, sso.issuer and sso.oidcConfig in settings.json.
+```
+
+For the first connection, the export contains `"sso": null`. Replace that `null`
+with the following object, adapting the domain, issuer and client credentials to your
+provider. Choose a `providerId` unique within the Widefleet installation and keep it
+unchanged when updating the connection. Leave the other exported settings intact.
+
+```json
+{
+  "providerId": "example-company",
+  "issuer": "https://login.example.com",
+  "domain": "example.com",
+  "oidcConfig": {
+    "clientId": "REPLACE_WITH_CLIENT_ID",
+    "clientSecret": "REPLACE_WITH_CLIENT_SECRET",
+    "pkce": true,
+    "scopes": ["openid", "profile", "email"],
+    "mapping": { "name": "name", "email": "email" }
+  }
+}
+```
+
+The initial registration requires the client secret. Then plan and apply the edited file:
+
+```sh
 widefleet settings plan --file settings.json
 widefleet settings apply --file settings.json
 widefleet settings domain-verification
