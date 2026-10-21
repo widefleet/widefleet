@@ -1,3 +1,5 @@
+import { readOrganizationSettings } from "./installation-store.ts";
+import { installationOrganizationId } from "../organization.ts";
 import { createReportingSymbolicator } from "./reporting-maps.ts";
 import * as contract from "@platform/contracts";
 import { count, eq, isNotNull, isNull, sql } from "drizzle-orm";
@@ -57,7 +59,7 @@ export const createReporting = (
 
     return {
       installationId: record.reportingId,
-      identity: contract.installationSettings.parse(record.settings).identity,
+      identity: (await readOrganizationSettings(database, installationOrganizationId)).identity,
       preferences: { usage: record.usageReporting, crashes: record.crashReporting },
       effective: {
         usage: configuration.PLATFORM_USAGE_REPORTING ?? record.usageReporting,

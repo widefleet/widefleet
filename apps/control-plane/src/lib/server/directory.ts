@@ -1,6 +1,7 @@
 import { groupSearch, groupSearchResult } from "@platform/contracts";
 import { Result, TaggedError } from "better-result";
 import { z } from "zod";
+import type { companyIdentity } from "./company-identity.ts";
 import type { Configuration } from "./config.ts";
 import type { Principal } from "./identity.ts";
 import { InvalidOperation } from "./errors.ts";
@@ -26,13 +27,14 @@ const graphGroups = z.object({
   "@odata.nextLink": z.string().optional(),
 });
 
-export const createDirectory = (configuration: Configuration, request: typeof fetch = fetch) => {
+const createCompanyDirectory = (
+  identity: z.infer<typeof companyIdentity> | null,
+  request: typeof fetch,
+) => {
   let token: { value: string; expiresAt: number } | undefined;
   let pendingToken: Promise<string> | undefined;
 
   const credentials = () => {
-    const identity = configuration.IDENTITY;
-
     if (!identity || identity.provider.type !== "entra" || !identity.directory)
       throw new DirectoryUnavailable({
         message:
@@ -136,24 +138,48 @@ export const createDirectory = (configuration: Configuration, request: typeof fe
             }),
     });
 
+  return { search };
+};
+
+export const createDirectory = (
+  configuration: Configuration,
+  request: typeof fetch = fetch,
+  resolveIdentity?: (organizationId: string) => Promise<z.infer<typeof companyIdentity> | null>,
+) => {
+  const directories = new Map<
+    string,
+    { fingerprint: string; directory: ReturnType<typeof createCompanyDirectory> }
+  >();
+
   return {
     search: (principal: Principal, input: z.infer<typeof groupSearch>) =>
       Result.gen(async function* () {
-        // These credentials belong to the installation's company directory.
-        // Other organizations require their own directory configuration.
-        if (principal.application.organizationId !== installationOrganizationId)
+        if (!principal.creator && !principal.application.admin)
+          return yield* new InvalidOperation({
+            code: "FORBIDDEN",
+            message: "App creation permission is required to search company groups",
+          });
+        const organizationId = principal.application.organizationId;
+
+        if (!resolveIdentity && organizationId !== installationOrganizationId)
           return yield* new InvalidOperation({
             code: "FORBIDDEN",
             message: "Company group search is not available for this organization",
           });
 
-        if (!principal.creator && !principal.admin)
-          return yield* new InvalidOperation({
-            code: "FORBIDDEN",
-            message: "App creation permission is required to search company groups",
-          });
+        const identity = resolveIdentity
+          ? await resolveIdentity(organizationId)
+          : configuration.IDENTITY;
 
-        return Result.ok(yield* Result.await(search(input)));
+        const fingerprint = JSON.stringify(identity);
+        let cached = directories.get(organizationId);
+
+        if (!cached || cached.fingerprint !== fingerprint) {
+          cached = { fingerprint, directory: createCompanyDirectory(identity ?? null, request) };
+          directories.set(organizationId, cached);
+        }
+
+        return Result.ok(yield* Result.await(cached.directory.search(input)));
       }),
   };
 };

@@ -3,8 +3,9 @@ import {
   installationSettings,
   settingsInput,
   settingsUpdate,
+  setupOwner,
 } from "@platform/contracts";
-import { eq, inArray, notInArray, sql } from "drizzle-orm";
+import { and, eq, inArray, notInArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import { appCallbackUrl, type AppSignIn } from "./app-sign-in.ts";
 import { companyAccountProvider, companyIdentity } from "./company-identity.ts";
@@ -13,33 +14,58 @@ import type { Configuration } from "./config.ts";
 import type { Database, DatabaseExecutor } from "./database.ts";
 import type { Principal } from "./identity.ts";
 import { InvalidOperation } from "./errors.ts";
-import { createInstallationSecrets } from "./installation-secrets.ts";
-import { installationId, readInstallation } from "./installation-store.ts";
+import { createOrganizationSecrets } from "./organization-secrets.ts";
+import { installationOrganizationId } from "../organization.ts";
+import {
+  installationId,
+  readInstallation,
+  readOrganizationSettings,
+  createInstallationOwner,
+} from "./installation-store.ts";
 import { session, oauthRefreshToken } from "./auth-schema.ts";
-import { installation, installationSecrets } from "./schema.ts";
+import { installation, organizationSecrets, organizationSettings } from "./schema.ts";
 
-const requireAdmin = (principal: Principal) => {
-  if (!principal.admin)
+const requireAdmin = (principal: Principal, organizationId: string) => {
+  if (!principal.application.admin || principal.application.organizationId !== organizationId)
     throw new InvalidOperation({
       code: "FORBIDDEN",
-      message: "Platform administrator access is required",
+      message: "Organization administrator access is required",
     });
 };
 
-export const createSettingsService = (
+const createOrganizationSettingsService = (
   configuration: Configuration,
   database: Database,
   encryptionKey: string,
   appSignIn: AppSignIn | null,
+  organizationId: string,
+  revision: { value: number },
 ) => {
-  const secrets = createInstallationSecrets(database, encryptionKey);
+  const secrets = createOrganizationSecrets(database, encryptionKey, organizationId);
 
-  let revision = 0;
+  const lockSettings = async (transaction: DatabaseExecutor) => {
+    await transaction
+      .insert(organizationSettings)
+      .values({
+        organizationId,
+        settings: installationSettings.parse({}),
+      })
+      .onConflictDoNothing();
+    await transaction
+      .select({ organizationId: organizationSettings.organizationId })
+      .from(organizationSettings)
+      .where(eq(organizationSettings.organizationId, organizationId))
+      .for("update");
+  };
 
   const readCurrent = async (transaction: DatabaseExecutor) => {
-    const snapshotSecrets = createInstallationSecrets(transaction, encryptionKey);
+    const snapshotSecrets = createOrganizationSecrets(transaction, encryptionKey, organizationId);
 
-    const state = await readInstallation(transaction);
+    const state = {
+      ...(await readInstallation(transaction)),
+      settings: await readOrganizationSettings(transaction, organizationId),
+    };
+
     const identity = state.settings.identity;
 
     if (!identity) return { state, identity: null, errors: [] };
@@ -83,7 +109,7 @@ export const createSettingsService = (
 
   const resolve = async () => {
     // A write overlapping this snapshot must invalidate it, even if it finishes first.
-    const startedRevision = revision;
+    const startedRevision = revision.value;
 
     const current = await database.transaction(readCurrent, {
       isolationLevel: "repeatable read",
@@ -98,21 +124,20 @@ export const createSettingsService = (
       async (transaction) => {
         // Keep publication ordered across hosted requests and self-hosted processes.
         // Ordinary readers use MVCC and do not wait for this writer's row lock.
-        if (publish)
-          await transaction
-            .select({ id: installation.id })
-            .from(installation)
-            .where(eq(installation.id, installationId))
-            .for("update");
+        if (publish) await lockSettings(transaction);
         const current = await readCurrent(transaction);
+
         const identity = current.state.settings.identity;
+
         let expectedRevision = "";
 
         if (identity && appSignIn) {
           try {
-            const secret = await createInstallationSecrets(transaction, encryptionKey).resolve(
-              identity.apps.secret,
-            );
+            const secret = await createOrganizationSecrets(
+              transaction,
+              encryptionKey,
+              organizationId,
+            ).resolve(identity.apps.secret);
 
             expectedRevision = await appSignIn.revision(identity, secret);
 
@@ -155,7 +180,8 @@ export const createSettingsService = (
 
     return {
       settings: resolved.state.settings,
-      localPasswordEnabled: resolved.state.localPasswordEnabled,
+      localPasswordEnabled:
+        organizationId === installationOrganizationId && resolved.state.localPasswordEnabled,
       managementCallbackUrl: identity
         ? `${configuration.PLATFORM_URL}/api/auth/callback/${companyAccountProvider(identity)}`
         : null,
@@ -167,9 +193,18 @@ export const createSettingsService = (
 
   const prepare = async (input: z.infer<typeof settingsInput>) => {
     const next = settingsInput.parse(input);
-    const state = await readInstallation(database);
 
-    if ((!state.localPasswordEnabled || state.settings.identity) && !next.identity)
+    const state = {
+      ...(await readInstallation(database)),
+      settings: await readOrganizationSettings(database, organizationId),
+    };
+
+    if (
+      (!state.localPasswordEnabled ||
+        state.settings.identity ||
+        organizationId !== installationOrganizationId) &&
+      !next.identity
+    )
       throw new InvalidOperation({
         code: "BAD_REQUEST",
         message: "Configure a replacement company login before removing the active provider",
@@ -195,11 +230,7 @@ export const createSettingsService = (
     const next = settingsInput.parse(input);
     await database.transaction(async (transaction) => {
       // Keep replacing references and removing unused secret rows in one ordered transaction.
-      await transaction
-        .select({ id: installation.id })
-        .from(installation)
-        .where(eq(installation.id, installationId))
-        .for("update");
+      await lockSettings(transaction);
       const identity = next.identity;
 
       const saved = identity
@@ -223,32 +254,37 @@ export const createSettingsService = (
         : null;
 
       await transaction
-        .update(installation)
+        .update(organizationSettings)
         .set({
           settings: installationSettings.parse({
             identity: saved,
             externallyManaged: next.externallyManaged,
           }),
         })
-        .where(eq(installation.id, installationId));
+        .where(eq(organizationSettings.organizationId, organizationId));
 
       const referenced = [saved?.management, saved?.apps, saved?.directory].flatMap((client) =>
         client?.secret.type === "stored" ? [client.secret.id] : [],
       );
 
       await transaction
-        .delete(installationSecrets)
-        .where(notInArray(installationSecrets.id, referenced));
+        .delete(organizationSecrets)
+        .where(
+          and(
+            eq(organizationSecrets.organizationId, organizationId),
+            notInArray(organizationSecrets.id, referenced),
+          ),
+        );
     });
 
-    revision++;
+    revision.value++;
 
     return inspect(true);
   };
 
   return {
     get revision() {
-      return revision;
+      return revision.value;
     },
     resolve,
     inspect,
@@ -258,12 +294,12 @@ export const createSettingsService = (
       return save(input);
     },
     read: async (principal: Principal) => {
-      requireAdmin(principal);
+      requireAdmin(principal, organizationId);
 
       return inspect();
     },
     plan: async (principal: Principal, input: z.infer<typeof settingsInput>) => {
-      requireAdmin(principal);
+      requireAdmin(principal, organizationId);
 
       return prepare(input);
     },
@@ -272,8 +308,12 @@ export const createSettingsService = (
       input: z.infer<typeof settingsUpdate>,
       browser: boolean,
     ) => {
-      requireAdmin(principal);
-      const state = await readInstallation(database);
+      requireAdmin(principal, organizationId);
+
+      const state = {
+        ...(await readInstallation(database)),
+        settings: await readOrganizationSettings(database, organizationId),
+      };
 
       if (browser && state.settings.externallyManaged)
         throw new InvalidOperation({
@@ -290,20 +330,29 @@ export const createSettingsService = (
       return save(next);
     },
     setExternalManagement: async (principal: Principal, enabled: boolean) => {
-      requireAdmin(principal);
-      await database
-        .update(installation)
-        .set({
-          settings: sql`jsonb_set(${installation.settings}, '{externallyManaged}', to_jsonb(${enabled}::boolean))`,
-        })
-        .where(eq(installation.id, installationId));
+      requireAdmin(principal, organizationId);
+      await database.transaction(async (transaction) => {
+        await lockSettings(transaction);
+        await transaction
+          .update(organizationSettings)
+          .set({
+            settings: sql`jsonb_set(${organizationSettings.settings}, '{externallyManaged}', to_jsonb(${enabled}::boolean))`,
+          })
+          .where(eq(organizationSettings.organizationId, organizationId));
+      });
 
-      revision++;
+      revision.value++;
 
       return inspect();
     },
     complete: async (principal: Principal, auth: Authentication, headers: Headers) => {
-      requireAdmin(principal);
+      requireAdmin(principal, organizationId);
+
+      if (!principal.admin || organizationId !== installationOrganizationId)
+        throw new InvalidOperation({
+          code: "FORBIDDEN",
+          message: "Only the installation administrator can finish installation setup",
+        });
       const current = await auth.api.getSession({ headers });
       const resolved = await resolve();
       const state = resolved.state;
@@ -323,17 +372,72 @@ export const createSettingsService = (
         const localSessions = transaction
           .select({ id: session.id })
           .from(session)
-          .where(eq(session.companyConfiguration, ""));
+          .where(
+            and(eq(session.companyConfiguration, ""), eq(session.userId, state.ownerId ?? "")),
+          );
 
         await transaction
           .delete(oauthRefreshToken)
           .where(inArray(oauthRefreshToken.sessionId, localSessions));
-        await transaction.delete(session).where(eq(session.companyConfiguration, ""));
+        await transaction
+          .delete(session)
+          .where(
+            and(eq(session.companyConfiguration, ""), eq(session.userId, state.ownerId ?? "")),
+          );
       });
 
-      revision++;
+      revision.value++;
 
       return inspect();
     },
+  };
+};
+
+export const createSettingsService = (
+  configuration: Configuration,
+  database: Database,
+  encryptionKey: string,
+  appSignIn: AppSignIn | null,
+) => {
+  const revision = { value: 0 };
+
+  const scoped = (organizationId: string) =>
+    createOrganizationSettingsService(
+      configuration,
+      database,
+      encryptionKey,
+      organizationId === installationOrganizationId ? appSignIn : null,
+      organizationId,
+      revision,
+    );
+
+  const installed = scoped(installationOrganizationId);
+
+  return {
+    get revision() {
+      return revision.value;
+    },
+    resolve: (organizationId = installationOrganizationId) => scoped(organizationId).resolve(),
+
+    inspect: installed.inspect,
+    createOwner: async (input: z.infer<typeof setupOwner>) => {
+      const owner = await createInstallationOwner(database, input);
+
+      return owner;
+    },
+    publish: (organizationId = installationOrganizationId) => scoped(organizationId).inspect(true),
+    initialize: (
+      input: z.infer<typeof settingsInput>,
+      organizationId = installationOrganizationId,
+    ) => scoped(organizationId).initialize(input),
+    read: (principal: Principal) => scoped(principal.application.organizationId).read(principal),
+    plan: (principal: Principal, input: z.infer<typeof settingsInput>) =>
+      scoped(principal.application.organizationId).plan(principal, input),
+    update: (principal: Principal, input: z.infer<typeof settingsUpdate>, browser: boolean) =>
+      scoped(principal.application.organizationId).update(principal, input, browser),
+    setExternalManagement: (principal: Principal, enabled: boolean) =>
+      scoped(principal.application.organizationId).setExternalManagement(principal, enabled),
+    complete: (principal: Principal, auth: Authentication, headers: Headers) =>
+      scoped(principal.application.organizationId).complete(principal, auth, headers),
   };
 };

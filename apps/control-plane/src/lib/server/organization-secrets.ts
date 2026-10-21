@@ -1,27 +1,37 @@
 import { secretInput, secretReference } from "@platform/contracts";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import type { DatabaseExecutor } from "./database.ts";
 import { InvalidOperation } from "./errors.ts";
-import { installationSecrets } from "./schema.ts";
+import { organizationSecrets } from "./schema.ts";
 import { decryptSecret, encryptSecret } from "./secret-encryption.ts";
 
 // This store belongs to the current login settings: saving settings deletes
 // unreferenced rows. Resources with historical snapshots must own their ciphertexts.
-export const createInstallationSecrets = (database: DatabaseExecutor, key: string) => {
+export const createOrganizationSecrets = (
+  database: DatabaseExecutor,
+  key: string,
+  organizationId: string,
+) => {
   const resolve = async (input: z.infer<typeof secretInput>) => {
     if (input.type === "value") return input.value;
 
     const [record] = await database
       .select()
-      .from(installationSecrets)
-      .where(eq(installationSecrets.id, input.id));
+      .from(organizationSecrets)
+      .where(
+        and(
+          eq(organizationSecrets.id, input.id),
+          eq(organizationSecrets.organizationId, organizationId),
+        ),
+      );
 
-    if (!record)
+    if (!record) {
       throw new InvalidOperation({
         code: "BAD_REQUEST",
         message: "The referenced secret does not exist",
       });
+    }
 
     return decryptSecret(key, record.ciphertext);
   };
@@ -32,22 +42,27 @@ export const createInstallationSecrets = (database: DatabaseExecutor, key: strin
   ): Promise<z.infer<typeof secretReference>> => {
     if (input.type === "stored") {
       const [record] = await executor
-        .select({ id: installationSecrets.id })
-        .from(installationSecrets)
-        .where(eq(installationSecrets.id, input.id));
+        .select({ id: organizationSecrets.id })
+        .from(organizationSecrets)
+        .where(
+          and(
+            eq(organizationSecrets.id, input.id),
+            eq(organizationSecrets.organizationId, organizationId),
+          ),
+        );
 
-      if (!record)
-        throw new InvalidOperation({
-          code: "BAD_REQUEST",
-          message: "The referenced secret no longer exists. Reload settings before saving.",
-        });
+      if (!record) {
+        const value = await createOrganizationSecrets(executor, key, organizationId).resolve(input);
+
+        return save(executor, { type: "value", value });
+      }
 
       return input;
     }
 
     const ciphertext = await encryptSecret(key, input.value);
     const id = crypto.randomUUID();
-    await executor.insert(installationSecrets).values({ id, ciphertext });
+    await executor.insert(organizationSecrets).values({ id, ciphertext, organizationId });
 
     return { type: "stored", id };
   };

@@ -274,12 +274,21 @@ export const installation = pgTable("installation", {
   reportingRevision: integer("reporting_revision").notNull().default(0),
   usageReporting: boolean("usage_reporting").notNull().default(true),
   crashReporting: boolean("crash_reporting").notNull().default(true),
-  settings: jsonb().notNull(),
   ownerId: text("owner_id").references(() => user.id),
   localPasswordEnabled: boolean("local_password_enabled").notNull().default(true),
 });
 
-export const installationSecrets = pgTable("installation_secret", {
+export const organizationSettings = pgTable("organization_settings", {
+  organizationId: text("organization_id")
+    .primaryKey()
+    .references(() => organization.id),
+  settings: jsonb().notNull(),
+});
+
+export const organizationSecrets = pgTable("organization_secret", {
   id: text().primaryKey(),
+  organizationId: text("organization_id")
+    .notNull()
+    .references(() => organization.id),
   ciphertext: text().notNull(),
 });

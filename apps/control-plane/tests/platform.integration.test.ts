@@ -44,7 +44,7 @@ import {
   jobs,
   runtimeReleases,
   connectors,
-  installationSecrets,
+  organizationSecrets,
 } from "../src/lib/server/schema.ts";
 import { InvalidOperation, StorageUnavailable } from "../src/lib/server/errors.ts";
 import { transact } from "../src/lib/server/transactions.ts";
@@ -2360,7 +2360,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     expect((await json(secretPath, "PUT", { value: "é".repeat(2501) })).status).toBe(400);
     expect((await json(secretPath, "PUT", { value: "x".repeat(5001) })).status).toBe(400);
 
-    const loginSecrets = await environment.database.db.select().from(installationSecrets);
+    const loginSecrets = await environment.database.db.select().from(organizationSecrets);
 
     const first = contract.connectorStatus.parse(
       await (await json(secretPath, "PUT", { value: firstValue })).json(),
@@ -2381,7 +2381,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     );
 
     expect(second.secretRevision).toBe(2);
-    expect(await environment.database.db.select().from(installationSecrets)).toEqual(loginSecrets);
+    expect(await environment.database.db.select().from(organizationSecrets)).toEqual(loginSecrets);
 
     // Saving unchanged login settings still runs its credential cleanup. Both
     // the claimed and newer queued connector snapshots must remain decryptable.
@@ -2417,7 +2417,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     ).not.toBe(200);
 
     const persisted = JSON.stringify([
-      await environment.database.db.select().from(installationSecrets),
+      await environment.database.db.select().from(organizationSecrets),
       await environment.database.db.select().from(connectors),
       await environment.database.db.select().from(jobs),
     ]);

@@ -78,7 +78,11 @@ export const createRuntime = ({
       settingsRevision,
       auth,
       identity: createIdentityService(auth, database.db, active, organizationAccess),
-      directory: createDirectory(active),
+      directory: createDirectory(
+        active,
+        undefined,
+        async (organizationId) => (await settings.resolve(organizationId)).identity,
+      ),
     };
   };
 
