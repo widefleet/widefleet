@@ -77,7 +77,11 @@ export const createTestEnvironment = async (
             client_secret: clientSecret,
             name: "Management fixture",
             tenant_id: tenantId,
-            redirect_uris: [`${platformUrl}/api/auth/sso/callback/${providerId}`],
+            redirect_uris: [
+              `${platformUrl}/api/auth/sso/callback/${providerId}`,
+              `${platformUrl}/api/auth/sso/callback/company-widefleet`,
+              "https://auth.apps.localhost/oauth2/widefleet/callback",
+            ],
           },
         ],
       },
@@ -163,17 +167,6 @@ export const createTestEnvironment = async (
     (organizationId) => createAppSignIn(configuration, cookieKey, organizationId),
   );
 
-  await settings.initialize({
-    externallyManaged: false,
-    identity: {
-      domain: "example.test",
-      provider: identity.provider,
-      management: { clientId, secret: { type: "value", value: clientSecret } },
-      apps: { clientId, secret: { type: "value", value: clientSecret } },
-      directory: null,
-    },
-  });
-
   const owner = await createInstallationOwner(database.db, {
     name: "Setup Owner",
     email: "owner@example.test",
@@ -185,6 +178,30 @@ export const createTestEnvironment = async (
   // The exported fixture factory accepts Better Auth's general plugin context.
   const fixtureAuth = betterAuth<BetterAuthOptions>(auth.options);
   const helpers = testUtils().init(await fixtureAuth.$context).context.test;
+
+  const credential = await helpers.login({ userId: owner.id });
+  await settings.initialize(
+    {
+      appIdentity:
+        provider === "entra" ? { type: "entra" } : { type: "oidc", groupsClaim: "groups" },
+      externallyManaged: false,
+      directory: null,
+      sso: {
+        providerId,
+        domain: "example.test",
+        issuer: provider === "entra" ? `${emulator.url}/${tenantId}/v2.0` : oidcIssuer,
+        oidcConfig: {
+          clientId,
+          clientSecret,
+          pkce: true,
+          scopes: ["openid", "profile", "email"],
+          mapping: { name: "name", email: "email" },
+        },
+      },
+    },
+    "widefleet",
+    { auth, headers: credential.headers },
+  );
 
   return {
     configuration,

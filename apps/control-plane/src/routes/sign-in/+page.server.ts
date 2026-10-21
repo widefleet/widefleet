@@ -2,7 +2,7 @@ import type { PageServerLoad } from "./$types";
 import { redirect } from "@sveltejs/kit";
 import { eq } from "drizzle-orm";
 import { getRuntime } from "#server/runtime";
-import { readOrganizationSettings } from "#server/installation-store";
+
 import { organization, ssoProvider } from "#server/auth-schema";
 import { localDestination } from "#server/navigation";
 import { installationOrganizationId } from "#lib/organization";
@@ -27,9 +27,8 @@ export const load: PageServerLoad = async ({ url, setHeaders }) => {
 
   const provider = target?.verified ? target.providerId : null;
 
-  const label = target
-    ? (await readOrganizationSettings(runtime.database.db, target.id)).identity?.provider.label
-    : null;
+  const label =
+    target && !slug ? (await runtime.settings.resolve(target.id)).identity?.provider.label : null;
 
   return {
     provider,

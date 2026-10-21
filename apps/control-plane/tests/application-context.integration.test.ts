@@ -153,7 +153,11 @@ describe("Mandatory application context", () => {
     const ownSettings = await api(request("/settings"));
     expect(ownSettings.status).toBe(200);
     expect(await ownSettings.json()).toMatchObject({
-      settings: { identity: null },
+      settings: {
+        appIdentity: { type: "oidc", groupsClaim: "groups" },
+        directory: null,
+        externallyManaged: false,
+      },
       localPasswordEnabled: false,
     });
     const directory = await api(request("/groups?query=Engineering&limit=10"));

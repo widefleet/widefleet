@@ -1,3 +1,4 @@
+import { readSsoProvider } from "./sso-settings.ts";
 import { readOrganizationSettings } from "./installation-store.ts";
 import { installationOrganizationId } from "../organization.ts";
 import { createReportingSymbolicator } from "./reporting-maps.ts";
@@ -59,7 +60,9 @@ export const createReporting = (
 
     return {
       installationId: record.reportingId,
-      identity: (await readOrganizationSettings(database, installationOrganizationId)).identity,
+      identity: (await readSsoProvider(database, installationOrganizationId))
+        ? await readOrganizationSettings(database, installationOrganizationId)
+        : null,
       preferences: { usage: record.usageReporting, crashes: record.crashReporting },
       effective: {
         usage: configuration.PLATFORM_USAGE_REPORTING ?? record.usageReporting,
@@ -155,7 +158,7 @@ export const createReporting = (
     },
   });
 
-  const snapshot = async (company: z.infer<typeof contract.installationSettings>["identity"]) => {
+  const snapshot = async (company: z.infer<typeof contract.installationSettings> | null) => {
     const [applicationCounts] = await database
       .select({
         apps: sql<number>`count(*) filter (where ${isNull(apps.parentId)})`.mapWith(Number),
@@ -199,7 +202,7 @@ export const createReporting = (
       os: platform(),
       arch: arch(),
       storage: configuration.ARTIFACT_STORAGE_PROVIDER,
-      authentication: company?.provider.type ?? "local",
+      authentication: company?.appIdentity.type ?? "local",
       directory_lookup: company?.directory !== null && company?.directory !== undefined,
       runtime_versions: runtimeVersions,
       runtime_versions_capped: runtimeRows.length > 20,

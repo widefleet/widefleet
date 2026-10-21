@@ -2,12 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventEmitter, once } from "node:events";
 import { eq } from "drizzle-orm";
 import { ssoProvider } from "../src/lib/server/auth-schema.ts";
-import { settingsInput } from "@platform/contracts";
-import { companyLoginRevision } from "../src/lib/server/auth.ts";
+import { editableSettings } from "./settings-input.ts";
 import { createRuntime, createRequestRuntime } from "../src/lib/server/runtime-services.ts";
 import { installation } from "../src/lib/server/schema.ts";
 import { createStorage } from "../src/lib/server/storage.ts";
-import { createTestEnvironment } from "./environment.ts";
+import { createTestEnvironment, organizationCredential } from "./environment.ts";
 
 describe("Control-plane runtime settings", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
@@ -37,18 +36,23 @@ describe("Control-plane runtime settings", () => {
     await first.auth.$context;
     expect(await resolve()).toBe(first);
 
-    const input = settingsInput.parse((await environment.settings.inspect()).settings);
+    const input = editableSettings(await environment.settings.inspect());
 
-    if (!input.identity) throw new Error("Expected the fixture's company login");
-    input.identity.management.secret = { type: "value", value: "rotated-fixture-secret" };
-    await environment.settings.initialize(input);
+    if (!input.sso) throw new Error("Expected the fixture's company login");
+    input.sso.oidcConfig.clientSecret = "rotated-fixture-secret";
+    await environment.settings.initialize(
+      input,
+      "widefleet",
+      await organizationCredential(environment, {
+        id: environment.owner.id,
+        application: { organizationId: "widefleet" },
+      }),
+    );
 
     const rotated = await resolve();
     await rotated.auth.$context;
     expect(rotated.configuration.IDENTITY?.management.clientSecret).toBe("rotated-fixture-secret");
-    expect(companyLoginRevision(rotated.configuration)).not.toBe(
-      companyLoginRevision(first.configuration),
-    );
+    expect(rotated.configuration.IDENTITY).not.toBe(first.configuration.IDENTITY);
     expect(rotated.auth).not.toBe(first.auth);
     expect(rotated.identity).not.toBe(first.identity);
     expect(rotated.directory).not.toBe(first.directory);
@@ -69,11 +73,18 @@ describe("Control-plane runtime settings", () => {
     expect(await request()).toBe(first);
     expect(reads).toHaveBeenCalledTimes(1);
 
-    const input = settingsInput.parse((await environment.settings.inspect()).settings);
+    const input = editableSettings(await environment.settings.inspect());
 
-    if (!input.identity) throw new Error("Expected the fixture's company login");
-    input.identity.management.secret = { type: "value", value: "changed-within-request" };
-    await first.settings.initialize(input);
+    if (!input.sso) throw new Error("Expected the fixture's company login");
+    input.sso.oidcConfig.clientSecret = "changed-within-request";
+    await first.settings.initialize(
+      input,
+      "widefleet",
+      await organizationCredential(environment, {
+        id: environment.owner.id,
+        application: { organizationId: "widefleet" },
+      }),
+    );
     const [refreshed, simultaneousRefresh] = await Promise.all([request(), request()]);
     await refreshed.auth.$context;
     expect(simultaneousRefresh).toBe(refreshed);
@@ -116,11 +127,18 @@ describe("Control-plane runtime settings", () => {
     await captured;
 
     try {
-      const input = settingsInput.parse((await environment.settings.inspect()).settings);
+      const input = editableSettings(await environment.settings.inspect());
 
-      if (!input.identity) throw new Error("Expected the fixture's company login");
-      input.identity.management.secret = { type: "value", value: "changed-during-read" };
-      await environment.settings.initialize(input);
+      if (!input.sso) throw new Error("Expected the fixture's company login");
+      input.sso.oidcConfig.clientSecret = "changed-during-read";
+      await environment.settings.initialize(
+        input,
+        "widefleet",
+        await organizationCredential(environment, {
+          id: environment.owner.id,
+          application: { organizationId: "widefleet" },
+        }),
+      );
     } finally {
       gate.emit("resume");
     }

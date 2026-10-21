@@ -1,10 +1,9 @@
 <script lang="ts">
-  import { companyAccountProvider } from "#lib/company-identity";
   import { getWorkspaceContext } from "#lib/workspace-context";
-  import { onMount, tick, untrack } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { beforeNavigate } from "$app/navigation";
   import { page } from "$app/state";
-  import { identitySettingsInput, settingsInput } from "@platform/contracts";
+  import { settingsInput, oidcProviderInput } from "@platform/contracts";
   import { z } from "zod";
   import { authClient } from "#lib/auth-client";
   import {
@@ -27,11 +26,6 @@
   import PageHeading from "#shadcn/components/PageHeading.svelte";
   import CopyValue from "#shadcn/components/CopyValue.svelte";
   import Feedback from "#shadcn/components/Feedback.svelte";
-  import Check from "@lucide/svelte/icons/check";
-  import ArrowRight from "@lucide/svelte/icons/arrow-right";
-  import ArrowLeft from "@lucide/svelte/icons/arrow-left";
-  import ShieldCheck from "@lucide/svelte/icons/shield-check";
-  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import type { PageData } from "./$types";
 
   const workspace = getWorkspaceContext();
@@ -40,7 +34,6 @@
 
   const settings = $derived(getSettings());
 
-  // Activation polling must preserve the configuration during a transient connection failure.
   const data = $derived(
     await settings.catch((cause: unknown) => {
       if (settings.error && settings.error.status >= 500 && settings.current)
@@ -51,53 +44,42 @@
 
   const view = $derived(data.view);
 
-  // Empty fields are a draft; schema validation runs when the complete configuration is submitted.
   const initialDraft = (
-    saved: z.infer<typeof identitySettingsInput> | null,
-  ): z.infer<typeof identitySettingsInput> =>
-    saved
-      ? $state.snapshot(saved)
+    source: typeof data.view,
+  ): Omit<z.infer<typeof settingsInput>, "sso"> & { sso: z.infer<typeof oidcProviderInput> } => ({
+    ...$state.snapshot(source.settings),
+    sso: source.sso
+      ? {
+          providerId: source.sso.providerId,
+          issuer: source.sso.issuer,
+          domain: source.sso.domain,
+          oidcConfig: { ...$state.snapshot(source.sso.oidcConfig), clientSecret: "" },
+        }
       : {
+          providerId: `company-${workspace.organizationId}`,
+          issuer: "",
           domain: "",
-          provider: {
-            type: "entra",
-            tenantId: "",
-            authority: "https://login.microsoftonline.com",
-            label: "Microsoft Entra",
+          oidcConfig: {
+            clientId: "",
+            clientSecret: "",
+            pkce: true,
+            scopes: ["openid", "profile", "email"],
+            mapping: { name: "name", email: "email" },
           },
-          management: { clientId: "", secret: { type: "value", value: "" } },
-          apps: { clientId: "", secret: { type: "value", value: "" } },
-          directory: null,
-        };
+        },
+  });
 
-  let identity = $state(untrack(() => initialDraft(data.view.settings.identity)));
-
-  let configureCompany = $state(
-    untrack(() => Boolean(data.view.settings.identity) || !data.emailSignIn),
-  );
-
-  let step = $state(
-    untrack(() =>
-      page.url.searchParams.has("account") ||
-      (data.view.localPasswordEnabled && data.view.settings.identity)
-        ? 4
-        : 1,
-    ),
-  );
-
-  let stepHeading = $state<HTMLHeadingElement | null>(null);
+  let draft = $state(untrack(() => initialDraft(view)));
 
   let busy = $state(false);
 
-  let savedIdentity = $state(untrack(() => JSON.stringify(identity)));
+  let savedDraft = $state(untrack(() => JSON.stringify(draft)));
 
-  const dirty = $derived(JSON.stringify(identity) !== savedIdentity);
+  const dirty = $derived(JSON.stringify(draft) !== savedDraft);
 
   let message = $state("");
 
   let saved = $state(false);
-
-  const refreshFailed = $derived(Boolean(settings.error));
 
   let pending = $state<z.infer<typeof settingsInput> | null>(null);
 
@@ -107,7 +89,7 @@
 
   const onboarding = $derived(view.localPasswordEnabled && !data.emailSignIn);
 
-  const steps = ["Provider", "Administration", "App sign-in", "Verify & finish"];
+  const callback = $derived(`${data.platformUrl}/api/auth/sso/callback/${draft.sso.providerId}`);
 
   const sections = $derived([
     { id: "identity", label: "Company sign-in" },
@@ -122,36 +104,6 @@
       cancel();
   });
 
-  const openStep = async (next: number) => {
-    step = next;
-    message = "";
-    await tick();
-    stepHeading?.focus();
-  };
-
-  const providerChange = (event: Event) => {
-    const target = event.currentTarget;
-
-    if (!(target instanceof HTMLSelectElement)) return;
-    identity.provider =
-      target.value === "entra"
-        ? {
-            type: "entra",
-            tenantId: "",
-            authority: "https://login.microsoftonline.com",
-            label: "Microsoft Entra",
-          }
-        : {
-            type: "oidc",
-            issuer: "",
-            label: "",
-            groupsClaim: "groups",
-            nameClaim: "name",
-            emailClaim: "email",
-          };
-    identity.directory = null;
-  };
-
   const apply = async (input: z.infer<typeof settingsInput>, acknowledgeRestart: boolean) => {
     await updateSettings({
       ...input,
@@ -159,15 +111,12 @@
       organizationId: workspace.organizationId,
     });
     const updated = await getSettings();
-
-    identity = initialDraft(updated.view.settings.identity);
-    savedIdentity = JSON.stringify(identity);
+    draft = initialDraft(updated.view);
+    savedDraft = JSON.stringify(draft);
     proof = null;
     pending = null;
     restartOpen = false;
     saved = true;
-
-    if (onboarding) await openStep(4);
   };
 
   const persist = async (input: z.infer<typeof settingsInput>) => {
@@ -179,20 +128,6 @@
     } else await apply(input, false);
   };
 
-  const useWidefleet = async () => {
-    busy = true;
-    message = "";
-
-    try {
-      await persist({ identity: null, externallyManaged: view.settings.externallyManaged });
-      configureCompany = false;
-    } catch (cause) {
-      message = cause instanceof Error ? cause.message : "Could not change app sign-in.";
-    } finally {
-      busy = false;
-    }
-  };
-
   const save = async (event: SubmitEvent) => {
     event.preventDefault();
     busy = true;
@@ -200,29 +135,28 @@
     saved = false;
 
     try {
-      const input = settingsInput.parse({
-        identity,
-        externallyManaged: view.settings.externallyManaged,
-      });
-
-      await persist(input);
+      await persist(
+        settingsInput.parse({
+          ...draft,
+          sso: {
+            ...draft.sso,
+            oidcConfig: {
+              ...draft.sso.oidcConfig,
+              clientSecret: draft.sso.oidcConfig.clientSecret || undefined,
+            },
+          },
+        }),
+      );
     } catch (cause) {
       message =
         cause instanceof z.ZodError
-          ? "Check your provider details and credentials. Use the steps above to go back."
+          ? "Check your provider details and credentials."
           : cause instanceof Error
             ? cause.message
             : "Could not save changes.";
     } finally {
       busy = false;
     }
-  };
-
-  const submitStep = async (event: SubmitEvent) => {
-    if (onboarding && step < 3) {
-      event.preventDefault();
-      await openStep(step + 1);
-    } else await save(event);
   };
 
   const confirm = async () => {
@@ -344,448 +278,218 @@
 
     return () => clearInterval(timer);
   });
-
-  const managementCallback = async (provider: z.infer<typeof identitySettingsInput>["provider"]) =>
-    `${data.platformUrl}/api/auth/sso/callback/${companyAccountProvider({ provider }, data.organizationId)}`;
-
-  const callback = $derived(managementCallback(identity.provider));
 </script>
 
 <svelte:head><title>Settings · Widefleet</title></svelte:head>
-<PageHeading
-  title={onboarding ? "Your workspace starts here." : "Settings"}
-  description={onboarding
-    ? "Set up company sign-in. We'll guide you from connecting your provider to verifying administrator access."
-    : "Sign-in, privacy and workspace administration."}
-/>
+<PageHeading title="Settings" description="Sign-in, privacy and workspace administration." />
 <nav aria-label="Settings sections" class="mt-7 mb-8 flex gap-6 overflow-x-auto border-b">
-  {#each sections as section (section.id)}<a
+  {#each sections as section (section.id)}
+    <a
       href={`/settings?section=${section.id}`}
       aria-current={route.section === section.id ? "page" : undefined}
       class={`whitespace-nowrap border-b-2 pb-3 text-xs font-medium ${route.section === section.id ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
       >{section.label}</a
-    >{/each}
+    >
+  {/each}
 </nav>
-<div class="space-y-5">
+<div class="max-w-2xl space-y-6">
   {#if route.loginFailed}<Feedback kind="error"
-      >Company sign-in failed. Check your provider, redirect URI and credentials, then try again.</Feedback
+      >Company sign-in failed. Check your provider, redirect URIs and credentials.</Feedback
     >{/if}
   {#if message}<Feedback kind="error">{message}</Feedback>{/if}
   {#if view.error}<Feedback kind="error">{view.error}</Feedback>{/if}
   {#if saved}<Feedback kind="success">Settings saved.</Feedback>{/if}
-  {#if route.section === "reporting" && data.reporting}<ReportingSettings
-      initial={data.reporting}
-    />
+  {#if route.section === "reporting" && data.reporting}
+    <ReportingSettings initial={data.reporting} />
   {:else if route.section === "management"}
-    <section class="max-w-2xl rounded-xl border p-6">
+    <section class="space-y-4 rounded-xl border p-6">
       <h2 class="text-base font-semibold">Manage configuration</h2>
-      <p class="text-muted-foreground mt-2 mb-5 text-sm leading-6">
+      <p class="text-muted-foreground text-sm">
         {readonly
-          ? "Settings are managed through the API or CLI. You can view them here. Enable browser editing to make changes here."
-          : "Settings can be changed here, through the API or through the CLI. If you manage configuration automatically, you can disable browser editing."}
+          ? "Settings are managed through the API or CLI. Enable browser editing to make changes here."
+          : "You can manage settings here, through the API or through the CLI."}
       </p>
       <Button variant="outline" disabled={busy} onclick={toggleExternal}
         >{readonly ? "Enable browser editing" : "Manage settings externally"}</Button
       >
     </section>
   {:else}
-    {#if readonly}<Feedback
-        >This configuration is managed externally. <a
-          class="underline underline-offset-4"
-          href="/settings?section=management">Manage editing</a
-        ></Feedback
-      >{/if}
-    {#if data.emailSignIn}
-      <section class="mb-6 max-w-2xl space-y-4 rounded-xl border p-6">
-        <h2 class="text-base font-semibold">App sign-in</h2>
-        <p class="text-muted-foreground text-sm leading-6">
-          {view.settings.identity
-            ? "Apps authenticate directly with your company's identity provider."
-            : "Organization members sign in to apps with their Widefleet account. Company SSO is optional."}
-        </p>
-        {#if !view.settings.identity}
-          <p class="text-muted-foreground text-xs leading-6" role="status">
-            {view.activation.state === "active"
-              ? "Widefleet app sign-in is active."
-              : view.activation.message}
+    <form onsubmit={save} class="rounded-xl border p-6">
+      <fieldset disabled={readonly || busy} class="space-y-5 disabled:opacity-70">
+        <div>
+          <h2 class="text-base font-semibold">Company SSO</h2>
+          <p class="text-muted-foreground mt-2 text-sm leading-6">
+            Create one registration for Widefleet and your apps. Add both redirect URIs and enter
+            its credentials once.
           </p>
-          {#if view.activation.state !== "active" && view.activation.state !== "applying"}
-            <Button onclick={useWidefleet} disabled={busy || readonly} variant="outline">
-              Activate Widefleet sign-in
-            </Button>
-          {/if}
-        {/if}
-        {#if view.settings.identity}
-          <details>
-            <summary class="text-sm font-medium">Switch to Widefleet sign-in</summary>
-            <p class="text-muted-foreground mt-3 text-sm leading-6">
-              Apps will accept this organization's Widefleet members. Members will need to sign in
-              again. Existing company group restrictions must be reviewed because Widefleet accounts
-              do not supply company groups.
-            </p>
-            <Button
-              onclick={useWidefleet}
-              disabled={busy || readonly}
-              class="mt-3"
-              variant="outline">Use Widefleet sign-in</Button
-            >
-          </details>
-        {:else if !configureCompany}<Button
-            onclick={() => (configureCompany = true)}
-            disabled={readonly}
-            variant="outline">Configure company SSO</Button
-          >{/if}
-      </section>
-    {/if}
-    {#if configureCompany}
-      <div class="grid items-start gap-7 lg:grid-cols-[190px_minmax(0,1fr)]">
-        <nav
-          aria-label={onboarding ? "Setup steps" : "Sign-in settings"}
-          class="flex gap-2 overflow-x-auto lg:flex-col lg:gap-1"
-        >
-          {#each steps as label, index (label)}
-            <Button
-              variant="ghost"
-              disabled={busy || (onboarding && !view.settings.identity && index + 1 > step)}
-              onclick={() => openStep(index + 1)}
-              aria-current={step === index + 1 ? "step" : undefined}
-              class={`h-auto justify-start gap-2.5 px-3 py-3 text-xs ${step === index + 1 ? "bg-muted font-medium" : "text-muted-foreground"}`}
-              ><span
-                class={`grid size-5 shrink-0 place-items-center rounded-full border text-[10px] ${step === index + 1 ? "border-primary bg-primary text-primary-foreground" : "border-border"}`}
-                >{#if onboarding && index + 1 < step}<Check class="size-3" />{:else}{index +
-                    1}{/if}</span
-              >{index === 3 && !onboarding ? "Company account" : label}</Button
-            >
-          {/each}
-        </nav>
-        <div class="min-w-0 max-w-2xl space-y-5">
-          {#if view.settings.identity}
-            <div class="bg-muted/40 space-y-2 rounded-lg p-4">
-              <h3 class="text-xs font-medium">App sign-in status</h3>
-              <p class="text-muted-foreground text-xs leading-6" role="status">
-                {view.activation.state === "active"
-                  ? "The sign-in service is running with the saved configuration."
-                  : view.activation.state === "failed"
-                    ? view.activation.message
-                    : view.activation.state === "applying"
-                      ? "Activating configuration …"
-                      : "The sign-in service is waiting for configuration."}
-              </p>
-              <p class="text-muted-foreground text-[11px] leading-5">
-                A running service does not yet confirm successful sign-in with your provider.
-              </p>
-            </div>
-            {#if refreshFailed}<Feedback kind="error"
-                >Could not refresh the activation status. Check your connection and reload the page.</Feedback
-              >{/if}
-          {/if}
-          {#if step <= 3}
-            <form
-              onsubmit={submitStep}
-              oninput={() => {
-                pending = null;
-                saved = false;
-              }}
-              class="rounded-xl border p-5 sm:p-7"
-            >
-              <fieldset disabled={readonly || busy} class="space-y-6">
-                {#if step === 1}
-                  <div>
-                    <h2
-                      bind:this={stepHeading}
-                      tabindex="-1"
-                      class="text-base font-semibold outline-none"
-                    >
-                      Connect your identity provider
-                    </h2>
-                    <p class="text-muted-foreground mt-2 text-sm leading-6">
-                      Choose how your team signs in. You'll need access to your provider's
-                      administration area.
-                    </p>
-                  </div>
-                  <div class="space-y-2">
-                    <Label for="company-domain">Company email domain</Label>
-                    <Input
-                      id="company-domain"
-                      bind:value={identity.domain}
-                      placeholder="example.com"
-                      required
-                    />
-                    <p class="text-muted-foreground text-xs">
-                      Verify ownership with a DNS TXT record before activating company SSO.
-                    </p>
-                    <Label for="identity-provider">Provider</Label><NativeSelect
-                      id="identity-provider"
-                      value={identity.provider.type}
-                      onchange={providerChange}
-                      class="w-full"
-                      ><option value="entra">Microsoft Entra</option><option value="oidc"
-                        >OpenID Connect</option
-                      ></NativeSelect
-                    >
-                  </div>
-                  {#if identity.provider.type === "entra"}
-                    <div class="space-y-2">
-                      <Label for="tenant">Directory ID (tenant ID)</Label><Input
-                        id="tenant"
-                        bind:value={identity.provider.tenantId}
-                        required
-                        class="h-10"
-                        placeholder="00000000-0000-0000-0000-000000000000"
-                      />
-                    </div>
-                    <details class="rounded-lg border p-4">
-                      <summary class="text-muted-foreground text-xs font-medium"
-                        >Advanced provider settings</summary
-                      >
-                      <div class="mt-4 space-y-2">
-                        <Label for="authority">Authority</Label><Input
-                          id="authority"
-                          type="url"
-                          bind:value={identity.provider.authority}
-                          required
-                        />
-                        <p class="text-muted-foreground text-xs leading-5">
-                          The default address works with the public Microsoft cloud.
-                        </p>
-                      </div>
-                    </details>
-                  {:else}
-                    <div class="space-y-2">
-                      <Label for="provider-label">Display name</Label><Input
-                        id="provider-label"
-                        bind:value={identity.provider.label}
-                        placeholder="Company sign-in"
-                        required
-                      />
-                    </div>
-                    <div class="space-y-2">
-                      <Label for="issuer">Issuer URL</Label><Input
-                        id="issuer"
-                        type="url"
-                        bind:value={identity.provider.issuer}
-                        required
-                        placeholder="https://login.example.com"
-                      />
-                    </div>
-                    <details class="rounded-lg border p-4">
-                      <summary class="text-muted-foreground text-xs font-medium"
-                        >Token claims</summary
-                      >
-                      <div class="mt-4 space-y-4">
-                        <div class="space-y-2">
-                          <Label for="groups-claim">Groups</Label><Input
-                            id="groups-claim"
-                            bind:value={identity.provider.groupsClaim}
-                            required
-                          />
-                        </div>
-                        <div class="space-y-2">
-                          <Label for="name-claim">Name</Label><Input
-                            id="name-claim"
-                            bind:value={identity.provider.nameClaim}
-                            required
-                          />
-                        </div>
-                        <div class="space-y-2">
-                          <Label for="email-claim">Email</Label><Input
-                            id="email-claim"
-                            bind:value={identity.provider.emailClaim}
-                            required
-                          />
-                        </div>
-                      </div>
-                    </details>
-                  {/if}
-                {:else if step === 2}
-                  <div>
-                    <h2
-                      bind:this={stepHeading}
-                      tabindex="-1"
-                      class="text-base font-semibold outline-none"
-                    >
-                      Workspace sign-in
-                    </h2>
-                    <p class="text-muted-foreground mt-2 text-sm leading-6">
-                      Register Widefleet with your provider. Use this redirect URI, then enter the
-                      credentials.
-                    </p>
-                  </div>
-                  <div class="space-y-2">
-                    <p class="text-xs font-medium">Redirect URI</p>
-                    {#await callback}<div
-                        class="bg-muted h-12 rounded-lg"
-                        aria-label="Calculating redirect URI"
-                      ></div>{:then url}<CopyValue
-                        value={url}
-                        label="Copy workspace redirect URI"
-                      />{/await}
-                  </div>
-                  <div class="space-y-2">
-                    <Label for="management-client">Client ID</Label><Input
-                      id="management-client"
-                      bind:value={identity.management.clientId}
-                      required
-                      class="h-10"
-                    />
-                  </div>
-                  <SecretField
-                    label="Workspace credentials"
-                    bind:value={identity.management.secret}
-                  />
-                {:else}
-                  <div>
-                    <h2
-                      bind:this={stepHeading}
-                      tabindex="-1"
-                      class="text-base font-semibold outline-none"
-                    >
-                      Published app sign-in
-                    </h2>
-                    <p class="text-muted-foreground mt-2 text-sm leading-6">
-                      This sign-in protects your published apps. Use a separate registration with
-                      your provider.
-                    </p>
-                  </div>
-                  <div class="space-y-2">
-                    <p class="text-xs font-medium">Redirect URI</p>
-                    <CopyValue value={view.appCallbackUrl} label="Copy app redirect URI" />
-                  </div>
-                  <div class="space-y-2">
-                    <Label for="apps-client">Client ID</Label><Input
-                      id="apps-client"
-                      bind:value={identity.apps.clientId}
-                      required
-                      class="h-10"
-                    />
-                  </div>
-                  <SecretField label="App sign-in credentials" bind:value={identity.apps.secret} />
-                  {#if identity.provider.type === "entra"}<p
-                      class="text-muted-foreground text-xs leading-6"
-                    >
-                      Enable group claims in this registration. For users in more than 200 groups,
-                      the sign-in service retrieves memberships through Microsoft Graph.
-                    </p>
-                    <details class="rounded-lg border p-4">
-                      <summary class="text-muted-foreground text-xs font-medium"
-                        >Group search for coding agents</summary
-                      >
-                      <div class="mt-4 space-y-4">
-                        <div class="flex items-center gap-3">
-                          <Checkbox
-                            id="directory"
-                            checked={identity.directory !== null}
-                            onCheckedChange={(enabled) => {
-                              identity.directory = enabled
-                                ? { clientId: "", secret: { type: "value", value: "" } }
-                                : null;
-                            }}
-                          /><Label for="directory">Connect Microsoft Graph (optional)</Label>
-                        </div>
-                        {#if identity.directory}<p class="text-muted-foreground text-xs leading-6">
-                            This registration needs the GroupMember.Read.All application permission
-                            with administrator consent.
-                          </p>
-                          <div class="space-y-2">
-                            <Label for="directory-client">Client ID</Label><Input
-                              id="directory-client"
-                              bind:value={identity.directory.clientId}
-                              required
-                            />
-                          </div>
-                          <SecretField
-                            label="Group search credentials"
-                            bind:value={identity.directory.secret}
-                          />{/if}
-                      </div>
-                    </details>
-                  {/if}
-                {/if}
-                {#if !readonly}<div
-                    class="flex flex-wrap items-center justify-between gap-3 border-t pt-5"
-                  >
-                    {#if onboarding && step > 1}<Button
-                        variant="ghost"
-                        onclick={() => openStep(step - 1)}
-                        disabled={busy}><ArrowLeft />Back</Button
-                      >{:else}<span class="text-muted-foreground text-xs"
-                        >{onboarding ? `Step ${step} of 4` : dirty ? "Unsaved changes" : ""}</span
-                      >{/if}<Button id="identity-save" type="submit" disabled={busy}
-                      >{busy
-                        ? "Saving …"
-                        : onboarding && step < 3
-                          ? "Continue"
-                          : "Save"}{#if onboarding && step < 3}<ArrowRight />{/if}</Button
-                    >
-                  </div>{/if}
-              </fieldset>
-            </form>
-          {:else}
-            <section class="space-y-6 rounded-xl border p-5 sm:p-7">
-              <div>
-                <div
-                  class="text-primary bg-primary/5 mb-4 grid size-10 place-items-center rounded-xl"
-                >
-                  <ShieldCheck class="size-5" />
-                </div>
-                <h2
-                  bind:this={stepHeading}
-                  tabindex="-1"
-                  class="text-base font-semibold outline-none"
-                >
-                  {onboarding ? "Verify administrator access" : "Company account"}
-                </h2>
-                <p class="text-muted-foreground mt-2 text-sm leading-6">
-                  {onboarding
-                    ? "Verify your new access before completing setup. Your existing permissions are preserved."
-                    : "Verify the company domain, then sign in with your company account."}
-                </p>
-              </div>
-              {#if dirty}<Feedback>Save your configuration changes before testing sign-in.</Feedback
-                >{/if}
-              {#if view.settings.identity}
-                {#if view.sso && !view.sso.verified}
-                  <p class="text-muted-foreground text-sm leading-6">
-                    Verify {view.sso.domain} to activate company SSO. Everyone accessing this organization
-                    must then use company SSO. Existing accounts with the same company email keep their
-                    memberships.
-                  </p>
-                  {#if proof}
-                    <CopyValue label="DNS record name" value={proof.name} />
-                    <CopyValue label="TXT value" value={proof.value} />
-                    <Button disabled={busy || dirty} onclick={verifyProof}
-                      >Verify domain and sign in<ArrowRight /></Button
-                    >
-                  {:else}
-                    <Button disabled={busy || dirty} onclick={requestProof}
-                      >Get verification record<ArrowRight /></Button
-                    >
-                  {/if}
-                {:else if !data.tested}
-                  <Button disabled={busy || !view.sso || dirty} onclick={signIn}
-                    >Sign in with company SSO<ArrowRight /></Button
-                  >
-                {:else}<Feedback kind="success"
-                    >Company sign-in and administrator access verified successfully.</Feedback
-                  >{#if onboarding}<p class="text-muted-foreground text-sm leading-6">
-                      Completing setup disables password access and closes all local sessions. You
-                      can generate a temporary recovery link on the server later.
-                    </p>
-                    <Button
-                      disabled={busy || dirty}
-                      onclick={complete}
-                      class="h-auto min-h-9 whitespace-normal py-2 text-left"
-                      >{#if busy}<LoaderCircle
-                          class="animate-spin motion-reduce:animate-none"
-                        />{/if}Complete setup and disable password access</Button
-                    >{/if}{/if}
-              {:else}<Feedback
-                  >First configure your identity provider and both sign-in registrations.</Feedback
-                ><Button onclick={() => openStep(1)}>Start setup<ArrowRight /></Button>{/if}
-            </section>
-          {/if}
         </div>
-      </div>
+        <div class="space-y-2">
+          <Label for="issuer">Issuer URL</Label><Input
+            id="issuer"
+            type="url"
+            bind:value={draft.sso.issuer}
+            placeholder="https://login.microsoftonline.com/TENANT-ID/v2.0"
+            required
+          />
+        </div>
+        <div class="space-y-2">
+          <Label for="company-domain">Company email domain</Label><Input
+            id="company-domain"
+            bind:value={draft.sso.domain}
+            placeholder="example.com"
+            required
+          />
+        </div>
+        <div class="space-y-2">
+          <p class="text-xs font-medium">Workspace redirect URI</p>
+          <CopyValue value={callback} label="Copy workspace redirect URI" />
+        </div>
+        <div class="space-y-2">
+          <p class="text-xs font-medium">App redirect URI</p>
+          <CopyValue value={view.appCallbackUrl} label="Copy app redirect URI" />
+        </div>
+        <div class="space-y-2">
+          <Label for="sso-client">Client ID</Label><Input
+            id="sso-client"
+            bind:value={draft.sso.oidcConfig.clientId}
+            required
+          />
+        </div>
+        <div class="space-y-2">
+          <Label for="sso-secret">Client secret</Label><Input
+            id="sso-secret"
+            type="password"
+            autocomplete="new-password"
+            bind:value={draft.sso.oidcConfig.clientSecret}
+            required={!view.sso}
+          />
+          {#if view.sso}<p class="text-muted-foreground text-xs">
+              Leave blank to keep the saved secret.
+            </p>{/if}
+        </div>
+        <div class="space-y-2">
+          <Label for="app-identity">App identity claims</Label>
+          <NativeSelect
+            id="app-identity"
+            value={draft.appIdentity.type}
+            onchange={(event) => {
+              draft.appIdentity =
+                event.currentTarget.value === "entra"
+                  ? { type: "entra" }
+                  : { type: "oidc", groupsClaim: "groups" };
+              if (draft.appIdentity.type !== "entra") draft.directory = null;
+            }}
+            ><option value="oidc">OpenID Connect</option><option value="entra"
+              >Microsoft Entra</option
+            ></NativeSelect
+          >
+          <p class="text-muted-foreground text-xs">
+            Choose Entra to use Microsoft object IDs and group memberships for app access.
+          </p>
+        </div>
+        <details class="rounded-lg border p-4">
+          <summary class="text-sm font-medium">Claim mappings</summary>
+          <div class="mt-4 space-y-4">
+            <div class="space-y-2">
+              <Label for="name-claim">Name</Label><Input
+                id="name-claim"
+                bind:value={draft.sso.oidcConfig.mapping.name}
+                required
+              />
+            </div>
+            <div class="space-y-2">
+              <Label for="email-claim">Email</Label><Input
+                id="email-claim"
+                bind:value={draft.sso.oidcConfig.mapping.email}
+                required
+              />
+            </div>
+            {#if draft.appIdentity.type === "oidc"}<div class="space-y-2">
+                <Label for="groups-claim">App groups</Label><Input
+                  id="groups-claim"
+                  bind:value={draft.appIdentity.groupsClaim}
+                  required
+                />
+              </div>{/if}
+          </div>
+        </details>
+        {#if draft.appIdentity.type === "entra"}
+          <details class="rounded-lg border p-4">
+            <summary class="text-sm font-medium">Directory search</summary>
+            <div class="mt-4 space-y-4">
+              <div class="flex items-center gap-3">
+                <Checkbox
+                  id="directory"
+                  checked={draft.directory !== null}
+                  onCheckedChange={(enabled) => {
+                    draft.directory = enabled
+                      ? { clientId: "", secret: { type: "value", value: "" } }
+                      : null;
+                  }}
+                /><Label for="directory">Connect Microsoft Graph</Label>
+              </div>
+              {#if draft.directory}
+                <p class="text-muted-foreground text-xs">
+                  Directory search needs the GroupMember.Read.All application permission with
+                  administrator consent.
+                </p>
+                <div class="space-y-2">
+                  <Label for="directory-client">Directory client ID</Label><Input
+                    id="directory-client"
+                    bind:value={draft.directory.clientId}
+                    required
+                  />
+                </div>
+                <SecretField label="Directory credentials" bind:value={draft.directory.secret} />
+              {/if}
+            </div>
+          </details>
+        {/if}
+        <div class="flex items-center justify-between border-t pt-4">
+          <span class="text-muted-foreground text-xs">{dirty ? "Unsaved changes" : ""}</span><Button
+            id="identity-save"
+            type="submit"
+            disabled={busy}>{busy ? "Saving …" : "Save"}</Button
+          >
+        </div>
+      </fieldset>
+    </form>
+    {#if view.sso}
+      <section class="space-y-4 rounded-xl border p-6">
+        <h2 class="text-base font-semibold">Verify company sign-in</h2>
+        {#if dirty}<Feedback>Save your changes before verifying company sign-in.</Feedback>{/if}
+        {#if !view.sso.domainVerified}
+          <p class="text-muted-foreground text-sm">
+            Verify {view.sso.domain} to activate company SSO. Access to this organization will then require
+            company sign-in.
+          </p>
+          {#if proof}
+            <CopyValue label="DNS record name" value={proof.name} /><CopyValue
+              label="TXT value"
+              value={proof.value}
+            />
+            <Button disabled={busy || dirty} onclick={verifyProof}>Verify domain and sign in</Button
+            >
+          {:else}<Button disabled={busy || dirty} onclick={requestProof}
+              >Get verification record</Button
+            >{/if}
+        {:else if !data.tested}<Button disabled={busy || dirty} onclick={signIn}
+            >Sign in with company SSO</Button
+          >
+        {:else}
+          <Feedback kind="success"
+            >Company sign-in and administrator access verified successfully.</Feedback
+          >
+          {#if onboarding}<p class="text-muted-foreground text-sm">
+              Completing setup disables password access and closes local sessions. Server recovery
+              remains available.
+            </p>
+            <Button disabled={busy || dirty} onclick={complete}
+              >Complete setup and disable password access</Button
+            >{/if}
+        {/if}
+        <p class="text-muted-foreground text-xs">{view.activation.message}</p>
+      </section>
     {/if}
   {/if}
 </div>

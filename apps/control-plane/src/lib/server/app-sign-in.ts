@@ -1,16 +1,15 @@
 import type { Configuration } from "./config.ts";
-import type { activationStatus, identitySettingsInput, settingsPlan } from "@platform/contracts";
+import type { activationStatus, settingsPlan } from "@platform/contracts";
+import type { companyIdentity } from "./company-identity.ts";
 import type { z } from "zod";
 import { installationOrganizationId } from "../organization.ts";
 
 export interface AppSignIn {
   callbackUrl: string;
-  publish(identity: z.infer<typeof identitySettingsInput>, clientSecret: string): Promise<string>;
-  revision(identity: z.infer<typeof identitySettingsInput>, clientSecret: string): Promise<string>;
+  publish(identity: z.infer<typeof companyIdentity>, clientSecret: string): Promise<string>;
+  revision(identity: z.infer<typeof companyIdentity>, clientSecret: string): Promise<string>;
   status(expectedRevision: string): Promise<z.infer<typeof activationStatus>>;
-  plan(
-    identity: z.infer<typeof identitySettingsInput> | null,
-  ): Promise<z.infer<typeof settingsPlan>>;
+  plan(identity: z.infer<typeof companyIdentity> | null): Promise<z.infer<typeof settingsPlan>>;
 }
 
 export const appCallbackUrl = (

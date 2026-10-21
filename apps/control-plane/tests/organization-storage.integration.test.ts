@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { settingsInput } from "@platform/contracts";
-import { organization, ssoProvider } from "../src/lib/server/auth-schema.ts";
-import { createTestEnvironment } from "./environment.ts";
+import { organization, member, ssoProvider } from "../src/lib/server/auth-schema.ts";
+import { createTestEnvironment, organizationCredential } from "./environment.ts";
 
 describe("Organization settings storage", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
@@ -21,23 +21,37 @@ describe("Organization settings storage", () => {
         createdAt: new Date(),
       });
 
+      await environment.database.db.insert(member).values({
+        id: crypto.randomUUID(),
+        organizationId: id,
+        userId: environment.owner.id,
+        role: "owner",
+        createdAt: new Date(),
+      });
+
+      const credential = await organizationCredential(environment, {
+        id: environment.owner.id,
+        application: { organizationId: id },
+      });
+
       const input = settingsInput.parse({
-        externallyManaged: false,
-        identity: {
+        appIdentity: { type: "entra" },
+        directory: { clientId: name, secret: { type: "value", value: `${name}-secret` } },
+        sso: {
+          providerId: name,
           domain: "example.test",
-          provider: environment.configuration.IDENTITY.provider,
-          management: { clientId: name, secret: { type: "value", value: `${name}-secret` } },
-          apps: { clientId: name, secret: { type: "value", value: `${name}-apps-secret` } },
+          issuer: `${environment.environment.ENTRA_AUTHORITY}/${environment.environment.ENTRA_TENANT_ID}/v2.0`,
+          oidcConfig: { clientId: name, clientSecret: `${name}-login-secret` },
         },
       });
 
-      await environment.settings.initialize(input, id);
+      await environment.settings.initialize(input, id, credential);
       await environment.database.db
         .update(ssoProvider)
         .set({ domainVerified: true })
         .where(eq(ssoProvider.organizationId, id));
 
-      return { id, input };
+      return { id, input, credential };
     };
 
     const first = await createOrganization("first");
@@ -46,21 +60,23 @@ describe("Organization settings storage", () => {
 
     const foreign = settingsInput.parse({
       ...second.input,
-      identity: { ...second.input.identity, management: firstSettings.identity?.management },
+      directory: firstSettings.directory,
     });
 
-    await expect(environment.settings.initialize(foreign, second.id)).rejects.toMatchObject({
+    await expect(
+      environment.settings.initialize(foreign, second.id, second.credential),
+    ).rejects.toMatchObject({
       code: "BAD_REQUEST",
     });
     const replacement = settingsInput.parse(second.input);
 
-    if (!replacement.identity) throw new Error("Missing fixture identity");
-    replacement.identity.management.secret = { type: "value", value: "rotated-second-secret" };
-    await environment.settings.initialize(replacement, second.id);
-    expect((await environment.settings.resolve(first.id)).identity?.management.clientSecret).toBe(
+    if (!replacement.directory) throw new Error("Missing fixture identity");
+    replacement.directory.secret = { type: "value", value: "rotated-second-secret" };
+    await environment.settings.initialize(replacement, second.id, second.credential);
+    expect((await environment.settings.resolve(first.id)).identity?.directory?.clientSecret).toBe(
       "first-secret",
     );
-    expect((await environment.settings.resolve(second.id)).identity?.management.clientSecret).toBe(
+    expect((await environment.settings.resolve(second.id)).identity?.directory?.clientSecret).toBe(
       "rotated-second-secret",
     );
   });

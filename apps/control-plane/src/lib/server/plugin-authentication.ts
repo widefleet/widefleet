@@ -3,6 +3,7 @@ import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/a
 import type { JSONWebKeySet } from "jose";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
+import { identityUrl } from "@platform/contracts";
 import { verifyAccessToken } from "./access-token.ts";
 import { invitation, member, ssoProvider, user } from "./auth-schema.ts";
 import type { OrganizationAccess } from "./application-context.ts";
@@ -71,6 +72,7 @@ export const pluginAuthentication = (
         organizationId: z.string().optional(),
         providerId: z.string().optional(),
         invitationId: z.string().optional(),
+        issuer: identityUrl.optional(),
       })
       .parse(context.body);
 
@@ -147,6 +149,15 @@ export const pluginAuthentication = (
       throw new APIError("FORBIDDEN", { message: "Sign in with this organization's company SSO" });
 
     context.context.session = current;
+
+    // Discovery uses the authorized administrator's proposed issuer, scoped to
+    // this invocation rather than a second auth instance or configuration store.
+    if (input.issuer && ["/sso/register", "/sso/update-provider"].includes(context.path)) {
+      context.context.trustedOrigins = [
+        ...context.context.trustedOrigins,
+        new URL(input.issuer).origin,
+      ];
+    }
 
     return undefined;
   });

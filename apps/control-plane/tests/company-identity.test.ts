@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { companyProvider, identitySettingsInput } from "@platform/contracts";
+import { companyProvider, settingsInput } from "@platform/contracts";
 import { companyAccountProvider, companyIdentity } from "../src/lib/server/company-identity.ts";
 import { installationSettings } from "./installation/settings.ts";
 
@@ -34,25 +34,20 @@ describe("company identity settings", () => {
     expect(companyAccountProvider(identity)).not.toBe(companyAccountProvider(other));
   });
 
-  it("accepts separate Graph credentials and rejects Graph for another provider", () => {
-    const clients = {
-      management: { clientId: "management", secret: { type: "value", value: "management-secret" } },
-      apps: { clientId: "apps", secret: { type: "value", value: "apps-secret" } },
+  it("accepts one native SSO registration and independent directory credentials", () => {
+    const settings = settingsInput.parse({
+      appIdentity: { type: "entra" },
+      sso: {
+        providerId: "company",
+        issuer: "https://login.example.test",
+        domain: "example.test",
+        oidcConfig: client,
+      },
       directory: { clientId: "directory", secret: { type: "value", value: "directory-secret" } },
-    };
+    });
 
-    expect(
-      identitySettingsInput.parse({
-        ...clients,
-        provider: { type: "entra", tenantId: installationSettings.ENTRA_TENANT_ID },
-      }).directory?.clientId,
-    ).toBe("directory");
-    expect(() =>
-      identitySettingsInput.parse({
-        ...clients,
-        provider: { type: "oidc", issuer: "https://login.example.test", label: "Company" },
-      }),
-    ).toThrow("Microsoft Graph directory search requires an Entra provider");
+    expect(settings.sso?.oidcConfig.clientId).toBe("client");
+    expect(settings.directory?.clientId).toBe("directory");
   });
 
   it("rejects unsafe issuer URLs and invalid claim names", () => {

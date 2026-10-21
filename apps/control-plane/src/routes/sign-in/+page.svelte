@@ -171,27 +171,27 @@
           }}>Use another email or request a new code</Button
         >{/if}
     </form>
-    {#if !data.provider}
-      <details class="mt-6 border-t pt-5">
-        <summary class="text-sm font-medium">Sign in with company SSO</summary>
-        <form method="GET" class="mt-4 space-y-3">
-          <input type="hidden" name="next" value={data.next} />
-          <Label for="organization-slug">Organization slug</Label>
-          <Input
-            id="organization-slug"
-            name="organization"
-            required
-            value={data.organizationSlug ?? ""}
-            placeholder="acme"
-          />
-          <Button type="submit" variant="outline" class="w-full">Continue</Button>
-          {#if data.organizationSlug}<Feedback kind="error"
-              >Company sign-in is not configured for this organization.</Feedback
-            >{/if}
-        </form>
-      </details>
-    {/if}
   {/if}
+  <details class="mt-6 border-t pt-5">
+    <summary class="text-sm font-medium"
+      >{data.provider ? "Sign in to another organization" : "Sign in with company SSO"}</summary
+    >
+    <form method="GET" class="mt-4 space-y-3">
+      <input type="hidden" name="next" value={data.next} />
+      <Label for="organization-slug">Organization slug</Label>
+      <Input
+        id="organization-slug"
+        name="organization"
+        required
+        value={data.organizationSlug ?? ""}
+        placeholder="acme"
+      />
+      <Button type="submit" variant="outline" class="w-full">Continue</Button>
+      {#if data.organizationSlug && !data.provider}<Feedback kind="error"
+          >Company sign-in is not configured for this organization.</Feedback
+        >{/if}
+    </form>
+  </details>
   {#if data.localPasswordEnabled}
     <details open={!data.provider} class="mt-6 border-t pt-5">
       <summary class="text-sm font-medium">Continue setup</summary>

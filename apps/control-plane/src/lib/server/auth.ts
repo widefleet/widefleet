@@ -18,22 +18,22 @@ import * as authSchema from "./auth-schema.ts";
 import type { Configuration } from "./config.ts";
 import type { Database, DatabaseExecutor } from "./database.ts";
 import { enrollCompanyUser } from "./organization.ts";
-import { decryptSecret } from "./secret-encryption.ts";
-import { z } from "zod";
-import { readOrganizationSettings } from "./installation-store.ts";
-import { companyAccountProvider } from "./company-identity.ts";
+import { readSsoConfiguration } from "./sso-settings.ts";
 import { createAuthenticationAdmission } from "./auth-admission.ts";
 import type { OrganizationAccess } from "./application-context.ts";
 import { companySsoOrigins, companySsoPlugin } from "./company-sso.ts";
 import { pluginAuthentication, managedPluginPaths } from "./plugin-authentication.ts";
 
-export const companyLoginRevision = (configuration: Configuration) =>
-  configuration.IDENTITY
+export const companyLoginRevision = (
+  connection: Awaited<ReturnType<typeof readSsoConfiguration>>,
+) =>
+  connection
     ? createHash("sha256")
         .update(
           JSON.stringify({
-            provider: configuration.IDENTITY.provider,
-            management: configuration.IDENTITY.management,
+            providerId: connection.providerId,
+            issuer: connection.issuer,
+            oidcConfig: connection.oidcConfig,
           }),
         )
         .digest("hex")
@@ -151,19 +151,9 @@ export const createAuthentication = (
                   emailVerified: true,
                 });
 
-              const saved = (await readOrganizationSettings(database, provider.organizationId))
-                .identity;
-
-              if (saved && provider.oidcConfig) {
-                const credentials = z
-                  .object({ clientId: z.string(), clientSecret: z.string() })
-                  .parse(JSON.parse(await decryptSecret(encryptionKey, provider.oidcConfig)));
-
-                revision = companyLoginRevision({
-                  ...configuration,
-                  IDENTITY: { provider: saved.provider, management: credentials, directory: null },
-                });
-              }
+              revision = companyLoginRevision(
+                await readSsoConfiguration(database, encryptionKey, provider.organizationId),
+              );
             }
 
             return {
@@ -181,10 +171,12 @@ export const createAuthentication = (
       account: {
         create: {
           after: async (identity) => {
-            if (
-              configuration.IDENTITY &&
-              identity.providerId === companyAccountProvider(configuration.IDENTITY)
-            )
+            const [provider] = await database
+              .select({ organizationId: authSchema.ssoProvider.organizationId })
+              .from(authSchema.ssoProvider)
+              .where(eq(authSchema.ssoProvider.providerId, identity.providerId));
+
+            if (provider?.organizationId === installationOrganizationId)
               await enrollCompanyUser(database, identity.userId);
           },
         },

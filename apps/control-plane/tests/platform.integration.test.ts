@@ -1,3 +1,4 @@
+import { editableSettings } from "./settings-input.ts";
 import {
   connectorUploadForm,
   connectorModule,
@@ -2396,9 +2397,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       creator: true,
     };
 
-    const settings = contract.settingsInput.parse(
-      (await environment.settings.read(owner)).settings,
-    );
+    const settings = editableSettings(await environment.settings.read(owner));
 
     await environment.settings.update(
       owner,

@@ -2,7 +2,9 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { bootstrapConfiguration } from "@platform/contracts";
-import { registerCli } from "../src/lib/server/auth.ts";
+import { initializeBootstrap } from "../src/lib/server/bootstrap.ts";
+import { migrateSsoSettings } from "../src/lib/server/sso-migration.ts";
+import { createAuthentication, registerCli } from "../src/lib/server/auth.ts";
 import { cloudflareConfigurationSchema } from "../src/lib/server/cloudflare-config.ts";
 import { createDatabase } from "../src/lib/server/database.ts";
 import {
@@ -31,6 +33,7 @@ try {
   if (execution.isErr()) throw execution.error;
   await initializeOrganization(database.db);
   await initializeInstallation(database.db);
+  await migrateSsoSettings(database.db, configuration.PLATFORM_ENCRYPTION_KEY);
   await registerCli(database.db, configuration);
 
   if (!(await readInstallation(database.db)).ownerId) {
@@ -67,15 +70,15 @@ try {
             ),
         );
 
-        const initialized = await settings.initialize(bootstrap.settings);
-
-        if (initialized.error) throw new Error(initialized.error);
+        await initializeBootstrap(
+          settings,
+          createAuthentication({ ...configuration, LOCAL_PASSWORD_ENABLED: true }, database.db),
+          bootstrap,
+        );
       } finally {
         await proxy.dispose();
       }
-    }
-
-    await createInstallationOwner(database.db, bootstrap.owner);
+    } else await createInstallationOwner(database.db, bootstrap.owner);
   }
 
   console.info("Hosted installation initialized");

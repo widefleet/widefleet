@@ -20,6 +20,7 @@ import { installation } from "../../src/lib/server/schema.ts";
 import { installationId, readInstallation } from "../../src/lib/server/installation-store.ts";
 import { initializeCloudflareRuntime } from "../../src/lib/server/organization-runtime.ts";
 import { createTestEnvironment } from "../environment.ts";
+import { editableSettings } from "../settings-input.ts";
 import { observeOAuthResourceWrites } from "../oauth-resource-writes.ts";
 import { expectRateLimitedBurst } from "../rate-limit.ts";
 
@@ -193,11 +194,13 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
     const initial = contract.settingsView.parse(await response.json());
     expect(initial.error).toBeNull();
 
-    const plan = await administrator.post("/api/v1/settings/plan", { data: initial.settings });
+    const plan = await administrator.post("/api/v1/settings/plan", {
+      data: editableSettings(initial),
+    });
     expect(plan.status()).toBe(200);
     expect(await plan.json()).toMatchObject({ restartRequired: false });
 
-    const saved = await administrator.put("/api/v1/settings", { data: initial.settings });
+    const saved = await administrator.put("/api/v1/settings", { data: editableSettings(initial) });
     expect(saved.status()).toBe(200);
     const result = contract.settingsView.parse(await saved.json());
     expect(result.error).toBeNull();

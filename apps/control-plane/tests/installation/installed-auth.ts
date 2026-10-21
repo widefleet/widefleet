@@ -16,10 +16,11 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { vi, expect } from "vitest";
 import { z } from "zod";
-import { activationStatus, identitySettingsInput, publishedApp } from "@platform/contracts";
+import { activationStatus, publishedApp } from "@platform/contracts";
 import { authConfiguration } from "@platform/auth-proxy";
 import { authControlPath } from "@platform/auth-proxy/publication";
 
+import { companyIdentity } from "../../src/lib/server/company-identity.ts";
 import { createAppSignIn } from "../../src/lib/server/app-sign-in-node.ts";
 import { runtimeConfigurationSchema } from "../../src/lib/server/config.ts";
 
@@ -143,13 +144,12 @@ export const installedAuth = async () => {
     );
 
     const revision = await signIn.publish(
-      identitySettingsInput.parse({
+      companyIdentity.parse({
         provider: input.provider,
         management: {
           clientId: input.clientId,
-          secret: { type: "value", value: input.clientSecret },
+          clientSecret: input.clientSecret,
         },
-        apps: { clientId: input.clientId, secret: { type: "value", value: input.clientSecret } },
         directory: null,
       }),
       input.clientSecret,

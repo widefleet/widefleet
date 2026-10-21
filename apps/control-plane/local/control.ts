@@ -124,16 +124,41 @@ if (command === "agent") {
         (organizationId) => createAppSignIn(configuration, keys.cookie, organizationId),
       );
 
-      await settings.initialize({
-        externallyManaged: false,
-        identity: {
-          domain: "example.test",
-          provider: { type: "entra", tenantId: tenant, authority, label: "Microsoft" },
-          management: { clientId, secret: { type: "value", value: clientSecret } },
-          apps: { clientId, secret: { type: "value", value: clientSecret } },
-          directory: null,
+      const { token: setupToken } = await auth.api.signJWT({
+        body: {
+          payload: {
+            sub: "local-admin",
+            reference_id: "organization:widefleet",
+            aud: apiResource(configuration),
+            iss: `${configuration.PLATFORM_URL}/api/auth`,
+            iat: Math.floor(Date.now() / 1000),
+            exp: Math.floor(Date.now() / 1000) + 300,
+            scope: "platform:write",
+          },
         },
       });
+
+      await settings.initialize(
+        {
+          externallyManaged: false,
+          appIdentity: { type: "entra" },
+          directory: null,
+          sso: {
+            providerId: "microsoft",
+            domain: "example.test",
+            issuer: `${authority}/${tenant}/v2.0`,
+            oidcConfig: {
+              clientId,
+              clientSecret,
+              pkce: true,
+              scopes: ["openid", "profile", "email"],
+              mapping: { name: "name", email: "email" },
+            },
+          },
+        },
+        "widefleet",
+        { auth, headers: new Headers({ authorization: `Bearer ${setupToken}` }) },
+      );
 
       // The guarded local demo uses its own synthetic DNS/IdP identities.
       await database.db

@@ -60,11 +60,17 @@ pub async fn run(api: &Api, token: &str, options: Options) -> Result<()> {
                     .await?,
             )
             .await?;
-            super::print_json(if matches!(options.command, Command::Export) {
-                &view["settings"]
+            if matches!(options.command, Command::Export) {
+                let mut settings = view["settings"].clone();
+                let mut provider = view["sso"].clone();
+                if let Some(provider) = provider.as_object_mut() {
+                    provider.remove("domainVerified");
+                }
+                settings["sso"] = provider;
+                super::print_json(&settings)
             } else {
-                &view
-            })
+                super::print_json(&view)
+            }
         }
         Command::DomainVerification | Command::VerifyDomain => {
             let path = if matches!(options.command, Command::DomainVerification) {

@@ -57,40 +57,43 @@ export const companyDomain = z
     "Enter the company's email domain, without a URL or wildcard",
   );
 
-export const identitySettings = z
-  .strictObject({
-    domain: companyDomain.nullable().default(null),
-    provider: companyProvider,
-    management: client,
-    apps: client,
-    directory: client.nullable().default(null),
-  })
-  .refine((value) => !value.directory || value.provider.type === "entra", {
-    message: "Microsoft Graph directory search requires an Entra provider",
-    path: ["directory"],
-  });
+// These settings describe app access claims, not the company's SSO connection.
+// Issuer, client credentials and profile mappings belong to the native SSO provider.
+export const appIdentitySettings = z.discriminatedUnion("type", [
+  z.strictObject({ type: z.literal("entra") }),
+  z.strictObject({
+    type: z.literal("oidc"),
+    groupsClaim: claimName.default("groups"),
+  }),
+]);
 
-export const identitySettingsInput = z
-  .strictObject({
-    domain: companyDomain.nullable().default(null),
-    provider: companyProvider,
-    management: clientInput,
-    apps: clientInput,
-    directory: clientInput.nullable().default(null),
-  })
-  .refine((value) => !value.directory || value.provider.type === "entra", {
-    message: "Microsoft Graph directory search requires an Entra provider",
-    path: ["directory"],
-  });
+export const oidcProviderInput = z.strictObject({
+  providerId: z.string().min(1),
+  issuer: identityUrl,
+  domain: companyDomain,
+  oidcConfig: z.strictObject({
+    clientId: z.string().min(1).max(512),
+    clientSecret: z.string().min(1).max(16_384).optional(),
+    pkce: z.boolean().default(true),
+    scopes: z.array(z.string()).default(["openid", "profile", "email"]),
+    mapping: z
+      .object({
+        name: claimName.default("name"),
+        email: claimName.default("email"),
+      })
+      .default({ name: "name", email: "email" }),
+  }),
+});
 
 export const installationSettings = z.strictObject({
-  identity: identitySettings.nullable().default(null),
+  appIdentity: appIdentitySettings.default({ type: "oidc", groupsClaim: "groups" }),
+  directory: client.nullable().default(null),
   externallyManaged: z.boolean().default(false),
 });
 
-export const settingsInput = z.strictObject({
-  identity: identitySettingsInput.nullable(),
-  externallyManaged: z.boolean(),
+export const settingsInput = installationSettings.extend({
+  directory: clientInput.nullable().default(null),
+  sso: oidcProviderInput.nullable(),
 });
 
 export const settingsUpdate = settingsInput.extend({
@@ -121,8 +124,8 @@ export const settingsView = z.strictObject({
   appCallbackUrl: z.url(),
   activation: activationStatus,
   error: z.string().nullable(),
-  sso: z
-    .object({ providerId: z.string(), domain: companyDomain, verified: z.boolean() })
+  sso: oidcProviderInput
+    .extend({ domain: z.union([companyDomain, z.literal("")]), domainVerified: z.boolean() })
     .nullable(),
 });
 

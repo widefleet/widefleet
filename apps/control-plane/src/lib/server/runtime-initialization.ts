@@ -3,7 +3,9 @@ import { createAppSignIn } from "./app-sign-in-node.ts";
 import { bootstrapConfiguration } from "@platform/contracts";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { join, resolve } from "node:path";
-import { registerCli } from "./auth.ts";
+import { initializeBootstrap } from "./bootstrap.ts";
+import { migrateSsoSettings } from "./sso-migration.ts";
+import { createAuthentication, registerCli } from "./auth.ts";
 import { readConfiguration, type Configuration } from "./config.ts";
 import { createDatabase } from "./database.ts";
 import { initializeEdge } from "./edge.ts";
@@ -13,11 +15,7 @@ import {
   readOptionalFile,
   writePrivateFile,
 } from "./installation-files.ts";
-import {
-  createInstallationOwner,
-  initializeInstallation,
-  readInstallation,
-} from "./installation-store.ts";
+import { initializeInstallation, readInstallation } from "./installation-store.ts";
 import { initializeOrganization } from "./organization.ts";
 import { createSettingsService } from "./settings.ts";
 import { installationRuntime } from "./organization-runtime.ts";
@@ -45,6 +43,7 @@ export const prepareInstallation = async (
     await migrate(database.db, { migrationsFolder });
     await initializeOrganization(database.db);
     await initializeInstallation(database.db);
+    await migrateSsoSettings(database.db, keys.encryption);
 
     const execution = await database.db.transaction(installationRuntime);
     const path = join(configuration.PLATFORM_RUNTIME_DIRECTORY, "installation.json");
@@ -99,8 +98,15 @@ export const initializeRuntime = async (
       const bootstrap = await readBootstrap(configuration);
 
       if (bootstrap) {
-        if (bootstrap.settings) await settings.initialize(bootstrap.settings);
-        await createInstallationOwner(database.db, bootstrap.owner);
+        await initializeBootstrap(
+          settings,
+          createAuthentication(
+            { ...configuration, LOCAL_PASSWORD_ENABLED: state.localPasswordEnabled },
+            database.db,
+            { encryptionKey: keys.encryption },
+          ),
+          bootstrap,
+        );
       }
     }
 

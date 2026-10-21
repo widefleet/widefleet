@@ -9,6 +9,7 @@ import { installationSettings, settingsView, domainVerification } from "@platfor
 import { account, ssoProvider } from "../../src/lib/server/auth-schema.ts";
 import { installation, organizationSettings } from "../../src/lib/server/schema.ts";
 import { installationId } from "../../src/lib/server/installation-store.ts";
+import { migrateSsoSettings } from "../../src/lib/server/sso-migration.ts";
 import { createOrganizationSecrets } from "../../src/lib/server/organization-secrets.ts";
 import { createRecoveryLink } from "../../src/lib/server/recovery.ts";
 import { createTestEnvironment } from "../environment.ts";
@@ -99,30 +100,20 @@ test("verifies company DNS, preserves matching accounts and closes password acce
     );
     await page.getByRole("link", { name: "Company sign-in", exact: true }).click();
     await page.getByLabel("Company email domain").fill("example.test");
-    await page.getByLabel("Directory ID (tenant ID)").fill(environment.environment.ENTRA_TENANT_ID);
-    await page.getByText("Advanced provider settings", { exact: true }).click();
     await page
-      .getByLabel("Authority", { exact: true })
-      .fill(environment.environment.ENTRA_AUTHORITY);
-    await page.getByRole("button", { name: "Continue", exact: true }).click();
+      .getByLabel("Issuer URL")
+      .fill(
+        `${environment.environment.ENTRA_AUTHORITY}/${environment.environment.ENTRA_TENANT_ID}/v2.0`,
+      );
+    await page.getByLabel("App identity claims").selectOption("entra");
     await expect(
-      page.getByText("http://localhost:25430/api/auth/sso/callback/microsoft", { exact: true }),
+      page.getByText("http://localhost:25430/api/auth/sso/callback/company-widefleet", {
+        exact: true,
+      }),
     ).toBeVisible();
-    await page
-      .getByLabel("Client ID", { exact: true })
-      .fill(environment.environment.ENTRA_CLIENT_ID);
-    await page
-      .getByLabel("Client secret", { exact: true })
-      .fill(environment.environment.ENTRA_CLIENT_SECRET);
-    await page.getByRole("button", { name: "Back", exact: true }).click();
-    await expect(page.getByLabel("Directory ID (tenant ID)")).toHaveValue(
-      environment.environment.ENTRA_TENANT_ID,
-    );
-    await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await expect(page.getByLabel("Client ID", { exact: true })).toHaveValue(
-      environment.environment.ENTRA_CLIENT_ID,
-    );
-    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await expect(
+      page.getByText("https://auth.apps.localhost/oauth2/widefleet/callback", { exact: true }),
+    ).toBeVisible();
     await page
       .getByLabel("Client ID", { exact: true })
       .fill(environment.environment.ENTRA_CLIENT_ID);
@@ -164,46 +155,41 @@ test("verifies company DNS, preserves matching accounts and closes password acce
       .click();
     await page.getByRole("button", { name: "Manage settings externally" }).click();
     await page.getByRole("link", { name: "Company sign-in", exact: true }).click();
-    await page
-      .getByRole("navigation", { name: "Sign-in settings" })
-      .getByRole("button", { name: "Administration", exact: false })
-      .click();
     await expect(page.getByLabel("Client ID", { exact: true })).toBeDisabled();
-    await expect(page.getByRole("button", { name: "Save", exact: true })).toHaveCount(0);
-    await page.getByRole("link", { name: "Manage editing" }).click();
+    await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+    await page
+      .getByRole("navigation", { name: "Settings sections" })
+      .getByRole("link", { name: "Administration", exact: true })
+      .click();
     await page.getByRole("button", { name: "Enable browser editing" }).click();
     await page.getByRole("link", { name: "Company sign-in", exact: true }).click();
-    await page
-      .getByRole("navigation", { name: "Sign-in settings" })
-      .getByRole("button", { name: "App sign-in", exact: false })
-      .click();
-    await page.getByLabel("Client ID", { exact: true }).fill("replacement-client");
+    await page.getByLabel("Client secret", { exact: true }).fill("rotated-secret");
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByText("Settings saved.", { exact: true })).toBeVisible();
     await expect(page.getByRole("dialog")).toHaveCount(0);
     // The HTTP publication is acknowledged before the settings save completes.
     await expect(page.getByLabel("Client ID", { exact: true })).toBeVisible();
     await expect(
-      page
-        .getByRole("status")
-        .filter({ hasText: "The sign-in service is running with the saved configuration." }),
+      page.getByText("The sign-in configuration is published.", {
+        exact: true,
+      }),
     ).toBeVisible();
 
     const desired = environment.authControl.read();
-    expect(desired.configuration?.clientId).toBe("replacement-client");
+    expect(desired.configuration?.clientId).toBe(environment.environment.ENTRA_CLIENT_ID);
+    expect(desired.configuration?.clientSecret).toBe("rotated-secret");
     expect(desired.revision).not.toBe(initial.revision);
     environment.authControl.available(false);
     await page.reload();
     await expect(
-      page.getByRole("status").filter({ hasText: "The auth proxy is unavailable." }),
+      page.getByText(
+        "The auth proxy is unavailable. Check the service and save the settings again.",
+        { exact: true },
+      ),
     ).toBeVisible();
     const settingsResponse = await page.request.get("/api/v1/settings");
     expect(settingsResponse.ok()).toBe(true);
     expect(settingsView.parse(await settingsResponse.json()).activation.state).toBe("failed");
-    await page
-      .getByRole("navigation", { name: "Sign-in settings" })
-      .getByRole("button", { name: "App sign-in", exact: false })
-      .click();
     await expect(page.getByLabel("Client ID", { exact: true })).toBeVisible();
     environment.authControl.available(true);
 
@@ -215,8 +201,6 @@ test("verifies company DNS, preserves matching accounts and closes password acce
       .where(eq(organizationSettings.organizationId, installationId));
 
     const preserved = installationSettings.parse(beforeUpgrade?.settings);
-
-    if (!preserved.identity) throw new Error("Missing saved company settings");
 
     const secrets = createOrganizationSecrets(
       environment.database.db,
@@ -233,16 +217,24 @@ test("verifies company DNS, preserves matching accounts and closes password acce
       .update(organizationSettings)
       .set({
         settings: {
-          ...preserved,
+          externallyManaged: preserved.externallyManaged,
           identity: {
-            ...preserved.identity,
+            provider: environment.configuration.IDENTITY.provider,
             domain: null,
-            management: { ...preserved.identity.management, secret: managementSecret },
+            management: {
+              clientId: environment.environment.ENTRA_CLIENT_ID,
+              secret: managementSecret,
+            },
+            directory: null,
           },
         },
       })
       .where(eq(organizationSettings.organizationId, installationId));
     await environment.database.db.delete(ssoProvider);
+    await migrateSsoSettings(
+      environment.database.db,
+      environment.environment.PLATFORM_ENCRYPTION_KEY,
+    );
     await page.context().clearCookies();
     await page.goto("/sign-in");
     await expect(page.getByRole("button", { name: "Sign in with Microsoft" })).toHaveCount(0);
@@ -255,20 +247,13 @@ test("verifies company DNS, preserves matching accounts and closes password acce
       "sso@example.test",
     );
 
+    await expect(page.getByText("Sign in with company SSO", { exact: true })).toBeVisible();
     await page.goto(link);
     await expect(page).toHaveURL(/\/settings$/);
     await expect(page.getByRole("heading", { name: "Settings", exact: true })).toBeVisible();
-    await page
-      .getByRole("navigation", { name: "Sign-in settings" })
-      .getByRole("button", { name: "Provider", exact: false })
-      .click();
     await page.getByLabel("Company email domain").fill("example.test");
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByText("Settings saved.", { exact: true })).toBeVisible();
-    await page
-      .getByRole("navigation", { name: "Sign-in settings" })
-      .getByRole("button", { name: "Company account", exact: false })
-      .click();
     await page.getByRole("button", { name: "Get verification record" }).click();
 
     const upgradeRecordResponse = await page.request.post("/api/v1/settings/domain-verification", {
@@ -312,41 +297,17 @@ test("verifies company DNS, preserves matching accounts and closes password acce
     await page.goto(replacementLink);
     await expect(page).toHaveURL(/\/settings$/);
     await page
-      .getByRole("navigation", { name: "Sign-in settings" })
-      .getByRole("button", { name: "Provider", exact: false })
-      .click();
-    await page.getByLabel("Directory ID (tenant ID)").fill(environment.replacementClient.tenantId);
-    await page
-      .getByRole("navigation", { name: "Sign-in settings" })
-      .getByRole("button", { name: "Administration", exact: false })
-      .click();
-    await page
-      .getByLabel("Client ID", { exact: true })
-      .fill(environment.replacementClient.clientId);
-    await page
-      .getByRole("navigation", { name: "Sign-in settings" })
-      .getByRole("button", { name: "App sign-in", exact: false })
-      .click();
+      .getByLabel("Issuer URL")
+      .fill(
+        `${environment.environment.ENTRA_AUTHORITY}/${environment.replacementClient.tenantId}/v2.0`,
+      );
     await page
       .getByLabel("Client ID", { exact: true })
       .fill(environment.replacementClient.clientId);
     await page.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(page.getByText("Settings saved.", { exact: true })).toBeVisible();
-    await page
-      .getByRole("navigation", { name: "Sign-in settings" })
-      .getByRole("button", { name: "Company account", exact: false })
-      .click();
-    await page.getByRole("button", { name: "Get verification record" }).click();
-
-    const changedRecordResponse = await page.request.post("/api/v1/settings/domain-verification", {
-      headers: { origin: environment.configuration.PLATFORM_URL },
-    });
-
-    const changedRecord = domainVerification.parse(await changedRecordResponse.json());
-    await writeFile(dnsFile, JSON.stringify({ [changedRecord.name]: changedRecord.value }));
-    await page.getByRole("button", { name: "Verify domain and sign in" }).click();
-    await page.getByRole("button", { name: /foreign@example.test/ }).click();
-    await expect.poll(async () => (await page.request.get("/api/v1/settings")).status()).toBe(403);
+    await expect(page.getByRole("alert")).toBeVisible();
+    const [provider] = await environment.database.db.select().from(ssoProvider);
+    expect(provider?.issuer).toContain(environment.environment.ENTRA_TENANT_ID);
 
     const linkedAccounts = await environment.database.db
       .select()
@@ -354,13 +315,7 @@ test("verifies company DNS, preserves matching accounts and closes password acce
       .where(eq(account.providerId, "microsoft"));
 
     expect(linkedAccounts).toHaveLength(1);
-
-    const [installed] = await environment.database.db
-      .select()
-      .from(installation)
-      .where(eq(installation.id, installationId));
-
-    expect(linkedAccounts[0]?.userId).not.toBe(installed?.ownerId);
+    expect(linkedAccounts[0]?.userId).toBe(afterUpgrade?.ownerId);
   } catch (cause) {
     await test.info().attach("setup-server-log", { body: logs, contentType: "text/plain" });
     throw cause;

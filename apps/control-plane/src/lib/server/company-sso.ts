@@ -64,6 +64,24 @@ export const companySsoPlugin = (
     providersLimit: Number.MAX_SAFE_INTEGER,
     domainVerification: { enabled: true },
     organizationProvisioning: { disabled: true },
+    guardProviderMutation: async (input, context) => {
+      if (input.action === "update" && !input.isAuthenticationBoundaryChange) return;
+      const organizationId = input.provider.organizationId;
+
+      if (!organizationId) return;
+      // Use the plugin's transaction. A rejected update rolls back revocation too.
+      await context.database.deleteMany({
+        model: "oauthRefreshToken",
+        where: [{ field: "referenceId", value: `organization:${organizationId}` }],
+      });
+      await context.database.deleteMany({
+        model: "session",
+        where: [
+          { field: "identityOrganizationId", value: organizationId },
+          { field: "recovery", value: false },
+        ],
+      });
+    },
     resolveUser: async (input) => {
       const [provider] = await database
         .select()

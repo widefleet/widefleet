@@ -4,7 +4,6 @@ import { z } from "zod";
 import type { DatabaseExecutor } from "./database.ts";
 import { InvalidOperation } from "./errors.ts";
 import { organizationSecrets } from "./schema.ts";
-import { ssoProvider } from "./auth-schema.ts";
 import { decryptSecret, encryptSecret } from "./secret-encryption.ts";
 
 // This store belongs to the current login settings: saving settings deletes
@@ -28,16 +27,6 @@ export const createOrganizationSecrets = (
       );
 
     if (!record) {
-      const [provider] = await database
-        .select({ config: ssoProvider.oidcConfig })
-        .from(ssoProvider)
-        .where(and(eq(ssoProvider.id, input.id), eq(ssoProvider.organizationId, organizationId)));
-
-      if (provider?.config)
-        return z
-          .object({ clientSecret: z.string() })
-          .parse(JSON.parse(await decryptSecret(key, provider.config))).clientSecret;
-
       throw new InvalidOperation({
         code: "BAD_REQUEST",
         message: "The referenced secret does not exist",
@@ -62,11 +51,11 @@ export const createOrganizationSecrets = (
           ),
         );
 
-      if (!record) {
-        const value = await createOrganizationSecrets(executor, key, organizationId).resolve(input);
-
-        return save(executor, { type: "value", value });
-      }
+      if (!record)
+        throw new InvalidOperation({
+          code: "BAD_REQUEST",
+          message: "The referenced directory secret does not exist",
+        });
 
       return input;
     }

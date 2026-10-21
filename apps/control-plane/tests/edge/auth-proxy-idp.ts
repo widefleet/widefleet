@@ -18,7 +18,7 @@ export const tenantId = "00000000-0000-4000-8000-000000000001";
 export const objectId = "00000000-0000-4000-8000-000000000002";
 
 export const createIdentityProvider = async (
-  redirectUrl = "https://auth.apps.example.test/oauth2/widefleet/callback",
+  redirectUrl: string | string[] = "https://auth.apps.example.test/oauth2/widefleet/callback",
   requireNonce = true,
 ) => {
   const keys = await generateKeyPair("RS256", { extractable: true });
@@ -72,7 +72,12 @@ export const createIdentityProvider = async (
 
         if (requireNonce && !parameters.nonce) throw new Error("Missing OIDC nonce");
 
-        if (parameters.redirect_uri !== redirectUrl) throw new Error("Unexpected callback URL");
+        if (
+          !(Array.isArray(redirectUrl) ? redirectUrl : [redirectUrl]).includes(
+            parameters.redirect_uri,
+          )
+        )
+          throw new Error("Unexpected callback URL");
         const code = randomUUID();
 
         codes.set(code, parameters);

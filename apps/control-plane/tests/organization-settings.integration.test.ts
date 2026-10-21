@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
+import { editableSettings } from "./settings-input.ts";
 import { settingsInput } from "@platform/contracts";
 import {
   account,
@@ -47,23 +48,19 @@ describe("Organization login settings", () => {
     });
 
     const input = settingsInput.parse({
-      identity: {
+      appIdentity: { type: "entra" },
+      directory: {
+        clientId: `${slug}-directory`,
+        secret: { type: "value", value: `${slug}-directory-secret` },
+      },
+      sso: {
+        providerId: slug,
         domain: "example.test",
-        provider: environment.configuration.IDENTITY.provider,
-        management: {
-          clientId: `${slug}-management`,
-          secret: { type: "value", value: `${slug}-management-secret` },
-        },
-        apps: { clientId: `${slug}-apps`, secret: { type: "value", value: `${slug}-apps-secret` } },
+        issuer: `${environment.environment.ENTRA_AUTHORITY}/${environment.environment.ENTRA_TENANT_ID}/v2.0`,
+        oidcConfig: { clientId: `${slug}-management`, clientSecret: `${slug}-management-secret` },
       },
       externallyManaged: false,
     });
-
-    await settings.initialize(input, organizationId);
-    await environment.database.db
-      .update(ssoProvider)
-      .set({ domainVerified: true })
-      .where(eq(ssoProvider.organizationId, organizationId));
 
     const principal = {
       ...environment.owner,
@@ -72,6 +69,16 @@ describe("Organization login settings", () => {
       creator: true,
       application: { organizationId, admin: true },
     };
+
+    await settings.initialize(
+      input,
+      organizationId,
+      await organizationCredential(environment, principal),
+    );
+    await environment.database.db
+      .update(ssoProvider)
+      .set({ domainVerified: true })
+      .where(eq(ssoProvider.organizationId, organizationId));
 
     return { organizationId, principal, input };
   };
@@ -83,10 +90,7 @@ describe("Organization login settings", () => {
 
     const foreign = settingsInput.parse({
       ...second.input,
-      identity: {
-        ...second.input.identity,
-        management: saved.settings.identity?.management,
-      },
+      directory: saved.settings.directory,
     });
 
     await expect(
@@ -102,7 +106,7 @@ describe("Organization login settings", () => {
     );
     await settings.update(
       second.principal,
-      { identity: null, externallyManaged: false, acknowledgeRestart: false },
+      { ...settingsInput.parse({ sso: null }), acknowledgeRestart: false },
       false,
       await organizationCredential(environment, second.principal),
     );
@@ -112,7 +116,7 @@ describe("Organization login settings", () => {
     expect((await settings.resolve(second.organizationId)).identity).toBeNull();
   });
 
-  it("replaces SSO account bindings and revokes only that organization's login grants", async () => {
+  it("preserves linked accounts on rejected identity changes and revokes only the removed provider's grants", async () => {
     const target = await company("settings-replacement");
     const other = await company("settings-unrelated");
     const credential = await organizationCredential(environment, target.principal);
@@ -123,7 +127,7 @@ describe("Organization login settings", () => {
     if (!current || !otherSession) throw new Error("Missing fixture sessions");
     const original = await settings.read(target.principal);
 
-    if (!original.sso || !original.settings.identity) throw new Error("Missing SSO fixture");
+    if (!original.sso) throw new Error("Missing SSO fixture");
     await environment.database.db.insert(account).values({
       id: crypto.randomUUID(),
       userId: target.principal.id,
@@ -142,21 +146,37 @@ describe("Organization login settings", () => {
       expiresAt: new Date(Date.now() + 60_000),
       scopes: ["platform:read"],
     });
-    const changed = settingsInput.parse(original.settings);
+    const changed = editableSettings(original);
 
-    if (!changed.identity) throw new Error("Missing identity");
-    changed.identity.management.clientId = "replacement-management-client";
+    if (!changed.sso) throw new Error("Missing identity");
+    changed.sso.oidcConfig.clientId = "replacement-management-client";
 
-    const updated = await settings.update(
+    await expect(
+      settings.update(
+        target.principal,
+        { ...changed, acknowledgeRestart: false },
+        false,
+        credential,
+      ),
+    ).rejects.toThrow();
+    expect((await settings.read(target.principal)).sso).toEqual(original.sso);
+    expect(
+      await environment.database.db
+        .select()
+        .from(account)
+        .where(eq(account.providerId, original.sso.providerId)),
+    ).toHaveLength(1);
+    expect(
+      await environment.database.db
+        .select()
+        .from(session)
+        .where(eq(session.id, current.session.id)),
+    ).toHaveLength(1);
+    await settings.update(
       target.principal,
-      { ...changed, acknowledgeRestart: false },
+      { ...settingsInput.parse({ sso: null }), acknowledgeRestart: false },
       false,
       credential,
-    );
-
-    expect(updated.sso?.verified).toBe(false);
-    expect(updated.settings.identity?.management.secret).not.toEqual(
-      original.settings.identity.management.secret,
     );
     expect(
       await environment.database.db
@@ -219,7 +239,7 @@ describe("Organization login settings", () => {
       () => null,
     );
 
-    expect((await wrongKey.resolve(first.organizationId)).identity).toBeNull();
+    await expect(wrongKey.resolve(first.organizationId)).rejects.toThrow();
     await environment.database.db.delete(ssoProvider).where(eq(ssoProvider.id, provider.id));
     expect((await settings.resolve(first.organizationId)).identity).toBeNull();
   });
