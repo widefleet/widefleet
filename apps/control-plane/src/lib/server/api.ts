@@ -16,6 +16,7 @@ import { uploadedConnector } from "./connector-package.ts";
 import { connectorAdministrator } from "./connector-changes.ts";
 import { connectorLogService } from "./telemetry.ts";
 
+import { changeMemberRole, listMembers, removeMember } from "./members.ts";
 import { readCompanyAccount } from "./settings-account.ts";
 
 const apiOperation = async <T>(operation: () => Promise<T>) => {
@@ -159,6 +160,98 @@ export const createApi = (runtime: Runtime) => {
       .output(contract.currentUser)
       .handler(async ({ context, input }) =>
         unwrap(await runtime.identity.selectOrganization(context.request, input.organizationId)),
+      ),
+    members: read
+      .route({ method: "GET", path: "/members" })
+      .input(
+        contract.memberQuery.extend({
+          page: z.coerce.number().pipe(contract.memberQuery.shape.page.removeDefault()).default(1),
+        }),
+      )
+      .output(contract.memberPage)
+      .handler(({ context, input }) =>
+        apiOperation(async () =>
+          unwrap(
+            await listMembers(runtime.database.db, context.principal, input.search, input.page),
+          ),
+        ),
+      ),
+    changeMember: write
+      .route({ method: "PATCH", path: "/members/{memberId}" })
+      .input(contract.memberRoleInput)
+      .output(z.object({ changed: z.boolean() }))
+      .handler(async ({ context, input }) =>
+        unwrap(
+          await changeMemberRole(context.principal, input, {
+            auth: runtime.auth,
+            headers: context.request.headers,
+          }),
+        ),
+      ),
+    removeMember: write
+      .route({ method: "DELETE", path: "/members/{memberId}" })
+      .input(contract.memberPath)
+      .output(z.object({ changed: z.boolean() }))
+      .handler(async ({ context, input }) =>
+        unwrap(
+          await removeMember(context.principal, input.memberId, {
+            auth: runtime.auth,
+            headers: context.request.headers,
+          }),
+        ),
+      ),
+    invitations: read
+      .route({ method: "GET", path: "/invitations" })
+      .output(z.array(contract.invitationEntry))
+      .handler(({ context }) => apiOperation(() => runtime.invitations.list(context.principal))),
+    invite: write
+      .route({ method: "POST", path: "/invitations" })
+      .input(contract.invitationInput)
+      .output(contract.invitationEntry)
+      .handler(({ context, input }) =>
+        apiOperation(() =>
+          runtime.invitations.invite(context.principal, input, {
+            auth: runtime.auth,
+            headers: context.request.headers,
+          }),
+        ),
+      ),
+    cancelInvitation: write
+      .route({ method: "DELETE", path: "/invitations/{invitationId}" })
+      .input(contract.invitationPath)
+      .output(z.object({ canceled: z.boolean() }))
+      .handler(({ context, input }) =>
+        apiOperation(() =>
+          runtime.invitations.cancel(context.principal, input.invitationId, {
+            auth: runtime.auth,
+            headers: context.request.headers,
+          }),
+        ),
+      ),
+    invitation: base
+      .route({ method: "GET", path: "/invitations/{invitationId}" })
+      .input(contract.invitationPath)
+      .output(contract.invitationDetails)
+      .handler(({ context, input }) =>
+        apiOperation(async () => {
+          const person = unwrap(
+            await runtime.identity.authenticateUser(context.request, "platform:read"),
+          );
+
+          return runtime.invitations.read(person, input.invitationId);
+        }),
+      ),
+    acceptInvitation: base
+      .route({ method: "POST", path: "/invitations/{invitationId}/accept" })
+      .input(contract.invitationAcceptance)
+      .output(contract.organizationSelection)
+      .handler(({ context, input }) =>
+        apiOperation(() =>
+          runtime.invitations.accept(input.invitationId, {
+            auth: runtime.auth,
+            headers: context.request.headers,
+          }),
+        ),
       ),
     reporting: read
       .route({ method: "GET", path: "/reporting" })

@@ -21,6 +21,7 @@ export const load: PageServerLoad = async ({ request, url, setHeaders }) => {
   return {
     search,
     page,
+    invited: url.searchParams.get("invited") === "1",
     saved: request.method === "GET" && url.searchParams.get("saved") === "1",
   };
 };

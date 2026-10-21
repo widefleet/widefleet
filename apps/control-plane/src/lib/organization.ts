@@ -13,7 +13,17 @@ export const organizationAccess = createAccessControl({
 });
 
 export const organizationRoles = {
-  owner: organizationAccess.newRole({ member: ["update"], app: ["create"], agent: ["manage"] }),
-  admin: organizationAccess.newRole({ member: ["update"], app: ["create"], agent: ["manage"] }),
+  owner: organizationAccess.newRole({
+    member: ["update", "delete"],
+    invitation: ["create", "cancel"],
+    app: ["create"],
+    agent: ["manage"],
+  }),
+  admin: organizationAccess.newRole({
+    member: ["update", "delete"],
+    invitation: ["create", "cancel"],
+    app: ["create"],
+    agent: ["manage"],
+  }),
   member: organizationAccess.newRole({ app: ["create"] }),
 };

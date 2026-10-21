@@ -41,6 +41,30 @@ export const pageOrganizations = async (request: Request) => {
   return result.value;
 };
 
+export const invitationIdentity = async (request: Request, invitationId: string, write = false) => {
+  const runtime = await getRuntime();
+
+  const verified = await runtime.identity.authenticateUser(
+    request,
+    write ? "platform:write" : "platform:read",
+  );
+
+  if (
+    verified.isErr() &&
+    (verified.error._tag === "DatabaseUnavailable" || verified.error.code !== "UNAUTHORIZED")
+  )
+    return identityFailure(verified.error, request);
+  const company = await runtime.invitations.companySignIn(invitationId);
+
+  if (company && (verified.isErr() || verified.value.identityOrganizationId !== company.id))
+    redirect(
+      303,
+      `/sign-in?${new URLSearchParams({ organization: company.slug, next: `/invitations/${invitationId}` })}`,
+    );
+
+  return verified.isErr() ? identityFailure(verified.error, request) : verified.value;
+};
+
 export const pagePrincipal = async (request: Request, write = false) => {
   const runtime = await getRuntime();
 

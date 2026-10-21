@@ -71,10 +71,7 @@ export const createAuthentication = (
 
   const auth = betterAuth({
     ...settings,
-    disabledPaths: [
-      ...settings.disabledPaths,
-      ...managedPluginPaths.filter((path) => path !== "/organization/update-member-role"),
-    ],
+    disabledPaths: [...settings.disabledPaths, ...managedPluginPaths],
     trustedOrigins: (request) => companySsoOrigins(database, configuration.PLATFORM_URL, request),
     plugins: [
       ...settings.plugins,
@@ -82,13 +79,12 @@ export const createAuthentication = (
       {
         id: "management-credentials",
         // These library endpoints are invoked by the shared services. Exposing
-        // them directly would skip admission, last-owner serialization and UI/API policy.
+        // them directly would skip the shared UI/API entrypoints.
         onRequest: async (request) => {
           const path = new URL(request.url).pathname;
 
           if (
-            (path.startsWith("/api/auth/organization/") &&
-              path !== "/api/auth/organization/update-member-role") ||
+            path.startsWith("/api/auth/organization/") ||
             (path.startsWith("/api/auth/sso/") && !path.startsWith("/api/auth/sso/callback/"))
           )
             return { response: new Response("Not Found", { status: 404 }) };

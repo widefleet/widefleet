@@ -13,7 +13,12 @@ import type { DatabaseExecutor } from "./database.ts";
 import { installationOrganizationId } from "../organization.ts";
 
 export const managedPluginPaths = [
+  "/organization/invite-member",
+  "/organization/cancel-invitation",
+  "/organization/accept-invitation",
+  "/organization/reject-invitation",
   "/organization/update-member-role",
+  "/organization/remove-member",
   "/sso/register",
   "/sso/update-provider",
   "/sso/delete-provider",

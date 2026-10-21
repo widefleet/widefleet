@@ -8,8 +8,18 @@ import { createIdentityProvider } from "./edge/auth-proxy-idp.ts";
 import { createAuthentication } from "../src/lib/server/auth.ts";
 import { apiResource, cliClientId } from "../src/lib/server/auth-options.ts";
 import { createIdentityService } from "../src/lib/server/identity.ts";
-import { member, organization, session, ssoProvider } from "../src/lib/server/auth-schema.ts";
+import {
+  invitation,
+  member,
+  organization,
+  session,
+  ssoProvider,
+} from "../src/lib/server/auth-schema.ts";
 import { organizationRuntimes, organizationSettings } from "../src/lib/server/schema.ts";
+import {
+  createInvitationService,
+  prepareOrganizationInvitation,
+} from "../src/lib/server/members.ts";
 
 const cookies = (response: Response) =>
   response.headers
@@ -509,6 +519,128 @@ describe("Organization SSO authority across browser and CLI sessions", () => {
     },
   );
 
+  it("does not let a company login accept an invitation to another organization", async () => {
+    const organizationId = crypto.randomUUID();
+
+    const prepared = await environment.database.db.transaction(async (transaction) => {
+      await transaction.insert(organization).values({
+        id: organizationId,
+        slug: "invitation-destination",
+        name: "Invitation destination",
+        createdAt: new Date(),
+      });
+      await transaction.insert(organizationRuntimes).values({ organizationId });
+
+      return prepareOrganizationInvitation(transaction, organizationId, environment.owner.id, {
+        email: "user@example.test",
+        role: "owner",
+      });
+    });
+
+    const invitations = createInvitationService(
+      environment.database.db,
+      environment.configuration,
+      undefined,
+      {
+        filterOrganizations: async (candidates) => candidates.map((candidate) => candidate.id),
+      },
+    );
+
+    const scoped = (
+      await identity.authenticateUser(
+        new Request(`${origin}/invitations/${prepared.invitation.id}`, {
+          headers: { cookie: firstCookie },
+        }),
+        "platform:read",
+      )
+    ).unwrap();
+
+    await expect(invitations.read(scoped, prepared.invitation.id)).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    await expect(
+      invitations.accept(prepared.invitation.id, {
+        auth,
+        headers: new Headers({ cookie: firstCookie }),
+      }),
+    ).rejects.toMatchObject({
+      code: "FORBIDDEN",
+    });
+    await expect(
+      invitations.accept(prepared.invitation.id, {
+        auth,
+        headers: (await environment.users.login({ userId })).headers,
+      }),
+    ).resolves.toEqual({ organizationId });
+  });
+
+  it("routes only pending invitations to an admitted, verified company login", async () => {
+    const organizationId = crypto.randomUUID();
+    await environment.database.db.insert(organization).values({
+      id: organizationId,
+      slug: "invitation-routing",
+      name: "Routing fixture",
+      createdAt: new Date(),
+    });
+
+    const prepared = await environment.database.db.transaction((transaction) =>
+      prepareOrganizationInvitation(transaction, organizationId, environment.owner.id, {
+        email: "invited@example.test",
+        role: "member",
+      }),
+    );
+
+    let admitted = true;
+
+    const invitations = createInvitationService(
+      environment.database.db,
+      environment.configuration,
+      undefined,
+      {
+        filterOrganizations: async (candidates) => (admitted ? candidates.map(({ id }) => id) : []),
+      },
+    );
+
+    const id = prepared.invitation.id;
+    expect(await invitations.companySignIn(id)).toBeNull();
+    await environment.database.db.insert(ssoProvider).values({
+      id: crypto.randomUUID(),
+      providerId: "invitation-routing",
+      organizationId,
+      issuer: firstProvider.origin,
+      domain: "example.test",
+      domainVerified: false,
+    });
+    expect(await invitations.companySignIn(id)).toBeNull();
+    await environment.database.db
+      .update(ssoProvider)
+      .set({ domainVerified: true })
+      .where(eq(ssoProvider.organizationId, organizationId));
+    expect(await invitations.companySignIn(id)).toBeNull();
+    await environment.database.db
+      .insert(organizationSettings)
+      .values({ organizationId, settings: {}, ssoRequired: true });
+    expect(await invitations.companySignIn(id)).toEqual({
+      id: organizationId,
+      slug: "invitation-routing",
+    });
+    admitted = false;
+    expect(await invitations.companySignIn(id)).toBeNull();
+    admitted = true;
+
+    for (const status of ["canceled", "accepted", "rejected"]) {
+      await environment.database.db.update(invitation).set({ status }).where(eq(invitation.id, id));
+      expect(await invitations.companySignIn(id)).toBeNull();
+    }
+
+    await environment.database.db
+      .update(invitation)
+      .set({ status: "pending", expiresAt: new Date(0) })
+      .where(eq(invitation.id, id));
+    expect(await invitations.companySignIn(id)).toBeNull();
+    expect(await invitations.companySignIn(crypto.randomUUID())).toBeNull();
+  });
+
   it("uses real CLI credentials for plugin operations without creating browser sessions", async () => {
     const device = await start();
     await confirmed(await approve(await consent(device.user_code, firstCookie), firstCookie));
@@ -521,25 +653,19 @@ describe("Organization SSO authority across browser and CLI sessions", () => {
 
     const sessionsBefore = await environment.database.db.select({ id: session.id }).from(session);
 
-    await environment.database.db
-      .update(ssoProvider)
-      .set({ domainVerified: false })
-      .where(eq(ssoProvider.organizationId, firstOrg));
+    const invited = await auth.api.createInvitation({
+      headers,
+      body: { organizationId: firstOrg, email: "cli-plugin@example.test", role: "member" },
+    });
 
-    try {
-      const proof = await auth.api.requestDomainVerification({
+    expect(invited.organizationId).toBe(firstOrg);
+    await auth.api.cancelInvitation({ headers, body: { invitationId: invited.id } });
+    await expect(
+      auth.api.createInvitation({
         headers,
-        body: { providerId: "company-alpha" },
-      });
-
-      expect(proof.domainVerificationToken).toBeTruthy();
-    } finally {
-      await environment.database.db
-        .update(ssoProvider)
-        .set({ domainVerified: true })
-        .where(eq(ssoProvider.organizationId, firstOrg));
-    }
-
+        body: { organizationId: secondOrg, email: "foreign-plugin@example.test", role: "owner" },
+      }),
+    ).rejects.toMatchObject({ statusCode: 403 });
     await expect(
       auth.api.requestDomainVerification({ headers, body: { providerId: "company-bravo" } }),
     ).rejects.toMatchObject({ statusCode: 403 });

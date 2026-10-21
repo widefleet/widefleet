@@ -1,4 +1,5 @@
 import { organizationSettings } from "../src/lib/server/schema.ts";
+import { createInvitationService } from "../src/lib/server/members.ts";
 import { createAuthControl } from "./auth-control.ts";
 import { installationKeys } from "../src/lib/server/installation-files.ts";
 import { createAppSignIn } from "../src/lib/server/app-sign-in-node.ts";
@@ -213,6 +214,7 @@ export const createTestEnvironment = async (
       admin: false,
     },
     authControl,
+    invitations: createInvitationService(database.db, configuration),
     emailSignIn: false,
     reporting: createReporting(configuration, database.db),
     replacementClient,

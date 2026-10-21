@@ -1,14 +1,15 @@
 import { form, getRequestEvent, query } from "$app/server";
 import { redirect } from "@sveltejs/kit";
-import { organizationSelection } from "@platform/contracts";
+import {
+  organizationSelection,
+  memberQuery,
+  invitationInput,
+  invitationPath,
+  memberPath,
+} from "@platform/contracts";
 import { z } from "zod";
-import { changeMemberRole, listMembers, memberRoleInput } from "#server/members";
+import { changeMemberRole, listMembers, memberRoleInput, removeMember } from "#server/members";
 import { formValue, queryValue, remoteContext, remoteOperation } from "#server/remote-support";
-
-const memberQuery = z.object({
-  search: z.string().trim().max(200),
-  page: z.number().int().min(1).max(100_000),
-});
 
 export const getMembers = query(memberQuery, async ({ search, page }) => {
   const { runtime, principal } = await remoteContext();
@@ -17,7 +18,12 @@ export const getMembers = query(memberQuery, async ({ search, page }) => {
     listMembers(runtime.database.db, principal, search, page),
   );
 
-  return { principal, ...queryValue(result) };
+  return {
+    principal,
+    ...queryValue(result),
+    invitations: await runtime.invitations.list(principal),
+    emailEnabled: runtime.invitations.enabled,
+  };
 });
 
 export const setMemberRole = form(
@@ -29,13 +35,17 @@ export const setMemberRole = form(
       .regex(/^[0-9]+$/)
       .default("1")
       .transform(Number)
-      .pipe(memberQuery.shape.page),
+      .pipe(memberQuery.shape.page.removeDefault()),
   }),
   async ({ memberId, role, search, page, organizationId }) => {
     const { runtime, principal, request } = await remoteContext({ organizationId });
     formValue(
       await remoteOperation(() =>
-        changeMemberRole(runtime.auth, principal, request.headers, { memberId, role }),
+        changeMemberRole(
+          principal,
+          { memberId, role },
+          { auth: runtime.auth, headers: request.headers },
+        ),
       ),
     );
     await getMembers({ search, page }).refresh();
@@ -47,5 +57,47 @@ export const setMemberRole = form(
       );
 
     return { saved: true };
+  },
+);
+
+export const inviteMember = form(
+  invitationInput.extend(organizationSelection.shape),
+  async ({ organizationId, ...input }) => {
+    const { runtime, principal, request } = await remoteContext({ organizationId });
+    await remoteOperation(() =>
+      runtime.invitations.invite(principal, input, {
+        auth: runtime.auth,
+        headers: request.headers,
+      }),
+    );
+    redirect(303, "/members?invited=1");
+  },
+);
+
+export const cancelInvitation = form(
+  invitationPath.extend(organizationSelection.shape),
+  async ({ organizationId, invitationId }) => {
+    const { runtime, principal, request } = await remoteContext({ organizationId });
+    await remoteOperation(() =>
+      runtime.invitations.cancel(principal, invitationId, {
+        auth: runtime.auth,
+        headers: request.headers,
+      }),
+    );
+    redirect(303, "/members");
+  },
+);
+
+export const deleteMember = form(
+  memberPath.extend(organizationSelection.shape),
+  async ({ organizationId, memberId }) => {
+    const { runtime, principal, request } = await remoteContext({ organizationId });
+    formValue(
+      await removeMember(principal, memberId, {
+        auth: runtime.auth,
+        headers: request.headers,
+      }),
+    );
+    redirect(303, "/members");
   },
 );

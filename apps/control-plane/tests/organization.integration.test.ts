@@ -6,13 +6,27 @@ import { member } from "../src/lib/server/auth-schema.ts";
 import { createIdentityService } from "../src/lib/server/identity.ts";
 import { findMembers } from "../src/lib/server/member-directory.ts";
 import { initializeOrganization } from "../src/lib/server/organization.ts";
+import { createRuntime } from "../src/lib/server/runtime-services.ts";
+import { createApi } from "../src/lib/server/api.ts";
+import { createStorage } from "../src/lib/server/storage.ts";
 import { createTestEnvironment } from "./environment.ts";
 
 describe("Installation organization", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
+  let api: ReturnType<typeof createApi>;
 
   beforeAll(async () => {
     environment = await createTestEnvironment();
+    api = createApi(
+      await createRuntime({
+        configuration: environment.configuration,
+        database: environment.database,
+        settings: environment.settings,
+        reporting: environment.reporting,
+        storage: createStorage(environment.configuration),
+        encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
+      })(),
+    );
   });
   afterAll(async () => {
     await environment.close();
@@ -56,12 +70,18 @@ describe("Installation organization", () => {
     );
   };
 
-  const role = (headers: Headers, memberId: string, value: string | string[]) =>
-    post("update-member-role", headers, {
-      memberId,
-      role: value,
-      organizationId: installationOrganizationId,
-    });
+  const role = (headers: Headers, memberId: string, value: string | string[]) => {
+    const credentials = new Headers(headers);
+    credentials.set("content-type", "application/json");
+
+    return api(
+      new Request(`${apiResource(environment.configuration)}/members/${memberId}`, {
+        method: "PATCH",
+        headers: credentials,
+        body: JSON.stringify({ role: value }),
+      }),
+    );
+  };
 
   it("keeps the explicitly created owner and does not promote users on startup", async () => {
     const second = await person("New Member");
@@ -164,7 +184,7 @@ describe("Installation organization", () => {
     );
 
     firstHeaders.set("origin", environment.configuration.PLATFORM_URL);
-    expect((await role(firstHeaders, first.id, "member")).status).toBe(400);
+    expect((await role(firstHeaders, first.id, "member")).status).toBe(409);
     const second = await person("Second Owner");
     expect((await role(firstHeaders, second.membership.id, "owner")).status).toBe(200);
 
