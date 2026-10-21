@@ -61,7 +61,7 @@ for equivalent CLI commands. If a browser selection becomes unavailable, the
 workspace returns to organization selection. With no available memberships, ask
 an administrator to grant access.
 
-## Members, invitations and account linking
+## Members, invitations and company sign-in
 
 These endpoints require an unreleased build containing organization invitations.
 Reads require `platform:read`, writes require `platform:write`; browser requests use
@@ -86,8 +86,17 @@ invitation. A global account name can only be changed through a Widefleet email 
 Expired or processed invitations cannot be accepted again. Native Better Auth organization
 mutation endpoints are unavailable; use the shared API above.
 
-Company-account linking requires an explicit browser session and provider confirmation
-at the returned `accountUrl`. API tokens cannot silently attach an external account.
+Company accounts with matching email addresses are linked during verified company SSO.
+An active company provider requires SSO authority for organization access; email credentials
+receive `403` with code `SSO_REQUIRED`. The organization list includes `ssoRequired` when
+the current credential must sign in through that organization's provider.
+
+Organization administrators use `POST /api/v1/settings/domain-verification` to obtain
+`{ "name": "_better-auth-token-PROVIDER_ID.example.com", "type": "TXT", "value": "..." }`.
+After publishing the record, `POST /api/v1/settings/verify-domain` verifies ownership and
+activates required company SSO. These operations accept the same browser or CLI write
+credentials as settings changes. Both operate on the selected organization; raw Better Auth
+SSO management routes are not exposed. See [activation](/guides/members#activate-company-sso).
 
 ## Publish an app
 

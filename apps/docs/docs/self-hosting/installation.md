@@ -24,8 +24,11 @@ After completing the state migration, upgrade the control plane,
 agent and runtime together; register the newly displayed app callback URL
 (`https://auth.APP_DOMAIN/oauth2/widefleet/callback` for the installation organization),
 reapply sign-in settings and redeploy existing apps to publish their organization-bound
-auth routes. Existing app sessions and CLI tokens require a fresh sign-in.
-These builds also support [member invitations and optional company sign-in](/guides/members)
+auth routes. Management callbacks now use `/api/auth/sso/callback/PROVIDER_ID`; copy the
+exact URL from Settings into the IdP registration. Saved providers are not automatically
+marked domain-verified. Use the installation [recovery link](#secrets-and-administrator-recovery) if no email or
+password login is available, enter the company domain, save and complete DNS verification. Existing app sessions and CLI tokens require a fresh sign-in.
+These builds also support [member invitations and company sign-in](/guides/members)
 when an email adapter is configured; the default self-hosted build does not add a mail service.
 
 Copy `infra/deployment.env.example` to a private file outside version control. Set the database/storage credentials, `PLATFORM_URL`, `APP_DOMAIN` and the absolute `PLATFORM_DATA_DIRECTORY`. The management hostname must be outside the app domain, for example `platform.example.test` and `*.apps.example.test`. Configure DNS and provide `${PLATFORM_DATA_DIRECTORY}/tls/fullchain.pem` and `privkey.pem`, or select [automatic HTTPS](/self-hosting/external-services#automatic-https-with-cloudflare).
@@ -39,12 +42,12 @@ After starting the containers, open `PLATFORM_URL`:
 1. Create the first administrator with a name, email and password.
 2. Choose Microsoft Entra or another OpenID Connect provider. The page shows both callback URLs before saving, so registrations can be created at the provider.
 3. Enter separate management and app-SSO client credentials. Enable group search only if needed.
-4. Explicitly link your company account, then test a company sign-in. Widefleet checks that this account has administrator access with the currently saved provider configuration.
+4. Enter your company email domain and publish the DNS TXT record shown by **Get verification record**. Choose **Verify domain and sign in**, then authenticate with the same email as the first administrator. Widefleet links that account automatically and checks its administrator access. Verified SSO is now required for the organization.
 5. Complete setup. Password authentication is disabled server-side and local browser sessions and their refresh tokens are removed. Future sign-ins use company SSO.
 
 All users admitted to the management client become Members and can create apps. Restrict that client to intended app builders at the identity provider. Admission to the separate app client does not grant management membership. Apps enforce their own business permissions using the verified user and group context.
 
-Management uses Better Auth's verified Generic OAuth integration. Entra accounts use the verified `oid`; generic OIDC accounts use `sub` within an issuer-specific namespace. Linking requires the logged-in administrator's explicit action; matching email addresses do not silently link accounts.
+Management uses Better Auth's SSO plugin for OIDC discovery, callbacks, provider registration and DNS verification. Existing accounts with a matching email in the verified company domain are linked automatically, retaining their membership and role. Other email domains are rejected. See [company SSO activation](/guides/members#activate-company-sso) for CLI commands and provider replacement behavior.
 
 Known runtime limitation: celld `0.6.2` drops incoming header values containing non-ASCII bytes. Display names can therefore be empty in Workers; the stable user identifier remains available for authorization.
 
@@ -68,6 +71,7 @@ Mount a JSON file read-only into the control-plane container and set `PLATFORM_B
   "settings": {
     "externallyManaged": false,
     "identity": {
+      "domain": "example.com",
       "provider": { "type": "entra", "tenantId": "00000000-0000-4000-8000-000000000001" },
       "management": {
         "clientId": "MANAGEMENT_CLIENT_ID",
@@ -96,7 +100,7 @@ services:
       - /absolute/private/bootstrap.json:/run/widefleet/bootstrap.json:ro
 ```
 
-The bootstrap file is read only while no first administrator exists. After setup, UI/API changes survive restarts even if the file still contains earlier values. It can be removed after successful initialization. Company-account linking and the actual SSO test remain explicit steps before closing password access.
+The bootstrap file is read only while no first administrator exists. After setup, UI/API changes survive restarts even if the file still contains earlier values. It can be removed after successful initialization. The bootstrap file does not prove domain ownership. Complete DNS verification and test the company login before closing password access.
 
 ### UI, API and CLI configuration
 
