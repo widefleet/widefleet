@@ -197,6 +197,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
     const plan = await administrator.post("/api/v1/settings/plan", {
       data: editableSettings(initial),
     });
+
     expect(plan.status()).toBe(200);
     expect(await plan.json()).toMatchObject({ restartRequired: false });
 
