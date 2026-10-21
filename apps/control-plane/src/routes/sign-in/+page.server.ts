@@ -28,7 +28,9 @@ export const load: PageServerLoad = async ({ url, setHeaders }) => {
   const provider = target?.verified ? target.providerId : null;
 
   const label =
-    target && !slug ? (await runtime.settings.resolve(target.id)).identity?.provider.label : null;
+    target?.id === installationOrganizationId
+      ? (await runtime.settings.resolve(target.id)).identity?.provider.label
+      : null;
 
   return {
     provider,

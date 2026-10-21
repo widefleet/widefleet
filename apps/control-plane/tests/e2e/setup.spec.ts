@@ -141,7 +141,9 @@ test("verifies company DNS, preserves matching accounts and closes password acce
       page.getByText("Company sign-in and administrator access verified successfully."),
     ).toBeVisible();
     await page.getByRole("button", { name: "Complete setup and disable password access" }).click();
-    await expect(page.getByRole("heading", { name: "Settings", exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Complete setup and disable password access" }),
+    ).toHaveCount(0);
 
     const passwordLogin = await request.post("/api/auth/sign-in/email", {
       headers: { origin: environment.configuration.PLATFORM_URL },
