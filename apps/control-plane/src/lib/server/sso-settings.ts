@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { appIdentitySettings, oidcProviderInput } from "@platform/contracts";
+import { organizationSettings } from "./schema.ts";
 import { ssoProvider } from "./auth-schema.ts";
 import { companyIdentity } from "./company-identity.ts";
 import type { DatabaseExecutor } from "./database.ts";
@@ -9,12 +10,16 @@ import type { OrganizationCredential } from "./organization-operations.ts";
 import { InvalidOperation } from "./errors.ts";
 
 export const readSsoProvider = async (database: DatabaseExecutor, organizationId: string) => {
-  const [provider] = await database
-    .select()
+  const [record] = await database
+    .select({ provider: ssoProvider, required: organizationSettings.ssoRequired })
     .from(ssoProvider)
+    .leftJoin(
+      organizationSettings,
+      eq(organizationSettings.organizationId, ssoProvider.organizationId),
+    )
     .where(eq(ssoProvider.organizationId, organizationId));
 
-  return provider ?? null;
+  return record ? { ...record.provider, required: record.required === true } : null;
 };
 
 // The runtime reads the native provider. This is a published consumer view, never
@@ -50,6 +55,7 @@ export const ssoRuntimeIdentity = (
     });
 
   return companyIdentity.parse({
+    scopes: configuration.scopes,
     provider:
       appIdentity.type === "entra"
         ? { type: "entra", authority: issuer.origin, tenantId: tenant, label: "Microsoft Entra" }

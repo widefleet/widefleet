@@ -10,7 +10,7 @@ import { account, ssoProvider } from "../../src/lib/server/auth-schema.ts";
 import { installation, organizationSettings } from "../../src/lib/server/schema.ts";
 import { installationId } from "../../src/lib/server/installation-store.ts";
 import { migrateSsoSettings } from "../../src/lib/server/sso-migration.ts";
-import { createOrganizationSecrets } from "../../src/lib/server/organization-secrets.ts";
+import { encryptSecret } from "../../src/lib/server/secret-encryption.ts";
 import { createRecoveryLink } from "../../src/lib/server/recovery.ts";
 import { createTestEnvironment } from "../environment.ts";
 
@@ -26,7 +26,7 @@ test("verifies company DNS, preserves matching accounts and closes password acce
 
   await environment.database.db
     .update(organizationSettings)
-    .set({ settings: installationSettings.parse({}) })
+    .set({ settings: installationSettings.parse({}), ssoRequired: false })
     .where(eq(organizationSettings.organizationId, installationId));
 
   await environment.database.db.delete(ssoProvider);
@@ -135,7 +135,8 @@ test("verifies company DNS, preserves matching accounts and closes password acce
     const record = domainVerification.parse(await recordResponse.json());
     await expect(page.getByText(record.value, { exact: true })).toBeVisible();
     await writeFile(dnsFile, JSON.stringify({ [record.name]: record.value }));
-    await page.getByRole("button", { name: "Verify domain and sign in" }).click();
+    await page.getByRole("button", { name: "Verify domain", exact: true }).click();
+    await page.getByRole("button", { name: "Test company sign-in" }).click();
     await page.getByRole("button", { name: /sso@example.test/ }).click();
     await expect(
       page.getByText("Company sign-in and administrator access verified successfully."),
@@ -195,7 +196,7 @@ test("verifies company DNS, preserves matching accounts and closes password acce
     await expect(page.getByLabel("Client ID", { exact: true })).toBeVisible();
     environment.authControl.available(true);
 
-    // Model the state preserved by migration 0022: saved encrypted credentials,
+    // Model the state preserved by migration 0023: saved encrypted credentials,
     // an existing owner, no company-domain proof and no native SSO provider yet.
     const [beforeUpgrade] = await environment.database.db
       .select()
@@ -204,20 +205,17 @@ test("verifies company DNS, preserves matching accounts and closes password acce
 
     const preserved = installationSettings.parse(beforeUpgrade?.settings);
 
-    const secrets = createOrganizationSecrets(
-      environment.database.db,
-      environment.environment.PLATFORM_ENCRYPTION_KEY,
-      installationId,
-    );
-
-    const managementSecret = await secrets.save(environment.database.db, {
-      type: "value",
-      value: environment.environment.ENTRA_CLIENT_SECRET,
-    });
+    const managementSecret = {
+      ciphertext: await encryptSecret(
+        environment.environment.PLATFORM_ENCRYPTION_KEY,
+        environment.environment.ENTRA_CLIENT_SECRET,
+      ),
+    };
 
     await environment.database.db
       .update(organizationSettings)
       .set({
+        ssoRequired: false,
         settings: {
           externallyManaged: preserved.externallyManaged,
           identity: {
@@ -265,7 +263,8 @@ test("verifies company DNS, preserves matching accounts and closes password acce
     expect(upgradeRecordResponse.ok()).toBe(true);
     const upgradeRecord = domainVerification.parse(await upgradeRecordResponse.json());
     await writeFile(dnsFile, JSON.stringify({ [upgradeRecord.name]: upgradeRecord.value }));
-    await page.getByRole("button", { name: "Verify domain and sign in" }).click();
+    await page.getByRole("button", { name: "Verify domain", exact: true }).click();
+    await page.getByRole("button", { name: "Test company sign-in" }).click();
     await page.getByRole("button", { name: /sso@example.test/ }).click();
     await expect(
       page.getByText("Company sign-in and administrator access verified successfully."),

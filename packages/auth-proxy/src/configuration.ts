@@ -8,6 +8,7 @@ export const authConfiguration = z
   .strictObject({
     organizationId: organizationIdentifier,
     provider: companyProvider,
+    scopes: z.array(z.string()).optional(),
     clientId: z.string().min(1).max(512),
     clientSecret: z.string().min(1).max(16_384),
     cookieSecret: z

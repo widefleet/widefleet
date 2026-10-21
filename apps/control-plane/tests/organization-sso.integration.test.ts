@@ -9,7 +9,7 @@ import { createAuthentication } from "../src/lib/server/auth.ts";
 import { apiResource, cliClientId } from "../src/lib/server/auth-options.ts";
 import { createIdentityService } from "../src/lib/server/identity.ts";
 import { member, organization, session, ssoProvider } from "../src/lib/server/auth-schema.ts";
-import { organizationRuntimes } from "../src/lib/server/schema.ts";
+import { organizationRuntimes, organizationSettings } from "../src/lib/server/schema.ts";
 
 const cookies = (response: Response) =>
   response.headers
@@ -180,6 +180,9 @@ describe("Organization SSO authority across browser and CLI sessions", () => {
         createdAt: new Date(),
       });
       await environment.database.db.insert(organizationRuntimes).values({ organizationId: id });
+      await environment.database.db
+        .insert(organizationSettings)
+        .values({ organizationId: id, settings: {}, ssoRequired: true });
       await environment.database.db.insert(member).values({
         id: crypto.randomUUID(),
         userId,

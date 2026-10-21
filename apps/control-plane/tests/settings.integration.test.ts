@@ -9,11 +9,7 @@ import { editableSettings } from "./settings-input.ts";
 import { installationSettings, settingsInput } from "@platform/contracts";
 import { createAuthentication, companyLoginRevision } from "../src/lib/server/auth.ts";
 import { member, session, user, ssoProvider } from "../src/lib/server/auth-schema.ts";
-import {
-  installation,
-  organizationSecrets,
-  organizationSettings,
-} from "../src/lib/server/schema.ts";
+import { installation, organizationSettings } from "../src/lib/server/schema.ts";
 import {
   createInstallationOwner,
   installationId,
@@ -135,7 +131,7 @@ describe("Platform setup and managed settings", () => {
     const [saved] = await environment.database.db.select().from(organizationSettings);
     expect(saved?.settings).not.toHaveProperty("identity");
     expect(saved?.settings).not.toHaveProperty("sso");
-    expect(await environment.database.db.select().from(organizationSecrets)).toHaveLength(0);
+    expect(saved?.directorySecret).toBeNull();
   });
 
   it("enforces administrator access and browser read-only while allowing API changes", async () => {

@@ -1,6 +1,6 @@
 import { verifyAccessToken } from "./access-token.ts";
 import { Result, TaggedError, type InferOk } from "better-result";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { member, user, organization, ssoProvider, session as sessions } from "./auth-schema.ts";
 import {
   installationOrganizationId,
@@ -11,7 +11,7 @@ import type { Authentication } from "./auth.ts";
 import type { Configuration } from "./config.ts";
 import type { Database } from "./database.ts";
 import type { OrganizationAccess } from "./application-context.ts";
-import { organizationRuntimes } from "./schema.ts";
+import { organizationRuntimes, organizationSettings } from "./schema.ts";
 import { DatabaseUnavailable } from "./errors.ts";
 
 export class AuthenticationFailed extends TaggedError("AuthenticationFailed")<{
@@ -41,13 +41,14 @@ export const createIdentityService = (
             organizationId: organization.id,
             organizationName: organization.name,
             organizationSlug: organization.slug,
-            ssoRequired: ssoProvider.domainVerified,
+            ssoRequired: sql<boolean>`coalesce(${ssoProvider.domainVerified} AND ${organizationSettings.ssoRequired}, false)`,
           })
           .from(user)
           .innerJoin(member, eq(member.userId, user.id))
           .innerJoin(organization, eq(organization.id, member.organizationId))
           .innerJoin(organizationRuntimes, eq(organizationRuntimes.organizationId, organization.id))
           .leftJoin(ssoProvider, eq(ssoProvider.organizationId, organization.id))
+          .leftJoin(organizationSettings, eq(organizationSettings.organizationId, organization.id))
           .where(eq(user.id, userId))
           .orderBy(organization.name, organization.id);
 

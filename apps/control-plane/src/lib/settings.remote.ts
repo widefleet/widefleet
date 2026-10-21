@@ -83,3 +83,8 @@ export const verifyCompanyDomain = command(organizationSelection, async (input) 
     runtime.settings.verifyDomain(principal, runtime.auth, request.headers),
   );
 });
+
+export const activateCompanySso = command(organizationSelection, async (input) => {
+  const { runtime, principal } = await remoteContext(input);
+  await remoteOperation(() => runtime.settings.activateSso(principal));
+});

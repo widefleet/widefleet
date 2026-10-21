@@ -37,6 +37,7 @@ it("uses one native registration for company control-plane and independent app s
           oidcConfig: {
             clientId: "app-login",
             clientSecret: "synthetic-client-secret",
+            scopes: ["openid", "profile", "email", "groups"],
             mapping: { name: "display_name", email: "mail" },
           },
         },
@@ -50,7 +51,13 @@ it("uses one native registration for company control-plane and independent app s
       .update(ssoProvider)
       .set({ domainVerified: true })
       .where(eq(ssoProvider.organizationId, "widefleet"));
-    await environment.settings.publish();
+    await environment.settings.activateSso({
+      ...environment.owner,
+      role: "owner",
+      admin: true,
+      creator: true,
+      application: { organizationId: "widefleet", admin: true },
+    });
 
     const started = await environment.auth.handler(
       new Request(`${origin}/api/auth/sign-in/sso`, {
@@ -63,6 +70,7 @@ it("uses one native registration for company control-plane and independent app s
     expect(started.status).toBe(200);
     const { url } = z.object({ url: z.url() }).parse(await started.json());
     expect(new URL(url).searchParams.get("client_id")).toBe("app-login");
+    expect(new URL(url).searchParams.get("scope")?.split(" ")).toContain("groups");
     const authorized = await fetch(url, { redirect: "manual" });
 
     const completed = await environment.auth.handler(
@@ -108,6 +116,7 @@ it("uses one native registration for company control-plane and independent app s
     expect(appStart.status).toBe(302);
     const appAuthorization = z.url().parse(appStart.headers.get("location"));
     expect(new URL(appAuthorization).searchParams.get("client_id")).toBe("app-login");
+    expect(new URL(appAuthorization).searchParams.get("scope")?.split(" ")).toContain("groups");
     const appAuthorized = await fetch(appAuthorization, { redirect: "manual" });
 
     const appCompleted = await proxy.fetch(

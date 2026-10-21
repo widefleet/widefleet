@@ -32,6 +32,7 @@ export const createIdentityProvider = async (
     entra: false,
     groups: ["accounting"],
     name: "Example User",
+    email: "user@example.test",
     graphFailure: "",
     issuerSuffix: "",
   };
@@ -117,15 +118,15 @@ export const createIdentityProvider = async (
                 oid: objectId,
                 tid: settings.failure === "tenant" ? objectId : tenantId,
                 name: settings.name,
-                email: "user@example.test",
+                email: settings.email,
                 _claim_names: { groups: "src1" },
                 _claim_sources: { src1: { endpoint: "https://untrusted.example.test/groups" } },
               }
             : {
                 display_name: settings.name,
-                mail: "user@example.test",
+                mail: settings.email,
                 name: settings.name,
-                email: "user@example.test",
+                email: settings.email,
                 roles: settings.groups,
               }),
         })

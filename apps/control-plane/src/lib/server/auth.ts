@@ -17,7 +17,6 @@ import {
 import * as authSchema from "./auth-schema.ts";
 import type { Configuration } from "./config.ts";
 import type { Database, DatabaseExecutor } from "./database.ts";
-import { enrollCompanyUser } from "./organization.ts";
 import { readSsoConfiguration } from "./sso-settings.ts";
 import { createAuthenticationAdmission } from "./auth-admission.ts";
 import type { OrganizationAccess } from "./application-context.ts";
@@ -142,11 +141,12 @@ export const createAuthentication = (
             if (provider && context) {
               const subject = await context.context.internalAdapter.findUserById(record.userId);
 
-              if (!subject || subject.email.toLowerCase().split("@")[1] !== provider.domain)
-                throw new APIError("FORBIDDEN", { message: "Company email is required" });
-
-              // Ownership of this exact email domain was checked by SSO before linking.
-              if (!subject.emailVerified)
+              // Domain ownership proves matching addresses, not external guests' email.
+              if (
+                subject &&
+                !subject.emailVerified &&
+                subject.email.toLowerCase().split("@")[1] === provider.domain
+              )
                 await context.context.internalAdapter.updateUser(record.userId, {
                   emailVerified: true,
                 });
@@ -165,19 +165,6 @@ export const createAuthentication = (
                 companyConfiguration: revision,
               },
             };
-          },
-        },
-      },
-      account: {
-        create: {
-          after: async (identity) => {
-            const [provider] = await database
-              .select({ organizationId: authSchema.ssoProvider.organizationId })
-              .from(authSchema.ssoProvider)
-              .where(eq(authSchema.ssoProvider.providerId, identity.providerId));
-
-            if (provider?.organizationId === installationOrganizationId)
-              await enrollCompanyUser(database, identity.userId);
           },
         },
       },

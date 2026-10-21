@@ -86,10 +86,15 @@ export const createAuthentication = async (configuration: AuthConfiguration, log
                 requireIdTokenVerification: true,
                 redirectURI: configuration.redirectUrl,
                 disableProviderLogout: true,
-                scopes:
-                  configuration.provider.type === "entra"
-                    ? ["openid", "profile", "email", "User.Read"]
-                    : ["openid", "profile", "email"],
+                scopes: [
+                  ...new Set([
+                    "openid",
+                    "profile",
+                    "email",
+                    ...(configuration.scopes ?? []),
+                    ...(configuration.provider.type === "entra" ? ["User.Read"] : []),
+                  ]),
+                ],
                 getUserInfo: async (tokens) => {
                   if (!tokens.idToken) return null;
 

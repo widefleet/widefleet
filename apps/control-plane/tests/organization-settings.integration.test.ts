@@ -116,7 +116,7 @@ describe("Organization login settings", () => {
     expect((await settings.resolve(second.organizationId)).identity).toBeNull();
   });
 
-  it("preserves linked accounts on rejected identity changes and revokes only the removed provider's grants", async () => {
+  it("preserves sessions and refresh grants when a provider update is rejected or the provider is removed", async () => {
     const target = await company("settings-replacement");
     const other = await company("settings-unrelated");
     const credential = await organizationCredential(environment, target.principal);
@@ -189,13 +189,13 @@ describe("Organization login settings", () => {
         .select()
         .from(oauthRefreshToken)
         .where(eq(oauthRefreshToken.id, tokenId)),
-    ).toEqual([]);
+    ).toHaveLength(1);
     expect(
       await environment.database.db
         .select()
         .from(session)
         .where(eq(session.id, current.session.id)),
-    ).toEqual([]);
+    ).toHaveLength(1);
     expect(
       await environment.database.db
         .select()

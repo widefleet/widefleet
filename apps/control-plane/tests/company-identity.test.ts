@@ -43,7 +43,7 @@ describe("company identity settings", () => {
         domain: "example.test",
         oidcConfig: client,
       },
-      directory: { clientId: "directory", secret: { type: "value", value: "directory-secret" } },
+      directory: { clientId: "directory", clientSecret: "directory-secret" },
     });
 
     expect(settings.sso?.oidcConfig.clientId).toBe("client");

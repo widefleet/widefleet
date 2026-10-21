@@ -8,6 +8,7 @@ const credentials = z.object({ clientId: z.string().min(1), clientSecret: z.stri
 
 export const companyIdentity = z.object({
   provider: companyProvider,
+  scopes: z.array(z.string()).optional(),
   management: credentials,
   directory: credentials.nullable().default(null),
 });

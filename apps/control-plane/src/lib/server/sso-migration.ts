@@ -1,13 +1,16 @@
-import { and, eq, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
-import { companyProvider, installationSettings, secretReference } from "@platform/contracts";
+import { companyProvider, installationSettings } from "@platform/contracts";
 import { ssoProvider } from "./auth-schema.ts";
-import { organizationSecrets, organizationSettings } from "./schema.ts";
+import { organizationSettings } from "./schema.ts";
 import type { Database } from "./database.ts";
 import { decryptSecret, encryptSecret } from "./secret-encryption.ts";
 import { companyAccountProvider, providerIssuer } from "./company-identity.ts";
 
-const legacyClient = z.object({ clientId: z.string(), secret: secretReference });
+const legacyClient = z.object({
+  clientId: z.string(),
+  secret: z.object({ ciphertext: z.string() }),
+});
 
 const legacySettings = z.object({
   externallyManaged: z.boolean(),
@@ -16,7 +19,7 @@ const legacySettings = z.object({
       provider: companyProvider,
       domain: z.string().nullable().optional(),
       management: legacyClient,
-      directory: legacyClient.nullable(),
+      directory: z.object({ clientId: z.string() }).nullable(),
     })
     .nullable(),
 });
@@ -43,18 +46,7 @@ export const migrateSsoSettings = async (database: Database, key: string) => {
           .where(eq(ssoProvider.organizationId, row.organizationId));
 
         if (!existing) {
-          const [secret] = await transaction
-            .select()
-            .from(organizationSecrets)
-            .where(
-              and(
-                eq(organizationSecrets.id, identity.management.secret.id),
-                eq(organizationSecrets.organizationId, row.organizationId),
-              ),
-            );
-
-          if (!secret) throw new Error("The saved company SSO credential is missing");
-          const clientSecret = await decryptSecret(key, secret.ciphertext);
+          const clientSecret = await decryptSecret(key, identity.management.secret.ciphertext);
           await transaction.insert(ssoProvider).values({
             id: crypto.randomUUID(),
             organizationId: row.organizationId,
@@ -94,16 +86,6 @@ export const migrateSsoSettings = async (database: Database, key: string) => {
         .update(organizationSettings)
         .set({ settings })
         .where(eq(organizationSettings.organizationId, row.organizationId));
-      await transaction
-        .delete(organizationSecrets)
-        .where(
-          and(
-            eq(organizationSecrets.organizationId, row.organizationId),
-            settings.directory
-              ? sql`${organizationSecrets.id} <> ${settings.directory.secret.id}`
-              : undefined,
-          ),
-        );
     }
   });
 };

@@ -8,6 +8,7 @@
   import { authClient } from "#lib/auth-client";
   import {
     completeSetup,
+    activateCompanySso,
     requestDomainVerification,
     verifyCompanyDomain,
     getSettings,
@@ -16,7 +17,6 @@
     updateSettings,
   } from "#lib/settings.remote";
   import ReportingSettings from "#shadcn/ReportingSettings.svelte";
-  import SecretField from "#shadcn/SecretField.svelte";
   import { Button } from "#shadcn/components/ui/button/index.js";
   import { Input } from "#shadcn/components/ui/input/index.js";
   import { Label } from "#shadcn/components/ui/label/index.js";
@@ -48,6 +48,9 @@
     source: typeof data.view,
   ): Omit<z.infer<typeof settingsInput>, "sso"> & { sso: z.infer<typeof oidcProviderInput> } => ({
     ...$state.snapshot(source.settings),
+    directory: source.settings.directory
+      ? { ...source.settings.directory, clientSecret: "" }
+      : null,
     sso: source.sso
       ? {
           providerId: source.sso.providerId,
@@ -138,6 +141,10 @@
       await persist(
         settingsInput.parse({
           ...draft,
+          externallyManaged: view.settings.externallyManaged,
+          directory: draft.directory
+            ? { ...draft.directory, clientSecret: draft.directory.clientSecret || undefined }
+            : null,
           sso: {
             ...draft.sso,
             oidcConfig: {
@@ -232,11 +239,25 @@
 
     try {
       await verifyCompanyDomain({ organizationId: workspace.organizationId });
-      busy = false;
-      await signIn();
+      await getSettings().refresh();
     } catch (cause) {
       message =
         cause instanceof Error ? cause.message : "The DNS TXT record could not be verified.";
+    } finally {
+      busy = false;
+    }
+  };
+
+  const activateSso = async () => {
+    busy = true;
+    message = "";
+
+    try {
+      await activateCompanySso({ organizationId: workspace.organizationId });
+      busy = false;
+      await signIn();
+    } catch (cause) {
+      message = cause instanceof Error ? cause.message : "Could not activate company SSO.";
     } finally {
       busy = false;
     }
@@ -422,9 +443,7 @@
                   id="directory"
                   checked={draft.directory !== null}
                   onCheckedChange={(enabled) => {
-                    draft.directory = enabled
-                      ? { clientId: "", secret: { type: "value", value: "" } }
-                      : null;
+                    draft.directory = enabled ? { clientId: "", clientSecret: "" } : null;
                   }}
                 /><Label for="directory">Connect Microsoft Graph</Label>
               </div>
@@ -440,7 +459,19 @@
                     required
                   />
                 </div>
-                <SecretField label="Directory credentials" bind:value={draft.directory.secret} />
+                <div class="space-y-2">
+                  <Label for="directory-secret">Directory client secret</Label>
+                  <Input
+                    id="directory-secret"
+                    type="password"
+                    bind:value={draft.directory.clientSecret}
+                    required={!view.settings.directory}
+                    placeholder={view.settings.directory
+                      ? "Leave blank to keep the saved secret"
+                      : ""}
+                    autocomplete="new-password"
+                  />
+                </div>
               {/if}
             </div>
           </details>
@@ -460,33 +491,48 @@
         {#if dirty}<Feedback>Save your changes before verifying company sign-in.</Feedback>{/if}
         {#if !view.sso.domainVerified}
           <p class="text-muted-foreground text-sm">
-            Verify {view.sso.domain} to activate company SSO. Access to this organization will then require
-            company sign-in.
+            Verify ownership of {view.sso.domain} to enable company sign-in testing. This does not change
+            how members currently access the organization.
           </p>
           {#if proof}
             <CopyValue label="DNS record name" value={proof.name} /><CopyValue
               label="TXT value"
               value={proof.value}
             />
-            <Button disabled={busy || dirty} onclick={verifyProof}>Verify domain and sign in</Button
-            >
+            <Button disabled={busy || dirty} onclick={verifyProof}>Verify domain</Button>
           {:else}<Button disabled={busy || dirty} onclick={requestProof}
               >Get verification record</Button
             >{/if}
-        {:else if !data.tested}<Button disabled={busy || dirty} onclick={signIn}
-            >Sign in with company SSO</Button
-          >
         {:else}
-          <Feedback kind="success"
-            >Company sign-in and administrator access verified successfully.</Feedback
-          >
-          {#if onboarding}<p class="text-muted-foreground text-sm">
+          {#if !data.tested}
+            <Button variant="outline" disabled={busy || dirty} onclick={signIn}
+              >Test company sign-in</Button
+            >
+          {:else}
+            <Feedback kind="success"
+              >Company sign-in and administrator access verified successfully.</Feedback
+            >
+          {/if}
+          {#if onboarding}
+            <p class="text-muted-foreground text-sm">
               Completing setup disables password access and closes local sessions. Server recovery
               remains available.
             </p>
-            <Button disabled={busy || dirty} onclick={complete}
+            <Button disabled={busy || dirty || !data.tested} onclick={complete}
               >Complete setup and disable password access</Button
-            >{/if}
+            >
+          {:else if !view.ssoRequired}
+            <p class="text-muted-foreground text-sm">
+              Activating company SSO requires all members to use this provider for this
+              organization. Email sign-in will no longer grant access. You can test the connection
+              before activating it.
+            </p>
+            <Button disabled={busy || dirty || readonly} onclick={activateSso}
+              >Activate company SSO</Button
+            >
+          {:else}
+            <Feedback kind="success">Company SSO is required for this organization.</Feedback>
+          {/if}
         {/if}
         <p class="text-muted-foreground text-xs">{view.activation.message}</p>
       </section>

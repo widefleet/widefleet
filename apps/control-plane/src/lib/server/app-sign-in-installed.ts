@@ -17,6 +17,7 @@ export const createInstalledAppSignIn = (
     authConfiguration.parse({
       organizationId,
       provider: identity.provider,
+      scopes: identity.scopes,
       clientId: identity.management.clientId,
       clientSecret,
       cookieSecret,

@@ -5,7 +5,8 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { identityUrl } from "@platform/contracts";
 import { verifyAccessToken } from "./access-token.ts";
-import { invitation, member, ssoProvider, user } from "./auth-schema.ts";
+import { organizationSettings } from "./schema.ts";
+import { invitation, ssoProvider, user } from "./auth-schema.ts";
 import type { OrganizationAccess } from "./application-context.ts";
 import type { Configuration } from "./config.ts";
 import type { DatabaseExecutor } from "./database.ts";
@@ -106,20 +107,6 @@ export const pluginAuthentication = (
     )
       throw new APIError("FORBIDDEN", { message: "This organization is unavailable" });
 
-    if (
-      !["/organization/accept-invitation", "/organization/reject-invitation"].includes(context.path)
-    ) {
-      const [membership] = await database
-        .select({ role: member.role })
-        .from(member)
-        .where(and(eq(member.organizationId, organizationId), eq(member.userId, current.user.id)));
-
-      if (!membership || !["owner", "admin"].includes(membership.role))
-        throw new APIError("FORBIDDEN", {
-          message: "Organization administrator access is required",
-        });
-    }
-
     const authority = z
       .string()
       .nullable()
@@ -143,7 +130,16 @@ export const pluginAuthentication = (
     const [company] = await database
       .select({ verified: ssoProvider.domainVerified })
       .from(ssoProvider)
-      .where(eq(ssoProvider.organizationId, organizationId));
+      .innerJoin(
+        organizationSettings,
+        eq(organizationSettings.organizationId, ssoProvider.organizationId),
+      )
+      .where(
+        and(
+          eq(ssoProvider.organizationId, organizationId),
+          eq(organizationSettings.ssoRequired, true),
+        ),
+      );
 
     if (company?.verified && authority !== organizationId && current.session["recovery"] !== true)
       throw new APIError("FORBIDDEN", { message: "Sign in with this organization's company SSO" });

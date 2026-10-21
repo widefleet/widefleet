@@ -6,6 +6,8 @@ import dns from "node:dns/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { createTestEnvironment } from "./environment.ts";
 import { createIdentityProvider } from "./edge/auth-proxy-idp.ts";
+import { organizationSettings } from "../src/lib/server/schema.ts";
+import { createIdentityService } from "../src/lib/server/identity.ts";
 import { ssoProvider } from "../src/lib/server/auth-schema.ts";
 
 describe("Better Auth SSO provider integration", () => {
@@ -28,6 +30,14 @@ describe("Better Auth SSO provider integration", () => {
 
   it("encrypts provider credentials and verifies the domain through the plugin", async () => {
     await environment.database.db.delete(ssoProvider);
+    await environment.database.db.update(organizationSettings).set({
+      ssoRequired: false,
+      settings: {
+        appIdentity: { type: "oidc", groupsClaim: "groups" },
+        directory: null,
+        externallyManaged: false,
+      },
+    });
 
     const auth = betterAuth({
       ...environment.auth.options,
@@ -36,6 +46,18 @@ describe("Better Auth SSO provider integration", () => {
 
     const logged = await environment.users.login({ userId: environment.owner.id });
     const headers = logged.headers;
+    headers.set("origin", origin);
+
+    const identity = createIdentityService(
+      environment.auth,
+      environment.database.db,
+      environment.configuration,
+    );
+
+    const authenticate = () =>
+      identity.authenticate(new Request(`${origin}/api/v1/me`, { headers }), "platform:write");
+
+    const principal = (await authenticate()).unwrap();
 
     const created = await auth.api.registerSSOProvider({
       headers,
@@ -55,6 +77,9 @@ describe("Better Auth SSO provider integration", () => {
     });
 
     expect(created.domainVerified).toBe(false);
+    await expect(environment.settings.activateSso(principal)).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
     const [stored] = await environment.database.db.select().from(ssoProvider);
     expect(stored?.oidcConfig).not.toContain("synthetic-client-secret");
     expect(() => {
@@ -85,5 +110,12 @@ describe("Better Auth SSO provider integration", () => {
 
     expect(new URL(redirect.url).origin).toBe(idp.origin);
     expect(redirect.url).not.toContain("synthetic-client-secret");
+    expect((await authenticate()).isOk()).toBe(true);
+    expect((await environment.settings.read(principal)).ssoRequired).toBe(false);
+    // The test redirect was not completed: activation deliberately requires no test-login proof.
+    const activated = await environment.settings.activateSso(principal);
+    expect(activated.ssoRequired).toBe(true);
+    expect(environment.authControl.read().configuration?.clientId).toBe("app-login");
+    expect(await authenticate()).toMatchObject({ error: { code: "SSO_REQUIRED" } });
   });
 });

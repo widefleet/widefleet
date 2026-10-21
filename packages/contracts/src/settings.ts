@@ -35,17 +35,9 @@ export const companyProvider = z.discriminatedUnion("type", [
   }),
 ]);
 
-// External providers can be added here without changing the settings that use secrets.
-export const secretReference = z.strictObject({ type: z.literal("stored"), id: z.uuid() });
+const client = z.strictObject({ clientId: z.string().min(1).max(512) });
 
-export const secretInput = z.union([
-  secretReference,
-  z.strictObject({ type: z.literal("value"), value: z.string().min(1).max(16_384) }),
-]);
-
-const client = z.strictObject({ clientId: z.string().min(1).max(512), secret: secretReference });
-
-const clientInput = client.extend({ secret: secretInput });
+const clientInput = client.extend({ clientSecret: z.string().min(1).max(16_384).optional() });
 
 export const companyDomain = z
   .string()
@@ -119,6 +111,7 @@ export const activationStatus = z.strictObject({
 
 export const settingsView = z.strictObject({
   settings: installationSettings,
+  ssoRequired: z.boolean(),
   localPasswordEnabled: z.boolean(),
   managementCallbackUrl: z.string().nullable(),
   appCallbackUrl: z.url(),

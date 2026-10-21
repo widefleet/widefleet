@@ -4,7 +4,7 @@ import {
   settingsUpdate,
   setupOwner,
 } from "@platform/contracts";
-import { and, eq, inArray, notInArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { OrganizationCredential } from "./organization-operations.ts";
 import { appCallbackUrl, type AppSignIn } from "./app-sign-in.ts";
@@ -14,7 +14,7 @@ import type { Configuration } from "./config.ts";
 import type { Database, DatabaseExecutor } from "./database.ts";
 import type { Principal } from "./identity.ts";
 import { InvalidOperation } from "./errors.ts";
-import { createOrganizationSecrets } from "./organization-secrets.ts";
+import { decryptSecret, encryptSecret } from "./secret-encryption.ts";
 import { installationOrganizationId } from "../organization.ts";
 import {
   installationId,
@@ -24,7 +24,7 @@ import {
 } from "./installation-store.ts";
 import { session, oauthRefreshToken } from "./auth-schema.ts";
 import { readSsoConfiguration, ssoRuntimeIdentity, saveSsoProvider } from "./sso-settings.ts";
-import { installation, organizationSecrets, organizationSettings } from "./schema.ts";
+import { installation, organizationSettings } from "./schema.ts";
 
 const requireAdmin = (principal: Principal, organizationId: string) => {
   if (!principal.application.admin || principal.application.organizationId !== organizationId)
@@ -43,8 +43,6 @@ const createOrganizationSettingsService = (
   revision: { value: number },
   emailSignIn: boolean,
 ) => {
-  const secrets = createOrganizationSecrets(database, encryptionKey, organizationId);
-
   const lockSettings = async (transaction: DatabaseExecutor) => {
     await transaction
       .insert(organizationSettings)
@@ -61,7 +59,10 @@ const createOrganizationSettingsService = (
   };
 
   const readCurrent = async (transaction: DatabaseExecutor) => {
-    const snapshotSecrets = createOrganizationSecrets(transaction, encryptionKey, organizationId);
+    const [stored] = await transaction
+      .select({ directorySecret: organizationSettings.directorySecret })
+      .from(organizationSettings)
+      .where(eq(organizationSettings.organizationId, organizationId));
 
     const state = {
       ...(await readInstallation(transaction)),
@@ -73,13 +74,13 @@ const createOrganizationSettingsService = (
     let identity: z.infer<typeof companyIdentity> | null = null;
 
     try {
-      if (sso?.domainVerified) {
+      if (sso?.domainVerified && sso.required) {
         identity = ssoRuntimeIdentity(sso, state.settings.appIdentity);
 
         if (state.settings.directory)
           identity.directory = {
             clientId: state.settings.directory.clientId,
-            clientSecret: await snapshotSecrets.resolve(state.settings.directory.secret),
+            clientSecret: await decryptSecret(encryptionKey, stored?.directorySecret ?? ""),
           };
       }
     } catch (cause) {
@@ -179,6 +180,7 @@ const createOrganizationSettingsService = (
     return {
       settings: resolved.state.settings,
       sso,
+      ssoRequired: Boolean(connection?.domainVerified && connection.required),
       localPasswordEnabled:
         organizationId === installationOrganizationId && resolved.state.localPasswordEnabled,
       managementCallbackUrl: sso
@@ -212,7 +214,18 @@ const createOrganizationSettingsService = (
         message: "Configure a replacement company login before removing the active provider",
       });
 
-    if (next.directory) await secrets.resolve(next.directory.secret);
+    if (next.directory && !next.directory.clientSecret) {
+      const [saved] = await database
+        .select({ secret: organizationSettings.directorySecret })
+        .from(organizationSettings)
+        .where(eq(organizationSettings.organizationId, organizationId));
+
+      if (!saved?.secret)
+        throw new InvalidOperation({
+          code: "BAD_REQUEST",
+          message: "Enter the directory client secret",
+        });
+    }
 
     if (next.directory && next.appIdentity.type !== "entra")
       throw new InvalidOperation({
@@ -244,16 +257,29 @@ const createOrganizationSettingsService = (
     await database.transaction(async (transaction) => {
       await lockSettings(transaction);
 
-      const directory = next.directory
-        ? {
-            clientId: next.directory.clientId,
-            secret: await secrets.save(transaction, next.directory.secret),
-          }
-        : null;
+      const [current] = await transaction
+        .select({ directorySecret: organizationSettings.directorySecret })
+        .from(organizationSettings)
+        .where(eq(organizationSettings.organizationId, organizationId));
+
+      const directorySecret = !next.directory
+        ? null
+        : next.directory.clientSecret
+          ? await encryptSecret(encryptionKey, next.directory.clientSecret)
+          : current?.directorySecret;
+
+      if (next.directory && !directorySecret)
+        throw new InvalidOperation({
+          code: "BAD_REQUEST",
+          message: "Enter the directory client secret",
+        });
+      const directory = next.directory ? { clientId: next.directory.clientId } : null;
 
       await transaction
         .update(organizationSettings)
         .set({
+          directorySecret: directorySecret ?? null,
+          ssoRequired: next.sso ? undefined : false,
           settings: installationSettings.parse({
             appIdentity: next.appIdentity,
             directory,
@@ -261,15 +287,6 @@ const createOrganizationSettingsService = (
           }),
         })
         .where(eq(organizationSettings.organizationId, organizationId));
-      const referenced = directory ? [directory.secret.id] : [];
-      await transaction
-        .delete(organizationSecrets)
-        .where(
-          and(
-            eq(organizationSecrets.organizationId, organizationId),
-            notInArray(organizationSecrets.id, referenced),
-          ),
-        );
     });
 
     revision.value++;
@@ -376,9 +393,28 @@ const createOrganizationSettingsService = (
         });
       await auth.api.verifyDomain({ headers, body: { providerId: provider.providerId } });
       revision.value++;
-      await inspect(true);
 
       return { success: true };
+    },
+    activateSso: async (principal: Principal) => {
+      requireAdmin(principal, organizationId);
+      await database.transaction(async (transaction) => {
+        await lockSettings(transaction);
+        const provider = await readSsoConfiguration(transaction, encryptionKey, organizationId);
+
+        if (!provider?.domainVerified)
+          throw new InvalidOperation({
+            code: "CONFLICT",
+            message: "Verify the company domain before activating SSO",
+          });
+        await transaction
+          .update(organizationSettings)
+          .set({ ssoRequired: true })
+          .where(eq(organizationSettings.organizationId, organizationId));
+      });
+      revision.value++;
+
+      return inspect(true);
     },
     complete: async (principal: Principal, auth: Authentication, headers: Headers) => {
       requireAdmin(principal, organizationId);
@@ -404,6 +440,10 @@ const createOrganizationSettingsService = (
         });
       await database.transaction(async (transaction) => {
         await transaction
+          .update(organizationSettings)
+          .set({ ssoRequired: true })
+          .where(eq(organizationSettings.organizationId, organizationId));
+        await transaction
           .update(installation)
           .set({ localPasswordEnabled: false })
           .where(eq(installation.id, installationId));
@@ -427,7 +467,7 @@ const createOrganizationSettingsService = (
 
       revision.value++;
 
-      return inspect();
+      return inspect(true);
     },
   };
 };
@@ -487,6 +527,8 @@ export const createSettingsService = (
       scoped(principal.application.organizationId).domainVerification(principal, auth, headers),
     verifyDomain: (principal: Principal, auth: Authentication, headers: Headers) =>
       scoped(principal.application.organizationId).verifyDomain(principal, auth, headers),
+    activateSso: (principal: Principal) =>
+      scoped(principal.application.organizationId).activateSso(principal),
     complete: (principal: Principal, auth: Authentication, headers: Headers) =>
       scoped(principal.application.organizationId).complete(principal, auth, headers),
   };

@@ -1,3 +1,4 @@
+import { organizationSettings } from "../src/lib/server/schema.ts";
 import { createAuthControl } from "./auth-control.ts";
 import { installationKeys } from "../src/lib/server/installation-files.ts";
 import { createAppSignIn } from "../src/lib/server/app-sign-in-node.ts";
@@ -202,6 +203,9 @@ export const createTestEnvironment = async (
     "widefleet",
     { auth, headers: credential.headers },
   );
+
+  // The shared fixture models an installed company; setup tests clear this policy.
+  await database.db.update(organizationSettings).set({ ssoRequired: true });
 
   return {
     configuration,

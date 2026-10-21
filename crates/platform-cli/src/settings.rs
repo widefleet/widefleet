@@ -20,9 +20,11 @@ enum Command {
     Get,
     /// Request the DNS TXT record needed to activate company SSO.
     DomainVerification,
-    /// Verify the published TXT record and require company SSO for this organization.
+    /// Verify the published TXT record without changing the organization's sign-in policy.
     VerifyDomain,
-    /// Export editable settings with secret references.
+    /// Require company SSO for this organization after domain verification.
+    ActivateSso,
+    /// Export editable settings without saved secrets.
     Export,
     /// Validate a JSON configuration and report whether app sign-in must restart.
     Plan {
@@ -72,11 +74,11 @@ pub async fn run(api: &Api, token: &str, options: Options) -> Result<()> {
                 super::print_json(&view)
             }
         }
-        Command::DomainVerification | Command::VerifyDomain => {
-            let path = if matches!(options.command, Command::DomainVerification) {
-                "/settings/domain-verification"
-            } else {
-                "/settings/verify-domain"
+        Command::DomainVerification | Command::VerifyDomain | Command::ActivateSso => {
+            let path = match options.command {
+                Command::DomainVerification => "/settings/domain-verification",
+                Command::VerifyDomain => "/settings/verify-domain",
+                _ => "/settings/activate-sso",
             };
             let result: Value =
                 json(api.authenticated(Method::POST, path, token).send().await?).await?;

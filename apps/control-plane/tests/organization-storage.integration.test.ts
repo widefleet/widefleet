@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
+import { organizationSettings } from "../src/lib/server/schema.ts";
+import { decryptSecret } from "../src/lib/server/secret-encryption.ts";
 import { settingsInput } from "@platform/contracts";
 import { organization, member, ssoProvider } from "../src/lib/server/auth-schema.ts";
 import { createTestEnvironment, organizationCredential } from "./environment.ts";
@@ -11,7 +13,7 @@ describe("Organization settings storage", () => {
   });
   afterAll(async () => environment?.close());
 
-  it("rejects foreign secret references and preserves other organizations when replacing settings", async () => {
+  it("keeps encrypted directory secrets isolated and preserves omitted credentials", async () => {
     const createOrganization = async (name: string) => {
       const id = crypto.randomUUID();
       await environment.database.db.insert(organization).values({
@@ -36,7 +38,7 @@ describe("Organization settings storage", () => {
 
       const input = settingsInput.parse({
         appIdentity: { type: "entra" },
-        directory: { clientId: name, secret: { type: "value", value: `${name}-secret` } },
+        directory: { clientId: name, clientSecret: `${name}-secret` },
         sso: {
           providerId: name,
           domain: "example.test",
@@ -51,6 +53,11 @@ describe("Organization settings storage", () => {
         .set({ domainVerified: true })
         .where(eq(ssoProvider.organizationId, id));
 
+      await environment.database.db
+        .update(organizationSettings)
+        .set({ ssoRequired: true })
+        .where(eq(organizationSettings.organizationId, id));
+
       return { id, input, credential };
     };
 
@@ -58,20 +65,19 @@ describe("Organization settings storage", () => {
     const second = await createOrganization("second");
     const firstSettings = (await environment.settings.resolve(first.id)).state.settings;
 
-    const foreign = settingsInput.parse({
+    expect(firstSettings.directory).toEqual({ clientId: "first" });
+    // Importing another organization's public settings never imports its secret.
+    const copied = settingsInput.parse({ ...second.input, directory: firstSettings.directory });
+    await environment.settings.initialize(copied, second.id, second.credential);
+    expect((await environment.settings.resolve(second.id)).identity?.directory?.clientSecret).toBe(
+      "second-secret",
+    );
+
+    const replacement = settingsInput.parse({
       ...second.input,
-      directory: firstSettings.directory,
+      directory: { clientId: "second", clientSecret: "rotated-second-secret" },
     });
 
-    await expect(
-      environment.settings.initialize(foreign, second.id, second.credential),
-    ).rejects.toMatchObject({
-      code: "BAD_REQUEST",
-    });
-    const replacement = settingsInput.parse(second.input);
-
-    if (!replacement.directory) throw new Error("Missing fixture identity");
-    replacement.directory.secret = { type: "value", value: "rotated-second-secret" };
     await environment.settings.initialize(replacement, second.id, second.credential);
     expect((await environment.settings.resolve(first.id)).identity?.directory?.clientSecret).toBe(
       "first-secret",
@@ -79,5 +85,34 @@ describe("Organization settings storage", () => {
     expect((await environment.settings.resolve(second.id)).identity?.directory?.clientSecret).toBe(
       "rotated-second-secret",
     );
+
+    const [saved] = await environment.database.db
+      .select()
+      .from(organizationSettings)
+      .where(eq(organizationSettings.organizationId, second.id));
+
+    expect(saved?.directorySecret).not.toBe("rotated-second-secret");
+    expect(
+      await decryptSecret(
+        environment.environment.PLATFORM_ENCRYPTION_KEY,
+        saved?.directorySecret ?? "",
+      ),
+    ).toBe("rotated-second-secret");
+    expect(JSON.stringify(saved?.settings)).not.toContain("secret");
+    await environment.settings.initialize(
+      { ...replacement, directory: null },
+      second.id,
+      second.credential,
+    );
+
+    const [cleared] = await environment.database.db
+      .select()
+      .from(organizationSettings)
+      .where(eq(organizationSettings.organizationId, second.id));
+
+    expect(cleared?.directorySecret).toBeNull();
+    await expect(
+      environment.settings.initialize(copied, second.id, second.credential),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
   });
 });

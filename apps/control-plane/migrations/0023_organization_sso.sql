@@ -18,3 +18,28 @@ CREATE TABLE "sso_provider" (
   "user_id" text REFERENCES "user"("id") ON DELETE SET NULL,
   "organization_id" text NOT NULL UNIQUE REFERENCES "organization"("id") ON DELETE CASCADE
 );
+
+--> statement-breakpoint
+ALTER TABLE "organization_settings" ADD COLUMN "directory_secret" text;
+--> statement-breakpoint
+UPDATE "organization_settings" AS settings
+SET "directory_secret" = secret."ciphertext"
+FROM "organization_secret" AS secret
+WHERE secret."organization_id" = settings."organization_id"
+  AND secret."id" = settings."settings" #>> '{identity,directory,secret,id}';
+--> statement-breakpoint
+-- Keep the encrypted legacy login credential until the one-time plugin conversion.
+UPDATE "organization_settings" AS settings
+SET "settings" = jsonb_set(settings."settings", '{identity,management,secret}',
+  jsonb_build_object('ciphertext', secret."ciphertext"))
+FROM "organization_secret" AS secret
+WHERE secret."organization_id" = settings."organization_id"
+  AND secret."id" = settings."settings" #>> '{identity,management,secret,id}';
+--> statement-breakpoint
+UPDATE "organization_settings"
+SET "settings" = "settings" #- '{identity,directory,secret}';
+--> statement-breakpoint
+DROP TABLE "organization_secret";
+
+--> statement-breakpoint
+ALTER TABLE "organization_settings" ADD COLUMN "sso_required" boolean NOT NULL DEFAULT false;

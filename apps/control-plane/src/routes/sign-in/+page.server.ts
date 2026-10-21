@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { getRuntime } from "#server/runtime";
 
 import { organization, ssoProvider } from "#server/auth-schema";
+import { organizationSettings } from "#server/schema";
 import { localDestination } from "#server/navigation";
 import { installationOrganizationId } from "#lib/organization";
 
@@ -20,9 +21,11 @@ export const load: PageServerLoad = async ({ url, setHeaders }) => {
       name: organization.name,
       providerId: ssoProvider.providerId,
       verified: ssoProvider.domainVerified,
+      required: organizationSettings.ssoRequired,
     })
     .from(organization)
     .leftJoin(ssoProvider, eq(ssoProvider.organizationId, organization.id))
+    .leftJoin(organizationSettings, eq(organizationSettings.organizationId, organization.id))
     .where(slug ? eq(organization.slug, slug) : eq(organization.id, installationOrganizationId));
 
   const provider = target?.verified ? target.providerId : null;
@@ -37,8 +40,9 @@ export const load: PageServerLoad = async ({ url, setHeaders }) => {
     label: label ?? target?.name ?? "your company",
     organizationSlug: slug,
     organizationName: target?.name ?? null,
-    emailSignIn: runtime.emailSignIn && !(slug && provider),
-    localPasswordEnabled: runtime.configuration.LOCAL_PASSWORD_ENABLED && !provider,
+    emailSignIn: runtime.emailSignIn && !(slug && provider && target?.required),
+    localPasswordEnabled:
+      runtime.configuration.LOCAL_PASSWORD_ENABLED && !(provider && target?.required),
     next: localDestination(url.searchParams.get("next")),
   };
 };

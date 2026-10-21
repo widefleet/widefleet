@@ -283,12 +283,6 @@ export const organizationSettings = pgTable("organization_settings", {
     .primaryKey()
     .references(() => organization.id),
   settings: jsonb().notNull(),
-});
-
-export const organizationSecrets = pgTable("organization_secret", {
-  id: text().primaryKey(),
-  organizationId: text("organization_id")
-    .notNull()
-    .references(() => organization.id),
-  ciphertext: text().notNull(),
+  directorySecret: text("directory_secret"),
+  ssoRequired: boolean("sso_required").notNull().default(false),
 });

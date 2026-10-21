@@ -1,9 +1,9 @@
 import { sso } from "@better-auth/sso";
-import { and, eq, gt } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { installationOrganizationId } from "../organization.ts";
 import type { OrganizationAccess } from "./application-context.ts";
-import { invitation, member, ssoProvider, user } from "./auth-schema.ts";
+import { ssoProvider } from "./auth-schema.ts";
 import type { DatabaseExecutor } from "./database.ts";
 import { decryptSecret, encryptSecret } from "./secret-encryption.ts";
 
@@ -63,25 +63,6 @@ export const companySsoPlugin = (
     // The schema permits one provider per organization, regardless of its creator.
     providersLimit: Number.MAX_SAFE_INTEGER,
     domainVerification: { enabled: true },
-    organizationProvisioning: { disabled: true },
-    guardProviderMutation: async (input, context) => {
-      if (input.action === "update" && !input.isAuthenticationBoundaryChange) return;
-      const organizationId = input.provider.organizationId;
-
-      if (!organizationId) return;
-      // Use the plugin's transaction. A rejected update rolls back revocation too.
-      await context.database.deleteMany({
-        model: "oauthRefreshToken",
-        where: [{ field: "referenceId", value: `organization:${organizationId}` }],
-      });
-      await context.database.deleteMany({
-        model: "session",
-        where: [
-          { field: "identityOrganizationId", value: organizationId },
-          { field: "recovery", value: false },
-        ],
-      });
-    },
     resolveUser: async (input) => {
       const [provider] = await database
         .select()
@@ -96,36 +77,7 @@ export const companySsoPlugin = (
       )
         return { action: "reject", code: "ORGANIZATION_UNAVAILABLE" };
 
-      // A verified company domain authorizes this provider's email identities,
-      // not addresses outside that domain or membership in another organization.
-      const email = input.providerUser.email.toLowerCase();
-
-      if (email.split("@")[1] !== provider.domain)
-        return { action: "reject", code: "COMPANY_EMAIL_REQUIRED" };
-
-      if (provider.organizationId === installationOrganizationId) return { action: "continue" };
-
-      const [membership] = await database
-        .select({ id: member.id })
-        .from(member)
-        .innerJoin(user, eq(user.id, member.userId))
-        .where(and(eq(member.organizationId, provider.organizationId), eq(user.email, email)));
-
-      const [pending] = await database
-        .select({ id: invitation.id })
-        .from(invitation)
-        .where(
-          and(
-            eq(invitation.organizationId, provider.organizationId),
-            eq(invitation.email, email),
-            eq(invitation.status, "pending"),
-            gt(invitation.expiresAt, new Date()),
-          ),
-        );
-
-      return membership || pending
-        ? { action: "continue" }
-        : { action: "reject", code: "INVITATION_REQUIRED" };
+      return { action: "continue" };
     },
   });
 

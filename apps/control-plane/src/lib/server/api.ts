@@ -435,6 +435,12 @@ export const createApi = (runtime: Runtime) => {
           runtime.settings.verifyDomain(context.principal, runtime.auth, context.request.headers),
         ),
       ),
+    activateSso: write
+      .route({ method: "POST", path: "/settings/activate-sso" })
+      .output(contract.settingsView)
+      .handler(({ context }) =>
+        apiOperation(() => runtime.settings.activateSso(context.principal)),
+      ),
     completeSetup: write
       .route({ method: "POST", path: "/settings/complete" })
       .output(contract.settingsView)
