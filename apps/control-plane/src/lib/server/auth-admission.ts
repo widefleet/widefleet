@@ -1,3 +1,6 @@
+import type { OAuthClaimExtensionInput } from "@better-auth/oauth-provider";
+import { readAuthenticationReference } from "./authentication-context.ts";
+import { APIError } from "better-auth/api";
 import { and, eq, gt } from "drizzle-orm";
 import type { OrganizationAccess } from "./application-context.ts";
 import type { DatabaseExecutor } from "./database.ts";
@@ -30,5 +33,15 @@ export const createAuthenticationAdmission = (
     const allowed = new Set(await access.filterOrganizations(candidates));
 
     return candidates.some((candidate) => allowed.has(candidate.id));
+  },
+  tokenClaims: async ({ user: subject, referenceId }: OAuthClaimExtensionInput) => {
+    const authority = subject ? readAuthenticationReference(subject.id, referenceId) : null;
+
+    if (!subject || !authority || !referenceId)
+      throw new APIError("UNAUTHORIZED", {
+        message: "This authorization has no valid sign-in context; sign in again",
+      });
+
+    return { reference_id: referenceId };
   },
 });

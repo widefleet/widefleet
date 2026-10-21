@@ -15,12 +15,13 @@ export const runtimeIdentity = async (
   groups: string[] = [],
   otherGroups?: string[],
 ) => {
-  const redirectUrl = `https://auth.${domain}/oauth2/callback`;
+  const redirectUrl = `https://auth.${domain}/oauth2/widefleet/callback`;
   const provider = await createIdentityProvider(redirectUrl);
   provider.settings.groups = groups;
 
   try {
     const configuration = authConfiguration.parse({
+      organizationId: "widefleet",
       provider: {
         type: "oidc",
         issuer: provider.origin,
@@ -45,7 +46,7 @@ export const runtimeIdentity = async (
 
     const login = async () => {
       const started = await proxy.fetch(
-        new Request(`https://auth.${domain}/oauth2/start?rd=${encodeURIComponent(app)}`),
+        new Request(`https://auth.${domain}/oauth2/widefleet/start?rd=${encodeURIComponent(app)}`),
       );
 
       const authorized = await fetch(z.url().parse(started.headers.get("location")), {

@@ -20,7 +20,7 @@ import {
 import { createAuthentication, registerCli } from "../src/lib/server/auth.ts";
 import { configurationSchema } from "../src/lib/server/config.ts";
 import { createDatabase } from "../src/lib/server/database.ts";
-import { account, member } from "../src/lib/server/auth-schema.ts";
+import { account, member, session } from "../src/lib/server/auth-schema.ts";
 import { enrollCompanyUser, initializeOrganization } from "../src/lib/server/organization.ts";
 import { companyAccountProvider, companyIdentity } from "../src/lib/server/company-identity.ts";
 
@@ -70,14 +70,14 @@ export const createTestEnvironment = async (
             client_secret: replacementClient.clientSecret,
             name: "Replacement tenant fixture",
             tenant_id: replacementClient.tenantId,
-            redirect_uris: [`${platformUrl}/api/auth/callback/microsoft`],
+            redirect_uris: [`${platformUrl}/api/auth/sso/callback/microsoft`],
           },
           {
             client_id: clientId,
             client_secret: clientSecret,
             name: "Management fixture",
             tenant_id: tenantId,
-            redirect_uris: [`${platformUrl}/api/auth/callback/${providerId}`],
+            redirect_uris: [`${platformUrl}/api/auth/sso/callback/${providerId}`],
           },
         ],
       },
@@ -154,16 +154,19 @@ export const createTestEnvironment = async (
   await initializeOrganization(database.db);
   await initializeInstallation(database.db);
 
+  const cookieKey = (await installationKeys(configuration)).cookie;
+
   const settings = createSettingsService(
     configuration,
     database.db,
     environment.PLATFORM_ENCRYPTION_KEY,
-    createAppSignIn(configuration, (await installationKeys(configuration)).cookie),
+    (organizationId) => createAppSignIn(configuration, cookieKey, organizationId),
   );
 
   await settings.initialize({
     externallyManaged: false,
     identity: {
+      domain: "example.test",
       provider: identity.provider,
       management: { clientId, secret: { type: "value", value: clientSecret } },
       apps: { clientId, secret: { type: "value", value: clientSecret } },
@@ -223,4 +226,28 @@ export const createTestEnvironment = async (
       await rm(directory, { recursive: true, force: true });
     },
   };
+};
+
+// Synthetic scoped credential for service tests; real SSO callbacks are covered
+// by organization-sso.integration.test.ts and the browser setup flow.
+export const organizationCredential = async (
+  environment: Awaited<ReturnType<typeof createTestEnvironment>>,
+  principal: { id: string; application: { organizationId: string } },
+) => {
+  const auth = createAuthentication(environment.configuration, environment.database.db, {
+    organizationAccess: {
+      filterOrganizations: async (organizations) => organizations.map(({ id }) => id),
+    },
+  });
+
+  const { headers } = await environment.users.login({ userId: principal.id });
+  const current = await auth.api.getSession({ headers });
+
+  if (!current) throw new Error("Missing fixture session");
+  await environment.database.db
+    .update(session)
+    .set({ identityOrganizationId: principal.application.organizationId })
+    .where(eq(session.id, current.session.id));
+
+  return { auth, headers };
 };

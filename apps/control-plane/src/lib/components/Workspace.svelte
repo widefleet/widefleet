@@ -110,7 +110,7 @@
 {#snippet navigationLinks()}
   <nav aria-label="Main navigation" class="space-y-1">
     {#each navigation as item, index (item.href)}
-      {#if index < 3 || principal.admin}
+      {#if index < 3 || (["/agents", "/members"].includes(item.href) ? principal.admin : principal.application.admin)}
         {#if index === 3}<p
             class="text-muted-foreground px-3 pt-7 pb-2 text-[11px] font-medium tracking-wider uppercase"
           >
@@ -170,6 +170,10 @@
               ><DropdownMenu.Label class="truncate">{principal.email}</DropdownMenu.Label
               ></DropdownMenu.Group
             >
+            <DropdownMenu.Item>
+              {#snippet child({ props })}<a {...props} href="/account"><Users />Your account</a
+                >{/snippet}
+            </DropdownMenu.Item>
             <DropdownMenu.Separator /><DropdownMenu.Item disabled={signingOut} onclick={signOut}
               ><LogOut />{signingOut ? "Signing out …" : "Sign out"}</DropdownMenu.Item
             >
@@ -201,6 +205,9 @@
         <div class="bg-popover absolute top-11 right-0 z-40 w-64 rounded-xl border p-3 shadow-lg">
           {@render navigationLinks()}
           <div class="mt-3 space-y-1 border-t pt-3">
+            <Button href="/account" variant="ghost" class="w-full justify-start"
+              ><Users />Your account</Button
+            >
             <Button href="/device" variant="ghost" class="w-full justify-start"
               ><Terminal />Connect CLI</Button
             ><Button

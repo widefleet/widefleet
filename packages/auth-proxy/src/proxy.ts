@@ -22,16 +22,13 @@ const redirect = (url: string, headers = new Headers()) => {
   return new Response(null, { status: 302, headers });
 };
 
-const unambiguousCookies = (headers: Headers) => {
+const unambiguousCookies = (headers: Headers, prefix: string) => {
   const names = new Set<string>();
 
   for (const cookie of (headers.get("cookie") ?? "").split(";")) {
     const name = cookie.trim().split("=")[0] ?? "";
 
-    if (
-      !name.startsWith(`__Secure-${cookiePrefix}.`) &&
-      name !== `__Host-${cookiePrefix}.oauth_state`
-    )
+    if (!name.startsWith(`__Secure-${prefix}.`) && name !== `__Host-${prefix}.oauth_state`)
       continue;
 
     if (names.has(name)) return false;
@@ -44,6 +41,7 @@ const unambiguousCookies = (headers: Headers) => {
 export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
   const configuration = authConfiguration.parse(input);
   const callback = new URL(configuration.redirectUrl);
+  const basePath = `/oauth2/${configuration.organizationId}`;
 
   const appUrl = (url: URL) =>
     url.protocol === "https:" &&
@@ -63,7 +61,7 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
   };
 
   const loginUrl = (url: URL) => {
-    const target = new URL("/oauth2/start", callback);
+    const target = new URL(`${basePath}/start`, callback);
 
     target.searchParams.set("rd", url.href);
 
@@ -71,10 +69,10 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
   };
 
   const authentication = async (request: Request, url: URL) => {
-    if (url.pathname === "/oauth2/error")
+    if (url.pathname === `${basePath}/error`)
       return response(401, "Company sign-in failed. Return to the app and try again.");
 
-    if (url.pathname === "/oauth2/start" && request.method === "GET") {
+    if (url.pathname === `${basePath}/start` && request.method === "GET") {
       const target = await returnUrl(url.searchParams.get("rd"));
 
       if (!target) return response(400, "Choose a registered app to sign in.");
@@ -85,7 +83,7 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
         body: {
           provider: "company",
           callbackURL: target.href,
-          errorCallbackURL: new URL("/oauth2/error", callback).href,
+          errorCallbackURL: new URL(`${basePath}/error`, callback).href,
           disableRedirect: true,
         },
         asResponse: true,
@@ -97,13 +95,13 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
       return redirect(destination, new Headers(result.headers));
     }
 
-    if (url.pathname === "/oauth2/callback" && request.method === "GET") {
+    if (url.pathname === `${basePath}/callback` && request.method === "GET") {
       if (["state", "code", "error"].some((key) => url.searchParams.getAll(key).length > 1))
         return response(400, "Invalid sign-in callback.");
       const auth = await createAuthentication(configuration, true);
       const internal = new URL(url);
 
-      internal.pathname = "/oauth2/callback/company";
+      internal.pathname = `${basePath}/callback/company`;
       const result = await auth.handler(new Request(internal, request));
       const headers = new Headers(result.headers);
 
@@ -112,11 +110,11 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
       return new Response(result.body, { status: result.status, headers });
     }
 
-    if (url.pathname === "/oauth2/sign_out" && request.method === "POST") {
+    if (url.pathname === `${basePath}/sign_out` && request.method === "POST") {
       const auth = await createAuthentication(configuration, false);
       const internal = new URL(url);
 
-      internal.pathname = "/oauth2/sign-out";
+      internal.pathname = `${basePath}/sign-out`;
 
       return auth.handler(new Request(internal, request));
     }
@@ -128,7 +126,8 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
     async fetch(request: Request) {
       const url = new URL(request.url);
 
-      if (!unambiguousCookies(request.headers)) return response(400, "Ambiguous sign-in cookies.");
+      if (!unambiguousCookies(request.headers, cookiePrefix(configuration)))
+        return response(400, "Ambiguous sign-in cookies.");
 
       if (url.origin === callback.origin) {
         try {

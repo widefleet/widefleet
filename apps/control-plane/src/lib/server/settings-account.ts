@@ -5,14 +5,14 @@ import { companyAccountProvider } from "./company-identity.ts";
 import type { Principal } from "./identity.ts";
 import type { Runtime } from "./runtime.ts";
 
-export const readSettingsAccount = async (
+export const readCompanyAccount = async (
   runtime: Runtime,
   principal: Principal,
   headers: Headers,
 ) => {
-  const view = await runtime.settings.read(principal);
-  const identity = runtime.configuration.IDENTITY;
-  const provider = identity ? companyAccountProvider(identity) : null;
+  const organizationId = principal.application.organizationId;
+  const identity = (await runtime.settings.resolve(organizationId)).identity;
+  const provider = identity ? companyAccountProvider(identity, organizationId) : null;
 
   const linked = provider
     ? await runtime.database.db
@@ -25,14 +25,28 @@ export const readSettingsAccount = async (
   const current = await runtime.auth.api.getSession({ headers });
 
   return {
-    view,
-    reporting: principal.admin ? await runtime.reporting.read(principal) : null,
-    platformUrl: runtime.configuration.PLATFORM_URL,
+    organizationId,
     provider,
+    label: identity?.provider.label ?? null,
+    accountUrl: `${runtime.configuration.PLATFORM_URL}/account`,
     linked: linked.length > 0,
     tested: Boolean(
       identity &&
-      current?.session.companyConfiguration === companyLoginRevision(runtime.configuration),
+      current?.session.identityOrganizationId === organizationId &&
+      current?.session.companyConfiguration ===
+        companyLoginRevision({ ...runtime.configuration, IDENTITY: identity }),
     ),
   };
 };
+
+export const readSettingsAccount = async (
+  runtime: Runtime,
+  principal: Principal,
+  headers: Headers,
+) => ({
+  view: await runtime.settings.read(principal),
+  ...(await readCompanyAccount(runtime, principal, headers)),
+  emailSignIn: runtime.emailSignIn,
+  reporting: principal.admin ? await runtime.reporting.read(principal) : null,
+  platformUrl: runtime.configuration.PLATFORM_URL,
+});

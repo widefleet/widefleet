@@ -27,7 +27,7 @@ const publicKey = { ...(await exportJWK(key.publicKey)), kid: "fixture", alg: "R
 
 const authorization = z.object({
   client_id: z.literal(clientId),
-  redirect_uri: z.literal("https://auth.apps.localhost:25443/oauth2/callback"),
+  redirect_uri: z.literal("https://auth.apps.localhost:25443/oauth2/widefleet/callback"),
   state: z.string().min(1),
   nonce: z.string().min(1),
   code_challenge: z.string().min(1),

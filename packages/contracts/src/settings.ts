@@ -29,6 +29,7 @@ export const companyProvider = z.discriminatedUnion("type", [
     issuer: identityUrl,
     label: z.string().min(1).max(100),
     groupsClaim: claimName.default("groups"),
+    organizationClaim: claimName.optional(),
     nameClaim: claimName.default("name"),
     emailClaim: claimName.default("email"),
   }),
@@ -46,8 +47,19 @@ const client = z.strictObject({ clientId: z.string().min(1).max(512), secret: se
 
 const clientInput = client.extend({ secret: secretInput });
 
+export const companyDomain = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .max(253)
+  .regex(
+    /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/,
+    "Enter the company's email domain, without a URL or wildcard",
+  );
+
 export const identitySettings = z
   .strictObject({
+    domain: companyDomain.nullable().default(null),
     provider: companyProvider,
     management: client,
     apps: client,
@@ -60,6 +72,7 @@ export const identitySettings = z
 
 export const identitySettingsInput = z
   .strictObject({
+    domain: companyDomain.nullable().default(null),
     provider: companyProvider,
     management: clientInput,
     apps: clientInput,
@@ -108,6 +121,15 @@ export const settingsView = z.strictObject({
   appCallbackUrl: z.url(),
   activation: activationStatus,
   error: z.string().nullable(),
+  sso: z
+    .object({ providerId: z.string(), domain: companyDomain, verified: z.boolean() })
+    .nullable(),
+});
+
+export const domainVerification = z.object({
+  name: z.string(),
+  type: z.literal("TXT"),
+  value: z.string(),
 });
 
 export const settingsPlan = z.strictObject({

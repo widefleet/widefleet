@@ -1,6 +1,7 @@
 import type { Configuration } from "./config.ts";
 import type { activationStatus, identitySettingsInput, settingsPlan } from "@platform/contracts";
 import type { z } from "zod";
+import { installationOrganizationId } from "../organization.ts";
 
 export interface AppSignIn {
   callbackUrl: string;
@@ -12,5 +13,8 @@ export interface AppSignIn {
   ): Promise<z.infer<typeof settingsPlan>>;
 }
 
-export const appCallbackUrl = (configuration: Configuration) =>
-  `https://auth.${configuration.APP_DOMAIN}${configuration.APP_HTTPS_PORT === 443 ? "" : `:${configuration.APP_HTTPS_PORT}`}/oauth2/callback`;
+export const appCallbackUrl = (
+  configuration: Configuration,
+  organizationId = installationOrganizationId,
+) =>
+  `https://auth.${configuration.APP_DOMAIN}${configuration.APP_HTTPS_PORT === 443 ? "" : `:${configuration.APP_HTTPS_PORT}`}/oauth2/${organizationId}/callback`;

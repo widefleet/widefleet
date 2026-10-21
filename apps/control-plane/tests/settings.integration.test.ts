@@ -7,11 +7,11 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { installationSettings, settingsInput } from "@platform/contracts";
 import { createAuthentication, companyLoginRevision } from "../src/lib/server/auth.ts";
-import { member, session, user } from "../src/lib/server/auth-schema.ts";
+import { member, session, user, ssoProvider } from "../src/lib/server/auth-schema.ts";
 import {
   installation,
-  organizationSettings,
   organizationSecrets,
+  organizationSettings,
 } from "../src/lib/server/schema.ts";
 import {
   createInstallationOwner,
@@ -20,7 +20,7 @@ import {
 } from "../src/lib/server/installation-store.ts";
 import { createRecoveryLink } from "../src/lib/server/recovery.ts";
 import { createIdentityService } from "../src/lib/server/identity.ts";
-import { createTestEnvironment } from "./environment.ts";
+import { createTestEnvironment, organizationCredential } from "./environment.ts";
 import { createSettingsService } from "../src/lib/server/settings.ts";
 import type { AppSignIn } from "../src/lib/server/app-sign-in.ts";
 import { createInstalledAppSignIn } from "../src/lib/server/app-sign-in-installed.ts";
@@ -29,6 +29,8 @@ describe("Platform setup and managed settings", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
   beforeAll(async () => {
     environment = await createTestEnvironment();
+    await environment.database.db.update(ssoProvider).set({ domainVerified: true });
+    await environment.settings.publish();
   });
   afterAll(async () => {
     await environment.close();
@@ -92,6 +94,7 @@ describe("Platform setup and managed settings", () => {
       principal(),
       { ...current, acknowledgeRestart: false },
       true,
+      await organizationCredential(environment, principal()),
     );
 
     expect(JSON.stringify(result)).not.toContain("private-management-secret");
@@ -103,10 +106,10 @@ describe("Platform setup and managed settings", () => {
 
     const [stored] = await environment.database.db
       .select()
-      .from(organizationSecrets)
-      .where(eq(organizationSecrets.id, reference.id));
+      .from(ssoProvider)
+      .where(eq(ssoProvider.id, reference.id));
 
-    expect(stored?.ciphertext).not.toContain("private-management-secret");
+    expect(stored?.oidcConfig).not.toContain("private-management-secret");
     expect((await environment.settings.resolve()).identity?.management.clientSecret).toBe(
       "private-management-secret",
     );
@@ -120,13 +123,19 @@ describe("Platform setup and managed settings", () => {
 
     if (!current.identity) throw new Error("Expected configured identity");
     current.identity.apps.secret = current.identity.management.secret;
-    await environment.settings.update(principal(), { ...current, acknowledgeRestart: false }, true);
+    await environment.settings.update(
+      principal(),
+      { ...current, acknowledgeRestart: false },
+      true,
+      await organizationCredential(environment, principal()),
+    );
     current.identity.management.secret = { type: "value", value: "replacement-management-secret" };
 
     const updated = await environment.settings.update(
       principal(),
       { ...current, acknowledgeRestart: false },
       true,
+      await organizationCredential(environment, principal()),
     );
 
     expect(updated.settings.identity?.management.secret).not.toEqual(
@@ -139,7 +148,7 @@ describe("Platform setup and managed settings", () => {
     const bundle = environment.authControl.read();
 
     expect(bundle.configuration?.clientSecret).toBe("private-management-secret");
-    expect(await environment.database.db.select().from(organizationSecrets)).toHaveLength(2);
+    expect(await environment.database.db.select().from(organizationSecrets)).toHaveLength(1);
   });
 
   it("enforces administrator access and browser read-only while allowing API changes", async () => {
@@ -154,10 +163,20 @@ describe("Platform setup and managed settings", () => {
     await environment.settings.setExternalManagement(principal(), true);
     const current = await input();
     await expect(
-      environment.settings.update(principal(), { ...current, acknowledgeRestart: false }, true),
+      environment.settings.update(
+        principal(),
+        { ...current, acknowledgeRestart: false },
+        true,
+        await organizationCredential(environment, principal()),
+      ),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(
-      environment.settings.update(principal(), { ...current, acknowledgeRestart: false }, false),
+      environment.settings.update(
+        principal(),
+        { ...current, acknowledgeRestart: false },
+        false,
+        await organizationCredential(environment, principal()),
+      ),
     ).resolves.toMatchObject({ settings: { externallyManaged: true } });
     await environment.settings.setExternalManagement(principal(), false);
   });
@@ -171,7 +190,12 @@ describe("Platform setup and managed settings", () => {
     expect(await environment.settings.plan(principal(), current)).toMatchObject({
       restartRequired: false,
     });
-    await environment.settings.update(principal(), { ...current, acknowledgeRestart: false }, true);
+    await environment.settings.update(
+      principal(),
+      { ...current, acknowledgeRestart: false },
+      true,
+      await organizationCredential(environment, principal()),
+    );
     expect((await input()).identity?.apps.clientId).toBe("replacement-app-client");
 
     const bundle = environment.authControl.read();
@@ -199,6 +223,7 @@ describe("Platform setup and managed settings", () => {
             principal(),
             { ...current, acknowledgeRestart: false },
             true,
+            await organizationCredential(environment, principal()),
           )
         ).error,
       ).toBe("App sign-in could not be prepared");
@@ -208,7 +233,12 @@ describe("Platform setup and managed settings", () => {
 
     expect((await environment.settings.read(principal())).activation.state).toBe("failed");
     expect(environment.authControl.read().publications).toBe(before);
-    await environment.settings.update(principal(), { ...current, acknowledgeRestart: false }, true);
+    await environment.settings.update(
+      principal(),
+      { ...current, acknowledgeRestart: false },
+      true,
+      await organizationCredential(environment, principal()),
+    );
     expect((await environment.settings.read(principal())).activation.state).toBe("active");
   });
 
@@ -221,7 +251,7 @@ describe("Platform setup and managed settings", () => {
     const published: { clientId: string; secret: string }[] = [];
 
     const signIn = {
-      callbackUrl: "https://auth.apps.localhost/oauth2/callback",
+      callbackUrl: "https://auth.apps.localhost/oauth2/widefleet/callback",
       plan: () => Promise.resolve({ restartRequired: false, message: "Fixture" }),
       status: () =>
         Promise.resolve({
@@ -248,7 +278,7 @@ describe("Platform setup and managed settings", () => {
         environment.configuration,
         environment.database.db,
         environment.environment.PLATFORM_ENCRYPTION_KEY,
-        signIn,
+        () => signIn,
       );
 
     const change = (clientId: string, secret: string) =>
@@ -323,7 +353,7 @@ describe("Platform setup and managed settings", () => {
     let reads = 0;
 
     const signIn: AppSignIn = {
-      callbackUrl: "https://auth.apps.localhost/oauth2/callback",
+      callbackUrl: "https://auth.apps.localhost/oauth2/widefleet/callback",
       plan: () => Promise.resolve({ restartRequired: false, message: "Fixture" }),
       publish: () => {
         throw new Error("A read must not publish");
@@ -344,7 +374,7 @@ describe("Platform setup and managed settings", () => {
       environment.configuration,
       environment.database.db,
       environment.environment.PLATFORM_ENCRYPTION_KEY,
-      signIn,
+      () => signIn,
     );
 
     const first = service.inspect();

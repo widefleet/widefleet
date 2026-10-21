@@ -56,7 +56,7 @@ export default {
           }),
         );
 
-      const installed = await publish("/configuration", env.CONFIGURATION);
+      const installed = await publish("/organizations/widefleet/configuration", env.CONFIGURATION);
 
       if (!installed.ok) return installed;
 
@@ -69,6 +69,7 @@ export default {
         const result = await publish(
           `/apps/${hostname}`,
           JSON.stringify({
+            organizationId: "widefleet",
             appId: "00000000-0000-4000-8000-000000000003",
             access: { revision: 1, groups },
           }),

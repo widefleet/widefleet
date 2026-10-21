@@ -56,10 +56,15 @@ try {
           configuration,
           database.db,
           configuration.PLATFORM_ENCRYPTION_KEY,
-          createCloudflareAppSignIn(configuration, {
-            ...proxy.env,
-            ...secrets,
-          }),
+          (organizationId) =>
+            createCloudflareAppSignIn(
+              configuration,
+              {
+                ...proxy.env,
+                ...secrets,
+              },
+              organizationId,
+            ),
         );
 
         const initialized = await settings.initialize(bootstrap.settings);

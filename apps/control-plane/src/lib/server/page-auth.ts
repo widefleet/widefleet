@@ -15,6 +15,14 @@ export const identityFailure = (
 ): never => {
   if (cause._tag === "DatabaseUnavailable") error(503, "Sign-in is temporarily unavailable.");
 
+  if (cause.code === "SSO_REQUIRED") {
+    const url = new URL(request.url);
+    redirect(
+      303,
+      `/sign-in?${new URLSearchParams({ organization: cause.organizationSlug ?? "", next: url.pathname + url.search })}`,
+    );
+  }
+
   if (cause.code === "ORGANIZATION_REQUIRED") chooseOrganization(request);
 
   if (cause.code === "CONFLICT") error(409, cause.message);

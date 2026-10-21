@@ -228,7 +228,7 @@ export default {
       for (const asset of assets) await env.WIDEFLEET_PACKAGES.put('apps/' + app.appId + '/assets/' + asset.hash, asset.source);
       await env.WIDEFLEET_PACKAGES.put('versions/' + app.appId + '/' + app.version + '.json', JSON.stringify(app));
       await env.WIDEFLEET_PACKAGES.put('hosts/' + app.hostname + '.json', JSON.stringify(app));
-      await env.AUTH_CONFIG.put('apps/' + app.hostname, JSON.stringify({appId:app.appId, access:{revision:1,groups:[]}}));
+      await env.AUTH_CONFIG.put('apps/' + app.hostname, JSON.stringify({organizationId:"widefleet",appId:app.appId, access:{revision:1,groups:[]}}));
       return new Response(null, { status: 204 });
     }
     return runtime.fetch(request, env, ctx);

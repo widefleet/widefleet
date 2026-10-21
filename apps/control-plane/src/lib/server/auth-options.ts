@@ -1,16 +1,19 @@
-import { oauthDeviceAuthorization, oauthProvider } from "@better-auth/oauth-provider";
+import {
+  oauthDeviceAuthorization,
+  oauthProvider,
+  type OAuthClaimExtensionInput,
+} from "@better-auth/oauth-provider";
 import type { BetterAuthOptions } from "better-auth";
-import { emailOTP, genericOAuth, jwt, organization, oneTimeToken } from "better-auth/plugins";
+import { emailOTP, jwt, organization, oneTimeToken } from "better-auth/plugins";
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
-import type { GenericOAuthConfig } from "better-auth/plugins/generic-oauth";
 import { z } from "zod";
-import type { SendEmail } from "./email.ts";
 import type { Configuration } from "./config.ts";
-import { companyAccountProvider, providerIssuer } from "./company-identity.ts";
+import type { SendEmail } from "./email.ts";
+import { authenticationReference } from "./authentication-context.ts";
 import {
   installationOrganizationId,
-  organizationAccess,
   organizationRole,
+  organizationAccess,
   organizationRoles,
 } from "../organization.ts";
 
@@ -33,42 +36,22 @@ export const cliResourcePolicy = (configuration: Configuration) => ({
   accessTokenTtl: 300,
 });
 
-export const managementProviders = (configuration: Configuration): GenericOAuthConfig[] => {
-  const identity = configuration.IDENTITY;
-
-  if (!identity) return [];
-
-  const provider = identity.provider;
-
-  return [
-    {
-      providerId: companyAccountProvider(identity),
-      name: provider.label,
-      clientId: identity.management.clientId,
-      clientSecret: identity.management.clientSecret,
-      discoveryUrl: `${providerIssuer(provider)}/.well-known/openid-configuration`,
-      requireIdTokenVerification: true,
-      scopes: ["openid", "profile", "email"],
-      accountSubject: ({ profile }) =>
-        provider.type === "entra"
-          ? z.object({ oid: z.uuid(), tid: z.literal(provider.tenantId) }).parse(profile).oid
-          : z.object({ sub: z.string().min(1) }).parse(profile).sub,
-    },
-  ];
-};
-
 export const authenticationOptions = (
   configuration: Configuration,
   {
     initializeResources = false,
     sendEmail,
     allowEmail,
+    tokenClaims,
     rateLimit,
     ipAddressHeaders,
   }: {
     initializeResources?: boolean;
     sendEmail?: SendEmail;
     allowEmail?: (email: string) => Promise<boolean>;
+    tokenClaims?: (
+      input: OAuthClaimExtensionInput,
+    ) => Promise<{ reference_id: string; organization_id?: string }>;
     rateLimit?: BetterAuthOptions["rateLimit"];
     ipAddressHeaders?: string[];
   } = {},
@@ -78,8 +61,7 @@ export const authenticationOptions = (
     baseURL: configuration.PLATFORM_URL,
     secret: configuration.BETTER_AUTH_SECRET,
     trustedOrigins: [configuration.PLATFORM_URL],
-    // This installation has one organization. Membership comes from verified
-    // management sign-in; invitations, teams and organization lifecycle are not exposed.
+    // Membership mutations use the shared organization services for UI, API and CLI.
     disabledPaths: [
       "/sign-up/email",
       "/request-password-reset",
@@ -112,6 +94,58 @@ export const authenticationOptions = (
     },
     hooks: {
       before: createAuthMiddleware(async (context) => {
+        const accountPaths = [
+          "/link-social",
+          "/unlink-account",
+          "/get-access-token",
+          "/refresh-token",
+          "/list-accounts",
+          "/list-sessions",
+          "/revoke-session",
+          "/revoke-sessions",
+          "/revoke-other-sessions",
+          "/update-user",
+          "/delete-user",
+          "/change-email",
+        ];
+
+        const current =
+          ["/device/approve", "/device/deny"].includes(context.path) ||
+          accountPaths.includes(context.path)
+            ? await getSessionFromCtx(context)
+            : null;
+
+        const identityOrganizationId = z
+          .string()
+          .nullable()
+          .parse(current?.session["identityOrganizationId"] ?? null);
+
+        if (identityOrganizationId !== null) {
+          if (
+            ["/link-social", "/unlink-account", "/get-access-token", "/refresh-token"].includes(
+              context.path,
+            )
+          ) {
+            throw new APIError("FORBIDDEN", {
+              message: "Company accounts are managed through organization SSO settings",
+            });
+          } else if (
+            [
+              "/list-accounts",
+              "/list-sessions",
+              "/revoke-session",
+              "/revoke-sessions",
+              "/revoke-other-sessions",
+              "/update-user",
+              "/delete-user",
+              "/change-email",
+            ].includes(context.path)
+          )
+            throw new APIError("FORBIDDEN", {
+              message: "Sign in with your Widefleet email to manage your global account",
+            });
+        }
+
         if (
           context.path === "/email-otp/send-verification-otp" ||
           context.path === "/sign-in/email-otp"
@@ -130,8 +164,16 @@ export const authenticationOptions = (
           }
         }
 
+        if (!["/device/approve", "/device/deny"].includes(context.path)) return undefined;
+        const approvalSession = context.headers?.get("x-widefleet-approval-session");
+
+        if (approvalSession && approvalSession !== current?.session.id)
+          throw new APIError("FORBIDDEN", {
+            error: "access_denied",
+            error_description: "Your sign-in changed. Reload this page before connecting the CLI.",
+          });
+
         if (context.path !== "/device/approve") return undefined;
-        const current = await getSessionFromCtx(context);
 
         if (current?.session["recovery"] === true)
           throw new APIError("FORBIDDEN", {
@@ -145,22 +187,24 @@ export const authenticationOptions = (
     account: {
       accountLinking: {
         enabled: true,
-        disableImplicitLinking: true,
-        allowDifferentEmails: true,
-        trustedProviders: configuration.IDENTITY
-          ? [companyAccountProvider(configuration.IDENTITY)]
-          : [],
+        // The SSO plugin grants linking trust only after verified domain ownership.
+        allowDifferentEmails: false,
+        // The bootstrap owner has no email verification before SSO is configured.
+        // Its matching address is proven by the verified-domain provider instead.
+        requireLocalEmailVerified: false,
       },
     },
     session: {
       expiresIn: 60 * 60 * 8,
       updateAge: 60 * 30,
       additionalFields: {
+        identityOrganizationId: { type: "string", required: false, input: false },
         recovery: { type: "boolean", defaultValue: false, input: false },
         companyConfiguration: { type: "string", defaultValue: "", input: false },
       },
     },
     advanced: {
+      database: { generateId: () => crypto.randomUUID() },
       ipAddress: { ipAddressHeaders: ipAddressHeaders ?? ["x-forwarded-for"] },
       cookiePrefix: "platform",
       crossSubDomainCookies: { enabled: false },
@@ -185,7 +229,6 @@ export const authenticationOptions = (
           });
         },
       }),
-
       oneTimeToken({ expiresIn: 10, storeToken: "hashed", disableClientRequest: true }),
       organization({
         allowUserToCreateOrganization: false,
@@ -204,12 +247,37 @@ export const authenticationOptions = (
           },
         },
       }),
-      genericOAuth({ config: managementProviders(configuration) }),
       jwt({ jwt: { issuer: `${configuration.PLATFORM_URL}/api/auth` } }),
       oauthProvider({
         loginPage: "/sign-in",
         consentPage: "/device",
-        scopes: cliScopes,
+        postLogin: {
+          page: "/organizations",
+          shouldRedirect: () => false,
+          consentReferenceId: ({ user, session }) => {
+            if (session["recovery"] === true)
+              throw new APIError("FORBIDDEN", {
+                message: "Recovery cannot authorize long-lived access",
+              });
+
+            return authenticationReference(
+              user.id,
+              z
+                .string()
+                .nullable()
+                .parse(session["identityOrganizationId"] ?? null),
+            );
+          },
+        },
+        extensions: tokenClaims
+          ? [{ claims: { accessToken: tokenClaims, idToken: tokenClaims } }]
+          : [],
+        scopes: [...cliScopes, "email"],
+        customIdTokenClaims: ({ user, scopes }) => ({
+          email: scopes.includes("email") ? user.email : undefined,
+          email_verified: scopes.includes("email") ? user.emailVerified : undefined,
+          name: scopes.includes("profile") ? user.name : undefined,
+        }),
         // Request-scoped instances read the policies persisted by installation setup.
         resources: initializeResources ? [cliResourcePolicy(configuration)] : [],
         resourceSeedMode: "overwrite",

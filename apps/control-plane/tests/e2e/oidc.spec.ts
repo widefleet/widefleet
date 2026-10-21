@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { eq } from "drizzle-orm";
-import { account, member } from "../../src/lib/server/auth-schema.ts";
+import { account, member, ssoProvider } from "../../src/lib/server/auth-schema.ts";
 import { companyAccountProvider } from "../../src/lib/server/company-identity.ts";
 import { createTestEnvironment } from "../environment.ts";
 
@@ -11,6 +11,8 @@ test("signs in through generic OIDC and enrolls the verified account as a manage
   page,
 }) => {
   const environment = await createTestEnvironment("http://localhost:25431", "oidc");
+
+  await environment.database.db.update(ssoProvider).set({ domainVerified: true });
 
   const server = spawn(process.execPath, ["build"], {
     cwd: fileURLToPath(new URL("../../", import.meta.url)),

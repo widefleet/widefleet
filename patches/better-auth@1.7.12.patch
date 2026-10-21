@@ -1,0 +1,68 @@
+diff --git a/dist/plugins/device-authorization/index.d.mts b/dist/plugins/device-authorization/index.d.mts
+index b8a205fc2687e61a3b0843d40428e915edfd61cf..f154ad61b9e88eea0a198c60ad53ed7eadd365af 100644
+--- a/dist/plugins/device-authorization/index.d.mts
++++ b/dist/plugins/device-authorization/index.d.mts
+@@ -90,6 +90,11 @@ interface DeviceAuthorizationGrant<RequestFields extends z.ZodRawShape = z.ZodRa
+     ctx: GenericEndpointContext;
+     request: DeviceAuthorizationRequest & z.infer<z.ZodObject<RequestFields>>;
+   }) => DeviceAuthorizationGrantAuthorization | undefined | Promise<DeviceAuthorizationGrantAuthorization | undefined>;
++  /** Capture grant-owned context in the same update that approves the code. */
++  prepareApproval?: (input: {
++    ctx: GenericEndpointContext;
++    deviceCode: Record<string, unknown>;
++  }) => Record<string, unknown> | Promise<Record<string, unknown>>;
+   /** Refuse the standalone session-token endpoint for grant-owned codes. */
+   assertSessionRedemption: (input: {
+     ctx: GenericEndpointContext;
+diff --git a/dist/plugins/device-authorization/index.mjs b/dist/plugins/device-authorization/index.mjs
+index 05c1b6d944cd79951894361f105acea1b82858ff..2f407b5c65e4908372f0fd4860e8b2af81fa798e 100644
+--- a/dist/plugins/device-authorization/index.mjs
++++ b/dist/plugins/device-authorization/index.mjs
+@@ -66,7 +66,7 @@ const deviceAuthorization = (options = {}) => {
+ 			deviceCode: deviceCode(opts, grant),
+ 			deviceToken: deviceToken(opts, grant),
+ 			deviceVerify: deviceVerify(grant),
+-			deviceApprove,
++			deviceApprove: deviceApprove(grant),
+ 			deviceDeny
+ 		},
+ 		rateLimit: [{
+diff --git a/dist/plugins/device-authorization/routes.mjs b/dist/plugins/device-authorization/routes.mjs
+index 615077ddc8b50e753a6dea7d2322e803e23c785d..bc371747458cc5aee780843e42593027f91d0578 100644
+--- a/dist/plugins/device-authorization/routes.mjs
++++ b/dist/plugins/device-authorization/routes.mjs
+@@ -561,7 +561,7 @@ const deviceVerify = (grant) => createAuthEndpoint("/device", {
+ 	};
+ 	return ctx.json(response);
+ });
+-const deviceApprove = createAuthEndpoint("/device/approve", {
++const deviceApprove = (grant) => createAuthEndpoint("/device/approve", {
+ 	method: "POST",
+ 	body: z.object({ userCode: z.string().meta({ description: "The user code to approve" }) }),
+ 	error: z.object({
+@@ -613,17 +613,23 @@ const deviceApprove = createAuthEndpoint("/device/approve", {
+ 		error: "access_denied",
+ 		error_description: "You are not authorized to approve this device authorization"
+ 	});
+-	await ctx.context.adapter.update({
++	const approval = await grant?.prepareApproval?.({ ctx, deviceCode: deviceCodeRecord });
++	const updated = await ctx.context.adapter.update({
+ 		model: "deviceCode",
+ 		where: [{
+ 			field: "id",
+ 			value: deviceCodeRecord.id
+-		}],
++		}, { field: "status", value: "pending" }],
+ 		update: {
++			...approval,
+ 			status: "approved",
+ 			userId: session.user.id
+ 		}
+ 	});
++	if (!updated) throw new APIError("BAD_REQUEST", {
++		error: "invalid_request",
++		error_description: DEVICE_AUTHORIZATION_ERROR_CODES.DEVICE_CODE_ALREADY_PROCESSED.message
++	});
+ 	return ctx.json({ success: true });
+ });
+ const deviceDeny = createAuthEndpoint("/device/deny", {

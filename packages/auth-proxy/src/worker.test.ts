@@ -12,7 +12,10 @@ describe("Auth proxy diagnostics", () => {
 
     try {
       const response = await manageAuthConfiguration(
-        new Request(`https://auth.invalid${authControlPath}/configuration`, { method: "PUT" }),
+        new Request(
+          `https://auth.invalid${authControlPath}/organizations/widefleet/configuration`,
+          { method: "PUT" },
+        ),
         {
           WIDEFLEET_CONTROL_TOKEN: "",
           get AUTH_CONFIG(): never {
@@ -29,7 +32,7 @@ describe("Auth proxy diagnostics", () => {
     }
   });
 
-  it.each(["configuration", "control"])("logs only the %s failure category", async (phase) => {
+  it.each(["app-route", "control"])("logs only the %s failure category", async (phase) => {
     const key = "local-auth-proxy-control-key-never-deploy";
     const privateValue = "private-client-secret-cookie-and-token";
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -44,11 +47,14 @@ describe("Auth proxy diagnostics", () => {
     try {
       const request =
         phase === "control"
-          ? new Request(`https://auth.apps.example.test${authControlPath}/configuration`, {
-              method: "PUT",
-              headers: { authorization: `Bearer ${key}` },
-              body: JSON.stringify({ clientSecret: privateValue }),
-            })
+          ? new Request(
+              `https://auth.apps.example.test${authControlPath}/organizations/widefleet/configuration`,
+              {
+                method: "PUT",
+                headers: { authorization: `Bearer ${key}` },
+                body: JSON.stringify({ clientSecret: privateValue }),
+              },
+            )
           : new Request("https://notes.apps.example.test/");
 
       const response = await createAuthHandler(environment, async () => new Response("App")).fetch(

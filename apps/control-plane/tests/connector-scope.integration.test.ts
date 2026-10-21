@@ -606,6 +606,7 @@ describe("Organization connector management", () => {
         body: {
           payload: {
             sub: first.principal.id,
+            reference_id: `user:${first.principal.id}`,
             aud: `${environment.configuration.PLATFORM_URL}/api/v1`,
             iss: `${environment.configuration.PLATFORM_URL}/api/auth`,
             iat: now,

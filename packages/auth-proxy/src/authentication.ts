@@ -5,13 +5,14 @@ import { z } from "zod";
 import { sessionVersion, type AuthConfiguration } from "./configuration.ts";
 import { issuer, providerIdentity, proxyIdentity } from "./identity.ts";
 
-export const cookiePrefix = "platform_sso";
+export const cookiePrefix = (configuration: AuthConfiguration) =>
+  `platform_sso_${configuration.organizationId}`;
 
 const authenticationOptions = async (configuration: AuthConfiguration) =>
   ({
     appName: "Widefleet Auth Proxy",
     baseURL: new URL(configuration.redirectUrl).origin,
-    basePath: "/oauth2",
+    basePath: `/oauth2/${configuration.organizationId}`,
     secret: configuration.cookieSecret,
     trustedOrigins: [
       new URL(configuration.redirectUrl).origin,
@@ -39,7 +40,7 @@ const authenticationOptions = async (configuration: AuthConfiguration) =>
       },
     },
     advanced: {
-      cookiePrefix,
+      cookiePrefix: cookiePrefix(configuration),
       // Explicit prefixes let the OAuth state use __Host-; Better Auth otherwise
       // prepends __Secure- to every cookie name. All cookies remain Secure.
       useSecureCookies: false,
@@ -49,13 +50,16 @@ const authenticationOptions = async (configuration: AuthConfiguration) =>
       disableOriginCheck: false,
       cookies: {
         // Login state belongs to the auth host, while sessions are shared by apps.
-        oauth_state: { name: `__Host-${cookiePrefix}.oauth_state`, attributes: { maxAge: 300 } },
+        oauth_state: {
+          name: `__Host-${cookiePrefix(configuration)}.oauth_state`,
+          attributes: { maxAge: 300 },
+        },
         session_token: {
-          name: `__Secure-${cookiePrefix}.session_token`,
+          name: `__Secure-${cookiePrefix(configuration)}.session_token`,
           attributes: { domain: configuration.domain },
         },
         session_data: {
-          name: `__Secure-${cookiePrefix}.session_data`,
+          name: `__Secure-${cookiePrefix(configuration)}.session_data`,
           attributes: { domain: configuration.domain },
         },
       },
@@ -93,6 +97,7 @@ export const createAuthentication = async (configuration: AuthConfiguration, log
                     configuration.provider,
                     tokens.idToken,
                     tokens.accessToken,
+                    configuration.organizationId,
                   );
 
                   identity = result.identity;

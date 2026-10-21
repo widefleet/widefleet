@@ -39,35 +39,47 @@
   </p>
   <div class="mt-6 space-y-2">
     {#each data.organizations as organization (organization.id)}
-      {@const selection = selectOrganization.for(organization.id)}
-      <form
-        {...selection.enhance(async ({ submit }) => {
-          if (pending) return;
-          pending = true;
-          message = "";
-          try {
-            await submit();
-            // A full navigation drops cached queries and forms from the previous organization.
-            if (selection.result?.selected) window.location.assign(selection.result.next);
-          } catch {
-            message = "Could not select this organization. Refresh the page and try again.";
-          } finally {
-            pending = false;
-          }
-        })}
-      >
-        <input {...selection.fields.organizationId.as("hidden", organization.id)} />
-        <input {...selection.fields.next.as("hidden", data.next)} />
+      {#if organization.ssoRequired}
         <Button
-          type="submit"
+          href={`/sign-in?${new URLSearchParams({ organization: organization.slug, next: data.next })}`}
           variant="outline"
           class="h-auto w-full justify-between px-4 py-3"
-          disabled={pending}
         >
-          <span class="truncate">{organization.name}</span>
-          <span class="text-muted-foreground text-xs capitalize">{organization.role}</span>
+          <span class="truncate">{organization.name}</span><span
+            class="text-muted-foreground text-xs">Company SSO</span
+          >
         </Button>
-      </form>
+      {:else}
+        {@const selection = selectOrganization.for(organization.id)}
+        <form
+          {...selection.enhance(async ({ submit }) => {
+            if (pending) return;
+            pending = true;
+            message = "";
+            try {
+              await submit();
+              // A full navigation drops cached queries and forms from the previous organization.
+              if (selection.result?.selected) window.location.assign(selection.result.next);
+            } catch {
+              message = "Could not select this organization. Refresh the page and try again.";
+            } finally {
+              pending = false;
+            }
+          })}
+        >
+          <input {...selection.fields.organizationId.as("hidden", organization.id)} />
+          <input {...selection.fields.next.as("hidden", data.next)} />
+          <Button
+            type="submit"
+            variant="outline"
+            class="h-auto w-full justify-between px-4 py-3"
+            disabled={pending}
+          >
+            <span class="truncate">{organization.name}</span>
+            <span class="text-muted-foreground text-xs capitalize">{organization.role}</span>
+          </Button>
+        </form>
+      {/if}
     {/each}
   </div>
   {#if message}<div class="mt-4"><Feedback kind="error">{message}</Feedback></div>{/if}

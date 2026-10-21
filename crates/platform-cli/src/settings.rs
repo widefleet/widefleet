@@ -18,6 +18,10 @@ pub struct Options {
 enum Command {
     /// Show configuration and activation status. Secret values are never returned.
     Get,
+    /// Request the DNS TXT record needed to activate company SSO.
+    DomainVerification,
+    /// Verify the published TXT record and require company SSO for this organization.
+    VerifyDomain,
     /// Export editable settings with secret references.
     Export,
     /// Validate a JSON configuration and report whether app sign-in must restart.
@@ -61,6 +65,16 @@ pub async fn run(api: &Api, token: &str, options: Options) -> Result<()> {
             } else {
                 &view
             })
+        }
+        Command::DomainVerification | Command::VerifyDomain => {
+            let path = if matches!(options.command, Command::DomainVerification) {
+                "/settings/domain-verification"
+            } else {
+                "/settings/verify-domain"
+            };
+            let result: Value =
+                json(api.authenticated(Method::POST, path, token).send().await?).await?;
+            super::print_json(&result)
         }
         Command::Plan { file } => {
             let input: Value = serde_json::from_slice(&std::fs::read(file)?)?;

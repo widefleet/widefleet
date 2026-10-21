@@ -360,7 +360,11 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
                 configuration.APP_RUNTIME_NAME,
               ).beginActivation(command.id, app.id);
 
-            await publishAuthRoute(bindings, app.hostname, { appId: app.id, access });
+            await publishAuthRoute(bindings, app.hostname, {
+              organizationId: app.organizationId,
+              appId: app.id,
+              access,
+            });
 
             if (currentBody !== body) {
               if (command.kind === "deploy" && !current)

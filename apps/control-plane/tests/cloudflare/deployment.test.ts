@@ -474,7 +474,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       expect(
         (
           await managementFetch(
-            "https://auth.apps.example.test/.well-known/widefleet/auth/configuration",
+            "https://auth.apps.example.test/.well-known/widefleet/auth/organizations/widefleet/configuration",
             {
               method: "PUT",
               headers: { authorization: `Bearer ${token}` },
@@ -1073,7 +1073,11 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           {
             method: "PUT",
             headers: { authorization: `Bearer ${token}` },
-            body: JSON.stringify({ appId, access: { revision: 1, groups: ["engineering"] } }),
+            body: JSON.stringify({
+              organizationId: first.organizationId,
+              appId,
+              access: { revision: 1, groups: ["engineering"] },
+            }),
           },
         );
 

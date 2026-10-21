@@ -4,25 +4,28 @@ import { activationStatus } from "@platform/contracts";
 import type { AppSignIn } from "./app-sign-in.ts";
 import { appCallbackUrl } from "./app-sign-in.ts";
 import type { Configuration } from "./config.ts";
+import { installationOrganizationId } from "../organization.ts";
 
 export const createInstalledAppSignIn = (
   configuration: Configuration,
   cookieSecret: string | undefined,
   request: (method: "GET" | "PUT", body?: string) => Promise<{ text(): Promise<string> }>,
   propagation: "immediate" | "eventual",
+  organizationId = installationOrganizationId,
 ): AppSignIn => {
   const prepare = (identity: Parameters<AppSignIn["publish"]>[0], clientSecret: string) =>
     authConfiguration.parse({
+      organizationId,
       provider: identity.provider,
       clientId: identity.apps.clientId,
       clientSecret,
       cookieSecret,
       domain: configuration.APP_DOMAIN,
-      redirectUrl: appCallbackUrl(configuration),
+      redirectUrl: appCallbackUrl(configuration, organizationId),
     });
 
   return {
-    callbackUrl: appCallbackUrl(configuration),
+    callbackUrl: appCallbackUrl(configuration, organizationId),
     revision: (identity, clientSecret) => configurationRevision(prepare(identity, clientSecret)),
     publish: async (identity, clientSecret) => {
       const input = prepare(identity, clientSecret);

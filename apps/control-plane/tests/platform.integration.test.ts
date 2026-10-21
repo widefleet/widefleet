@@ -50,7 +50,7 @@ import { InvalidOperation, StorageUnavailable } from "../src/lib/server/errors.t
 import { transact } from "../src/lib/server/transactions.ts";
 import { createStorage } from "../src/lib/server/storage.ts";
 import { createUploadService } from "../src/lib/server/uploads.ts";
-import { createTestEnvironment } from "./environment.ts";
+import { createTestEnvironment, organizationCredential } from "./environment.ts";
 import { createTelemetry } from "../src/lib/server/telemetry.ts";
 
 describe("Platform API with PostgreSQL and RustFS", () => {
@@ -1277,6 +1277,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       body: {
         payload: {
           sub: outsiderId,
+          reference_id: `user:${outsiderId}`,
           aud: apiResource(environment.configuration),
           iss: `${environment.configuration.PLATFORM_URL}/api/auth`,
           iat: now,
@@ -1493,6 +1494,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       body: {
         payload: {
           sub: before.ownerId,
+          reference_id: `user:${before.ownerId}`,
           aud: apiResource(environment.configuration),
           iss: `${environment.configuration.PLATFORM_URL}/api/auth`,
           iat: now,
@@ -1872,6 +1874,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
         body: {
           payload: {
             sub: subject,
+            reference_id: `user:${subject}`,
             aud: apiResource(environment.configuration),
             iss: `${environment.configuration.PLATFORM_URL}/api/auth`,
             iat: now,
@@ -2397,7 +2400,12 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       (await environment.settings.read(owner)).settings,
     );
 
-    await environment.settings.update(owner, { ...settings, acknowledgeRestart: false }, true);
+    await environment.settings.update(
+      owner,
+      { ...settings, acknowledgeRestart: false },
+      true,
+      await organizationCredential(environment, owner),
+    );
     const snapshot = await packages(leased);
     expect(snapshot.connectorSecrets["erp-api"]).toEqual({ API_KEY: firstValue });
     expect(JSON.stringify(snapshot.connectors)).not.toContain(firstValue);

@@ -1,0 +1,57 @@
+diff --git a/dist/index.mjs b/dist/index.mjs
+index fe835f5da671e85cf70afc501e8b9988cac33006..d5d918f6b49ce6333cca473b41052bbdc2c54f78 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -1,8 +1,8 @@
+ import { E as oauthClientMetadataSchema, i as getOAuthProviderApi, p as extractRepeatedResourceFromForm, x as ResourceUriSchema, y as resolveResourcePolicy } from "./introspect-DeWu79D4.mjs";
+-import { L as extendOAuthProvider, M as verifyOAuthQueryParams, O as toAudienceClaim, g as normalizeClientAuthenticationParameters, j as validateClientScopes, k as toResourceList, s as getClient, u as getOAuthProviderPlugin } from "./utils-BfpTo7XY.mjs";
++import { L as extendOAuthProvider, M as verifyOAuthQueryParams, O as toAudienceClaim, c as getConsentReferenceId, g as normalizeClientAuthenticationParameters, j as validateClientScopes, k as toResourceList, s as getClient, u as getOAuthProviderPlugin } from "./utils-BfpTo7XY.mjs";
+ import { d as metadataResponse, f as oauthAuthorizationServerMetadata, h as oidcServerMetadata, i as oauthProvider, m as oauthProviderOpenIdConfigMetadata, n as DEFAULT_OAUTH_SCOPES, p as oauthProviderAuthServerMetadata, r as getOAuthProviderState, s as consumeClientAssertion, t as getIssuer, u as authServerMetadata } from "./authorize-D_jy3s-1.mjs";
+ import { t as createResourceServerChallenge } from "./resource-challenge-Damwi0Or.mjs";
+-import { APIError } from "better-auth/api";
++import { APIError, getSessionFromCtx } from "better-auth/api";
+ import * as z from "zod";
+ import { BetterAuthError } from "@better-auth/core/error";
+ import { deviceAuthorization, redeemDeviceCode } from "better-auth/plugins/device-authorization";
+@@ -95,6 +95,9 @@ async function exchangeOAuthDeviceCode(input) {
+ 		user,
+ 		resources,
+ 		originalResources: claimedDeviceCode.resources ?? void 0,
++		referenceId: claimedDeviceCode.referenceId ?? void 0,
++		sessionId: claimedDeviceCode.sessionId ?? void 0,
++		authTime: claimedDeviceCode.authTime == null ? void 0 : new Date(claimedDeviceCode.authTime),
+ 		confirmation
+ 	});
+ }
+@@ -127,6 +130,9 @@ function buildOAuthDeviceGrant() {
+ 			if (issues.length > 0 && issues.every((issue) => issue.path?.[0] === "resource")) tokenError("BAD_REQUEST", "invalid_target", "Invalid resource indicator");
+ 		},
+ 		deviceCodeSchemaFields: {
++			referenceId: { type: "string", required: false },
++			sessionId: { type: "string", required: false },
++			authTime: { type: "date", required: false },
+ 			resources: {
+ 				type: "string[]",
+ 				required: false
+@@ -173,6 +179,21 @@ function buildOAuthDeviceGrant() {
+ 				}
+ 			};
+ 		},
++		prepareApproval: async ({ ctx, deviceCode }) => {
++			if (typeof deviceCode.oauthClientId !== "string") return {};
++			const provider = getOAuthProviderPlugin(ctx.context);
++			const session = await getSessionFromCtx(ctx);
++			if (!provider || !session) tokenError("UNAUTHORIZED", "access_denied", "Approval session is unavailable");
++			return {
++				referenceId: await getConsentReferenceId(provider.options, {
++					user: session.user,
++					session: session.session,
++					scopes: parseScopes(deviceCode.scope)
++				}) ?? null,
++				sessionId: session.session.id,
++				authTime: new Date(session.session.createdAt)
++			};
++		},
+ 		assertSessionRedemption: ({ deviceCode }) => {
+ 			if (typeof deviceCode.oauthClientId !== "string") return;
+ 			throw new APIError("BAD_REQUEST", {

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventEmitter, once } from "node:events";
 import { eq } from "drizzle-orm";
+import { ssoProvider } from "../src/lib/server/auth-schema.ts";
 import { settingsInput } from "@platform/contracts";
 import { companyLoginRevision } from "../src/lib/server/auth.ts";
 import { createRuntime, createRequestRuntime } from "../src/lib/server/runtime-services.ts";
@@ -14,6 +15,8 @@ describe("Control-plane runtime settings", () => {
 
   beforeEach(async () => {
     environment = await createTestEnvironment();
+    await environment.database.db.update(ssoProvider).set({ domainVerified: true });
+    await environment.settings.publish();
     resolve = createRuntime({
       configuration: environment.configuration,
       database: environment.database,

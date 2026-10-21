@@ -346,6 +346,7 @@ describe("OAuth device authorization against PostgreSQL", () => {
 
     const claims = {
       sub: session.user.id,
+      reference_id: `user:${session.user.id}`,
       aud: apiResource(environment.configuration),
       iss: `${environment.configuration.PLATFORM_URL}/api/auth`,
       iat: now,

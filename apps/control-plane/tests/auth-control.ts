@@ -33,7 +33,7 @@ export const createAuthControl = async (directory: string) => {
       return;
     }
 
-    if (request.url !== `${authControlPath}/configuration`) {
+    if (request.url !== `${authControlPath}/organizations/widefleet/configuration`) {
       response.writeHead(404).end();
 
       return;

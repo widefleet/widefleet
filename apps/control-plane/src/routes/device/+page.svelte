@@ -57,11 +57,16 @@
     message = "";
 
     try {
-      const result = allow
-        ? await authClient.device.approve({ userCode: code })
-        : await authClient.device.deny({ userCode: code });
+      const options = { headers: { "x-widefleet-approval-session": data.sessionId } };
 
-      if (result.error) message = "Could not complete this request. Please request a new code.";
+      const result = allow
+        ? await authClient.device.approve({ userCode: code }, options)
+        : await authClient.device.deny({ userCode: code }, options);
+
+      if (result.error)
+        message =
+          result.error.error_description ||
+          "Could not complete this request. Please request a new code.";
       else {
         done = true;
         message = allow
@@ -102,6 +107,8 @@
       <dd class="wrap-anywhere">{authorization.client_id}</dd>
       <dt class="text-muted-foreground">Permissions</dt>
       <dd class="wrap-anywhere">{authorization.scope}</dd>
+      <dt class="text-muted-foreground">Organizations</dt>
+      <dd class="wrap-anywhere">{data.organization ?? "Your Widefleet memberships"}</dd>
       <dt class="text-muted-foreground">API</dt>
       <dd class="wrap-anywhere">
         {Array.isArray(authorization.resource)

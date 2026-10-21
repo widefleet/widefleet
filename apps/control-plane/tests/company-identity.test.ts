@@ -1,36 +1,21 @@
 import { describe, expect, it } from "vitest";
 import { companyProvider, identitySettingsInput } from "@platform/contracts";
-import { configurationSchema } from "../src/lib/server/config.ts";
-import { managementProviders } from "../src/lib/server/auth-options.ts";
 import { companyAccountProvider, companyIdentity } from "../src/lib/server/company-identity.ts";
 import { installationSettings } from "./installation/settings.ts";
-
-const infrastructure = configurationSchema.parse({
-  ...installationSettings,
-  S3_ENDPOINT: "http://127.0.0.1:25400",
-  S3_BUCKET: "artifacts",
-});
 
 const client = { clientId: "client", clientSecret: "secret" };
 
 describe("company identity settings", () => {
-  it("starts without a provider and enables only the configured management login", () => {
-    expect(managementProviders(infrastructure)).toEqual([]);
-
+  it("keeps the installation account namespace", () => {
     const identity = companyIdentity.parse({
       provider: { type: "entra", tenantId: installationSettings.ENTRA_TENANT_ID },
       management: client,
     });
 
     expect(companyAccountProvider(identity)).toBe("microsoft");
-    expect(managementProviders({ ...infrastructure, IDENTITY: identity })[0]).toMatchObject({
-      providerId: "microsoft",
-      clientId: "client",
-      requireIdTokenVerification: true,
-    });
   });
 
-  it("uses generic OIDC for management and app sign-in, with issuer-scoped accounts", () => {
+  it("uses issuer-scoped OIDC accounts", () => {
     const identity = companyIdentity.parse({
       provider: {
         type: "oidc",
@@ -39,12 +24,6 @@ describe("company identity settings", () => {
         groupsClaim: "roles",
       },
       management: client,
-    });
-
-    expect(managementProviders({ ...infrastructure, IDENTITY: identity })[0]).toMatchObject({
-      clientId: "client",
-      discoveryUrl: "https://login.example.test/realm/company/.well-known/openid-configuration",
-      requireIdTokenVerification: true,
     });
 
     const other = companyIdentity.parse({

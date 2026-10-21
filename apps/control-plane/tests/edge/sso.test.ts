@@ -136,7 +136,7 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")(
 
         expect(anonymous.status).toBe(302);
         expect(anonymous.headers.location).toBe(
-          "https://auth.apps.example.test/oauth2/start?rd=https%3A%2F%2Fnotes.apps.example.test%2Freport",
+          "https://auth.apps.example.test/oauth2/widefleet/start?rd=https%3A%2F%2Fnotes.apps.example.test%2Freport",
         );
         const login = await fixture.login();
 
@@ -183,7 +183,7 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")(
 
         for (const hostname of ["auth.apps.example.test", "notes.apps.example.test"]) {
           for (const path of [
-            "/.well-known/widefleet/auth/configuration",
+            "/.well-known/widefleet/auth/organizations/widefleet/configuration",
             "/.well-known/widefleet/runtime",
             "/.well-known/widefleet/ready",
             "/.well-known/widefleet/workflows",

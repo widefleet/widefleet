@@ -14,6 +14,7 @@ import * as contract from "@platform/contracts";
 import { z } from "zod";
 import { apiResource, cliClientId } from "../../src/lib/server/auth-options.ts";
 import { hashAsset } from "../../src/lib/server/asset-hash.ts";
+import { ssoProvider, session } from "../../src/lib/server/auth-schema.ts";
 import { eq } from "drizzle-orm";
 import { installation } from "../../src/lib/server/schema.ts";
 import { installationId, readInstallation } from "../../src/lib/server/installation-store.ts";
@@ -32,6 +33,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
 
   beforeAll(async () => {
     environment = await createTestEnvironment(origin, "oidc");
+    await environment.database.db.update(ssoProvider).set({ domainVerified: true });
     resourceWrites = await observeOAuthResourceWrites(environment.database.db);
     (await initializeCloudflareRuntime(environment.database.db)).unwrap();
     directory = await mkdtemp(join(tmpdir(), "widefleet-cloudflare-"));
@@ -133,6 +135,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
 
     expect(await signedIn.json()).toMatchObject({ user: { id: environment.owner.id } });
     expect(signedIn.status()).toBe(200);
+    await environment.database.db
+      .update(session)
+      .set({ identityOrganizationId: "widefleet" })
+      .where(eq(session.userId, environment.owner.id));
   }, 60_000);
 
   afterAll(async () => {

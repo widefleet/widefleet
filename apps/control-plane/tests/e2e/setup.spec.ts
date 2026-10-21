@@ -1,16 +1,19 @@
 import { expect, test } from "@playwright/test";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { eq } from "drizzle-orm";
-import { installationSettings, settingsView } from "@platform/contracts";
-import { account } from "../../src/lib/server/auth-schema.ts";
+import { installationSettings, settingsView, domainVerification } from "@platform/contracts";
+import { account, ssoProvider } from "../../src/lib/server/auth-schema.ts";
 import { installation, organizationSettings } from "../../src/lib/server/schema.ts";
 import { installationId } from "../../src/lib/server/installation-store.ts";
+import { createOrganizationSecrets } from "../../src/lib/server/organization-secrets.ts";
 import { createRecoveryLink } from "../../src/lib/server/recovery.ts";
 import { createTestEnvironment } from "../environment.ts";
 
-test("sets up an administrator, links and verifies company SSO, then closes password access", async ({
+test("verifies company DNS, preserves matching accounts and closes password access", async ({
   page,
   request,
 }) => {
@@ -19,26 +22,36 @@ test("sets up an administrator, links and verifies company SSO, then closes pass
     .update(installation)
     .set({ ownerId: null, usageReporting: false })
     .where(eq(installation.id, installationId));
+
   await environment.database.db
     .update(organizationSettings)
     .set({ settings: installationSettings.parse({}) })
     .where(eq(organizationSettings.organizationId, installationId));
 
-  const server = spawn(process.execPath, ["build"], {
-    cwd: fileURLToPath(new URL("../../", import.meta.url)),
-    env: {
-      ...process.env,
-      ...environment.environment,
-      // Exercise editable preferences while keeping all reporting disabled.
-      PLATFORM_USAGE_REPORTING: undefined,
-      NODE_ENV: "production",
-      HOST: "127.0.0.1",
-      PORT: "25430",
-      PROTOCOL_HEADER: "x-forwarded-proto",
-      SHUTDOWN_TIMEOUT: "1",
+  await environment.database.db.delete(ssoProvider);
+  const dnsFile = join(environment.environment.PLATFORM_STATE_DIRECTORY, "dns.json");
+  await writeFile(dnsFile, "{}");
+
+  const server = spawn(
+    process.execPath,
+    ["--import", fileURLToPath(new URL("./dns.fixture.ts", import.meta.url)), "build"],
+    {
+      cwd: fileURLToPath(new URL("../../", import.meta.url)),
+      env: {
+        ...process.env,
+        ...environment.environment,
+        WIDEFLEET_TEST_DNS_FILE: dnsFile,
+        // Exercise editable preferences while keeping all reporting disabled.
+        PLATFORM_USAGE_REPORTING: undefined,
+        NODE_ENV: "production",
+        HOST: "127.0.0.1",
+        PORT: "25430",
+        PROTOCOL_HEADER: "x-forwarded-proto",
+        SHUTDOWN_TIMEOUT: "1",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
     },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  );
 
   let logs = "";
   server.stdout?.setEncoding("utf8").on("data", (chunk: string) => {
@@ -66,7 +79,7 @@ test("sets up an administrator, links and verifies company SSO, then closes pass
     await page.goto("/");
     await expect(page).toHaveURL(/\/setup$/);
     await page.getByLabel("Name", { exact: true }).fill("IT Admin");
-    await page.getByLabel("Email", { exact: true }).fill("it-admin@example.test");
+    await page.getByLabel("Email", { exact: true }).fill("sso@example.test");
     await page.getByLabel("Password", { exact: true }).fill("setup-password-for-browser-test");
     await page.getByRole("button", { name: "Create account and continue" }).click();
     await expect(page).toHaveURL(/\/settings$/);
@@ -85,6 +98,7 @@ test("sets up an administrator, links and verifies company SSO, then closes pass
       /installation_snapshot/,
     );
     await page.getByRole("link", { name: "Company sign-in", exact: true }).click();
+    await page.getByLabel("Company email domain").fill("example.test");
     await page.getByLabel("Directory ID (tenant ID)").fill(environment.environment.ENTRA_TENANT_ID);
     await page.getByText("Advanced provider settings", { exact: true }).click();
     await page
@@ -92,7 +106,7 @@ test("sets up an administrator, links and verifies company SSO, then closes pass
       .fill(environment.environment.ENTRA_AUTHORITY);
     await page.getByRole("button", { name: "Continue", exact: true }).click();
     await expect(
-      page.getByText("http://localhost:25430/api/auth/callback/microsoft", { exact: true }),
+      page.getByText("http://localhost:25430/api/auth/sso/callback/microsoft", { exact: true }),
     ).toBeVisible();
     await page
       .getByLabel("Client ID", { exact: true })
@@ -120,10 +134,17 @@ test("sets up an administrator, links and verifies company SSO, then closes pass
 
     const initial = environment.authControl.read();
 
-    await page.getByRole("button", { name: "Link company account" }).click();
-    await page.getByRole("button", { name: /sso@example.test/ }).click();
-    await expect(page.getByRole("button", { name: "Test company sign-in" })).toBeVisible();
-    await page.getByRole("button", { name: "Test company sign-in" }).click();
+    await page.getByRole("button", { name: "Get verification record" }).click();
+
+    const recordResponse = await page.request.post("/api/v1/settings/domain-verification", {
+      headers: { origin: environment.configuration.PLATFORM_URL },
+    });
+
+    expect(recordResponse.ok()).toBe(true);
+    const record = domainVerification.parse(await recordResponse.json());
+    await expect(page.getByText(record.value, { exact: true })).toBeVisible();
+    await writeFile(dnsFile, JSON.stringify({ [record.name]: record.value }));
+    await page.getByRole("button", { name: "Verify domain and sign in" }).click();
     await page.getByRole("button", { name: /sso@example.test/ }).click();
     await expect(
       page.getByText("Company sign-in and administrator access verified successfully."),
@@ -133,7 +154,7 @@ test("sets up an administrator, links and verifies company SSO, then closes pass
 
     const passwordLogin = await request.post("/api/auth/sign-in/email", {
       headers: { origin: environment.configuration.PLATFORM_URL },
-      data: { email: "it-admin@example.test", password: "setup-password-for-browser-test" },
+      data: { email: "sso@example.test", password: "setup-password-for-browser-test" },
     });
 
     expect(passwordLogin.status()).toBeGreaterThanOrEqual(400);
@@ -186,17 +207,110 @@ test("sets up an administrator, links and verifies company SSO, then closes pass
     await expect(page.getByLabel("Client ID", { exact: true })).toBeVisible();
     environment.authControl.available(true);
 
+    // Model the state preserved by migration 0022: saved encrypted credentials,
+    // an existing owner, no company-domain proof and no native SSO provider yet.
+    const [beforeUpgrade] = await environment.database.db
+      .select()
+      .from(organizationSettings)
+      .where(eq(organizationSettings.organizationId, installationId));
+
+    const preserved = installationSettings.parse(beforeUpgrade?.settings);
+
+    if (!preserved.identity) throw new Error("Missing saved company settings");
+
+    const secrets = createOrganizationSecrets(
+      environment.database.db,
+      environment.environment.PLATFORM_ENCRYPTION_KEY,
+      installationId,
+    );
+
+    const managementSecret = await secrets.save(environment.database.db, {
+      type: "value",
+      value: environment.environment.ENTRA_CLIENT_SECRET,
+    });
+
+    await environment.database.db
+      .update(organizationSettings)
+      .set({
+        settings: {
+          ...preserved,
+          identity: {
+            ...preserved.identity,
+            domain: null,
+            management: { ...preserved.identity.management, secret: managementSecret },
+          },
+        },
+      })
+      .where(eq(organizationSettings.organizationId, installationId));
+    await environment.database.db.delete(ssoProvider);
+    await page.context().clearCookies();
+    await page.goto("/sign-in");
+    await expect(page.getByRole("button", { name: "Sign in with Microsoft" })).toHaveCount(0);
+    await expect(page.getByLabel("Password", { exact: true })).toHaveCount(0);
+
     const link = await createRecoveryLink(
       environment.auth,
       environment.database.db,
       environment.configuration,
-      "it-admin@example.test",
+      "sso@example.test",
     );
 
     await page.goto(link);
     await expect(page).toHaveURL(/\/settings$/);
     await expect(page.getByRole("heading", { name: "Settings", exact: true })).toBeVisible();
+    await page
+      .getByRole("navigation", { name: "Sign-in settings" })
+      .getByRole("button", { name: "Provider", exact: false })
+      .click();
+    await page.getByLabel("Company email domain").fill("example.test");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByText("Settings saved.", { exact: true })).toBeVisible();
+    await page
+      .getByRole("navigation", { name: "Sign-in settings" })
+      .getByRole("button", { name: "Company account", exact: false })
+      .click();
+    await page.getByRole("button", { name: "Get verification record" }).click();
 
+    const upgradeRecordResponse = await page.request.post("/api/v1/settings/domain-verification", {
+      headers: { origin: environment.configuration.PLATFORM_URL },
+    });
+
+    expect(upgradeRecordResponse.ok()).toBe(true);
+    const upgradeRecord = domainVerification.parse(await upgradeRecordResponse.json());
+    await writeFile(dnsFile, JSON.stringify({ [upgradeRecord.name]: upgradeRecord.value }));
+    await page.getByRole("button", { name: "Verify domain and sign in" }).click();
+    await page.getByRole("button", { name: /sso@example.test/ }).click();
+    await expect(
+      page.getByText("Company sign-in and administrator access verified successfully."),
+    ).toBeVisible();
+    expect((await page.request.get("/api/v1/settings")).status()).toBe(200);
+
+    const [afterUpgrade] = await environment.database.db
+      .select()
+      .from(installation)
+      .where(eq(installation.id, installationId));
+
+    expect(afterUpgrade?.localPasswordEnabled).toBe(false);
+
+    const restored = await environment.auth.api.getSession({
+      headers: new Headers({
+        cookie: (await page.context().cookies())
+          .map(({ name, value }) => `${name}=${value}`)
+          .join("; "),
+      }),
+    });
+
+    expect(restored?.user.id).toBe(afterUpgrade?.ownerId);
+
+    const replacementLink = await createRecoveryLink(
+      environment.auth,
+      environment.database.db,
+      environment.configuration,
+      "sso@example.test",
+    );
+
+    await page.goto(replacementLink);
+    await expect(page).toHaveURL(/\/settings$/);
     await page
       .getByRole("navigation", { name: "Sign-in settings" })
       .getByRole("button", { name: "Provider", exact: false })
@@ -222,21 +336,34 @@ test("sets up an administrator, links and verifies company SSO, then closes pass
       .getByRole("navigation", { name: "Sign-in settings" })
       .getByRole("button", { name: "Company account", exact: false })
       .click();
-    await page.getByRole("button", { name: "Link another company account" }).click();
+    await page.getByRole("button", { name: "Get verification record" }).click();
+
+    const changedRecordResponse = await page.request.post("/api/v1/settings/domain-verification", {
+      headers: { origin: environment.configuration.PLATFORM_URL },
+    });
+
+    const changedRecord = domainVerification.parse(await changedRecordResponse.json());
+    await writeFile(dnsFile, JSON.stringify({ [changedRecord.name]: changedRecord.value }));
+    await page.getByRole("button", { name: "Verify domain and sign in" }).click();
     await page.getByRole("button", { name: /foreign@example.test/ }).click();
-    await page.getByRole("button", { name: "Test company sign-in" }).click();
-    await page.getByRole("button", { name: /foreign@example.test/ }).click();
-    await expect(
-      page.getByText("Company sign-in and administrator access verified successfully."),
-    ).toBeVisible();
+    await expect.poll(async () => (await page.request.get("/api/v1/settings")).status()).toBe(403);
 
     const linkedAccounts = await environment.database.db
       .select()
       .from(account)
       .where(eq(account.providerId, "microsoft"));
 
-    expect(linkedAccounts).toHaveLength(2);
-    expect(new Set(linkedAccounts.map((entry) => entry.userId)).size).toBe(1);
+    expect(linkedAccounts).toHaveLength(1);
+
+    const [installed] = await environment.database.db
+      .select()
+      .from(installation)
+      .where(eq(installation.id, installationId));
+
+    expect(linkedAccounts[0]?.userId).not.toBe(installed?.ownerId);
+  } catch (cause) {
+    await test.info().attach("setup-server-log", { body: logs, contentType: "text/plain" });
+    throw cause;
   } finally {
     if (server.exitCode === null) {
       const exited = once(server, "exit");

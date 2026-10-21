@@ -1,4 +1,4 @@
-import { companyProvider } from "@platform/contracts";
+import { companyProvider, organizationIdentifier } from "@platform/contracts";
 import { base64url } from "jose";
 import { z } from "zod";
 
@@ -6,6 +6,7 @@ const hostname = z.string().regex(/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{
 
 export const authConfiguration = z
   .strictObject({
+    organizationId: organizationIdentifier,
     provider: companyProvider,
     clientId: z.string().min(1).max(512),
     clientSecret: z.string().min(1).max(16_384),
@@ -26,7 +27,7 @@ export const authConfiguration = z
     if (
       url.protocol !== "https:" ||
       url.hostname !== `auth.${configuration.domain}` ||
-      url.pathname !== "/oauth2/callback" ||
+      url.pathname !== `/oauth2/${configuration.organizationId}/callback` ||
       url.username ||
       url.password ||
       url.search ||
@@ -35,7 +36,8 @@ export const authConfiguration = z
       context.addIssue({
         code: "custom",
         path: ["redirectUrl"],
-        message: "Use the HTTPS callback at auth.APP_DOMAIN/oauth2/callback",
+        message:
+          "Use the organization's HTTPS callback at auth.APP_DOMAIN/oauth2/ORGANIZATION/callback",
       });
   });
 
@@ -45,6 +47,7 @@ export const sessionVersion = async (configuration: AuthConfiguration) => {
   // Changing the identity source must invalidate identities issued by the old
   // provider. Rotating only its client secret does not change existing users.
   const source = JSON.stringify({
+    organizationId: configuration.organizationId,
     provider: configuration.provider,
     clientId: configuration.clientId,
     redirectUrl: configuration.redirectUrl,

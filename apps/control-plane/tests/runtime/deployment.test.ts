@@ -182,6 +182,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
         body: {
           payload: {
             sub: person.id,
+            reference_id: `user:${person.id}`,
             aud: apiResource(environment.configuration),
             iss: `${environment.configuration.PLATFORM_URL}/api/auth`,
             iat: now,
@@ -424,11 +425,14 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
   const publishIdentity = async () => {
     expect(
       (
-        await fetch(`${runtimeOrigin}/.well-known/widefleet/auth/configuration`, {
-          method: "PUT",
-          headers: { authorization: `Bearer ${runtimeControlToken}` },
-          body: JSON.stringify(identity.configuration),
-        })
+        await fetch(
+          `${runtimeOrigin}/.well-known/widefleet/auth/organizations/widefleet/configuration`,
+          {
+            method: "PUT",
+            headers: { authorization: `Bearer ${runtimeControlToken}` },
+            body: JSON.stringify(identity.configuration),
+          },
+        )
       ).status,
     ).toBe(204);
   };

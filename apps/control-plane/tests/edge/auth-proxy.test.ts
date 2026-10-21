@@ -33,6 +33,7 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
     let sessionCookies: string;
 
     const config = () => ({
+      organizationId: "widefleet",
       provider: {
         type: "oidc",
         issuer: idp.origin,
@@ -45,7 +46,7 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
       clientSecret: "synthetic-client-secret",
       cookieSecret: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url"),
       domain: "apps.example.test",
-      redirectUrl: "https://auth.apps.example.test/oauth2/callback",
+      redirectUrl: "https://auth.apps.example.test/oauth2/widefleet/callback",
     });
 
     const install = async <T extends { origin: string; stop: () => Promise<void> }>(running: T) => {
@@ -174,7 +175,7 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
     };
 
     const begin = async (destination = "https://ledger.apps.example.test/report?year=2026") => {
-      const startUrl = new URL("https://auth.apps.example.test/oauth2/start");
+      const startUrl = new URL("https://auth.apps.example.test/oauth2/widefleet/start");
 
       startUrl.searchParams.set("rd", destination);
       const started = await request(startUrl.href);
@@ -241,11 +242,121 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
       if (directory) await rm(directory, { recursive: true, force: true });
     });
 
+    it("isolates organization providers, callback destinations and simultaneous browser sessions", async () => {
+      const organizationId = "other-organization";
+      const app = "https://ledger-other.apps.example.test/";
+      const redirectUrl = `https://auth.apps.example.test/oauth2/${organizationId}/callback`;
+      const provider = await createIdentityProvider(redirectUrl);
+
+      const headers = {
+        authorization: "Bearer test-only-auth-proxy-control-key-32-characters",
+        "content-type": "application/json",
+      };
+
+      const publish = (path: string, value: z.infer<ReturnType<typeof z.json>>) =>
+        request(`https://auth.apps.example.test/.well-known/widefleet/auth${path}`, {
+          method: "PUT",
+          headers,
+          body: JSON.stringify(value),
+        });
+
+      try {
+        const settings = {
+          ...configuration,
+          organizationId,
+          redirectUrl,
+          provider: { ...configuration.provider, issuer: provider.origin },
+        };
+
+        expect(
+          (await publish(`/organizations/${organizationId}/configuration`, configuration)).status,
+        ).toBe(400);
+        expect(
+          (await publish(`/organizations/${organizationId}/configuration`, settings)).status,
+        ).toBe(204);
+        expect(
+          (
+            await publish(`/apps/${new URL(app).hostname}`, {
+              organizationId,
+              appId: "00000000-0000-4000-8000-000000000004",
+              access: { revision: 1, groups: [] },
+            })
+          ).status,
+        ).toBe(204);
+        // Even an unrestricted app rejects another organization's valid session.
+        expect((await request(app, { headers: { cookie: sessionCookies } })).status).toBe(401);
+        const start = `https://auth.apps.example.test/oauth2/${organizationId}/start`;
+        expect(
+          (await request(`${start}?rd=${encodeURIComponent("https://ledger.apps.example.test/")}`))
+            .status,
+        ).toBe(400);
+        expect(
+          (
+            await request(
+              `https://auth.apps.example.test/oauth2/widefleet/start?rd=${encodeURIComponent(app)}`,
+            )
+          ).status,
+        ).toBe(400);
+        const started = await request(`${start}?rd=${encodeURIComponent(app)}`);
+        expect(started.status).toBe(302);
+        expect(new URL(z.url().parse(started.headers.get("location"))).origin).toBe(
+          provider.origin,
+        );
+
+        const authorized = await fetch(z.url().parse(started.headers.get("location")), {
+          redirect: "manual",
+        });
+
+        const callback = z.url().parse(authorized.headers.get("location"));
+        const state = cookieHeader(started.headers.getSetCookie());
+
+        const foreignCallback = callback.replace(
+          `/oauth2/${organizationId}/`,
+          "/oauth2/widefleet/",
+        );
+
+        const foreign = await request(foreignCallback, { headers: { cookie: state } });
+        expect(foreign.headers.get("location")).not.toBe(app);
+        const completed = await request(callback, { headers: { cookie: state } });
+        expect(completed.headers.get("location")).toBe(app);
+        const secondSession = cookieHeader(completed.headers.getSetCookie());
+        expect(
+          (
+            await request("https://ledger.apps.example.test/", {
+              headers: { cookie: secondSession },
+            })
+          ).status,
+        ).toBe(401);
+        const combined = `${sessionCookies}; ${secondSession}`;
+        provider.settings.available = false;
+        idp.settings.available = false;
+        expect((await request(app, { headers: { cookie: combined } })).status).toBe(200);
+        expect(
+          (await request("https://ledger.apps.example.test/", { headers: { cookie: combined } }))
+            .status,
+        ).toBe(200);
+        // Reassigning a route cannot make an old owner's session valid for its new owner.
+        expect(
+          (
+            await publish(`/apps/${new URL(app).hostname}`, {
+              organizationId: "widefleet",
+              appId: "00000000-0000-4000-8000-000000000004",
+              access: { revision: 2, groups: [] },
+            })
+          ).status,
+        ).toBe(204);
+        expect((await request(app, { headers: { cookie: secondSession } })).status).toBe(401);
+      } finally {
+        await provider.stop();
+      }
+    });
+
     it("publishes and removes app rules without restarting or contacting the control plane", async () => {
       const path =
         "https://auth.apps.example.test/.well-known/widefleet/auth/apps/ledger.apps.example.test";
 
       const changed = {
+        organizationId: "widefleet",
         appId: "00000000-0000-4000-8000-000000000003",
         access: { revision: 2, groups: ["administrators"] },
       };
@@ -454,7 +565,7 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
       "https://evil.example.test",
       "https://apps.example.test.evil.example.test",
       "https://unknown.apps.example.test",
-      "https://auth.apps.example.test/oauth2/start",
+      "https://auth.apps.example.test/oauth2/widefleet/start",
       "http://ledger.apps.example.test",
       "https://user@ledger.apps.example.test",
       "https://ledger.apps.example.test:444",
@@ -462,7 +573,7 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
       expect(
         (
           await request(
-            `https://auth.apps.example.test/oauth2/start?rd=${encodeURIComponent(destination)}`,
+            `https://auth.apps.example.test/oauth2/widefleet/start?rd=${encodeURIComponent(destination)}`,
           )
         ).status,
       ).toBe(400);
@@ -479,7 +590,7 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
       ])
         expect(
           (
-            await request(`https://auth.apps.example.test/oauth2/${path}`, {
+            await request(`https://auth.apps.example.test/oauth2/widefleet/${path}`, {
               headers: { cookie: sessionCookies },
             })
           ).status,
@@ -633,12 +744,12 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
         ).toBe(false);
         expect((await page.goto("https://ledger-pr42.apps.example.test"))?.status()).toBe(200);
         expect((await page.goto("https://preview.ledger.apps.example.test"))?.status()).toBe(403);
-        await page.goto("https://auth.apps.example.test/oauth2/error");
+        await page.goto("https://auth.apps.example.test/oauth2/widefleet/error");
         expect(
           await page.evaluate(
             async () =>
               (
-                await fetch("/oauth2/sign_out", {
+                await fetch("/oauth2/widefleet/sign_out", {
                   method: "POST",
                   headers: { "content-type": "application/json" },
                   body: "{}",
@@ -661,7 +772,7 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
     }, 30_000);
 
     it("clears app sessions on sign-out without touching control-plane cookies", async () => {
-      const rejected = await request("https://auth.apps.example.test/oauth2/sign_out", {
+      const rejected = await request("https://auth.apps.example.test/oauth2/widefleet/sign_out", {
         method: "POST",
         body: "{}",
         headers: {
@@ -673,7 +784,7 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
 
       expect(rejected.status).toBe(403);
 
-      const result = await request("https://auth.apps.example.test/oauth2/sign_out", {
+      const result = await request("https://auth.apps.example.test/oauth2/widefleet/sign_out", {
         method: "POST",
         body: "{}",
         headers: {
@@ -689,7 +800,7 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
           .getSetCookie()
           .some(
             (value) =>
-              value.startsWith("__Secure-platform_sso.session_data=") &&
+              value.startsWith("__Secure-platform_sso_widefleet.session_data=") &&
               value.includes("Max-Age=0"),
           ),
       ).toBe(true);

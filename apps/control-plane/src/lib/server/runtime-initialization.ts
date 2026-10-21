@@ -90,7 +90,7 @@ export const initializeRuntime = async (
       configuration,
       database.db,
       keys.encryption,
-      createAppSignIn(configuration, keys.cookie),
+      (organizationId) => createAppSignIn(configuration, keys.cookie, organizationId),
     );
 
     const state = await readInstallation(database.db);

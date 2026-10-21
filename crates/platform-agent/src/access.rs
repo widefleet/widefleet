@@ -21,7 +21,7 @@ pub fn publication(job: &Job) -> Result<Value> {
     {
         return Err(Error::invalid("Invalid app access groups".into()));
     }
-    Ok(json!({ "appId": job.app_id()?, "access": access }))
+    Ok(json!({ "organizationId": job.organization_id, "appId": job.app_id()?, "access": access }))
 }
 
 pub fn origin(configuration: &Configuration) -> Result<Url> {

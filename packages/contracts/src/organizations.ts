@@ -12,6 +12,7 @@ export const organizationChoice = z.object({
   id: z.string(),
   name: z.string(),
   slug: z.string(),
+  ssoRequired: z.boolean().default(false),
   role: z.enum(["owner", "admin", "member"]),
 });
 

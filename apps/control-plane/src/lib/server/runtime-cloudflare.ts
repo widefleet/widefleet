@@ -17,18 +17,19 @@ export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
   // A pool belongs to this request only; Hyperdrive owns pooling between requests.
   const database = createDatabase(configuration, 5);
 
+  const sendEmail = createCloudflareEmail(bindings);
+
   const settings = createSettingsService(
     configuration,
     database.db,
     configuration.PLATFORM_ENCRYPTION_KEY,
-    createCloudflareAppSignIn(configuration, bindings),
+    (organizationId) => createCloudflareAppSignIn(configuration, bindings, organizationId),
+    Boolean(sendEmail),
   );
 
   const reporting = createReporting(configuration, database.db);
 
   const storage = createArtifactStorage(createR2Storage(bindings.ARTIFACTS));
-
-  const sendEmail = createCloudflareEmail(bindings);
 
   const options: Parameters<typeof createRuntime>[0] = {
     configuration,

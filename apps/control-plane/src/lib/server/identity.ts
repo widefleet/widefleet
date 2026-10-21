@@ -1,9 +1,7 @@
+import { verifyAccessToken } from "./access-token.ts";
 import { Result, TaggedError, type InferOk } from "better-result";
 import { and, eq } from "drizzle-orm";
-import { createLocalJWKSet, jwtVerify } from "jose";
-import { z } from "zod";
-import { apiResource } from "./auth-options.ts";
-import { member, user, organization, session as sessions } from "./auth-schema.ts";
+import { member, user, organization, ssoProvider, session as sessions } from "./auth-schema.ts";
 import {
   installationOrganizationId,
   organizationRole,
@@ -17,11 +15,10 @@ import { organizationRuntimes } from "./schema.ts";
 import { DatabaseUnavailable } from "./errors.ts";
 
 export class AuthenticationFailed extends TaggedError("AuthenticationFailed")<{
-  code: "UNAUTHORIZED" | "FORBIDDEN" | "ORGANIZATION_REQUIRED" | "CONFLICT";
+  code: "UNAUTHORIZED" | "FORBIDDEN" | "ORGANIZATION_REQUIRED" | "SSO_REQUIRED" | "CONFLICT";
   message: string;
+  organizationSlug?: string;
 }> {}
-
-const tokenClaims = z.object({ sub: z.string().min(1), scope: z.string() });
 
 export const createIdentityService = (
   auth: Authentication,
@@ -32,7 +29,7 @@ export const createIdentityService = (
     defaultOrganizationId: installationOrganizationId,
   },
 ) => {
-  const memberships = (userId: string) =>
+  const memberships = (userId: string, identityOrganizationId: string | null) =>
     Result.tryPromise({
       try: async () => {
         const records = await database
@@ -44,11 +41,13 @@ export const createIdentityService = (
             organizationId: organization.id,
             organizationName: organization.name,
             organizationSlug: organization.slug,
+            ssoRequired: ssoProvider.domainVerified,
           })
           .from(user)
           .innerJoin(member, eq(member.userId, user.id))
           .innerJoin(organization, eq(organization.id, member.organizationId))
           .innerJoin(organizationRuntimes, eq(organizationRuntimes.organizationId, organization.id))
+          .leftJoin(ssoProvider, eq(ssoProvider.organizationId, organization.id))
           .where(eq(user.id, userId))
           .orderBy(organization.name, organization.id);
 
@@ -64,7 +63,9 @@ export const createIdentityService = (
         return records.flatMap((record) => {
           const role = organizationRole.safeParse(record.role);
 
-          return admitted.has(record.organizationId) && role.success
+          return admitted.has(record.organizationId) &&
+            role.success &&
+            (identityOrganizationId === null || identityOrganizationId === record.organizationId)
             ? [{ ...record, role: role.data }]
             : [];
         });
@@ -73,9 +74,13 @@ export const createIdentityService = (
         new DatabaseUnavailable({ message: "Could not read organization access", cause }),
     });
 
-  const resolveUser = (userId: string, organizationId: string | null) =>
+  const resolveUser = (
+    userId: string,
+    organizationId: string | null,
+    identityOrganizationId: string | null,
+  ) =>
     Result.gen(async function* () {
-      const records = yield* Result.await(memberships(userId));
+      const records = yield* Result.await(memberships(userId, identityOrganizationId));
 
       const matching =
         organizationId === null
@@ -95,6 +100,13 @@ export const createIdentityService = (
         return yield* new AuthenticationFailed({
           code: "FORBIDDEN",
           message: "This organization is unavailable or you are no longer a member",
+        });
+
+      if (record.ssoRequired && identityOrganizationId !== record.organizationId)
+        return yield* new AuthenticationFailed({
+          code: "SSO_REQUIRED",
+          organizationSlug: record.organizationSlug,
+          message: `Sign in with company SSO for ${record.organizationName}. Open /sign-in?organization=${encodeURIComponent(record.organizationSlug)} before authorizing the CLI.`,
         });
 
       const admin = organizationRoles[record.role].authorize({ agent: ["manage"] }).success;
@@ -128,16 +140,11 @@ export const createIdentityService = (
         const verified = yield* Result.await(
           Result.tryPromise({
             try: async () => {
-              const keys = await auth.api.getJwks();
-
-              const { payload } = await jwtVerify(authorization.slice(7), createLocalJWKSet(keys), {
-                issuer: `${configuration.PLATFORM_URL}/api/auth`,
-                audience: apiResource(configuration),
-                algorithms: ["EdDSA"],
-                requiredClaims: ["exp", "iat", "sub", "scope"],
-              });
-
-              return tokenClaims.parse(payload);
+              return verifyAccessToken(
+                authorization.slice(7),
+                await auth.api.getJwks(),
+                configuration,
+              );
             },
             catch: () =>
               new AuthenticationFailed({
@@ -168,7 +175,12 @@ export const createIdentityService = (
             message: "The user no longer exists",
           });
 
-        return Result.ok({ userId: current.id, sessionId: null, activeOrganizationId: null });
+        return Result.ok({
+          userId: current.id,
+          sessionId: null,
+          activeOrganizationId: null,
+          identityOrganizationId: verified.authority.organizationId,
+        });
       }
 
       if (
@@ -197,6 +209,7 @@ export const createIdentityService = (
       }
 
       return Result.ok({
+        identityOrganizationId: session.session.identityOrganizationId ?? null,
         userId: session.user.id,
         sessionId: session.session.id,
         activeOrganizationId: session.session.activeOrganizationId ?? null,
@@ -217,7 +230,9 @@ export const createIdentityService = (
         access.defaultOrganizationId ??
         null;
 
-      const principal = yield* Result.await(resolveUser(verified.userId, organizationId));
+      const principal = yield* Result.await(
+        resolveUser(verified.userId, organizationId, verified.identityOrganizationId),
+      );
 
       // A rendered browser form carries its displayed organization. Never reinterpret
       // that form using a selection changed by another tab in the same session.
@@ -236,7 +251,10 @@ export const createIdentityService = (
   const organizations = (request: Request) =>
     Result.gen(async function* () {
       const verified = yield* Result.await(verify(request, "platform:read"));
-      const records = yield* Result.await(memberships(verified.userId));
+
+      const records = yield* Result.await(
+        memberships(verified.userId, verified.identityOrganizationId),
+      );
 
       return Result.ok(
         records.map((record) => ({
@@ -244,6 +262,9 @@ export const createIdentityService = (
           name: record.organizationName,
           slug: record.organizationSlug,
           role: record.role,
+          ssoRequired:
+            record.ssoRequired === true &&
+            verified.identityOrganizationId !== record.organizationId,
         })),
       );
     });
@@ -251,7 +272,10 @@ export const createIdentityService = (
   const selectOrganization = (request: Request, organizationId: string) =>
     Result.gen(async function* () {
       const verified = yield* Result.await(verify(request, "platform:write"));
-      const principal = yield* Result.await(resolveUser(verified.userId, organizationId));
+
+      const principal = yield* Result.await(
+        resolveUser(verified.userId, organizationId, verified.identityOrganizationId),
+      );
 
       if (verified.sessionId) {
         const sessionId = verified.sessionId;
@@ -279,9 +303,11 @@ export const createIdentityService = (
       return Result.ok(principal);
     });
 
-  return { authenticate, organizations, selectOrganization };
+  return { authenticate, organizations, selectOrganization, authenticateUser: verify };
 };
 
 export type IdentityService = ReturnType<typeof createIdentityService>;
 
 export type Principal = InferOk<Awaited<ReturnType<IdentityService["authenticate"]>>>;
+
+export type AuthenticatedUser = InferOk<Awaited<ReturnType<IdentityService["authenticateUser"]>>>;

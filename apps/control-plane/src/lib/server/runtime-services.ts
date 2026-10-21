@@ -78,7 +78,7 @@ export const createRuntime = ({
     ownerId: string | null,
     settingsRevision: number,
   ) => {
-    const authOptions: NonNullable<Parameters<typeof createAuthentication>[2]> = {};
+    const authOptions: NonNullable<Parameters<typeof createAuthentication>[2]> = { encryptionKey };
 
     if (sendEmail) authOptions.sendEmail = sendEmail;
 

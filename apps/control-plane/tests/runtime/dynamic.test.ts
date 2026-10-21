@@ -371,8 +371,8 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
             for (const asset of ${JSON.stringify(assetFiles)}) await env.WIDEFLEET_PACKAGES.put('apps/${appId}/assets/' + asset.hash, asset.text);
             await env.WIDEFLEET_PACKAGES.put('versions/${appId}/${version}.json', JSON.stringify(app));
             await env.WIDEFLEET_PACKAGES.put('hosts/fixture.apps.example.test.json', JSON.stringify(app));
-            await env.AUTH_CONFIG.put('configuration', ${JSON.stringify(authConfiguration)});
-            for (const hostname of ['fixture.apps.example.test', 'spa.apps.example.test']) await env.AUTH_CONFIG.put('apps/' + hostname, JSON.stringify({appId:app.appId,access:{revision:0,groups:[]}}));
+            await env.AUTH_CONFIG.put('organizations/widefleet/configuration', ${JSON.stringify(authConfiguration)});
+            for (const hostname of ['fixture.apps.example.test', 'spa.apps.example.test']) await env.AUTH_CONFIG.put('apps/' + hostname, JSON.stringify({organizationId:"widefleet",appId:app.appId,access:{revision:0,groups:[]}}));
             const spaRules = '/* /index.html 200\\n';
             const spaHash = '${"6".repeat(32)}';
             await env.WIDEFLEET_PACKAGES.put('apps/${appId}/assets/' + spaHash, spaRules);

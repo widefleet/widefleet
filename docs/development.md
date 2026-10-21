@@ -119,7 +119,7 @@ When testing the built server, use `BODY_SIZE_LIMIT=32M` for supported Worker up
 
 ## Dependency constraints
 
-Better Auth 1.7.12 supports SvelteKit 3 without a peer-dependency exception. Its integration is covered by tests against the built server.
+Better Auth 1.7.12 supports SvelteKit 3 without a peer-dependency exception. Its integration is covered by tests against the built server. The [device authorization patch](../patches/better-auth@1.7.12.patch) and [OAuth provider patch](../patches/@better-auth__oauth-provider@1.7.12.patch) persist the approving session and its consent reference with the device code. Token issuance and refresh keep that reference, so a company login cannot widen its authority through the CLI. Review these patches when upgrading.
 
 The TypeScript version remains 6.0.3 for the selected Svelte compiler integration. Keep compiler upgrades covered by the starter and control-plane checks.
 

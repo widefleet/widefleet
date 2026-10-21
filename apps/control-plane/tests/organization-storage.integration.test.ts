@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 import { settingsInput } from "@platform/contracts";
-import { organization } from "../src/lib/server/auth-schema.ts";
+import { organization, ssoProvider } from "../src/lib/server/auth-schema.ts";
 import { createTestEnvironment } from "./environment.ts";
 
 describe("Organization settings storage", () => {
@@ -23,6 +24,7 @@ describe("Organization settings storage", () => {
       const input = settingsInput.parse({
         externallyManaged: false,
         identity: {
+          domain: "example.test",
           provider: environment.configuration.IDENTITY.provider,
           management: { clientId: name, secret: { type: "value", value: `${name}-secret` } },
           apps: { clientId: name, secret: { type: "value", value: `${name}-apps-secret` } },
@@ -30,6 +32,10 @@ describe("Organization settings storage", () => {
       });
 
       await environment.settings.initialize(input, id);
+      await environment.database.db
+        .update(ssoProvider)
+        .set({ domainVerified: true })
+        .where(eq(ssoProvider.organizationId, id));
 
       return { id, input };
     };
