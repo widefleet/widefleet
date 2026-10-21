@@ -55,8 +55,11 @@ widefleet invitations list
 Use the IDs returned by these commands for `widefleet members role MEMBER_ID admin`,
 `widefleet members remove MEMBER_ID` or `widefleet invitations cancel INVITATION_ID`.
 Recipients can use `widefleet invitations show INVITATION_ID` and
-`widefleet invitations accept INVITATION_ID --name "Your Name"` after authenticating
+`widefleet invitations accept INVITATION_ID` after authenticating
 with their verified email. These commands require the normal read/write login scopes.
+With Widefleet email login, add `--name "Your Name"` to set your account name when
+accepting. Company SSO uses the saved account name; supplying a different `--name`
+returns `FORBIDDEN` and leaves the invitation pending.
 
 ## Activate company SSO
 
@@ -124,10 +127,17 @@ Without company group claims, leave group restrictions empty: that allows the
 organization members admitted by Widefleet, never anonymous visitors. With company
 SSO, an empty group list allows users admitted by the app's IdP registration; restrict
 that registration to the intended users. Nonempty rules require matching group claims.
-Changes to organization membership or to users and groups at the IdP do not immediately
-revoke an already issued app cookie; new sessions reflect them at the next sign-in,
-within the one-hour session lifetime. Changing the provider configuration or app client ID
-in Widefleet invalidates existing app sessions as soon as the new configuration is active.
+
+With Widefleet app sign-in, removing a member prevents new app sessions. With company
+SSO, revoke the user's app access at the IdP or remove them from the groups required
+by the app's access rules. Removing their Widefleet membership alone does not block
+direct company app login.
+
+These membership and IdP changes do not revoke an already issued app cookie; it remains
+valid until its one-hour lifetime ends. The next app sign-in checks Widefleet membership
+or the current IdP admission and group claims, according to the configured login mode.
+Changing the provider configuration or app client ID in Widefleet invalidates existing
+app sessions as soon as the new configuration is active.
 Rotating only the IdP client secret preserves existing sessions.
 
 If settings are saved but app sign-in is unavailable, check their activation status
