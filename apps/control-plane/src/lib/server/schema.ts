@@ -284,6 +284,7 @@ export const organizationSettings = pgTable("organization_settings", {
     .primaryKey()
     .references(() => organization.id),
   settings: jsonb().notNull(),
+  appClientSecret: text("app_client_secret"),
   directorySecret: text("directory_secret"),
   ssoRequired: boolean("sso_required").notNull().default(false),
 });

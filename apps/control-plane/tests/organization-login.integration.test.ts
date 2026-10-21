@@ -1,4 +1,4 @@
-import { createServer } from "node:http";
+import { createServer, get } from "node:http";
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -6,16 +6,53 @@ import { once } from "node:events";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
+import { authConfiguration, createAuthProxy } from "@platform/auth-proxy";
+import { configurationRevision } from "@platform/auth-proxy/publication";
 import { organization, member, invitation, user } from "../src/lib/server/auth-schema.ts";
-import { organizationRuntimes } from "../src/lib/server/schema.ts";
+import {
+  installation,
+  organizationSettings,
+  organizationRuntimes,
+} from "../src/lib/server/schema.ts";
 import { createSettingsService } from "../src/lib/server/settings.ts";
+import { createInstalledAppSignIn } from "../src/lib/server/app-sign-in-installed.ts";
 import { createRuntime } from "../src/lib/server/runtime-services.ts";
 import type { Runtime } from "../src/lib/server/runtime-services.ts";
 import { createStorage } from "../src/lib/server/storage.ts";
 import { createApi } from "../src/lib/server/api.ts";
-import { prepareOrganizationInvitation, changeMemberRole } from "../src/lib/server/members.ts";
+import {
+  prepareOrganizationInvitation,
+  removeMember,
+  changeMemberRole,
+} from "../src/lib/server/members.ts";
 import type { EmailMessage } from "../src/lib/server/email.ts";
 import { createTestEnvironment } from "./environment.ts";
+
+const navigate = (url: string, cookie: string) =>
+  new Promise<Response>((resolve, reject) => {
+    // Node fetch marks requests as CORS; use navigation headers for the provider's
+    // browser redirect, while the proxy exchanges the code through real HTTP.
+    get(url, { headers: { cookie, accept: "text/html" } }, (response) => {
+      const chunks: Buffer[] = [];
+      const headers = new Headers();
+
+      for (const [name, value] of Object.entries(response.headers)) {
+        if (Array.isArray(value)) for (const item of value) headers.append(name, item);
+        else if (value) headers.set(name, value);
+      }
+
+      response.on("data", (chunk: Buffer) => chunks.push(chunk));
+      response.on("end", () =>
+        resolve(
+          new Response(Buffer.concat(chunks), {
+            status: response.statusCode ?? 500,
+            headers,
+          }),
+        ),
+      );
+      response.on("error", reject);
+    }).on("error", reject);
+  });
 
 const cookies = (response: Response) =>
   response.headers
@@ -24,16 +61,24 @@ const cookies = (response: Response) =>
     .map((value) => value.split(";")[0])
     .join("; ");
 
-describe("Organization members and invitations", () => {
+describe("Invited organization members with Widefleet OIDC", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
   let runtime: Runtime;
   let resolve: ReturnType<typeof createRuntime>;
   let origin: string;
   const delivered: EmailMessage[] = [];
+  const published = new Map<string, z.infer<typeof authConfiguration>>();
   const admitted = new Set<string>();
+  let available = true;
 
   const server = createServer((incoming, outgoing) => {
     const handle = async () => {
+      if (!available) {
+        outgoing.writeHead(503).end();
+
+        return;
+      }
+
       const chunks: Buffer[] = [];
 
       for await (const chunk of incoming) chunks.push(z.instanceof(Buffer).parse(chunk));
@@ -84,7 +129,27 @@ describe("Organization members and invitations", () => {
       environment.configuration,
       environment.database.db,
       environment.environment.PLATFORM_ENCRYPTION_KEY,
-      () => null,
+      (organizationId) =>
+        createInstalledAppSignIn(
+          environment.configuration,
+          Buffer.alloc(32, 3).toString("base64url"),
+          async (method, body) => {
+            if (method === "PUT")
+              published.set(
+                organizationId,
+                authConfiguration.parse(JSON.parse(z.string().parse(body))),
+              );
+            const active = published.get(organizationId);
+
+            return Response.json({
+              revision: active ? await configurationRevision(active) : "",
+              state: active ? "active" : "waiting",
+              message: "Synthetic runtime",
+            });
+          },
+          "immediate",
+          organizationId,
+        ),
       true,
     );
 
@@ -178,7 +243,43 @@ describe("Organization members and invitations", () => {
     return { organizationId, email, userId: user.id, cookie, principal };
   };
 
-  it("invites new owners and creates same-named apps within their organizations", async () => {
+  const login = async (
+    person: Awaited<ReturnType<typeof customer>>,
+    controlCookie = person.cookie,
+  ) => {
+    const configuration = authConfiguration.parse(published.get(person.organizationId));
+    const app = `https://notes-${person.email.split("@")[0]}.${configuration.domain}/`;
+
+    const proxy = createAuthProxy(configuration, {
+      resolve: async (hostname) =>
+        hostname === new URL(app).hostname ? { revision: 0, groups: [] } : null,
+      fetch: async () => new Response("App response"),
+    });
+
+    const started = await proxy.fetch(
+      new Request(
+        `https://auth.${configuration.domain}/oauth2/${person.organizationId}/start?rd=${encodeURIComponent(app)}`,
+      ),
+    );
+
+    expect(started.status).toBe(302);
+
+    const authorized = await navigate(
+      z.url().parse(started.headers.get("location")),
+      controlCookie,
+    );
+
+    expect(authorized.status, await authorized.clone().text()).toBe(302);
+    const callback = z.url().parse(authorized.headers.get("location"));
+
+    const completed = await proxy.fetch(
+      new Request(callback, { headers: { cookie: cookies(started) } }),
+    );
+
+    return { proxy, app, completed };
+  };
+
+  it("invites new owners, creates same-named apps and uses the real OAuth provider for isolated app sessions", async () => {
     const alpha = await customer("onboarding-alpha");
     const beta = await customer("onboarding-beta");
 
@@ -200,6 +301,48 @@ describe("Organization members and invitations", () => {
 
     expect((await runtime.apps.list(alpha.principal)).unwrap()).toEqual([first]);
     expect((await runtime.apps.list(beta.principal)).unwrap()).toEqual([second]);
+    const logged = await login(alpha);
+    expect(logged.completed.headers.get("location"), await logged.completed.clone().text()).toBe(
+      logged.app,
+    );
+    const session = cookies(logged.completed);
+    available = false;
+
+    try {
+      expect(
+        (await logged.proxy.fetch(new Request(logged.app, { headers: { cookie: session } })))
+          .status,
+      ).toBe(200);
+    } finally {
+      available = true;
+    }
+
+    const foreign = await login(beta, alpha.cookie);
+    expect(foreign.completed.headers.get("location")).not.toBe(foreign.app);
+    await environment.database.db.insert(member).values({
+      id: crypto.randomUUID(),
+      organizationId: alpha.organizationId,
+      userId: environment.owner.id,
+      role: "owner",
+      createdAt: new Date(),
+    });
+
+    const [departing] = await environment.database.db
+      .select()
+      .from(member)
+      .where(and(eq(member.organizationId, alpha.organizationId), eq(member.userId, alpha.userId)));
+
+    expect(
+      (
+        await removeMember(
+          alpha.principal,
+          z.string().parse(departing?.id),
+          credential(alpha.cookie),
+        )
+      ).isOk(),
+    ).toBe(true);
+    const revoked = await login(alpha);
+    expect(revoked.completed.headers.get("location")).not.toBe(revoked.app);
   });
 
   it("uses the native invitation lifetime, duplicate policy and limits", async () => {
@@ -607,4 +750,41 @@ describe("Organization members and invitations", () => {
       });
     },
   );
+  it("activates built-in app sign-in through the setup API without company settings", async () => {
+    await environment.database.db
+      .update(installation)
+      .set({ ownerId: null })
+      .where(eq(installation.id, "widefleet"));
+    await environment.database.db
+      .update(organizationSettings)
+      .set({
+        settings: {
+          directory: null,
+          externallyManaged: false,
+        },
+        appClientSecret: null,
+      })
+      .where(eq(organizationSettings.organizationId, "widefleet"));
+    published.delete("widefleet");
+
+    const setup = () =>
+      fetch(`${origin}/api/v1/setup`, {
+        method: "POST",
+        headers: { origin, "content-type": "application/json" },
+        body: JSON.stringify({
+          name: "Email API Owner",
+          email: "email-api-owner@example.test",
+          password: "synthetic-api-owner-password",
+        }),
+      });
+
+    const created = await setup();
+    expect(created.status).toBe(200);
+    expect(published.get("widefleet")?.provider).toMatchObject({
+      type: "oidc",
+      issuer: `${origin}/api/auth`,
+    });
+    expect((await runtime.settings.inspect()).activation.state).toBe("active");
+    expect((await setup()).status).toBe(409);
+  });
 });

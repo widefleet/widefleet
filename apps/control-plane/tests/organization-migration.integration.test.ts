@@ -158,7 +158,11 @@ describe("Organization ownership migration", () => {
                ('local', now() + interval '1 hour', 'local-token', now(), 'owner', '', false);
     `);
 
-    for (const name of ["0022_organization_settings.sql", "0023_organization_sso.sql"]) {
+    for (const name of [
+      "0022_organization_settings.sql",
+      "0023_organization_sso.sql",
+      "0024_app_login.sql",
+    ]) {
       await client.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
     }
 

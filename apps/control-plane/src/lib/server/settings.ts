@@ -23,7 +23,9 @@ import {
   createInstallationOwner,
 } from "./installation-store.ts";
 import { session, oauthRefreshToken } from "./auth-schema.ts";
+import { oauthClient } from "./auth-schema.ts";
 import { readSsoConfiguration, ssoRuntimeIdentity, saveSsoProvider } from "./sso-settings.ts";
+import { appLoginClientId, readAppLogin, registerAppLogin } from "./app-login-client.ts";
 import { installation, organizationSettings } from "./schema.ts";
 
 const requireAdmin = (principal: Principal, organizationId: string) => {
@@ -112,7 +114,22 @@ const createOrganizationSettingsService = (
         if (publish) await lockSettings(transaction);
         const current = await readCurrent(transaction);
 
-        const identity = current.identity;
+        let fallback =
+          !current.identity && emailSignIn
+            ? await readAppLogin(transaction, configuration, encryptionKey, organizationId)
+            : null;
+
+        if (publish && emailSignIn && !current.identity) {
+          await registerAppLogin(transaction, configuration, encryptionKey, organizationId);
+          fallback = await readAppLogin(transaction, configuration, encryptionKey, organizationId);
+        }
+
+        if (publish && current.identity)
+          await transaction
+            .update(oauthClient)
+            .set({ disabled: true })
+            .where(eq(oauthClient.clientId, appLoginClientId(organizationId)));
+        const identity = current.identity ?? fallback;
 
         let expectedRevision = "";
 
@@ -505,6 +522,8 @@ export const createSettingsService = (
     inspect: installed.inspect,
     createOwner: async (input: z.infer<typeof setupOwner>, bootstrapPending = false) => {
       const owner = await createInstallationOwner(database, input, bootstrapPending);
+
+      if (emailSignIn) await installed.inspect(true);
 
       return owner;
     },
