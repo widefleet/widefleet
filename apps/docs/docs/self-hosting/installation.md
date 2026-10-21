@@ -30,7 +30,7 @@ reapply sign-in settings and redeploy existing apps to publish their organizatio
 auth routes. Management callbacks now use `/api/auth/sso/callback/PROVIDER_ID`; copy the
 exact URL from Settings into the IdP registration. Saved providers are not automatically
 marked domain-verified. Use the installation [recovery link](#secrets-and-administrator-recovery) if no email or
-password login is available, enter the company domain, save and complete DNS verification. Existing app sessions and CLI tokens require a fresh sign-in.
+password login is available, enter the company domain, save, complete DNS verification and activate company SSO. Existing app sessions and CLI tokens require a fresh sign-in.
 These builds also support [member invitations and company sign-in](/guides/members)
 when an email adapter is configured; the default self-hosted build does not add a mail service.
 
@@ -45,12 +45,12 @@ After starting the containers, open `PLATFORM_URL`:
 1. Create the first administrator with a name, email and password.
 2. Enter the issuer URL and choose the app identity claims: Microsoft Entra for Entra object IDs and group handling, or OpenID Connect for standard subjects and configurable group claims. The page shows both callback URLs before saving.
 3. Register both callbacks in one IdP registration and enter its client ID and secret once. Enable directory search only if needed.
-4. Enter your company email domain and publish the DNS TXT record shown by **Get verification record**. Choose **Verify domain and sign in**, then authenticate with the same email as the first administrator. Widefleet links that account automatically and checks its administrator access. Verified SSO is now required for the organization.
-5. Complete setup. Password authentication is disabled server-side and local browser sessions and their refresh tokens are removed. Future sign-ins use company SSO.
+4. Enter your company email domain and publish the DNS TXT record shown by **Get verification record**. Choose **Verify domain**, then **Test company sign-in** and authenticate with the same email as the first administrator. Widefleet links that account automatically and checks its administrator access.
+5. Complete setup. Company SSO becomes required and password authentication is disabled server-side and local browser sessions and their refresh tokens are removed. Future sign-ins use company SSO.
 
 Company sign-in automatically enrolls users admitted by the organization's provider as Members who can create apps, including external guests. Restrict the shared IdP registration to the intended users. Existing memberships keep their roles, and pending invitations retain their acceptance flow. Without company SSO, customers join through invitations. Apps enforce their own access rules and business permissions using the verified user and group context.
 
-Management uses Better Auth's SSO plugin for OIDC discovery, callbacks, provider registration and DNS verification. Existing accounts with a matching email in the verified company domain are linked automatically, retaining their membership and role. Other email domains are rejected. See [company SSO activation](/guides/members#activate-company-sso) for CLI commands and provider replacement behavior.
+Management uses Better Auth's SSO plugin for OIDC discovery, callbacks, provider registration and DNS verification. Existing accounts with a matching email in the verified company domain are linked automatically, retaining their membership and role. External guests admitted by the provider can join, but a different email domain does not establish trusted linking to an existing account. See [company SSO activation](/guides/members#activate-company-sso) for CLI commands and provider replacement behavior.
 
 Known runtime limitation: celld `0.6.2` drops incoming header values containing non-ASCII bytes. Display names can therefore be empty in Workers; the stable user identifier remains available for authorization.
 
@@ -88,7 +88,7 @@ Mount a JSON file read-only into the control-plane container and set `PLATFORM_B
 }
 ```
 
-`settings` is optional. SSO credentials belong to the native provider configuration; directory credentials, when used, accept `{ "type": "value", "value": "..." }` secrets. Both are encrypted before storage. A Compose override can mount the bootstrap file; it must not mount the host Docker socket into management.
+`settings` is optional. SSO credentials belong to the native provider configuration; directory credentials, when used, accept a `clientSecret` string. Both are encrypted before storage. A Compose override can mount the bootstrap file; it must not mount the host Docker socket into management.
 
 For example, add this override to the selected Compose files (the source paths must already exist):
 
@@ -169,7 +169,7 @@ For apps, configure the IdP to include memberships in the ID token. The optional
 
 For Entra, enable **Connect Microsoft Graph** in Settings to let authenticated app builders search company groups through `widefleet groups search "Einkauf" --json` or `GET /api/v1/groups?query=Einkauf`. API tokens require `platform:read`; the CLI uses the normal Widefleet login. Results contain the native group `id`, `name`, existing `description` and `source`, plus `hasMore` when the search should be narrowed. Graph is queried directly; no directory database or SCIM setup is required.
 
-Grant the directory registration Microsoft Graph **GroupMember.Read.All application permission**, with tenant admin consent. Enter the directory client ID and secret for a registration in the same tenant. The API can reuse an existing stored secret reference. This application permission is separate from the app-SSO registration's delegated `User.Read` permission for group overage. See Microsoft's [list groups API and permissions](https://learn.microsoft.com/en-us/graph/api/group-list?view=graph-rest-1.0).
+Grant the directory registration Microsoft Graph **GroupMember.Read.All application permission**, with tenant admin consent. Enter the directory client ID and secret for a registration in the same tenant. Omitting `directory.clientSecret` from an API update preserves the saved encrypted secret. This application permission is separate from the app-SSO registration's delegated `User.Read` permission for group overage. See Microsoft's [list groups API and permissions](https://learn.microsoft.com/en-us/graph/api/group-list?view=graph-rest-1.0).
 
 Search returns Entra object IDs, matching app tokens configured to emit Group ID. Choosing a group during development does not grant access to the app; its server-side code checks `locals.user.groups`. Directory credentials stay in the control plane. A directory outage makes search unavailable but does not affect app authentication, which uses the published runtime configuration and IdP.
 
@@ -282,7 +282,7 @@ Widefleet uses Better Auth's Organization plugin with one automatically provisio
 | Admin  | Manage all apps, deployment agents and member roles, except Owner assignments |
 | Owner  | Admin permissions plus appointing and changing Owners                         |
 
-After the first verified management sign-in, the person appears under **Members**. Owners and admins can search by name or email and change their role there. Role changes apply to existing browser and CLI sessions on their next API request. At least one Owner must remain, including during concurrent changes. Only Owners can change Owner assignments.
+After the first verified management sign-in, the person appears under **Members**. Owners and admins can search by name or email and change their role there. Role changes apply to existing browser and CLI sessions on their next API request. At least one Owner must remain, using Better Auth's native owner checks. Only Owners can change Owner assignments.
 
 On an app's **Access** tab, **Management access** lets you search members by name or email and grant or revoke app collaboration. A collaborator can deploy, roll back and delete that app; only its owner or an organization administrator can change its grants. Organization administrators retain access independently of individual grants. The CLI's existing `grant` and `revoke` commands remain compatible.
 

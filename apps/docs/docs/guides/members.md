@@ -16,15 +16,15 @@ admitted by that provider can join as members on their first sign-in without an 
 2. Without active company SSO, enter the six-digit code from the sign-in email. It expires
    after five minutes and allows three attempts. With active company SSO, use that
    organization's provider instead; an email-code login cannot accept its invitations.
-3. Review the organization and role, enter your name when prompted, and accept.
+3. Review the organization and role, then accept. Acceptance changes your membership, not your account name.
 
 Repeated sign-in or code-delivery requests can return HTTP `429`. Wait for the
 delay in the response's `X-Retry-After` header before trying again. The three failed
 attempts allowed for each email code are checked separately from request limits,
 including when requests come from different IP addresses.
 
-The organization is now available in the workspace. Invitations expire after seven
-days. An expired or canceled invitation needs a new invitation from an administrator.
+The organization is now available in the workspace. Invitations expire after 48
+hours. An expired or canceled invitation needs a new invitation from an administrator.
 Signing in with a different email does not let you accept it. Company SSO must return
 the invited email, and the account's email must be verified. Company domain ownership
 does not verify an external guest's email address.
@@ -41,10 +41,10 @@ the last owner cannot be removed or demoted. Owner and admin roles in the instal
 `widefleet` organization also grant installation administration. In other organizations,
 these roles grant administration only within that organization.
 
-Removing an inviter or changing their role to `member` cancels their pending invitations.
-Changing an owner to `admin` cancels their pending owner invitations; member and admin
-invitations remain valid. Only owners can replace an existing owner invitation, including
-when inviting that recipient with a lower role.
+Existing invitations stay valid after their inviter is removed or changes role, until
+accepted, expired or explicitly canceled. Reinviting an address with a pending invitation
+returns an error; cancel it before issuing a replacement. Better Auth's default limits
+apply: 100 members and 100 pending invitations per organization.
 
 The same operations are available in the CLI:
 
@@ -59,9 +59,6 @@ Use the IDs returned by these commands for `widefleet members role MEMBER_ID adm
 Recipients can use `widefleet invitations show INVITATION_ID` and
 `widefleet invitations accept INVITATION_ID` after authenticating
 with their verified email. These commands require the normal read/write login scopes.
-With Widefleet email login, add `--name "Your Name"` to set your account name when
-accepting. Company SSO uses the saved account name; supplying a different `--name`
-returns `FORBIDDEN` and leaves the invitation pending.
 
 ## Activate company SSO
 
@@ -69,12 +66,14 @@ An organization owner or administrator configures Entra or another OIDC provider
 **Settings → Company sign-in**. Enter the company email domain, register the displayed
 workspace and app callback URLs in one IdP registration, and enter its client ID and secret once. Save, choose
 **Get verification record**, publish the displayed DNS TXT record, then choose
-**Verify domain and sign in**. DNS ownership is checked by Better Auth's SSO plugin.
+**Verify domain**. DNS ownership is checked by Better Auth's SSO plugin.
 Until verification succeeds, the provider cannot authenticate users and an email-enabled
 organization continues using Widefleet sign-in.
 
-Once verified, company SSO is required for this organization in the browser, API and
-CLI. Existing email sessions and email-authorized CLI tokens no longer grant access to
+After verification, **Test company sign-in** optionally checks the connection. Email
+access remains available until an administrator chooses **Activate company SSO**.
+Activation does not require a completed test. It makes company SSO required for this
+organization in the browser, API and CLI. Existing email sessions and email-authorized CLI tokens no longer grant access to
 it. Sign in through the company provider and authorize the CLI again. Existing verified
 accounts with matching company email addresses can link through Better Auth's native
 account-linking rules; existing membership and role are preserved.
@@ -123,10 +122,12 @@ widefleet settings apply --file settings.json
 widefleet settings domain-verification
 # Publish the returned TXT name/value in the company's DNS.
 widefleet settings verify-domain
+# Optionally test company sign-in in the browser, then enforce it.
+widefleet settings activate-sso
 ```
 
 If the plan requires it, pass `--acknowledge-restart` when applying settings. After
-verification, open the organization's company login in the browser and run `widefleet login`
+activation, open the organization's company login in the browser and run `widefleet login`
 to obtain new CLI credentials. `widefleet account` reports account status and its browser URL.
 
 A company sign-in authenticates only for that company, even if the account has memberships
@@ -138,8 +139,11 @@ approving a CLI requires reloading the approval page.
 The provider configuration is stored by Better Auth's SSO plugin. The settings export
 includes the editable native provider fields but omits its secret; applying that export
 preserves the saved secret. Set `sso.oidcConfig.clientSecret` to rotate it. The UI likewise
-keeps the saved secret when the field is blank. Directory secrets use organization-owned
-references and remain independent of company login credentials.
+keeps the saved secret when the field is blank. Directory credentials remain independent of company login credentials. Set
+`directory` to `{"clientId":"CLIENT_ID","clientSecret":"CLIENT_SECRET"}` when
+configuring Entra directory search. Exports omit `directory.clientSecret`; leaving it
+out of an update preserves the organization's encrypted secret. Supply a new value
+to rotate it, or set `directory` to `null` to remove the directory configuration and secret.
 
 Native SSO rejects changes to the issuer or client identity while provider accounts are
 linked. It does not silently delete those accounts to make an update succeed. Removing

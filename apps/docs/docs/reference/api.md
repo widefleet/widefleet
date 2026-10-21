@@ -51,7 +51,8 @@ within that organization. Same-named connectors in other organizations are indep
 Deployment-agent administration, runtime upgrades and installation reporting still
 require installation administration. Identity settings and directory search use the
 selected organization's configuration. Organization owners and administrators can
-manage that configuration; a stored secret reference from another organization is rejected.
+manage that configuration. Directory secrets are encrypted per organization and omitted
+from settings responses; omitting `directory.clientSecret` from an update preserves the saved value.
 
 See [connector management](/guides/connectors#manage-connectors-in-an-organization)
 for the browser flow and connector API endpoints.
@@ -77,12 +78,12 @@ selected organization and the owner restrictions described in [member management
 | `POST /api/v1/invitations`                       | Invite `{ "email": "person@example.com", "role": "member" }`.     |
 | `DELETE /api/v1/invitations/{invitationId}`      | Cancel a pending invitation.                                      |
 | `GET /api/v1/invitations/{invitationId}`         | Read an invitation addressed to the authenticated verified email. |
-| `POST /api/v1/invitations/{invitationId}/accept` | Accept it; body `{}` or `{ "name": "Your Name" }`.                |
+| `POST /api/v1/invitations/{invitationId}/accept` | Accept it; body `{}`.                                             |
 | `GET /api/v1/account`                            | Read your company-account link status and browser management URL. |
 
 Reading or accepting your own invitation does not require an existing membership or
 organization selection. A company-scoped sign-in cannot accept another organization's
-invitation. A global account name can only be changed through a Widefleet email session.
+invitation. Acceptance does not change the account name.
 Expired or processed invitations cannot be accepted again. Native Better Auth organization
 mutation endpoints are unavailable; use the shared API above.
 
@@ -93,9 +94,10 @@ the current credential must sign in through that organization's provider.
 
 Organization administrators use `POST /api/v1/settings/domain-verification` to obtain
 `{ "name": "_better-auth-token-PROVIDER_ID.example.com", "type": "TXT", "value": "..." }`.
-After publishing the record, `POST /api/v1/settings/verify-domain` verifies ownership and
-activates required company SSO. These operations accept the same browser or CLI write
-credentials as settings changes. Both operate on the selected organization; raw Better Auth
+After publishing the record, `POST /api/v1/settings/verify-domain` verifies ownership.
+`POST /api/v1/settings/activate-sso` separately makes company SSO required; it requires
+verified DNS but does not require a completed test login. These operations accept the
+same browser or CLI write credentials as settings changes and operate on the selected organization; raw Better Auth
 SSO management routes are not exposed. See [activation](/guides/members#activate-company-sso).
 
 ## Publish an app
