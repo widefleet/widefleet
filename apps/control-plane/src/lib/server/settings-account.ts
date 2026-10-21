@@ -26,7 +26,7 @@ export const readSettingsAccount = async (
 
   return {
     view,
-    reporting: await runtime.reporting.read(principal),
+    reporting: principal.admin ? await runtime.reporting.read(principal) : null,
     platformUrl: runtime.configuration.PLATFORM_URL,
     provider,
     linked: linked.length > 0,

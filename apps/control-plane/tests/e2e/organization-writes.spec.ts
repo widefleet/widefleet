@@ -169,6 +169,30 @@ const organizationSession = async (browser: Browser, javaScriptEnabled: boolean)
   return { person, alpha, beta, context };
 };
 
+test("opens organization settings without installation reporting privileges", async ({
+  browser,
+}) => {
+  const { alpha, context } = await organizationSession(browser, false);
+
+  try {
+    const page = await context.newPage();
+    await page.goto("/organizations");
+    await page.getByRole("button", { name: /Alpha/ }).click();
+    const response = await page.goto("/settings");
+
+    expect(response?.status()).toBe(200);
+    await expect(page.getByRole("heading", { name: "Settings", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Privacy", exact: true })).toHaveCount(0);
+    const current = await context.request.get("/api/v1/me");
+    expect(await current.json()).toMatchObject({
+      admin: false,
+      application: { organizationId: alpha, admin: true },
+    });
+  } finally {
+    await context.close();
+  }
+});
+
 for (const javaScriptEnabled of [true, false]) {
   test(`manages connectors named new, preserves multiline secrets and rejects stale changes (JavaScript ${javaScriptEnabled})`, async ({
     browser,

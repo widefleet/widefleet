@@ -99,11 +99,11 @@
 
   const steps = ["Provider", "Administration", "App sign-in", "Verify & finish"];
 
-  const sections = [
+  const sections = $derived([
     { id: "identity", label: "Company sign-in" },
-    { id: "reporting", label: "Privacy" },
+    ...(data.reporting ? [{ id: "reporting", label: "Privacy" }] : []),
     { id: "management", label: "Administration" },
-  ];
+  ]);
 
   beforeNavigate(({ cancel, to, type }) => {
     if (!dirty || (to?.url.origin === page.url.origin && to.url.pathname === "/settings")) return;
@@ -329,7 +329,9 @@
   {#if message}<Feedback kind="error">{message}</Feedback>{/if}
   {#if view.error}<Feedback kind="error">{view.error}</Feedback>{/if}
   {#if saved}<Feedback kind="success">Settings saved.</Feedback>{/if}
-  {#if route.section === "reporting"}<ReportingSettings initial={data.reporting} />
+  {#if route.section === "reporting" && data.reporting}<ReportingSettings
+      initial={data.reporting}
+    />
   {:else if route.section === "management"}
     <section class="max-w-2xl rounded-xl border p-6">
       <h2 class="text-base font-semibold">Manage configuration</h2>
