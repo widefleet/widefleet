@@ -12,6 +12,7 @@ export const load: PageServerLoad = async ({ url, setHeaders }) => {
   const identity = runtime.configuration.IDENTITY;
 
   return {
+    emailSignIn: runtime.emailSignIn,
     provider: identity ? companyAccountProvider(identity) : null,
     label: identity?.provider.label ?? "Unternehmen",
     localPasswordEnabled: runtime.configuration.LOCAL_PASSWORD_ENABLED,

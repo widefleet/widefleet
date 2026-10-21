@@ -1,3 +1,5 @@
+import { createAuthenticationAdmission } from "./auth-admission.ts";
+import type { OrganizationAccess } from "./application-context.ts";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { DEVICE_CODE_GRANT_TYPE } from "@better-auth/oauth-provider";
@@ -32,10 +34,15 @@ export const companyLoginRevision = (configuration: Configuration) =>
 export const createAuthentication = (
   configuration: Configuration,
   database: DatabaseExecutor,
-  options: Parameters<typeof authenticationOptions>[1] = {},
+  options: Parameters<typeof authenticationOptions>[1] & {
+    organizationAccess?: OrganizationAccess;
+  } = {},
 ) =>
   betterAuth({
-    ...authenticationOptions(configuration, options),
+    ...authenticationOptions(configuration, {
+      ...options,
+      ...createAuthenticationAdmission(database, options.organizationAccess),
+    }),
     database: drizzleAdapter(database, { provider: "pg", schema: authSchema, transaction: true }),
     databaseHooks: {
       session: {

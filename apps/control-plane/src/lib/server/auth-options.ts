@@ -1,9 +1,10 @@
 import { oauthDeviceAuthorization, oauthProvider } from "@better-auth/oauth-provider";
 import type { BetterAuthOptions } from "better-auth";
-import { genericOAuth, jwt, organization, oneTimeToken } from "better-auth/plugins";
+import { emailOTP, genericOAuth, jwt, organization, oneTimeToken } from "better-auth/plugins";
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import type { GenericOAuthConfig } from "better-auth/plugins/generic-oauth";
 import { z } from "zod";
+import type { SendEmail } from "./email.ts";
 import type { Configuration } from "./config.ts";
 import { companyAccountProvider, providerIssuer } from "./company-identity.ts";
 import {
@@ -58,7 +59,19 @@ export const managementProviders = (configuration: Configuration): GenericOAuthC
 
 export const authenticationOptions = (
   configuration: Configuration,
-  { initializeResources = false } = {},
+  {
+    initializeResources = false,
+    sendEmail,
+    allowEmail,
+    rateLimit,
+    ipAddressHeaders,
+  }: {
+    initializeResources?: boolean;
+    sendEmail?: SendEmail;
+    allowEmail?: (email: string) => Promise<boolean>;
+    rateLimit?: BetterAuthOptions["rateLimit"];
+    ipAddressHeaders?: string[];
+  } = {},
 ) =>
   ({
     appName: "Widefleet",
@@ -83,6 +96,14 @@ export const authenticationOptions = (
       "/organization/accept-invitation",
       "/organization/reject-invitation",
       "/organization/cancel-invitation",
+      "/email-otp/get-verification-otp",
+      "/email-otp/check-verification-otp",
+      "/email-otp/verify-email",
+      "/email-otp/request-password-reset",
+      "/email-otp/reset-password",
+      "/email-otp/request-email-change",
+      "/email-otp/change-email",
+      "/forget-password/email-otp",
     ],
     emailAndPassword: {
       enabled: configuration.LOCAL_PASSWORD_ENABLED,
@@ -91,7 +112,25 @@ export const authenticationOptions = (
     },
     hooks: {
       before: createAuthMiddleware(async (context) => {
-        if (context.path !== "/device/approve") return;
+        if (
+          context.path === "/email-otp/send-verification-otp" ||
+          context.path === "/sign-in/email-otp"
+        ) {
+          if (!sendEmail || !allowEmail)
+            throw new APIError("FORBIDDEN", { message: "Email sign-in is not configured" });
+
+          const input = z
+            .object({ email: z.email(), type: z.literal("sign-in").optional() })
+            .parse(context.body);
+
+          if (!(await allowEmail(input.email.toLowerCase()))) {
+            if (context.path === "/email-otp/send-verification-otp")
+              return context.json({ success: true });
+            throw new APIError("UNAUTHORIZED", { message: "Invalid or expired sign-in code" });
+          }
+        }
+
+        if (context.path !== "/device/approve") return undefined;
         const current = await getSessionFromCtx(context);
 
         if (current?.session["recovery"] === true)
@@ -99,6 +138,8 @@ export const authenticationOptions = (
             message:
               "Sign in with your company account before authorizing a CLI. Recovery access cannot create long-lived credentials.",
           });
+
+        return undefined;
       }),
     },
     account: {
@@ -120,6 +161,7 @@ export const authenticationOptions = (
       },
     },
     advanced: {
+      ipAddress: { ipAddressHeaders: ipAddressHeaders ?? ["x-forwarded-for"] },
       cookiePrefix: "platform",
       crossSubDomainCookies: { enabled: false },
       // Keep browser protection enabled in integration tests too; Better Auth's
@@ -127,7 +169,23 @@ export const authenticationOptions = (
       disableCSRFCheck: false,
       disableOriginCheck: false,
     },
+    rateLimit: rateLimit ?? { storage: "memory" },
     plugins: [
+      emailOTP({
+        storeOTP: "hashed",
+        expiresIn: 300,
+        allowedAttempts: 3,
+        sendVerificationOTP: async ({ email, otp, type }) => {
+          if (!sendEmail || type !== "sign-in")
+            throw new APIError("FORBIDDEN", { message: "Email sign-in is not configured" });
+          await sendEmail({
+            to: email,
+            subject: "Your Widefleet sign-in code",
+            text: `Your Widefleet sign-in code is ${otp}.\n\nIt expires in five minutes. If you did not request it, you can ignore this email.`,
+          });
+        },
+      }),
+
       oneTimeToken({ expiresIn: 10, storeToken: "hashed", disableClientRequest: true }),
       organization({
         allowUserToCreateOrganization: false,

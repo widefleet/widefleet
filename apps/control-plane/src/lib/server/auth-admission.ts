@@ -1,0 +1,34 @@
+import { and, eq, gt } from "drizzle-orm";
+import type { OrganizationAccess } from "./application-context.ts";
+import type { DatabaseExecutor } from "./database.ts";
+import { invitation, member, user } from "./auth-schema.ts";
+import { installationOrganizationId } from "../organization.ts";
+
+export const createAuthenticationAdmission = (
+  database: DatabaseExecutor,
+  access: OrganizationAccess = { filterOrganizations: async () => [installationOrganizationId] },
+) => ({
+  allowEmail: async (email: string) => {
+    const memberships = await database
+      .select({ id: member.organizationId })
+      .from(member)
+      .innerJoin(user, eq(user.id, member.userId))
+      .where(eq(user.email, email));
+
+    const invitations = await database
+      .select({ id: invitation.organizationId })
+      .from(invitation)
+      .where(
+        and(
+          eq(invitation.email, email),
+          eq(invitation.status, "pending"),
+          gt(invitation.expiresAt, new Date()),
+        ),
+      );
+
+    const candidates = [...memberships, ...invitations];
+    const allowed = new Set(await access.filterOrganizations(candidates));
+
+    return candidates.some((candidate) => allowed.has(candidate.id));
+  },
+});
