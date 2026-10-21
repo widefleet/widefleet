@@ -1,13 +1,14 @@
 ---
 title: Members and company sign-in
 description: Accept invitations, manage organization membership and activate verified company sign-in.
-lastModified: 2026-10-21
+lastModified: 2026-10-22
 ---
 
 Use this flow on an installation with email delivery and organization invitations enabled.
 It requires an unreleased build containing organization sign-in and the matching CLI.
-An owner or administrator must invite you first; entering an arbitrary email address
-does not create access.
+Without company SSO, an owner or administrator must invite you first; entering an
+arbitrary email address does not create access. With verified company SSO, users
+admitted by that provider can join as members on their first sign-in without an invitation.
 
 ## Accept an invitation
 
@@ -25,7 +26,8 @@ including when requests come from different IP addresses.
 The organization is now available in the workspace. Invitations expire after seven
 days. An expired or canceled invitation needs a new invitation from an administrator.
 Signing in with a different email does not let you accept it. Company SSO must return
-the invited email within the verified company domain.
+the invited email, and the account's email must be verified. Company domain ownership
+does not verify an external guest's email address.
 
 With one available organization, app commands work without an explicit selection.
 With several, use [organization selection](/reference/cli-configuration#select-an-organization).
@@ -73,10 +75,16 @@ organization continues using Widefleet sign-in.
 
 Once verified, company SSO is required for this organization in the browser, API and
 CLI. Existing email sessions and email-authorized CLI tokens no longer grant access to
-it. Sign in through the company provider and authorize the CLI again. Existing accounts
-with the same company email are linked automatically; membership and role are preserved.
-Addresses outside the verified domain are rejected. An existing account with a different
-email is not merged. Hosted users still need a membership or invitation.
+it. Sign in through the company provider and authorize the CLI again. Existing verified
+accounts with matching company email addresses can link through Better Auth's native
+account-linking rules; existing membership and role are preserved.
+
+Users admitted by the provider, including guests with another email domain, join as
+members without a separate invitation. An existing pending invitation retains its
+acceptance flow and invited role. An external email claim alone does not link an
+existing account. Removing a member is not a permanent SSO access block: a subsequent
+provider-authorized login can add them again. To block future SSO access, remove their
+assignment to Widefleet at the company provider.
 
 Settings, encrypted provider credentials and optional directory credentials belong to the
 selected organization. Directory search queries the configured provider; it does not
@@ -135,8 +143,9 @@ references and remain independent of company login credentials.
 
 Native SSO rejects changes to the issuer or client identity while provider accounts are
 linked. It does not silently delete those accounts to make an update succeed. Removing
-company SSO explicitly removes its provider account links and ends that organization's
-company sessions and CLI refresh grants; issued access tokens have a five-minute lifetime.
+company SSO explicitly removes its provider account links. Provider updates and removal
+do not automatically revoke existing control-plane sessions or CLI refresh grants;
+current organization authorization still applies, and access tokens last five minutes.
 A self-hosted installation requires another usable login before removal. Rotating only
 the secret preserves domain proof and account links. The installation operator can use
 the [recovery procedure](/self-hosting/installation#secrets-and-administrator-recovery).

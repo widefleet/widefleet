@@ -1,7 +1,7 @@
 ---
 title: Single-host installation
 description: Install, configure, upgrade and recover a company installation.
-lastModified: 2026-10-21
+lastModified: 2026-10-22
 ---
 
 This Compose deployment is the reference installation. Use Linux x86-64, Docker Engine 29.8.1, Docker Compose 2.20.0 or newer (including v5), and a checkout of the matching release. Published images contain the required runtime and setup tools; the operator host needs no Node, pnpm or Rust installation. The operator owns DNS, certificates, identity-provider registrations, backups and upgrades. Commands below change the selected installation; choose its environment file deliberately.
@@ -48,7 +48,7 @@ After starting the containers, open `PLATFORM_URL`:
 4. Enter your company email domain and publish the DNS TXT record shown by **Get verification record**. Choose **Verify domain and sign in**, then authenticate with the same email as the first administrator. Widefleet links that account automatically and checks its administrator access. Verified SSO is now required for the organization.
 5. Complete setup. Password authentication is disabled server-side and local browser sessions and their refresh tokens are removed. Future sign-ins use company SSO.
 
-In the installation organization, company sign-in automatically enrolls admitted users as Members who can create apps. Restrict the shared IdP registration to the intended company users. Customer organizations require a membership or invitation for control-plane access. Apps enforce their own access rules and business permissions using the verified user and group context.
+Company sign-in automatically enrolls users admitted by the organization's provider as Members who can create apps, including external guests. Restrict the shared IdP registration to the intended users. Existing memberships keep their roles, and pending invitations retain their acceptance flow. Without company SSO, customers join through invitations. Apps enforce their own access rules and business permissions using the verified user and group context.
 
 Management uses Better Auth's SSO plugin for OIDC discovery, callbacks, provider registration and DNS verification. Existing accounts with a matching email in the verified company domain are linked automatically, retaining their membership and role. Other email domains are rejected. See [company SSO activation](/guides/members#activate-company-sso) for CLI commands and provider replacement behavior.
 
