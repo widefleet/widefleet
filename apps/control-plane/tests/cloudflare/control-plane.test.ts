@@ -20,6 +20,7 @@ import { installationId, readInstallation } from "../../src/lib/server/installat
 import { initializeCloudflareRuntime } from "../../src/lib/server/organization-runtime.ts";
 import { createTestEnvironment } from "../environment.ts";
 import { observeOAuthResourceWrites } from "../oauth-resource-writes.ts";
+import { expectRateLimitedBurst } from "../rate-limit.ts";
 
 describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control plane", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
@@ -42,6 +43,13 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
         compatibility_date: z.string(),
         compatibility_flags: z.array(z.string()),
         vars: z.record(z.string(), z.string()),
+        ratelimits: z.array(
+          z.object({
+            name: z.string(),
+            namespace_id: z.string(),
+            simple: z.object({ limit: z.number(), period: z.number() }),
+          }),
+        ),
       })
       .parse(
         unstable_readConfig({
@@ -75,6 +83,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
         main: entry,
         compatibility_date: configuration.compatibility_date,
         compatibility_flags: configuration.compatibility_flags,
+        ratelimits: configuration.ratelimits,
         assets: {
           directory: fileURLToPath(new URL("../../dist/cloudflare/public", import.meta.url)),
           binding: "ASSETS",
@@ -144,26 +153,28 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
     const signIn = (ip: string) =>
       fetch(`${origin}/api/auth/sign-in/email`, {
         method: "POST",
-        headers: { origin, "content-type": "application/json", "x-forwarded-for": ip },
+        headers: {
+          origin,
+          "content-type": "application/json",
+          "cf-connecting-ip": ip,
+          "x-forwarded-for": crypto.randomUUID(),
+        },
         body: JSON.stringify({
           email: environment.owner.email,
           password: "incorrect-local-test-password",
         }),
       });
 
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const response = await signIn("192.0.2.50");
-      expect(response.status).toBe(401);
+    const admitted = await expectRateLimitedBurst(() => signIn("192.0.2.50"), {
+      max: 3,
+      window: 10,
+      clockAligned: true,
+      admittedStatus: 401,
+    });
+
+    for (const response of admitted) {
       expect(await response.json()).toMatchObject({ code: "INVALID_EMAIL_OR_PASSWORD" });
     }
-
-    const limited = await signIn("192.0.2.50");
-    expect(limited.status).toBe(429);
-    expect(Number(limited.headers.get("x-retry-after"))).toBeGreaterThan(0);
-    expect(Number(limited.headers.get("x-retry-after"))).toBeLessThanOrEqual(10);
-    expect(await limited.json()).toMatchObject({
-      message: "Too many requests. Please try again later.",
-    });
 
     const otherIp = await signIn("192.0.2.51");
     expect(otherIp.status).toBe(401);
