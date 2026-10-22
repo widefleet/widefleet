@@ -35,7 +35,11 @@
 
 <svelte:head><title>Members · Widefleet</title></svelte:head>
 <PageHeading title="Members" description="The people in your workspace and their permissions." />
-{#if route.invited}<div class="mt-5"><Feedback kind="success">Invitation sent.</Feedback></div>{/if}
+{#if route.invited}<div class="mt-5">
+    <Feedback kind="success"
+      >Invitation saved. If the email hasn't arrived, use Resend invitation.</Feedback
+    >
+  </div>{/if}
 {#if data.emailEnabled}
   <details class="mt-6 rounded-lg border p-4">
     <summary class="text-sm font-medium">Invite a member</summary>
@@ -196,7 +200,20 @@
             </p>
           </div>
           {#if entry.role !== "owner" || data.principal.role === "owner"}
+            {@const resendForm = inviteMember.for(entry.id)}
             {@const cancelForm = cancelInvitation.for(entry.id)}
+            {#if data.emailEnabled}
+              <form {...resendForm}>
+                <OrganizationField field={resendForm.fields.organizationId} />
+                <input {...resendForm.fields.email.as("hidden", entry.email)} />
+                <input {...resendForm.fields.role.as("hidden", entry.role)} />
+                <input {...resendForm.fields.resend.as("hidden", "true")} />
+                <FormIssues issues={resendForm.fields.allIssues()} />
+                <Button type="submit" variant="outline" size="sm" disabled={resendForm.pending > 0}
+                  >Resend invitation</Button
+                >
+              </form>
+            {/if}
             <form {...cancelForm}>
               <OrganizationField field={cancelForm.fields.organizationId} />
               <input {...cancelForm.fields.invitationId.as("hidden", entry.id)} />

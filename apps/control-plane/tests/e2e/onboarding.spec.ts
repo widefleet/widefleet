@@ -25,13 +25,22 @@ test("accepts emailed owner invitations and manages members in isolated organiza
 
   const environment = await createTestEnvironment();
   const messages: z.infer<typeof emailMessage>[] = [];
+  const failedRecipients = new Set<string>();
 
   const mailbox = createServer((request, response) => {
     const receive = async () => {
       const chunks: Buffer[] = [];
 
       for await (const chunk of request) chunks.push(z.instanceof(Buffer).parse(chunk));
-      messages.push(emailMessage.parse(JSON.parse(Buffer.concat(chunks).toString("utf8"))));
+      const message = emailMessage.parse(JSON.parse(Buffer.concat(chunks).toString("utf8")));
+
+      if (failedRecipients.has(message.to)) {
+        response.writeHead(503).end();
+
+        return;
+      }
+
+      messages.push(message);
       response.writeHead(204).end();
     };
 
@@ -384,14 +393,36 @@ test("accepts emailed owner invitations and manages members in isolated organiza
       await page.goto("/members");
       await page.getByText("Invite a member", { exact: true }).click();
       await page.getByLabel("Email", { exact: true }).fill(`member-${company.email}`);
+      failedRecipients.add(`member-${company.email}`);
       await page.getByRole("button", { name: "Send invitation" }).click();
-      await expect(page.getByText("Invitation sent.", { exact: true })).toBeVisible();
-      expect(
-        messages.some(
-          (message) =>
-            message.to === `member-${company.email}` && message.text.includes("/invitations/"),
-        ),
-      ).toBe(true);
+      await expect(
+        page.getByText("Invitation saved. If the email hasn't arrived, use Resend invitation."),
+      ).toBeVisible();
+
+      const pending = page
+        .getByRole("region", { name: "Pending invitations" })
+        .getByRole("listitem");
+
+      await expect(pending).toHaveCount(1);
+      await expect(pending).toContainText(`member-${company.email}`);
+      expect(messages.some((message) => message.to === `member-${company.email}`)).toBe(false);
+      failedRecipients.delete(`member-${company.email}`);
+      await pending.getByRole("button", { name: "Resend invitation" }).click();
+      await expect(
+        page.getByText("Invitation saved. If the email hasn't arrived, use Resend invitation.", {
+          exact: true,
+        }),
+      ).toBeVisible();
+      await expect(pending).toHaveCount(1);
+      await expect
+        .poll(
+          () =>
+            messages.filter(
+              (message) =>
+                message.to === `member-${company.email}` && message.text.includes("/invitations/"),
+            ).length,
+        )
+        .toBe(1);
       await page.goto("/settings");
       await expect(
         page.getByText("Apps use Widefleet sign-in until company SSO is activated.", {
