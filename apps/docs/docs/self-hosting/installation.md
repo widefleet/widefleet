@@ -128,13 +128,15 @@ widefleet settings external-management true
 widefleet settings external-management false
 ```
 
-The CLI and external integrations use `GET/PUT /api/v1/settings`, `POST /api/v1/settings/plan` and `PUT /api/v1/settings/external-management`. The UI uses SvelteKit remote functions that call the same settings service. Administrator permission is required through either entry point. Exports omit the SSO secret, which the native provider preserves when unchanged. Set `sso.oidcConfig.clientSecret` to replace it. Directory secrets are exported as references scoped to the selected organization. Stored secret values are never returned.
+The CLI and external integrations use `GET/PUT /api/v1/settings`, `POST /api/v1/settings/plan` and `PUT /api/v1/settings/external-management`. The UI uses SvelteKit remote functions that call the same settings service. Administrator permission is required through either entry point. Exports omit the SSO secret, which the native provider preserves when unchanged. Set `sso.oidcConfig.clientSecret` to replace it. Directory exports omit `clientSecret`; leaving it out of an update preserves the selected organization's saved secret. Stored secret values are never returned.
 
 External management makes the settings UI read-only; API/CLI writes and app management remain available. An administrator can turn browser editing back on.
 
 Settings are validated before saving. The shared runtime applies app sign-in configuration
-without restarting. Activation status distinguishes saved settings from a published
-configuration, and remains waiting while company-domain verification is pending. If
+without restarting. Activation status describes the published app sign-in configuration.
+With email-code sign-in enabled, it can be active while company-domain verification is
+pending because apps still use Widefleet sign-in. Check DNS verification and SSO enforcement
+separately under company sign-in. If
 publication fails, correct the runtime connection and save again. A future runtime requiring
 a restart must report it through the same plan and acknowledgement flow.
 
