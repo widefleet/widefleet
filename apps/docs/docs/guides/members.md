@@ -42,9 +42,16 @@ the last owner cannot be removed or demoted. Owner and admin roles in the instal
 these roles grant administration only within that organization.
 
 Existing invitations stay valid after their inviter is removed or changes role, until
-accepted, expired or explicitly canceled. Reinviting an address with a pending invitation
-returns an error; cancel it before issuing a replacement. Better Auth's default limits
+accepted, expired or explicitly canceled. Inviting the same address again without choosing
+**Resend invitation** returns an error. Resending a pending invitation keeps its link and
+assigned role and renews its 48-hour expiry. To change the invited role, cancel the invitation
+and create a replacement. Better Auth's default limits
 apply: 100 members and 100 pending invitations per organization.
+
+**Invitation saved** confirms that the invitation exists, not that its email was delivered.
+If the email does not arrive, check the address and choose **Resend invitation** under
+**Pending invitations**. Delivery errors are recorded in the control-plane logs; the pending
+invitation remains available for another send attempt.
 
 The same operations are available in the CLI:
 
@@ -52,7 +59,11 @@ The same operations are available in the CLI:
 widefleet members list
 widefleet invitations invite teammate@example.com --role member
 widefleet invitations list
+widefleet invitations invite teammate@example.com --role member --resend
 ```
+
+API clients use `POST /api/v1/invitations` with the same email and role and `"resend": true`.
+The response describes the invitation; it does not confirm email delivery.
 
 Use the IDs returned by these commands for `widefleet members role MEMBER_ID admin`,
 `widefleet members remove MEMBER_ID` or `widefleet invitations cancel INVITATION_ID`.
