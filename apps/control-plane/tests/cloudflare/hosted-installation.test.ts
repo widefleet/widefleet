@@ -42,6 +42,17 @@ const configuration = {
 };
 
 describe("Hosted resource provisioning", () => {
+  it("defaults to email and preserves explicit sign-in delivery in the deployed Worker", async () => {
+    expect(
+      (await hostedConfigurations(installation, ids)).controlPlane.vars.LOGIN_CODE_DELIVERY,
+    ).toBe("email");
+
+    for (const delivery of ["email", "console"] as const) {
+      const configs = await hostedConfigurations(installation, ids, delivery);
+      expect(configs.controlPlane.vars.LOGIN_CODE_DELIVERY).toBe(delivery);
+    }
+  });
+
   it("keeps authentication rate policies with stable, installation-specific namespaces", async () => {
     const first = (await hostedConfigurations(installation, ids)).controlPlane.ratelimits;
     const again = (await hostedConfigurations(installation, ids)).controlPlane.ratelimits;
