@@ -26,11 +26,13 @@
 
   let email = $state("");
 
+  let passwordEmail = $state("");
+
   let password = $state("");
 
   let otp = $state("");
 
-  let sent = $state(false);
+  let sentTo = $state<string | null>(null);
 
   const oauthRedirect = z.object({ redirect: z.literal(true), url: z.url() });
 
@@ -42,13 +44,18 @@
     message = "";
 
     try {
-      if (!sent) {
-        const result = await authClient.emailOtp.sendVerificationOtp({ email, type: "sign-in" });
+      if (sentTo === null) {
+        const recipient = email;
+
+        const result = await authClient.emailOtp.sendVerificationOtp({
+          email: recipient,
+          type: "sign-in",
+        });
 
         if (result.error) message = "Could not send a sign-in code. Please try again.";
-        else sent = true;
+        else sentTo = recipient;
       } else {
-        const result = await authClient.signIn.emailOtp({ email, otp });
+        const result = await authClient.signIn.emailOtp({ email: sentTo, otp });
 
         if (result.error) message = "Invalid or expired code. Request another code and try again.";
         else if (!oauthRedirect.safeParse(result.data).success)
@@ -89,7 +96,7 @@
     message = "";
 
     try {
-      const result = await authClient.signIn.email({ email, password });
+      const result = await authClient.signIn.email({ email: passwordEmail, password });
 
       if (result.error) message = "Email or password not recognized.";
       else if (!oauthRedirect.safeParse(result.data).success) await goto(data.next);
@@ -127,13 +134,13 @@
           id="code-email"
           type="email"
           bind:value={email}
-          disabled={!ready}
-          readonly={sent}
+          disabled={!ready || busy}
+          readonly={sentTo !== null}
           autocomplete="email"
           required
         />
       </div>
-      {#if sent}
+      {#if sentTo !== null}
         <p class="text-muted-foreground text-xs leading-5">
           If this address has an invitation or membership, a six-digit code is on its way.
         </p>
@@ -152,15 +159,15 @@
         </div>
       {/if}
       <Button type="submit" disabled={busy || !ready} class="w-full"
-        >{busy ? "Please wait …" : sent ? "Sign in" : "Email me a sign-in code"}</Button
+        >{busy ? "Please wait …" : sentTo !== null ? "Sign in" : "Email me a sign-in code"}</Button
       >
-      {#if sent}<Button
+      {#if sentTo !== null}<Button
           type="button"
           variant="ghost"
           class="w-full"
           disabled={busy}
           onclick={() => {
-            sent = false;
+            sentTo = null;
             otp = "";
           }}>Use another email or request a new code</Button
         >{/if}
@@ -197,7 +204,7 @@
           <Label for="login-email">Email</Label><Input
             id="login-email"
             type="email"
-            bind:value={email}
+            bind:value={passwordEmail}
             autocomplete="username"
             required
             class="h-10"
