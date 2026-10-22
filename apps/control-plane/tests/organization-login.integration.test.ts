@@ -141,7 +141,6 @@ describe("Organization members and invitations", () => {
     await runtime.settings.initialize(
       {
         sso: null,
-        appIdentity: { type: "oidc", groupsClaim: "groups" },
         directory: null,
         externallyManaged: false,
       },
