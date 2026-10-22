@@ -83,6 +83,8 @@ export const createAuthentication = async (configuration: AuthConfiguration, log
                 clientId: configuration.clientId,
                 clientSecret: configuration.clientSecret,
                 discoveryUrl: `${issuer(configuration.provider)}/.well-known/openid-configuration`,
+                // The hosted provider enforces the same form-origin check as the CLI.
+                authorizationHeaders: { origin: new URL(issuer(configuration.provider)).origin },
                 requireIdTokenVerification: true,
                 redirectURI: configuration.redirectUrl,
                 disableProviderLogout: true,
