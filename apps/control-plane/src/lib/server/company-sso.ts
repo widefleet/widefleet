@@ -6,10 +6,12 @@ import type { OrganizationAccess } from "./application-context.ts";
 import { ssoProvider } from "./auth-schema.ts";
 import type { DatabaseExecutor } from "./database.ts";
 import { decryptSecret, encryptSecret } from "./secret-encryption.ts";
+import { oidcConfiguration, prepareCompanyOidc } from "./sso-origins.ts";
 
 export const companySsoOrigins = async (
   database: DatabaseExecutor,
   platformUrl: string,
+  encryptionKey: string,
   request?: Request,
 ) => {
   const origins = [platformUrl];
@@ -17,13 +19,14 @@ export const companySsoOrigins = async (
   if (!request) return origins;
   const path = new URL(request.url).pathname;
 
-  if (!path.includes("/sso/") && !path.endsWith("/sign-in/sso")) return origins;
+  const callback = path.match(/\/sso\/callback\/([^/]+)$/)?.[1];
+
+  if (!callback && !path.endsWith("/sign-in/sso")) return origins;
 
   // The IdP origins below authorize outbound OIDC requests, never an incoming
   // cross-origin management request carrying the user's cookies.
   if (request.headers.has("origin") && request.headers.get("origin") !== platformUrl)
     return origins;
-  const callback = path.match(/\/sso\/callback\/([^/]+)$/)?.[1];
 
   const input =
     request.method === "POST" && !request.bodyUsed
@@ -40,16 +43,19 @@ export const companySsoOrigins = async (
   if (!providerId) return origins;
 
   const [provider] = await database
-    .select({ issuer: ssoProvider.issuer })
+    .select()
     .from(ssoProvider)
     .where(eq(ssoProvider.providerId, providerId));
 
-  if (provider) {
-    origins.push(new URL(provider.issuer).origin);
+  if (!provider?.domainVerified || !provider.oidcConfig) return origins;
 
-    if (new URL(provider.issuer).hostname === "login.microsoftonline.com")
-      origins.push("https://graph.microsoft.com");
-  }
+  const configuration = oidcConfiguration.parse(
+    JSON.parse(await decryptSecret(encryptionKey, provider.oidcConfig)),
+  );
+
+  const prepared = await prepareCompanyOidc(provider.issuer, configuration);
+
+  origins.push(...prepared.origins);
 
   return origins;
 };

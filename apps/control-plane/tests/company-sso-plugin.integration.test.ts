@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { betterAuth } from "better-auth";
+import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import dns from "node:dns/promises";
@@ -10,6 +11,8 @@ import { createIdentityProvider } from "./edge/auth-proxy-idp.ts";
 import { organizationSettings } from "../src/lib/server/schema.ts";
 import { createIdentityService } from "../src/lib/server/identity.ts";
 import { ssoProvider } from "../src/lib/server/auth-schema.ts";
+import { companySsoOrigins } from "../src/lib/server/company-sso.ts";
+import { decryptSecret, encryptSecret } from "../src/lib/server/secret-encryption.ts";
 
 describe("Better Auth SSO provider integration", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
@@ -157,4 +160,284 @@ describe("Better Auth SSO provider integration", () => {
       groupsClaim: "roles",
     });
   });
+
+  it.each(["registered", "migrated"])(
+    "completes %s-provider sign-in without changing stored configuration",
+    async (kind) => {
+      await environment.database.db.delete(ssoProvider);
+      await environment.database.db.update(organizationSettings).set({ ssoRequired: false });
+      const issuer = "https://issuer.example.test";
+      const providerId = `split-origin-${kind}`;
+
+      const encryptionKey =
+        environment.configuration.PLATFORM_ENCRYPTION_KEY ??
+        environment.configuration.BETTER_AUTH_SECRET;
+
+      let discoveryAvailable = true;
+
+      const metadata = {
+        issuer,
+        authorization_endpoint: "https://login.example.test/authorize",
+        token_endpoint: "https://tokens.example.test/token",
+        jwks_uri: "https://keys.example.test/jwks",
+        userinfo_endpoint: "https://profile.example.test/userinfo",
+      };
+
+      const keys = await generateKeyPair("RS256", { extractable: true });
+      const publicKey = { ...(await exportJWK(keys.publicKey)), kid: "split-origin", alg: "RS256" };
+
+      const profile = {
+        sub: `split-origin-${kind}`,
+        email: `split-origin-${kind}@example.test`,
+        name: "Split Origin User",
+        email_verified: true,
+      };
+
+      const idToken = await new SignJWT(profile)
+        .setProtectedHeader({ alg: "RS256", kid: publicKey.kid })
+        .setIssuer(issuer)
+        .setAudience("synthetic-client")
+        .setIssuedAt()
+        .setExpirationTime("5m")
+        .sign(keys.privateKey);
+
+      const visited = new Set<string>();
+
+      const request = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+        const outgoing = new Request(input, init);
+        visited.add(outgoing.url);
+
+        switch (outgoing.url) {
+          case `${issuer}/.well-known/openid-configuration`:
+            if (!discoveryAvailable) return new Response(null, { status: 503 });
+
+            return Response.json(metadata);
+          case metadata.token_endpoint: {
+            expect(outgoing.method).toBe("POST");
+            const fields = new URLSearchParams(await outgoing.text());
+            expect(fields.get("code")).toBe("synthetic-code");
+            expect(fields.get("redirect_uri")).toBe(
+              `${origin}/api/auth/sso/callback/${providerId}`,
+            );
+
+            return Response.json({
+              access_token: "synthetic-access-token",
+              token_type: "Bearer",
+              expires_in: 300,
+              id_token: idToken,
+            });
+          }
+
+          case metadata.jwks_uri:
+            return Response.json({ keys: [publicKey] });
+
+          case metadata.userinfo_endpoint:
+            expect(outgoing.headers.get("authorization")).toBe("Bearer synthetic-access-token");
+
+            return Response.json(profile);
+          default:
+            throw new Error(`Unexpected identity-provider request: ${outgoing.url}`);
+        }
+      });
+
+      const ipv4 = vi.spyOn(dns, "resolve4").mockResolvedValue(["93.184.216.34"]);
+
+      const ipv6 = vi.spyOn(dns, "resolve6").mockResolvedValue([]);
+
+      try {
+        const logged = await environment.users.login({ userId: environment.owner.id });
+        logged.headers.set("origin", origin);
+
+        const input = {
+          providerId,
+          issuer,
+          domain: "example.test",
+          organizationId: "widefleet",
+          oidcConfig: {
+            clientId: "synthetic-client",
+            clientSecret: "synthetic-client-secret",
+            pkce: true,
+            scopes: ["openid", "profile", "email"],
+          },
+        };
+
+        await expect(
+          environment.auth.api.registerSSOProvider({ body: input }),
+        ).rejects.toBeDefined();
+        expect(request).not.toHaveBeenCalled();
+        await environment.auth.api.registerSSOProvider({ headers: logged.headers, body: input });
+        expect(request).toHaveBeenCalledOnce();
+        discoveryAvailable = false;
+        request.mockClear();
+        const rotatedSecret = "concurrently-rotated-secret";
+
+        if (kind === "registered")
+          ipv4.mockImplementationOnce(async () => {
+            const [current] = await environment.database.db.select().from(ssoProvider);
+
+            const configuration = z
+              .record(z.string(), z.unknown())
+              .parse(
+                JSON.parse(
+                  await decryptSecret(encryptionKey, z.string().parse(current?.oidcConfig)),
+                ),
+              );
+
+            await environment.database.db.update(ssoProvider).set({
+              oidcConfig: await encryptSecret(
+                encryptionKey,
+                JSON.stringify({
+                  ...configuration,
+                  clientSecret: rotatedSecret,
+                }),
+              ),
+            });
+
+            return ["93.184.216.34"];
+          });
+
+        await environment.auth.api.updateSSOProvider({
+          headers: logged.headers,
+          body: { providerId, oidcConfig: { scopes: ["openid", "email", "profile"] } },
+        });
+        expect(request).not.toHaveBeenCalled();
+
+        // Migrated providers lack hydrated endpoints. Exercise runtime discovery
+        // rather than relying only on registration's stored endpoint URLs.
+        await environment.database.db.update(ssoProvider).set({ domainVerified: true });
+
+        if (kind === "migrated")
+          await environment.database.db.update(ssoProvider).set({
+            oidcConfig: await encryptSecret(
+              encryptionKey,
+              JSON.stringify({ ...input.oidcConfig, issuer }),
+            ),
+          });
+        request.mockClear();
+        discoveryAvailable = kind === "migrated";
+        visited.clear();
+        const [before] = await environment.database.db.select().from(ssoProvider);
+        const encrypted = z.string().parse(before?.oidcConfig);
+
+        const signIn = new Request(`${origin}/api/auth/sign-in/sso`, {
+          method: "POST",
+          headers: { origin, "content-type": "application/json" },
+          body: JSON.stringify({ providerId: input.providerId, callbackURL: "/settings" }),
+        });
+
+        const response = await environment.auth.handler(signIn.clone());
+        const body: unknown = await response.json();
+        expect(response.status, JSON.stringify(body)).toBe(200);
+        const target = z.object({ url: z.url(), redirect: z.literal(true) }).parse(body);
+        expect(new URL(target.url).origin).toBe("https://login.example.test");
+        expect(visited).toEqual(
+          new Set(kind === "migrated" ? [`${issuer}/.well-known/openid-configuration`] : []),
+        );
+
+        const [saved] = await environment.database.db.select().from(ssoProvider);
+        expect(saved?.oidcConfig).toBe(encrypted);
+        expect(encrypted).not.toContain(input.oidcConfig.clientSecret);
+        expect(JSON.parse(await decryptSecret(encryptionKey, encrypted))).toMatchObject({
+          clientSecret: kind === "registered" ? rotatedSecret : input.oidcConfig.clientSecret,
+        });
+        visited.clear();
+
+        const callback = `${origin}/api/auth/sso/callback/${input.providerId}`;
+        const callbackUrl = new URL(callback);
+        callbackUrl.searchParams.set(
+          "state",
+          z.string().min(1).parse(new URL(target.url).searchParams.get("state")),
+        );
+        callbackUrl.searchParams.set("code", "synthetic-code");
+
+        const cookie = (result: Response) =>
+          result.headers
+            .getSetCookie()
+            .filter((value) => !value.includes("Max-Age=0"))
+            .map((value) => value.split(";")[0])
+            .join("; ");
+
+        const completed = await environment.auth.handler(
+          new Request(callbackUrl, { headers: { cookie: cookie(response) } }),
+        );
+
+        expect(completed.status).toBe(302);
+        expect(completed.headers.get("location")).toBe("/settings");
+        expect(visited).toEqual(
+          new Set([
+            metadata.token_endpoint,
+            metadata.jwks_uri,
+            metadata.userinfo_endpoint,
+            ...(kind === "migrated" ? [`${issuer}/.well-known/openid-configuration`] : []),
+          ]),
+        );
+
+        const authenticated = await environment.auth.handler(
+          new Request(`${origin}/api/auth/get-session`, {
+            headers: { cookie: cookie(completed) },
+          }),
+        );
+
+        expect(authenticated.status).toBe(200);
+        expect(await authenticated.json()).toMatchObject({
+          user: { email: profile.email, name: profile.name },
+          session: { identityOrganizationId: "widefleet" },
+        });
+
+        request.mockClear();
+        visited.clear();
+        expect((await environment.auth.handler(signIn.clone())).status).toBe(200);
+        expect(visited).toEqual(
+          new Set(kind === "migrated" ? [`${issuer}/.well-known/openid-configuration`] : []),
+        );
+        const [unchanged] = await environment.database.db.select().from(ssoProvider);
+        expect(unchanged?.oidcConfig).toBe(encrypted);
+
+        request.mockClear();
+        ipv4.mockClear();
+        expect(await companySsoOrigins(environment.database.db, origin, encryptionKey)).toEqual([
+          origin,
+        ]);
+        expect(
+          await companySsoOrigins(
+            environment.database.db,
+            origin,
+            encryptionKey,
+            new Request(`${origin}/api/auth/sign-out`),
+          ),
+        ).toEqual([origin]);
+        expect(
+          await companySsoOrigins(
+            environment.database.db,
+            origin,
+            encryptionKey,
+            new Request(callback, { headers: { origin: "https://tokens.example.test" } }),
+          ),
+        ).toEqual([origin]);
+        expect(
+          await companySsoOrigins(
+            environment.database.db,
+            origin,
+            encryptionKey,
+            new Request(`${origin}/api/auth/sso/callback/missing`),
+          ),
+        ).toEqual([origin]);
+        await environment.database.db.update(ssoProvider).set({ domainVerified: false });
+        expect(
+          await companySsoOrigins(
+            environment.database.db,
+            origin,
+            encryptionKey,
+            new Request(callback),
+          ),
+        ).toEqual([origin]);
+        expect(request).not.toHaveBeenCalled();
+        expect(ipv4).not.toHaveBeenCalled();
+      } finally {
+        request.mockRestore();
+        ipv4.mockRestore();
+        ipv6.mockRestore();
+      }
+    },
+  );
 });

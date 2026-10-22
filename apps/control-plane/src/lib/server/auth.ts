@@ -65,6 +65,7 @@ export const createAuthentication = (
   const authorizePlugin = pluginAuthentication(
     database,
     configuration,
+    encryptionKey,
     () => readKeys(),
     options.organizationAccess,
   );
@@ -72,7 +73,8 @@ export const createAuthentication = (
   const auth = betterAuth({
     ...settings,
     disabledPaths: [...settings.disabledPaths, ...managedPluginPaths],
-    trustedOrigins: (request) => companySsoOrigins(database, configuration.PLATFORM_URL, request),
+    trustedOrigins: (request) =>
+      companySsoOrigins(database, configuration.PLATFORM_URL, encryptionKey, request),
     plugins: [
       ...settings.plugins,
       companySsoPlugin(database, encryptionKey, options.organizationAccess),
