@@ -86,7 +86,7 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
     await page.getByRole("button", { name: "Create account and continue" }).click();
     await expect(page).toHaveURL(/\/sign-in\?/);
     await expect(page.getByLabel("Email", { exact: true })).toHaveValue("sso@example.test");
-    await page.getByRole("button", { name: "Request sign-in code" }).click();
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
     await expect.poll(() => logs.match(/code is (\d{6})/)?.[1]).toBeTruthy();
     const otp = z.string().parse(logs.match(/code is (\d{6})/)?.[1]);
     await page.getByLabel("Sign-in code", { exact: true }).fill(otp);
@@ -256,7 +256,7 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
       "sso@example.test",
     );
 
-    await expect(page.getByText("Sign in with company SSO", { exact: true })).toBeVisible();
+    await expect(page.getByLabel("Organization slug")).toHaveCount(0);
     await page.goto(link);
     await expect(page).toHaveURL(/\/settings$/);
     await expect(page.getByRole("heading", { name: "Settings", exact: true })).toBeVisible();

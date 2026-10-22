@@ -23,6 +23,7 @@ import type { ArtifactStorage } from "./storage.ts";
 import type { HostedExecution } from "./deployment-execution.ts";
 import { createSignInEmail, type SendEmail } from "./email.ts";
 import { createInvitationService } from "./members.ts";
+import { createAuthenticationAdmission } from "./auth-admission.ts";
 
 export const createRuntime = ({
   configuration,
@@ -75,6 +76,7 @@ export const createRuntime = ({
     storage,
     invitations: createInvitationService(database.db, configuration, sendEmail, organizationAccess),
     emailSignIn: Boolean(createSignInEmail(configuration, sendEmail)),
+    signInProvider: createAuthenticationAdmission(database.db, organizationAccess).signInProvider,
     apps: createAppService(database.db, configuration, execution),
     agents: createAgentService(database.db),
     jobs: createJobService(database.db, storage, encryptionKey, reporting.operation),

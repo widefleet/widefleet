@@ -1,4 +1,5 @@
 import { organizationSettings } from "../src/lib/server/schema.ts";
+import { createAuthenticationAdmission } from "../src/lib/server/auth-admission.ts";
 import { createInvitationService } from "../src/lib/server/members.ts";
 import { createAuthControl } from "./auth-control.ts";
 import { installationKeys } from "../src/lib/server/installation-files.ts";
@@ -215,6 +216,7 @@ export const createTestEnvironment = async (
     authControl,
     invitations: createInvitationService(database.db, configuration),
     emailSignIn: false,
+    signInProvider: createAuthenticationAdmission(database.db).signInProvider,
     reporting: createReporting(configuration, database.db),
     replacementClient,
     settings,

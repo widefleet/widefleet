@@ -2,6 +2,7 @@
   import { z } from "zod";
   import { onMount } from "svelte";
   import { authClient } from "#lib/auth-client";
+  import { findSignInProvider } from "#lib/sign-in.remote";
   import { goto } from "$app/navigation";
   import AuthLayout from "#shadcn/components/AuthLayout.svelte";
   import Feedback from "#shadcn/components/Feedback.svelte";
@@ -42,7 +43,23 @@
 
     try {
       if (sentTo === null) {
-        const recipient = email;
+        const recipient = email.trim().toLowerCase();
+
+        const provider = data.organizationSlug
+          ? null
+          : await findSignInProvider({ email: recipient });
+
+        if (provider) {
+          const result = await authClient.signIn.sso({
+            providerId: provider,
+            email: recipient,
+            callbackURL: data.next,
+          });
+
+          if (result.error) message = "Could not start sign-in. Please try again.";
+
+          return;
+        }
 
         const result = await authClient.emailOtp.sendVerificationOtp({
           email: recipient,
@@ -50,7 +67,10 @@
         });
 
         if (result.error) message = "Could not send a sign-in code. Please try again.";
-        else sentTo = recipient;
+        else {
+          email = recipient;
+          sentTo = recipient;
+        }
       } else {
         const result = await authClient.signIn.emailOtp({ email: sentTo, otp });
 
@@ -58,8 +78,11 @@
         else if (!oauthRedirect.safeParse(result.data).success)
           await goto(data.next, { invalidateAll: true });
       }
-    } catch {
-      message = "Sign-in is temporarily unavailable. Check your connection.";
+    } catch (cause) {
+      message =
+        cause instanceof Error
+          ? cause.message
+          : "Sign-in is temporarily unavailable. Check your connection.";
     } finally {
       busy = false;
     }
@@ -101,7 +124,10 @@
         ? `Sign in to ${data.organizationName}.`
         : "Sign in to continue to your workspace."}
   </p>
-  {#if data.provider}<Button onclick={signIn} disabled={busy} class="mt-7 h-10 w-full"
+  {#if data.provider && (data.organizationSlug || !data.emailSignIn)}<Button
+      onclick={signIn}
+      disabled={busy}
+      class="mt-7 h-10 w-full"
       >{busy ? "Opening sign-in …" : `Sign in with ${data.label}`}<ArrowRight /></Button
     >{/if}
   {#if data.emailSignIn}
@@ -139,7 +165,7 @@
         </div>
       {/if}
       <Button type="submit" disabled={busy || !ready} class="w-full"
-        >{busy ? "Please wait …" : sentTo !== null ? "Sign in" : "Request sign-in code"}</Button
+        >{busy ? "Please wait …" : sentTo !== null ? "Sign in" : "Continue"}</Button
       >
       {#if sentTo !== null}<Button
           type="button"
@@ -153,26 +179,6 @@
         >{/if}
     </form>
   {/if}
-  <details class="mt-6 border-t pt-5">
-    <summary class="text-sm font-medium"
-      >{data.provider ? "Sign in to another organization" : "Sign in with company SSO"}</summary
-    >
-    <form method="GET" class="mt-4 space-y-3">
-      <input type="hidden" name="next" value={data.next} />
-      <Label for="organization-slug">Organization slug</Label>
-      <Input
-        id="organization-slug"
-        name="organization"
-        required
-        value={data.organizationSlug ?? ""}
-        placeholder="acme"
-      />
-      <Button type="submit" variant="outline" class="w-full">Continue</Button>
-      {#if data.organizationSlug && !data.provider}<Feedback kind="error"
-          >Company sign-in is not configured for this organization.</Feedback
-        >{/if}
-    </form>
-  </details>
   {#if !data.provider && !data.emailSignIn}<div class="mt-5">
       <Feedback kind="error"
         >Company sign-in is temporarily unavailable. Contact your administrator.</Feedback

@@ -151,7 +151,7 @@ test("completes app OAuth through the built server after signing in", async ({ p
   await page.goto(z.url().parse(started.headers.get("location")));
   await expect(page).toHaveURL(/\/sign-in\?/);
   await page.getByLabel("Email", { exact: true }).fill("owner@example.test");
-  await page.getByRole("button", { name: "Request sign-in code" }).click();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
   await expect.poll(() => logs.match(/code is (\d{6})/)?.[1]).toBeTruthy();
   await page
     .getByLabel("Sign-in code", { exact: true })
@@ -545,7 +545,8 @@ test("redirects anonymous device requests to login and preserves the code", asyn
   await environment.database.db.update(ssoProvider).set({ domainVerified: true });
   await page.goto("/device?user_code=ABCD1234");
   await expect(page).toHaveURL(/\/sign-in\?next=/);
-  await expect(page.getByRole("button", { name: "Sign in with Microsoft" })).toBeVisible();
+  await expect(page.getByLabel("Email", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Continue", exact: true })).toBeVisible();
   expect(new URL(page.url()).searchParams.get("next")).toBe("/device?user_code=ABCD1234");
 });
 
@@ -635,13 +636,34 @@ test("completes Microsoft login against emulate through the built SvelteKit serv
 }) => {
   await environment.database.db.update(ssoProvider).set({ domainVerified: true });
   await page.goto("/sign-in");
-  await page.getByRole("button", { name: "Sign in with Microsoft" }).click();
+  await expect(page.getByLabel("Organization slug")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Sign in with Microsoft" })).toHaveCount(0);
+  await page.getByLabel("Email", { exact: true }).fill("sso@EXAMPLE.TEST");
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
   await page.getByRole("button", { name: /sso@example.test/ }).click();
   await expect(page.getByRole("heading", { name: "Your apps", exact: true })).toBeVisible();
   await expect(page.getByText("SSO Test User", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: /^Account:/ }).click();
   await page.getByRole("menuitem", { name: "Sign out" }).click();
   await expect(page).toHaveURL(/\/sign-in$/);
+});
+
+test("keeps an SSO error on the email step without requesting an email code", async ({ page }) => {
+  await environment.database.db.update(ssoProvider).set({ domainVerified: true });
+  let codeRequests = 0;
+  page.on("request", (request) => {
+    if (request.url().endsWith("/email-otp/send-verification-otp")) codeRequests += 1;
+  });
+  await page.route("**/api/auth/sign-in/sso", (route) =>
+    route.fulfill({ status: 503, json: { message: "Company sign-in is unavailable" } }),
+  );
+  await page.goto("/sign-in");
+  await page.getByLabel("Email", { exact: true }).fill("sso@example.test");
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(page.getByText("Could not start sign-in. Please try again.")).toBeVisible();
+  await expect(page.getByLabel("Email", { exact: true })).toBeEnabled();
+  await expect(page.getByLabel("Sign-in code", { exact: true })).toHaveCount(0);
+  expect(codeRequests).toBe(0);
 });
 
 test("requires code confirmation in the browser, grants the CLI, then signs out", async ({

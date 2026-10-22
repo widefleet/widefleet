@@ -9,11 +9,33 @@ import type { DatabaseExecutor } from "./database.ts";
 import { organizationSettings } from "./schema.ts";
 import { invitation, member, user, ssoProvider } from "./auth-schema.ts";
 import { installationOrganizationId } from "../organization.ts";
+import { InvalidOperation } from "./errors.ts";
 
 export const createAuthenticationAdmission = (
   database: DatabaseExecutor,
   access: OrganizationAccess = { filterOrganizations: async () => [installationOrganizationId] },
 ) => ({
+  signInProvider: async (email: string) => {
+    const domain = email.trim().toLowerCase().split("@")[1];
+
+    if (!domain) return null;
+
+    const candidates = await database
+      .select({ id: ssoProvider.organizationId, providerId: ssoProvider.providerId })
+      .from(ssoProvider)
+      .where(and(eq(ssoProvider.domain, domain), eq(ssoProvider.domainVerified, true)));
+
+    const allowed = new Set(await access.filterOrganizations(candidates));
+    const providers = candidates.filter((candidate) => allowed.has(candidate.id));
+
+    if (providers.length > 1)
+      throw new InvalidOperation({
+        code: "CONFLICT",
+        message: "Use the sign-in link provided by your organization.",
+      });
+
+    return providers[0]?.providerId ?? null;
+  },
   allowEmail: async (email: string) => {
     const memberships = await database
       .select({ id: member.organizationId })
