@@ -15,43 +15,59 @@ beforeAll(async () => {
 
 afterAll(async () => environment?.close());
 
-it("moves legacy SSO once, keeps directory credentials and requires explicit domain proof", async () => {
-  const database = environment.database.db;
-  const key = environment.environment.PLATFORM_ENCRYPTION_KEY;
-  await database.delete(ssoProvider);
-  const directory = { clientId: "directory-client" };
-  await database
-    .update(organizationSettings)
-    .set({
-      directorySecret: await encryptSecret(key, "directory-secret"),
-      settings: {
-        externallyManaged: true,
-        identity: {
-          provider: environment.configuration.IDENTITY.provider,
-          management: {
-            clientId: "company-client",
-            secret: { ciphertext: await encryptSecret(key, "management-secret") },
+it.each(["entra", "oidc"] as const)(
+  "moves legacy %s SSO once and preserves its claims and directory credentials",
+  async (type) => {
+    const database = environment.database.db;
+    const key = environment.environment.PLATFORM_ENCRYPTION_KEY;
+    await database.delete(ssoProvider);
+    const directory = { clientId: "directory-client" };
+    await database
+      .update(organizationSettings)
+      .set({
+        directorySecret: await encryptSecret(key, "directory-secret"),
+        settings: {
+          externallyManaged: true,
+          identity: {
+            provider:
+              type === "entra"
+                ? environment.configuration.IDENTITY.provider
+                : {
+                    type: "oidc",
+                    issuer: "https://login.example.test",
+                    label: "Company",
+                    nameClaim: "display_name",
+                    emailClaim: "mail",
+                    groupsClaim: "roles",
+                  },
+            management: {
+              clientId: "company-client",
+              secret: { ciphertext: await encryptSecret(key, "management-secret") },
+            },
+            directory,
           },
-          directory,
         },
+      })
+      .where(eq(organizationSettings.organizationId, "widefleet"));
+    await migrateSsoSettings(database, key);
+    const provider = await readSsoConfiguration(database, key, "widefleet");
+    expect(provider).toMatchObject({
+      domain: "",
+      domainVerified: false,
+      appIdentityType: type,
+      oidcConfig: {
+        clientId: "company-client",
+        clientSecret: "management-secret",
+        mapping: { extraFields: { groups: type === "entra" ? "groups" : "roles" } },
       },
-    })
-    .where(eq(organizationSettings.organizationId, "widefleet"));
-  await migrateSsoSettings(database, key);
-  const provider = await readSsoConfiguration(database, key, "widefleet");
-  expect(provider).toMatchObject({
-    providerId: "microsoft",
-    domain: "",
-    domainVerified: false,
-    oidcConfig: { clientId: "company-client", clientSecret: "management-secret" },
-  });
-  const [saved] = await database.select().from(organizationSettings);
-  expect(saved?.settings).toEqual({
-    externallyManaged: true,
-    appIdentity: { type: "entra" },
-    directory,
-  });
-  expect(await decryptSecret(key, saved?.directorySecret ?? "")).toBe("directory-secret");
-  await migrateSsoSettings(database, key);
-  expect(await readSsoConfiguration(database, key, "widefleet")).toEqual(provider);
-});
+    });
+    const [saved] = await database.select().from(organizationSettings);
+    expect(saved?.settings).toEqual({
+      externallyManaged: true,
+      directory,
+    });
+    expect(await decryptSecret(key, saved?.directorySecret ?? "")).toBe("directory-secret");
+    await migrateSsoSettings(database, key);
+    expect(await readSsoConfiguration(database, key, "widefleet")).toEqual(provider);
+  },
+);

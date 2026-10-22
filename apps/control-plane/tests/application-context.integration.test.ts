@@ -154,7 +154,6 @@ describe("Mandatory application context", () => {
     expect(ownSettings.status).toBe(200);
     expect(await ownSettings.json()).toMatchObject({
       settings: {
-        appIdentity: { type: "oidc", groupsClaim: "groups" },
         directory: null,
         externallyManaged: false,
       },

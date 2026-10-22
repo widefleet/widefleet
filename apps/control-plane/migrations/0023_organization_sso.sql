@@ -13,6 +13,7 @@ CREATE TABLE "sso_provider" (
   "issuer" text NOT NULL,
   "domain" text NOT NULL,
   "domain_verified" boolean NOT NULL DEFAULT false,
+  "app_identity_type" text NOT NULL DEFAULT 'oidc' CHECK ("app_identity_type" IN ('oidc', 'entra')),
   "oidc_config" text,
   "saml_config" text,
   "user_id" text REFERENCES "user"("id") ON DELETE SET NULL,
@@ -43,3 +44,5 @@ DROP TABLE "organization_secret";
 
 --> statement-breakpoint
 ALTER TABLE "organization_settings" ADD COLUMN "sso_required" boolean NOT NULL DEFAULT false;
+--> statement-breakpoint
+ALTER TABLE "installation" ADD COLUMN "bootstrap_pending" boolean NOT NULL DEFAULT false;

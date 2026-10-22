@@ -62,6 +62,7 @@ export const ssoProvider = pgTable("sso_provider", {
   issuer: text("issuer").notNull(),
   domain: text("domain").notNull(),
   domainVerified: boolean("domain_verified").notNull().default(false),
+  appIdentityType: text("app_identity_type").notNull().default("oidc"),
   oidcConfig: text("oidc_config"),
   samlConfig: text("saml_config"),
   userId: text("user_id").references(() => user.id, { onDelete: "set null" }),

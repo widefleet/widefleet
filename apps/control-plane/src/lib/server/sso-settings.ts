@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { appIdentitySettings, oidcProviderInput } from "@platform/contracts";
+import { oidcProviderInput } from "@platform/contracts";
 import { organizationSettings } from "./schema.ts";
 import { ssoProvider } from "./auth-schema.ts";
 import { companyIdentity } from "./company-identity.ts";
@@ -37,18 +37,21 @@ export const readSsoConfiguration = async (
     .strip()
     .parse(JSON.parse(await decryptSecret(key, provider.oidcConfig)));
 
-  return { ...provider, oidcConfig };
+  return {
+    ...provider,
+    appIdentityType: oidcProviderInput.shape.appIdentityType.parse(provider.appIdentityType),
+    oidcConfig,
+  };
 };
 
 export const ssoRuntimeIdentity = (
   connection: NonNullable<Awaited<ReturnType<typeof readSsoConfiguration>>>,
-  appIdentity: z.infer<typeof appIdentitySettings>,
 ) => {
   const configuration = connection.oidcConfig;
   const issuer = new URL(connection.issuer);
   const tenant = issuer.pathname.match(/^\/([^/]+)\/v2\.0\/?$/)?.[1];
 
-  if (appIdentity.type === "entra" && !z.uuid().safeParse(tenant).success)
+  if (connection.appIdentityType === "entra" && !z.uuid().safeParse(tenant).success)
     throw new InvalidOperation({
       code: "BAD_REQUEST",
       message: "Entra app claims require a tenant-specific Entra issuer",
@@ -57,7 +60,7 @@ export const ssoRuntimeIdentity = (
   return companyIdentity.parse({
     scopes: configuration.scopes,
     provider:
-      appIdentity.type === "entra"
+      connection.appIdentityType === "entra"
         ? { type: "entra", authority: issuer.origin, tenantId: tenant, label: "Microsoft Entra" }
         : {
             type: "oidc",
@@ -65,7 +68,7 @@ export const ssoRuntimeIdentity = (
             label: "Company SSO",
             nameClaim: configuration.mapping.name,
             emailClaim: configuration.mapping.email,
-            groupsClaim: appIdentity.groupsClaim,
+            groupsClaim: configuration.mapping.extraFields.groups,
           },
     management: { clientId: configuration.clientId, clientSecret: configuration.clientSecret },
     directory: null,

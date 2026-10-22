@@ -36,7 +36,9 @@ try {
   await migrateSsoSettings(database.db, configuration.PLATFORM_ENCRYPTION_KEY);
   await registerCli(database.db, configuration);
 
-  if (!(await readInstallation(database.db)).ownerId) {
+  const state = await readInstallation(database.db);
+
+  if (!state.ownerId || state.bootstrapPending) {
     if (!configuration.PLATFORM_BOOTSTRAP_FILE)
       throw new Error("PLATFORM_BOOTSTRAP_FILE must provide the first hosted administrator");
 
@@ -44,7 +46,7 @@ try {
       JSON.parse(await readFile(configuration.PLATFORM_BOOTSTRAP_FILE, "utf8")),
     );
 
-    if (bootstrap.settings) {
+    if (bootstrap.settings || state.bootstrapPending) {
       const secrets = z.object({ APP_COOKIE_SECRET: z.string().min(1) }).parse(process.env);
 
       const proxy = await getPlatformProxy<AuthProxyBindings>({
@@ -73,6 +75,7 @@ try {
         await initializeBootstrap(
           settings,
           createAuthentication({ ...configuration, LOCAL_PASSWORD_ENABLED: true }, database.db),
+          database.db,
           bootstrap,
         );
       } finally {

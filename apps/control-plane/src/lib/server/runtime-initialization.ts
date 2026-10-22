@@ -94,8 +94,11 @@ export const initializeRuntime = async (
 
     const state = await readInstallation(database.db);
 
-    if (!state.ownerId) {
+    if (!state.ownerId || state.bootstrapPending) {
       const bootstrap = await readBootstrap(configuration);
+
+      if (state.bootstrapPending && !bootstrap)
+        throw new Error("Restore PLATFORM_BOOTSTRAP_FILE to finish the interrupted initialization");
 
       if (bootstrap) {
         await initializeBootstrap(
@@ -105,6 +108,7 @@ export const initializeRuntime = async (
             database.db,
             { encryptionKey: keys.encryption },
           ),
+          database.db,
           bootstrap,
         );
       }

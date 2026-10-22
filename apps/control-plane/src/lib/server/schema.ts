@@ -275,6 +275,7 @@ export const installation = pgTable("installation", {
   usageReporting: boolean("usage_reporting").notNull().default(true),
   crashReporting: boolean("crash_reporting").notNull().default(true),
   ownerId: text("owner_id").references(() => user.id),
+  bootstrapPending: boolean("bootstrap_pending").notNull().default(false),
   localPasswordEnabled: boolean("local_password_enabled").notNull().default(true),
 });
 

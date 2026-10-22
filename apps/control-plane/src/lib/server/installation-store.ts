@@ -49,6 +49,7 @@ export const readInstallation = async (database: DatabaseExecutor) => {
   return {
     settings: await readOrganizationSettings(database, installationOrganizationId),
     ownerId: row.ownerId,
+    bootstrapPending: row.bootstrapPending,
     localPasswordEnabled: row.localPasswordEnabled,
   };
 };
@@ -56,6 +57,7 @@ export const readInstallation = async (database: DatabaseExecutor) => {
 export const createInstallationOwner = async (
   database: Database,
   input: z.infer<typeof setupOwner>,
+  bootstrapPending = false,
 ) => {
   if ((await readInstallation(database)).ownerId)
     throw new InvalidOperation({
@@ -107,7 +109,7 @@ export const createInstallationOwner = async (
     });
     await transaction
       .update(installation)
-      .set({ ownerId: userId })
+      .set({ ownerId: userId, bootstrapPending })
       .where(eq(installation.id, installationId));
 
     return { id: userId, name: owner.name, email: owner.email.toLowerCase() };

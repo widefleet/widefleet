@@ -48,12 +48,12 @@ describe("Organization login settings", () => {
     });
 
     const input = settingsInput.parse({
-      appIdentity: { type: "entra" },
       directory: {
         clientId: `${slug}-directory`,
-        secret: { type: "value", value: `${slug}-directory-secret` },
+        clientSecret: `${slug}-directory-secret`,
       },
       sso: {
+        appIdentityType: "entra",
         providerId: slug,
         domain: "example.test",
         issuer: `${environment.environment.ENTRA_AUTHORITY}/${environment.environment.ENTRA_TENANT_ID}/v2.0`,
@@ -80,10 +80,12 @@ describe("Organization login settings", () => {
       .set({ domainVerified: true })
       .where(eq(ssoProvider.organizationId, organizationId));
 
+    await settings.activateSso(principal);
+
     return { organizationId, principal, input };
   };
 
-  it("rejects foreign stored credentials and preserves them when another organization saves", async () => {
+  it("preserves organization credentials when importing public settings", async () => {
     const first = await company("settings-first");
     const second = await company("settings-second");
     const saved = await settings.read(first.principal);
@@ -100,7 +102,10 @@ describe("Organization login settings", () => {
         false,
         await organizationCredential(environment, second.principal),
       ),
-    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    ).resolves.toMatchObject({ settings: { directory: { clientId: "settings-first-directory" } } });
+    expect((await settings.resolve(second.organizationId)).identity?.directory?.clientSecret).toBe(
+      "settings-second-directory-secret",
+    );
     expect((await settings.resolve(second.organizationId)).identity?.management.clientSecret).toBe(
       "settings-second-management-secret",
     );

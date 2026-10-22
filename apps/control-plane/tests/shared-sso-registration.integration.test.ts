@@ -1,11 +1,13 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { settingsInput } from "@platform/contracts";
 import { createAuthProxy } from "@platform/auth-proxy";
 import { ssoProvider } from "../src/lib/server/auth-schema.ts";
-import { createTestEnvironment } from "./environment.ts";
+import { createTestEnvironment, organizationCredential } from "./environment.ts";
 import { createIdentityProvider } from "./edge/auth-proxy-idp.ts";
+import { editableSettings } from "./settings-input.ts";
+import { EventEmitter, once } from "node:events";
 
 const cookies = (response: Response) =>
   response.headers
@@ -29,7 +31,6 @@ it("uses one native registration for company control-plane and independent app s
     const { headers } = await environment.users.login({ userId: environment.owner.id });
     await environment.settings.initialize(
       settingsInput.parse({
-        appIdentity: { type: "oidc", groupsClaim: "roles" },
         sso: {
           providerId: "shared-company",
           issuer: provider.origin,
@@ -38,7 +39,7 @@ it("uses one native registration for company control-plane and independent app s
             clientId: "app-login",
             clientSecret: "synthetic-client-secret",
             scopes: ["openid", "profile", "email", "groups"],
-            mapping: { name: "display_name", email: "mail" },
+            mapping: { name: "display_name", email: "mail", extraFields: { groups: "roles" } },
           },
         },
       }),
@@ -135,6 +136,76 @@ it("uses one native registration for company control-plane and independent app s
     expect(await app.text()).toBe("Company app");
   } finally {
     await provider.stop();
+    await environment.close();
+  }
+});
+
+it("keeps the native provider and app claims together when settings saves overlap", async () => {
+  const environment = await createTestEnvironment();
+  const gate = new EventEmitter();
+  const firstCommitted = once(gate, "committed");
+  const releaseFirst = once(gate, "resume");
+  const update = environment.auth.api.updateSSOProvider;
+
+  // Pause after the real native transaction, before the remaining settings write.
+  const intercepted = vi
+    .spyOn(environment.auth.api, "updateSSOProvider")
+    .mockImplementation(async (input) => {
+      const result = await update(input);
+
+      if (input?.body.oidcConfig?.mapping?.name === "first_name") {
+        gate.emit("committed");
+        await releaseFirst;
+      }
+
+      return result;
+    });
+
+  try {
+    await environment.database.db.update(ssoProvider).set({ domainVerified: true });
+
+    const { headers } = await organizationCredential(environment, {
+      id: environment.owner.id,
+      application: { organizationId: "widefleet" },
+    });
+
+    const credential = { auth: environment.auth, headers };
+    const firstInput = editableSettings(await environment.settings.inspect());
+
+    if (!firstInput.sso) throw new Error("Missing fixture provider");
+    firstInput.sso.appIdentityType = "entra";
+    firstInput.sso.oidcConfig.mapping.name = "first_name";
+    firstInput.sso.oidcConfig.mapping.extraFields.groups = "first_groups";
+    const secondInput = structuredClone(firstInput);
+
+    if (!secondInput.sso) throw new Error("Missing fixture provider");
+    secondInput.sso.appIdentityType = "oidc";
+    secondInput.sso.oidcConfig.mapping.name = "second_name";
+    secondInput.sso.oidcConfig.mapping.extraFields.groups = "second_groups";
+    const first = environment.settings.initialize(firstInput, "widefleet", credential);
+
+    try {
+      await Promise.race([firstCommitted, first]);
+      await environment.settings.initialize(secondInput, "widefleet", credential);
+    } finally {
+      gate.emit("resume");
+      await first;
+    }
+
+    const saved = await environment.settings.inspect();
+    expect(saved.settings).not.toHaveProperty("appIdentity");
+    expect(saved.sso).toMatchObject({
+      appIdentityType: "oidc",
+      oidcConfig: { mapping: { name: "second_name", extraFields: { groups: "second_groups" } } },
+    });
+    expect(environment.authControl.read().configuration?.provider).toMatchObject({
+      type: "oidc",
+      nameClaim: "second_name",
+      groupsClaim: "second_groups",
+    });
+  } finally {
+    gate.emit("resume");
+    intercepted.mockRestore();
     await environment.close();
   }
 });

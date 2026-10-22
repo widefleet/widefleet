@@ -250,7 +250,6 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         response.end(
           JSON.stringify({
             settings: {
-              appIdentity: { type: "oidc", groupsClaim: "groups" },
               directory: null,
               externallyManaged: false,
             },
@@ -842,7 +841,6 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         settingsFile,
         JSON.stringify({
           sso: null,
-          appIdentity: { type: "oidc", groupsClaim: "groups" },
           directory: null,
           externallyManaged: false,
         }),
@@ -855,7 +853,6 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
 
       expect(JSON.parse((await settingsCli("export")).stdout)).toEqual({
         sso: null,
-        appIdentity: { type: "oidc", groupsClaim: "groups" },
         directory: null,
         externallyManaged: false,
       });

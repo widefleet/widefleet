@@ -4,7 +4,8 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import dns from "node:dns/promises";
 import { syncBuiltinESMExports } from "node:module";
-import { createTestEnvironment } from "./environment.ts";
+import { createTestEnvironment, organizationCredential } from "./environment.ts";
+import { editableSettings } from "./settings-input.ts";
 import { createIdentityProvider } from "./edge/auth-proxy-idp.ts";
 import { organizationSettings } from "../src/lib/server/schema.ts";
 import { createIdentityService } from "../src/lib/server/identity.ts";
@@ -33,7 +34,6 @@ describe("Better Auth SSO provider integration", () => {
     await environment.database.db.update(organizationSettings).set({
       ssoRequired: false,
       settings: {
-        appIdentity: { type: "oidc", groupsClaim: "groups" },
         directory: null,
         externallyManaged: false,
       },
@@ -117,5 +117,44 @@ describe("Better Auth SSO provider integration", () => {
     expect(activated.ssoRequired).toBe(true);
     expect(environment.authControl.read().configuration?.clientId).toBe("app-login");
     expect(await authenticate()).toMatchObject({ error: { code: "SSO_REQUIRED" } });
+  });
+
+  it("publishes updated app claims after re-verifying an activated connection", async () => {
+    const principal = {
+      ...environment.owner,
+      role: "owner" as const,
+      admin: true,
+      creator: true,
+      application: { organizationId: "widefleet", admin: true },
+    };
+
+    const credential = await organizationCredential(environment, principal);
+    const next = editableSettings(await environment.settings.read(principal));
+
+    if (!next.sso) throw new Error("Missing fixture provider");
+    next.sso.domain = "changed.example.test";
+    next.sso.oidcConfig.mapping.extraFields.groups = "roles";
+    await environment.settings.update(
+      principal,
+      { ...next, acknowledgeRestart: false },
+      false,
+      credential,
+    );
+    expect(environment.authControl.read().configuration?.provider).toMatchObject({
+      groupsClaim: "groups",
+    });
+
+    const proof = await environment.settings.domainVerification(
+      principal,
+      credential.auth,
+      credential.headers,
+    );
+
+    resolver.mockResolvedValue([[proof.value]]);
+    await environment.settings.verifyDomain(principal, credential.auth, credential.headers);
+    expect((await environment.settings.read(principal)).ssoRequired).toBe(true);
+    expect(environment.authControl.read().configuration?.provider).toMatchObject({
+      groupsClaim: "roles",
+    });
   });
 });

@@ -37,9 +37,9 @@ describe("Organization settings storage", () => {
       });
 
       const input = settingsInput.parse({
-        appIdentity: { type: "entra" },
         directory: { clientId: name, clientSecret: `${name}-secret` },
         sso: {
+          appIdentityType: "entra",
           providerId: name,
           domain: "example.test",
           issuer: `${environment.environment.ENTRA_AUTHORITY}/${environment.environment.ENTRA_TENANT_ID}/v2.0`,

@@ -183,11 +183,10 @@ export const createTestEnvironment = async (
   const credential = await helpers.login({ userId: owner.id });
   await settings.initialize(
     {
-      appIdentity:
-        provider === "entra" ? { type: "entra" } : { type: "oidc", groupsClaim: "groups" },
       externallyManaged: false,
       directory: null,
       sso: {
+        appIdentityType: provider,
         providerId,
         domain: "example.test",
         issuer: provider === "entra" ? `${emulator.url}/${tenantId}/v2.0` : oidcIssuer,
@@ -196,7 +195,7 @@ export const createTestEnvironment = async (
           clientSecret,
           pkce: true,
           scopes: ["openid", "profile", "email"],
-          mapping: { name: "name", email: "email" },
+          mapping: { name: "name", email: "email", extraFields: { groups: "groups" } },
         },
       },
     },

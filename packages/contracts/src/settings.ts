@@ -49,18 +49,9 @@ export const companyDomain = z
     "Enter the company's email domain, without a URL or wildcard",
   );
 
-// These settings describe app access claims, not the company's SSO connection.
-// Issuer, client credentials and profile mappings belong to the native SSO provider.
-export const appIdentitySettings = z.discriminatedUnion("type", [
-  z.strictObject({ type: z.literal("entra") }),
-  z.strictObject({
-    type: z.literal("oidc"),
-    groupsClaim: claimName.default("groups"),
-  }),
-]);
-
 export const oidcProviderInput = z.strictObject({
   providerId: z.string().min(1),
+  appIdentityType: z.enum(["oidc", "entra"]).default("oidc"),
   issuer: identityUrl,
   domain: companyDomain,
   oidcConfig: z.strictObject({
@@ -72,13 +63,15 @@ export const oidcProviderInput = z.strictObject({
       .object({
         name: claimName.default("name"),
         email: claimName.default("email"),
+        extraFields: z
+          .object({ groups: claimName.default("groups") })
+          .default({ groups: "groups" }),
       })
-      .default({ name: "name", email: "email" }),
+      .default({ name: "name", email: "email", extraFields: { groups: "groups" } }),
   }),
 });
 
 export const installationSettings = z.strictObject({
-  appIdentity: appIdentitySettings.default({ type: "oidc", groupsClaim: "groups" }),
   directory: client.nullable().default(null),
   externallyManaged: z.boolean().default(false),
 });

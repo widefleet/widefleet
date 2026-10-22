@@ -75,7 +75,7 @@ const createOrganizationSettingsService = (
 
     try {
       if (sso?.domainVerified && sso.required) {
-        identity = ssoRuntimeIdentity(sso, state.settings.appIdentity);
+        identity = ssoRuntimeIdentity(sso);
 
         if (state.settings.directory)
           identity.directory = {
@@ -165,6 +165,7 @@ const createOrganizationSettingsService = (
     const sso = connection
       ? {
           providerId: connection.providerId,
+          appIdentityType: connection.appIdentityType,
           issuer: connection.issuer,
           domain: connection.domain,
           domainVerified: connection.domainVerified,
@@ -227,7 +228,7 @@ const createOrganizationSettingsService = (
         });
     }
 
-    if (next.directory && next.appIdentity.type !== "entra")
+    if (next.directory && next.sso?.appIdentityType !== "entra")
       throw new InvalidOperation({
         code: "BAD_REQUEST",
         message: "Microsoft Graph directory search requires Entra app identity",
@@ -281,7 +282,6 @@ const createOrganizationSettingsService = (
           directorySecret: directorySecret ?? null,
           ssoRequired: next.sso ? undefined : false,
           settings: installationSettings.parse({
-            appIdentity: next.appIdentity,
             directory,
             externallyManaged: next.externallyManaged,
           }),
@@ -394,6 +394,8 @@ const createOrganizationSettingsService = (
       await auth.api.verifyDomain({ headers, body: { providerId: provider.providerId } });
       revision.value++;
 
+      if (provider.required) await inspect(true);
+
       return { success: true };
     },
     activateSso: async (principal: Principal) => {
@@ -501,8 +503,8 @@ export const createSettingsService = (
     resolve: (organizationId = installationOrganizationId) => scoped(organizationId).resolve(),
 
     inspect: installed.inspect,
-    createOwner: async (input: z.infer<typeof setupOwner>) => {
-      const owner = await createInstallationOwner(database, input);
+    createOwner: async (input: z.infer<typeof setupOwner>, bootstrapPending = false) => {
+      const owner = await createInstallationOwner(database, input, bootstrapPending);
 
       return owner;
     },

@@ -141,9 +141,9 @@ if (command === "agent") {
       await settings.initialize(
         {
           externallyManaged: false,
-          appIdentity: { type: "entra" },
           directory: null,
           sso: {
+            appIdentityType: "entra",
             providerId: "microsoft",
             domain: "example.test",
             issuer: `${authority}/${tenant}/v2.0`,
@@ -152,7 +152,7 @@ if (command === "agent") {
               clientSecret,
               pkce: true,
               scopes: ["openid", "profile", "email"],
-              mapping: { name: "name", email: "email" },
+              mapping: { name: "name", email: "email", extraFields: { groups: "groups" } },
             },
           },
         },
@@ -165,7 +165,16 @@ if (command === "agent") {
         .update(ssoProvider)
         .set({ domainVerified: true })
         .where(eq(ssoProvider.organizationId, installationId));
-      const applied = await settings.publish();
+
+      const applied = await settings.activateSso({
+        id: "local-admin",
+        name: "Local Administrator",
+        email: "admin@example.test",
+        role: "owner",
+        admin: true,
+        creator: true,
+        application: { organizationId: installationId, admin: true },
+      });
 
       if (applied.error || applied.activation.state !== "active")
         throw new Error(applied.error ?? applied.activation.message);

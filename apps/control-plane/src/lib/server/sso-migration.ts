@@ -51,6 +51,7 @@ export const migrateSsoSettings = async (database: Database, key: string) => {
             id: crypto.randomUUID(),
             organizationId: row.organizationId,
             providerId: companyAccountProvider(identity, row.organizationId),
+            appIdentityType: provider.type,
             issuer: providerIssuer(provider),
             domain: identity.domain ?? "",
             // Earlier configurations did not establish ownership of an email domain.
@@ -65,8 +66,12 @@ export const migrateSsoSettings = async (database: Database, key: string) => {
                 scopes: ["openid", "profile", "email"],
                 mapping:
                   provider.type === "oidc"
-                    ? { name: provider.nameClaim, email: provider.emailClaim }
-                    : { name: "name", email: "email" },
+                    ? {
+                        name: provider.nameClaim,
+                        email: provider.emailClaim,
+                        extraFields: { groups: provider.groupsClaim },
+                      }
+                    : { name: "name", email: "email", extraFields: { groups: "groups" } },
               }),
             ),
           });
@@ -75,10 +80,6 @@ export const migrateSsoSettings = async (database: Database, key: string) => {
 
       const settings = installationSettings.parse({
         externallyManaged: old.externallyManaged,
-        appIdentity:
-          provider?.type === "entra"
-            ? { type: "entra" }
-            : { type: "oidc", groupsClaim: provider?.groupsClaim ?? "groups" },
         directory: identity?.directory ?? null,
       });
 

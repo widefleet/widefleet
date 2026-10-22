@@ -63,6 +63,18 @@ export const companySsoPlugin = (
     // The schema permits one provider per organization, regardless of its creator.
     providersLimit: Number.MAX_SAFE_INTEGER,
     domainVerification: { enabled: true },
+    schema: {
+      ssoProvider: {
+        additionalFields: {
+          appIdentityType: {
+            type: "string",
+            required: false,
+            defaultValue: "oidc",
+            validator: { input: z.enum(["oidc", "entra"]) },
+          },
+        },
+      },
+    },
     resolveUser: async (input) => {
       const [provider] = await database
         .select()

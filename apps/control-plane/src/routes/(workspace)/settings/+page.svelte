@@ -54,12 +54,14 @@
     sso: source.sso
       ? {
           providerId: source.sso.providerId,
+          appIdentityType: source.sso.appIdentityType,
           issuer: source.sso.issuer,
           domain: source.sso.domain,
           oidcConfig: { ...$state.snapshot(source.sso.oidcConfig), clientSecret: "" },
         }
       : {
           providerId: `company-${workspace.organizationId}`,
+          appIdentityType: "oidc",
           issuer: "",
           domain: "",
           oidcConfig: {
@@ -67,7 +69,7 @@
             clientSecret: "",
             pkce: true,
             scopes: ["openid", "profile", "email"],
-            mapping: { name: "name", email: "email" },
+            mapping: { name: "name", email: "email", extraFields: { groups: "groups" } },
           },
         },
   });
@@ -392,13 +394,10 @@
           <Label for="app-identity">App identity claims</Label>
           <NativeSelect
             id="app-identity"
-            value={draft.appIdentity.type}
+            value={draft.sso.appIdentityType}
             onchange={(event) => {
-              draft.appIdentity =
-                event.currentTarget.value === "entra"
-                  ? { type: "entra" }
-                  : { type: "oidc", groupsClaim: "groups" };
-              if (draft.appIdentity.type !== "entra") draft.directory = null;
+              draft.sso.appIdentityType = event.currentTarget.value === "entra" ? "entra" : "oidc";
+              if (draft.sso.appIdentityType !== "entra") draft.directory = null;
             }}
             ><option value="oidc">OpenID Connect</option><option value="entra"
               >Microsoft Entra</option
@@ -425,16 +424,16 @@
                 required
               />
             </div>
-            {#if draft.appIdentity.type === "oidc"}<div class="space-y-2">
+            {#if draft.sso.appIdentityType === "oidc"}<div class="space-y-2">
                 <Label for="groups-claim">App groups</Label><Input
                   id="groups-claim"
-                  bind:value={draft.appIdentity.groupsClaim}
+                  bind:value={draft.sso.oidcConfig.mapping.extraFields.groups}
                   required
                 />
               </div>{/if}
           </div>
         </details>
-        {#if draft.appIdentity.type === "entra"}
+        {#if draft.sso.appIdentityType === "entra"}
           <details class="rounded-lg border p-4">
             <summary class="text-sm font-medium">Directory search</summary>
             <div class="mt-4 space-y-4">

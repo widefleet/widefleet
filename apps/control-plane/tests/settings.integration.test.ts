@@ -21,6 +21,7 @@ import { createTestEnvironment, organizationCredential } from "./environment.ts"
 import { createSettingsService } from "../src/lib/server/settings.ts";
 import type { AppSignIn } from "../src/lib/server/app-sign-in.ts";
 import { createInstalledAppSignIn } from "../src/lib/server/app-sign-in-installed.ts";
+import { createIdentityProvider } from "./edge/auth-proxy-idp.ts";
 
 describe("Platform setup and managed settings", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
@@ -612,7 +613,9 @@ describe("Platform setup and managed settings", () => {
     const initialized = await initializeRuntime(configuration, migrations);
 
     try {
-      expect((await readInstallation(initialized.database.db)).ownerId).not.toBeNull();
+      const state = await readInstallation(initialized.database.db);
+      expect(state.ownerId).not.toBeNull();
+      expect(state.bootstrapPending).toBe(false);
       await initialized.settings.setExternalManagement(principal(), true);
     } finally {
       await initialized.database.close();
@@ -628,4 +631,70 @@ describe("Platform setup and managed settings", () => {
       await restarted.database.close();
     }
   });
+});
+
+it("resumes file initialization with the existing owner after provider discovery fails", async () => {
+  const environment = await createTestEnvironment();
+  const provider = await createIdentityProvider();
+
+  try {
+    const database = environment.database.db;
+    await database.update(installation).set({ ownerId: null });
+    await database.delete(ssoProvider);
+    const bootstrap = join(environment.configuration.PLATFORM_STATE_DIRECTORY, "bootstrap.json");
+    await writeFile(
+      bootstrap,
+      JSON.stringify({
+        owner: {
+          name: "File Owner",
+          email: "file-owner@example.test",
+          password: "bootstrap-password-only",
+        },
+        settings: {
+          sso: {
+            providerId: "file-company",
+            issuer: provider.origin,
+            domain: "example.test",
+            oidcConfig: {
+              clientId: "app-login",
+              clientSecret: "synthetic-client-secret",
+              mapping: { extraFields: { groups: "roles" } },
+            },
+          },
+        },
+      }),
+    );
+    const configuration = { ...environment.configuration, PLATFORM_BOOTSTRAP_FILE: bootstrap };
+    const migrations = fileURLToPath(new URL("../migrations", import.meta.url));
+    provider.settings.available = false;
+
+    await expect(initializeRuntime(configuration, migrations)).rejects.toThrow();
+    const interrupted = await readInstallation(database);
+    expect(interrupted.ownerId).not.toBeNull();
+    expect(interrupted.bootstrapPending).toBe(true);
+    expect(await database.select().from(ssoProvider)).toHaveLength(0);
+    await expect(initializeRuntime(environment.configuration, migrations)).rejects.toThrow(
+      "Restore PLATFORM_BOOTSTRAP_FILE",
+    );
+
+    provider.settings.available = true;
+    const resumed = await initializeRuntime(configuration, migrations);
+
+    try {
+      const state = await readInstallation(database);
+      expect(state.ownerId).toBe(interrupted.ownerId);
+      expect(state.bootstrapPending).toBe(false);
+      expect((await resumed.settings.inspect()).sso?.oidcConfig.mapping.extraFields.groups).toBe(
+        "roles",
+      );
+      expect(
+        await database.select().from(user).where(eq(user.email, "file-owner@example.test")),
+      ).toHaveLength(1);
+    } finally {
+      await resumed.database.close();
+    }
+  } finally {
+    await provider.stop();
+    await environment.close();
+  }
 });

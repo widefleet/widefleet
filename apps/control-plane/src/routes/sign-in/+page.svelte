@@ -51,14 +51,8 @@
         const result = await authClient.signIn.emailOtp({ email, otp });
 
         if (result.error) message = "Invalid or expired code. Request another code and try again.";
-        else if (!oauthRedirect.safeParse(result.data).success) {
-          if (data.provider && data.organizationSlug) {
-            await goto(
-              `/sign-in?${new URLSearchParams({ organization: data.organizationSlug, next: data.next })}`,
-              { invalidateAll: true },
-            );
-          } else await goto(data.next, { invalidateAll: true });
-        }
+        else if (!oauthRedirect.safeParse(result.data).success)
+          await goto(data.next, { invalidateAll: true });
       }
     } catch {
       message = "Sign-in is temporarily unavailable. Check your connection.";

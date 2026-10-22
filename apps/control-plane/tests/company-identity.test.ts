@@ -36,8 +36,8 @@ describe("company identity settings", () => {
 
   it("accepts one native SSO registration and independent directory credentials", () => {
     const settings = settingsInput.parse({
-      appIdentity: { type: "entra" },
       sso: {
+        appIdentityType: "entra",
         providerId: "company",
         issuer: "https://login.example.test",
         domain: "example.test",

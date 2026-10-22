@@ -58,10 +58,15 @@ export const createReporting = (
       errors = 0;
     }
 
+    const provider = await readSsoProvider(database, installationOrganizationId);
+
     return {
       installationId: record.reportingId,
-      identity: (await readSsoProvider(database, installationOrganizationId))
-        ? await readOrganizationSettings(database, installationOrganizationId)
+      identity: provider
+        ? {
+            ...(await readOrganizationSettings(database, installationOrganizationId)),
+            appIdentityType: provider.appIdentityType,
+          }
         : null,
       preferences: { usage: record.usageReporting, crashes: record.crashReporting },
       effective: {
@@ -158,7 +163,7 @@ export const createReporting = (
     },
   });
 
-  const snapshot = async (company: z.infer<typeof contract.installationSettings> | null) => {
+  const snapshot = async (company: Awaited<ReturnType<typeof state>>["identity"]) => {
     const [applicationCounts] = await database
       .select({
         apps: sql<number>`count(*) filter (where ${isNull(apps.parentId)})`.mapWith(Number),
@@ -202,7 +207,7 @@ export const createReporting = (
       os: platform(),
       arch: arch(),
       storage: configuration.ARTIFACT_STORAGE_PROVIDER,
-      authentication: company?.appIdentity.type ?? "local",
+      authentication: company?.appIdentityType ?? "local",
       directory_lookup: company?.directory !== null && company?.directory !== undefined,
       runtime_versions: runtimeVersions,
       runtime_versions_capped: runtimeRows.length > 20,
