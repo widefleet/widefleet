@@ -1,8 +1,9 @@
-import { createAuthenticationAdmission } from "./auth-admission.ts";
-import type { OrganizationAccess } from "./application-context.ts";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { DEVICE_CODE_GRANT_TYPE } from "@better-auth/oauth-provider";
+import { APIError } from "better-auth/api";
+import type { JSONWebKeySet } from "jose";
+import { installationOrganizationId } from "../organization.ts";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { eq, sql } from "drizzle-orm";
@@ -16,16 +17,22 @@ import {
 import * as authSchema from "./auth-schema.ts";
 import type { Configuration } from "./config.ts";
 import type { Database, DatabaseExecutor } from "./database.ts";
-import { enrollCompanyUser } from "./organization.ts";
-import { companyAccountProvider } from "./company-identity.ts";
+import { readSsoConfiguration } from "./sso-settings.ts";
+import { createAuthenticationAdmission } from "./auth-admission.ts";
+import type { OrganizationAccess } from "./application-context.ts";
+import { companySsoOrigins, companySsoPlugin } from "./company-sso.ts";
+import { pluginAuthentication, managedPluginPaths } from "./plugin-authentication.ts";
 
-export const companyLoginRevision = (configuration: Configuration) =>
-  configuration.IDENTITY
+export const companyLoginRevision = (
+  connection: Awaited<ReturnType<typeof readSsoConfiguration>>,
+) =>
+  connection
     ? createHash("sha256")
         .update(
           JSON.stringify({
-            provider: configuration.IDENTITY.provider,
-            management: configuration.IDENTITY.management,
+            providerId: connection.providerId,
+            issuer: connection.issuer,
+            oidcConfig: connection.oidcConfig,
           }),
         )
         .digest("hex")
@@ -36,13 +43,68 @@ export const createAuthentication = (
   database: DatabaseExecutor,
   options: Parameters<typeof authenticationOptions>[1] & {
     organizationAccess?: OrganizationAccess;
+    encryptionKey?: string;
   } = {},
-) =>
-  betterAuth({
-    ...authenticationOptions(configuration, {
-      ...options,
-      ...createAuthenticationAdmission(database, options.organizationAccess),
-    }),
+) => {
+  const settings = authenticationOptions(configuration, {
+    ...createAuthenticationAdmission(database, options.organizationAccess),
+    ...options,
+  });
+
+  const encryptionKey =
+    options.encryptionKey ??
+    configuration.PLATFORM_ENCRYPTION_KEY ??
+    configuration.BETTER_AUTH_SECRET;
+
+  if (!encryptionKey) throw new Error("An encryption key is required for authentication");
+
+  let readKeys: () => Promise<JSONWebKeySet> = async () => {
+    throw new Error("Authentication is initializing");
+  };
+
+  const authorizePlugin = pluginAuthentication(
+    database,
+    configuration,
+    () => readKeys(),
+    options.organizationAccess,
+  );
+
+  const auth = betterAuth({
+    ...settings,
+    disabledPaths: [
+      ...settings.disabledPaths,
+      ...managedPluginPaths.filter((path) => path !== "/organization/update-member-role"),
+    ],
+    trustedOrigins: (request) => companySsoOrigins(database, configuration.PLATFORM_URL, request),
+    plugins: [
+      ...settings.plugins,
+      companySsoPlugin(database, encryptionKey, options.organizationAccess),
+      {
+        id: "management-credentials",
+        // These library endpoints are invoked by the shared services. Exposing
+        // them directly would skip admission, last-owner serialization and UI/API policy.
+        onRequest: async (request) => {
+          const path = new URL(request.url).pathname;
+
+          if (
+            (path.startsWith("/api/auth/organization/") &&
+              path !== "/api/auth/organization/update-member-role") ||
+            (path.startsWith("/api/auth/sso/") && !path.startsWith("/api/auth/sso/callback/"))
+          )
+            return { response: new Response("Not Found", { status: 404 }) };
+
+          return undefined;
+        },
+        hooks: {
+          before: [
+            {
+              matcher: (context) => managedPluginPaths.includes(context.path ?? ""),
+              handler: authorizePlugin,
+            },
+          ],
+        },
+      },
+    ],
     database: drizzleAdapter(database, { provider: "pg", schema: authSchema, transaction: true }),
     databaseHooks: {
       session: {
@@ -60,32 +122,59 @@ export const createAuthentication = (
           },
         },
         create: {
-          before: async (record, context) => ({
-            data: {
-              ...record,
-              companyConfiguration:
-                configuration.IDENTITY &&
-                context?.path.startsWith("/callback/") &&
-                context.params?.["id"] === companyAccountProvider(configuration.IDENTITY)
-                  ? companyLoginRevision(configuration)
-                  : "",
-            },
-          }),
-        },
-      },
-      account: {
-        create: {
-          after: async (identity) => {
-            if (
-              configuration.IDENTITY &&
-              identity.providerId === companyAccountProvider(configuration.IDENTITY)
-            )
-              await enrollCompanyUser(database, identity.userId);
+          before: async (record, context) => {
+            const providerId = context?.path.startsWith("/sso/callback/")
+              ? context.params?.["providerId"]
+              : undefined;
+
+            const [provider] = providerId
+              ? await database
+                  .select()
+                  .from(authSchema.ssoProvider)
+                  .where(eq(authSchema.ssoProvider.providerId, providerId))
+              : [];
+
+            if (providerId && !provider?.domainVerified)
+              throw new APIError("FORBIDDEN", { message: "Company SSO is not verified" });
+            let revision = "";
+
+            if (provider && context) {
+              const subject = await context.context.internalAdapter.findUserById(record.userId);
+
+              // Domain ownership proves matching addresses, not external guests' email.
+              if (
+                subject &&
+                !subject.emailVerified &&
+                subject.email.toLowerCase().split("@")[1] === provider.domain
+              )
+                await context.context.internalAdapter.updateUser(record.userId, {
+                  emailVerified: true,
+                });
+
+              revision = companyLoginRevision(
+                await readSsoConfiguration(database, encryptionKey, provider.organizationId),
+              );
+            }
+
+            return {
+              data: {
+                ...record,
+                identityOrganizationId:
+                  provider?.organizationId ??
+                  (record["recovery"] === true ? installationOrganizationId : null),
+                companyConfiguration: revision,
+              },
+            };
           },
         },
       },
     },
   });
+
+  readKeys = () => auth.api.getJwks();
+
+  return auth;
+};
 
 export type Authentication = ReturnType<typeof createAuthentication>;
 

@@ -19,6 +19,8 @@ export * from "./directory.ts";
 
 export * from "./organizations.ts";
 
+export * from "./members.ts";
+
 export * from "./reporting.ts";
 
 export const protocolVersion = 1;

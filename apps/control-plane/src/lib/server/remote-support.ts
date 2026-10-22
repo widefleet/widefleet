@@ -1,3 +1,4 @@
+import { APIError } from "better-auth/api";
 import { getRequestEvent } from "$app/server";
 import { error, invalid } from "@sveltejs/kit";
 import type { Result } from "better-result";
@@ -52,6 +53,8 @@ export const remoteOperation = async <T>(operation: () => Promise<T>) => {
     return await operation();
   } catch (cause) {
     if (cause instanceof InvalidOperation) pageFailure(cause);
+
+    if (cause instanceof APIError) error(cause.statusCode, cause.message);
     throw cause;
   }
 };

@@ -238,8 +238,8 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
             await env.WIDEFLEET_PACKAGES.put('apps/${appId}/modules/${hash}', ${JSON.stringify(applicationSource)});
             await env.WIDEFLEET_PACKAGES.put('versions/${appId}/${version}.json', JSON.stringify(app));
             await env.WIDEFLEET_PACKAGES.put('hosts/fixture.apps.example.test.json', JSON.stringify(app));
-            await env.AUTH_CONFIG.put('configuration', ${JSON.stringify(authConfiguration)});
-            for (const hostname of ['fixture.apps.example.test', 'spa.apps.example.test']) await env.AUTH_CONFIG.put('apps/' + hostname, JSON.stringify({appId:app.appId,access:{revision:0,groups:[]}}));
+            await env.AUTH_CONFIG.put('organizations/widefleet/configuration', ${JSON.stringify(authConfiguration)});
+            for (const hostname of ['fixture.apps.example.test', 'spa.apps.example.test']) await env.AUTH_CONFIG.put('apps/' + hostname, JSON.stringify({organizationId:"widefleet",appId:app.appId,access:{revision:0,groups:[]}}));
             return Response.json({ ok: true });
           }
           if (path === '/fixture/deploy') {

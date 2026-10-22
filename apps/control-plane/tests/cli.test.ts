@@ -249,7 +249,11 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       ) {
         response.end(
           JSON.stringify({
-            settings: { identity: null, externallyManaged: false },
+            settings: {
+              directory: null,
+              externallyManaged: false,
+            },
+            sso: null,
             activation: { state: "active" },
           }),
         );
@@ -833,7 +837,14 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
 
     it("exports settings and requires explicit acknowledgement of the server's restart plan", async () => {
       const settingsFile = join(state, "settings.json");
-      await writeFile(settingsFile, JSON.stringify({ identity: null, externallyManaged: false }));
+      await writeFile(
+        settingsFile,
+        JSON.stringify({
+          sso: null,
+          directory: null,
+          externallyManaged: false,
+        }),
+      );
 
       const settingsCli = (...args: string[]) =>
         execute(join(state, "installation", executableName), ["settings", ...args], {
@@ -841,7 +852,8 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         });
 
       expect(JSON.parse((await settingsCli("export")).stdout)).toEqual({
-        identity: null,
+        sso: null,
+        directory: null,
         externallyManaged: false,
       });
       const planned = await settingsCli("plan", "--file", settingsFile);

@@ -98,6 +98,7 @@ describe("Installation organization", () => {
       body: {
         payload: {
           sub: candidate.record.id,
+          reference_id: `user:${candidate.record.id}`,
           aud: apiResource(environment.configuration),
           iss: `${environment.configuration.PLATFORM_URL}/api/auth`,
           iat: now,

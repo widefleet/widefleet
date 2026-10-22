@@ -1,4 +1,4 @@
-import { appAccessSnapshot } from "@platform/contracts";
+import { appAccessSnapshot, organizationIdentifier } from "@platform/contracts";
 import { symmetricDecrypt, symmetricEncrypt } from "better-auth/crypto";
 import { z } from "zod";
 import { authConfiguration, type AuthConfiguration } from "./configuration.ts";
@@ -6,6 +6,7 @@ import { authConfiguration, type AuthConfiguration } from "./configuration.ts";
 export const authHostname = z.string().regex(/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/);
 
 export const authRoute = z.strictObject({
+  organizationId: organizationIdentifier,
   appId: z.uuid(),
   access: appAccessSnapshot,
 });
@@ -47,3 +48,6 @@ export const decodeConfiguration = async (key: string, value: string) => {
 export const authControlPath = "/.well-known/widefleet/auth";
 
 export const authRouteKey = (hostname: string) => `apps/${authHostname.parse(hostname)}`;
+
+export const authConfigurationKey = (organizationId: string) =>
+  `organizations/${organizationIdentifier.parse(organizationId)}/configuration`;

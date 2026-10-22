@@ -29,55 +29,56 @@ export const companyProvider = z.discriminatedUnion("type", [
     issuer: identityUrl,
     label: z.string().min(1).max(100),
     groupsClaim: claimName.default("groups"),
+    organizationClaim: claimName.optional(),
     nameClaim: claimName.default("name"),
     emailClaim: claimName.default("email"),
   }),
 ]);
 
-// External providers can be added here without changing the settings that use secrets.
-export const secretReference = z.strictObject({ type: z.literal("stored"), id: z.uuid() });
+const client = z.strictObject({ clientId: z.string().min(1).max(512) });
 
-export const secretInput = z.union([
-  secretReference,
-  z.strictObject({ type: z.literal("value"), value: z.string().min(1).max(16_384) }),
-]);
+const clientInput = client.extend({ clientSecret: z.string().min(1).max(16_384).optional() });
 
-const client = z.strictObject({ clientId: z.string().min(1).max(512), secret: secretReference });
+export const companyDomain = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .max(253)
+  .regex(
+    /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/,
+    "Enter the company's email domain, without a URL or wildcard",
+  );
 
-const clientInput = client.extend({ secret: secretInput });
-
-export const identitySettings = z
-  .strictObject({
-    provider: companyProvider,
-    management: client,
-    apps: client,
-    directory: client.nullable().default(null),
-  })
-  .refine((value) => !value.directory || value.provider.type === "entra", {
-    message: "Microsoft Graph directory search requires an Entra provider",
-    path: ["directory"],
-  });
-
-export const identitySettingsInput = z
-  .strictObject({
-    provider: companyProvider,
-    management: clientInput,
-    apps: clientInput,
-    directory: clientInput.nullable().default(null),
-  })
-  .refine((value) => !value.directory || value.provider.type === "entra", {
-    message: "Microsoft Graph directory search requires an Entra provider",
-    path: ["directory"],
-  });
+export const oidcProviderInput = z.strictObject({
+  providerId: z.string().min(1),
+  appIdentityType: z.enum(["oidc", "entra"]).default("oidc"),
+  issuer: identityUrl,
+  domain: companyDomain,
+  oidcConfig: z.strictObject({
+    clientId: z.string().min(1).max(512),
+    clientSecret: z.string().min(1).max(16_384).optional(),
+    pkce: z.boolean().default(true),
+    scopes: z.array(z.string()).default(["openid", "profile", "email"]),
+    mapping: z
+      .object({
+        name: claimName.default("name"),
+        email: claimName.default("email"),
+        extraFields: z
+          .object({ groups: claimName.default("groups") })
+          .default({ groups: "groups" }),
+      })
+      .default({ name: "name", email: "email", extraFields: { groups: "groups" } }),
+  }),
+});
 
 export const installationSettings = z.strictObject({
-  identity: identitySettings.nullable().default(null),
+  directory: client.nullable().default(null),
   externallyManaged: z.boolean().default(false),
 });
 
-export const settingsInput = z.strictObject({
-  identity: identitySettingsInput.nullable(),
-  externallyManaged: z.boolean(),
+export const settingsInput = installationSettings.extend({
+  directory: clientInput.nullable().default(null),
+  sso: oidcProviderInput.nullable(),
 });
 
 export const settingsUpdate = settingsInput.extend({
@@ -103,11 +104,21 @@ export const activationStatus = z.strictObject({
 
 export const settingsView = z.strictObject({
   settings: installationSettings,
+  ssoRequired: z.boolean(),
   localPasswordEnabled: z.boolean(),
   managementCallbackUrl: z.string().nullable(),
   appCallbackUrl: z.url(),
   activation: activationStatus,
   error: z.string().nullable(),
+  sso: oidcProviderInput
+    .extend({ domain: z.union([companyDomain, z.literal("")]), domainVerified: z.boolean() })
+    .nullable(),
+});
+
+export const domainVerification = z.object({
+  name: z.string(),
+  type: z.literal("TXT"),
+  value: z.string(),
 });
 
 export const settingsPlan = z.strictObject({

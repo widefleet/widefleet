@@ -1,7 +1,9 @@
 import type { KVNamespace } from "@cloudflare/workers-types";
+import { organizationIdentifier } from "@platform/contracts";
 import { authConfiguration } from "./configuration.ts";
 import {
   authControlPath,
+  authConfigurationKey,
   authRoute,
   authRouteKey,
   decodeConfiguration,
@@ -20,18 +22,28 @@ const reply = (status: number, message: string) =>
     headers: { "cache-control": "no-store" },
   });
 
-const configuration = async (environment: AuthEnvironment) => {
-  const value = await environment.AUTH_CONFIG.get("configuration");
+const configuration = async (environment: AuthEnvironment, organizationId: string) => {
+  const value = await environment.AUTH_CONFIG.get(authConfigurationKey(organizationId));
 
-  return value ? decodeConfiguration(environment.WIDEFLEET_CONTROL_TOKEN, value) : null;
+  if (!value) return null;
+  const stored = await decodeConfiguration(environment.WIDEFLEET_CONTROL_TOKEN, value);
+
+  if (stored.configuration.organizationId !== organizationId)
+    throw new Error("Sign-in configuration belongs to a different organization");
+
+  return stored;
 };
 
 const control = async (request: Request, environment: AuthEnvironment) => {
   const path = new URL(request.url).pathname.slice(authControlPath.length);
 
-  if (path === "/configuration") {
+  const match = /^\/organizations\/([A-Za-z0-9_-]+)\/configuration$/.exec(path);
+
+  if (match) {
+    const organizationId = organizationIdentifier.parse(match[1]);
+
     if (request.method === "GET") {
-      const current = await configuration(environment);
+      const current = await configuration(environment, organizationId);
 
       return Response.json(
         current
@@ -52,8 +64,11 @@ const control = async (request: Request, environment: AuthEnvironment) => {
 
     if (request.method === "PUT") {
       const input = authConfiguration.parse(await request.json());
+
+      if (input.organizationId !== organizationId)
+        return reply(400, "Organization does not match configuration");
       await environment.AUTH_CONFIG.put(
-        "configuration",
+        authConfigurationKey(organizationId),
         await encodeConfiguration(environment.WIDEFLEET_CONTROL_TOKEN, input),
       );
 
@@ -112,12 +127,9 @@ export const createAuthHandler = (
       return manageAuthConfiguration(request, environment);
     }
 
-    let phase = "configuration";
+    let phase = "app-route";
 
     try {
-      const installed = await configuration(environment);
-
-      if (!installed) return reply(503, "Company sign-in is not configured");
       const routes = new Map<string, Promise<ReturnType<typeof authRoute.parse> | null>>();
 
       const resolve = (hostname: string) => {
@@ -134,17 +146,36 @@ export const createAuthHandler = (
         return route;
       };
 
+      const route = await resolve(url.hostname);
+
+      // App hostnames select their owner from the published route. Only the auth
+      // host can dispatch by callback path; the proxy checks that host below.
+      const callback = /^\/oauth2\/([A-Za-z0-9_-]+)\/(?:start|callback|error|sign_out)$/.exec(
+        url.pathname,
+      );
+
+      const organizationId = route?.organizationId ?? callback?.[1];
+
+      if (!organizationId) return reply(404, "Not found");
+      phase = "configuration";
+      const installed = await configuration(environment, organizationId);
+
+      if (!installed)
+        return route
+          ? reply(503, "Organization sign-in is not configured")
+          : reply(404, "Not found");
+
       const proxy = createAuthProxy(installed.configuration, {
         resolve: async (hostname) => {
           const route = await resolve(hostname);
           phase = "authentication";
 
-          return route?.access ?? null;
+          return route?.organizationId === organizationId ? route.access : null;
         },
         fetch: async (forwarded) => {
           const route = await resolve(new URL(forwarded.url).hostname);
 
-          if (!route) return reply(404, "Not found");
+          if (!route || route.organizationId !== organizationId) return reply(404, "Not found");
           phase = "app-runtime";
 
           return runApp(forwarded, route.appId);
@@ -153,8 +184,7 @@ export const createAuthHandler = (
 
       phase = "authentication";
       const response = await proxy.fetch(request);
-      const route = routes.get(url.hostname);
-      const resolved = route ? await route : null;
+      const resolved = await routes.get(url.hostname);
 
       if (resolved)
         response.headers.set(

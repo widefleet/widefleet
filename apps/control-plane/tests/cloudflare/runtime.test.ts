@@ -244,11 +244,14 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
     worker = await start();
     expect(
       (
-        await worker.fetch("https://auth.example.test/.well-known/widefleet/auth/configuration", {
-          method: "PUT",
-          headers: { "x-fixture-management": "true" },
-          body: JSON.stringify(identity.configuration),
-        })
+        await worker.fetch(
+          "https://auth.example.test/.well-known/widefleet/auth/organizations/widefleet/configuration",
+          {
+            method: "PUT",
+            headers: { "x-fixture-management": "true" },
+            body: JSON.stringify(identity.configuration),
+          },
+        )
       ).status,
     ).toBe(204);
     await publish(app);
@@ -269,7 +272,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
       "/.well-known/widefleet/runtime",
       "/.well-known/widefleet/ready",
       "/.well-known/widefleet/workflows",
-      "/.well-known/widefleet/auth/configuration",
+      "/.well-known/widefleet/auth/organizations/widefleet/configuration",
     ]) {
       for (const authorization of [
         "",

@@ -1,3 +1,4 @@
+import { editableSettings } from "./settings-input.ts";
 import {
   connectorUploadForm,
   connectorModule,
@@ -44,13 +45,13 @@ import {
   jobs,
   runtimeReleases,
   connectors,
-  organizationSecrets,
+  organizationSettings,
 } from "../src/lib/server/schema.ts";
 import { InvalidOperation, StorageUnavailable } from "../src/lib/server/errors.ts";
 import { transact } from "../src/lib/server/transactions.ts";
 import { createStorage } from "../src/lib/server/storage.ts";
 import { createUploadService } from "../src/lib/server/uploads.ts";
-import { createTestEnvironment } from "./environment.ts";
+import { createTestEnvironment, organizationCredential } from "./environment.ts";
 import { createTelemetry } from "../src/lib/server/telemetry.ts";
 
 describe("Platform API with PostgreSQL and RustFS", () => {
@@ -1277,6 +1278,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       body: {
         payload: {
           sub: outsiderId,
+          reference_id: `user:${outsiderId}`,
           aud: apiResource(environment.configuration),
           iss: `${environment.configuration.PLATFORM_URL}/api/auth`,
           iat: now,
@@ -1493,6 +1495,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       body: {
         payload: {
           sub: before.ownerId,
+          reference_id: `user:${before.ownerId}`,
           aud: apiResource(environment.configuration),
           iss: `${environment.configuration.PLATFORM_URL}/api/auth`,
           iat: now,
@@ -1872,6 +1875,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
         body: {
           payload: {
             sub: subject,
+            reference_id: `user:${subject}`,
             aud: apiResource(environment.configuration),
             iss: `${environment.configuration.PLATFORM_URL}/api/auth`,
             iat: now,
@@ -2360,7 +2364,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     expect((await json(secretPath, "PUT", { value: "é".repeat(2501) })).status).toBe(400);
     expect((await json(secretPath, "PUT", { value: "x".repeat(5001) })).status).toBe(400);
 
-    const loginSecrets = await environment.database.db.select().from(organizationSecrets);
+    const loginSecrets = await environment.database.db.select().from(organizationSettings);
 
     const first = contract.connectorStatus.parse(
       await (await json(secretPath, "PUT", { value: firstValue })).json(),
@@ -2381,10 +2385,9 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     );
 
     expect(second.secretRevision).toBe(2);
-    expect(await environment.database.db.select().from(organizationSecrets)).toEqual(loginSecrets);
+    expect(await environment.database.db.select().from(organizationSettings)).toEqual(loginSecrets);
 
-    // Saving unchanged login settings still runs its credential cleanup. Both
-    // the claimed and newer queued connector snapshots must remain decryptable.
+    // Updating login settings must leave connector snapshots decryptable.
     const owner = {
       ...environment.owner,
       application: { ...environment.application, admin: true },
@@ -2393,11 +2396,14 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       creator: true,
     };
 
-    const settings = contract.settingsInput.parse(
-      (await environment.settings.read(owner)).settings,
-    );
+    const settings = editableSettings(await environment.settings.read(owner));
 
-    await environment.settings.update(owner, { ...settings, acknowledgeRestart: false }, true);
+    await environment.settings.update(
+      owner,
+      { ...settings, acknowledgeRestart: false },
+      true,
+      await organizationCredential(environment, owner),
+    );
     const snapshot = await packages(leased);
     expect(snapshot.connectorSecrets["erp-api"]).toEqual({ API_KEY: firstValue });
     expect(JSON.stringify(snapshot.connectors)).not.toContain(firstValue);
@@ -2417,7 +2423,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     ).not.toBe(200);
 
     const persisted = JSON.stringify([
-      await environment.database.db.select().from(organizationSecrets),
+      await environment.database.db.select().from(organizationSettings),
       await environment.database.db.select().from(connectors),
       await environment.database.db.select().from(jobs),
     ]);

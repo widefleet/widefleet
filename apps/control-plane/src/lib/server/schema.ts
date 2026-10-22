@@ -275,6 +275,7 @@ export const installation = pgTable("installation", {
   usageReporting: boolean("usage_reporting").notNull().default(true),
   crashReporting: boolean("crash_reporting").notNull().default(true),
   ownerId: text("owner_id").references(() => user.id),
+  bootstrapPending: boolean("bootstrap_pending").notNull().default(false),
   localPasswordEnabled: boolean("local_password_enabled").notNull().default(true),
 });
 
@@ -283,12 +284,6 @@ export const organizationSettings = pgTable("organization_settings", {
     .primaryKey()
     .references(() => organization.id),
   settings: jsonb().notNull(),
-});
-
-export const organizationSecrets = pgTable("organization_secret", {
-  id: text().primaryKey(),
-  organizationId: text("organization_id")
-    .notNull()
-    .references(() => organization.id),
-  ciphertext: text().notNull(),
+  directorySecret: text("directory_secret"),
+  ssoRequired: boolean("sso_required").notNull().default(false),
 });

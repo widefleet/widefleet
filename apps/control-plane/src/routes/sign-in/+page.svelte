@@ -51,9 +51,8 @@
         const result = await authClient.signIn.emailOtp({ email, otp });
 
         if (result.error) message = "Invalid or expired code. Request another code and try again.";
-        else if (!oauthRedirect.safeParse(result.data).success) {
+        else if (!oauthRedirect.safeParse(result.data).success)
           await goto(data.next, { invalidateAll: true });
-        }
       }
     } catch {
       message = "Sign-in is temporarily unavailable. Check your connection.";
@@ -68,9 +67,9 @@
     message = "";
 
     try {
-      const input = { provider: data.provider, callbackURL: data.next };
+      const input = { providerId: data.provider, callbackURL: data.next };
 
-      const result = await authClient.signIn.social(input);
+      const result = await authClient.signIn.sso(input);
 
       if (result.error) {
         message = "Could not start sign-in. Please try again.";
@@ -113,7 +112,9 @@
   <p class="text-muted-foreground mt-3 text-sm leading-6">
     {data.next.startsWith("/device")
       ? "Sign in to review the request from your terminal and connect your CLI."
-      : "Sign in to continue to your workspace."}
+      : data.organizationName
+        ? `Sign in to ${data.organizationName}.`
+        : "Sign in to continue to your workspace."}
   </p>
   {#if data.provider}<Button onclick={signIn} disabled={busy} class="mt-7 h-10 w-full"
       >{busy ? "Opening sign-in …" : `Sign in with ${data.label}`}<ArrowRight /></Button
@@ -165,6 +166,26 @@
         >{/if}
     </form>
   {/if}
+  <details class="mt-6 border-t pt-5">
+    <summary class="text-sm font-medium"
+      >{data.provider ? "Sign in to another organization" : "Sign in with company SSO"}</summary
+    >
+    <form method="GET" class="mt-4 space-y-3">
+      <input type="hidden" name="next" value={data.next} />
+      <Label for="organization-slug">Organization slug</Label>
+      <Input
+        id="organization-slug"
+        name="organization"
+        required
+        value={data.organizationSlug ?? ""}
+        placeholder="acme"
+      />
+      <Button type="submit" variant="outline" class="w-full">Continue</Button>
+      {#if data.organizationSlug && !data.provider}<Feedback kind="error"
+          >Company sign-in is not configured for this organization.</Feedback
+        >{/if}
+    </form>
+  </details>
   {#if data.localPasswordEnabled}
     <details open={!data.provider} class="mt-6 border-t pt-5">
       <summary class="text-sm font-medium">Continue setup</summary>

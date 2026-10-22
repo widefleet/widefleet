@@ -5,14 +5,11 @@ import { fileURLToPath } from "node:url";
 import { eq, sql } from "drizzle-orm";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { editableSettings } from "./settings-input.ts";
 import { installationSettings, settingsInput } from "@platform/contracts";
 import { createAuthentication, companyLoginRevision } from "../src/lib/server/auth.ts";
-import { member, session, user } from "../src/lib/server/auth-schema.ts";
-import {
-  installation,
-  organizationSettings,
-  organizationSecrets,
-} from "../src/lib/server/schema.ts";
+import { member, session, user, ssoProvider } from "../src/lib/server/auth-schema.ts";
+import { installation, organizationSettings } from "../src/lib/server/schema.ts";
 import {
   createInstallationOwner,
   installationId,
@@ -20,15 +17,18 @@ import {
 } from "../src/lib/server/installation-store.ts";
 import { createRecoveryLink } from "../src/lib/server/recovery.ts";
 import { createIdentityService } from "../src/lib/server/identity.ts";
-import { createTestEnvironment } from "./environment.ts";
+import { createTestEnvironment, organizationCredential } from "./environment.ts";
 import { createSettingsService } from "../src/lib/server/settings.ts";
 import type { AppSignIn } from "../src/lib/server/app-sign-in.ts";
 import { createInstalledAppSignIn } from "../src/lib/server/app-sign-in-installed.ts";
+import { createIdentityProvider } from "./edge/auth-proxy-idp.ts";
 
 describe("Platform setup and managed settings", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
   beforeAll(async () => {
     environment = await createTestEnvironment();
+    await environment.database.db.update(ssoProvider).set({ domainVerified: true });
+    await environment.settings.publish();
   });
   afterAll(async () => {
     await environment.close();
@@ -42,8 +42,7 @@ describe("Platform setup and managed settings", () => {
     creator: true,
   });
 
-  const input = async () =>
-    settingsInput.parse((await environment.settings.read(principal())).settings);
+  const input = async () => editableSettings(await environment.settings.read(principal()));
 
   it("claims first-administrator setup once and stores a Better Auth password account", async () => {
     await environment.database.db
@@ -85,61 +84,55 @@ describe("Platform setup and managed settings", () => {
   it("encrypts entered credentials and never returns them in settings", async () => {
     const current = await input();
 
-    if (!current.identity) throw new Error("Expected configured identity");
-    current.identity.management.secret = { type: "value", value: "private-management-secret" };
+    if (!current.sso) throw new Error("Expected configured identity");
+    current.sso.oidcConfig.clientSecret = "private-management-secret";
 
     const result = await environment.settings.update(
       principal(),
       { ...current, acknowledgeRestart: false },
       true,
+      await organizationCredential(environment, principal()),
     );
 
     expect(JSON.stringify(result)).not.toContain("private-management-secret");
-    expect(result.settings.identity?.management.secret).toMatchObject({ type: "stored" });
-
-    const reference = result.settings.identity?.management.secret;
-
-    if (reference?.type !== "stored") throw new Error("Expected a stored secret reference");
+    expect(result.sso?.oidcConfig).not.toHaveProperty("clientSecret");
 
     const [stored] = await environment.database.db
       .select()
-      .from(organizationSecrets)
-      .where(eq(organizationSecrets.id, reference.id));
+      .from(ssoProvider)
+      .where(eq(ssoProvider.organizationId, "widefleet"));
 
-    expect(stored?.ciphertext).not.toContain("private-management-secret");
+    expect(stored?.oidcConfig).not.toContain("private-management-secret");
     expect((await environment.settings.resolve()).identity?.management.clientSecret).toBe(
       "private-management-secret",
     );
     expect(() =>
-      installationSettings.parse({ ...result.settings, identity: current.identity }),
+      installationSettings.parse({ ...result.settings, identity: current.sso }),
     ).toThrow();
   });
 
-  it("preserves other clients sharing a stored secret when one client replaces it", async () => {
+  it("preserves the native secret on export/import and publishes one registration to apps", async () => {
     const current = await input();
-
-    if (!current.identity) throw new Error("Expected configured identity");
-    current.identity.apps.secret = current.identity.management.secret;
-    await environment.settings.update(principal(), { ...current, acknowledgeRestart: false }, true);
-    current.identity.management.secret = { type: "value", value: "replacement-management-secret" };
-
-    const updated = await environment.settings.update(
+    expect(current.sso?.oidcConfig.clientSecret).toBeUndefined();
+    await environment.settings.update(
       principal(),
       { ...current, acknowledgeRestart: false },
       true,
-    );
-
-    expect(updated.settings.identity?.management.secret).not.toEqual(
-      updated.settings.identity?.apps.secret,
+      await organizationCredential(environment, principal()),
     );
     expect((await environment.settings.resolve()).identity?.management.clientSecret).toBe(
-      "replacement-management-secret",
+      "private-management-secret",
     );
-
-    const bundle = environment.authControl.read();
-
-    expect(bundle.configuration?.clientSecret).toBe("private-management-secret");
-    expect(await environment.database.db.select().from(organizationSecrets)).toHaveLength(2);
+    expect(environment.authControl.read().configuration?.clientSecret).toBe(
+      "private-management-secret",
+    );
+    expect(environment.authControl.read().configuration?.clientId).toBe(
+      current.sso?.oidcConfig.clientId,
+    );
+    const [saved] = await environment.database.db.select().from(organizationSettings);
+    expect(saved?.settings).not.toHaveProperty("identity");
+    expect(saved?.settings).not.toHaveProperty("sso");
+    expect(saved?.directorySecret).toBeNull();
   });
 
   it("enforces administrator access and browser read-only while allowing API changes", async () => {
@@ -154,10 +147,20 @@ describe("Platform setup and managed settings", () => {
     await environment.settings.setExternalManagement(principal(), true);
     const current = await input();
     await expect(
-      environment.settings.update(principal(), { ...current, acknowledgeRestart: false }, true),
+      environment.settings.update(
+        principal(),
+        { ...current, acknowledgeRestart: false },
+        true,
+        await organizationCredential(environment, principal()),
+      ),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
     await expect(
-      environment.settings.update(principal(), { ...current, acknowledgeRestart: false }, false),
+      environment.settings.update(
+        principal(),
+        { ...current, acknowledgeRestart: false },
+        false,
+        await organizationCredential(environment, principal()),
+      ),
     ).resolves.toMatchObject({ settings: { externallyManaged: true } });
     await environment.settings.setExternalManagement(principal(), false);
   });
@@ -165,14 +168,19 @@ describe("Platform setup and managed settings", () => {
   it("applies client changes without restarting the auth proxy", async () => {
     const current = await input();
 
-    if (!current.identity) throw new Error("Expected configured identity");
-    current.identity.apps.secret = { type: "value", value: "rotated-app-secret" };
-    current.identity.apps.clientId = "replacement-app-client";
+    if (!current.sso) throw new Error("Expected configured identity");
+    current.sso.oidcConfig.clientSecret = "rotated-app-secret";
+    current.sso.oidcConfig.clientId = "replacement-app-client";
     expect(await environment.settings.plan(principal(), current)).toMatchObject({
       restartRequired: false,
     });
-    await environment.settings.update(principal(), { ...current, acknowledgeRestart: false }, true);
-    expect((await input()).identity?.apps.clientId).toBe("replacement-app-client");
+    await environment.settings.update(
+      principal(),
+      { ...current, acknowledgeRestart: false },
+      true,
+      await organizationCredential(environment, principal()),
+    );
+    expect((await input()).sso?.oidcConfig.clientId).toBe("replacement-app-client");
 
     const bundle = environment.authControl.read();
 
@@ -187,8 +195,8 @@ describe("Platform setup and managed settings", () => {
     await environment.settings.read(principal());
     expect(environment.authControl.read().publications).toBe(before);
 
-    if (!current.identity) throw new Error("Expected configured identity");
-    current.identity.apps.clientId = "not-yet-installed-client";
+    if (!current.sso) throw new Error("Expected configured identity");
+    current.sso.oidcConfig.clientId = "not-yet-installed-client";
     environment.authControl.available(false);
 
     try {
@@ -199,6 +207,7 @@ describe("Platform setup and managed settings", () => {
             principal(),
             { ...current, acknowledgeRestart: false },
             true,
+            await organizationCredential(environment, principal()),
           )
         ).error,
       ).toBe("App sign-in could not be prepared");
@@ -208,20 +217,25 @@ describe("Platform setup and managed settings", () => {
 
     expect((await environment.settings.read(principal())).activation.state).toBe("failed");
     expect(environment.authControl.read().publications).toBe(before);
-    await environment.settings.update(principal(), { ...current, acknowledgeRestart: false }, true);
+    await environment.settings.update(
+      principal(),
+      { ...current, acknowledgeRestart: false },
+      true,
+      await organizationCredential(environment, principal()),
+    );
     expect((await environment.settings.read(principal())).activation.state).toBe("active");
   });
 
   it("orders overlapping saves from separate hosted request instances", async () => {
     const current = await input();
 
-    if (!current.identity) throw new Error("Expected configured identity");
+    if (!current.sso) throw new Error("Expected configured identity");
     const gate = new EventEmitter();
     const paused = once(gate, "paused");
     const published: { clientId: string; secret: string }[] = [];
 
     const signIn = {
-      callbackUrl: "https://auth.apps.localhost/oauth2/callback",
+      callbackUrl: "https://auth.apps.localhost/oauth2/widefleet/callback",
       plan: () => Promise.resolve({ restartRequired: false, message: "Fixture" }),
       status: () =>
         Promise.resolve({
@@ -229,17 +243,17 @@ describe("Platform setup and managed settings", () => {
           state: "active",
           message: "Fixture",
         }),
-      revision: (identity) => Promise.resolve(identity.apps.clientId),
+      revision: (identity) => Promise.resolve(identity.management.clientId),
       publish: async (identity, secret) => {
-        if (identity.apps.clientId === "older-client") {
+        if (identity.management.clientId === "older-client") {
           const resumed = once(gate, "resume");
           gate.emit("paused");
           await resumed;
         }
 
-        published.push({ clientId: identity.apps.clientId, secret });
+        published.push({ clientId: identity.management.clientId, secret });
 
-        return identity.apps.clientId;
+        return identity.management.clientId;
       },
     } satisfies AppSignIn;
 
@@ -248,21 +262,31 @@ describe("Platform setup and managed settings", () => {
         environment.configuration,
         environment.database.db,
         environment.environment.PLATFORM_ENCRYPTION_KEY,
-        signIn,
+        () => signIn,
       );
 
     const change = (clientId: string, secret: string) =>
       settingsInput.parse({
         ...current,
-        identity: {
-          ...current.identity,
-          apps: { clientId, secret: { type: "value", value: secret } },
+        sso: {
+          ...current.sso,
+          oidcConfig: { ...current.sso?.oidcConfig, clientId, clientSecret: secret },
         },
       });
 
-    const older = service().initialize(change("older-client", "older-secret"));
+    const older = service().initialize(
+      change("older-client", "older-secret"),
+      "widefleet",
+      await organizationCredential(environment, principal()),
+    );
+
     await paused;
-    const newer = service().initialize(change("newer-client", "newer-secret"));
+
+    const newer = service().initialize(
+      change("newer-client", "newer-secret"),
+      "widefleet",
+      await organizationCredential(environment, principal()),
+    );
 
     try {
       // Wait until the second request has either reached the database lock or
@@ -286,35 +310,38 @@ describe("Platform setup and managed settings", () => {
       { clientId: "older-client", secret: "older-secret" },
       { clientId: "newer-client", secret: "newer-secret" },
     ]);
-    expect((await readInstallation(environment.database.db)).settings.identity?.apps.clientId).toBe(
+    expect((await environment.settings.resolve()).identity?.management.clientId).toBe(
       "newer-client",
     );
   });
 
-  it("resolves management settings without reading the app credential", async () => {
-    const original = (await readInstallation(environment.database.db)).settings;
-
-    if (!original.identity) throw new Error("Expected configured identity");
-    const settings = installationSettings.parse(original);
-
-    if (!settings.identity) throw new Error("Expected configured identity");
-    settings.identity.apps.secret = { type: "stored", id: crypto.randomUUID() };
-    await environment.database.db
-      .update(organizationSettings)
-      .set({ settings })
-      .where(eq(organizationSettings.organizationId, installationId));
+  it("shows waiting when the saved provider still needs verification", async () => {
+    await environment.database.db.update(ssoProvider).set({ domainVerified: false });
 
     try {
-      const management = await environment.settings.resolve();
-      expect(management.identity?.management.clientId).toBe(original.identity.management.clientId);
-      expect(management.errors).toEqual([]);
-      expect((await environment.settings.inspect()).error).not.toBeNull();
+      expect((await environment.settings.read(principal())).activation).toMatchObject({
+        state: "waiting",
+        revision: "",
+      });
     } finally {
-      await environment.database.db
-        .update(organizationSettings)
-        .set({ settings: original })
-        .where(eq(organizationSettings.organizationId, installationId));
+      await environment.database.db.update(ssoProvider).set({ domainVerified: true });
     }
+  });
+
+  it("completes concurrent native saves without holding outer transaction connections", async () => {
+    const saved = await input();
+    const credential = await organizationCredential(environment, principal());
+    await Promise.all(
+      Array.from({ length: 12 }, () =>
+        environment.settings.update(
+          principal(),
+          { ...saved, acknowledgeRestart: false },
+          false,
+          credential,
+        ),
+      ),
+    );
+    expect((await environment.settings.read(principal())).sso).toMatchObject(saved.sso ?? {});
   });
 
   it("lets a second settings read finish while an earlier read is still preparing its app status", async () => {
@@ -323,7 +350,7 @@ describe("Platform setup and managed settings", () => {
     let reads = 0;
 
     const signIn: AppSignIn = {
-      callbackUrl: "https://auth.apps.localhost/oauth2/callback",
+      callbackUrl: "https://auth.apps.localhost/oauth2/widefleet/callback",
       plan: () => Promise.resolve({ restartRequired: false, message: "Fixture" }),
       publish: () => {
         throw new Error("A read must not publish");
@@ -344,7 +371,7 @@ describe("Platform setup and managed settings", () => {
       environment.configuration,
       environment.database.db,
       environment.environment.PLATFORM_ENCRYPTION_KEY,
-      signIn,
+      () => signIn,
     );
 
     const first = service.inspect();
@@ -370,7 +397,7 @@ describe("Platform setup and managed settings", () => {
   it("compares app status with each reader's own expected revision", async () => {
     const current = await input();
 
-    if (!current.identity) throw new Error("Expected configured identity");
+    if (!current.sso) throw new Error("Expected configured identity");
     let installed = "";
 
     const service = createInstalledAppSignIn(
@@ -386,8 +413,11 @@ describe("Platform setup and managed settings", () => {
       "immediate",
     );
 
-    const original = await service.revision(current.identity, "original-secret");
-    const changed = await service.revision(current.identity, "changed-secret");
+    const resolved = await environment.settings.resolve();
+
+    if (!resolved.identity) throw new Error("Missing published identity");
+    const original = await service.revision(resolved.identity, "original-secret");
+    const changed = await service.revision(resolved.identity, "changed-secret");
     installed = changed;
     const [older, newer] = await Promise.all([service.status(original), service.status(changed)]);
     expect(older).toMatchObject({ revision: original, state: "failed" });
@@ -442,10 +472,7 @@ describe("Platform setup and managed settings", () => {
     });
     const resolved = await environment.settings.resolve();
 
-    const proof = companyLoginRevision({
-      ...environment.configuration,
-      IDENTITY: resolved.identity,
-    });
+    const proof = companyLoginRevision(resolved.sso);
 
     await environment.database.db
       .update(session)
@@ -566,6 +593,10 @@ describe("Platform setup and managed settings", () => {
       .set({ ownerId: null, localPasswordEnabled: true })
       .where(eq(installation.id, installationId));
     const settings = await input();
+
+    if (!settings.sso) throw new Error("Missing fixture provider");
+    settings.sso.oidcConfig.clientSecret = "bootstrap-fixture-secret";
+    await environment.database.db.delete(ssoProvider);
     await writeFile(
       bootstrap,
       JSON.stringify({
@@ -582,7 +613,9 @@ describe("Platform setup and managed settings", () => {
     const initialized = await initializeRuntime(configuration, migrations);
 
     try {
-      expect((await readInstallation(initialized.database.db)).ownerId).not.toBeNull();
+      const state = await readInstallation(initialized.database.db);
+      expect(state.ownerId).not.toBeNull();
+      expect(state.bootstrapPending).toBe(false);
       await initialized.settings.setExternalManagement(principal(), true);
     } finally {
       await initialized.database.close();
@@ -598,4 +631,70 @@ describe("Platform setup and managed settings", () => {
       await restarted.database.close();
     }
   });
+});
+
+it("resumes file initialization with the existing owner after provider discovery fails", async () => {
+  const environment = await createTestEnvironment();
+  const provider = await createIdentityProvider();
+
+  try {
+    const database = environment.database.db;
+    await database.update(installation).set({ ownerId: null });
+    await database.delete(ssoProvider);
+    const bootstrap = join(environment.configuration.PLATFORM_STATE_DIRECTORY, "bootstrap.json");
+    await writeFile(
+      bootstrap,
+      JSON.stringify({
+        owner: {
+          name: "File Owner",
+          email: "file-owner@example.test",
+          password: "bootstrap-password-only",
+        },
+        settings: {
+          sso: {
+            providerId: "file-company",
+            issuer: provider.origin,
+            domain: "example.test",
+            oidcConfig: {
+              clientId: "app-login",
+              clientSecret: "synthetic-client-secret",
+              mapping: { extraFields: { groups: "roles" } },
+            },
+          },
+        },
+      }),
+    );
+    const configuration = { ...environment.configuration, PLATFORM_BOOTSTRAP_FILE: bootstrap };
+    const migrations = fileURLToPath(new URL("../migrations", import.meta.url));
+    provider.settings.available = false;
+
+    await expect(initializeRuntime(configuration, migrations)).rejects.toThrow();
+    const interrupted = await readInstallation(database);
+    expect(interrupted.ownerId).not.toBeNull();
+    expect(interrupted.bootstrapPending).toBe(true);
+    expect(await database.select().from(ssoProvider)).toHaveLength(0);
+    await expect(initializeRuntime(environment.configuration, migrations)).rejects.toThrow(
+      "Restore PLATFORM_BOOTSTRAP_FILE",
+    );
+
+    provider.settings.available = true;
+    const resumed = await initializeRuntime(configuration, migrations);
+
+    try {
+      const state = await readInstallation(database);
+      expect(state.ownerId).toBe(interrupted.ownerId);
+      expect(state.bootstrapPending).toBe(false);
+      expect((await resumed.settings.inspect()).sso?.oidcConfig.mapping.extraFields.groups).toBe(
+        "roles",
+      );
+      expect(
+        await database.select().from(user).where(eq(user.email, "file-owner@example.test")),
+      ).toHaveLength(1);
+    } finally {
+      await resumed.database.close();
+    }
+  } finally {
+    await provider.stop();
+    await environment.close();
+  }
 });

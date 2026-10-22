@@ -27,7 +27,9 @@ describe("Auth proxy session lifecycle", () => {
     const proxy = createAuthProxy(configuration, apps);
 
     const started = await proxy.fetch(
-      new Request(`https://auth.apps.example.test/oauth2/start?rd=${encodeURIComponent(app)}`),
+      new Request(
+        `https://auth.apps.example.test/oauth2/widefleet/start?rd=${encodeURIComponent(app)}`,
+      ),
     );
 
     expect(started.status).toBe(302);
@@ -53,6 +55,7 @@ describe("Auth proxy session lifecycle", () => {
   beforeAll(async () => {
     idp = await createIdentityProvider();
     configuration = authConfiguration.parse({
+      organizationId: "widefleet",
       provider: {
         type: "oidc",
         issuer: idp.origin,
@@ -65,7 +68,7 @@ describe("Auth proxy session lifecycle", () => {
       clientSecret: "synthetic-client-secret",
       cookieSecret: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url"),
       domain: "apps.example.test",
-      redirectUrl: "https://auth.apps.example.test/oauth2/callback",
+      redirectUrl: "https://auth.apps.example.test/oauth2/widefleet/callback",
     });
     cookie = await login();
   });
@@ -141,10 +144,10 @@ describe("Auth proxy session lifecycle", () => {
   it("rejects configuration that would send session cookies or callbacks to the wrong host", () => {
     for (const redirectUrl of [
       "invalid",
-      "http://auth.apps.example.test/oauth2/callback",
-      "https://evil.example.test/oauth2/callback",
-      "https://auth.apps.example.test/oauth2/callback?redirect=elsewhere",
-      "https://user@auth.apps.example.test/oauth2/callback",
+      "http://auth.apps.example.test/oauth2/widefleet/callback",
+      "https://evil.example.test/oauth2/widefleet/callback",
+      "https://auth.apps.example.test/oauth2/widefleet/callback?redirect=elsewhere",
+      "https://user@auth.apps.example.test/oauth2/widefleet/callback",
     ]) {
       expect(authConfiguration.safeParse({ ...configuration, redirectUrl }).success).toBe(false);
     }

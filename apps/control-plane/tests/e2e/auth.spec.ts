@@ -5,7 +5,13 @@ import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { app, artifact } from "@platform/contracts";
-import { member, session as authSession } from "../../src/lib/server/auth-schema.ts";
+import {
+  account,
+  member,
+  user,
+  ssoProvider,
+  session as authSession,
+} from "../../src/lib/server/auth-schema.ts";
 import {
   agents,
   appGrants,
@@ -78,6 +84,8 @@ test.afterAll(async () => {
 });
 
 test.afterEach(async ({ browserName }, info) => {
+  await environment.database.db.update(ssoProvider).set({ domainVerified: false });
+
   if (info.status !== info.expectedStatus)
     await info.attach(`${browserName}-server-log`, { body: logs, contentType: "text/plain" });
 });
@@ -422,6 +430,7 @@ test("preserves SvelteKit form protection and accepts the CLI with an explicit O
 });
 
 test("redirects anonymous device requests to login and preserves the code", async ({ page }) => {
+  await environment.database.db.update(ssoProvider).set({ domainVerified: true });
   await page.goto("/device?user_code=ABCD1234");
   await expect(page).toHaveURL(/\/sign-in\?next=/);
   await expect(page.getByRole("button", { name: "Sign in with Microsoft" })).toBeVisible();
@@ -429,10 +438,12 @@ test("redirects anonymous device requests to login and preserves the code", asyn
 });
 
 test("starts Entra login with a host-only HttpOnly state cookie", async ({ request }) => {
-  const response = await request.post("/api/auth/sign-in/social", {
+  await environment.database.db.update(ssoProvider).set({ domainVerified: true });
+
+  const response = await request.post("/api/auth/sign-in/sso", {
     headers: { origin: environment.configuration.PLATFORM_URL },
     data: {
-      provider: "microsoft",
+      providerId: "microsoft",
       callbackURL: "/device?user_code=ABCD1234",
       disableRedirect: true,
     },
@@ -444,7 +455,7 @@ test("starts Entra login with a host-only HttpOnly state cookie", async ({ reque
   expect(target.origin).toBe(environment.environment.ENTRA_AUTHORITY);
   expect(target.pathname).toBe("/oauth2/v2.0/authorize");
   expect(target.searchParams.get("redirect_uri")).toBe(
-    `${environment.configuration.PLATFORM_URL}/api/auth/callback/microsoft`,
+    `${environment.configuration.PLATFORM_URL}/api/auth/sso/callback/microsoft`,
   );
 
   const cookies = response
@@ -459,9 +470,58 @@ test("starts Entra login with a host-only HttpOnly state cookie", async ({ reque
   }
 });
 
+test("requires company SSO and links the matching verified company email without changing membership", async ({
+  page,
+  context,
+}) => {
+  const person = environment.users.createUser({
+    name: "SSO Test User",
+    email: "sso@example.test",
+    emailVerified: true,
+  });
+
+  await environment.users.saveUser(person);
+  await environment.database.db.insert(member).values({
+    id: crypto.randomUUID(),
+    organizationId: "widefleet",
+    userId: person.id,
+    role: "member",
+    createdAt: new Date(),
+  });
+  const login = await environment.users.login({ userId: person.id });
+  await context.addCookies(
+    login.cookies.map((cookie) => ({
+      ...cookie,
+      domain: "localhost",
+      sameSite: "Lax",
+      secure: false,
+    })),
+  );
+  await environment.database.db.update(ssoProvider).set({ domainVerified: true });
+
+  try {
+    await page.goto("/account");
+    await expect(page).toHaveURL(/sign-in.*organization=widefleet/);
+    await page.getByRole("button", { name: "Sign in with Microsoft" }).click();
+    await page.getByRole("button", { name: /sso@example.test/ }).click();
+    await expect(page.getByText("You are signed in with your company account.")).toBeVisible();
+    expect(await (await page.request.get("/api/v1/me")).json()).toMatchObject({
+      id: person.id,
+      role: "member",
+      admin: false,
+    });
+    expect((await page.request.get("/api/v1/settings")).status()).toBe(403);
+  } finally {
+    await environment.database.db.delete(account).where(eq(account.userId, person.id));
+    await environment.database.db.delete(member).where(eq(member.userId, person.id));
+    await environment.database.db.delete(user).where(eq(user.id, person.id));
+  }
+});
+
 test("completes Microsoft login against emulate through the built SvelteKit server", async ({
   page,
 }) => {
+  await environment.database.db.update(ssoProvider).set({ domainVerified: true });
   await page.goto("/sign-in");
   await page.getByRole("button", { name: "Sign in with Microsoft" }).click();
   await page.getByRole("button", { name: /sso@example.test/ }).click();

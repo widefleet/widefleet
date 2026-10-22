@@ -1,3 +1,4 @@
+import { companyIdentity } from "../../src/lib/server/company-identity.ts";
 import { runtimeIdentity } from "../runtime-identity.ts";
 import { connectorReference } from "../../src/lib/server/connector-package.ts";
 import { connectorFixture } from "../cloudflare-connector.fixture.ts";
@@ -474,7 +475,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       expect(
         (
           await managementFetch(
-            "https://auth.apps.example.test/.well-known/widefleet/auth/configuration",
+            "https://auth.apps.example.test/.well-known/widefleet/auth/organizations/widefleet/configuration",
             {
               method: "PUT",
               headers: { authorization: `Bearer ${token}` },
@@ -999,13 +1000,12 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
 
       const client = {
         clientId: "fixture-app-client",
-        secret: { type: "value", value: "fixture-client-secret" },
+        clientSecret: "fixture-client-secret",
       };
 
-      const identity = contract.identitySettingsInput.parse({
+      const identity = companyIdentity.parse({
         provider: { type: "oidc", issuer: "https://identity.example.test", label: "Fixture" },
         management: client,
-        apps: client,
       });
 
       const original = await service.revision(identity, "fixture-client-secret");
@@ -1073,7 +1073,11 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           {
             method: "PUT",
             headers: { authorization: `Bearer ${token}` },
-            body: JSON.stringify({ appId, access: { revision: 1, groups: ["engineering"] } }),
+            body: JSON.stringify({
+              organizationId: first.organizationId,
+              appId,
+              access: { revision: 1, groups: ["engineering"] },
+            }),
           },
         );
 

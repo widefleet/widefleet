@@ -150,15 +150,17 @@ describe("Organization ownership migration", () => {
     await client.query(`
       INSERT INTO "user" (id, name, email) VALUES ('owner', 'Owner', 'owner@example.test');
       INSERT INTO installation (id, settings, owner_id, local_password_enabled)
-        VALUES ('widefleet', '{"externallyManaged":true,"identity":{"management":{"secret":{"type":"stored","id":"secret"}}}}', 'owner', false);
-      INSERT INTO installation_secret (id, ciphertext) VALUES ('secret', 'opaque-existing-ciphertext');
+        VALUES ('widefleet', '{"externallyManaged":true,"identity":{"management":{"secret":{"type":"stored","id":"secret"}},"directory":{"clientId":"directory","secret":{"type":"stored","id":"directory-secret"}}}}', 'owner', false);
+      INSERT INTO installation_secret (id, ciphertext) VALUES ('secret', 'opaque-existing-ciphertext'), ('directory-secret', 'opaque-directory-ciphertext');
+      INSERT INTO session (id, expires_at, token, updated_at, user_id, company_configuration, recovery)
+        VALUES ('company', now() + interval '1 hour', 'company-token', now(), 'owner', 'existing-proof', false),
+               ('recovery', now() + interval '1 hour', 'recovery-token', now(), 'owner', '', true),
+               ('local', now() + interval '1 hour', 'local-token', now(), 'owner', '', false);
     `);
-    await client.query(
-      await readFile(
-        new URL("../migrations/0022_organization_settings.sql", import.meta.url),
-        "utf8",
-      ),
-    );
+
+    for (const name of ["0022_organization_settings.sql", "0023_organization_sso.sql"]) {
+      await client.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
+    }
 
     const settings = await client.query<{ organization_id: string; settings: unknown }>(
       "SELECT organization_id, settings FROM organization_settings",
@@ -169,23 +171,41 @@ describe("Organization ownership migration", () => {
         organization_id: "widefleet",
         settings: {
           externallyManaged: true,
-          identity: { management: { secret: { type: "stored", id: "secret" } } },
+          identity: {
+            management: { secret: { ciphertext: "opaque-existing-ciphertext" } },
+            directory: { clientId: "directory" },
+          },
         },
       },
     ]);
 
-    const secrets = await client.query<{ id: string; organization_id: string; ciphertext: string }>(
-      "SELECT id, organization_id, ciphertext FROM organization_secret",
+    const secrets = await client.query<{ directory_secret: string }>(
+      "SELECT directory_secret FROM organization_settings",
     );
 
-    expect(secrets.rows).toEqual([
-      { id: "secret", organization_id: "widefleet", ciphertext: "opaque-existing-ciphertext" },
-    ]);
+    expect(secrets.rows).toEqual([{ directory_secret: "opaque-directory-ciphertext" }]);
+    expect(
+      (
+        await client.query<{ name: string | null }>(
+          "SELECT to_regclass('organization_secret') AS name",
+        )
+      ).rows,
+    ).toEqual([{ name: null }]);
 
     const state = await client.query<{ owner_id: string; local_password_enabled: boolean }>(
       "SELECT owner_id, local_password_enabled FROM installation",
     );
 
     expect(state.rows).toEqual([{ owner_id: "owner", local_password_enabled: false }]);
+
+    const sessions = await client.query<{ id: string; identity_organization_id: string | null }>(
+      "SELECT id, identity_organization_id FROM session ORDER BY id",
+    );
+
+    expect(sessions.rows).toEqual([
+      { id: "company", identity_organization_id: "widefleet" },
+      { id: "local", identity_organization_id: null },
+      { id: "recovery", identity_organization_id: "widefleet" },
+    ]);
   });
 });

@@ -1,3 +1,4 @@
+import { APIError } from "better-auth/api";
 import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { OpenAPIGenerator } from "@orpc/openapi";
 import { ORPCError, os } from "@orpc/server";
@@ -10,10 +11,12 @@ import { parseWorkerUpload, readBody } from "./upload-body.ts";
 import { binaryPaths, binarySchemas } from "./openapi-binary.ts";
 import { DirectoryUnavailable } from "./directory.ts";
 import { InvalidOperation, TelemetryNotConfigured, TelemetryUnavailable } from "./errors.ts";
-import { createInstallationOwner, readInstallation } from "./installation-store.ts";
+import { readInstallation } from "./installation-store.ts";
 import { uploadedConnector } from "./connector-package.ts";
 import { connectorAdministrator } from "./connector-changes.ts";
 import { connectorLogService } from "./telemetry.ts";
+
+import { readCompanyAccount } from "./settings-account.ts";
 
 const apiOperation = async <T>(operation: () => Promise<T>) => {
   try {
@@ -21,6 +24,12 @@ const apiOperation = async <T>(operation: () => Promise<T>) => {
   } catch (cause) {
     if (cause instanceof InvalidOperation)
       throw new ORPCError(cause.code, { message: cause.message });
+
+    if (cause instanceof APIError)
+      throw new ORPCError("AUTH_OPERATION_FAILED", {
+        status: cause.statusCode,
+        message: cause.message,
+      });
     throw cause;
   }
 };
@@ -36,8 +45,8 @@ const unwrap = <T, E extends { message: string }>(result: Result<T, E>) => {
     throw new ORPCError("TELEMETRY_NOT_CONFIGURED", { status: 503, message: error.message });
 
   if ("code" in error) {
-    if (error.code === "ORGANIZATION_REQUIRED")
-      throw new ORPCError("ORGANIZATION_REQUIRED", { status: 403, message: error.message });
+    if (error.code === "ORGANIZATION_REQUIRED" || error.code === "SSO_REQUIRED")
+      throw new ORPCError(error.code, { status: 403, message: error.message });
 
     const code = z
       .enum(["UNAUTHORIZED", "FORBIDDEN", "NOT_FOUND", "CONFLICT", "BAD_REQUEST"])
@@ -132,6 +141,12 @@ export const createApi = (runtime: Runtime) => {
   const appAndDeployment = contract.appPath.extend({ deploymentId: contract.identifier });
 
   const router = {
+    account: read
+      .route({ method: "GET", path: "/account" })
+      .output(contract.companyAccount)
+      .handler(({ context }) =>
+        readCompanyAccount(runtime, context.principal, context.request.headers),
+      ),
     organizations: base
       .route({ method: "GET", path: "/organizations" })
       .output(z.array(contract.organizationChoice))
@@ -364,7 +379,7 @@ export const createApi = (runtime: Runtime) => {
         if (origin !== runtime.configuration.PLATFORM_URL)
           throw new ORPCError("FORBIDDEN", { message: "A same-origin setup request is required" });
 
-        return apiOperation(() => createInstallationOwner(runtime.database.db, input));
+        return apiOperation(() => runtime.settings.createOwner(input));
       }),
     getSettings: read
       .route({ method: "GET", path: "/settings" })
@@ -387,6 +402,7 @@ export const createApi = (runtime: Runtime) => {
             context.principal,
             input,
             !context.request.headers.has("authorization"),
+            { auth: runtime.auth, headers: context.request.headers },
           ),
         ),
       ),
@@ -398,6 +414,32 @@ export const createApi = (runtime: Runtime) => {
         apiOperation(() =>
           runtime.settings.setExternalManagement(context.principal, input.enabled),
         ),
+      ),
+    domainVerification: write
+      .route({ method: "POST", path: "/settings/domain-verification" })
+      .output(contract.domainVerification)
+      .handler(({ context }) =>
+        apiOperation(() =>
+          runtime.settings.domainVerification(
+            context.principal,
+            runtime.auth,
+            context.request.headers,
+          ),
+        ),
+      ),
+    verifyDomain: write
+      .route({ method: "POST", path: "/settings/verify-domain" })
+      .output(z.object({ success: z.boolean() }))
+      .handler(({ context }) =>
+        apiOperation(() =>
+          runtime.settings.verifyDomain(context.principal, runtime.auth, context.request.headers),
+        ),
+      ),
+    activateSso: write
+      .route({ method: "POST", path: "/settings/activate-sso" })
+      .output(contract.settingsView)
+      .handler(({ context }) =>
+        apiOperation(() => runtime.settings.activateSso(context.principal)),
       ),
     completeSetup: write
       .route({ method: "POST", path: "/settings/complete" })

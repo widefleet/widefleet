@@ -672,6 +672,7 @@ describe.runIf(process.env["RUN_TELEMETRY_TESTS"] === "1")(
         body: {
           payload: {
             sub: adminId,
+            reference_id: `user:${adminId}`,
             aud: `${origin}/api/v1`,
             iss: `${origin}/api/auth`,
             iat: now,

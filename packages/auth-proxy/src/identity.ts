@@ -83,6 +83,7 @@ export const providerIdentity = async (
   provider: z.infer<typeof companyProvider>,
   idToken: string,
   accessToken: string | undefined,
+  organizationId: string,
 ) => {
   // Called only by Better Auth's getUserInfo, after its signature, issuer,
   // audience and nonce verification. This maps already verified claims.
@@ -94,6 +95,13 @@ export const providerIdentity = async (
 
   if (tokenIssuer !== issuer(provider) || claims["email_verified"] === false)
     throw new Error("The company identity is not trusted");
+
+  if (
+    provider.type === "oidc" &&
+    provider.organizationClaim &&
+    claims[provider.organizationClaim] !== organizationId
+  )
+    throw new Error("The identity belongs to a different organization");
 
   const subject =
     provider.type === "entra"

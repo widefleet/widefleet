@@ -5,7 +5,8 @@ import { createServer } from "node:http";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import { account, user } from "../../src/lib/server/auth-schema.ts";
+import { decodeJwt } from "jose";
+import { account, ssoProvider, user } from "../../src/lib/server/auth-schema.ts";
 import { createTestEnvironment } from "../environment.ts";
 
 const platformUrl = "http://localhost:25436";
@@ -20,6 +21,7 @@ describe.runIf(process.env["RUN_ENTRA_TESTS"] === "1")(
 
     beforeAll(async () => {
       environment = await createTestEnvironment(platformUrl);
+      await environment.database.db.update(ssoProvider).set({ domainVerified: true });
       const auth = environment.auth;
 
       const handler = toNodeHandler(auth);
@@ -47,12 +49,12 @@ describe.runIf(process.env["RUN_ENTRA_TESTS"] === "1")(
       await environment?.close();
     });
 
-    it("accepts a signed company identity, persists its Entra object ID and ends the session on logout", async () => {
+    it("accepts a signed company identity, persists its OIDC subject and ends the session on logout", async () => {
       const context = await browser.newContext();
 
-      const start = await context.request.post(`${platformUrl}/api/auth/sign-in/social`, {
+      const start = await context.request.post(`${platformUrl}/api/auth/sign-in/sso`, {
         headers: { origin: platformUrl },
-        data: { provider: "microsoft", callbackURL: "/done", disableRedirect: true },
+        data: { providerId: "microsoft", callbackURL: "/done" },
       });
 
       expect(start.ok()).toBe(true);
@@ -64,6 +66,7 @@ describe.runIf(process.env["RUN_ENTRA_TESTS"] === "1")(
 
       const session = z
         .object({
+          session: z.object({ identityOrganizationId: z.literal("widefleet") }),
           user: z.object({
             id: z.string(),
             email: z.literal("sso@example.test"),
@@ -82,7 +85,7 @@ describe.runIf(process.env["RUN_ENTRA_TESTS"] === "1")(
         .where(eq(account.userId, session.user.id));
 
       expect(linked?.providerId).toBe("microsoft");
-      expect(z.uuid().safeParse(linked?.accountId).success).toBe(true);
+      expect(linked?.accountId).toBe(decodeJwt(z.string().parse(linked?.idToken)).sub);
       expect(linked?.userId).toBe(session.user.id);
       expect(saved?.id).toBe(session.user.id);
       const cookies = await context.cookies();
@@ -108,11 +111,12 @@ describe.runIf(process.env["RUN_ENTRA_TESTS"] === "1")(
     it("rejects a token signed by the same key for a different tenant", async () => {
       const context = await browser.newContext();
 
-      const start = await context.request.post(`${platformUrl}/api/auth/sign-in/social`, {
+      const start = await context.request.post(`${platformUrl}/api/auth/sign-in/sso`, {
         headers: { origin: platformUrl },
-        data: { provider: "microsoft", callbackURL: "/done", disableRedirect: true },
+        data: { providerId: "microsoft", callbackURL: "/done" },
       });
 
+      expect(start.ok()).toBe(true);
       const authorization = z.object({ url: z.url() }).parse(await start.json());
       const page = await context.newPage();
       await page.goto(authorization.url);

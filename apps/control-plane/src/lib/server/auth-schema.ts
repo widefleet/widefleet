@@ -37,6 +37,7 @@ export const session = pgTable(
     ipAddress: text("ip_address"),
     userAgent: text("user_agent"),
     activeOrganizationId: text("active_organization_id"),
+    identityOrganizationId: text("identity_organization_id"),
     recovery: boolean("recovery").notNull().default(false),
     companyConfiguration: text("company_configuration").notNull().default(""),
     userId: text("user_id")
@@ -53,6 +54,22 @@ export const organization = pgTable("organization", {
   logo: text("logo"),
   metadata: text("metadata"),
   createdAt: timestamp("created_at").notNull(),
+});
+
+export const ssoProvider = pgTable("sso_provider", {
+  id: text("id").primaryKey(),
+  providerId: text("provider_id").notNull().unique(),
+  issuer: text("issuer").notNull(),
+  domain: text("domain").notNull(),
+  domainVerified: boolean("domain_verified").notNull().default(false),
+  appIdentityType: text("app_identity_type").notNull().default("oidc"),
+  oidcConfig: text("oidc_config"),
+  samlConfig: text("saml_config"),
+  userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
+  organizationId: text("organization_id")
+    .notNull()
+    .unique()
+    .references(() => organization.id, { onDelete: "cascade" }),
 });
 
 export const member = pgTable(
@@ -342,6 +359,9 @@ export const deviceCode = pgTable(
     scope: text("scope"),
     resources: text("resources").array(),
     oauthClientId: text("oauth_client_id"),
+    referenceId: text("reference_id"),
+    sessionId: text("session_id"),
+    authTime: timestamp("auth_time"),
   },
   (table) => [
     uniqueIndex("deviceCode_deviceCode_uidx").on(table.deviceCode),

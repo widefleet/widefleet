@@ -43,6 +43,7 @@
     "@azure/identity": "4.13.3",
     "@azure/storage-blob": "12.34.0",
     "@better-auth/oauth-provider": "1.7.12",
+    "@better-auth/sso": "1.7.12",
     "@google-cloud/storage": "8.2.0",
     "@jridgewell/trace-mapping": "0.3.31",
     "@noble/hashes": "2.4.0",

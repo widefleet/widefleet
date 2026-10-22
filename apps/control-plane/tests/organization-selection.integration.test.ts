@@ -42,6 +42,7 @@ describe("Organization discovery and selection", () => {
       body: {
         payload: {
           sub: userId,
+          reference_id: `user:${userId}`,
           aud: `${environment.configuration.PLATFORM_URL}/api/v1`,
           iss: `${environment.configuration.PLATFORM_URL}/api/auth`,
           iat: now,
@@ -140,8 +141,8 @@ describe("Organization discovery and selection", () => {
     const result = await api(request("/organizations"));
     expect(result.status).toBe(200);
     expect(await result.json()).toEqual([
-      { id: alpha, name: "Alpha", slug: "alpha", role: "admin" },
-      { id: beta, name: "Beta", slug: "beta", role: "member" },
+      { id: alpha, name: "Alpha", slug: "alpha", role: "admin", ssoRequired: false },
+      { id: beta, name: "Beta", slug: "beta", role: "member", ssoRequired: false },
     ]);
     expect((await api(request("/organizations", { headers: {} }))).status).toBe(401);
   });
@@ -320,7 +321,7 @@ describe("Organization discovery and selection", () => {
       .where(and(eq(member.userId, userId), eq(member.organizationId, beta)));
     expect((await api(request("/apps"))).status).toBe(403);
     expect(await (await api(request("/organizations"))).json()).toEqual([
-      { id: alpha, name: "Alpha", slug: "alpha", role: "admin" },
+      { id: alpha, name: "Alpha", slug: "alpha", role: "admin", ssoRequired: false },
     ]);
     admitted.clear();
     expect(await (await api(request("/organizations"))).json()).toEqual([]);

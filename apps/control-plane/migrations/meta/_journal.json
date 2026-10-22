@@ -162,6 +162,13 @@
       "when": 1792694400000,
       "tag": "0022_organization_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1792694400001,
+      "tag": "0023_organization_sso",
+      "breakpoints": true
     }
   ]
 }

@@ -38,8 +38,8 @@ const emulator = await createEmulator({
           tenant_id: tenant,
           name: "Widefleet local demo",
           redirect_uris: [
-            `${platformUrl}/api/auth/callback/microsoft`,
-            "https://auth.apps.localhost:25453/oauth2/callback",
+            `${platformUrl}/api/auth/sso/callback/microsoft`,
+            "https://auth.apps.localhost:25453/oauth2/widefleet/callback",
           ],
         },
       ],

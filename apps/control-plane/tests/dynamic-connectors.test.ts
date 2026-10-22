@@ -534,8 +534,8 @@ export default { async fetch(request, env, ctx) {
       await env.WIDEFLEET_PACKAGES.put('apps/' + app.appId + '/modules/' + module.sha256, new Uint8Array(module.bytes));
     }
     await env.WIDEFLEET_PACKAGES.put('hosts/' + app.hostname + '.json', JSON.stringify(app));
-    await env.AUTH_CONFIG.put('configuration', ${JSON.stringify(encrypted)});
-    await env.AUTH_CONFIG.put('apps/' + app.hostname, JSON.stringify({appId:app.appId,access:{revision:1,groups:[]}}));
+    await env.AUTH_CONFIG.put('organizations/widefleet/configuration', ${JSON.stringify(encrypted)});
+    await env.AUTH_CONFIG.put('apps/' + app.hostname, JSON.stringify({organizationId:"widefleet",appId:app.appId,access:{revision:1,groups:[]}}));
     return Response.json(true);
   }
   if (url.pathname === '/fixture/snapshots') {

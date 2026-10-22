@@ -68,6 +68,8 @@ enum Command {
     Login(auth::LoginOptions),
     Logout,
     Whoami,
+    /// Show your company account link and the browser page for managing it.
+    Account,
     /// List organizations available to the signed-in account.
     Organizations,
     /// List visible applications.
@@ -76,7 +78,7 @@ enum Command {
     Catalog(catalog::Options),
     /// Search the connected company directory.
     Groups(groups::Options),
-    /// Configure this Widefleet installation (administrator access required).
+    /// Configure the selected organization (owner or administrator access required).
     Settings(settings::Options),
     /// Update the application runtime independently of the deployment agent.
     Runtime(runtime::Options),
@@ -225,6 +227,14 @@ async fn run(args: Arguments) -> Result<()> {
         Command::Organizations => print_json(
             &json::<Value>(
                 api.authenticated(Method::GET, "/organizations", &token)
+                    .send()
+                    .await?,
+            )
+            .await?,
+        ),
+        Command::Account => print_json(
+            &json::<Value>(
+                api.authenticated(Method::GET, "/account", &token)
                     .send()
                     .await?,
             )
@@ -381,6 +391,7 @@ async fn main() {
         Command::Login(_) => "login",
         Command::Logout => "logout",
         Command::Whoami => "whoami",
+        Command::Account => "account",
         Command::Organizations => "organizations",
         Command::Apps => "apps",
         Command::Catalog(_) => "catalog",

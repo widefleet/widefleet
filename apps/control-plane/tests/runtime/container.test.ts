@@ -211,11 +211,14 @@ describe.runIf(process.env["RUN_IMAGE_TESTS"] === "1")("release container images
       );
       expect(
         (
-          await runtimeRequest("/.well-known/widefleet/auth/configuration", {
-            method: "PUT",
-            headers: controlHeaders,
-            body: JSON.stringify(identity.configuration),
-          })
+          await runtimeRequest(
+            "/.well-known/widefleet/auth/organizations/widefleet/configuration",
+            {
+              method: "PUT",
+              headers: controlHeaders,
+              body: JSON.stringify(identity.configuration),
+            },
+          )
         ).status,
       ).toBe(204);
 
@@ -272,6 +275,7 @@ describe.runIf(process.env["RUN_IMAGE_TESTS"] === "1")("release container images
         body: {
           payload: {
             sub: person.id,
+            reference_id: `user:${person.id}`,
             aud: apiResource(environment.configuration),
             iss: `${environment.configuration.PLATFORM_URL}/api/auth`,
             iat: now,

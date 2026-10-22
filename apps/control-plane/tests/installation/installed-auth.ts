@@ -16,10 +16,11 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { vi, expect } from "vitest";
 import { z } from "zod";
-import { activationStatus, identitySettingsInput, publishedApp } from "@platform/contracts";
+import { activationStatus, publishedApp } from "@platform/contracts";
 import { authConfiguration } from "@platform/auth-proxy";
 import { authControlPath } from "@platform/auth-proxy/publication";
 
+import { companyIdentity } from "../../src/lib/server/company-identity.ts";
 import { createAppSignIn } from "../../src/lib/server/app-sign-in-node.ts";
 import { runtimeConfigurationSchema } from "../../src/lib/server/config.ts";
 
@@ -45,12 +46,13 @@ export const installedAuth = async () => {
   });
 
   const configuration = authConfiguration.parse({
+    organizationId: "widefleet",
     provider: { type: "oidc", issuer: "http://127.0.0.1:4181", label: "Test" },
     clientId: "test-client",
     clientSecret: "test-secret",
     cookieSecret: Buffer.alloc(32, 1).toString("base64url"),
     domain: "apps.example.test",
-    redirectUrl: "https://auth.apps.example.test/oauth2/callback",
+    redirectUrl: "https://auth.apps.example.test/oauth2/widefleet/callback",
   });
 
   await s3.send(new CreateBucketCommand({ Bucket: name }));
@@ -83,7 +85,7 @@ export const installedAuth = async () => {
       JSON.parse(
         await node(
           'import {readFile} from "node:fs/promises"; const key=(await readFile("/runtime-config/control-token","utf8")).trim(); const response=await fetch("http://127.0.0.1:8080' +
-            "/.well-known/widefleet/auth/configuration" +
+            "/.well-known/widefleet/auth/organizations/widefleet/configuration" +
             '",{headers:{authorization:"Bearer "+key}}); if(!response.ok)throw new Error("Auth proxy unavailable");console.log(await response.text());',
         ),
       ),
@@ -111,6 +113,7 @@ export const installedAuth = async () => {
         "/apps/notes.apps.example.test",
         "PUT",
         JSON.stringify({
+          organizationId: "widefleet",
           appId: "00000000-0000-4000-8000-000000000001",
           access: { revision, groups },
         }),
@@ -141,13 +144,12 @@ export const installedAuth = async () => {
     );
 
     const revision = await signIn.publish(
-      identitySettingsInput.parse({
+      companyIdentity.parse({
         provider: input.provider,
         management: {
           clientId: input.clientId,
-          secret: { type: "value", value: input.clientSecret },
+          clientSecret: input.clientSecret,
         },
-        apps: { clientId: input.clientId, secret: { type: "value", value: input.clientSecret } },
         directory: null,
       }),
       input.clientSecret,
@@ -299,7 +301,7 @@ export const installedAuth = async () => {
         await node(`
     const base="http://127.0.0.1:8080";
     const headers={"x-forwarded-host":"auth.apps.example.test","x-forwarded-proto":"https"};
-    const started=await fetch(base+"/oauth2/start?rd=https://notes.apps.example.test/",{redirect:"manual",headers});
+    const started=await fetch(base+"/oauth2/widefleet/start?rd=https://notes.apps.example.test/",{redirect:"manual",headers});
     if(started.status!==302){console.log(JSON.stringify({status:started.status,cookie:"",location:null}));}else{
       const authorized=await fetch(started.headers.get("location"),{redirect:"manual"});
       const callback=new URL(authorized.headers.get("location"));

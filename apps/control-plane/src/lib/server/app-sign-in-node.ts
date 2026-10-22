@@ -1,11 +1,16 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import { authControlPath } from "@platform/auth-proxy/publication";
+import { authConfigurationKey, authControlPath } from "@platform/auth-proxy/publication";
 import { createInstalledAppSignIn } from "./app-sign-in-installed.ts";
 import type { Configuration } from "./config.ts";
+import { installationOrganizationId } from "../organization.ts";
 
-export const createAppSignIn = (configuration: Configuration, cookieSecret: string) =>
+export const createAppSignIn = (
+  configuration: Configuration,
+  cookieSecret: string,
+  organizationId = installationOrganizationId,
+) =>
   createInstalledAppSignIn(
     configuration,
     cookieSecret,
@@ -29,7 +34,10 @@ export const createAppSignIn = (configuration: Configuration, cookieSecret: stri
       if (method === "PUT") options.body = body ?? null;
 
       const response = await fetch(
-        new URL(`${authControlPath}/configuration`, configuration.PLATFORM_APP_RUNTIME_URL),
+        new URL(
+          `${authControlPath}/${authConfigurationKey(organizationId)}`,
+          configuration.PLATFORM_APP_RUNTIME_URL,
+        ),
         options,
       );
 
@@ -43,4 +51,5 @@ export const createAppSignIn = (configuration: Configuration, cookieSecret: stri
       return response;
     },
     "immediate",
+    organizationId,
   );

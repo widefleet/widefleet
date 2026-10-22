@@ -1,20 +1,20 @@
 import {
-  identitySettings,
   installationSettings,
   settingsInput,
   settingsUpdate,
   setupOwner,
 } from "@platform/contracts";
-import { and, eq, inArray, notInArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
+import type { OrganizationCredential } from "./organization-operations.ts";
 import { appCallbackUrl, type AppSignIn } from "./app-sign-in.ts";
-import { companyAccountProvider, companyIdentity } from "./company-identity.ts";
+import { companyIdentity } from "./company-identity.ts";
 import { companyLoginRevision, type Authentication } from "./auth.ts";
 import type { Configuration } from "./config.ts";
 import type { Database, DatabaseExecutor } from "./database.ts";
 import type { Principal } from "./identity.ts";
 import { InvalidOperation } from "./errors.ts";
-import { createOrganizationSecrets } from "./organization-secrets.ts";
+import { decryptSecret, encryptSecret } from "./secret-encryption.ts";
 import { installationOrganizationId } from "../organization.ts";
 import {
   installationId,
@@ -23,7 +23,8 @@ import {
   createInstallationOwner,
 } from "./installation-store.ts";
 import { session, oauthRefreshToken } from "./auth-schema.ts";
-import { installation, organizationSecrets, organizationSettings } from "./schema.ts";
+import { readSsoConfiguration, ssoRuntimeIdentity, saveSsoProvider } from "./sso-settings.ts";
+import { installation, organizationSettings } from "./schema.ts";
 
 const requireAdmin = (principal: Principal, organizationId: string) => {
   if (!principal.application.admin || principal.application.organizationId !== organizationId)
@@ -40,9 +41,8 @@ const createOrganizationSettingsService = (
   appSignIn: AppSignIn | null,
   organizationId: string,
   revision: { value: number },
+  emailSignIn: boolean,
 ) => {
-  const secrets = createOrganizationSecrets(database, encryptionKey, organizationId);
-
   const lockSettings = async (transaction: DatabaseExecutor) => {
     await transaction
       .insert(organizationSettings)
@@ -59,52 +59,37 @@ const createOrganizationSettingsService = (
   };
 
   const readCurrent = async (transaction: DatabaseExecutor) => {
-    const snapshotSecrets = createOrganizationSecrets(transaction, encryptionKey, organizationId);
+    const [stored] = await transaction
+      .select({ directorySecret: organizationSettings.directorySecret })
+      .from(organizationSettings)
+      .where(eq(organizationSettings.organizationId, organizationId));
 
     const state = {
       ...(await readInstallation(transaction)),
       settings: await readOrganizationSettings(transaction, organizationId),
     };
 
-    const identity = state.settings.identity;
-
-    if (!identity) return { state, identity: null, errors: [] };
-
-    let resolved: z.infer<typeof companyIdentity> | null = null;
     const errors: string[] = [];
+    const sso = await readSsoConfiguration(transaction, encryptionKey, organizationId);
+    let identity: z.infer<typeof companyIdentity> | null = null;
 
     try {
-      resolved = companyIdentity.parse({
-        provider: identity.provider,
-        management: {
-          clientId: identity.management.clientId,
-          clientSecret: await snapshotSecrets.resolve(identity.management.secret),
-        },
-      });
+      if (sso?.domainVerified && sso.required) {
+        identity = ssoRuntimeIdentity(sso);
+
+        if (state.settings.directory)
+          identity.directory = {
+            clientId: state.settings.directory.clientId,
+            clientSecret: await decryptSecret(encryptionKey, stored?.directorySecret ?? ""),
+          };
+      }
     } catch (cause) {
       errors.push(
-        cause instanceof InvalidOperation
-          ? cause.message
-          : "Management sign-in could not be prepared",
+        cause instanceof InvalidOperation ? cause.message : "Company sign-in could not be prepared",
       );
     }
 
-    if (identity.directory && resolved) {
-      try {
-        resolved.directory = {
-          clientId: identity.directory.clientId,
-          clientSecret: await snapshotSecrets.resolve(identity.directory.secret),
-        };
-      } catch (cause) {
-        errors.push(
-          cause instanceof InvalidOperation
-            ? cause.message
-            : "The group directory could not be prepared",
-        );
-      }
-    }
-
-    return { state, identity: resolved, errors };
+    return { state, identity, sso, errors };
   };
 
   const resolve = async () => {
@@ -127,18 +112,13 @@ const createOrganizationSettingsService = (
         if (publish) await lockSettings(transaction);
         const current = await readCurrent(transaction);
 
-        const identity = current.state.settings.identity;
+        const identity = current.identity;
 
         let expectedRevision = "";
 
         if (identity && appSignIn) {
           try {
-            const secret = await createOrganizationSecrets(
-              transaction,
-              encryptionKey,
-              organizationId,
-            ).resolve(identity.apps.secret);
-
+            const secret = identity.management.clientSecret;
             expectedRevision = await appSignIn.revision(identity, secret);
 
             if (publish) await appSignIn.publish(identity, secret);
@@ -159,13 +139,17 @@ const createOrganizationSettingsService = (
       },
     );
 
-    const current = appSignIn
-      ? await appSignIn.status(resolved.revision)
-      : {
-          revision: "",
-          state: "waiting" as const,
-          message: "App sign-in is not connected to this installation.",
-        };
+    const current =
+      appSignIn && resolved.revision
+        ? await appSignIn.status(resolved.revision)
+        : {
+            revision: "",
+            state: "waiting" as const,
+            message:
+              resolved.sso && !resolved.sso.domainVerified
+                ? "Verify the company domain before publishing its app sign-in configuration."
+                : "App sign-in has no publishable configuration.",
+          };
 
     const activation =
       resolved.revision && current.revision !== resolved.revision
@@ -176,16 +160,34 @@ const createOrganizationSettingsService = (
           }
         : current;
 
-    const identity = resolved.state.settings.identity;
+    const connection = resolved.sso;
+
+    const sso = connection
+      ? {
+          providerId: connection.providerId,
+          appIdentityType: connection.appIdentityType,
+          issuer: connection.issuer,
+          domain: connection.domain,
+          domainVerified: connection.domainVerified,
+          oidcConfig: {
+            clientId: connection.oidcConfig.clientId,
+            pkce: connection.oidcConfig.pkce,
+            scopes: connection.oidcConfig.scopes,
+            mapping: connection.oidcConfig.mapping,
+          },
+        }
+      : null;
 
     return {
       settings: resolved.state.settings,
+      sso,
+      ssoRequired: Boolean(connection?.domainVerified && connection.required),
       localPasswordEnabled:
         organizationId === installationOrganizationId && resolved.state.localPasswordEnabled,
-      managementCallbackUrl: identity
-        ? `${configuration.PLATFORM_URL}/api/auth/callback/${companyAccountProvider(identity)}`
+      managementCallbackUrl: sso
+        ? `${configuration.PLATFORM_URL}/api/auth/sso/callback/${sso.providerId}`
         : null,
-      appCallbackUrl: appSignIn?.callbackUrl ?? appCallbackUrl(configuration),
+      appCallbackUrl: appSignIn?.callbackUrl ?? appCallbackUrl(configuration, organizationId),
       activation,
       error: resolved.errors.length ? resolved.errors.join(". ") : null,
     };
@@ -199,26 +201,41 @@ const createOrganizationSettingsService = (
       settings: await readOrganizationSettings(database, organizationId),
     };
 
+    const connection = await readSsoConfiguration(database, encryptionKey, organizationId);
+
     if (
+      !emailSignIn &&
       (!state.localPasswordEnabled ||
-        state.settings.identity ||
+        connection ||
         organizationId !== installationOrganizationId) &&
-      !next.identity
+      !next.sso
     )
       throw new InvalidOperation({
         code: "BAD_REQUEST",
         message: "Configure a replacement company login before removing the active provider",
       });
 
-    if (next.identity) {
-      await secrets.resolve(next.identity.management.secret);
-      await secrets.resolve(next.identity.apps.secret);
+    if (next.directory && !next.directory.clientSecret) {
+      const [saved] = await database
+        .select({ secret: organizationSettings.directorySecret })
+        .from(organizationSettings)
+        .where(eq(organizationSettings.organizationId, organizationId));
 
-      if (next.identity.directory) await secrets.resolve(next.identity.directory.secret);
+      if (!saved?.secret)
+        throw new InvalidOperation({
+          code: "BAD_REQUEST",
+          message: "Enter the directory client secret",
+        });
     }
 
+    if (next.directory && next.sso?.appIdentityType !== "entra")
+      throw new InvalidOperation({
+        code: "BAD_REQUEST",
+        message: "Microsoft Graph directory search requires Entra app identity",
+      });
+
     return appSignIn
-      ? appSignIn.plan(next.identity)
+      ? appSignIn.plan(null)
       : {
           restartRequired: false,
           message:
@@ -226,55 +243,50 @@ const createOrganizationSettingsService = (
         };
   };
 
-  const save = async (input: z.infer<typeof settingsInput>) => {
+  const save = async (
+    input: z.infer<typeof settingsInput>,
+    credential?: OrganizationCredential,
+  ) => {
     const next = settingsInput.parse(input);
-    await database.transaction(async (transaction) => {
-      // Keep replacing references and removing unused secret rows in one ordered transaction.
-      await lockSettings(transaction);
-      const identity = next.identity;
 
-      const saved = identity
-        ? identitySettings.parse({
-            provider: identity.provider,
-            management: {
-              clientId: identity.management.clientId,
-              secret: await secrets.save(transaction, identity.management.secret),
-            },
-            apps: {
-              clientId: identity.apps.clientId,
-              secret: await secrets.save(transaction, identity.apps.secret),
-            },
-            directory: identity.directory
-              ? {
-                  clientId: identity.directory.clientId,
-                  secret: await secrets.save(transaction, identity.directory.secret),
-                }
-              : null,
-          })
-        : null;
+    if (credential) await saveSsoProvider(database, organizationId, next.sso, credential);
+    else if (next.sso)
+      throw new InvalidOperation({
+        code: "FORBIDDEN",
+        message: "Sign in before configuring the SSO provider",
+      });
+    await database.transaction(async (transaction) => {
+      await lockSettings(transaction);
+
+      const [current] = await transaction
+        .select({ directorySecret: organizationSettings.directorySecret })
+        .from(organizationSettings)
+        .where(eq(organizationSettings.organizationId, organizationId));
+
+      const directorySecret = !next.directory
+        ? null
+        : next.directory.clientSecret
+          ? await encryptSecret(encryptionKey, next.directory.clientSecret)
+          : current?.directorySecret;
+
+      if (next.directory && !directorySecret)
+        throw new InvalidOperation({
+          code: "BAD_REQUEST",
+          message: "Enter the directory client secret",
+        });
+      const directory = next.directory ? { clientId: next.directory.clientId } : null;
 
       await transaction
         .update(organizationSettings)
         .set({
+          directorySecret: directorySecret ?? null,
+          ssoRequired: next.sso ? undefined : false,
           settings: installationSettings.parse({
-            identity: saved,
+            directory,
             externallyManaged: next.externallyManaged,
           }),
         })
         .where(eq(organizationSettings.organizationId, organizationId));
-
-      const referenced = [saved?.management, saved?.apps, saved?.directory].flatMap((client) =>
-        client?.secret.type === "stored" ? [client.secret.id] : [],
-      );
-
-      await transaction
-        .delete(organizationSecrets)
-        .where(
-          and(
-            eq(organizationSecrets.organizationId, organizationId),
-            notInArray(organizationSecrets.id, referenced),
-          ),
-        );
     });
 
     revision.value++;
@@ -288,10 +300,13 @@ const createOrganizationSettingsService = (
     },
     resolve,
     inspect,
-    initialize: async (input: z.infer<typeof settingsInput>) => {
+    initialize: async (
+      input: z.infer<typeof settingsInput>,
+      credential?: OrganizationCredential,
+    ) => {
       await prepare(input);
 
-      return save(input);
+      return save(input, credential);
     },
     read: async (principal: Principal) => {
       requireAdmin(principal, organizationId);
@@ -307,6 +322,7 @@ const createOrganizationSettingsService = (
       principal: Principal,
       input: z.infer<typeof settingsUpdate>,
       browser: boolean,
+      credential: OrganizationCredential,
     ) => {
       requireAdmin(principal, organizationId);
 
@@ -321,13 +337,13 @@ const createOrganizationSettingsService = (
           message:
             "Configuration is externally managed. Turn off external management to edit it in the UI.",
         });
-      const next = { identity: input.identity, externallyManaged: input.externallyManaged };
+      const { acknowledgeRestart, ...next } = settingsUpdate.parse(input);
       const plan = await prepare(next);
 
-      if (plan.restartRequired && !input.acknowledgeRestart)
+      if (plan.restartRequired && !acknowledgeRestart)
         throw new InvalidOperation({ code: "CONFLICT", message: plan.message });
 
-      return save(next);
+      return save(next, credential);
     },
     setExternalManagement: async (principal: Principal, enabled: boolean) => {
       requireAdmin(principal, organizationId);
@@ -345,6 +361,63 @@ const createOrganizationSettingsService = (
 
       return inspect();
     },
+    domainVerification: async (principal: Principal, auth: Authentication, headers: Headers) => {
+      requireAdmin(principal, organizationId);
+      const provider = await readSsoConfiguration(database, encryptionKey, organizationId);
+
+      if (!provider)
+        throw new InvalidOperation({
+          code: "BAD_REQUEST",
+          message: "Save the company SSO configuration first",
+        });
+
+      const proof = await auth.api.requestDomainVerification({
+        headers,
+        body: { providerId: provider.providerId },
+      });
+
+      return {
+        name: `_better-auth-token-${provider.providerId}.${provider.domain}`,
+        type: "TXT" as const,
+        value: proof.domainVerificationToken,
+      };
+    },
+    verifyDomain: async (principal: Principal, auth: Authentication, headers: Headers) => {
+      requireAdmin(principal, organizationId);
+      const provider = await readSsoConfiguration(database, encryptionKey, organizationId);
+
+      if (!provider)
+        throw new InvalidOperation({
+          code: "BAD_REQUEST",
+          message: "Save the company SSO configuration first",
+        });
+      await auth.api.verifyDomain({ headers, body: { providerId: provider.providerId } });
+      revision.value++;
+
+      if (provider.required) await inspect(true);
+
+      return { success: true };
+    },
+    activateSso: async (principal: Principal) => {
+      requireAdmin(principal, organizationId);
+      await database.transaction(async (transaction) => {
+        await lockSettings(transaction);
+        const provider = await readSsoConfiguration(transaction, encryptionKey, organizationId);
+
+        if (!provider?.domainVerified)
+          throw new InvalidOperation({
+            code: "CONFLICT",
+            message: "Verify the company domain before activating SSO",
+          });
+        await transaction
+          .update(organizationSettings)
+          .set({ ssoRequired: true })
+          .where(eq(organizationSettings.organizationId, organizationId));
+      });
+      revision.value++;
+
+      return inspect(true);
+    },
     complete: async (principal: Principal, auth: Authentication, headers: Headers) => {
       requireAdmin(principal, organizationId);
 
@@ -356,14 +429,22 @@ const createOrganizationSettingsService = (
       const current = await auth.api.getSession({ headers });
       const resolved = await resolve();
       const state = resolved.state;
-      const proof = companyLoginRevision({ ...configuration, IDENTITY: resolved.identity });
+      const proof = companyLoginRevision(resolved.sso);
 
-      if (!proof || !state.settings.identity || current?.session.companyConfiguration !== proof)
+      if (
+        !proof ||
+        !resolved.sso?.domainVerified ||
+        current?.session.companyConfiguration !== proof
+      )
         throw new InvalidOperation({
           code: "CONFLICT",
           message: "Sign in with the linked company account to confirm administrator access first",
         });
       await database.transaction(async (transaction) => {
+        await transaction
+          .update(organizationSettings)
+          .set({ ssoRequired: true })
+          .where(eq(organizationSettings.organizationId, organizationId));
         await transaction
           .update(installation)
           .set({ localPasswordEnabled: false })
@@ -388,7 +469,7 @@ const createOrganizationSettingsService = (
 
       revision.value++;
 
-      return inspect();
+      return inspect(true);
     },
   };
 };
@@ -397,7 +478,8 @@ export const createSettingsService = (
   configuration: Configuration,
   database: Database,
   encryptionKey: string,
-  appSignIn: AppSignIn | null,
+  appSignIn: (organizationId: string) => AppSignIn | null,
+  emailSignIn = false,
 ) => {
   const revision = { value: 0 };
 
@@ -406,9 +488,10 @@ export const createSettingsService = (
       configuration,
       database,
       encryptionKey,
-      organizationId === installationOrganizationId ? appSignIn : null,
+      appSignIn(organizationId),
       organizationId,
       revision,
+      emailSignIn,
     );
 
   const installed = scoped(installationOrganizationId);
@@ -420,8 +503,8 @@ export const createSettingsService = (
     resolve: (organizationId = installationOrganizationId) => scoped(organizationId).resolve(),
 
     inspect: installed.inspect,
-    createOwner: async (input: z.infer<typeof setupOwner>) => {
-      const owner = await createInstallationOwner(database, input);
+    createOwner: async (input: z.infer<typeof setupOwner>, bootstrapPending = false) => {
+      const owner = await createInstallationOwner(database, input, bootstrapPending);
 
       return owner;
     },
@@ -429,14 +512,25 @@ export const createSettingsService = (
     initialize: (
       input: z.infer<typeof settingsInput>,
       organizationId = installationOrganizationId,
-    ) => scoped(organizationId).initialize(input),
+      credential?: OrganizationCredential,
+    ) => scoped(organizationId).initialize(input, credential),
     read: (principal: Principal) => scoped(principal.application.organizationId).read(principal),
     plan: (principal: Principal, input: z.infer<typeof settingsInput>) =>
       scoped(principal.application.organizationId).plan(principal, input),
-    update: (principal: Principal, input: z.infer<typeof settingsUpdate>, browser: boolean) =>
-      scoped(principal.application.organizationId).update(principal, input, browser),
+    update: (
+      principal: Principal,
+      input: z.infer<typeof settingsUpdate>,
+      browser: boolean,
+      credential: OrganizationCredential,
+    ) => scoped(principal.application.organizationId).update(principal, input, browser, credential),
     setExternalManagement: (principal: Principal, enabled: boolean) =>
       scoped(principal.application.organizationId).setExternalManagement(principal, enabled),
+    domainVerification: (principal: Principal, auth: Authentication, headers: Headers) =>
+      scoped(principal.application.organizationId).domainVerification(principal, auth, headers),
+    verifyDomain: (principal: Principal, auth: Authentication, headers: Headers) =>
+      scoped(principal.application.organizationId).verifyDomain(principal, auth, headers),
+    activateSso: (principal: Principal) =>
+      scoped(principal.application.organizationId).activateSso(principal),
     complete: (principal: Principal, auth: Authentication, headers: Headers) =>
       scoped(principal.application.organizationId).complete(principal, auth, headers),
   };

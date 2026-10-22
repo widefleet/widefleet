@@ -18,7 +18,13 @@ pub struct Options {
 enum Command {
     /// Show configuration and activation status. Secret values are never returned.
     Get,
-    /// Export editable settings with secret references.
+    /// Request the DNS TXT record needed to activate company SSO.
+    DomainVerification,
+    /// Verify the published TXT record without changing the organization's sign-in policy.
+    VerifyDomain,
+    /// Require company SSO for this organization after domain verification.
+    ActivateSso,
+    /// Export editable settings without saved secrets.
     Export,
     /// Validate a JSON configuration and report whether app sign-in must restart.
     Plan {
@@ -56,11 +62,27 @@ pub async fn run(api: &Api, token: &str, options: Options) -> Result<()> {
                     .await?,
             )
             .await?;
-            super::print_json(if matches!(options.command, Command::Export) {
-                &view["settings"]
+            if matches!(options.command, Command::Export) {
+                let mut settings = view["settings"].clone();
+                let mut provider = view["sso"].clone();
+                if let Some(provider) = provider.as_object_mut() {
+                    provider.remove("domainVerified");
+                }
+                settings["sso"] = provider;
+                super::print_json(&settings)
             } else {
-                &view
-            })
+                super::print_json(&view)
+            }
+        }
+        Command::DomainVerification | Command::VerifyDomain | Command::ActivateSso => {
+            let path = match options.command {
+                Command::DomainVerification => "/settings/domain-verification",
+                Command::VerifyDomain => "/settings/verify-domain",
+                _ => "/settings/activate-sso",
+            };
+            let result: Value =
+                json(api.authenticated(Method::POST, path, token).send().await?).await?;
+            super::print_json(&result)
         }
         Command::Plan { file } => {
             let input: Value = serde_json::from_slice(&std::fs::read(file)?)?;

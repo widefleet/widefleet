@@ -8,7 +8,7 @@ const authorization = z.object({
   client_id: z.literal("app-login"),
   redirect_uri: z.url(),
   state: z.string().min(1),
-  nonce: z.string().min(1),
+  nonce: z.string().min(1).optional(),
   code_challenge: z.string().min(1),
   code_challenge_method: z.literal("S256"),
 });
@@ -18,7 +18,8 @@ export const tenantId = "00000000-0000-4000-8000-000000000001";
 export const objectId = "00000000-0000-4000-8000-000000000002";
 
 export const createIdentityProvider = async (
-  redirectUrl = "https://auth.apps.example.test/oauth2/callback",
+  redirectUrl: string | string[] = "https://auth.apps.example.test/oauth2/widefleet/callback",
+  requireNonce = true,
 ) => {
   const keys = await generateKeyPair("RS256", { extractable: true });
   const wrongKeys = await generateKeyPair("RS256");
@@ -31,6 +32,7 @@ export const createIdentityProvider = async (
     entra: false,
     groups: ["accounting"],
     name: "Example User",
+    email: "user@example.test",
     graphFailure: "",
     issuerSuffix: "",
   };
@@ -69,7 +71,14 @@ export const createIdentityProvider = async (
       } else if (url.pathname === "/authorize") {
         const parameters = authorization.parse(Object.fromEntries(url.searchParams));
 
-        if (parameters.redirect_uri !== redirectUrl) throw new Error("Unexpected callback URL");
+        if (requireNonce && !parameters.nonce) throw new Error("Missing OIDC nonce");
+
+        if (
+          !(Array.isArray(redirectUrl) ? redirectUrl : [redirectUrl]).includes(
+            parameters.redirect_uri,
+          )
+        )
+          throw new Error("Unexpected callback URL");
         const code = randomUUID();
 
         codes.set(code, parameters);
@@ -101,7 +110,7 @@ export const createIdentityProvider = async (
           return;
         }
 
-        const token = await new SignJWT({
+        const claims = new SignJWT({
           nonce: settings.failure === "nonce" ? "wrong-nonce" : parameters.nonce,
           email_verified: settings.failure !== "email",
           ...(settings.entra
@@ -109,13 +118,15 @@ export const createIdentityProvider = async (
                 oid: objectId,
                 tid: settings.failure === "tenant" ? objectId : tenantId,
                 name: settings.name,
-                email: "user@example.test",
+                email: settings.email,
                 _claim_names: { groups: "src1" },
                 _claim_sources: { src1: { endpoint: "https://untrusted.example.test/groups" } },
               }
             : {
                 display_name: settings.name,
-                mail: "user@example.test",
+                mail: settings.email,
+                name: settings.name,
+                email: settings.email,
                 roles: settings.groups,
               }),
         })
@@ -130,10 +141,16 @@ export const createIdentityProvider = async (
                 : issuer,
           )
           .setAudience(settings.failure === "audience" ? "other-app" : "app-login")
-          .setSubject("pairwise-subject")
-          .setIssuedAt()
-          .setExpirationTime(settings.failure === "expired" ? "-1h" : "1h")
-          .sign(settings.failure === "signature" ? wrongKeys.privateKey : keys.privateKey);
+          .setSubject("pairwise-subject");
+
+        if (settings.failure !== "missing-issued-at") claims.setIssuedAt();
+
+        if (settings.failure !== "missing-expiry")
+          claims.setExpirationTime(settings.failure === "expired" ? "-1h" : "1h");
+
+        const token = await claims.sign(
+          settings.failure === "signature" ? wrongKeys.privateKey : keys.privateKey,
+        );
 
         response.end(
           JSON.stringify({

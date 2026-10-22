@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { readFile, writeFile } from "node:fs/promises";
 import { z } from "zod";
-import { account, user, member } from "../src/lib/server/auth-schema.ts";
+import { account, user, member, ssoProvider } from "../src/lib/server/auth-schema.ts";
 import { apiResource } from "../src/lib/server/auth-options.ts";
 import { createAuthentication } from "../src/lib/server/auth.ts";
 import { enrollCompanyUser } from "../src/lib/server/organization.ts";
@@ -121,17 +121,59 @@ if (command === "agent") {
         configuration,
         database.db,
         keys.encryption,
-        createAppSignIn(configuration, keys.cookie),
+        (organizationId) => createAppSignIn(configuration, keys.cookie, organizationId),
       );
 
-      const applied = await settings.initialize({
-        externallyManaged: false,
-        identity: {
-          provider: { type: "entra", tenantId: tenant, authority, label: "Microsoft" },
-          management: { clientId, secret: { type: "value", value: clientSecret } },
-          apps: { clientId, secret: { type: "value", value: clientSecret } },
-          directory: null,
+      const { token: setupToken } = await auth.api.signJWT({
+        body: {
+          payload: {
+            sub: "local-admin",
+            reference_id: "organization:widefleet",
+            aud: apiResource(configuration),
+            iss: `${configuration.PLATFORM_URL}/api/auth`,
+            iat: Math.floor(Date.now() / 1000),
+            exp: Math.floor(Date.now() / 1000) + 300,
+            scope: "platform:write",
+          },
         },
+      });
+
+      await settings.initialize(
+        {
+          externallyManaged: false,
+          directory: null,
+          sso: {
+            appIdentityType: "entra",
+            providerId: "microsoft",
+            domain: "example.test",
+            issuer: `${authority}/${tenant}/v2.0`,
+            oidcConfig: {
+              clientId,
+              clientSecret,
+              pkce: true,
+              scopes: ["openid", "profile", "email"],
+              mapping: { name: "name", email: "email", extraFields: { groups: "groups" } },
+            },
+          },
+        },
+        "widefleet",
+        { auth, headers: new Headers({ authorization: `Bearer ${setupToken}` }) },
+      );
+
+      // The guarded local demo uses its own synthetic DNS/IdP identities.
+      await database.db
+        .update(ssoProvider)
+        .set({ domainVerified: true })
+        .where(eq(ssoProvider.organizationId, installationId));
+
+      const applied = await settings.activateSso({
+        id: "local-admin",
+        name: "Local Administrator",
+        email: "admin@example.test",
+        role: "owner",
+        admin: true,
+        creator: true,
+        application: { organizationId: installationId, admin: true },
       });
 
       if (applied.error || applied.activation.state !== "active")
@@ -148,6 +190,7 @@ if (command === "agent") {
       body: {
         payload: {
           sub: "local-admin",
+          reference_id: "organization:widefleet",
           aud: apiResource(configuration),
           iss: `${configuration.PLATFORM_URL}/api/auth`,
           iat: now,
