@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { spawn } from "node:child_process";
+import { createServer, request as httpRequest } from "node:http";
 import { EventEmitter, once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
@@ -25,6 +26,8 @@ import {
 import { apiResource, cliClientId } from "../../src/lib/server/auth-options.ts";
 import { createTestEnvironment } from "../environment.ts";
 import { connectorReference } from "../../src/lib/server/connector-package.ts";
+import { authConfiguration, createAuthProxy } from "@platform/auth-proxy";
+import { registerAppLogin, readAppLogin } from "../../src/lib/server/app-login-client.ts";
 
 let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
 
@@ -32,8 +35,30 @@ let server: ReturnType<typeof spawn>;
 
 let logs = "";
 
+// Model the trusted reverse proxy for browser and OAuth back-channel requests.
+const edge = createServer((request, response) => {
+  const upstream = httpRequest(
+    {
+      hostname: "127.0.0.1",
+      port: 25431,
+      path: request.url,
+      method: request.method,
+      headers: { ...request.headers, "x-forwarded-proto": "http" },
+    },
+    (result) => {
+      response.writeHead(result.statusCode ?? 502, result.headers);
+      result.pipe(response);
+    },
+  );
+
+  upstream.on("error", () => response.writeHead(502).end());
+  request.pipe(upstream);
+});
+
 test.beforeAll(async () => {
   environment = await createTestEnvironment();
+  edge.listen(25430);
+  await once(edge, "listening");
   server = spawn(process.execPath, ["build"], {
     cwd: fileURLToPath(new URL("../../", import.meta.url)),
     env: {
@@ -41,7 +66,7 @@ test.beforeAll(async () => {
       ...environment.environment,
       NODE_ENV: "production",
       HOST: "127.0.0.1",
-      PORT: "25430",
+      PORT: "25431",
       PROTOCOL_HEADER: "x-forwarded-proto",
       SHUTDOWN_TIMEOUT: "1",
       BODY_SIZE_LIMIT: "32M",
@@ -71,7 +96,89 @@ test.beforeAll(async () => {
     .toBe(true);
 });
 
+test("completes app OAuth through the built server after signing in", async ({ page }) => {
+  await environment.database.db.update(ssoProvider).set({ domainVerified: false });
+  await environment.database.db
+    .update(user)
+    .set({ emailVerified: true })
+    .where(eq(user.id, environment.owner.id));
+  await environment.database.db.transaction((transaction) =>
+    registerAppLogin(
+      transaction,
+      environment.configuration,
+      environment.environment.PLATFORM_ENCRYPTION_KEY,
+      "widefleet",
+    ),
+  );
+
+  const identity = await readAppLogin(
+    environment.database.db,
+    environment.configuration,
+    environment.environment.PLATFORM_ENCRYPTION_KEY,
+    "widefleet",
+  );
+
+  if (!identity) throw new Error("App client was not registered");
+
+  const configuration = authConfiguration.parse({
+    organizationId: "widefleet",
+    provider: identity.provider,
+    ...identity.management,
+    cookieSecret: Buffer.alloc(32, 1).toString("base64url"),
+    domain: "apps.localhost",
+    redirectUrl: "https://auth.apps.localhost/oauth2/widefleet/callback",
+  });
+
+  const appUrl = "https://notes.apps.localhost/";
+
+  const proxy = createAuthProxy(configuration, {
+    resolve: async (hostname) =>
+      hostname === "notes.apps.localhost" ? { revision: 0, groups: [] } : null,
+    fetch: async () => new Response("Signed in to the app"),
+  });
+
+  const started = await proxy.fetch(
+    new Request(
+      `https://auth.apps.localhost/oauth2/widefleet/start?rd=${encodeURIComponent(appUrl)}`,
+    ),
+  );
+
+  expect(started.status).toBe(302);
+  await page.route(`${configuration.redirectUrl}*`, (route) =>
+    route.fulfill({ body: "App callback" }),
+  );
+  await page.goto(z.url().parse(started.headers.get("location")));
+  await expect(page).toHaveURL(/\/sign-in\?/);
+  await page.locator("#login-email").fill("owner@example.test");
+  await page.locator("#login-password").fill("local-test-password-only");
+  await page.getByRole("button", { name: "Sign in as setup administrator" }).click();
+  await expect(page).toHaveURL(new RegExp(`${configuration.redirectUrl}\\?`));
+
+  const cookies = (response: Response) =>
+    response.headers
+      .getSetCookie()
+      .filter((value) => !value.includes("Max-Age=0"))
+      .map((value) => value.split(";")[0])
+      .join("; ");
+
+  const completed = await proxy.fetch(
+    new Request(page.url(), { headers: { cookie: cookies(started) } }),
+  );
+
+  expect(completed.headers.get("location"), await completed.clone().text()).toBe(appUrl);
+
+  const opened = await proxy.fetch(
+    new Request(appUrl, { headers: { cookie: cookies(completed) } }),
+  );
+
+  expect(opened.status).toBe(200);
+  expect(await opened.text()).toBe("Signed in to the app");
+});
+
 test.afterAll(async () => {
+  edge.closeAllConnections();
+  await new Promise<void>((resolve) => edge.close(() => resolve()));
+
   if (server?.exitCode === null) {
     const exited = once(server, "exit");
     const timeout = setTimeout(() => server.kill("SIGKILL"), 5000);

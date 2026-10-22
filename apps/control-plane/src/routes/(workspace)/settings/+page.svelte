@@ -76,6 +76,8 @@
 
   let draft = $state(untrack(() => initialDraft(view)));
 
+  let configureCompany = $state(untrack(() => Boolean(view.sso) || !data.emailSignIn));
+
   let busy = $state(false);
 
   let savedDraft = $state(untrack(() => JSON.stringify(draft)));
@@ -117,6 +119,7 @@
     });
     const updated = await getSettings();
     draft = initialDraft(updated.view);
+    configureCompany = Boolean(updated.view.sso) || !data.emailSignIn;
     savedDraft = JSON.stringify(draft);
     proof = null;
     pending = null;
@@ -131,6 +134,19 @@
       pending = structuredClone(input);
       restartOpen = true;
     } else await apply(input, false);
+  };
+
+  const useWidefleet = async () => {
+    busy = true;
+    message = "";
+
+    try {
+      await persist(settingsInput.parse({ ...view.settings, sso: null, directory: null }));
+    } catch (cause) {
+      message = cause instanceof Error ? cause.message : "Could not change app sign-in.";
+    } finally {
+      busy = false;
+    }
   };
 
   const save = async (event: SubmitEvent) => {
@@ -337,204 +353,237 @@
       >
     </section>
   {:else}
-    <form onsubmit={save} class="rounded-xl border p-6">
-      <fieldset disabled={readonly || busy} class="space-y-5 disabled:opacity-70">
-        <div>
-          <h2 class="text-base font-semibold">Company SSO</h2>
-          <p class="text-muted-foreground mt-2 text-sm leading-6">
-            Create one registration for Widefleet and your apps. Add both redirect URIs and enter
-            its credentials once.
-          </p>
-        </div>
-        <div class="space-y-2">
-          <Label for="issuer">Issuer URL</Label><Input
-            id="issuer"
-            type="url"
-            bind:value={draft.sso.issuer}
-            placeholder="https://login.microsoftonline.com/TENANT-ID/v2.0"
-            required
-          />
-        </div>
-        <div class="space-y-2">
-          <Label for="company-domain">Company email domain</Label><Input
-            id="company-domain"
-            bind:value={draft.sso.domain}
-            placeholder="example.com"
-            required
-          />
-        </div>
-        <div class="space-y-2">
-          <p class="text-xs font-medium">Workspace redirect URI</p>
-          <CopyValue value={callback} label="Copy workspace redirect URI" />
-        </div>
-        <div class="space-y-2">
-          <p class="text-xs font-medium">App redirect URI</p>
-          <CopyValue value={view.appCallbackUrl} label="Copy app redirect URI" />
-        </div>
-        <div class="space-y-2">
-          <Label for="sso-client">Client ID</Label><Input
-            id="sso-client"
-            bind:value={draft.sso.oidcConfig.clientId}
-            required
-          />
-        </div>
-        <div class="space-y-2">
-          <Label for="sso-secret">Client secret</Label><Input
-            id="sso-secret"
-            type="password"
-            autocomplete="new-password"
-            bind:value={draft.sso.oidcConfig.clientSecret}
-            required={!view.sso}
-          />
-          {#if view.sso}<p class="text-muted-foreground text-xs">
-              Leave blank to keep the saved secret.
-            </p>{/if}
-        </div>
-        <div class="space-y-2">
-          <Label for="app-identity">App identity claims</Label>
-          <NativeSelect
-            id="app-identity"
-            value={draft.sso.appIdentityType}
-            onchange={(event) => {
-              draft.sso.appIdentityType = event.currentTarget.value === "entra" ? "entra" : "oidc";
-              if (draft.sso.appIdentityType !== "entra") draft.directory = null;
-            }}
-            ><option value="oidc">OpenID Connect</option><option value="entra"
-              >Microsoft Entra</option
-            ></NativeSelect
-          >
-          <p class="text-muted-foreground text-xs">
-            Choose Entra to use Microsoft object IDs and group memberships for app access.
-          </p>
-        </div>
-        <details class="rounded-lg border p-4">
-          <summary class="text-sm font-medium">Claim mappings</summary>
-          <div class="mt-4 space-y-4">
-            <div class="space-y-2">
-              <Label for="name-claim">Name</Label><Input
-                id="name-claim"
-                bind:value={draft.sso.oidcConfig.mapping.name}
-                required
-              />
-            </div>
-            <div class="space-y-2">
-              <Label for="email-claim">Email</Label><Input
-                id="email-claim"
-                bind:value={draft.sso.oidcConfig.mapping.email}
-                required
-              />
-            </div>
-            {#if draft.sso.appIdentityType === "oidc"}<div class="space-y-2">
-                <Label for="groups-claim">App groups</Label><Input
-                  id="groups-claim"
-                  bind:value={draft.sso.oidcConfig.mapping.extraFields.groups}
+    {#if data.emailSignIn}
+      <section class="space-y-3 rounded-xl border p-6">
+        <h2 class="text-base font-semibold">App sign-in</h2>
+        <p class="text-muted-foreground text-sm">
+          {view.ssoRequired
+            ? "Apps sign in directly with your company provider."
+            : "Apps use Widefleet sign-in until company SSO is activated."}
+        </p>
+        {#if !view.sso}
+          <Feedback kind={view.activation.state === "active" ? "success" : "info"}>
+            {view.activation.state === "active"
+              ? "Widefleet app sign-in is active."
+              : view.activation.message}
+          </Feedback>
+          {#if view.activation.state !== "active"}
+            <Button variant="outline" disabled={readonly || busy} onclick={useWidefleet}
+              >Activate Widefleet sign-in</Button
+            >
+          {/if}
+        {/if}
+        {#if !configureCompany}<Button
+            disabled={readonly || busy}
+            onclick={() => {
+              configureCompany = true;
+            }}>Configure company SSO</Button
+          >{/if}
+        {#if view.sso}<Button variant="outline" disabled={readonly || busy} onclick={useWidefleet}
+            >Remove company SSO and use Widefleet</Button
+          >{/if}
+      </section>
+    {/if}
+    {#if configureCompany}
+      <form onsubmit={save} class="rounded-xl border p-6">
+        <fieldset disabled={readonly || busy} class="space-y-5 disabled:opacity-70">
+          <div>
+            <h2 class="text-base font-semibold">Company SSO</h2>
+            <p class="text-muted-foreground mt-2 text-sm leading-6">
+              Create one registration for Widefleet and your apps. Add both redirect URIs and enter
+              its credentials once.
+            </p>
+          </div>
+          <div class="space-y-2">
+            <Label for="issuer">Issuer URL</Label><Input
+              id="issuer"
+              type="url"
+              bind:value={draft.sso.issuer}
+              placeholder="https://login.microsoftonline.com/TENANT-ID/v2.0"
+              required
+            />
+          </div>
+          <div class="space-y-2">
+            <Label for="company-domain">Company email domain</Label><Input
+              id="company-domain"
+              bind:value={draft.sso.domain}
+              placeholder="example.com"
+              required
+            />
+          </div>
+          <div class="space-y-2">
+            <p class="text-xs font-medium">Workspace redirect URI</p>
+            <CopyValue value={callback} label="Copy workspace redirect URI" />
+          </div>
+          <div class="space-y-2">
+            <p class="text-xs font-medium">App redirect URI</p>
+            <CopyValue value={view.appCallbackUrl} label="Copy app redirect URI" />
+          </div>
+          <div class="space-y-2">
+            <Label for="sso-client">Client ID</Label><Input
+              id="sso-client"
+              bind:value={draft.sso.oidcConfig.clientId}
+              required
+            />
+          </div>
+          <div class="space-y-2">
+            <Label for="sso-secret">Client secret</Label><Input
+              id="sso-secret"
+              type="password"
+              autocomplete="new-password"
+              bind:value={draft.sso.oidcConfig.clientSecret}
+              required={!view.sso}
+            />
+            {#if view.sso}<p class="text-muted-foreground text-xs">
+                Leave blank to keep the saved secret.
+              </p>{/if}
+          </div>
+          <div class="space-y-2">
+            <Label for="app-identity">App identity claims</Label>
+            <NativeSelect
+              id="app-identity"
+              value={draft.sso.appIdentityType}
+              onchange={(event) => {
+                draft.sso.appIdentityType =
+                  event.currentTarget.value === "entra" ? "entra" : "oidc";
+                if (draft.sso.appIdentityType !== "entra") draft.directory = null;
+              }}
+              ><option value="oidc">OpenID Connect</option><option value="entra"
+                >Microsoft Entra</option
+              ></NativeSelect
+            >
+            <p class="text-muted-foreground text-xs">
+              Choose Entra to use Microsoft object IDs and group memberships for app access.
+            </p>
+          </div>
+          <details class="rounded-lg border p-4">
+            <summary class="text-sm font-medium">Claim mappings</summary>
+            <div class="mt-4 space-y-4">
+              <div class="space-y-2">
+                <Label for="name-claim">Name</Label><Input
+                  id="name-claim"
+                  bind:value={draft.sso.oidcConfig.mapping.name}
                   required
                 />
-              </div>{/if}
-          </div>
-        </details>
-        {#if draft.sso.appIdentityType === "entra"}
-          <details class="rounded-lg border p-4">
-            <summary class="text-sm font-medium">Directory search</summary>
-            <div class="mt-4 space-y-4">
-              <div class="flex items-center gap-3">
-                <Checkbox
-                  id="directory"
-                  checked={draft.directory !== null}
-                  onCheckedChange={(enabled) => {
-                    draft.directory = enabled ? { clientId: "", clientSecret: "" } : null;
-                  }}
-                /><Label for="directory">Connect Microsoft Graph</Label>
               </div>
-              {#if draft.directory}
-                <p class="text-muted-foreground text-xs">
-                  Directory search needs the GroupMember.Read.All application permission with
-                  administrator consent.
-                </p>
-                <div class="space-y-2">
-                  <Label for="directory-client">Directory client ID</Label><Input
-                    id="directory-client"
-                    bind:value={draft.directory.clientId}
+              <div class="space-y-2">
+                <Label for="email-claim">Email</Label><Input
+                  id="email-claim"
+                  bind:value={draft.sso.oidcConfig.mapping.email}
+                  required
+                />
+              </div>
+              {#if draft.sso.appIdentityType === "oidc"}<div class="space-y-2">
+                  <Label for="groups-claim">App groups</Label><Input
+                    id="groups-claim"
+                    bind:value={draft.sso.oidcConfig.mapping.extraFields.groups}
                     required
                   />
-                </div>
-                <div class="space-y-2">
-                  <Label for="directory-secret">Directory client secret</Label>
-                  <Input
-                    id="directory-secret"
-                    type="password"
-                    bind:value={draft.directory.clientSecret}
-                    required={!view.settings.directory}
-                    placeholder={view.settings.directory
-                      ? "Leave blank to keep the saved secret"
-                      : ""}
-                    autocomplete="new-password"
-                  />
-                </div>
-              {/if}
+                </div>{/if}
             </div>
           </details>
-        {/if}
-        <div class="flex items-center justify-between border-t pt-4">
-          <span class="text-muted-foreground text-xs">{dirty ? "Unsaved changes" : ""}</span><Button
-            id="identity-save"
-            type="submit"
-            disabled={busy}>{busy ? "Saving …" : "Save"}</Button
-          >
-        </div>
-      </fieldset>
-    </form>
-    {#if view.sso}
-      <section class="space-y-4 rounded-xl border p-6">
-        <h2 class="text-base font-semibold">Verify company sign-in</h2>
-        {#if dirty}<Feedback>Save your changes before verifying company sign-in.</Feedback>{/if}
-        {#if !view.sso.domainVerified}
-          <p class="text-muted-foreground text-sm">
-            Verify ownership of {view.sso.domain} to enable company sign-in testing. This does not change
-            how members currently access the organization.
-          </p>
-          {#if proof}
-            <CopyValue label="DNS record name" value={proof.name} /><CopyValue
-              label="TXT value"
-              value={proof.value}
-            />
-            <Button disabled={busy || dirty} onclick={verifyProof}>Verify domain</Button>
-          {:else}<Button disabled={busy || dirty} onclick={requestProof}
-              >Get verification record</Button
-            >{/if}
-        {:else}
-          {#if !data.tested}
-            <Button variant="outline" disabled={busy || dirty} onclick={signIn}
-              >Test company sign-in</Button
-            >
-          {:else}
-            <Feedback kind="success"
-              >Company sign-in and administrator access verified successfully.</Feedback
-            >
+          {#if draft.sso.appIdentityType === "entra"}
+            <details class="rounded-lg border p-4">
+              <summary class="text-sm font-medium">Directory search</summary>
+              <div class="mt-4 space-y-4">
+                <div class="flex items-center gap-3">
+                  <Checkbox
+                    id="directory"
+                    checked={draft.directory !== null}
+                    onCheckedChange={(enabled) => {
+                      draft.directory = enabled ? { clientId: "", clientSecret: "" } : null;
+                    }}
+                  /><Label for="directory">Connect Microsoft Graph</Label>
+                </div>
+                {#if draft.directory}
+                  <p class="text-muted-foreground text-xs">
+                    Directory search needs the GroupMember.Read.All application permission with
+                    administrator consent.
+                  </p>
+                  <div class="space-y-2">
+                    <Label for="directory-client">Directory client ID</Label><Input
+                      id="directory-client"
+                      bind:value={draft.directory.clientId}
+                      required
+                    />
+                  </div>
+                  <div class="space-y-2">
+                    <Label for="directory-secret">Directory client secret</Label>
+                    <Input
+                      id="directory-secret"
+                      type="password"
+                      bind:value={draft.directory.clientSecret}
+                      required={!view.settings.directory}
+                      placeholder={view.settings.directory
+                        ? "Leave blank to keep the saved secret"
+                        : ""}
+                      autocomplete="new-password"
+                    />
+                  </div>
+                {/if}
+              </div>
+            </details>
           {/if}
-          {#if onboarding}
-            <p class="text-muted-foreground text-sm">
-              Completing setup disables password access and closes local sessions. Server recovery
-              remains available.
-            </p>
-            <Button disabled={busy || dirty || !data.tested} onclick={complete}
-              >Complete setup and disable password access</Button
+          <div class="flex items-center justify-between border-t pt-4">
+            <span class="text-muted-foreground text-xs">{dirty ? "Unsaved changes" : ""}</span
+            ><Button id="identity-save" type="submit" disabled={busy}
+              >{busy ? "Saving …" : "Save"}</Button
             >
-          {:else if !view.ssoRequired}
+          </div>
+        </fieldset>
+      </form>
+      {#if view.sso}
+        <section class="space-y-4 rounded-xl border p-6">
+          <h2 class="text-base font-semibold">Verify company sign-in</h2>
+          {#if dirty}<Feedback>Save your changes before verifying company sign-in.</Feedback>{/if}
+          {#if !view.sso.domainVerified}
             <p class="text-muted-foreground text-sm">
-              Activating company SSO requires all members to use this provider for this
-              organization. Email sign-in will no longer grant access. You can test the connection
-              before activating it.
+              Verify ownership of {view.sso.domain} to enable company sign-in testing. This does not change
+              how members currently access the organization.
             </p>
-            <Button disabled={busy || dirty || readonly} onclick={activateSso}
-              >Activate company SSO</Button
-            >
+            {#if proof}
+              <CopyValue label="DNS record name" value={proof.name} /><CopyValue
+                label="TXT value"
+                value={proof.value}
+              />
+              <Button disabled={busy || dirty} onclick={verifyProof}>Verify domain</Button>
+            {:else}<Button disabled={busy || dirty} onclick={requestProof}
+                >Get verification record</Button
+              >{/if}
           {:else}
-            <Feedback kind="success">Company SSO is required for this organization.</Feedback>
+            {#if !data.tested}
+              <Button variant="outline" disabled={busy || dirty} onclick={signIn}
+                >Test company sign-in</Button
+              >
+            {:else}
+              <Feedback kind="success"
+                >Company sign-in and administrator access verified successfully.</Feedback
+              >
+            {/if}
+            {#if onboarding}
+              <p class="text-muted-foreground text-sm">
+                Completing setup disables password access and closes local sessions. Server recovery
+                remains available.
+              </p>
+              <Button disabled={busy || dirty || !data.tested} onclick={complete}
+                >Complete setup and disable password access</Button
+              >
+            {:else if !view.ssoRequired}
+              <p class="text-muted-foreground text-sm">
+                Activating company SSO requires all members to use this provider for this
+                organization. Email sign-in will no longer grant access. You can test the connection
+                before activating it.
+              </p>
+              <Button disabled={busy || dirty || readonly} onclick={activateSso}
+                >Activate company SSO</Button
+              >
+            {:else}
+              <Feedback kind="success">Company SSO is required for this organization.</Feedback>
+            {/if}
           {/if}
-        {/if}
-        <p class="text-muted-foreground text-xs">{view.activation.message}</p>
-      </section>
+          <p class="text-muted-foreground text-xs">{view.activation.message}</p>
+        </section>
+      {/if}
     {/if}
   {/if}
 </div>

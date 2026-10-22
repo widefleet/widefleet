@@ -169,6 +169,13 @@
       "when": 1792694400001,
       "tag": "0023_organization_sso",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1792694400002,
+      "tag": "0024_app_login",
+      "breakpoints": true
     }
   ]
 }

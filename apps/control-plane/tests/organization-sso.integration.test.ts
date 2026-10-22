@@ -3,6 +3,7 @@ import { DEVICE_CODE_GRANT_TYPE } from "@better-auth/oauth-provider";
 import { decodeJwt } from "jose";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
+import { createHash, randomBytes } from "node:crypto";
 import { createTestEnvironment } from "./environment.ts";
 import { createIdentityProvider } from "./edge/auth-proxy-idp.ts";
 import { createAuthentication } from "../src/lib/server/auth.ts";
@@ -16,6 +17,7 @@ import {
   ssoProvider,
 } from "../src/lib/server/auth-schema.ts";
 import { organizationRuntimes, organizationSettings } from "../src/lib/server/schema.ts";
+import { registerAppLogin, readAppLogin } from "../src/lib/server/app-login-client.ts";
 import {
   createInvitationService,
   prepareOrganizationInvitation,
@@ -639,6 +641,63 @@ describe("Organization SSO authority across browser and CLI sessions", () => {
       .where(eq(invitation.id, id));
     expect(await invitations.companySignIn(id)).toBeNull();
     expect(await invitations.companySignIn(crypto.randomUUID())).toBeNull();
+  });
+
+  it("does not expose Widefleet app sign-in when company SSO is active", async () => {
+    await environment.database.db.transaction((transaction) =>
+      registerAppLogin(
+        transaction,
+        environment.configuration,
+        environment.environment.PLATFORM_ENCRYPTION_KEY,
+        secondOrg,
+      ),
+    );
+
+    const client = await readAppLogin(
+      environment.database.db,
+      environment.configuration,
+      environment.environment.PLATFORM_ENCRYPTION_KEY,
+      secondOrg,
+    );
+
+    if (!client) throw new Error("Expected an app sign-in client");
+    const secret = client.management.clientSecret;
+    const callback = `https://auth.${environment.configuration.APP_DOMAIN}/oauth2/${secondOrg}/callback`;
+
+    const exchange = async (cookie: string) => {
+      const verifier = randomBytes(32).toString("base64url");
+
+      const parameters = new URLSearchParams({
+        client_id: client.management.clientId,
+        response_type: "code",
+        redirect_uri: callback,
+        scope: "openid profile email",
+        state: crypto.randomUUID(),
+        nonce: crypto.randomUUID(),
+        code_challenge_method: "S256",
+        code_challenge: createHash("sha256").update(verifier).digest("base64url"),
+      });
+
+      const authorized = await request(`/oauth2/authorize?${parameters}`, undefined, cookie);
+      const destination = new URL(await redirect(authorized));
+
+      return request(
+        "/oauth2/token",
+        new URLSearchParams({
+          grant_type: "authorization_code",
+          client_id: client.management.clientId,
+          client_secret: secret,
+          code: z.string().parse(destination.searchParams.get("code")),
+          redirect_uri: callback,
+          code_verifier: verifier,
+        }),
+      );
+    };
+
+    const denied = await exchange(firstCookie);
+    expect(denied.status, await denied.clone().text()).toBeGreaterThanOrEqual(400);
+    const ownCompany = await exchange(secondCookie);
+    expect(ownCompany.status).toBe(403);
   });
 
   it("uses real CLI credentials for plugin operations without creating browser sessions", async () => {

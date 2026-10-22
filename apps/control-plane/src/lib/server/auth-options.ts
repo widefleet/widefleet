@@ -9,6 +9,7 @@ import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/a
 import { z } from "zod";
 import type { Configuration } from "./config.ts";
 import type { SendEmail } from "./email.ts";
+import { hashAppClientSecret } from "./app-login-client.ts";
 import { authenticationReference } from "./authentication-context.ts";
 import { organizationAccess, organizationRoles } from "../organization.ts";
 
@@ -259,6 +260,7 @@ export const authenticationOptions = (
           ? [{ claims: { accessToken: tokenClaims, idToken: tokenClaims } }]
           : [],
         scopes: [...cliScopes, "email"],
+        storeClientSecret: { hash: hashAppClientSecret },
         customIdTokenClaims: ({ user, scopes }) => ({
           email: scopes.includes("email") ? user.email : undefined,
           email_verified: scopes.includes("email") ? user.emailVerified : undefined,

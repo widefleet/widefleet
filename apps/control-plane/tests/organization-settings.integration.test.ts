@@ -7,14 +7,16 @@ import {
   account,
   member,
   organization,
+  oauthClient,
   oauthRefreshToken,
   session,
   ssoProvider,
 } from "../src/lib/server/auth-schema.ts";
-import { organizationRuntimes } from "../src/lib/server/schema.ts";
+import { organizationRuntimes, organizationSettings } from "../src/lib/server/schema.ts";
 import * as encryption from "../src/lib/server/secret-encryption.ts";
 import { createSettingsService } from "../src/lib/server/settings.ts";
 import { cliClientId } from "../src/lib/server/auth-options.ts";
+import { readAppLogin, appLoginClientId } from "../src/lib/server/app-login-client.ts";
 import { createTestEnvironment, organizationCredential } from "./environment.ts";
 
 describe("Organization login settings", () => {
@@ -119,6 +121,67 @@ describe("Organization login settings", () => {
       "settings-first-management-secret",
     );
     expect((await settings.resolve(second.organizationId)).identity).toBeNull();
+  });
+
+  it("disables the built-in app client for company SSO and restores the encrypted secret on return", async () => {
+    const target = await company("settings-toggle");
+    const fallback = { ...settingsInput.parse({ sso: null }), acknowledgeRestart: false };
+    await settings.update(
+      target.principal,
+      fallback,
+      false,
+      await organizationCredential(environment, target.principal),
+    );
+
+    const readClient = () =>
+      readAppLogin(
+        environment.database.db,
+        environment.configuration,
+        environment.environment.PLATFORM_ENCRYPTION_KEY,
+        target.organizationId,
+      );
+
+    const original = await readClient();
+    expect(original?.management.clientSecret).toBeTruthy();
+
+    const [stored] = await environment.database.db
+      .select()
+      .from(organizationSettings)
+      .where(eq(organizationSettings.organizationId, target.organizationId));
+
+    if (!original?.management.clientSecret) throw new Error("Expected generated credentials");
+    expect(stored?.appClientSecret).not.toContain(original.management.clientSecret);
+
+    const disabled = async () => {
+      const [client] = await environment.database.db
+        .select()
+        .from(oauthClient)
+        .where(eq(oauthClient.clientId, appLoginClientId(target.organizationId)));
+
+      return client?.disabled;
+    };
+
+    expect(await disabled()).toBe(false);
+    await settings.update(
+      target.principal,
+      { ...target.input, acknowledgeRestart: false },
+      false,
+      await organizationCredential(environment, target.principal),
+    );
+    await environment.database.db
+      .update(ssoProvider)
+      .set({ domainVerified: true })
+      .where(eq(ssoProvider.organizationId, target.organizationId));
+    await settings.activateSso(target.principal);
+    expect(await disabled()).toBe(true);
+    await settings.update(
+      target.principal,
+      fallback,
+      false,
+      await organizationCredential(environment, target.principal),
+    );
+    expect(await disabled()).toBe(false);
+    expect(await readClient()).toEqual(original);
   });
 
   it("preserves sessions and refresh grants when a provider update is rejected or the provider is removed", async () => {
@@ -247,5 +310,42 @@ describe("Organization login settings", () => {
     await expect(wrongKey.resolve(first.organizationId)).rejects.toThrow();
     await environment.database.db.delete(ssoProvider).where(eq(ssoProvider.id, provider.id));
     expect((await settings.resolve(first.organizationId)).identity).toBeNull();
+  });
+
+  it("publishes initial email sign-in without replacing organization settings or rotating its credentials", async () => {
+    const organizationId = crypto.randomUUID();
+    await environment.database.db.insert(organization).values({
+      id: organizationId,
+      name: "Email sign-in",
+      slug: "settings-email-publication",
+      createdAt: new Date(),
+    });
+
+    const readClient = () =>
+      readAppLogin(
+        environment.database.db,
+        environment.configuration,
+        environment.environment.PLATFORM_ENCRYPTION_KEY,
+        organizationId,
+      );
+
+    expect(await readClient()).toBeNull();
+    const first = await settings.publish(organizationId);
+    const credentials = await readClient();
+    expect(credentials?.management.clientSecret).toBeTruthy();
+    expect(first.settings).toEqual({
+      directory: null,
+      externallyManaged: false,
+    });
+    expect(first.error).toBeNull();
+    await settings.publish(organizationId);
+    expect(await readClient()).toEqual(credentials);
+    expect((await settings.resolve(organizationId)).state.settings).toEqual(first.settings);
+    expect(
+      await environment.database.db
+        .select({ disabled: oauthClient.disabled })
+        .from(oauthClient)
+        .where(eq(oauthClient.clientId, appLoginClientId(organizationId))),
+    ).toEqual([{ disabled: false }]);
   });
 });

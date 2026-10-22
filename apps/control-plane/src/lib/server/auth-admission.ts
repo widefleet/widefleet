@@ -2,9 +2,12 @@ import type { OAuthClaimExtensionInput } from "@better-auth/oauth-provider";
 import { readAuthenticationReference } from "./authentication-context.ts";
 import { APIError } from "better-auth/api";
 import { and, eq, gt } from "drizzle-orm";
+import { z } from "zod";
+import { organizationIdentifier } from "@platform/contracts";
 import type { OrganizationAccess } from "./application-context.ts";
 import type { DatabaseExecutor } from "./database.ts";
-import { invitation, member, user } from "./auth-schema.ts";
+import { organizationSettings } from "./schema.ts";
+import { invitation, member, user, ssoProvider } from "./auth-schema.ts";
 import { installationOrganizationId } from "../organization.ts";
 
 export const createAuthenticationAdmission = (
@@ -34,14 +37,52 @@ export const createAuthenticationAdmission = (
 
     return candidates.some((candidate) => allowed.has(candidate.id));
   },
-  tokenClaims: async ({ user: subject, referenceId }: OAuthClaimExtensionInput) => {
+  tokenClaims: async ({ user: subject, metadata, referenceId }: OAuthClaimExtensionInput) => {
     const authority = subject ? readAuthenticationReference(subject.id, referenceId) : null;
 
     if (!subject || !authority || !referenceId)
       throw new APIError("UNAUTHORIZED", {
         message: "This authorization has no valid sign-in context; sign in again",
       });
+    const userId = subject.id;
 
-    return { reference_id: referenceId };
+    const client = z
+      .object({ purpose: z.literal("app-login"), organizationId: organizationIdentifier })
+      .safeParse(metadata);
+
+    if (!client.success) return { reference_id: referenceId };
+    const organizationId = client.data.organizationId;
+
+    const [current] = await database
+      .select({ emailVerified: user.emailVerified })
+      .from(member)
+      .innerJoin(user, eq(user.id, member.userId))
+      .where(and(eq(member.userId, userId), eq(member.organizationId, organizationId)));
+
+    if (
+      !current?.emailVerified ||
+      (authority.organizationId !== null && authority.organizationId !== organizationId) ||
+      !(await access.filterOrganizations([{ id: organizationId }])).includes(organizationId) ||
+      (
+        await database
+          .select({ verified: ssoProvider.domainVerified })
+          .from(ssoProvider)
+          .innerJoin(
+            organizationSettings,
+            eq(organizationSettings.organizationId, ssoProvider.organizationId),
+          )
+          .where(
+            and(
+              eq(ssoProvider.organizationId, organizationId),
+              eq(organizationSettings.ssoRequired, true),
+            ),
+          )
+      )[0]?.verified === true
+    )
+      throw new APIError("FORBIDDEN", {
+        message: "This account cannot sign in to this organization's apps through Widefleet",
+      });
+
+    return { reference_id: referenceId, organization_id: organizationId };
   },
 });

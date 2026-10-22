@@ -231,6 +231,7 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
       idp.settings.graphFailure = "";
       idp.settings.issuerSuffix = "";
       idp.graphRequests.length = 0;
+      idp.tokenOrigins.length = 0;
       configuration.provider.issuer = idp.origin;
       await worker.stop();
       worker = await start();
@@ -394,6 +395,7 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
       const result = await login();
       const cookies = result.headers.getSetCookie();
 
+      expect(idp.tokenOrigins).toEqual([undefined]);
       const session = cookies.filter((value) => value.includes(".session_"));
 
       expect(session.length).toBeGreaterThanOrEqual(2);
@@ -824,6 +826,7 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
       const result = await login("https://welcome.apps.example.test");
       const cookies = result.headers.getSetCookie();
 
+      expect(idp.tokenOrigins).toEqual([undefined]);
       expect(idp.graphRequests).toHaveLength(3);
       expect(cookies.every((value) => value.length < 4096)).toBe(true);
       expect(cookies.filter((value) => value.includes(".session_data.")).length).toBeGreaterThan(1);

@@ -30,6 +30,8 @@ export const companyProvider = z.discriminatedUnion("type", [
     label: z.string().min(1).max(100),
     groupsClaim: claimName.default("groups"),
     organizationClaim: claimName.optional(),
+    // Widefleet's form-encoded token endpoint requires its own Origin header.
+    sendTokenRequestOrigin: z.boolean().optional(),
     nameClaim: claimName.default("name"),
     emailClaim: claimName.default("email"),
   }),
