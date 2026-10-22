@@ -83,8 +83,13 @@ export const createAuthentication = async (configuration: AuthConfiguration, log
                 clientId: configuration.clientId,
                 clientSecret: configuration.clientSecret,
                 discoveryUrl: `${issuer(configuration.provider)}/.well-known/openid-configuration`,
-                // The hosted provider enforces the same form-origin check as the CLI.
-                authorizationHeaders: { origin: new URL(issuer(configuration.provider)).origin },
+                // Only Widefleet needs the form-origin check; Entra rejects Origin
+                // on confidential-client token requests.
+                authorizationHeaders:
+                  configuration.provider.type === "oidc" &&
+                  configuration.provider.sendTokenRequestOrigin
+                    ? { origin: new URL(issuer(configuration.provider)).origin }
+                    : undefined,
                 requireIdTokenVerification: true,
                 redirectURI: configuration.redirectUrl,
                 disableProviderLogout: true,

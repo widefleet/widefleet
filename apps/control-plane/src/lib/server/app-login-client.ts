@@ -84,6 +84,7 @@ export const readAppLogin = async (
       issuer: `${configuration.PLATFORM_URL}/api/auth`,
       label: "Widefleet",
       organizationClaim: "organization_id",
+      sendTokenRequestOrigin: true,
     },
     management: { clientId, clientSecret },
     directory: null,

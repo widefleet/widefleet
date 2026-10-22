@@ -38,6 +38,7 @@ export const createIdentityProvider = async (
   };
 
   const graphRequests: string[] = [];
+  const tokenOrigins: (string | undefined)[] = [];
 
   const server = createServer((request, response) => {
     const handle = async () => {
@@ -88,6 +89,15 @@ export const createIdentityProvider = async (
         target.searchParams.set("code", code);
         response.writeHead(302, { location: target.href }).end();
       } else if (url.pathname === "/token" && request.method === "POST") {
+        tokenOrigins.push(request.headers.origin);
+
+        // Entra rejects confidential-client token exchanges carrying a browser Origin.
+        if (settings.entra && request.headers.origin !== undefined) {
+          response.writeHead(400).end(JSON.stringify({ error: "invalid_request" }));
+
+          return;
+        }
+
         const chunks: Buffer[] = [];
 
         for await (const chunk of request) chunks.push(z.instanceof(Buffer).parse(chunk));
@@ -200,6 +210,7 @@ export const createIdentityProvider = async (
     origin,
     settings,
     graphRequests,
+    tokenOrigins,
     stop: () =>
       new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve())),
