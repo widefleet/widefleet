@@ -1,6 +1,5 @@
 import { sso } from "@better-auth/sso";
-import { and, eq } from "drizzle-orm";
-import { APIError } from "better-auth/api";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { installationOrganizationId } from "../organization.ts";
 import type { OrganizationAccess } from "./application-context.ts";
@@ -55,30 +54,6 @@ export const companySsoOrigins = async (
   );
 
   const prepared = await prepareCompanyOidc(provider.issuer, configuration);
-
-  // Hydrate legacy providers before Better Auth binds OAuth state to their
-  // configuration. Never change that configuration during a callback.
-  if (prepared.discovered && !callback) {
-    const updated = await database
-      .update(ssoProvider)
-      .set({
-        oidcConfig: await encryptSecret(encryptionKey, JSON.stringify(prepared.configuration)),
-      })
-      .where(
-        and(
-          eq(ssoProvider.id, provider.id),
-          eq(ssoProvider.issuer, provider.issuer),
-          eq(ssoProvider.oidcConfig, provider.oidcConfig),
-          eq(ssoProvider.domainVerified, true),
-        ),
-      )
-      .returning({ id: ssoProvider.id });
-
-    if (updated.length === 0)
-      throw new APIError("CONFLICT", {
-        message: "SSO provider changed; please try signing in again",
-      });
-  }
 
   origins.push(...prepared.origins);
 

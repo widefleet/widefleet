@@ -162,7 +162,7 @@ describe("Better Auth SSO provider integration", () => {
   });
 
   it.each(["registered", "migrated"])(
-    "completes %s-provider sign-in without rediscovering saved endpoints",
+    "completes %s-provider sign-in without changing stored configuration",
     async (kind) => {
       await environment.database.db.delete(ssoProvider);
       await environment.database.db.update(organizationSettings).set({ ssoRequired: false });
@@ -315,21 +315,9 @@ describe("Better Auth SSO provider integration", () => {
           });
         request.mockClear();
         discoveryAvailable = kind === "migrated";
-
-        if (kind === "migrated") {
-          const [before] = await environment.database.db.select().from(ssoProvider);
-          // A callback from an already-started legacy flow must retain the
-          // configuration fingerprint recorded in that flow's OAuth state.
-          await companySsoOrigins(
-            environment.database.db,
-            origin,
-            encryptionKey,
-            new Request(`${origin}/api/auth/sso/callback/${providerId}`),
-          );
-          const [after] = await environment.database.db.select().from(ssoProvider);
-          expect(after?.oidcConfig).toBe(before?.oidcConfig);
-          request.mockClear();
-        }
+        visited.clear();
+        const [before] = await environment.database.db.select().from(ssoProvider);
+        const encrypted = z.string().parse(before?.oidcConfig);
 
         const signIn = new Request(`${origin}/api/auth/sign-in/sso`, {
           method: "POST",
@@ -342,18 +330,16 @@ describe("Better Auth SSO provider integration", () => {
         expect(response.status, JSON.stringify(body)).toBe(200);
         const target = z.object({ url: z.url(), redirect: z.literal(true) }).parse(body);
         expect(new URL(target.url).origin).toBe("https://login.example.test");
-        expect(request).toHaveBeenCalledTimes(kind === "migrated" ? 1 : 0);
+        expect(visited).toEqual(
+          new Set(kind === "migrated" ? [`${issuer}/.well-known/openid-configuration`] : []),
+        );
 
         const [saved] = await environment.database.db.select().from(ssoProvider);
-        const encrypted = z.string().parse(saved?.oidcConfig);
+        expect(saved?.oidcConfig).toBe(encrypted);
         expect(encrypted).not.toContain(input.oidcConfig.clientSecret);
         expect(JSON.parse(await decryptSecret(encryptionKey, encrypted))).toMatchObject({
-          tokenEndpoint: metadata.token_endpoint,
-          jwksEndpoint: metadata.jwks_uri,
-          userInfoEndpoint: metadata.userinfo_endpoint,
           clientSecret: kind === "registered" ? rotatedSecret : input.oidcConfig.clientSecret,
         });
-        discoveryAvailable = false;
         visited.clear();
 
         const callback = `${origin}/api/auth/sso/callback/${input.providerId}`;
@@ -378,7 +364,12 @@ describe("Better Auth SSO provider integration", () => {
         expect(completed.status).toBe(302);
         expect(completed.headers.get("location")).toBe("/settings");
         expect(visited).toEqual(
-          new Set([metadata.token_endpoint, metadata.jwks_uri, metadata.userinfo_endpoint]),
+          new Set([
+            metadata.token_endpoint,
+            metadata.jwks_uri,
+            metadata.userinfo_endpoint,
+            ...(kind === "migrated" ? [`${issuer}/.well-known/openid-configuration`] : []),
+          ]),
         );
 
         const authenticated = await environment.auth.handler(
@@ -394,8 +385,11 @@ describe("Better Auth SSO provider integration", () => {
         });
 
         request.mockClear();
+        visited.clear();
         expect((await environment.auth.handler(signIn.clone())).status).toBe(200);
-        expect(request).not.toHaveBeenCalled();
+        expect(visited).toEqual(
+          new Set(kind === "migrated" ? [`${issuer}/.well-known/openid-configuration`] : []),
+        );
         const [unchanged] = await environment.database.db.select().from(ssoProvider);
         expect(unchanged?.oidcConfig).toBe(encrypted);
 
@@ -446,61 +440,4 @@ describe("Better Auth SSO provider integration", () => {
       }
     },
   );
-
-  it("does not overwrite a provider edited while legacy discovery is in flight", async () => {
-    await environment.database.db.delete(ssoProvider);
-
-    const encryptionKey =
-      environment.configuration.PLATFORM_ENCRYPTION_KEY ??
-      environment.configuration.BETTER_AUTH_SECRET;
-
-    const providerId = "concurrent-discovery";
-    const issuer = "http://127.0.0.1:25439";
-    const original = { clientId: "synthetic-client", clientSecret: "original-secret", issuer };
-
-    const replacement = await encryptSecret(
-      encryptionKey,
-      JSON.stringify({ ...original, clientSecret: "rotated-secret" }),
-    );
-
-    await environment.database.db.insert(ssoProvider).values({
-      id: crypto.randomUUID(),
-      providerId,
-      issuer,
-      domain: "example.test",
-      domainVerified: true,
-      organizationId: "widefleet",
-      oidcConfig: await encryptSecret(encryptionKey, JSON.stringify(original)),
-    });
-
-    const request = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-      await environment.database.db.update(ssoProvider).set({ oidcConfig: replacement });
-
-      return Response.json({
-        issuer,
-        authorization_endpoint: `${issuer}/authorize`,
-        token_endpoint: `${issuer}/token`,
-        jwks_uri: `${issuer}/jwks`,
-      });
-    });
-
-    try {
-      await expect(
-        companySsoOrigins(
-          environment.database.db,
-          origin,
-          encryptionKey,
-          new Request(`${origin}/api/auth/sign-in/sso`, {
-            method: "POST",
-            headers: { origin, "content-type": "application/json" },
-            body: JSON.stringify({ providerId }),
-          }),
-        ),
-      ).rejects.toMatchObject({ status: "CONFLICT" });
-      const [stored] = await environment.database.db.select().from(ssoProvider);
-      expect(stored?.oidcConfig).toBe(replacement);
-    } finally {
-      request.mockRestore();
-    }
-  });
 });
