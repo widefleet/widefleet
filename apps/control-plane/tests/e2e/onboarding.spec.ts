@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { once } from "node:events";
+import { EventEmitter, once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
@@ -137,11 +137,49 @@ test("accepts emailed owner invitations and manages members in isolated organiza
     baseURL: environment.configuration.PLATFORM_URL,
   });
 
-  const signIn = async (page: Page, email: string) => {
+  const signIn = async (page: Page, email: string, checkEmailState = false) => {
     const form = page.locator("form").filter({ has: page.locator("#code-email") });
     await form.getByLabel("Email", { exact: true }).fill(email);
+
+    if (checkEmailState) {
+      const pending = new EventEmitter();
+      const requested = once(pending, "requested");
+      const released = once(pending, "released");
+      await page.route(
+        "**/api/auth/email-otp/send-verification-otp",
+        async (route) => {
+          pending.emit("requested");
+          await released;
+          await route.fulfill({ status: 503, json: { message: "Temporarily unavailable" } });
+        },
+        { times: 1 },
+      );
+      await form.getByRole("button", { name: "Email me a sign-in code" }).click();
+      await requested;
+
+      try {
+        await expect(page.locator("#code-email")).toBeDisabled();
+        await page.locator("#login-email").fill("another@example.test");
+      } finally {
+        pending.emit("released");
+      }
+
+      await expect(
+        page.getByText("Could not send a sign-in code. Please try again."),
+      ).toBeVisible();
+      await expect(page.locator("#code-email")).toBeEnabled();
+      await expect(page.locator("#code-email")).toHaveValue(email);
+      await expect(page.getByLabel("Sign-in code", { exact: true })).toHaveCount(0);
+    }
+
     await form.getByRole("button", { name: "Email me a sign-in code" }).click();
     await expect(page.getByLabel("Sign-in code", { exact: true })).toBeVisible();
+
+    if (checkEmailState) {
+      await page.locator("#login-email").fill("yet-another@example.test");
+      await expect(page.locator("#code-email")).toHaveValue(email);
+      await expect(page.locator("#code-email")).toHaveAttribute("readonly", "");
+    }
 
     const code = z
       .string()
@@ -247,7 +285,7 @@ test("accepts emailed owner invitations and manages members in isolated organiza
     // A recipient may already have an email session when their company enables SSO.
     const emailPage = await emailContext.newPage();
     await emailPage.goto(`/invitations/${company.invitationId}`);
-    await signIn(emailPage, company.email);
+    await signIn(emailPage, company.email, true);
     await expect(emailPage.getByRole("heading", { name: "Join browser-company" })).toBeVisible();
     const { adapter } = await environment.auth.$context;
     await adapter.create({
