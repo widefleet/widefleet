@@ -29,8 +29,12 @@ agent and runtime together; register the newly displayed app callback URL
 reapply sign-in settings and redeploy existing apps to publish their organization-bound
 auth routes. Management callbacks now use `/api/auth/sso/callback/PROVIDER_ID`; copy the
 exact URL from Settings into the IdP registration. Saved providers are not automatically
-marked domain-verified. Use the installation [recovery link](#secrets-and-administrator-recovery) if no email or
-password login is available, enter the company domain, save, complete DNS verification and activate company SSO. Existing app sessions and CLI tokens require a fresh sign-in.
+marked domain-verified. Use the installation [recovery link](#secrets-and-administrator-recovery) if no email-code login is available, enter the company domain, save, complete DNS verification and activate company SSO. Existing app sessions and CLI tokens require a fresh sign-in.
+Local password authentication is removed in these builds. The migration deletes password
+credentials and the former database flag while preserving users, memberships and SSO accounts.
+Before upgrading, configure email-code delivery, explicitly choose `LOGIN_CODE_DELIVERY=console`,
+or verify that company SSO works. Remove `owner.password` from any pending bootstrap file.
+Company SSO and directory settings remain organization-scoped database configuration.
 These builds also support [member invitations and company sign-in](/guides/members)
 when an email adapter is configured; the default self-hosted build does not add a mail service.
 
@@ -40,13 +44,22 @@ Configure company SSO, directory credentials and browser editability in **Settin
 
 **Keep first setup accessible only to the installing administrator**, or supply the [bootstrap file](#automated-first-setup) before exposing the installation. The first person who completes the setup form becomes Owner; there is no initial shared password or setup key. Once claimed, this endpoint cannot create another administrator.
 
-After starting the containers, open `PLATFORM_URL`:
+For interactive first setup, choose a sign-in-code transport before starting the containers:
 
-1. Create the first administrator with a name, email and password.
-2. Enter the issuer URL and choose the app identity claims: Microsoft Entra for Entra object IDs and group handling, or OpenID Connect for standard subjects and configurable group claims. The page shows both callback URLs before saving.
+- `LOGIN_CODE_DELIVERY=email` is the default. It requires a configured email adapter; the standard self-hosted build does not include a mail service.
+- `LOGIN_CODE_DELIVERY=console` explicitly prints sign-in codes to the control-plane log. The example deployment environment selects this operator mode. Read it with `docker compose ... logs --since=5m control-plane`. Log readers can use the codes, so keep logs private. Console delivery does not prove control of the email inbox, although Better Auth marks a successful email-code login as email-verified. Use email delivery or company SSO for ordinary users.
+
+This setting controls sign-in codes only. Invitations still require an email adapter. Mail failures never switch delivery to the console. Changing the transport requires recreating the control-plane container and does not revoke existing sessions.
+
+Open `PLATFORM_URL`:
+
+1. Create the first administrator with a name and email, then request a sign-in code. Read it from the selected transport and sign in. Codes expire after five minutes and allow three incorrect attempts.
+2. To use company SSO, enter the issuer URL and choose the app identity claims: Microsoft Entra for Entra object IDs and group handling, or OpenID Connect for standard subjects and configurable group claims. The page shows both callback URLs before saving.
 3. Register both callbacks in one IdP registration and enter its client ID and secret once. Enable directory search only if needed.
 4. Enter your company email domain and publish the DNS TXT record shown by **Get verification record**. Choose **Verify domain**, then **Test company sign-in** and authenticate with the same email as the first administrator. Widefleet links that account automatically and checks its administrator access.
-5. Complete setup. Company SSO becomes required and password authentication is disabled server-side and local browser sessions and their refresh tokens are removed. Future sign-ins use company SSO.
+5. Choose **Activate company SSO**. Company SSO becomes required for the operator organization. Existing email-code sessions can no longer access it; the operator recovery command remains available. An email-code login cannot bypass required SSO.
+
+Customer administrators can change their own SSO and directory settings without restarting the platform.
 
 Company sign-in automatically enrolls users admitted by the organization's provider as Members who can create apps, including external guests. Restrict the shared IdP registration to the intended users. Existing memberships keep their roles, and pending invitations retain their acceptance flow. Without company SSO, customers join through invitations. Apps enforce their own access rules and business permissions using the verified user and group context.
 
@@ -68,8 +81,7 @@ Mount a JSON file read-only into the control-plane container and set `PLATFORM_B
 {
   "owner": {
     "name": "IT Administrator",
-    "email": "admin@example.com",
-    "password": "REPLACE_WITH_A_LONG_RANDOM_PASSWORD"
+    "email": "admin@example.com"
   },
   "settings": {
     "externallyManaged": false,
@@ -101,7 +113,7 @@ services:
       - /absolute/private/bootstrap.json:/run/widefleet/bootstrap.json:ro
 ```
 
-The bootstrap file initializes the administrator and the optional settings once. If initialization fails after creating the administrator, the next start resumes with that account. Keep the file mounted, correct the reported configuration or provider failure, and restart until initialization succeeds. After successful initialization, the file is ignored and can be removed; later UI/API changes survive restarts. The bootstrap file does not prove domain ownership. Complete DNS verification and test the company login before closing password access.
+The bootstrap file initializes the administrator and the optional settings once. If initialization fails after creating the administrator, the next start resumes with that account. Keep the file mounted, correct the reported configuration or provider failure, and restart until initialization succeeds. After successful initialization, the file is ignored and can be removed; later UI/API changes survive restarts. The bootstrap file does not prove domain ownership. File initialization uses a short-lived operator session that is closed afterwards; it does not send a code or mark the owner’s email as verified. Use an email-code login or a recovery link to complete DNS verification and test the company login.
 
 ### UI, API and CLI configuration
 
@@ -142,7 +154,7 @@ If company SSO is broken, run on the selected installation's host:
 docker compose ... exec control-plane node tools/recover.ts admin@example.com
 ```
 
-The command requires an existing Owner or Admin and prints a one-use link. It opens a fixed ten-minute administrator session; it does not reopen password authentication. The token travels in the URL fragment, not a request URL. Recovery sessions cannot authorize a CLI credential. Correct the settings, link a replacement company account if needed, and verify company sign-in. No mail service is needed.
+The command requires an existing Owner or Admin and prints a one-use link. It opens a fixed ten-minute administrator session; it does not create a permanent login credential. The token travels in the URL fragment, not a request URL. Recovery sessions cannot authorize a CLI credential. Correct the settings, link a replacement company account if needed, and verify company sign-in. No mail service is needed.
 
 ### App group claims
 
