@@ -1231,7 +1231,9 @@ test.describe("member forms without JavaScript", () => {
       select.value = "owner";
     });
     await form.getByRole("button", { name: "Save role" }).click();
-    await expect(page.getByRole("alert")).toContainText("Only owners can appoint");
+    await expect(page.getByRole("alert")).toContainText(
+      "You are not allowed to update this member",
+    );
     await expect(page.getByRole("status")).toHaveCount(0);
     await expect(page.getByLabel("Search by name or email")).toHaveValue("Native Role");
     await expect(page.getByText("Page 2", { exact: true })).toBeVisible();

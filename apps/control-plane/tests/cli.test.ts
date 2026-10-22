@@ -243,9 +243,28 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         return;
       }
 
+      if (request.url === "/api/v1/settings/domain-verification") {
+        response.end(
+          JSON.stringify({
+            name: "_better-auth-token-company.example.test",
+            type: "TXT",
+            value: "synthetic-domain-proof",
+          }),
+        );
+
+        return;
+      }
+
+      if (request.url === "/api/v1/settings/verify-domain") {
+        response.end(JSON.stringify({ success: true }));
+
+        return;
+      }
+
       if (
         request.url === "/api/v1/settings" ||
-        request.url === "/api/v1/settings/external-management"
+        request.url === "/api/v1/settings/external-management" ||
+        request.url === "/api/v1/settings/activate-sso"
       ) {
         response.end(
           JSON.stringify({
@@ -865,6 +884,16 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       expect(requests).toContain("PUT /api/v1/settings");
       await settingsCli("external-management", "true");
       expect(requests).toContain("PUT /api/v1/settings/external-management");
+      expect(JSON.parse((await settingsCli("domain-verification")).stdout)).toEqual({
+        name: "_better-auth-token-company.example.test",
+        type: "TXT",
+        value: "synthetic-domain-proof",
+      });
+      expect(JSON.parse((await settingsCli("verify-domain")).stdout)).toEqual({ success: true });
+      expect(requests).toContain("POST /api/v1/settings/domain-verification");
+      expect(requests).toContain("POST /api/v1/settings/verify-domain");
+      await settingsCli("activate-sso");
+      expect(requests).toContain("POST /api/v1/settings/activate-sso");
     });
 
     it.each(["flag", "environment"])(

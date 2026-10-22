@@ -1834,6 +1834,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
   }, 180000);
 
   it("enforces browser network grants through the deployed app and real Traefik", async () => {
+    console.info("browser-network: starting");
     appDirectory = join(state, "browser app");
     await mkdir(join(appDirectory, "public"), { recursive: true });
     await cp(
@@ -1854,8 +1855,11 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       }),
     );
     const app = await createApp("browser-network");
+    console.info("browser-network: created");
     await cli("deploy", app.id, "--skip-build", "--no-wait");
+    console.info("browser-network: deploying");
     await agent();
+    console.info("browser-network: deployed");
     const edgeName = `widefleet-browser-test-${crypto.randomUUID()}`;
     const routePath = join(state, "routes/browser-fixture.yaml");
     let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
@@ -1923,6 +1927,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
         "--providers.providersThrottleDuration=100ms",
       ]);
       const published = (await execute("docker", ["port", edgeName, "8443/tcp"])).stdout.trim();
+      console.info("browser-network: Traefik started");
       const port = new URL(`https://${published}`).port;
       const origin = `https://${app.hostname}:${port}`;
 
@@ -1939,8 +1944,10 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       browser = await chromium.launch({
         args: ["--host-resolver-rules=MAP *.localhost 127.0.0.1"],
       });
+      console.info("browser-network: Chromium started");
       const context = await browser.newContext({ ignoreHTTPSErrors: true });
       const page = await context.newPage();
+      page.on("console", (message) => console.info("browser-network:", message.text()));
       const resourceEvents: string[] = [];
       page.on("response", (response) => {
         if (new URL(response.url()).pathname.startsWith("/resource/"))
@@ -1953,8 +1960,11 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       await vi.waitFor(async () => expect((await page.goto(origin))?.status()).toBe(200), {
         timeout: 20000,
       });
+      console.info("browser-network: app loaded");
 
       const probe = async (phase: string, grants: boolean) => {
+        console.info("browser-network: probe", phase);
+
         const violations = await page.evaluate(
           async ({ destinations, phase }) => {
             const violations: string[] = [];
@@ -1983,10 +1993,13 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
                         image.onerror = () => resolve();
                         image.src = url;
                       });
+                    console.info("completed resource", phase, destination.host, kind);
                   }),
                 ),
               );
+              console.info("resources completed", phase);
               await new Promise(requestAnimationFrame);
+              console.info("animation completed", phase);
 
               return violations.sort();
             } finally {
@@ -2025,6 +2038,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
                 .sort()
             : [],
         );
+        console.info("browser-network: probe completed", phase);
       };
 
       const response = await page.reload();
@@ -2038,7 +2052,9 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       );
 
       await cli("network", "allow", ...browserOrigins, "--browser", "--app", app.slug, "--no-wait");
+      console.info("browser-network: grants queued");
       await agent();
+      console.info("browser-network: grants applied");
       await vi.waitFor(
         async () => {
           const response = await page.reload();
@@ -2062,9 +2078,13 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
         app.slug,
         "--no-wait",
       );
+      console.info("browser-network: backend grants queued");
       await agent();
+      console.info("browser-network: backend grants applied");
       await cli("network", "deny", ...browserOrigins, "--browser", "--app", app.slug, "--no-wait");
+      console.info("browser-network: revocation queued");
       await agent();
+      console.info("browser-network: revocation applied");
       await vi.waitFor(
         async () => {
           const response = await page.goto(origin);
@@ -2074,12 +2094,16 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       );
       await probe("revoked", false);
     } finally {
+      console.info("browser-network: closing Chromium and Traefik");
       await browser?.close();
       await execute("docker", ["rm", "-f", edgeName]).catch(() => undefined);
+      console.info("browser-network: Chromium and Traefik closed");
     }
 
     await cli("delete", app.id, "--yes");
+    console.info("browser-network: app deletion queued");
     await agent();
+    console.info("browser-network: app deleted");
   }, 180000);
 
   it("deploys and reloads, isolates preview data, rolls back code, boots without the control plane and removes an app and its previews without deleting unrelated apps", async () => {

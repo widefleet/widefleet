@@ -110,7 +110,7 @@
 {#snippet navigationLinks()}
   <nav aria-label="Main navigation" class="space-y-1">
     {#each navigation as item, index (item.href)}
-      {#if index < 3 || (["/agents", "/members"].includes(item.href) ? principal.admin : principal.application.admin)}
+      {#if index < 3 || (item.href === "/agents" ? principal.admin : principal.application.admin)}
         {#if index === 3}<p
             class="text-muted-foreground px-3 pt-7 pb-2 text-[11px] font-medium tracking-wider uppercase"
           >

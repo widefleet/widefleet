@@ -1,6 +1,5 @@
-import type { SendEmail } from "./email.ts";
-import type { BetterAuthOptions } from "better-auth";
 import type { OrganizationAccess } from "./application-context.ts";
+import type { BetterAuthOptions } from "better-auth";
 import { createAuthentication } from "./auth.ts";
 import { createIdentityService } from "./identity.ts";
 import { createAppService } from "./apps.ts";
@@ -22,6 +21,8 @@ import type { createReporting } from "./reporting.ts";
 import type { createSettingsService } from "./settings.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import type { HostedExecution } from "./deployment-execution.ts";
+import type { SendEmail } from "./email.ts";
+import { createInvitationService } from "./members.ts";
 
 export const createRuntime = ({
   configuration,
@@ -56,6 +57,7 @@ export const createRuntime = ({
     settings,
     reporting,
     storage,
+    invitations: createInvitationService(database.db, configuration, sendEmail, organizationAccess),
     emailSignIn: Boolean(sendEmail),
     apps: createAppService(database.db, configuration, execution),
     agents: createAgentService(database.db),

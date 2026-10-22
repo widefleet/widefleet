@@ -10,12 +10,7 @@ import { z } from "zod";
 import type { Configuration } from "./config.ts";
 import type { SendEmail } from "./email.ts";
 import { authenticationReference } from "./authentication-context.ts";
-import {
-  installationOrganizationId,
-  organizationRole,
-  organizationAccess,
-  organizationRoles,
-} from "../organization.ts";
+import { organizationAccess, organizationRoles } from "../organization.ts";
 
 export const cliClientId = "platform-cli";
 
@@ -78,6 +73,7 @@ export const authenticationOptions = (
       "/organization/accept-invitation",
       "/organization/reject-invitation",
       "/organization/cancel-invitation",
+      "/organization/update-member-role",
       "/email-otp/get-verification-otp",
       "/email-otp/check-verification-otp",
       "/email-otp/verify-email",
@@ -233,19 +229,9 @@ export const authenticationOptions = (
       organization({
         allowUserToCreateOrganization: false,
         disableOrganizationDeletion: true,
+        requireEmailVerificationOnInvitation: true,
         ac: organizationAccess,
         roles: organizationRoles,
-        organizationHooks: {
-          beforeUpdateMemberRole: async ({ newRole, organization: target }) => {
-            if (
-              target.id !== installationOrganizationId ||
-              !organizationRole.safeParse(newRole).success
-            )
-              throw new APIError("BAD_REQUEST", {
-                message: "Choose Owner, Admin or Member in this installation",
-              });
-          },
-        },
       }),
       jwt({ jwt: { issuer: `${configuration.PLATFORM_URL}/api/auth` } }),
       oauthProvider({

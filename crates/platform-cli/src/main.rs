@@ -10,6 +10,7 @@ mod discovery;
 mod groups;
 mod installation;
 mod logs;
+mod members;
 mod migrations;
 mod network;
 mod preview;
@@ -72,6 +73,10 @@ enum Command {
     Account,
     /// List organizations available to the signed-in account.
     Organizations,
+    /// Manage the selected organization's members and roles.
+    Members(members::Options),
+    /// Invite people to your organization or accept an invitation.
+    Invitations(members::InvitationOptions),
     /// List visible applications.
     Apps,
     /// Discover listed apps or publish and withdraw your app's catalog listing.
@@ -250,6 +255,8 @@ async fn run(args: Arguments) -> Result<()> {
         Command::Runtime(options) => runtime::run(&api, &credentials, &token, options).await,
         Command::Settings(options) => settings::run(&api, &token, options).await,
         Command::Groups(options) => groups::run(&api, &token, options).await,
+        Command::Members(options) => members::run(&api, &token, options).await,
+        Command::Invitations(options) => members::invitations(&api, &token, options).await,
         Command::Catalog(options) => catalog::run(&api, &token, options).await,
         Command::Whoami => print_json(
             &json::<Value>(api.authenticated(Method::GET, "/me", &token).send().await?).await?,
@@ -393,6 +400,8 @@ async fn main() {
         Command::Whoami => "whoami",
         Command::Account => "account",
         Command::Organizations => "organizations",
+        Command::Members(_) => "members",
+        Command::Invitations(_) => "invitations",
         Command::Apps => "apps",
         Command::Catalog(_) => "catalog",
         Command::Groups(_) => "groups",
