@@ -1,4 +1,5 @@
 import { createRuntimeExtension } from "#runtime-extension";
+import type { RuntimeExtension, RuntimeExtensionContext } from "./runtime-extension.ts";
 import { organizationIdentifier } from "@platform/contracts";
 import { createAppSignIn } from "./app-sign-in-node.ts";
 import { bootstrapConfiguration } from "@platform/contracts";
@@ -82,11 +83,14 @@ export const prepareInstallation = async (
 export const initializeRuntime = async (
   input = readConfiguration(),
   migrationsFolder = resolve("migrations"),
+  createExtension: (
+    context: RuntimeExtensionContext,
+  ) => RuntimeExtension | Promise<RuntimeExtension> = createRuntimeExtension,
 ) => {
   const { keys, configuration, database } = await prepareInstallation(input, migrationsFolder);
 
   try {
-    const extension = createRuntimeExtension({ database: database.db, configuration });
+    const extension = await createExtension({ database: database.db, configuration });
 
     const settings = createSettingsService(
       configuration,
