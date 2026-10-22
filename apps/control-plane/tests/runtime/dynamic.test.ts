@@ -972,7 +972,9 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
         const incoming = once(request, "response");
         // Exceed native KV's 25 MiB limit without ending the upload. The
         // response must arrive without EOF; buffering the input would hang.
-        request.write(Buffer.alloc(32 * 1024 * 1024));
+        // Stop at the first rejected byte so unread excess data cannot reset
+        // the connection while the client is receiving that early response.
+        request.write(Buffer.alloc(25 * 1024 * 1024 + 1));
         const [parsed] = z.tuple([z.instanceof(IncomingMessage)]).parse(await incoming);
         parsed.setEncoding("utf8");
         let body = "";
