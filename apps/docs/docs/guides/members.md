@@ -102,6 +102,7 @@ unchanged when updating the connection. Leave the other exported settings intact
 ```json
 {
   "providerId": "example-company",
+  "appIdentityType": "oidc",
   "issuer": "https://login.example.com",
   "domain": "example.com",
   "oidcConfig": {
@@ -109,10 +110,16 @@ unchanged when updating the connection. Leave the other exported settings intact
     "clientSecret": "REPLACE_WITH_CLIENT_SECRET",
     "pkce": true,
     "scopes": ["openid", "profile", "email"],
-    "mapping": { "name": "name", "email": "email" }
+    "mapping": {
+      "name": "name",
+      "email": "email",
+      "extraFields": { "groups": "groups" }
+    }
   }
 }
 ```
+
+`appIdentityType` selects the app identity format: `oidc` by default, or `entra` for Microsoft object IDs and group handling. For OIDC, `oidcConfig.mapping.extraFields.groups` names the provider claim containing app groups; change it if your provider uses a name such as `roles`. Both workspace and app sign-in use the same saved provider mapping.
 
 The initial registration requires the client secret. Then plan and apply the edited file:
 

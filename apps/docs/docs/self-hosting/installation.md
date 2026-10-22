@@ -73,10 +73,10 @@ Mount a JSON file read-only into the control-plane container and set `PLATFORM_B
   },
   "settings": {
     "externallyManaged": false,
-    "appIdentity": { "type": "entra" },
     "directory": null,
     "sso": {
       "providerId": "company-widefleet",
+      "appIdentityType": "entra",
       "domain": "example.com",
       "issuer": "https://login.microsoftonline.com/00000000-0000-4000-8000-000000000001/v2.0",
       "oidcConfig": {
@@ -101,7 +101,7 @@ services:
       - /absolute/private/bootstrap.json:/run/widefleet/bootstrap.json:ro
 ```
 
-The bootstrap file is read only while no first administrator exists. After setup, UI/API changes survive restarts even if the file still contains earlier values. It can be removed after successful initialization. The bootstrap file does not prove domain ownership. Complete DNS verification and test the company login before closing password access.
+The bootstrap file initializes the administrator and the optional settings once. If initialization fails after creating the administrator, the next start resumes with that account. Keep the file mounted, correct the reported configuration or provider failure, and restart until initialization succeeds. After successful initialization, the file is ignored and can be removed; later UI/API changes survive restarts. The bootstrap file does not prove domain ownership. Complete DNS verification and test the company login before closing password access.
 
 ### UI, API and CLI configuration
 
