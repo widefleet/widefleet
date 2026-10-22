@@ -1,3 +1,5 @@
+import type { SendEmail } from "./email.ts";
+import type { BetterAuthOptions } from "better-auth";
 import type { OrganizationAccess } from "./application-context.ts";
 import { createAuthentication } from "./auth.ts";
 import { createIdentityService } from "./identity.ts";
@@ -31,6 +33,9 @@ export const createRuntime = ({
   execution,
   hostedLogs,
   organizationAccess,
+  sendEmail,
+  authRateLimit,
+  authIpAddressHeaders,
 }: {
   configuration: Configuration & { BETTER_AUTH_SECRET: string };
   database: ReturnType<typeof createDatabase>;
@@ -40,6 +45,9 @@ export const createRuntime = ({
   encryptionKey: string;
   execution?: HostedExecution;
   organizationAccess?: OrganizationAccess;
+  sendEmail?: SendEmail;
+  authRateLimit?: BetterAuthOptions["rateLimit"];
+  authIpAddressHeaders?: string[];
   hostedLogs?: ReturnType<typeof createCloudflareLogs>;
 }) => {
   const services = {
@@ -48,6 +56,7 @@ export const createRuntime = ({
     settings,
     reporting,
     storage,
+    emailSignIn: Boolean(sendEmail),
     apps: createAppService(database.db, configuration, execution),
     agents: createAgentService(database.db),
     jobs: createJobService(database.db, storage, encryptionKey, reporting.operation),
@@ -69,7 +78,16 @@ export const createRuntime = ({
     ownerId: string | null,
     settingsRevision: number,
   ) => {
-    const auth = createAuthentication(active, database.db);
+    const authOptions: NonNullable<Parameters<typeof createAuthentication>[2]> = {};
+
+    if (sendEmail) authOptions.sendEmail = sendEmail;
+
+    if (authRateLimit) authOptions.rateLimit = authRateLimit;
+
+    if (authIpAddressHeaders) authOptions.ipAddressHeaders = authIpAddressHeaders;
+
+    if (organizationAccess) authOptions.organizationAccess = organizationAccess;
+    const auth = createAuthentication(active, database.db, authOptions);
 
     return {
       ...services,

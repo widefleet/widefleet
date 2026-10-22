@@ -1,3 +1,5 @@
+import { createCloudflareEmail } from "./email-cloudflare.ts";
+import { cloudflareAuthRateLimit } from "./auth-rate-limit-cloudflare.ts";
 import { error } from "@sveltejs/kit";
 import { createArtifactStorage } from "./artifact-storage.ts";
 import { readCloudflareConfiguration, type CloudflareBindings } from "./cloudflare-config.ts";
@@ -26,7 +28,9 @@ export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
 
   const storage = createArtifactStorage(createR2Storage(bindings.ARTIFACTS));
 
-  const resolve = createRuntime({
+  const sendEmail = createCloudflareEmail(bindings);
+
+  const options: Parameters<typeof createRuntime>[0] = {
     configuration,
     database,
     settings,
@@ -35,7 +39,12 @@ export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
     hostedLogs: createCloudflareLogs(bindings),
     reporting,
     encryptionKey: configuration.PLATFORM_ENCRYPTION_KEY,
-  });
+    authRateLimit: cloudflareAuthRateLimit(bindings, configuration.PLATFORM_URL),
+    authIpAddressHeaders: ["cf-connecting-ip"],
+  };
+
+  if (sendEmail) options.sendEmail = sendEmail;
+  const resolve = createRuntime(options);
 
   return {
     get: createRequestRuntime(async () => {

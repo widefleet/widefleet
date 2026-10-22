@@ -190,6 +190,7 @@ export const createTestEnvironment = async (
       admin: false,
     },
     authControl,
+    emailSignIn: false,
     reporting: createReporting(configuration, database.db),
     replacementClient,
     settings,

@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { z } from "zod";
+  import { onMount } from "svelte";
   import { authClient } from "#lib/auth-client";
   import { goto } from "$app/navigation";
   import AuthLayout from "#shadcn/components/AuthLayout.svelte";
@@ -14,11 +16,51 @@
 
   let busy = $state(false);
 
+  let ready = $state(false);
+
+  onMount(() => {
+    ready = true;
+  });
+
   let message = $state("");
 
   let email = $state("");
 
   let password = $state("");
+
+  let otp = $state("");
+
+  let sent = $state(false);
+
+  const oauthRedirect = z.object({ redirect: z.literal(true), url: z.url() });
+
+  const emailSignIn = async (event: SubmitEvent) => {
+    event.preventDefault();
+
+    if (busy) return;
+    busy = true;
+    message = "";
+
+    try {
+      if (!sent) {
+        const result = await authClient.emailOtp.sendVerificationOtp({ email, type: "sign-in" });
+
+        if (result.error) message = "Could not send a sign-in code. Please try again.";
+        else sent = true;
+      } else {
+        const result = await authClient.signIn.emailOtp({ email, otp });
+
+        if (result.error) message = "Invalid or expired code. Request another code and try again.";
+        else if (!oauthRedirect.safeParse(result.data).success) {
+          await goto(data.next, { invalidateAll: true });
+        }
+      }
+    } catch {
+      message = "Sign-in is temporarily unavailable. Check your connection.";
+    } finally {
+      busy = false;
+    }
+  };
 
   const signIn = async () => {
     if (!data.provider || busy) return;
@@ -26,10 +68,9 @@
     message = "";
 
     try {
-      const result = await authClient.signIn.social({
-        provider: data.provider,
-        callbackURL: data.next,
-      });
+      const input = { provider: data.provider, callbackURL: data.next };
+
+      const result = await authClient.signIn.social(input);
 
       if (result.error) {
         message = "Could not start sign-in. Please try again.";
@@ -52,7 +93,7 @@
       const result = await authClient.signIn.email({ email, password });
 
       if (result.error) message = "Email or password not recognized.";
-      else await goto(data.next);
+      else if (!oauthRedirect.safeParse(result.data).success) await goto(data.next);
     } catch {
       message = "Sign-in is temporarily unavailable. Check your connection.";
     } finally {
@@ -72,11 +113,58 @@
   <p class="text-muted-foreground mt-3 text-sm leading-6">
     {data.next.startsWith("/device")
       ? "Sign in to review the request from your terminal and connect your CLI."
-      : "Sign in with your company account to continue in your workspace."}
+      : "Sign in to continue to your workspace."}
   </p>
   {#if data.provider}<Button onclick={signIn} disabled={busy} class="mt-7 h-10 w-full"
       >{busy ? "Opening sign-in …" : `Sign in with ${data.label}`}<ArrowRight /></Button
     >{/if}
+  {#if data.emailSignIn}
+    <form onsubmit={emailSignIn} class="mt-6 space-y-4">
+      <div class="space-y-2">
+        <Label for="code-email">Email</Label>
+        <Input
+          id="code-email"
+          type="email"
+          bind:value={email}
+          disabled={!ready}
+          readonly={sent}
+          autocomplete="email"
+          required
+        />
+      </div>
+      {#if sent}
+        <p class="text-muted-foreground text-xs leading-5">
+          If this address has an invitation or membership, a six-digit code is on its way.
+        </p>
+        <div class="space-y-2">
+          <Label for="sign-in-code">Sign-in code</Label>
+          <Input
+            id="sign-in-code"
+            bind:value={otp}
+            inputmode="numeric"
+            autocomplete="one-time-code"
+            pattern={"[0-9]{6}"}
+            minlength={6}
+            maxlength={6}
+            required
+          />
+        </div>
+      {/if}
+      <Button type="submit" disabled={busy || !ready} class="w-full"
+        >{busy ? "Please wait …" : sent ? "Sign in" : "Email me a sign-in code"}</Button
+      >
+      {#if sent}<Button
+          type="button"
+          variant="ghost"
+          class="w-full"
+          disabled={busy}
+          onclick={() => {
+            sent = false;
+            otp = "";
+          }}>Use another email or request a new code</Button
+        >{/if}
+    </form>
+  {/if}
   {#if data.localPasswordEnabled}
     <details open={!data.provider} class="mt-6 border-t pt-5">
       <summary class="text-sm font-medium">Continue setup</summary>
@@ -113,7 +201,7 @@
         >
       </form>
     </details>
-  {:else if !data.provider}<div class="mt-5">
+  {:else if !data.provider && !data.emailSignIn}<div class="mt-5">
       <Feedback kind="error"
         >Company sign-in is temporarily unavailable. Contact your administrator.</Feedback
       >

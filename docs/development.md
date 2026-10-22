@@ -119,7 +119,7 @@ When testing the built server, use `BODY_SIZE_LIMIT=32M` for supported Worker up
 
 ## Dependency constraints
 
-Better Auth 1.7.7 declares a SvelteKit 2 peer range. The [workspace constraints](../pnpm-workspace.yaml) allow only the selected Better Auth 1.7.7 / SvelteKit 3.0.0 pair. Its integration is covered by tests against the built server. The [OAuth provider patch](../patches/@better-auth__oauth-provider@1.7.7.patch) removes incompatible optional `undefined` declarations from generated OpenAPI types without changing runtime JavaScript. Review these exceptions when upgrading.
+Better Auth 1.7.12 supports SvelteKit 3 without a peer-dependency exception. Its integration is covered by tests against the built server.
 
 The TypeScript version remains 6.0.3 for the selected Svelte compiler integration. Keep compiler upgrades covered by the starter and control-plane checks.
 
