@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { betterAuth } from "better-auth";
+import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import dns from "node:dns/promises";
@@ -160,7 +161,7 @@ describe("Better Auth SSO provider integration", () => {
     });
   });
 
-  it("discovers separate endpoint origins for registration and migrated-provider sign-in", async () => {
+  it("registers and completes migrated-provider sign-in across discovered endpoint origins", async () => {
     await environment.database.db.delete(ssoProvider);
     await environment.database.db.update(organizationSettings).set({ ssoRequired: false });
     const issuer = "https://issuer.example.test";
@@ -173,9 +174,60 @@ describe("Better Auth SSO provider integration", () => {
       userinfo_endpoint: "https://profile.example.test/userinfo",
     };
 
-    const request = vi
-      .spyOn(globalThis, "fetch")
-      .mockImplementation(async () => Response.json(metadata));
+    const keys = await generateKeyPair("RS256", { extractable: true });
+    const publicKey = { ...(await exportJWK(keys.publicKey)), kid: "split-origin", alg: "RS256" };
+
+    const profile = {
+      sub: "split-origin-user",
+      email: "split-origin@example.test",
+      name: "Split Origin User",
+      email_verified: true,
+    };
+
+    const idToken = await new SignJWT(profile)
+      .setProtectedHeader({ alg: "RS256", kid: publicKey.kid })
+      .setIssuer(issuer)
+      .setAudience("synthetic-client")
+      .setIssuedAt()
+      .setExpirationTime("5m")
+      .sign(keys.privateKey);
+
+    const visited = new Set<string>();
+
+    const request = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const outgoing = new Request(input, init);
+      visited.add(outgoing.url);
+
+      switch (outgoing.url) {
+        case `${issuer}/.well-known/openid-configuration`:
+          return Response.json(metadata);
+        case metadata.token_endpoint: {
+          expect(outgoing.method).toBe("POST");
+          const fields = new URLSearchParams(await outgoing.text());
+          expect(fields.get("code")).toBe("synthetic-code");
+          expect(fields.get("redirect_uri")).toBe(
+            `${origin}/api/auth/sso/callback/split-origin-provider`,
+          );
+
+          return Response.json({
+            access_token: "synthetic-access-token",
+            token_type: "Bearer",
+            expires_in: 300,
+            id_token: idToken,
+          });
+        }
+
+        case metadata.jwks_uri:
+          return Response.json({ keys: [publicKey] });
+
+        case metadata.userinfo_endpoint:
+          expect(outgoing.headers.get("authorization")).toBe("Bearer synthetic-access-token");
+
+          return Response.json(profile);
+        default:
+          throw new Error(`Unexpected identity-provider request: ${outgoing.url}`);
+      }
+    });
 
     const ipv4 = vi.spyOn(dns, "resolve4").mockResolvedValue(["93.184.216.34"]);
 
@@ -226,15 +278,47 @@ describe("Better Auth SSO provider integration", () => {
       expect(new URL(target.url).origin).toBe("https://login.example.test");
 
       const callback = `${origin}/api/auth/sso/callback/${input.providerId}`;
+      const callbackUrl = new URL(callback);
+      callbackUrl.searchParams.set(
+        "state",
+        z.string().min(1).parse(new URL(target.url).searchParams.get("state")),
+      );
+      callbackUrl.searchParams.set("code", "synthetic-code");
 
-      const trusted = await companySsoOrigins(
-        environment.database.db,
-        origin,
-        new Request(callback),
+      const cookie = (result: Response) =>
+        result.headers
+          .getSetCookie()
+          .filter((value) => !value.includes("Max-Age=0"))
+          .map((value) => value.split(";")[0])
+          .join("; ");
+
+      const completed = await environment.auth.handler(
+        new Request(callbackUrl, { headers: { cookie: cookie(response) } }),
       );
 
-      expect(trusted).toContain("https://tokens.example.test");
-      expect(trusted).toContain("https://profile.example.test");
+      expect(completed.status).toBe(302);
+      expect(completed.headers.get("location")).toBe("/settings");
+      expect(visited).toEqual(
+        new Set([
+          `${issuer}/.well-known/openid-configuration`,
+          metadata.token_endpoint,
+          metadata.jwks_uri,
+          metadata.userinfo_endpoint,
+        ]),
+      );
+
+      const authenticated = await environment.auth.handler(
+        new Request(`${origin}/api/auth/get-session`, {
+          headers: { cookie: cookie(completed) },
+        }),
+      );
+
+      expect(authenticated.status).toBe(200);
+      expect(await authenticated.json()).toMatchObject({
+        user: { email: profile.email, name: profile.name },
+        session: { identityOrganizationId: "widefleet" },
+      });
+
       request.mockClear();
       ipv4.mockClear();
       expect(await companySsoOrigins(environment.database.db, origin)).toEqual([origin]);
