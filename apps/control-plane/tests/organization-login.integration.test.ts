@@ -541,6 +541,25 @@ describe("Invited organization members with Widefleet OIDC", () => {
           ),
         ),
     ).toEqual([{ id: protectedInvitation.id, role: "owner", status: "pending" }]);
+
+    const beforeOwnerResend = delivered.length;
+
+    const ownerResend = await call(joined, "POST", "/invitations", {
+      email: "protected-owner@example.test",
+      role: "member",
+      resend: true,
+    });
+
+    // Native resend preserves the grant already issued by an owner. It does not
+    // let the administrator create a new owner invitation or change its role.
+    expect(ownerResend.status).toBe(200);
+    expect(await ownerResend.json()).toMatchObject({
+      id: protectedInvitation.id,
+      role: "owner",
+      status: "pending",
+    });
+    expect(delivered).toHaveLength(beforeOwnerResend + 1);
+    expect(delivered.at(-1)?.text).toContain(`/invitations/${protectedInvitation.id}`);
     expect(
       (
         await call(joined, "POST", "/invitations", {
