@@ -7,7 +7,6 @@
   import { z } from "zod";
   import { authClient } from "#lib/auth-client";
   import {
-    completeSetup,
     activateCompanySso,
     requestDomainVerification,
     verifyCompanyDomain,
@@ -93,8 +92,6 @@
   let restartOpen = $state(false);
 
   const readonly = $derived(view.settings.externallyManaged);
-
-  const onboarding = $derived(view.localPasswordEnabled && !data.emailSignIn);
 
   const callback = $derived(`${data.platformUrl}/api/auth/sso/callback/${draft.sso.providerId}`);
 
@@ -276,19 +273,6 @@
       await signIn();
     } catch (cause) {
       message = cause instanceof Error ? cause.message : "Could not activate company SSO.";
-    } finally {
-      busy = false;
-    }
-  };
-
-  const complete = async () => {
-    busy = true;
-    message = "";
-
-    try {
-      await completeSetup({ organizationId: workspace.organizationId });
-    } catch (cause) {
-      message = cause instanceof Error ? cause.message : "Could not complete setup.";
     } finally {
       busy = false;
     }
@@ -560,15 +544,7 @@
                 >Company sign-in and administrator access verified successfully.</Feedback
               >
             {/if}
-            {#if onboarding}
-              <p class="text-muted-foreground text-sm">
-                Completing setup disables password access and closes local sessions. Server recovery
-                remains available.
-              </p>
-              <Button disabled={busy || dirty || !data.tested} onclick={complete}
-                >Complete setup and disable password access</Button
-              >
-            {:else if !view.ssoRequired}
+            {#if !view.ssoRequired}
               <p class="text-muted-foreground text-sm">
                 Activating company SSO requires all members to use this provider for this
                 organization. Email sign-in will no longer grant access. You can test the connection

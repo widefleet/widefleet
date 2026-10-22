@@ -1,3 +1,4 @@
+import type { Configuration } from "./config.ts";
 import { InvalidOperation } from "./errors.ts";
 
 export interface EmailMessage {
@@ -7,6 +8,16 @@ export interface EmailMessage {
 }
 
 export type SendEmail = (message: EmailMessage) => Promise<void>;
+
+export const createSignInEmail = (
+  configuration: Configuration,
+  sendEmail: SendEmail | undefined,
+): SendEmail | undefined =>
+  configuration.LOGIN_CODE_DELIVERY === "console"
+    ? async ({ to, text }) => {
+        console.info(`Widefleet sign-in code for ${to}:\n${text}`);
+      }
+    : sendEmail;
 
 export const sendOrganizationInvitation = async (
   sendEmail: SendEmail | undefined,

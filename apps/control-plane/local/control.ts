@@ -180,7 +180,7 @@ if (command === "agent") {
         throw new Error(applied.error ?? applied.activation.message);
       await database.db
         .update(installation)
-        .set({ ownerId: "local-admin", localPasswordEnabled: false })
+        .set({ ownerId: "local-admin" })
         .where(eq(installation.id, installationId));
     }
 

@@ -8,7 +8,7 @@ import { emailOTP, jwt, organization, oneTimeToken } from "better-auth/plugins";
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { z } from "zod";
 import type { Configuration } from "./config.ts";
-import { sendOrganizationInvitation, type SendEmail } from "./email.ts";
+import { createSignInEmail, sendOrganizationInvitation, type SendEmail } from "./email.ts";
 import { hashAppClientSecret } from "./app-login-client.ts";
 import { authenticationReference } from "./authentication-context.ts";
 import { organizationAccess, organizationRoles } from "../organization.ts";
@@ -51,8 +51,10 @@ export const authenticationOptions = (
     rateLimit?: BetterAuthOptions["rateLimit"];
     ipAddressHeaders?: string[];
   } = {},
-) =>
-  ({
+) => {
+  const sendSignInEmail = createSignInEmail(configuration, sendEmail);
+
+  return {
     appName: "Widefleet",
     baseURL: configuration.PLATFORM_URL,
     secret: configuration.BETTER_AUTH_SECRET,
@@ -60,6 +62,7 @@ export const authenticationOptions = (
     // Membership mutations use the shared organization services for UI, API and CLI.
     disabledPaths: [
       "/sign-up/email",
+      "/sign-in/email",
       "/request-password-reset",
       "/reset-password",
       "/set-password",
@@ -84,11 +87,6 @@ export const authenticationOptions = (
       "/email-otp/change-email",
       "/forget-password/email-otp",
     ],
-    emailAndPassword: {
-      enabled: configuration.LOCAL_PASSWORD_ENABLED,
-      disableSignUp: true,
-      minPasswordLength: 12,
-    },
     hooks: {
       before: createAuthMiddleware(async (context) => {
         const accountPaths = [
@@ -147,7 +145,7 @@ export const authenticationOptions = (
           context.path === "/email-otp/send-verification-otp" ||
           context.path === "/sign-in/email-otp"
         ) {
-          if (!sendEmail || !allowEmail)
+          if (!sendSignInEmail || !allowEmail)
             throw new APIError("FORBIDDEN", { message: "Email sign-in is not configured" });
 
           const input = z
@@ -217,9 +215,9 @@ export const authenticationOptions = (
         expiresIn: 300,
         allowedAttempts: 3,
         sendVerificationOTP: async ({ email, otp, type }) => {
-          if (!sendEmail || type !== "sign-in")
+          if (!sendSignInEmail || type !== "sign-in")
             throw new APIError("FORBIDDEN", { message: "Email sign-in is not configured" });
-          await sendEmail({
+          await sendSignInEmail({
             to: email,
             subject: "Your Widefleet sign-in code",
             text: `Your Widefleet sign-in code is ${otp}.\n\nIt expires in five minutes. If you did not request it, you can ignore this email.`,
@@ -284,4 +282,5 @@ export const authenticationOptions = (
       }),
       oauthDeviceAuthorization({ verificationUri: `${configuration.PLATFORM_URL}/device` }),
     ],
-  }) satisfies BetterAuthOptions;
+  } satisfies BetterAuthOptions;
+};

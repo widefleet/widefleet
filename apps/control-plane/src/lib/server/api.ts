@@ -534,14 +534,6 @@ export const createApi = (runtime: Runtime) => {
       .handler(({ context }) =>
         apiOperation(() => runtime.settings.activateSso(context.principal)),
       ),
-    completeSetup: write
-      .route({ method: "POST", path: "/settings/complete" })
-      .output(contract.settingsView)
-      .handler(({ context }) =>
-        apiOperation(() =>
-          runtime.settings.complete(context.principal, runtime.auth, context.request.headers),
-        ),
-      ),
     searchGroups: read
       .route({ method: "GET", path: "/groups" })
       .input(contract.groupSearch)

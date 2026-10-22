@@ -157,7 +157,6 @@ describe("Mandatory application context", () => {
         directory: null,
         externallyManaged: false,
       },
-      localPasswordEnabled: false,
     });
     const directory = await api(request("/groups?query=Engineering&limit=10"));
     expect(directory.status).toBe(503);

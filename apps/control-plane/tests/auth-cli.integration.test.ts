@@ -155,7 +155,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1" && process.platform !== "win
         ...environment,
         storage,
         identity: createIdentityService(environment.auth, database, configuration),
-        directory: createDirectory(configuration),
+        directory: createDirectory(async (id) => (await environment.settings.resolve(id)).identity),
         apps: createAppService(database, configuration),
         agents: createAgentService(database),
         jobs: createJobService(database, storage, "local-integration-test-encryption-key-only"),

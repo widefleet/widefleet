@@ -64,6 +64,7 @@ test.beforeAll(async () => {
     env: {
       ...process.env,
       ...environment.environment,
+      LOGIN_CODE_DELIVERY: "console",
       NODE_ENV: "production",
       HOST: "127.0.0.1",
       PORT: "25431",
@@ -149,9 +150,13 @@ test("completes app OAuth through the built server after signing in", async ({ p
   );
   await page.goto(z.url().parse(started.headers.get("location")));
   await expect(page).toHaveURL(/\/sign-in\?/);
-  await page.locator("#login-email").fill("owner@example.test");
-  await page.locator("#login-password").fill("local-test-password-only");
-  await page.getByRole("button", { name: "Sign in as setup administrator" }).click();
+  await page.getByLabel("Email", { exact: true }).fill("owner@example.test");
+  await page.getByRole("button", { name: "Request sign-in code" }).click();
+  await expect.poll(() => logs.match(/code is (\d{6})/)?.[1]).toBeTruthy();
+  await page
+    .getByLabel("Sign-in code", { exact: true })
+    .fill(z.string().parse(logs.match(/code is (\d{6})/)?.[1]));
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`${configuration.redirectUrl}\\?`));
 
   const cookies = (response: Response) =>

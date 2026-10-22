@@ -82,7 +82,7 @@ describe.runIf(process.env["RUN_INSTALLATION_TESTS"] === "1")(
       const { services } = await render(["compose.base", "compose.azure"]);
       const control = serviceSchema.parse(services["control-plane"]);
       const runtime = serviceSchema.parse(services["runtime"]);
-      expect(configurationSchema.parse(control.environment).IDENTITY).toBeNull();
+      expect(configurationSchema.parse(control.environment).LOGIN_CODE_DELIVERY).toBe("email");
       expect(control.environment).not.toHaveProperty("ENTRA_CLIENT_SECRET");
       expect(runtime.environment).not.toHaveProperty("DATABASE_URL");
       expect(runtime.depends_on).toHaveProperty("initialize");

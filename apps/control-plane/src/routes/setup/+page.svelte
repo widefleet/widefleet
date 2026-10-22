@@ -6,14 +6,11 @@
   import { Label } from "#shadcn/components/ui/label/index.js";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
   import { goto } from "$app/navigation";
-  import { authClient } from "#lib/auth-client";
   import { createOwner } from "#lib/settings.remote";
 
   let name = $state("");
 
   let email = $state("");
-
-  let password = $state("");
 
   let busy = $state(false);
 
@@ -25,16 +22,8 @@
     message = "";
 
     try {
-      await createOwner({ name, email, password });
-      const result = await authClient.signIn.email({ email, password });
-
-      if (result.error) {
-        await goto("/sign-in?next=/settings");
-
-        return;
-      }
-
-      await goto("/settings");
+      await createOwner({ name, email });
+      await goto(`/sign-in?email=${encodeURIComponent(email)}&next=/settings`);
     } catch (cause) {
       message = cause instanceof Error ? cause.message : "Could not complete setup.";
     } finally {
@@ -50,8 +39,8 @@
     Your first administrator account.
   </h1>
   <p class="text-muted-foreground mt-3 text-sm leading-6">
-    Use this account to configure your workspace and company sign-in. Password access will be
-    disabled when setup is complete.
+    Create your administrator account, then sign in with a one-time code to configure your
+    workspace.
   </p>
   <div class="text-muted-foreground mt-6 flex items-center gap-2 text-[11px]">
     <span class="text-foreground font-medium">1. Account</span><ArrowRight class="size-3" /><span
@@ -78,20 +67,6 @@
         required
         class="h-10"
       />
-    </div>
-    <div class="space-y-2">
-      <Label for="owner-password">Password</Label><Input
-        id="owner-password"
-        bind:value={password}
-        type="password"
-        autocomplete="new-password"
-        minlength={12}
-        maxlength={128}
-        required
-        class="h-10"
-        aria-describedby="password-hint"
-      />
-      <p id="password-hint" class="text-muted-foreground text-xs">At least 12 characters.</p>
     </div>
     {#if message}<Feedback kind="error">{message}</Feedback>{/if}
     <Button type="submit" disabled={busy} class="h-10 w-full"

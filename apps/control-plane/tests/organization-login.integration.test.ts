@@ -852,7 +852,6 @@ describe("Invited organization members with Widefleet OIDC", () => {
         body: JSON.stringify({
           name: "Email API Owner",
           email: "email-api-owner@example.test",
-          password: "synthetic-api-owner-password",
         }),
       });
 

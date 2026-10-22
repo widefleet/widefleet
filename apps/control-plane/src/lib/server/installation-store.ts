@@ -1,9 +1,8 @@
 import { installationSettings, setupOwner } from "@platform/contracts";
-import { hashPassword } from "better-auth/crypto";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { installationOrganizationId } from "../organization.ts";
-import { account, member, user } from "./auth-schema.ts";
+import { member, user } from "./auth-schema.ts";
 import type { Database, DatabaseExecutor } from "./database.ts";
 import { InvalidOperation } from "./errors.ts";
 import { installation, organizationSettings } from "./schema.ts";
@@ -47,10 +46,8 @@ export const readInstallation = async (database: DatabaseExecutor) => {
   if (!row) throw new Error("The installation has not been initialized");
 
   return {
-    settings: await readOrganizationSettings(database, installationOrganizationId),
     ownerId: row.ownerId,
     bootstrapPending: row.bootstrapPending,
-    localPasswordEnabled: row.localPasswordEnabled,
   };
 };
 
@@ -66,7 +63,6 @@ export const createInstallationOwner = async (
     });
 
   const owner = setupOwner.parse(input);
-  const password = await hashPassword(owner.password);
 
   return database.transaction(async (transaction) => {
     const [state] = await transaction
@@ -82,21 +78,11 @@ export const createInstallationOwner = async (
       });
     const userId = crypto.randomUUID();
     const now = new Date();
-    // Use Better Auth's credential account and password hashing; sign-in and sessions stay in Better Auth.
     await transaction.insert(user).values({
       id: userId,
       name: owner.name,
       email: owner.email.toLowerCase(),
       emailVerified: false,
-      createdAt: now,
-      updatedAt: now,
-    });
-    await transaction.insert(account).values({
-      id: crypto.randomUUID(),
-      accountId: userId,
-      providerId: "credential",
-      userId,
-      password,
       createdAt: now,
       updatedAt: now,
     });

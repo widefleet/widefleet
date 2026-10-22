@@ -14,7 +14,6 @@ export const handle: Handle = async ({ event, resolve }) => {
   };
 
   try {
-    await runtime.get();
     const response = await resolve(event);
 
     if (!response.body) {

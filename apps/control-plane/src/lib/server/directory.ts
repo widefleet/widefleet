@@ -2,10 +2,8 @@ import { groupSearch, groupSearchResult } from "@platform/contracts";
 import { Result, TaggedError } from "better-result";
 import { z } from "zod";
 import type { companyIdentity } from "./company-identity.ts";
-import type { Configuration } from "./config.ts";
 import type { Principal } from "./identity.ts";
 import { InvalidOperation } from "./errors.ts";
-import { installationOrganizationId } from "../organization.ts";
 
 export class DirectoryUnavailable extends TaggedError("DirectoryUnavailable")<{
   message: string;
@@ -142,9 +140,8 @@ const createCompanyDirectory = (
 };
 
 export const createDirectory = (
-  configuration: Configuration,
+  resolveIdentity: (organizationId: string) => Promise<z.infer<typeof companyIdentity> | null>,
   request: typeof fetch = fetch,
-  resolveIdentity?: (organizationId: string) => Promise<z.infer<typeof companyIdentity> | null>,
 ) => {
   const directories = new Map<
     string,
@@ -161,15 +158,7 @@ export const createDirectory = (
           });
         const organizationId = principal.application.organizationId;
 
-        if (!resolveIdentity && organizationId !== installationOrganizationId)
-          return yield* new InvalidOperation({
-            code: "FORBIDDEN",
-            message: "Company group search is not available for this organization",
-          });
-
-        const identity = resolveIdentity
-          ? await resolveIdentity(organizationId)
-          : configuration.IDENTITY;
+        const identity = await resolveIdentity(organizationId);
 
         const fingerprint = JSON.stringify(identity);
         let cached = directories.get(organizationId);

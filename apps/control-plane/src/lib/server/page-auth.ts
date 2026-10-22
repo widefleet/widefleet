@@ -1,7 +1,6 @@
 import { error, redirect } from "@sveltejs/kit";
 import type { DatabaseUnavailable, InvalidOperation, StorageUnavailable } from "./errors.ts";
 import { getRuntime } from "./runtime.ts";
-import { readInstallation } from "./installation-store.ts";
 import { AuthenticationFailed } from "./identity.ts";
 
 const chooseOrganization = (request: Request): never => {
@@ -67,8 +66,6 @@ export const invitationIdentity = async (request: Request, invitationId: string,
 
 export const pagePrincipal = async (request: Request, write = false) => {
   const runtime = await getRuntime();
-
-  if (!(await readInstallation(runtime.database.db)).ownerId) redirect(303, "/setup");
 
   const result = await runtime.identity.authenticate(
     request,

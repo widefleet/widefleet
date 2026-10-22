@@ -57,7 +57,7 @@ describe("company directory", () => {
     const graphRequests: (string | null)[] = [];
 
     const directory = createDirectory(
-      configuration,
+      async (id) => identities.get(id) ?? null,
       async (input, init) => {
         const request = new Request(input, init);
 
@@ -72,7 +72,6 @@ describe("company directory", () => {
 
         return Response.json({ value: [] });
       },
-      async (id) => identities.get(id) ?? null,
     );
 
     const search = async (id: string) => {
@@ -106,11 +105,14 @@ describe("company directory", () => {
   it("does not use installation directory credentials for another organization", async () => {
     let calls = 0;
 
-    const directory = createDirectory(configuration, async () => {
-      calls++;
+    const directory = createDirectory(
+      async (id) => (id === "widefleet" ? configuration.IDENTITY : null),
+      async () => {
+        calls++;
 
-      return Response.json({ value: [] });
-    });
+        return Response.json({ value: [] });
+      },
+    );
 
     const result = await directory.search(
       {
@@ -125,39 +127,42 @@ describe("company directory", () => {
       { query: "Engineering", limit: 10 },
     );
 
-    expect(result).toMatchObject({ error: { code: "FORBIDDEN" } });
+    expect(result).toMatchObject({ error: { _tag: "DirectoryUnavailable" } });
     expect(calls).toBe(0);
   });
 
   it("returns native group IDs and names through one search contract and reuses the application token", async () => {
     const requests: Request[] = [];
 
-    const directory = createDirectory(configuration, async (input, init) => {
-      const request = new Request(input, init);
-      requests.push(request);
+    const directory = createDirectory(
+      async (id) => (id === "widefleet" ? configuration.IDENTITY : null),
+      async (input, init) => {
+        const request = new Request(input, init);
+        requests.push(request);
 
-      if (request.url.endsWith("/token")) {
-        const fields = new URLSearchParams(await request.text());
-        expect(fields.get("grant_type")).toBe("client_credentials");
-        expect(fields.get("client_secret")).toBe("directory-secret");
+        if (request.url.endsWith("/token")) {
+          const fields = new URLSearchParams(await request.text());
+          expect(fields.get("grant_type")).toBe("client_credentials");
+          expect(fields.get("client_secret")).toBe("directory-secret");
 
-        return Response.json({ access_token: "fixture-token", expires_in: 3600 });
-      }
+          return Response.json({ access_token: "fixture-token", expires_in: 3600 });
+        }
 
-      expect(request.headers.get("authorization")).toBe("Bearer fixture-token");
-      expect(new URL(request.url).searchParams.get("$search")).toBe('"displayName:Einkauf"');
+        expect(request.headers.get("authorization")).toBe("Bearer fixture-token");
+        expect(new URL(request.url).searchParams.get("$search")).toBe('"displayName:Einkauf"');
 
-      return Response.json({
-        value: [
-          {
-            id: "00000000-0000-4000-8000-000000000011",
-            displayName: "Einkauf",
-            description: "Procurement",
-          },
-          { id: "00000000-0000-4000-8000-000000000012", displayName: "Einkauf International" },
-        ],
-      });
-    });
+        return Response.json({
+          value: [
+            {
+              id: "00000000-0000-4000-8000-000000000011",
+              displayName: "Einkauf",
+              description: "Procurement",
+            },
+            { id: "00000000-0000-4000-8000-000000000012", displayName: "Einkauf International" },
+          ],
+        });
+      },
+    );
 
     const results = await Promise.all([
       directory.search(creator, { query: "Einkauf", limit: 1 }),
@@ -193,7 +198,10 @@ describe("company directory", () => {
       return new Response("permission denied with sensitive upstream details", { status: 403 });
     };
 
-    const directory = createDirectory(configuration, transport);
+    const directory = createDirectory(
+      async (id) => (id === "widefleet" ? configuration.IDENTITY : null),
+      transport,
+    );
 
     const denied = await directory.search(
       { ...creator, creator: false },
@@ -204,7 +212,7 @@ describe("company directory", () => {
     expect(calls).toBe(0);
 
     const disabled = createDirectory(
-      { ...configuration, IDENTITY: { ...configuration.IDENTITY, directory: null } },
+      async () => ({ ...configuration.IDENTITY, directory: null }),
       transport,
     );
 

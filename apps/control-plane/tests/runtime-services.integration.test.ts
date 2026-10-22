@@ -1,22 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { EventEmitter, once } from "node:events";
-import { eq } from "drizzle-orm";
+import { z } from "zod";
 import { ssoProvider } from "../src/lib/server/auth-schema.ts";
 import { editableSettings } from "./settings-input.ts";
 import { createRuntime, createRequestRuntime } from "../src/lib/server/runtime-services.ts";
-import { installation } from "../src/lib/server/schema.ts";
+import { organizationSettings } from "../src/lib/server/schema.ts";
 import { createStorage } from "../src/lib/server/storage.ts";
+import { createApi } from "../src/lib/server/api.ts";
 import { createTestEnvironment, organizationCredential } from "./environment.ts";
 
-describe("Control-plane runtime settings", () => {
+describe("Operator configuration and organization settings", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
-  let resolve: ReturnType<typeof createRuntime>;
 
-  beforeEach(async () => {
-    environment = await createTestEnvironment();
-    await environment.database.db.update(ssoProvider).set({ domainVerified: true });
-    await environment.settings.publish();
-    resolve = createRuntime({
+  const runtime = () =>
+    createRuntime({
       configuration: environment.configuration,
       database: environment.database,
       settings: environment.settings,
@@ -24,6 +20,10 @@ describe("Control-plane runtime settings", () => {
       reporting: environment.reporting,
       encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
     });
+
+  beforeEach(async () => {
+    environment = await createTestEnvironment();
+    await environment.database.db.update(ssoProvider).set({ domainVerified: true });
   });
 
   afterEach(async () => {
@@ -31,15 +31,67 @@ describe("Control-plane runtime settings", () => {
     await environment.close();
   });
 
-  it("refreshes authentication after credential rotation without replacing application services", async () => {
-    const first = await resolve();
-    await first.auth.$context;
-    expect(await resolve()).toBe(first);
+  it("constructs authentication without loading settings, including on later requests", async () => {
+    const reads = vi
+      .spyOn(environment.settings, "resolve")
+      .mockRejectedValue(new Error("Settings unavailable"));
 
+    const resolve = runtime();
+    const request = createRequestRuntime(resolve);
+    const [first, simultaneous] = await Promise.all([request(), request()]);
+    expect(simultaneous).toBe(first);
+    expect(await createRequestRuntime(resolve)()).toBe(first);
+    expect(reads).not.toHaveBeenCalled();
+  });
+
+  it("serves authenticated app requests without decrypting unrelated operator credentials", async () => {
+    const session = await environment.users.login({ userId: environment.owner.id });
+    await environment.database.db
+      .update(organizationSettings)
+      .set({ ssoRequired: false, directorySecret: "invalid-ciphertext" });
+    await environment.database.db.update(ssoProvider).set({ oidcConfig: "invalid-ciphertext" });
+    // This would fail the old pre-request settings load before authentication or routing.
+    await expect(environment.settings.resolve()).rejects.toThrow();
+    const current = await runtime()();
+    const api = createApi(current);
+
+    const request = (path: string) =>
+      new Request(`${environment.configuration.PLATFORM_URL}/api/v1${path}`, {
+        headers: new Headers(session.headers),
+      });
+
+    expect((await api(request("/me"))).status).toBe(200);
+    expect(await (await api(request("/apps"))).json()).toEqual([]);
+    expect(
+      (await api(new Request(`${environment.configuration.PLATFORM_URL}/api/v1/apps`))).status,
+    ).toBe(401);
+  });
+
+  it("reads edited SSO providers through the native plugin without rebuilding authentication", async () => {
+    const resolve = runtime();
+    const current = await resolve();
     const input = editableSettings(await environment.settings.inspect());
 
-    if (!input.sso) throw new Error("Expected the fixture's company login");
-    input.sso.oidcConfig.clientSecret = "rotated-fixture-secret";
+    if (!input.sso) throw new Error("Expected fixture SSO provider");
+
+    const startSignIn = async () => {
+      const origin = environment.configuration.PLATFORM_URL;
+
+      const response = await current.auth.handler(
+        new Request(`${origin}/api/auth/sign-in/sso`, {
+          method: "POST",
+          headers: { origin, "content-type": "application/json" },
+          body: JSON.stringify({ providerId: input.sso?.providerId, callbackURL: "/" }),
+        }),
+      );
+
+      expect(response.status).toBe(200);
+
+      return new URL(z.object({ url: z.url() }).parse(await response.json()).url);
+    };
+
+    expect((await startSignIn()).searchParams.get("client_id")).toBe(input.sso.oidcConfig.clientId);
+    input.sso.oidcConfig.clientId = "updated-organization-client";
     await environment.settings.initialize(
       input,
       "widefleet",
@@ -48,136 +100,7 @@ describe("Control-plane runtime settings", () => {
         application: { organizationId: "widefleet" },
       }),
     );
-
-    const rotated = await resolve();
-    await rotated.auth.$context;
-    expect(rotated.configuration.IDENTITY?.management.clientSecret).toBe("rotated-fixture-secret");
-    expect(rotated.configuration.IDENTITY).not.toBe(first.configuration.IDENTITY);
-    expect(rotated.auth).not.toBe(first.auth);
-    expect(rotated.identity).not.toBe(first.identity);
-    expect(rotated.directory).not.toBe(first.directory);
-    expect(rotated.apps).toBe(first.apps);
-    expect(rotated.jobs).toBe(first.jobs);
-    expect(rotated.storage).toBe(first.storage);
-    expect(rotated.reporting).toBe(first.reporting);
-    expect(first.configuration.IDENTITY?.management.clientSecret).toBe("local-tests-only");
-    expect(await resolve()).toBe(rotated);
-  });
-
-  it("shares a settings read within a request and refreshes after a settings command", async () => {
-    const reads = vi.spyOn(environment.settings, "resolve");
-    const request = createRequestRuntime(resolve);
-    const [first, simultaneous] = await Promise.all([request(), request()]);
-    await first.auth.$context;
-    expect(simultaneous).toBe(first);
-    expect(await request()).toBe(first);
-    expect(reads).toHaveBeenCalledTimes(1);
-
-    const input = editableSettings(await environment.settings.inspect());
-
-    if (!input.sso) throw new Error("Expected the fixture's company login");
-    input.sso.oidcConfig.clientSecret = "changed-within-request";
-    await first.settings.initialize(
-      input,
-      "widefleet",
-      await organizationCredential(environment, {
-        id: environment.owner.id,
-        application: { organizationId: "widefleet" },
-      }),
-    );
-    const [refreshed, simultaneousRefresh] = await Promise.all([request(), request()]);
-    await refreshed.auth.$context;
-    expect(simultaneousRefresh).toBe(refreshed);
-    expect(refreshed.configuration.IDENTITY?.management.clientSecret).toBe(
-      "changed-within-request",
-    );
-    expect(refreshed.auth).not.toBe(first.auth);
-    expect(reads).toHaveBeenCalledTimes(2);
-
-    await createRequestRuntime(resolve)();
-    expect(reads).toHaveBeenCalledTimes(3);
-  });
-
-  it("checks settings again on the next HTTP request even if the previous request was cached", async () => {
-    const request = createRequestRuntime(resolve);
-    const first = await request();
-    await first.auth.$context;
-    await environment.database.db.delete(installation).where(eq(installation.id, "widefleet"));
-    await expect(createRequestRuntime(resolve)()).rejects.toThrow(
-      "The installation has not been initialized",
-    );
-  });
-
-  it("refreshes a request when another settings write overlaps its first read", async () => {
-    const gate = new EventEmitter();
-    const captured = once(gate, "captured");
-    const read = environment.settings.resolve;
-
-    const reads = vi.spyOn(environment.settings, "resolve").mockImplementationOnce(async () => {
-      const snapshot = await read();
-      const resumed = once(gate, "resume");
-      gate.emit("captured");
-      await resumed;
-
-      return snapshot;
-    });
-
-    const request = createRequestRuntime(resolve);
-    const pending = request();
-    await captured;
-
-    try {
-      const input = editableSettings(await environment.settings.inspect());
-
-      if (!input.sso) throw new Error("Expected the fixture's company login");
-      input.sso.oidcConfig.clientSecret = "changed-during-read";
-      await environment.settings.initialize(
-        input,
-        "widefleet",
-        await organizationCredential(environment, {
-          id: environment.owner.id,
-          application: { organizationId: "widefleet" },
-        }),
-      );
-    } finally {
-      gate.emit("resume");
-    }
-
-    const first = await pending;
-    await first.auth.$context;
-    expect(first.configuration.IDENTITY?.management.clientSecret).toBe("local-tests-only");
-    const [refreshed, simultaneous] = await Promise.all([request(), request()]);
-    await refreshed.auth.$context;
-    expect(refreshed.configuration.IDENTITY?.management.clientSecret).toBe("changed-during-read");
-    expect(refreshed.auth).not.toBe(first.auth);
-    expect(simultaneous).toBe(refreshed);
-    expect(await request()).toBe(refreshed);
-    expect(reads).toHaveBeenCalledTimes(2);
-  });
-
-  it("disables password sign-in on the next resolution after setup closes", async () => {
-    const first = await resolve();
-    const body = { email: environment.owner.email, password: "local-test-password-only" };
-    expect((await first.auth.api.signInEmail({ body })).user.id).toBe(environment.owner.id);
-
-    await environment.database.db
-      .update(installation)
-      .set({ localPasswordEnabled: false })
-      .where(eq(installation.id, "widefleet"));
-
-    const configured = await resolve();
-    expect(configured.configuration.LOCAL_PASSWORD_ENABLED).toBe(false);
-    await expect(configured.auth.api.signInEmail({ body })).rejects.toMatchObject({
-      body: { code: "EMAIL_PASSWORD_DISABLED" },
-    });
-    expect(configured.apps).toBe(first.apps);
-  });
-
-  it("propagates a settings failure instead of serving a cached authentication configuration", async () => {
-    const current = await resolve();
-    await current.auth.$context;
-    await environment.database.db.delete(installation).where(eq(installation.id, "widefleet"));
-
-    await expect(resolve()).rejects.toThrow("The installation has not been initialized");
+    expect(await resolve()).toBe(current);
+    expect((await startSignIn()).searchParams.get("client_id")).toBe("updated-organization-client");
   });
 });

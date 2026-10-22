@@ -86,10 +86,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     storage = createStorage(configuration);
     api = createApi({
       directory: createDirectory(
-        {
-          ...configuration,
-          IDENTITY: { ...configuration.IDENTITY, directory: configuration.IDENTITY.management },
-        },
+        async () => ({ ...configuration.IDENTITY, directory: configuration.IDENTITY.management }),
         async (input, init) => {
           const request = new Request(input, init);
 

@@ -176,6 +176,13 @@
       "when": 1792694400002,
       "tag": "0024_app_login",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1792694400003,
+      "tag": "0025_passwordless_sign_in",
+      "breakpoints": true
     }
   ]
 }

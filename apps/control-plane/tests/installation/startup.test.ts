@@ -87,6 +87,7 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")("First container 
         {
           cwd: root,
           env: {
+            LOGIN_CODE_DELIVERY: "console",
             PATH: process.env["PATH"],
             HOME: process.env["HOME"],
             DOCKER_HOST: process.env["DOCKER_HOST"],
@@ -165,7 +166,7 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")("First container 
         "--input-type=module",
         "--eval",
         `
-        const response = await fetch("http://127.0.0.1:3000/api/v1/setup", {method:"POST", headers:{"content-type":"application/json",origin:"https://platform.example.test"},body:JSON.stringify({name:"IT Admin",email:"setup@example.test",password:"first-container-password"})});
+        const response = await fetch("http://127.0.0.1:3000/api/v1/setup", {method:"POST", headers:{"content-type":"application/json",origin:"https://platform.example.test"},body:JSON.stringify({name:"IT Admin",email:"setup@example.test"})});
         console.log(response.status);
       `,
       );

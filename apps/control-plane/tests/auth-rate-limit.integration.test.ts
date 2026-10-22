@@ -70,19 +70,15 @@ describe.each(["memory", "cloudflare"] as const)("Authentication rate limits: %s
   });
 
   const authentication = () =>
-    createAuthentication(
-      { ...environment.configuration, LOCAL_PASSWORD_ENABLED: true },
-      environment.database.db,
-      {
-        rateLimit: platform
-          ? cloudflareAuthRateLimit(platform.env, environment.configuration.PLATFORM_URL)
-          : { enabled: true },
-        ipAddressHeaders: backend === "cloudflare" ? ["cf-connecting-ip"] : ["x-forwarded-for"],
-        sendEmail: async (message) => {
-          delivered.push(message);
-        },
+    createAuthentication(environment.configuration, environment.database.db, {
+      rateLimit: platform
+        ? cloudflareAuthRateLimit(platform.env, environment.configuration.PLATFORM_URL)
+        : { enabled: true },
+      ipAddressHeaders: backend === "cloudflare" ? ["cf-connecting-ip"] : ["x-forwarded-for"],
+      sendEmail: async (message) => {
+        delivered.push(message);
       },
-    );
+    });
 
   const request = (path: string, body: Record<string, string>, ip: string) =>
     authentication().handler(
@@ -98,33 +94,38 @@ describe.each(["memory", "cloudflare"] as const)("Authentication rate limits: %s
       }),
     );
 
-  it("limits password requests across auth instances without a rate-limit table", async () => {
+  it("limits code verification requests across auth instances without a rate-limit table", async () => {
     const tables = await environment.database.db.execute(
       sql`select to_regclass('public.rate_limit') as name`,
     );
 
     expect(tables.rows).toEqual([{ name: null }]);
-    const body = { email: environment.owner.email, password: "incorrect-test-password" };
+    const body = { email: environment.owner.email, otp: "000000" };
     const ip = backend === "memory" ? "192.0.2.100" : "192.0.2.101";
 
-    const admitted = await expectRateLimitedBurst(() => request("/sign-in/email", body, ip), {
+    const admitted = await expectRateLimitedBurst(() => request("/sign-in/email-otp", body, ip), {
       max: 3,
-      window: 10,
+      window: 60,
       clockAligned: backend === "cloudflare",
-      admittedStatus: 401,
+      admittedStatus: 400,
     });
 
     for (const response of admitted) {
-      expect(await response.json()).toMatchObject({ code: "INVALID_EMAIL_OR_PASSWORD" });
+      expect(await response.json()).toMatchObject({ code: "INVALID_OTP" });
     }
 
     expect(
-      (await request("/sign-in/email", body, backend === "memory" ? "192.0.2.110" : "192.0.2.111"))
-        .status,
-    ).toBe(401);
+      (
+        await request(
+          "/sign-in/email-otp",
+          body,
+          backend === "memory" ? "192.0.2.110" : "192.0.2.111",
+        )
+      ).status,
+    ).toBe(400);
   });
 
-  it("limits actual code deliveries independently from password requests", async () => {
+  it("limits actual code deliveries independently from code verification requests", async () => {
     const body = { email: environment.owner.email, type: "sign-in" };
     const before = delivered.length;
     const ip = backend === "memory" ? "198.51.100.10" : "198.51.100.11";
@@ -143,15 +144,15 @@ describe.each(["memory", "cloudflare"] as const)("Authentication rate limits: %s
     expect(
       (
         await request(
-          "/sign-in/email",
+          "/sign-in/email-otp",
           {
             email: environment.owner.email,
-            password: "incorrect-test-password",
+            otp: "000000",
           },
           ip,
         )
       ).status,
-    ).toBe(401);
+    ).toBe(400);
   });
 
   it("rejects an exhausted code even when every attempt uses a different IP", async () => {

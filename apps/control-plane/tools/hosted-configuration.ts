@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { parseConfigFileTextToJson } from "typescript";
 import { z } from "zod";
 import { runtimeConfigurationSchema } from "../src/lib/server/config.ts";
+import type { Configuration } from "../src/lib/server/config.ts";
 
 export const hostedInstallation = z
   .strictObject({
@@ -110,6 +111,7 @@ const readWorkerConfiguration = async (directory: string) => {
 export const hostedConfigurations = async (
   installation: z.infer<typeof hostedInstallation>,
   ids: z.infer<typeof hostedResourceIds>,
+  loginCodeDelivery: Configuration["LOGIN_CODE_DELIVERY"] = "email",
 ) => {
   const names = hostedResourceNames(installation);
   const controlDirectory = fileURLToPath(new URL("../", import.meta.url));
@@ -197,6 +199,7 @@ export const hostedConfigurations = async (
         CLOUDFLARE_ACCOUNT_ID: ids.account,
         PLATFORM_URL: installation.platformUrl,
         APP_DOMAIN: installation.appDomain,
+        LOGIN_CODE_DELIVERY: loginCodeDelivery,
         ...emailVariables,
       },
       hyperdrive: [{ binding: "HYPERDRIVE", id: installation.hyperdriveId }],

@@ -67,6 +67,7 @@ const configuration = cloudflareConfigurationSchema.parse({
   ...secrets,
   PLATFORM_URL: installation.platformUrl,
   APP_DOMAIN: installation.appDomain,
+  LOGIN_CODE_DELIVERY: process.env["LOGIN_CODE_DELIVERY"],
   PLATFORM_USAGE_REPORTING: "false",
   PLATFORM_CRASH_REPORTING: "false",
 });
@@ -104,8 +105,8 @@ const childEnvironment = {
 
 const password = decodeURIComponent(new URL(secrets.DATABASE_URL).password);
 
-const sensitive = [...Object.values(secrets), password, bootstrap?.owner.password].flatMap(
-  (value) => (value ? [value, JSON.stringify(value).slice(1, -1)] : []),
+const sensitive = [...Object.values(secrets), password].flatMap((value) =>
+  value ? [value, JSON.stringify(value).slice(1, -1)] : [],
 );
 
 const redact = (output: string) => {
@@ -174,7 +175,7 @@ try {
     ...(await provisionHostedResources(installation, cloudflare, wrangler)),
   });
 
-  const configs = await hostedConfigurations(installation, ids);
+  const configs = await hostedConfigurations(installation, ids, configuration.LOGIN_CODE_DELIVERY);
   const runtimeConfig = await write("runtime.json", JSON.stringify(configs.runtime));
   const controlConfig = await write("control-plane.json", JSON.stringify(configs.controlPlane));
   const initializeConfig = await write("initialize.json", JSON.stringify(configs.initialize));
@@ -257,6 +258,7 @@ try {
     ...childEnvironment,
     PLATFORM_URL: installation.platformUrl,
     APP_DOMAIN: installation.appDomain,
+    LOGIN_CODE_DELIVERY: configs.controlPlane.vars.LOGIN_CODE_DELIVERY,
     PLATFORM_USAGE_REPORTING: "false",
     PLATFORM_CRASH_REPORTING: "false",
     WIDEFLEET_INITIALIZE_CONFIG: initializeConfig,

@@ -6,6 +6,7 @@ import { installationOrganizationId } from "../organization.ts";
 import { eq } from "drizzle-orm";
 import type { Database } from "./database.ts";
 import { readInstallation, installationId } from "./installation-store.ts";
+import { createRecoverySession } from "./recovery.ts";
 import { installation } from "./schema.ts";
 
 export const initializeBootstrap = async (
@@ -21,15 +22,9 @@ export const initializeBootstrap = async (
   if (!state.ownerId) await settings.createOwner(input.owner, true);
 
   if (input.settings) {
-    // Registration follows the same native SSO authorization as interactive setup.
-    const login = await auth.api.signInEmail({ body: input.owner, returnHeaders: true });
-
-    const headers = new Headers({
-      cookie: login.headers
-        .getSetCookie()
-        .map((cookie) => cookie.split(";")[0])
-        .join("; "),
-    });
+    // A bootstrap file is an operator credential; use the existing short-lived
+    // operator session without passwords, email delivery, or marking email verified.
+    const headers = await createRecoverySession(auth, database, input.owner.email);
 
     try {
       const result = await settings.initialize(input.settings, installationOrganizationId, {

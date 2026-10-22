@@ -19,16 +19,13 @@
   let ready = $state(false);
 
   onMount(() => {
+    email = data.email;
     ready = true;
   });
 
   let message = $state("");
 
   let email = $state("");
-
-  let passwordEmail = $state("");
-
-  let password = $state("");
 
   let otp = $state("");
 
@@ -87,25 +84,6 @@
       busy = false;
     }
   };
-
-  const localSignIn = async (event: SubmitEvent) => {
-    event.preventDefault();
-
-    if (busy) return;
-    busy = true;
-    message = "";
-
-    try {
-      const result = await authClient.signIn.email({ email: passwordEmail, password });
-
-      if (result.error) message = "Email or password not recognized.";
-      else if (!oauthRedirect.safeParse(result.data).success) await goto(data.next);
-    } catch {
-      message = "Sign-in is temporarily unavailable. Check your connection.";
-    } finally {
-      busy = false;
-    }
-  };
 </script>
 
 <svelte:head><title>Sign in · Widefleet</title></svelte:head>
@@ -142,7 +120,9 @@
       </div>
       {#if sentTo !== null}
         <p class="text-muted-foreground text-xs leading-5">
-          If this address has an invitation or membership, a six-digit code is on its way.
+          {data.codeDelivery === "console"
+            ? "If this address has an invitation or membership, its six-digit code is in the server log."
+            : "If this address has an invitation or membership, a six-digit code is on its way."}
         </p>
         <div class="space-y-2">
           <Label for="sign-in-code">Sign-in code</Label>
@@ -159,7 +139,7 @@
         </div>
       {/if}
       <Button type="submit" disabled={busy || !ready} class="w-full"
-        >{busy ? "Please wait …" : sentTo !== null ? "Sign in" : "Email me a sign-in code"}</Button
+        >{busy ? "Please wait …" : sentTo !== null ? "Sign in" : "Request sign-in code"}</Button
       >
       {#if sentTo !== null}<Button
           type="button"
@@ -193,43 +173,7 @@
         >{/if}
     </form>
   </details>
-  {#if data.localPasswordEnabled}
-    <details open={!data.provider} class="mt-6 border-t pt-5">
-      <summary class="text-sm font-medium">Continue setup</summary>
-      <p class="text-muted-foreground mt-2 text-xs leading-6">
-        Use the administrator account you created during setup.
-      </p>
-      <form onsubmit={localSignIn} class="mt-5 space-y-4">
-        <div class="space-y-2">
-          <Label for="login-email">Email</Label><Input
-            id="login-email"
-            type="email"
-            bind:value={passwordEmail}
-            autocomplete="username"
-            required
-            class="h-10"
-          />
-        </div>
-        <div class="space-y-2">
-          <Label for="login-password">Password</Label><Input
-            id="login-password"
-            type="password"
-            bind:value={password}
-            autocomplete="current-password"
-            required
-            class="h-10"
-          />
-        </div>
-        <Button
-          type="submit"
-          variant={data.provider ? "outline" : "default"}
-          disabled={busy}
-          class="h-auto min-h-10 w-full whitespace-normal py-2"
-          >Sign in as setup administrator</Button
-        >
-      </form>
-    </details>
-  {:else if !data.provider && !data.emailSignIn}<div class="mt-5">
+  {#if !data.provider && !data.emailSignIn}<div class="mt-5">
       <Feedback kind="error"
         >Company sign-in is temporarily unavailable. Contact your administrator.</Feedback
       >

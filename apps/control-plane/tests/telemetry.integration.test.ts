@@ -196,7 +196,7 @@ describe.runIf(process.env["RUN_TELEMETRY_TESTS"] === "1")(
 
       telemetry = createTelemetry(environment.database.db, storage, configuration);
       api = createApi({
-        directory: createDirectory(configuration),
+        directory: createDirectory(async (id) => (await environment.settings.resolve(id)).identity),
         ...environment,
         storage,
         telemetry,
