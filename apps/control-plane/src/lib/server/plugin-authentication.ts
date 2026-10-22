@@ -11,7 +11,8 @@ import type { OrganizationAccess } from "./application-context.ts";
 import type { Configuration } from "./config.ts";
 import type { DatabaseExecutor } from "./database.ts";
 import { installationOrganizationId } from "../organization.ts";
-import { companyOidcOrigins } from "./sso-origins.ts";
+import { oidcConfiguration, prepareCompanyOidc } from "./sso-origins.ts";
+import { decryptSecret } from "./secret-encryption.ts";
 
 export const managedPluginPaths = [
   "/organization/invite-member",
@@ -30,6 +31,7 @@ export const managedPluginPaths = [
 export const pluginAuthentication = (
   database: DatabaseExecutor,
   configuration: Configuration,
+  encryptionKey: string,
   keys: () => Promise<JSONWebKeySet>,
   access: OrganizationAccess = { filterOrganizations: async () => [installationOrganizationId] },
 ) =>
@@ -75,22 +77,26 @@ export const pluginAuthentication = (
     if (!current) throw new APIError("UNAUTHORIZED");
 
     const input = z
-      .object({
+      .looseObject({
         organizationId: z.string().optional(),
         providerId: z.string().optional(),
         invitationId: z.string().optional(),
         issuer: identityUrl.optional(),
+        oidcConfig: oidcConfiguration.optional(),
       })
       .parse(context.body);
 
     let organizationId = input.organizationId;
 
-    if (input.providerId && context.path !== "/sso/register") {
-      const [provider] = await database
-        .select({ organizationId: ssoProvider.organizationId })
-        .from(ssoProvider)
-        .where(eq(ssoProvider.providerId, input.providerId));
+    const [provider] =
+      input.providerId && context.path !== "/sso/register"
+        ? await database
+            .select()
+            .from(ssoProvider)
+            .where(eq(ssoProvider.providerId, input.providerId))
+        : [];
 
+    if (input.providerId && context.path !== "/sso/register") {
       if (organizationId && organizationId !== provider?.organizationId)
         throw new APIError("FORBIDDEN");
       organizationId = provider?.organizationId;
@@ -152,13 +158,45 @@ export const pluginAuthentication = (
 
     context.context.session = current;
 
-    // Discovery uses the authorized administrator's proposed issuer, scoped to
-    // this invocation rather than a second auth instance or configuration store.
-    if (input.issuer && ["/sso/register", "/sso/update-provider"].includes(context.path)) {
-      context.context.trustedOrigins = [
-        ...context.context.trustedOrigins,
-        ...(await companyOidcOrigins(input.issuer)),
-      ];
+    // Prepare endpoints once and let the native plugin persist them. Existing
+    // endpoints survive ordinary updates; changing issuer requires fresh discovery.
+    const issuer = input.issuer ?? provider?.issuer;
+
+    if (
+      issuer &&
+      (input.oidcConfig || (input.issuer && provider?.oidcConfig)) &&
+      ["/sso/register", "/sso/update-provider"].includes(context.path)
+    ) {
+      const saved =
+        provider?.oidcConfig && issuer === provider.issuer
+          ? oidcConfiguration.parse(
+              JSON.parse(await decryptSecret(encryptionKey, provider.oidcConfig)),
+            )
+          : {};
+
+      const prepared = await prepareCompanyOidc(issuer, { ...saved, ...input.oidcConfig });
+      context.context.trustedOrigins = [...context.context.trustedOrigins, ...prepared.origins];
+
+      if (context.path === "/sso/register")
+        return {
+          context: {
+            body: { ...input, oidcConfig: { ...prepared.configuration, skipDiscovery: true } },
+          },
+        };
+
+      // Leave omitted credentials and claims for the plugin's transactional merge.
+      if (prepared.discovered)
+        return {
+          context: {
+            body: {
+              ...input,
+              oidcConfig: {
+                ...input.oidcConfig,
+                ...oidcConfiguration.strip().parse(prepared.configuration),
+              },
+            },
+          },
+        };
     }
 
     return undefined;

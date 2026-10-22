@@ -1,16 +1,18 @@
 import { sso } from "@better-auth/sso";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
+import { APIError } from "better-auth/api";
 import { z } from "zod";
 import { installationOrganizationId } from "../organization.ts";
 import type { OrganizationAccess } from "./application-context.ts";
 import { ssoProvider } from "./auth-schema.ts";
 import type { DatabaseExecutor } from "./database.ts";
 import { decryptSecret, encryptSecret } from "./secret-encryption.ts";
-import { companyOidcOrigins } from "./sso-origins.ts";
+import { oidcConfiguration, prepareCompanyOidc } from "./sso-origins.ts";
 
 export const companySsoOrigins = async (
   database: DatabaseExecutor,
   platformUrl: string,
+  encryptionKey: string,
   request?: Request,
 ) => {
   const origins = [platformUrl];
@@ -42,11 +44,43 @@ export const companySsoOrigins = async (
   if (!providerId) return origins;
 
   const [provider] = await database
-    .select({ issuer: ssoProvider.issuer, verified: ssoProvider.domainVerified })
+    .select()
     .from(ssoProvider)
     .where(eq(ssoProvider.providerId, providerId));
 
-  if (provider?.verified) origins.push(...(await companyOidcOrigins(provider.issuer)));
+  if (!provider?.domainVerified || !provider.oidcConfig) return origins;
+
+  const configuration = oidcConfiguration.parse(
+    JSON.parse(await decryptSecret(encryptionKey, provider.oidcConfig)),
+  );
+
+  const prepared = await prepareCompanyOidc(provider.issuer, configuration);
+
+  // Hydrate legacy providers before Better Auth binds OAuth state to their
+  // configuration. Never change that configuration during a callback.
+  if (prepared.discovered && !callback) {
+    const updated = await database
+      .update(ssoProvider)
+      .set({
+        oidcConfig: await encryptSecret(encryptionKey, JSON.stringify(prepared.configuration)),
+      })
+      .where(
+        and(
+          eq(ssoProvider.id, provider.id),
+          eq(ssoProvider.issuer, provider.issuer),
+          eq(ssoProvider.oidcConfig, provider.oidcConfig),
+          eq(ssoProvider.domainVerified, true),
+        ),
+      )
+      .returning({ id: ssoProvider.id });
+
+    if (updated.length === 0)
+      throw new APIError("CONFLICT", {
+        message: "SSO provider changed; please try signing in again",
+      });
+  }
+
+  origins.push(...prepared.origins);
 
   return origins;
 };

@@ -1,20 +1,22 @@
 import dns from "node:dns/promises";
 import { classifyHost, isPublicRoutableHost } from "@better-auth/core/utils/host";
-import {
-  computeDiscoveryUrl,
-  DiscoveryError,
-  fetchDiscoveryDocument,
-  normalizeDiscoveryUrls,
-  validateDiscoveryDocument,
-} from "@better-auth/sso";
+import { DiscoveryError, discoverOIDCConfig } from "@better-auth/sso";
+import type { DiscoverOIDCConfigParams } from "@better-auth/sso";
 import { z } from "zod";
 import { identityUrl } from "@platform/contracts";
 
-const cache = new Map<string, { expiresAt: number; origins: string[] }>();
-
-const cacheDuration = 5 * 60 * 1000;
-
-const cacheLimit = 100;
+// Keep credentials, mappings and other native plugin fields when filling in
+// endpoints on a migrated provider. Better Auth validates those fields itself.
+export const oidcConfiguration = z.looseObject({
+  authorizationEndpoint: z.url().optional(),
+  tokenEndpoint: z.url().optional(),
+  jwksEndpoint: z.url().optional(),
+  userInfoEndpoint: z.url().optional(),
+  discoveryEndpoint: z.url().optional(),
+  tokenEndpointAuthentication: z
+    .enum(["client_secret_basic", "client_secret_post", "private_key_jwt"])
+    .optional(),
+});
 
 const absentRecord = (cause: unknown) => {
   const result = z.object({ code: z.enum(["ENODATA", "ENOTFOUND"]) }).safeParse(cause);
@@ -50,54 +52,78 @@ const requirePublicOrigin = async (origin: string) => {
 // The administrator-selected issuer is the trust anchor. Its authenticated
 // discovery document can delegate to other HTTPS origins, but cannot expand
 // that trust to private networks or Better Auth's wildcard origin patterns.
-export const companyOidcOrigins = async (issuer: string) => {
+export const prepareCompanyOidc = async (
+  issuer: string,
+  configuration: z.infer<typeof oidcConfiguration>,
+) => {
   const issuerOrigin = new URL(identityUrl.parse(issuer)).origin;
 
   if (issuerOrigin.includes("*"))
     throw new DiscoveryError("discovery_invalid_url", "SSO issuers cannot contain wildcards");
-  const cached = cache.get(issuer);
-  let origins = cached && cached.expiresAt > Date.now() ? cached.origins : null;
+  const origins = new Set([issuerOrigin]);
 
-  if (!origins) {
-    const document = await fetchDiscoveryDocument(
-      computeDiscoveryUrl(issuer),
-      10_000,
-      (url) => new URL(url).origin === issuerOrigin,
+  const discovered =
+    !configuration.authorizationEndpoint ||
+    !configuration.tokenEndpoint ||
+    !configuration.jwksEndpoint;
+
+  const accept = (value: string) => {
+    const url = new URL(value);
+
+    if (url.username || url.password || url.hash || url.hostname.includes("*")) return false;
+
+    if (
+      url.origin !== issuerOrigin &&
+      (url.protocol !== "https:" || !isPublicRoutableHost(url.hostname))
+    )
+      return false;
+    origins.add(url.origin);
+
+    return true;
+  };
+
+  for (const endpoint of [
+    configuration.authorizationEndpoint,
+    configuration.tokenEndpoint,
+    configuration.jwksEndpoint,
+    configuration.userInfoEndpoint,
+    discovered ? configuration.discoveryEndpoint : undefined,
+  ]) {
+    if (endpoint && !accept(endpoint))
+      throw new DiscoveryError("discovery_untrusted_origin", "Unsafe SSO endpoint", {
+        url: endpoint,
+      });
+  }
+
+  // trustedOrigins bypasses Better Auth's DNS checks. Check saved endpoints too,
+  // and validate any custom discovery host before fetching it.
+  const checkHosts = () =>
+    Promise.all(
+      [...origins].flatMap((origin) =>
+        origin === issuerOrigin ? [] : [requirePublicOrigin(origin)],
+      ),
     );
 
-    validateDiscoveryDocument(document, issuer);
-    const discovered = new Set([issuerOrigin]);
+  await checkHosts();
 
-    normalizeDiscoveryUrls(document, issuer, (value) => {
-      const url = new URL(value);
+  if (discovered) {
+    const parameters: DiscoverOIDCConfigParams = {
+      issuer,
+      isTrustedOrigin: accept,
+    };
 
-      if (url.username || url.password || url.hash || url.hostname.includes("*")) return false;
+    if (configuration.discoveryEndpoint)
+      parameters.discoveryEndpoint = configuration.discoveryEndpoint;
+    const endpoints = await discoverOIDCConfig(parameters);
 
-      if (
-        url.origin !== issuerOrigin &&
-        (url.protocol !== "https:" || !isPublicRoutableHost(url.hostname))
-      )
-        return false;
-      discovered.add(url.origin);
-
-      return true;
-    });
-    origins = [...discovered];
+    configuration = {
+      ...endpoints,
+      ...Object.fromEntries(
+        Object.entries(configuration).filter(([, value]) => value !== undefined),
+      ),
+    };
+    await checkHosts();
   }
 
-  // trustedOrigins bypasses Better Auth's DNS checks. Recheck delegated hosts
-  // even on cache hits, rather than treating cached metadata as network policy.
-  await Promise.all(origins.filter((origin) => origin !== issuerOrigin).map(requirePublicOrigin));
-
-  if (origins !== cached?.origins) {
-    if (cache.size >= cacheLimit) {
-      const oldest = cache.keys().next().value;
-
-      if (oldest !== undefined) cache.delete(oldest);
-    }
-
-    cache.set(issuer, { origins, expiresAt: Date.now() + cacheDuration });
-  }
-
-  return origins;
+  return { configuration, origins: [...origins], discovered };
 };
