@@ -111,11 +111,9 @@ export const initializeRuntime = async (
       if (bootstrap) {
         await initializeBootstrap(
           settings,
-          createAuthentication(
-            { ...configuration, LOCAL_PASSWORD_ENABLED: state.localPasswordEnabled },
-            database.db,
-            { encryptionKey: keys.encryption },
-          ),
+          createAuthentication(configuration, database.db, {
+            encryptionKey: keys.encryption,
+          }),
           database.db,
           bootstrap,
         );

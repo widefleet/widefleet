@@ -59,6 +59,7 @@ try {
       .parse(unstable_readConfig({ config: configPath }));
 
     const emailSignIn =
+      configuration.LOGIN_CODE_DELIVERY === "console" ||
       Boolean(extension.sendEmail) ||
       worker.send_email.some((binding) => binding.name === "EMAIL") ||
       Boolean(worker.vars["EMAIL_FROM"]);
@@ -78,11 +79,7 @@ try {
       try {
         await initializeBootstrap(
           services.settings,
-          createAuthentication(
-            { ...configuration, LOCAL_PASSWORD_ENABLED: true },
-            database.db,
-            extension,
-          ),
+          createAuthentication(configuration, database.db, extension),
           database.db,
           bootstrap,
         );

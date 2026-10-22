@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { companyIdentity } from "./company-identity.ts";
 import { artifactStorageSchema } from "./storage/config.ts";
 
 const telemetryUrl = z.url().refine((value) => {
@@ -69,8 +68,7 @@ export const runtimeConfigurationSchema = z.object({
     .optional()
     .transform((value) => value || undefined),
   PLATFORM_ENCRYPTION_KEY_FILE: z.string().min(1).optional(),
-  IDENTITY: companyIdentity.nullable().default(null),
-  LOCAL_PASSWORD_ENABLED: z.boolean().default(false),
+  LOGIN_CODE_DELIVERY: z.enum(["email", "console"]).default("email"),
 });
 
 export const configurationSchema = runtimeConfigurationSchema.and(artifactStorageSchema);

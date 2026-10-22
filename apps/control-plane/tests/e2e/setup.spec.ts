@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { expect, test } from "@playwright/test";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -14,7 +15,7 @@ import { encryptSecret } from "../../src/lib/server/secret-encryption.ts";
 import { createRecoveryLink } from "../../src/lib/server/recovery.ts";
 import { createTestEnvironment } from "../environment.ts";
 
-test("verifies company DNS, preserves matching accounts and closes password access", async ({
+test("verifies company DNS, preserves matching accounts and enforces company SSO", async ({
   page,
   request,
 }) => {
@@ -41,6 +42,7 @@ test("verifies company DNS, preserves matching accounts and closes password acce
       env: {
         ...process.env,
         ...environment.environment,
+        LOGIN_CODE_DELIVERY: "console",
         WIDEFLEET_TEST_DNS_FILE: dnsFile,
         // Exercise editable preferences while keeping all reporting disabled.
         PLATFORM_USAGE_REPORTING: undefined,
@@ -81,8 +83,14 @@ test("verifies company DNS, preserves matching accounts and closes password acce
     await expect(page).toHaveURL(/\/setup$/);
     await page.getByLabel("Name", { exact: true }).fill("IT Admin");
     await page.getByLabel("Email", { exact: true }).fill("sso@example.test");
-    await page.getByLabel("Password", { exact: true }).fill("setup-password-for-browser-test");
     await page.getByRole("button", { name: "Create account and continue" }).click();
+    await expect(page).toHaveURL(/\/sign-in\?/);
+    await expect(page.getByLabel("Email", { exact: true })).toHaveValue("sso@example.test");
+    await page.getByRole("button", { name: "Request sign-in code" }).click();
+    await expect.poll(() => logs.match(/code is (\d{6})/)?.[1]).toBeTruthy();
+    const otp = z.string().parse(logs.match(/code is (\d{6})/)?.[1]);
+    await page.getByLabel("Sign-in code", { exact: true }).fill(otp);
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await expect(page).toHaveURL(/\/settings$/);
     await page.getByRole("link", { name: "Privacy", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Improve Widefleet" })).toBeVisible();
@@ -99,6 +107,7 @@ test("verifies company DNS, preserves matching accounts and closes password acce
       /installation_snapshot/,
     );
     await page.getByRole("link", { name: "Company sign-in", exact: true }).click();
+    await page.getByRole("button", { name: "Configure company SSO", exact: true }).click();
     await page.getByLabel("Company email domain").fill("example.test");
     await page
       .getByLabel("Issuer URL")
@@ -141,17 +150,17 @@ test("verifies company DNS, preserves matching accounts and closes password acce
     await expect(
       page.getByText("Company sign-in and administrator access verified successfully."),
     ).toBeVisible();
-    await page.getByRole("button", { name: "Complete setup and disable password access" }).click();
-    await expect(
-      page.getByRole("button", { name: "Complete setup and disable password access" }),
-    ).toHaveCount(0);
+    await page.getByRole("button", { name: "Activate company SSO" }).click();
+    await page.getByRole("button", { name: /sso@example.test/ }).click();
+    await expect(page).toHaveURL(/\/settings(?:\?|$)/);
+    await expect(page.getByRole("button", { name: "Activate company SSO" })).toHaveCount(0);
 
     const passwordLogin = await request.post("/api/auth/sign-in/email", {
       headers: { origin: environment.configuration.PLATFORM_URL },
       data: { email: "sso@example.test", password: "setup-password-for-browser-test" },
     });
 
-    expect(passwordLogin.status()).toBeGreaterThanOrEqual(400);
+    expect(passwordLogin.status()).toBe(404);
     await page
       .getByRole("navigation", { name: "Settings sections" })
       .getByRole("link", { name: "Administration", exact: true })
@@ -276,7 +285,9 @@ test("verifies company DNS, preserves matching accounts and closes password acce
       .from(installation)
       .where(eq(installation.id, installationId));
 
-    expect(afterUpgrade?.localPasswordEnabled).toBe(false);
+    expect(
+      settingsView.parse(await (await page.request.get("/api/v1/settings")).json()).ssoRequired,
+    ).toBe(false);
 
     const restored = await environment.auth.api.getSession({
       headers: new Headers({

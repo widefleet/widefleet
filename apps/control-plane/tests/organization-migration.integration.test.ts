@@ -152,6 +152,7 @@ describe("Organization ownership migration", () => {
       INSERT INTO installation (id, settings, owner_id, local_password_enabled)
         VALUES ('widefleet', '{"externallyManaged":true,"identity":{"management":{"secret":{"type":"stored","id":"secret"}},"directory":{"clientId":"directory","secret":{"type":"stored","id":"directory-secret"}}}}', 'owner', false);
       INSERT INTO installation_secret (id, ciphertext) VALUES ('secret', 'opaque-existing-ciphertext'), ('directory-secret', 'opaque-directory-ciphertext');
+      INSERT INTO account (id, account_id, provider_id, user_id, password, created_at, updated_at) VALUES ('password-account', 'owner', 'credential', 'owner', 'old-hash', now(), now());
       INSERT INTO session (id, expires_at, token, updated_at, user_id, company_configuration, recovery)
         VALUES ('company', now() + interval '1 hour', 'company-token', now(), 'owner', 'existing-proof', false),
                ('recovery', now() + interval '1 hour', 'recovery-token', now(), 'owner', '', true),
@@ -162,9 +163,14 @@ describe("Organization ownership migration", () => {
       "0022_organization_settings.sql",
       "0023_organization_sso.sql",
       "0024_app_login.sql",
+      "0025_passwordless_sign_in.sql",
     ]) {
       await client.query(await readFile(new URL(`../migrations/${name}`, import.meta.url), "utf8"));
     }
+
+    expect(
+      (await client.query("SELECT id FROM account WHERE provider_id = 'credential'")).rows,
+    ).toEqual([]);
 
     const settings = await client.query<{ organization_id: string; settings: unknown }>(
       "SELECT organization_id, settings FROM organization_settings",
@@ -196,11 +202,16 @@ describe("Organization ownership migration", () => {
       ).rows,
     ).toEqual([{ name: null }]);
 
-    const state = await client.query<{ owner_id: string; local_password_enabled: boolean }>(
-      "SELECT owner_id, local_password_enabled FROM installation",
-    );
+    const state = await client.query<{ owner_id: string }>("SELECT owner_id FROM installation");
 
-    expect(state.rows).toEqual([{ owner_id: "owner", local_password_enabled: false }]);
+    expect(state.rows).toEqual([{ owner_id: "owner" }]);
+    expect(
+      (
+        await client.query(
+          "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'installation' AND column_name = 'local_password_enabled'",
+        )
+      ).rows,
+    ).toEqual([]);
 
     const sessions = await client.query<{ id: string; identity_organization_id: string | null }>(
       "SELECT id, identity_organization_id FROM session ORDER BY id",

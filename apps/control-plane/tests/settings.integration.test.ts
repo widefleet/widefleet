@@ -7,13 +7,14 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { editableSettings } from "./settings-input.ts";
 import { installationSettings, settingsInput } from "@platform/contracts";
-import { createAuthentication, companyLoginRevision } from "../src/lib/server/auth.ts";
-import { member, session, user, ssoProvider } from "../src/lib/server/auth-schema.ts";
+import { createAuthentication } from "../src/lib/server/auth.ts";
+import { account, member, session, user, ssoProvider } from "../src/lib/server/auth-schema.ts";
 import { installation, organizationSettings } from "../src/lib/server/schema.ts";
 import {
   createInstallationOwner,
   installationId,
   readInstallation,
+  readOrganizationSettings,
 } from "../src/lib/server/installation-store.ts";
 import { createRecoveryLink } from "../src/lib/server/recovery.ts";
 import { createIdentityService } from "../src/lib/server/identity.ts";
@@ -44,7 +45,7 @@ describe("Platform setup and managed settings", () => {
 
   const input = async () => editableSettings(await environment.settings.read(principal()));
 
-  it("claims first-administrator setup once and stores a Better Auth password account", async () => {
+  it("claims first-administrator setup once without creating password credentials", async () => {
     await environment.database.db
       .update(installation)
       .set({ ownerId: null })
@@ -55,7 +56,6 @@ describe("Platform setup and managed settings", () => {
         createInstallationOwner(environment.database.db, {
           name,
           email: `${name}@example.test`,
-          password: "first-owner-password",
         }),
       ),
     );
@@ -69,16 +69,16 @@ describe("Platform setup and managed settings", () => {
     const roles = await environment.database.db.select().from(member);
     expect(roles).toEqual([expect.objectContaining({ userId: winner.value.id, role: "owner" })]);
 
-    const auth = createAuthentication(
-      { ...environment.configuration, LOCAL_PASSWORD_ENABLED: true },
-      environment.database.db,
-    );
-
-    const result = await auth.api.signInEmail({
-      body: { email: winner.value.email, password: "first-owner-password" },
-    });
-
-    expect(result.user.id).toBe(winner.value.id);
+    expect(
+      await environment.database.db
+        .select()
+        .from(account)
+        .where(eq(account.userId, winner.value.id)),
+    ).toEqual([]);
+    expect(
+      (await environment.database.db.select().from(user).where(eq(user.id, winner.value.id)))[0]
+        ?.emailVerified,
+    ).toBe(false);
   });
 
   it("encrypts entered credentials and never returns them in settings", async () => {
@@ -449,61 +449,8 @@ describe("Platform setup and managed settings", () => {
     expect(stored?.expiresAt).toEqual(refreshed?.session.expiresAt);
   });
 
-  it("requires a login with current SSO settings before closing password access and local sessions", async () => {
-    const auth = createAuthentication(
-      { ...environment.configuration, LOCAL_PASSWORD_ENABLED: true },
-      environment.database.db,
-    );
-
-    const loggedIn = await environment.users.login({ userId: environment.owner.id });
-    const headers = new Headers(loggedIn.headers);
-    await expect(environment.settings.complete(principal(), auth, headers)).rejects.toMatchObject({
-      code: "CONFLICT",
-    });
-    const current = await auth.api.getSession({ headers });
-
-    if (!current) throw new Error("Expected owner session");
-    await environment.database.db
-      .update(session)
-      .set({ companyConfiguration: "stale-configuration" })
-      .where(eq(session.id, current.session.id));
-    await expect(environment.settings.complete(principal(), auth, headers)).rejects.toMatchObject({
-      code: "CONFLICT",
-    });
-    const resolved = await environment.settings.resolve();
-
-    const proof = companyLoginRevision(resolved.sso);
-
-    await environment.database.db
-      .update(session)
-      .set({ companyConfiguration: proof })
-      .where(eq(session.id, current.session.id));
-    await environment.settings.complete(principal(), auth, headers);
-    expect((await readInstallation(environment.database.db)).localPasswordEnabled).toBe(false);
-    expect(
-      await environment.database.db
-        .select()
-        .from(session)
-        .where(eq(session.companyConfiguration, "")),
-    ).toHaveLength(0);
-
-    const closedAuth = createAuthentication(
-      { ...environment.configuration, LOCAL_PASSWORD_ENABLED: false },
-      environment.database.db,
-    );
-
-    await expect(
-      closedAuth.api.signInEmail({
-        body: { email: environment.owner.email, password: "first-owner-password" },
-      }),
-    ).rejects.toBeDefined();
-  });
-
   it("provides a single-use recovery link with a fixed short session and no password reopening", async () => {
-    const auth = createAuthentication(
-      { ...environment.configuration, LOCAL_PASSWORD_ENABLED: false },
-      environment.database.db,
-    );
+    const auth = createAuthentication(environment.configuration, environment.database.db);
 
     const url = new URL(
       await createRecoveryLink(
@@ -584,13 +531,17 @@ describe("Platform setup and managed settings", () => {
         )
       ).isErr(),
     ).toBe(true);
-    expect((await readInstallation(environment.database.db)).localPasswordEnabled).toBe(false);
+    await expect(
+      auth.api.signInEmail({
+        body: { email: environment.owner.email, password: "first-owner-password" },
+      }),
+    ).rejects.toMatchObject({ body: { code: "EMAIL_PASSWORD_DISABLED" } });
   });
   it("imports bootstrap settings once and preserves later API changes across startup", async () => {
     const bootstrap = join(environment.configuration.PLATFORM_STATE_DIRECTORY, "bootstrap.json");
     await environment.database.db
       .update(installation)
-      .set({ ownerId: null, localPasswordEnabled: true })
+      .set({ ownerId: null })
       .where(eq(installation.id, installationId));
     const settings = await input();
 
@@ -603,12 +554,16 @@ describe("Platform setup and managed settings", () => {
         owner: {
           name: "Automation Owner",
           email: "automation@example.test",
-          password: "bootstrap-password-only",
         },
         settings,
       }),
     );
-    const configuration = { ...environment.configuration, PLATFORM_BOOTSTRAP_FILE: bootstrap };
+
+    const configuration = {
+      ...environment.configuration,
+      PLATFORM_BOOTSTRAP_FILE: bootstrap,
+    };
+
     const migrations = fileURLToPath(new URL("../migrations", import.meta.url));
     const initialized = await initializeRuntime(configuration, migrations);
 
@@ -626,7 +581,9 @@ describe("Platform setup and managed settings", () => {
     const restarted = await initializeRuntime(configuration, migrations);
 
     try {
-      expect((await readInstallation(restarted.database.db)).settings.externallyManaged).toBe(true);
+      expect(
+        (await readOrganizationSettings(restarted.database.db, "widefleet")).externallyManaged,
+      ).toBe(true);
     } finally {
       await restarted.database.close();
     }
@@ -648,7 +605,6 @@ it("resumes file initialization with the existing owner after provider discovery
         owner: {
           name: "File Owner",
           email: "file-owner@example.test",
-          password: "bootstrap-password-only",
         },
         settings: {
           sso: {
@@ -664,7 +620,12 @@ it("resumes file initialization with the existing owner after provider discovery
         },
       }),
     );
-    const configuration = { ...environment.configuration, PLATFORM_BOOTSTRAP_FILE: bootstrap };
+
+    const configuration = {
+      ...environment.configuration,
+      PLATFORM_BOOTSTRAP_FILE: bootstrap,
+    };
+
     const migrations = fileURLToPath(new URL("../migrations", import.meta.url));
     provider.settings.available = false;
 

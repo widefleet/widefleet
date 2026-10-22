@@ -52,12 +52,6 @@ export const setExternalManagement = command(
   },
 );
 
-export const completeSetup = command(organizationSelection, async (input) => {
-  const { runtime, principal, request } = await remoteContext(input);
-  await remoteOperation(() => runtime.settings.complete(principal, runtime.auth, request.headers));
-  await getSettings().refresh();
-});
-
 export const createOwner = command(setupOwner, async (input) => {
   const { request } = getRequestEvent();
   const runtime = await getRuntime();

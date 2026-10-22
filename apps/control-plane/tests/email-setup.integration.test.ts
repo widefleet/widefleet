@@ -46,7 +46,6 @@ it.each(["runtime", "source command"])(
           owner: {
             name: "Bootstrap Owner",
             email: "bootstrap-owner@example.test",
-            password: "synthetic-bootstrap-password",
           },
         }),
       );

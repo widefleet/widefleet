@@ -1,6 +1,5 @@
 import { createRuntimeExtension } from "#runtime-extension";
 import { createCloudflareEmail } from "./email-cloudflare.ts";
-import { error } from "@sveltejs/kit";
 import { createArtifactStorage } from "./artifact-storage.ts";
 import { readCloudflareConfiguration, type CloudflareBindings } from "./cloudflare-config.ts";
 import { createDatabase } from "./database.ts";
@@ -14,6 +13,7 @@ import { createCloudflareAppSignIn } from "./app-sign-in-cloudflare.ts";
 import { cloudflareAuthRateLimit } from "./auth-rate-limit-cloudflare.ts";
 
 export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
+  // Hyperdrive exposes its connection string only inside a request handler.
   const configuration = readCloudflareConfiguration(bindings);
   // A pool belongs to this request only; Hyperdrive owns pooling between requests.
   const database = createDatabase(configuration, 5);
@@ -47,19 +47,9 @@ export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
   };
 
   if (sendEmail) options.sendEmail = sendEmail;
-  const resolve = createRuntime(options);
 
   return {
-    get: createRequestRuntime(async () => {
-      const installed = await settings.resolve();
-
-      if (!installed.state.ownerId)
-        error(503, "Initialize the hosted installation before accepting requests");
-      const runtime = await resolve(installed);
-      await runtime.auth.$context;
-
-      return runtime;
-    }),
+    get: createRequestRuntime(async () => createRuntime(options)()),
     close: async () => {
       try {
         await reporting.close();

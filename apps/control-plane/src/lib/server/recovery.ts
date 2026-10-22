@@ -6,10 +6,9 @@ import type { Configuration } from "./config.ts";
 import type { Database } from "./database.ts";
 import { member, user } from "./auth-schema.ts";
 
-export const createRecoveryLink = async (
+export const createRecoverySession = async (
   auth: Authentication,
   database: Database,
-  configuration: Configuration,
   email: string,
 ) => {
   const [owner] = await database
@@ -44,6 +43,16 @@ export const createRecoveryLink = async (
     cookie: `${context.authCookies.sessionToken.name}=${encodeURIComponent(`${session.token}.${signature}`)}`,
   });
 
+  return headers;
+};
+
+export const createRecoveryLink = async (
+  auth: Authentication,
+  database: Database,
+  configuration: Configuration,
+  email: string,
+) => {
+  const headers = await createRecoverySession(auth, database, email);
   const { token } = await auth.api.generateOneTimeToken({ headers });
 
   return `${configuration.PLATFORM_URL}/recover#token=${encodeURIComponent(token)}`;

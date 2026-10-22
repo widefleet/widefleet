@@ -163,12 +163,12 @@ test("accepts emailed owner invitations and manages members in isolated organiza
         },
         { times: 1 },
       );
-      await form.getByRole("button", { name: "Email me a sign-in code" }).click();
+      await form.getByRole("button", { name: "Request sign-in code" }).click();
       await requested;
 
       try {
         await expect(page.locator("#code-email")).toBeDisabled();
-        await page.locator("#login-email").fill("another@example.test");
+        await expect(page.locator("input[type=password]")).toHaveCount(0);
       } finally {
         pending.emit("released");
       }
@@ -181,11 +181,11 @@ test("accepts emailed owner invitations and manages members in isolated organiza
       await expect(page.getByLabel("Sign-in code", { exact: true })).toHaveCount(0);
     }
 
-    await form.getByRole("button", { name: "Email me a sign-in code" }).click();
+    await form.getByRole("button", { name: "Request sign-in code" }).click();
     await expect(page.getByLabel("Sign-in code", { exact: true })).toBeVisible();
 
     if (checkEmailState) {
-      await page.locator("#login-email").fill("yet-another@example.test");
+      await expect(page.locator("input[type=password]")).toHaveCount(0);
       await expect(page.locator("#code-email")).toHaveValue(email);
       await expect(page.locator("#code-email")).toHaveAttribute("readonly", "");
     }
@@ -223,8 +223,9 @@ test("accepts emailed owner invitations and manages members in isolated organiza
     await operator.waitForLoadState("networkidle");
     await operator.getByLabel("Name", { exact: true }).fill("Email Setup Owner");
     await operator.getByLabel("Email", { exact: true }).fill("email-setup@example.test");
-    await operator.getByLabel("Password", { exact: true }).fill("synthetic-setup-password");
     await operator.getByRole("button", { name: "Create account and continue" }).click();
+    await expect(operator).toHaveURL(/\/sign-in\?/);
+    await signIn(operator, "email-setup@example.test");
     await expect(operator).toHaveURL(/\/settings$/);
     await expect(
       operator.getByRole("status").filter({ hasText: "The auth proxy is unavailable" }),
@@ -350,7 +351,7 @@ test("accepts emailed owner invitations and manages members in isolated organiza
       expect(new URL(page.url()).searchParams.get("next")).toBe(
         `/invitations/${company.invitationId}`,
       );
-      await expect(page.getByRole("button", { name: "Email me a sign-in code" })).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Request sign-in code" })).toHaveCount(0);
       await page.getByRole("button", { name: "Sign in with browser-company" }).click();
       await expect(page.getByRole("heading", { name: "Join browser-company" })).toBeVisible();
       await expect(page.getByLabel("Your name")).toHaveCount(0);
@@ -451,15 +452,16 @@ test("accepts emailed owner invitations and manages members in isolated organiza
     expect((await operatorContext.request.get("/api/v1/me")).status()).toBe(200);
     const loginPage = await firstContext.newPage();
     await loginPage.goto("/sign-in?organization=widefleet&next=%2Fsettings");
-    await expect(loginPage.getByRole("button", { name: "Email me a sign-in code" })).toBeVisible();
+    await expect(loginPage.getByRole("button", { name: "Request sign-in code" })).toBeVisible();
     await signIn(loginPage, "email-setup@example.test");
     await expect(loginPage).toHaveURL(/\/settings$/);
-    // The first email proof revokes the earlier unverified setup session.
-    // Continue activation with the session just verified through Better Auth.
+    // Both operator sessions were verified by OTP. Activating SSO must deny
+    // organization access to each of them without deleting the global account.
     await loginPage.waitForLoadState("networkidle");
     await loginPage.getByRole("button", { name: "Activate company SSO", exact: true }).click();
     await expect(loginPage).not.toHaveURL(/\/settings$/);
     expect((await firstContext.request.get("/api/v1/me")).status()).toBe(403);
+    expect((await operatorContext.request.get("/api/v1/me")).status()).toBe(403);
 
     const [policy] = await environment.database.db
       .select()
@@ -468,7 +470,7 @@ test("accepts emailed owner invitations and manages members in isolated organiza
 
     expect(policy?.ssoRequired).toBe(true);
     await loginPage.goto("/sign-in?organization=widefleet");
-    await expect(loginPage.getByRole("button", { name: "Email me a sign-in code" })).toHaveCount(0);
+    await expect(loginPage.getByRole("button", { name: "Request sign-in code" })).toHaveCount(0);
   } catch (cause) {
     await test.info().attach("onboarding-server-log", { body: logs, contentType: "text/plain" });
 

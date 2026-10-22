@@ -12,10 +12,11 @@ import {
 } from "@playwright/test";
 import * as contract from "@platform/contracts";
 import { z } from "zod";
+import { createAuthentication } from "../../src/lib/server/auth.ts";
 import { apiResource, cliClientId } from "../../src/lib/server/auth-options.ts";
 import { hashAsset } from "../../src/lib/server/asset-hash.ts";
 import { ssoProvider, session } from "../../src/lib/server/auth-schema.ts";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { installation } from "../../src/lib/server/schema.ts";
 import { installationId, readInstallation } from "../../src/lib/server/installation-store.ts";
 import { initializeCloudflareRuntime } from "../../src/lib/server/organization-runtime.ts";
@@ -94,6 +95,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
         vars: {
           ...configuration.vars,
           ...environment.environment,
+          LOGIN_CODE_DELIVERY: "console",
           WIDEFLEET_CONTROL_TOKEN: "local-control-plane-auth-key-never-deploy",
           APP_COOKIE_SECRET: Buffer.alloc(32, 1).toString("base64url"),
         },
@@ -130,8 +132,20 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
     });
     administrator = await request.newContext({ baseURL: origin, extraHTTPHeaders: { origin } });
 
-    const signedIn = await administrator.post("/api/auth/sign-in/email", {
-      data: { email: environment.owner.email, password: "local-test-password-only" },
+    let code = "";
+
+    const auth = createAuthentication(environment.configuration, environment.database.db, {
+      sendEmail: async ({ text }) => {
+        code = text.match(/\b\d{6}\b/)?.[0] ?? "";
+      },
+    });
+
+    await auth.api.sendVerificationOTP({
+      body: { email: environment.owner.email, type: "sign-in" },
+    });
+
+    const signedIn = await administrator.post("/api/auth/sign-in/email-otp", {
+      data: { email: environment.owner.email, otp: code },
     });
 
     expect(await signedIn.json()).toMatchObject({ user: { id: environment.owner.id } });
@@ -158,7 +172,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
 
   it("limits login attempts across independent Worker requests for the same IP", async () => {
     const signIn = (ip: string) =>
-      fetch(`${origin}/api/auth/sign-in/email`, {
+      fetch(`${origin}/api/auth/sign-in/email-otp`, {
         method: "POST",
         headers: {
           origin,
@@ -168,24 +182,24 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
         },
         body: JSON.stringify({
           email: environment.owner.email,
-          password: "incorrect-local-test-password",
+          otp: "000000",
         }),
       });
 
     const admitted = await expectRateLimitedBurst(() => signIn("192.0.2.50"), {
       max: 3,
-      window: 10,
+      window: 60,
       clockAligned: true,
-      admittedStatus: 401,
+      admittedStatus: 400,
     });
 
     for (const response of admitted) {
-      expect(await response.json()).toMatchObject({ code: "INVALID_EMAIL_OR_PASSWORD" });
+      expect(await response.json()).toMatchObject({ code: "INVALID_OTP" });
     }
 
     const otherIp = await signIn("192.0.2.51");
-    expect(otherIp.status).toBe(401);
-    expect(await otherIp.json()).toMatchObject({ code: "INVALID_EMAIL_OR_PASSWORD" });
+    expect(otherIp.status).toBe(400);
+    expect(await otherIp.json()).toMatchObject({ code: "INVALID_OTP" });
   });
 
   it("publishes saved app sign-in settings through the auth proxy service binding", async () => {
@@ -410,6 +424,17 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
     }
   }, 30_000);
 
+  it("serves health while installation and organization configuration reads are blocked", async () => {
+    await environment.database.db.transaction(async (transaction) => {
+      await transaction.execute(
+        sql`LOCK TABLE installation, organization_settings, sso_provider IN ACCESS EXCLUSIVE MODE`,
+      );
+      const response = await fetch(`${origin}/healthz`, { signal: AbortSignal.timeout(2000) });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ status: "ok" });
+    });
+  });
+
   it("rejects public setup while the installation has no owner", async () => {
     const database = environment.database.db;
     await database
@@ -426,11 +451,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
         body: JSON.stringify({
           name: "Uninvited Owner",
           email: "uninvited@example.test",
-          password: "local-test-only-password",
         }),
       });
 
-      expect(setup.status).toBe(503);
+      expect(setup.status).toBe(403);
       expect((await readInstallation(database)).ownerId).toBeNull();
     } finally {
       await database

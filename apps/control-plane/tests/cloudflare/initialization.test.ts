@@ -66,7 +66,6 @@ describe("Hosted installation initialization", () => {
         owner: {
           name: "Hosted Owner",
           email: "owner@example.test",
-          password: "local-test-only-password",
         },
       }),
     );
@@ -99,14 +98,13 @@ describe("Hosted installation initialization", () => {
     const installed = await readInstallation(database.db);
     expect(installed.ownerId).toEqual(expect.any(String));
     const accounts = await database.db.select().from(account);
-    expect(accounts).toHaveLength(1);
+    expect(accounts).toHaveLength(0);
     await writeFile(
       bootstrapPath,
       JSON.stringify({
         owner: {
           name: "Replacement",
           email: "other@example.test",
-          password: "a-different-local-test-password",
         },
       }),
     );

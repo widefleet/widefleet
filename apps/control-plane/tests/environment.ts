@@ -172,7 +172,6 @@ export const createTestEnvironment = async (
   const owner = await createInstallationOwner(database.db, {
     name: "Setup Owner",
     email: "owner@example.test",
-    password: "local-test-password-only",
   });
 
   await registerCli(database.db, configuration);
@@ -221,7 +220,6 @@ export const createTestEnvironment = async (
     settings,
     owner,
     ownerId: owner.id,
-    settingsRevision: settings.revision,
     ownerSubject,
     environment,
     database,

@@ -104,8 +104,8 @@ const childEnvironment = {
 
 const password = decodeURIComponent(new URL(secrets.DATABASE_URL).password);
 
-const sensitive = [...Object.values(secrets), password, bootstrap?.owner.password].flatMap(
-  (value) => (value ? [value, JSON.stringify(value).slice(1, -1)] : []),
+const sensitive = [...Object.values(secrets), password].flatMap((value) =>
+  value ? [value, JSON.stringify(value).slice(1, -1)] : [],
 );
 
 const redact = (output: string) => {
