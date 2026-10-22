@@ -36,6 +36,7 @@ export const invitationInput = z.object({
     .max(254)
     .transform((value) => value.toLowerCase()),
   role: organizationChoice.shape.role.default("member"),
+  resend: z.boolean().optional(),
 });
 
 export const invitationEntry = z.object({

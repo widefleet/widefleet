@@ -10,7 +10,7 @@ import type { Configuration } from "./config.ts";
 import type { Database, DatabaseExecutor } from "./database.ts";
 import { DatabaseUnavailable, InvalidOperation } from "./errors.ts";
 import type { AuthenticatedUser, Principal } from "./identity.ts";
-import type { SendEmail } from "./email.ts";
+import { sendOrganizationInvitation, type SendEmail } from "./email.ts";
 import { findMembers } from "./member-directory.ts";
 import { organizationOperation, type OrganizationCredential } from "./organization-operations.ts";
 
@@ -158,15 +158,10 @@ export const createInvitationService = (
   };
 
   const send = async (prepared: Awaited<ReturnType<typeof prepareOrganizationInvitation>>) => {
-    if (!sendEmail)
-      throw new InvalidOperation({
-        code: "CONFLICT",
-        message: "Invitation email is not configured",
-      });
-    await sendEmail({
-      to: prepared.invitation.email,
-      subject: `Invitation to ${prepared.organizationName}`,
-      text: `You have been invited to ${prepared.organizationName} on Widefleet.\n\nAccept your invitation: ${configuration.PLATFORM_URL}/invitations/${prepared.invitation.id}\n\nThis invitation expires in 48 hours. If you were not expecting it, you can ignore this email.`,
+    await sendOrganizationInvitation(sendEmail, configuration.PLATFORM_URL, {
+      id: prepared.invitation.id,
+      email: prepared.invitation.email,
+      organizationName: prepared.organizationName,
     });
 
     return presentInvitation(prepared.invitation);
@@ -228,14 +223,7 @@ export const createInvitationService = (
         }),
       );
 
-      const [target] = await database
-        .select()
-        .from(organization)
-        .where(eq(organization.id, created.organizationId));
-
-      if (!target) throw new Error("Organization not found");
-
-      return send({ invitation: created, organizationName: target.name });
+      return presentInvitation(created);
     },
     cancel: async (
       principal: Principal,

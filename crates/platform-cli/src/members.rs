@@ -87,6 +87,9 @@ enum InvitationCommand {
         email: String,
         #[arg(long, value_enum, default_value = "member")]
         role: Role,
+        /// Resend an existing pending invitation and renew its expiry.
+        #[arg(long)]
+        resend: bool,
     },
     /// Revoke a pending invitation.
     Cancel { invitation: Uuid },
@@ -99,9 +102,13 @@ enum InvitationCommand {
 pub async fn invitations(api: &Api, token: &str, options: InvitationOptions) -> Result<()> {
     let request = match options.command {
         InvitationCommand::List => api.authenticated(Method::GET, "/invitations", token),
-        InvitationCommand::Invite { email, role } => api
+        InvitationCommand::Invite {
+            email,
+            role,
+            resend,
+        } => api
             .authenticated(Method::POST, "/invitations", token)
-            .json(&value!({ "email": email, "role": role })),
+            .json(&value!({ "email": email, "role": role, "resend": resend })),
         InvitationCommand::Cancel { invitation } => {
             api.authenticated(Method::DELETE, &format!("/invitations/{invitation}"), token)
         }

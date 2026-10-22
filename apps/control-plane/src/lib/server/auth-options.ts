@@ -8,7 +8,7 @@ import { emailOTP, jwt, organization, oneTimeToken } from "better-auth/plugins";
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { z } from "zod";
 import type { Configuration } from "./config.ts";
-import type { SendEmail } from "./email.ts";
+import { sendOrganizationInvitation, type SendEmail } from "./email.ts";
 import { hashAppClientSecret } from "./app-login-client.ts";
 import { authenticationReference } from "./authentication-context.ts";
 import { organizationAccess, organizationRoles } from "../organization.ts";
@@ -233,6 +233,12 @@ export const authenticationOptions = (
         requireEmailVerificationOnInvitation: true,
         ac: organizationAccess,
         roles: organizationRoles,
+        sendInvitationEmail: async ({ id, email, organization }) =>
+          sendOrganizationInvitation(sendEmail, configuration.PLATFORM_URL, {
+            id,
+            email,
+            organizationName: organization.name,
+          }),
       }),
       jwt({ jwt: { issuer: `${configuration.PLATFORM_URL}/api/auth` } }),
       oauthProvider({

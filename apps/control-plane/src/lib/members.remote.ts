@@ -61,7 +61,13 @@ export const setMemberRole = form(
 );
 
 export const inviteMember = form(
-  invitationInput.extend(organizationSelection.shape),
+  invitationInput.extend({
+    ...organizationSelection.shape,
+    resend: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((value) => value === "true"),
+  }),
   async ({ organizationId, ...input }) => {
     const { runtime, principal, request } = await remoteContext({ organizationId });
     await remoteOperation(() =>

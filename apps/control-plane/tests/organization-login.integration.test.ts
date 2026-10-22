@@ -67,6 +67,7 @@ describe("Invited organization members with Widefleet OIDC", () => {
   let resolve: ReturnType<typeof createRuntime>;
   let origin: string;
   const delivered: EmailMessage[] = [];
+  const failedRecipients = new Set<string>();
   const published = new Map<string, z.infer<typeof authConfiguration>>();
   const admitted = new Set<string>();
   let available = true;
@@ -161,6 +162,7 @@ describe("Invited organization members with Widefleet OIDC", () => {
       reporting: environment.reporting,
       encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
       sendEmail: async (message) => {
+        if (failedRecipients.has(message.to)) throw new Error("Synthetic delivery failure");
         delivered.push(message);
       },
       organizationAccess: {
@@ -433,13 +435,64 @@ describe("Invited organization members with Widefleet OIDC", () => {
         }),
       );
 
-    const created = await call(alpha, "POST", "/invitations", {
-      email: beta.email.toUpperCase(),
+    const beforeFailure = delivered.length;
+    failedRecipients.add(beta.email);
+
+    const failed = await call(alpha, "POST", "/invitations", {
+      email: beta.email,
       role: "admin",
     });
 
+    // Better Auth logs delivery failures and still returns the saved invitation.
+    expect(failed.status).toBe(200);
+    expect(delivered).toHaveLength(beforeFailure);
+
+    const undelivered = z
+      .array(z.object({ id: z.uuid(), email: z.email() }))
+      .parse(await (await call(alpha, "GET", "/invitations")).json());
+
+    const failedInvitations = undelivered.filter((entry) => entry.email === beta.email);
+    expect(failedInvitations).toHaveLength(1);
+    const failedInvitationId = z.string().parse(failedInvitations[0]?.id);
+    const previousExpiry = new Date(Date.now() + 60_000);
+    await environment.database.db
+      .update(invitation)
+      .set({ expiresAt: previousExpiry })
+      .where(eq(invitation.id, failedInvitationId));
+    failedRecipients.delete(beta.email);
+
+    expect(
+      (
+        await call({ ...beta, organizationId: alpha.organizationId }, "POST", "/invitations", {
+          email: beta.email,
+          role: "admin",
+          resend: true,
+        })
+      ).status,
+    ).toBe(403);
+    const beforeDelivery = delivered.length;
+
+    const created = await call(alpha, "POST", "/invitations", {
+      email: beta.email.toUpperCase(),
+      role: "member",
+      resend: true,
+    });
+
     expect(created.status, await created.clone().text()).toBe(200);
-    const invited = z.object({ id: z.uuid() }).parse(await created.json());
+
+    const invited = z
+      .object({ id: z.uuid(), role: z.string(), expiresAt: z.iso.datetime() })
+      .parse(await created.json());
+
+    expect(invited.id).toBe(failedInvitationId);
+    // Resend renews the native invitation; it does not replace its assigned role.
+    expect(invited.role).toBe("admin");
+    expect(new Date(invited.expiresAt).getTime()).toBeGreaterThan(previousExpiry.getTime());
+    expect(delivered).toHaveLength(beforeDelivery + 1);
+    expect(delivered.at(-1)?.text).toContain(`/invitations/${failedInvitationId}`);
+    expect(await (await call(alpha, "GET", "/invitations")).json()).toHaveLength(
+      undelivered.length,
+    );
     expect((await call(beta, "DELETE", `/invitations/${invited.id}`)).status).toBe(404);
     expect((await call(alpha, "POST", `/invitations/${invited.id}/accept`, {})).status).toBe(403);
     expect((await call(beta, "GET", `/invitations/${invited.id}`)).status).toBe(200);
@@ -488,6 +541,25 @@ describe("Invited organization members with Widefleet OIDC", () => {
           ),
         ),
     ).toEqual([{ id: protectedInvitation.id, role: "owner", status: "pending" }]);
+
+    const beforeOwnerResend = delivered.length;
+
+    const ownerResend = await call(joined, "POST", "/invitations", {
+      email: "protected-owner@example.test",
+      role: "member",
+      resend: true,
+    });
+
+    // Native resend preserves the grant already issued by an owner. It does not
+    // let the administrator create a new owner invitation or change its role.
+    expect(ownerResend.status).toBe(200);
+    expect(await ownerResend.json()).toMatchObject({
+      id: protectedInvitation.id,
+      role: "owner",
+      status: "pending",
+    });
+    expect(delivered).toHaveLength(beforeOwnerResend + 1);
+    expect(delivered.at(-1)?.text).toContain(`/invitations/${protectedInvitation.id}`);
     expect(
       (
         await call(joined, "POST", "/invitations", {
@@ -705,6 +777,12 @@ describe("Invited organization members with Widefleet OIDC", () => {
       const invited = z
         .object({ id: z.string() })
         .parse(await cli(ownerToken, "invitations", "invite", recipient.email));
+
+      const beforeDelivery = delivered.length;
+      expect(
+        await cli(ownerToken, "invitations", "invite", recipient.email, "--resend"),
+      ).toMatchObject({ id: invited.id, role: "member", status: "pending" });
+      expect(delivered).toHaveLength(beforeDelivery + 1);
 
       expect(await cli(ownerToken, "invitations", "list")).toEqual(
         expect.arrayContaining([
