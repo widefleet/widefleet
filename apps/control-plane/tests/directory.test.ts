@@ -35,6 +35,74 @@ const configuration = {
 };
 
 describe("company directory", () => {
+  it("separates organization tokens and refreshes credentials after a configuration change", async () => {
+    const identities = new Map([
+      [
+        "first",
+        {
+          ...configuration.IDENTITY,
+          directory: { clientId: "first", clientSecret: "first-secret" },
+        },
+      ],
+      [
+        "second",
+        {
+          ...configuration.IDENTITY,
+          directory: { clientId: "second", clientSecret: "second-secret" },
+        },
+      ],
+    ]);
+
+    const tokenRequests: string[] = [];
+    const graphRequests: (string | null)[] = [];
+
+    const directory = createDirectory(
+      configuration,
+      async (input, init) => {
+        const request = new Request(input, init);
+
+        if (request.url.endsWith("/token")) {
+          const secret = new URLSearchParams(await request.text()).get("client_secret") ?? "";
+          tokenRequests.push(secret);
+
+          return Response.json({ access_token: secret, expires_in: 3600 });
+        }
+
+        graphRequests.push(request.headers.get("authorization"));
+
+        return Response.json({ value: [] });
+      },
+      async (id) => identities.get(id) ?? null,
+    );
+
+    const search = async (id: string) => {
+      const result = await directory.search(
+        { ...creator, application: { organizationId: id, admin: false } },
+        { query: "Team", limit: 10 },
+      );
+
+      expect(result.isOk()).toBe(true);
+    };
+
+    await search("first");
+    await search("second");
+    await search("first");
+    identities.set("first", {
+      ...configuration.IDENTITY,
+      directory: { clientId: "first", clientSecret: "rotated-first-secret" },
+    });
+    await search("first");
+    await search("second");
+    expect(tokenRequests).toEqual(["first-secret", "second-secret", "rotated-first-secret"]);
+    expect(graphRequests).toEqual([
+      "Bearer first-secret",
+      "Bearer second-secret",
+      "Bearer first-secret",
+      "Bearer rotated-first-secret",
+      "Bearer second-secret",
+    ]);
+  });
+
   it("does not use installation directory credentials for another organization", async () => {
     let calls = 0;
 

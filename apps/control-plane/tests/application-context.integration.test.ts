@@ -148,13 +148,16 @@ describe("Mandatory application context", () => {
     expect(await (await api(request("/connector-catalog"))).json()).toEqual(catalog);
     expect(await (await api(request("/agents"))).json()).toEqual(listing);
 
-    for (const path of [
-      "/runtime",
-      "/settings",
-      "/reporting",
-      "/groups?query=Engineering&limit=10",
-    ])
+    for (const path of ["/runtime", "/reporting"])
       expect((await api(request(path))).status).toBe(403);
+    const ownSettings = await api(request("/settings"));
+    expect(ownSettings.status).toBe(200);
+    expect(await ownSettings.json()).toMatchObject({
+      settings: { identity: null },
+      localPasswordEnabled: false,
+    });
+    const directory = await api(request("/groups?query=Engineering&limit=10"));
+    expect(directory.status).toBe(503);
   });
 
   it("allows the same name in separate organizations and scopes administrator, owner and grant access", async () => {

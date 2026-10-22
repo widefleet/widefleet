@@ -6,7 +6,7 @@ import { installationOrganizationId } from "../organization.ts";
 import { account, member, user } from "./auth-schema.ts";
 import type { Database, DatabaseExecutor } from "./database.ts";
 import { InvalidOperation } from "./errors.ts";
-import { installation } from "./schema.ts";
+import { installation, organizationSettings } from "./schema.ts";
 
 export const installationId = "widefleet";
 
@@ -15,9 +15,27 @@ export const initializeInstallation = async (database: Database) => {
     .insert(installation)
     .values({
       id: installationId,
+    })
+    .onConflictDoNothing();
+  await database
+    .insert(organizationSettings)
+    .values({
+      organizationId: installationOrganizationId,
       settings: installationSettings.parse({}),
     })
     .onConflictDoNothing();
+};
+
+export const readOrganizationSettings = async (
+  database: DatabaseExecutor,
+  organizationId: string,
+) => {
+  const [record] = await database
+    .select()
+    .from(organizationSettings)
+    .where(eq(organizationSettings.organizationId, organizationId));
+
+  return installationSettings.parse(record?.settings ?? {});
 };
 
 export const readInstallation = async (database: DatabaseExecutor) => {
@@ -29,7 +47,7 @@ export const readInstallation = async (database: DatabaseExecutor) => {
   if (!row) throw new Error("The installation has not been initialized");
 
   return {
-    settings: installationSettings.parse(row.settings),
+    settings: await readOrganizationSettings(database, installationOrganizationId),
     ownerId: row.ownerId,
     localPasswordEnabled: row.localPasswordEnabled,
   };

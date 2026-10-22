@@ -144,4 +144,48 @@ describe("Organization ownership migration", () => {
       },
     ]);
   });
+
+  it("moves existing login settings and encrypted secrets into the installation organization", async () => {
+    await client.query(migration);
+    await client.query(`
+      INSERT INTO "user" (id, name, email) VALUES ('owner', 'Owner', 'owner@example.test');
+      INSERT INTO installation (id, settings, owner_id, local_password_enabled)
+        VALUES ('widefleet', '{"externallyManaged":true,"identity":{"management":{"secret":{"type":"stored","id":"secret"}}}}', 'owner', false);
+      INSERT INTO installation_secret (id, ciphertext) VALUES ('secret', 'opaque-existing-ciphertext');
+    `);
+    await client.query(
+      await readFile(
+        new URL("../migrations/0022_organization_settings.sql", import.meta.url),
+        "utf8",
+      ),
+    );
+
+    const settings = await client.query<{ organization_id: string; settings: unknown }>(
+      "SELECT organization_id, settings FROM organization_settings",
+    );
+
+    expect(settings.rows).toEqual([
+      {
+        organization_id: "widefleet",
+        settings: {
+          externallyManaged: true,
+          identity: { management: { secret: { type: "stored", id: "secret" } } },
+        },
+      },
+    ]);
+
+    const secrets = await client.query<{ id: string; organization_id: string; ciphertext: string }>(
+      "SELECT id, organization_id, ciphertext FROM organization_secret",
+    );
+
+    expect(secrets.rows).toEqual([
+      { id: "secret", organization_id: "widefleet", ciphertext: "opaque-existing-ciphertext" },
+    ]);
+
+    const state = await client.query<{ owner_id: string; local_password_enabled: boolean }>(
+      "SELECT owner_id, local_password_enabled FROM installation",
+    );
+
+    expect(state.rows).toEqual([{ owner_id: "owner", local_password_enabled: false }]);
+  });
 });

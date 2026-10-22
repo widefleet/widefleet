@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { eq } from "drizzle-orm";
 import { installationSettings, settingsView } from "@platform/contracts";
 import { account } from "../../src/lib/server/auth-schema.ts";
-import { installation } from "../../src/lib/server/schema.ts";
+import { installation, organizationSettings } from "../../src/lib/server/schema.ts";
 import { installationId } from "../../src/lib/server/installation-store.ts";
 import { createRecoveryLink } from "../../src/lib/server/recovery.ts";
 import { createTestEnvironment } from "../environment.ts";
@@ -17,8 +17,12 @@ test("sets up an administrator, links and verifies company SSO, then closes pass
   const environment = await createTestEnvironment();
   await environment.database.db
     .update(installation)
-    .set({ ownerId: null, settings: installationSettings.parse({}), usageReporting: false })
+    .set({ ownerId: null, usageReporting: false })
     .where(eq(installation.id, installationId));
+  await environment.database.db
+    .update(organizationSettings)
+    .set({ settings: installationSettings.parse({}) })
+    .where(eq(organizationSettings.organizationId, installationId));
 
   const server = spawn(process.execPath, ["build"], {
     cwd: fileURLToPath(new URL("../../", import.meta.url)),

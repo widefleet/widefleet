@@ -243,7 +243,7 @@ describe("Organization connector management", () => {
       404,
     );
 
-    for (const path of ["/runtime", "/settings", "/reporting"])
+    for (const path of ["/runtime", "/reporting"])
       expect((await first.request(path)).status).toBe(403);
     const background = createDatabase(environment.configuration);
 

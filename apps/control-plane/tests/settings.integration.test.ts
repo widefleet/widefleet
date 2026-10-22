@@ -8,7 +8,11 @@ import { join } from "node:path";
 import { installationSettings, settingsInput } from "@platform/contracts";
 import { createAuthentication, companyLoginRevision } from "../src/lib/server/auth.ts";
 import { member, session, user } from "../src/lib/server/auth-schema.ts";
-import { installation, installationSecrets } from "../src/lib/server/schema.ts";
+import {
+  installation,
+  organizationSettings,
+  organizationSecrets,
+} from "../src/lib/server/schema.ts";
 import {
   createInstallationOwner,
   installationId,
@@ -99,8 +103,8 @@ describe("Platform setup and managed settings", () => {
 
     const [stored] = await environment.database.db
       .select()
-      .from(installationSecrets)
-      .where(eq(installationSecrets.id, reference.id));
+      .from(organizationSecrets)
+      .where(eq(organizationSecrets.id, reference.id));
 
     expect(stored?.ciphertext).not.toContain("private-management-secret");
     expect((await environment.settings.resolve()).identity?.management.clientSecret).toBe(
@@ -135,11 +139,17 @@ describe("Platform setup and managed settings", () => {
     const bundle = environment.authControl.read();
 
     expect(bundle.configuration?.clientSecret).toBe("private-management-secret");
-    expect(await environment.database.db.select().from(installationSecrets)).toHaveLength(2);
+    expect(await environment.database.db.select().from(organizationSecrets)).toHaveLength(2);
   });
 
   it("enforces administrator access and browser read-only while allowing API changes", async () => {
-    const viewer = { ...principal(), role: "member" as const, admin: false };
+    const viewer = {
+      ...principal(),
+      role: "member" as const,
+      admin: false,
+      application: { ...environment.application, admin: false },
+    };
+
     await expect(environment.settings.read(viewer)).rejects.toMatchObject({ code: "FORBIDDEN" });
     await environment.settings.setExternalManagement(principal(), true);
     const current = await input();
@@ -290,9 +300,9 @@ describe("Platform setup and managed settings", () => {
     if (!settings.identity) throw new Error("Expected configured identity");
     settings.identity.apps.secret = { type: "stored", id: crypto.randomUUID() };
     await environment.database.db
-      .update(installation)
+      .update(organizationSettings)
       .set({ settings })
-      .where(eq(installation.id, installationId));
+      .where(eq(organizationSettings.organizationId, installationId));
 
     try {
       const management = await environment.settings.resolve();
@@ -301,9 +311,9 @@ describe("Platform setup and managed settings", () => {
       expect((await environment.settings.inspect()).error).not.toBeNull();
     } finally {
       await environment.database.db
-        .update(installation)
+        .update(organizationSettings)
         .set({ settings: original })
-        .where(eq(installation.id, installationId));
+        .where(eq(organizationSettings.organizationId, installationId));
     }
   });
 
