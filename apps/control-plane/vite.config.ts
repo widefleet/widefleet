@@ -1,3 +1,4 @@
+import { isAbsolute } from "node:path";
 import { readFileSync } from "node:fs";
 import { z } from "zod";
 import adapter from "@sveltejs/adapter-node";
@@ -10,8 +11,14 @@ const release = z
   .object({ version: z.string() })
   .parse(JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")));
 
+const extension = process.env["WIDEFLEET_RUNTIME_EXTENSION"];
+
+if (extension && !isAbsolute(extension))
+  throw new Error("WIDEFLEET_RUNTIME_EXTENSION must be an absolute module path");
+
 export const controlPlaneConfig = (target: "node" | "cloudflare") =>
   defineConfig({
+    resolve: { alias: extension ? { "#runtime-extension": extension } : {} },
     define: { "process.env.WIDEFLEET_BUILD_VERSION": JSON.stringify(release.version) },
     build: { sourcemap: "hidden" },
     plugins: [

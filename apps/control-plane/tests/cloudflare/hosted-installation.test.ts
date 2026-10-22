@@ -42,6 +42,24 @@ const configuration = {
 };
 
 describe("Hosted resource provisioning", () => {
+  it("keeps authentication rate policies with stable, installation-specific namespaces", async () => {
+    const first = (await hostedConfigurations(installation, ids)).controlPlane.ratelimits;
+    const again = (await hostedConfigurations(installation, ids)).controlPlane.ratelimits;
+
+    const other = (await hostedConfigurations({ ...installation, name: "other" }, ids)).controlPlane
+      .ratelimits;
+
+    expect(first).toEqual(again);
+    expect(first?.length).toBeGreaterThan(0);
+    expect(new Set(first?.map((binding) => binding.namespace_id)).size).toBe(first?.length);
+
+    for (const binding of first ?? []) {
+      expect(binding.name).toBe(`AUTH_RATE_LIMIT_${binding.simple.limit}_${binding.simple.period}`);
+      expect(binding.namespace_id).toMatch(/^[1-9][0-9]*$/);
+      expect(other?.some((entry) => entry.namespace_id === binding.namespace_id)).toBe(false);
+    }
+  });
+
   it("reuses resources and preserves the existing Hyperdrive origin credentials", async () => {
     const created = new Set<string>();
     const writes: string[][] = [];
@@ -240,6 +258,58 @@ describe("Hosted resource provisioning", () => {
       await rm(directory, { recursive: true, force: true });
     }
   }, 30_000);
+
+  it.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
+    "bundles the control plane with email restricted to the configured sender",
+    async () => {
+      const configs = await hostedConfigurations(
+        { ...installation, emailFrom: "notifications@notify.example.test" },
+        ids,
+      );
+
+      const directory = await mkdtemp(join(tmpdir(), "widefleet-hosted-email-"));
+
+      try {
+        const path = join(directory, "wrangler.json");
+        await writeFile(path, JSON.stringify(configs.controlPlane));
+
+        const output = await promisify(execFile)(
+          "pnpm",
+          [
+            "exec",
+            "wrangler",
+            "deploy",
+            "--config",
+            path,
+            "--dry-run",
+            "--outdir",
+            join(directory, "bundle"),
+          ],
+          {
+            cwd: fileURLToPath(new URL("../../", import.meta.url)),
+            env: { ...process.env, CLOUDFLARE_API_TOKEN: "", WRANGLER_SEND_METRICS: "false" },
+            maxBuffer: 1024 * 1024,
+          },
+        );
+
+        expect(output.stdout).toContain("--dry-run: exiting now");
+        expect(configs.controlPlane.send_email).toEqual([
+          { name: "EMAIL", allowed_sender_addresses: ["notifications@notify.example.test"] },
+        ]);
+        expect(configs.initialize.send_email).toEqual([
+          {
+            name: "EMAIL",
+            allowed_sender_addresses: ["notifications@notify.example.test"],
+            remote: true,
+          },
+        ]);
+        expect(configs.initialize.vars["EMAIL_FROM"]).toBe("notifications@notify.example.test");
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+    30_000,
+  );
 });
 
 describe("Hosted infrastructure deployment coordination", () => {

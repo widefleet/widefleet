@@ -1,3 +1,4 @@
+import { unstable_readConfig } from "wrangler";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
@@ -14,11 +15,9 @@ import {
 } from "../src/lib/server/installation-store.ts";
 import { initializeCloudflareRuntime } from "../src/lib/server/organization-runtime.ts";
 import { initializeOrganization } from "../src/lib/server/organization.ts";
-import { createSettingsService } from "../src/lib/server/settings.ts";
 import { z } from "zod";
-import { createCloudflareAppSignIn } from "../src/lib/server/app-sign-in-cloudflare.ts";
-import { getPlatformProxy } from "wrangler";
-import type { AuthProxyBindings } from "../src/lib/server/cloudflare-auth-proxy.ts";
+import { connectCloudflareSettings } from "./cloudflare-settings.ts";
+import { loadRuntimeExtension } from "./runtime-extension.ts";
 
 const configuration = cloudflareConfigurationSchema.parse(process.env);
 
@@ -46,42 +45,53 @@ try {
       JSON.parse(await readFile(configuration.PLATFORM_BOOTSTRAP_FILE, "utf8")),
     );
 
-    if (bootstrap.settings || state.bootstrapPending) {
+    const extension = await loadRuntimeExtension({ configuration, database: database.db });
+
+    const configPath =
+      process.env["WIDEFLEET_INITIALIZE_CONFIG"] ??
+      fileURLToPath(new URL("../wrangler.initialize.jsonc", import.meta.url));
+
+    const worker = z
+      .object({
+        send_email: z.array(z.object({ name: z.string() })),
+        vars: z.record(z.string(), z.unknown()),
+      })
+      .parse(unstable_readConfig({ config: configPath }));
+
+    const emailSignIn =
+      Boolean(extension.sendEmail) ||
+      worker.send_email.some((binding) => binding.name === "EMAIL") ||
+      Boolean(worker.vars["EMAIL_FROM"]);
+
+    if (bootstrap.settings || emailSignIn || state.bootstrapPending) {
       const secrets = z.object({ APP_COOKIE_SECRET: z.string().min(1) }).parse(process.env);
 
-      const proxy = await getPlatformProxy<AuthProxyBindings>({
-        configPath:
-          process.env["WIDEFLEET_INITIALIZE_CONFIG"] ??
-          fileURLToPath(new URL("../wrangler.initialize.jsonc", import.meta.url)),
-        persist: false,
-      });
+      const services = await connectCloudflareSettings(
+        configuration,
+        database.db,
+        configuration.PLATFORM_ENCRYPTION_KEY,
+        secrets.APP_COOKIE_SECRET,
+        configPath,
+        extension,
+      );
 
       try {
-        const settings = createSettingsService(
-          configuration,
-          database.db,
-          configuration.PLATFORM_ENCRYPTION_KEY,
-          (organizationId) =>
-            createCloudflareAppSignIn(
-              configuration,
-              {
-                ...proxy.env,
-                ...secrets,
-              },
-              organizationId,
-            ),
-        );
-
         await initializeBootstrap(
-          settings,
-          createAuthentication({ ...configuration, LOCAL_PASSWORD_ENABLED: true }, database.db),
+          services.settings,
+          createAuthentication(
+            { ...configuration, LOCAL_PASSWORD_ENABLED: true },
+            database.db,
+            extension,
+          ),
           database.db,
           bootstrap,
         );
       } finally {
-        await proxy.dispose();
+        await services.close();
       }
-    } else await createInstallationOwner(database.db, bootstrap.owner);
+    } else {
+      await createInstallationOwner(database.db, bootstrap.owner);
+    }
   }
 
   console.info("Hosted installation initialized");

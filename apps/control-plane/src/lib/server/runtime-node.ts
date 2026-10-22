@@ -6,7 +6,7 @@ import { createStorage } from "./storage.ts";
 export type { Runtime } from "./runtime-services.ts";
 
 const startRuntime = async () => {
-  const { configuration, database, settings, encryptionKey } = await initializeRuntime();
+  const { configuration, database, settings, encryptionKey, extension } = await initializeRuntime();
   const storage = createStorage(configuration);
 
   const reporting = createReporting(configuration, database.db);
@@ -25,7 +25,15 @@ const startRuntime = async () => {
       .catch((cause: unknown) => console.error("Database shutdown failed", cause));
   });
 
-  return createRuntime({ configuration, database, settings, storage, reporting, encryptionKey });
+  return createRuntime({
+    ...extension,
+    configuration,
+    database,
+    settings,
+    storage,
+    reporting,
+    encryptionKey,
+  });
 };
 
 let runtime: ReturnType<typeof startRuntime> | undefined;
