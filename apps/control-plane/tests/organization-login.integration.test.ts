@@ -639,7 +639,7 @@ describe("Invited organization members with Widefleet OIDC", () => {
     expect(
       (await authRequest("/sign-in/email-otp", { email: "uninvited@example.test", otp: "123456" }))
         .status,
-    ).toBe(401);
+    ).toBe(400);
   });
   it.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     "manages invitations and roles through the real CLI and shared API",
