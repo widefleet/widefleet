@@ -1,10 +1,16 @@
 ---
 title: CLI authentication
 description: Credential stores, headless sessions, token renewal and external credentials.
-lastModified: 2026-10-12
+lastModified: 2026-10-22
 ---
 
 Use `widefleet login` to approve a device code in your browser. Login uses configured or saved platform details, or asks for your work email/domain to discover them. See [CLI configuration](/reference/cli-configuration). The default scopes are `platform:read platform:write`; select additional scopes explicitly when needed. Credentials use Keychain on macOS, Credential Manager on Windows, or Secret Service on Linux. The store must be available and unlocked; Linux also requires a session D-Bus.
+
+## Browser sign-in
+
+If the browser asks you to sign in, enter your email and select **Continue**. When its domain matches a verified company SSO connection, Widefleet opens that company's sign-in page. Otherwise, enter the six-digit sign-in code delivered by your installation. Installations using console delivery print the code in the server log.
+
+Organization-specific invitation and sign-in links select the company directly. An installation configured only for SSO shows its company sign-in button. If Widefleet asks you to use your organization's sign-in link, request that link from your administrator. After signing in, review and approve the CLI device code.
 
 ## Headless login
 
