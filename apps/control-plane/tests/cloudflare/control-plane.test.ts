@@ -403,7 +403,8 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
     try {
       const page = await browser.newPage();
       await page.goto(`${origin}/sign-in`);
-      await page.getByRole("button", { name: "Sign in with Company SSO" }).click();
+      await page.getByLabel("Email", { exact: true }).fill("sso@example.test");
+      await page.getByRole("button", { name: "Continue", exact: true }).click();
       await page.getByRole("button", { name: /sso@example.test/ }).click();
       await browserExpect(
         page.getByRole("heading", { name: "Your apps", exact: true }),
