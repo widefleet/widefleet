@@ -11,6 +11,7 @@ import type { OrganizationAccess } from "./application-context.ts";
 import type { Configuration } from "./config.ts";
 import type { DatabaseExecutor } from "./database.ts";
 import { installationOrganizationId } from "../organization.ts";
+import { companyOidcOrigins } from "./sso-origins.ts";
 
 export const managedPluginPaths = [
   "/organization/invite-member",
@@ -156,7 +157,7 @@ export const pluginAuthentication = (
     if (input.issuer && ["/sso/register", "/sso/update-provider"].includes(context.path)) {
       context.context.trustedOrigins = [
         ...context.context.trustedOrigins,
-        new URL(input.issuer).origin,
+        ...(await companyOidcOrigins(input.issuer)),
       ];
     }
 

@@ -10,6 +10,8 @@ import { createIdentityProvider } from "./edge/auth-proxy-idp.ts";
 import { organizationSettings } from "../src/lib/server/schema.ts";
 import { createIdentityService } from "../src/lib/server/identity.ts";
 import { ssoProvider } from "../src/lib/server/auth-schema.ts";
+import { companySsoOrigins } from "../src/lib/server/company-sso.ts";
+import { encryptSecret } from "../src/lib/server/secret-encryption.ts";
 
 describe("Better Auth SSO provider integration", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
@@ -156,5 +158,117 @@ describe("Better Auth SSO provider integration", () => {
     expect(environment.authControl.read().configuration?.provider).toMatchObject({
       groupsClaim: "roles",
     });
+  });
+
+  it("discovers separate endpoint origins for registration and migrated-provider sign-in", async () => {
+    await environment.database.db.delete(ssoProvider);
+    await environment.database.db.update(organizationSettings).set({ ssoRequired: false });
+    const issuer = "https://issuer.example.test";
+
+    const metadata = {
+      issuer,
+      authorization_endpoint: "https://login.example.test/authorize",
+      token_endpoint: "https://tokens.example.test/token",
+      jwks_uri: "https://keys.example.test/jwks",
+      userinfo_endpoint: "https://profile.example.test/userinfo",
+    };
+
+    const request = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async () => Response.json(metadata));
+
+    const ipv4 = vi.spyOn(dns, "resolve4").mockResolvedValue(["93.184.216.34"]);
+
+    const ipv6 = vi.spyOn(dns, "resolve6").mockResolvedValue([]);
+
+    try {
+      const logged = await environment.users.login({ userId: environment.owner.id });
+      logged.headers.set("origin", origin);
+
+      const input = {
+        providerId: "split-origin-provider",
+        issuer,
+        domain: "example.test",
+        organizationId: "widefleet",
+        oidcConfig: {
+          clientId: "synthetic-client",
+          clientSecret: "synthetic-client-secret",
+          pkce: true,
+          scopes: ["openid", "profile", "email"],
+        },
+      };
+
+      await expect(environment.auth.api.registerSSOProvider({ body: input })).rejects.toBeDefined();
+      expect(request).not.toHaveBeenCalled();
+      await environment.auth.api.registerSSOProvider({ headers: logged.headers, body: input });
+
+      // Migrated providers lack hydrated endpoints. Exercise runtime discovery
+      // rather than relying only on registration's stored endpoint URLs.
+      await environment.database.db.update(ssoProvider).set({
+        domainVerified: true,
+        oidcConfig: await encryptSecret(
+          environment.configuration.PLATFORM_ENCRYPTION_KEY ??
+            environment.configuration.BETTER_AUTH_SECRET,
+          JSON.stringify({ ...input.oidcConfig, issuer }),
+        ),
+      });
+
+      const signIn = new Request(`${origin}/api/auth/sign-in/sso`, {
+        method: "POST",
+        headers: { origin, "content-type": "application/json" },
+        body: JSON.stringify({ providerId: input.providerId, callbackURL: "/settings" }),
+      });
+
+      const response = await environment.auth.handler(signIn);
+      const body: unknown = await response.json();
+      expect(response.status, JSON.stringify(body)).toBe(200);
+      const target = z.object({ url: z.url(), redirect: z.literal(true) }).parse(body);
+      expect(new URL(target.url).origin).toBe("https://login.example.test");
+
+      const callback = `${origin}/api/auth/sso/callback/${input.providerId}`;
+
+      const trusted = await companySsoOrigins(
+        environment.database.db,
+        origin,
+        new Request(callback),
+      );
+
+      expect(trusted).toContain("https://tokens.example.test");
+      expect(trusted).toContain("https://profile.example.test");
+      request.mockClear();
+      ipv4.mockClear();
+      expect(await companySsoOrigins(environment.database.db, origin)).toEqual([origin]);
+      expect(
+        await companySsoOrigins(
+          environment.database.db,
+          origin,
+          new Request(`${origin}/api/auth/sign-out`),
+        ),
+      ).toEqual([origin]);
+      expect(
+        await companySsoOrigins(
+          environment.database.db,
+          origin,
+          new Request(callback, { headers: { origin: "https://tokens.example.test" } }),
+        ),
+      ).toEqual([origin]);
+      expect(
+        await companySsoOrigins(
+          environment.database.db,
+          origin,
+          new Request(`${origin}/api/auth/sso/callback/missing`),
+        ),
+      ).toEqual([origin]);
+      await environment.database.db.update(ssoProvider).set({ domainVerified: false });
+      expect(
+        await companySsoOrigins(environment.database.db, origin, new Request(callback)),
+      ).toEqual([origin]);
+      expect(request).not.toHaveBeenCalled();
+      expect(ipv4).not.toHaveBeenCalled();
+    } finally {
+      request.mockRestore();
+      ipv4.mockRestore();
+      ipv6.mockRestore();
+    }
   });
 });

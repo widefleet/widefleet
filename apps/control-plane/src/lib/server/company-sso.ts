@@ -6,6 +6,7 @@ import type { OrganizationAccess } from "./application-context.ts";
 import { ssoProvider } from "./auth-schema.ts";
 import type { DatabaseExecutor } from "./database.ts";
 import { decryptSecret, encryptSecret } from "./secret-encryption.ts";
+import { companyOidcOrigins } from "./sso-origins.ts";
 
 export const companySsoOrigins = async (
   database: DatabaseExecutor,
@@ -17,13 +18,14 @@ export const companySsoOrigins = async (
   if (!request) return origins;
   const path = new URL(request.url).pathname;
 
-  if (!path.includes("/sso/") && !path.endsWith("/sign-in/sso")) return origins;
+  const callback = path.match(/\/sso\/callback\/([^/]+)$/)?.[1];
+
+  if (!callback && !path.endsWith("/sign-in/sso")) return origins;
 
   // The IdP origins below authorize outbound OIDC requests, never an incoming
   // cross-origin management request carrying the user's cookies.
   if (request.headers.has("origin") && request.headers.get("origin") !== platformUrl)
     return origins;
-  const callback = path.match(/\/sso\/callback\/([^/]+)$/)?.[1];
 
   const input =
     request.method === "POST" && !request.bodyUsed
@@ -40,16 +42,11 @@ export const companySsoOrigins = async (
   if (!providerId) return origins;
 
   const [provider] = await database
-    .select({ issuer: ssoProvider.issuer })
+    .select({ issuer: ssoProvider.issuer, verified: ssoProvider.domainVerified })
     .from(ssoProvider)
     .where(eq(ssoProvider.providerId, providerId));
 
-  if (provider) {
-    origins.push(new URL(provider.issuer).origin);
-
-    if (new URL(provider.issuer).hostname === "login.microsoftonline.com")
-      origins.push("https://graph.microsoft.com");
-  }
+  if (provider?.verified) origins.push(...(await companyOidcOrigins(provider.issuer)));
 
   return origins;
 };
