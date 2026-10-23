@@ -69,8 +69,10 @@ An agent can run `widefleet login --no-wait --json`, give you the link and code,
 then resume with `widefleet login --status --json`. It does not need to ask you
 for a URL or email first. See [agent login and resuming](/reference/authentication#agents-and-interrupted-login).
 
-With no published company installation, the browser continues in Cloud.
-Discovery failures ask you to retry or use your company's direct address.
+When discovery finds no usable company installation, the browser continues in
+Cloud. An ordinary website page, redirect or temporary lookup failure does not
+block sign-in. Malformed or conflicting published Widefleet TXT records still
+need correction by IT.
 Credentials use the OS credential store, with an automatic private-file fallback
 on headless Unix systems.
 

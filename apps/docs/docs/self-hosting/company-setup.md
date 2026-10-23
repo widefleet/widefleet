@@ -89,6 +89,11 @@ Keep it below 8 KiB. The URL must be an HTTPS origin without a path, query,
 fragment or embedded credentials. The file is hosted on the work email domain;
 publishing it only on the platform's own domain does not let employees find it.
 
+If the website provides HTML, redirects or an unavailable discovery endpoint,
+Cloud sign-in remains available. A valid published TXT record still takes
+precedence. For a company that must always connect directly, distribute the CLI
+platform URL as well, so initial routing does not depend on public discovery.
+
 If you use multiple email domains, publish discovery for each one. The CLI uses
 the exact supplied domain; it does not try parent domains or guess a company.
 When publishing both DNS and HTTPS, keep their platform URLs consistent. DNS

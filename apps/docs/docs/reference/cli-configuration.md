@@ -150,10 +150,17 @@ refresh token stay out of the Cloud handoff for self-hosted login. Cloud needs
 public discovery records; the browser and CLI need network access to the selected
 installation. The CLI does not use a localhost callback.
 
-If public TXT is absent and HTTPS returns `404` or `410`, or a successful address
-lookup finds no website addresses, Cloud remains the destination. Invalid or
-conflicting records, timeouts, redirects, TLS failures and server errors stop
-routing. They never silently turn a failed company lookup into a Cloud login.
+A valid company TXT record takes precedence. Without one, Cloud uses a valid
+HTTPS discovery document when available and otherwise continues in Cloud. A
+missing document, an ordinary HTML page, redirects, DNS/network outages and
+unusable HTTPS responses do not prevent Cloud login. Redirects are not followed;
+private discovery addresses and oversized responses are not used.
+
+Malformed or conflicting published Widefleet TXT records still require IT to
+correct them. A configured or already selected company platform remains the
+target even when it is unavailable; its authentication requests never fall back
+to another installation. To avoid initial Cloud routing during discovery outages,
+IT can distribute the company URL in CLI configuration.
 
 A request lasts 30 minutes. After browser approval, resume the CLI within nine
 minutes to exchange the code. See [resuming login](/reference/authentication#agents-and-interrupted-login)
@@ -181,23 +188,22 @@ timeout. It requires a valid TLS certificate, accepts at most 8 KiB of JSON and
 does not follow redirects. Malformed or conflicting TXT records stop discovery
 without trying a second source. A valid TXT record takes precedence over HTTPS.
 
-If the TXT lookup succeeds without a record and the HTTPS endpoint returns
-`404` or `410`, the CLI asks `https://app.widefleet.com/api/platform-discovery`
-to confirm the destination. This uses the same public discovery rules as Cloud
-sign-in. A published company URL takes precedence; otherwise the result is
-`https://app.widefleet.com`. For a self-hosted result, the CLI starts direct device authorization. A Cloud
-result starts the browser flow above; the employee enters their email there.
-The URL is saved only after login succeeds.
+When local discovery provides no usable company URL, the CLI asks
+`https://app.widefleet.com/api/platform-discovery` to resolve the domain using the
+same rules as the Cloud browser flow. This includes an absent website document,
+HTML pages, redirects and network failures. A company result starts direct device
+authorization; a Cloud result starts the browser flow above, where the employee
+enters their email. The URL is saved only after login succeeds.
 
-DNS failures, invalid or conflicting records, redirects, TLS failures and server
-errors do not select Cloud. A valid HTTPS discovery document can still resolve
-the company when native DNS is unavailable. If the shared Cloud endpoint is
-unavailable, retry or use an explicit `--url`.
+Invalid or conflicting TXT records remain configuration errors. If the shared
+Cloud endpoint itself is unavailable or returns an invalid result, retry or use
+an explicit `--url`. The CLI never follows a discovery redirect or weakens TLS
+verification.
 
 Only the domain is used in these optional CLI discovery requests. The email's local part is
 neither sent nor saved, and discovery requests carry no login credentials.
 The DNS resolver and company website can observe their requests. Cloud also
-receives the domain when confirming an otherwise absent company target. Valid
+receives the domain when resolving an unavailable or absent local company target. Valid
 local company discovery, saved URLs and managed configuration connect directly
 without contacting Cloud.
 

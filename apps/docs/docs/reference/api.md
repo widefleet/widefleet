@@ -22,12 +22,14 @@ A successful response has the form:
 ```
 
 The result is the published company origin, or `https://app.widefleet.com` when
-TXT is absent and the HTTPS document returns `404` or `410`, or a successful
-address lookup finds no website addresses. The endpoint returns
-`400` for an invalid domain and `503` when discovery fails, including malformed
-records, conflicting targets, redirects and network errors. It is available on
-the canonical Cloud installation; other installations return `404`. Responses
-are not cached.
+no usable company mapping is available. Optional website discovery can return
+HTML, redirects, errors or no response without blocking Cloud login. DNS failures
+also allow the HTTPS check and then the Cloud default. Redirects are never
+followed, and private website addresses are not fetched.
+
+The endpoint returns `400` for an invalid domain and `503` for malformed or
+conflicting published Widefleet TXT records. It is available on canonical Cloud;
+other installations return `404`. Responses are not cached.
 
 The result selects a login destination and grants no access. Obtain device codes
 and tokens directly from that destination. Do not send existing tokens to the
