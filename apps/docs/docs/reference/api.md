@@ -22,46 +22,13 @@ A successful response has the form:
 ```
 
 The result is the published company origin, or `https://app.widefleet.com` when
-no usable company mapping is available. Optional website discovery can return
-HTML, redirects, errors or no response without blocking Cloud login. DNS failures
-also allow the HTTPS check and then the Cloud default. Redirects are never
-followed, and private website addresses are not fetched.
+no usable company mapping is available. A valid TXT record takes precedence over
+the HTTPS document. The endpoint is available on Cloud and returns `400` for an
+invalid domain, `503` for malformed or conflicting Widefleet TXT records, and
+`404` on other installations.
 
-The endpoint returns `400` for an invalid domain and `503` for malformed or
-conflicting published Widefleet TXT records. It is available on canonical Cloud;
-other installations return `404`. Responses are not cached.
-
-The result selects a login destination and grants no access. Obtain device codes
-and tokens directly from that destination. Do not send existing tokens to the
-discovery endpoint or follow an HTTP redirect to move an authenticated API request.
-
-## Browser discovery for unconfigured CLI clients
-
-Prefer `widefleet login` unless implementing a separate client. Configured clients use
-their installation's ordinary device authorization endpoints directly.
-
-1. Call `POST https://app.widefleet.com/api/auth/cli-login/start` without a body.
-   Keep the returned `request_id` and `cli_token` in the running process. Show
-   `verification_uri` to the user, who enters their email in the browser.
-2. Poll Cloud's `POST /api/auth/cli-login/poll` with JSON
-   `{ "request_id": "REQUEST", "cli_token": "SECRET" }` at the returned interval.
-   `platform_url` is null until the browser selects an installation, then stays fixed.
-3. Request a device code directly from that installation's `/api/auth/device/code`,
-   with `client_id=platform-cli`, the required scopes and `resource=PLATFORM_URL/api/v1`.
-   Retain the secret `device_code` locally and print the public verification link/code.
-4. Send only the public `user_code` to Cloud's `POST /api/auth/cli-login/ready`:
-   `{ "request_id": "REQUEST", "cli_token": "SECRET", "user_code": "CODE" }`.
-   The waiting browser continues to the selected installation's `/device` page.
-5. Poll `/api/auth/oauth2/token` directly at the destination using
-   `grant_type=urn:ietf:params:oauth:grant-type:device_code`, `client_id=platform-cli`
-   and the secret `device_code`. Respect the provider's interval and `slow_down`
-   responses. Save tokens and the destination only after successful approval.
-
-The browser ticket and CLI secret are distinct. Cloud stores their hashes, the
-selected origin and public approval code for at most 30 minutes. It does not
-receive device secrets or self-hosted tokens. Routing is enabled only on Cloud;
-start and poll are limited to three starts and 60 polls per minute per client IP.
-Responses are not cached. Restarting a terminated command starts a new request.
+Authenticate at the returned installation using [CLI login](/reference/authentication).
+For publishing discovery records, see [company setup](/self-hosting/company-setup).
 
 ## Organization context
 

@@ -13,7 +13,7 @@ Each command also accepts `--help`; newer commands require matching platform com
 | Setting or command                                  | Meaning                                                                                                   |
 | --------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | `PLATFORM_URL` / `--url URL`                        | Explicit management origin; overrides saved and managed configuration.                                    |
-| `widefleet login`                                   | Browser login with no required URL or email; requests `platform:read platform:write` by default.          |
+| `widefleet login`                                   | Sign in through your browser; requests `platform:read platform:write` by default.                         |
 | `widefleet login --email EMAIL` / `--domain DOMAIN` | Discover the installation using a work email or company domain, then log in.                              |
 | `widefleet config show`                             | Inspect the selected platform URL, its source and configuration paths.                                    |
 | `widefleet config set-url URL` / `unset-url`        | Save or clear the platform URL without changing credentials.                                              |
@@ -28,20 +28,14 @@ Each command also accepts `--help`; newer commands require matching platform com
 Keep session files outside projects and shared artifacts. The CLI restricts file
 permissions and renews saved sessions automatically. See [headless login](/getting-started/installation#headless-login).
 
-Login uses any configured URL directly, including Cloud. With no configured URL,
-it starts in Cloud, where the browser asks for an email and finds the company
-installation. The CLI then uses device authorization at that installation and
-saves its URL after success. Use `--organization` / `PLATFORM_ORGANIZATION` to
-select the working organization for API commands. See
-[CLI configuration](/reference/cli-configuration) for precedence.
+Login uses a configured platform address or finds one through your email in the
+browser, then saves it for future commands. See
+[CLI configuration](/reference/cli-configuration) for version requirements and
+address precedence, and [agent login](/reference/authentication#agent-login) for
+signing in while working with an agent.
 
-For agents, keep `widefleet login` running and present the browser link and
-verification code to the user. Continue after the command exits successfully.
-If it is stopped or expires, start a new login. See
-[agent login](/reference/authentication#agent-login).
-
-See [organization selection](/reference/cli-configuration#select-an-organization)
-for prerequisites, precedence and access recovery.
+Use `--organization` or `PLATFORM_ORGANIZATION` to select the organization for
+API commands. See [organization selection](/reference/cli-configuration#select-an-organization).
 
 ## App commands
 

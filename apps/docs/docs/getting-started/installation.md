@@ -60,26 +60,19 @@ pnpm check
 widefleet deploy
 ```
 
-If IT configured your agent or computer, the CLI uses that address directly.
-Otherwise it prints a browser link to Widefleet Cloud. Open it in your own
-browser, enter your email and continue to the installation published by your
-company. Keep the CLI running, check its device code and approve in the browser.
-The CLI saves the selected platform after successful authorization.
+Open the link printed by `widefleet login`, sign in and approve the device code.
+Keep the command running until it confirms the connection. If a platform address
+is already configured, login opens there. Otherwise, enter your email in the
+browser to find your company's installation or continue in Widefleet Cloud.
+The CLI remembers the selected address for future commands.
 
-An agent can keep `widefleet login` running in a background terminal session and
-share its browser link and device code. It does not need to ask for a URL or
-email first. After the command succeeds, it can continue the deployment. See
+When working with an agent, ask it to start `widefleet login` and share the
+browser link. Approve the login yourself, then let the agent continue. See
 [agent login](/reference/authentication#agent-login).
 
-When discovery finds no usable company installation, the browser continues in
-Cloud. An ordinary website page, redirect or temporary lookup failure does not
-block sign-in. Malformed or conflicting published Widefleet TXT records still
-need correction by IT.
-Credentials use the OS credential store, with an automatic private-file fallback
-on headless Unix systems.
-
-Run `widefleet config show` to inspect the selected URL. If discovery is not set
-up, IT can [configure company discovery or distribute configuration](/self-hosting/company-setup).
+Run `widefleet config show` to check the saved address. IT can
+[configure company discovery or distribute configuration](/self-hosting/company-setup)
+to help employees reach the right installation.
 
 For the local demo, run `widefleet login --url http://localhost:25450` and approve
 the code with `admin@example.test`.
@@ -94,25 +87,13 @@ For ongoing development, follow [app development](/guides/app-development).
 
 ## Headless login
 
-On Linux and macOS without an available credential store, the new login flow
-chooses a private credential file automatically and prints its path. You can
-also select a path explicitly; this works with CLI 0.2.1 or newer. Keep that
-selection for subsequent commands:
+The CLI stores logins in your operating system's credential store. On Linux and
+macOS, CLI 0.4.3 or newer automatically uses a private credential file when that
+store is unavailable and prints its location. Windows uses Credential Manager.
 
-```sh
-export PLATFORM_SESSION_FILE="$HOME/.local/state/widefleet/session.json"
-widefleet login
-```
-
-This file contains unencrypted access and refresh tokens. Keep it outside the app
-project and shared folders. The CLI restricts its permissions and renews the saved
-session automatically. Use `widefleet logout` with the same setting to revoke the
-refresh token and remove the file. See [CLI authentication](/reference/authentication)
-for exact file permissions, token scopes, renewal, logout failures and external credentials.
-
-Session files require Unix file permissions and are unavailable on Windows. Use
-Credential Manager for saved logins or `PLATFORM_ACCESS_TOKEN` for noninteractive
-commands. In PowerShell, set a token with `$env:PLATFORM_ACCESS_TOKEN = "TOKEN"`.
+Credential files contain unencrypted tokens; keep them outside app projects and
+shared folders. See [CLI authentication](/reference/authentication#headless-login)
+to choose a file location, manage saved logins or use an external access token.
 
 ## Inspect runtime logs
 

@@ -4,48 +4,43 @@ description: Credential stores, headless sessions, token renewal and external cr
 lastModified: 2026-10-23
 ---
 
-Run `widefleet login` and open the printed link in your browser. With no configured
-platform, the browser asks for your email and routes to your installation. Any
-configured URL starts device login there directly, including Cloud. Check the
-platform and code before approving. The default scopes are
-`platform:read platform:write`; select additional scopes explicitly when needed.
-See [CLI configuration](/reference/cli-configuration).
+Run `widefleet login`, open the printed link and approve the device code in your
+browser. The CLI uses a configured address or finds your installation through
+your email. See [CLI configuration](/reference/cli-configuration) for discovery
+and version requirements. The default scopes are `platform:read platform:write`;
+select additional scopes explicitly when needed.
+
+With platform and CLI 0.4.0 or newer, company SSO grants the CLI access within
+that organization. Widefleet email login uses the account's admitted memberships.
+Sign in again after upgrading from an earlier version. See
+[members and company sign-in](/guides/members) for linking and invitations.
 
 ## Agent login
 
-An agent starts `widefleet login` without needing your email or platform URL.
-It keeps the command running and presents its browser link. With no configured
-platform, you enter your email in the browser; the CLI then prints the device
-verification link and code for the discovered installation. Approve that code
-in your own browser. Configured targets start device login immediately.
+Ask the agent to start `widefleet login` and keep it running in a background
+terminal session. Open the link it provides, enter your email if prompted and
+approve the displayed device code in your own browser. The agent can then verify
+access with `widefleet whoami` and continue the task.
 
-The agent can run the waiting command in a background terminal session while
-you sign in. After it exits successfully, verify access with `widefleet whoami`
-and continue the requested task. If the command is stopped, denied or expires,
-run `widefleet login` again. Open login requests are not saved for resumption.
-Already completed logins remain available through their saved credentials.
-
-The Cloud discovery request expires after 30 minutes. Device login uses the
-expiry returned by its server. Saving the destination can fail after tokens have
-been saved; the error explains how to supply `--url` or repair the configuration.
-
-With platform and CLI 0.4.0 or newer, a CLI approved through company SSO retains
-that organization's authority through token refresh. Another organization selection
-cannot expand it. A Widefleet email login can access the account's admitted memberships.
-See [members and company sign-in](/guides/members) for linking and invitations.
-After upgrading to 0.4.0, run `widefleet login` again: credentials
-issued without a recorded authentication context are rejected.
+Keep the command running until login succeeds. If the request expires or the
+command is stopped, start `widefleet login` again.
 
 ## Headless login
 
-Keychain on macOS, Credential Manager on Windows and Secret Service on Linux are
-the preferred saved credential stores. Linux Secret Service requires a session
-D-Bus. On Unix, if the store is unavailable, login automatically uses a private,
-unencrypted file under `$XDG_STATE_HOME/widefleet/credentials/`, or
-`~/.local/state/widefleet/credentials/` when that variable is unset. The CLI prints
-the chosen location and reuses it for later commands.
+The CLI uses Keychain on macOS, Credential Manager on Windows and Secret Service
+on Linux. Linux Secret Service needs an unlocked store and a session D-Bus.
+With CLI 0.4.3 or newer, Unix systems automatically use a private, unencrypted
+credential file when the OS store is unavailable. The CLI prints its location
+and reuses it for later commands.
 
-To choose the location explicitly, select a Unix session file. This requires CLI 0.2.1 or newer; `widefleet --help` lists `--session-file`. These commands use Bash syntax:
+Automatic files live under `$XDG_STATE_HOME/widefleet/credentials/`, or
+`~/.local/state/widefleet/credentials/` when that variable is unset.
+
+### Choose a session file
+
+On Unix, use `PLATFORM_SESSION_FILE` or `--session-file` to choose a location
+explicitly. This option requires CLI 0.2.1 or newer. Keep the setting for later
+commands, including logout:
 
 ```sh
 export PLATFORM_SESSION_FILE="$HOME/.local/state/widefleet/session.json"
@@ -54,10 +49,34 @@ widefleet whoami
 widefleet apps
 ```
 
-Open the printed verification URL in your browser and approve the code. The CLI handles authorization and token exchanges, binds the token to this platform's API and requests `offline_access` for automatic renewal. The example grants read access; request `platform:read platform:write` when deployment is needed. In Fish, use `set -gx` instead of `export`, for example `set -gx PLATFORM_SESSION_FILE "$HOME/.local/state/widefleet/session.json"`.
+The example grants read access. Use `--scope platform:read platform:write`
+when the session also needs to deploy apps. In Fish, replace `export` with
+`set -gx PLATFORM_SESSION_FILE "$HOME/.local/state/widefleet/session.json"`.
 
-The file contains **unencrypted access and refresh tokens**. Use a location outside app projects, shared folders and exported artifacts. The CLI creates missing parent directories with mode `0700` and credential files with mode `0600`; it rejects existing directories or files that grant group/other access, and rejects symlinked or hard-linked credential files. These permissions do not protect against processes running as the same user or an administrator. Keep one file per platform origin; the CLI refuses to use a file with another origin. Use `--session-file /absolute/path/session.json` to override the environment variable for a command. Keep the same selection for subsequent commands, including `widefleet logout`.
+Credential files contain **unencrypted access and refresh tokens**. Keep them
+outside app projects and shared folders, with one file per platform address.
+The CLI creates directories with mode `0700` and files with mode `0600`. Existing
+paths must also be owner-only, with regular files rather than symbolic or hard
+links. Use `--session-file /absolute/path/session.json` to override the environment
+setting for a command. On Windows, use Credential Manager for saved logins or
+an external access token for API commands.
 
-Saved sessions renew automatically, including during commands that poll for results. Refresh is serialized across processes and updated credentials are written atomically. `widefleet logout` revokes the saved refresh token before deleting the session file; if revocation fails, the file remains so logout can be retried. The companion `.lock` file contains no tokens and remains in place. Deleting a session file manually does not revoke the server-side credentials. An ephemeral environment needs a new login when its session file is lost.
+## Token renewal and logout
 
-For externally managed credentials, `PLATFORM_ACCESS_TOKEN` remains available. It takes precedence over either saved credential store for API commands, bypasses the store and does not renew automatically. `login` and `logout` still act on the selected saved store. For a manual device flow, include `resource=PLATFORM_URL/api/v1` in the initial `/api/auth/device/code` request; request `offline_access` as well if the external workflow needs a refresh token. Token requests use `application/x-www-form-urlencoded` and an `Origin` header matching `PLATFORM_URL`. A token issued without the API resource is not accepted by `/api/v1`, even before it expires.
+Saved sessions renew automatically. Run `widefleet logout` to revoke the saved
+refresh token and remove the local credentials. If logout fails, retry it while
+the installation is reachable; the CLI keeps the credentials for that retry.
+Use logout before removing a session file manually so server-side access is
+revoked as well.
+
+## External access tokens
+
+Set `PLATFORM_ACCESS_TOKEN` when another system manages your credentials. It
+takes precedence over saved credentials for API commands. Your system manages
+renewal; `widefleet login` and `widefleet logout` manage the CLI's saved login.
+In PowerShell, set the token with `$env:PLATFORM_ACCESS_TOKEN = "TOKEN"`.
+
+For a manual device flow, include `resource=PLATFORM_URL/api/v1` in the initial
+`/api/auth/device/code` request and request `offline_access` if you need a refresh
+token. Token requests use `application/x-www-form-urlencoded` and an `Origin`
+header matching `PLATFORM_URL`. The API resource is required for `/api/v1` access.

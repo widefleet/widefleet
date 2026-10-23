@@ -91,59 +91,45 @@ Keep it below 8 KiB. The URL must be an HTTPS origin without a path, query,
 fragment or embedded credentials. The file is hosted on the work email domain;
 publishing it only on the platform's own domain does not let employees find it.
 
-If the website provides HTML, redirects or an unavailable discovery endpoint,
-Cloud sign-in remains available. A valid published TXT record still takes
-precedence. For a company that must always connect directly, distribute the CLI
-platform URL as well, so initial routing does not depend on public discovery.
-
-If you use multiple email domains, publish discovery for each one. The CLI uses
-the exact supplied domain; it does not try parent domains or guess a company.
-When publishing both DNS and HTTPS, keep their platform URLs consistent. DNS
-takes precedence when it returns a valid record.
+If you use multiple email domains, publish discovery for each one. Use the exact
+domain from employees' email addresses. When publishing both DNS and HTTPS,
+keep their platform URLs consistent. A valid DNS record takes precedence.
 
 Publish DNS and website changes through your normal versioned infrastructure
 and deployment process. Allow the agent to reach the company's discovery website
-and platform API through its network policy. A public discovery record does not
-make a private platform reachable from a cloud sandbox.
+and platform API through its network policy, including VPN access where needed.
 
 ### Employees arriving at Widefleet Cloud
 
-Cloud sign-in can use the same public DNS record or HTTPS document to route
-employees who arrive at `https://app.widefleet.com`. After an employee enters a
-work email, Cloud checks that domain and opens the published platform's sign-in
-page before requesting a Cloud email code. No registration of the company in a
-separate Widefleet directory is required. See [Cloud defaults](/reference/cli-configuration).
+Employees can enter their work email at `https://app.widefleet.com` to reach
+your installation through the same DNS record or HTTPS document. If discovery
+finds no company address, they continue in Cloud. Company invitation and
+organization links open their intended installation directly.
 
-Publish discovery where public resolvers and the Cloud service can read it.
-Private DNS continues to work for local CLI discovery, but Cloud cannot use a
-company-only resolver or fetch a private discovery website. The published
-platform itself may still require the employee's VPN. Both the browser and the
-agent's CLI environment need access to it.
+Publish discovery where public resolvers and Cloud can read it. For private DNS,
+distribute a platform URL or use `widefleet login --domain example.com` from the
+company network. The installation itself may require a VPN; both the employee's
+browser and the agent's CLI environment need access.
 
-For the default CLI flow, Cloud finds the installation in the browser. The
-running CLI requests a device code directly from that installation, and the
-browser continues there to sign in and approve. Upgrade Cloud for browser
-discovery before rolling out the new CLI. The destination uses its existing
-device authorization flow.
-
-Explicit organization links retain their target, including for guests whose
-email belongs to another company. An existing device grant also stays at its
-issuer: the email entered during sign-in does not change its destination.
-OAuth and invitation continuations are not forwarded between installations.
+To connect employees directly to your installation independently of public
+discovery, distribute its URL using [managed configuration](#managed-computers).
 
 ## Agent instructions and verification
 
-Have the agent run `widefleet login` and keep it running while the employee
-opens its browser link and approves the device code. The agent continues after
-the command succeeds. It does not need to know the employee's email or choose
-between Cloud and self-hosting. A stopped command requires a new login.
+Have the agent run `widefleet login`, share the browser link and keep the command
+running while the employee signs in and approves the device code. After login
+succeeds, the agent can continue the task. See
+[agent login](/reference/authentication#agent-login).
 
-For private-only discovery, distribute the platform configuration or a known
-`widefleet login --domain example.com` command. A managed file is a default,
-not a policy lock: explicit overrides and the employee's saved URL take precedence.
+Verify the setup from each supported environment, including remote sandboxes:
 
-Verify login from each supported environment, including remote sandboxes. After
-success, `widefleet config show` reports the saved URL;
-`widefleet whoami` identifies the employee. Configuration contains no tokens.
+```sh
+widefleet config show
+widefleet whoami
+```
+
+The saved address should match your installation, and `whoami` should identify
+the employee.
+
 Credentials remain in the employee's credential store or private Unix file. See
 [credential storage](/reference/authentication).
