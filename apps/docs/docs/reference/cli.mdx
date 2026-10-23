@@ -13,7 +13,7 @@ Each command also accepts `--help`; newer commands require matching platform com
 | Setting or command                                  | Meaning                                                                                                   |
 | --------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | `PLATFORM_URL` / `--url URL`                        | Explicit management origin; overrides saved and managed configuration.                                    |
-| `widefleet login`                                   | Browser device login; requests `platform:read platform:write` by default.                                 |
+| `widefleet login`                                   | Sign in through your browser; requests `platform:read platform:write` by default.                         |
 | `widefleet login --email EMAIL` / `--domain DOMAIN` | Discover the installation using a work email or company domain, then log in.                              |
 | `widefleet config show`                             | Inspect the selected platform URL, its source and configuration paths.                                    |
 | `widefleet config set-url URL` / `unset-url`        | Save or clear the platform URL without changing credentials.                                              |
@@ -22,19 +22,20 @@ Each command also accepts `--help`; newer commands require matching platform com
 | `widefleet organizations`                           | List available organizations (0.4.0 or newer).                                                            |
 | `PLATFORM_ORGANIZATION` / `--organization ID`       | Select an organization for API commands (0.4.0 or newer).                                                 |
 | `widefleet logout`                                  | Revoke the stored refresh token and remove the saved session.                                             |
-| `PLATFORM_SESSION_FILE` / `--session-file PATH`     | Explicit, unencrypted session file for headless Unix use instead of the OS credential store.              |
+| `PLATFORM_SESSION_FILE` / `--session-file PATH`     | Choose an unencrypted Unix session file instead of automatic credential storage.                          |
 | `PLATFORM_ACCESS_TOKEN`                             | Externally supplied token; overrides saved credentials for API commands and does not renew automatically. |
 
 Keep session files outside projects and shared artifacts. The CLI restricts file
 permissions and renews saved sessions automatically. See [headless login](/getting-started/installation#headless-login).
 
-Login reuses configured or saved URLs and otherwise asks for a work email or
-company domain. After a successful login it saves the URL. See
-[CLI configuration](/reference/cli-configuration) for precedence, native file paths
-and discovery behavior, or [company setup](/self-hosting/company-setup) to configure employees' agents.
+Login uses a configured platform address or finds one through your email in the
+browser, then saves it for future commands. See
+[CLI configuration](/reference/cli-configuration) for version requirements and
+address precedence, and [agent login](/reference/authentication#agent-login) for
+signing in while working with an agent.
 
-See [organization selection](/reference/cli-configuration#select-an-organization)
-for prerequisites, precedence and access recovery.
+Use `--organization` or `PLATFORM_ORGANIZATION` to select the organization for
+API commands. See [organization selection](/reference/cli-configuration#select-an-organization).
 
 ## App commands
 

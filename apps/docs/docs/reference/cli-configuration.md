@@ -4,11 +4,14 @@ description: Inspect, change and distribute the platform URL used by the Widefle
 lastModified: 2026-10-23
 ---
 
-Company discovery and saved configuration require CLI 0.3.2 or newer. Check
-`widefleet --version`; `widefleet login --help` lists `--email` and `--domain`.
+Browser-based destination selection and automatic Unix credential-file fallback
+require CLI **0.4.3 or newer**. Company discovery with `--email` or `--domain`
+and saved configuration require CLI 0.3.2 or newer. Check `widefleet --version`;
+`widefleet login --help` lists `--email` and `--domain`.
 
 The CLI remembers the platform URL after a successful login. Credentials stay
-in the operating system's credential store or the explicitly selected session file.
+in the operating system's credential store or a private Unix credential file.
+See [CLI authentication](/reference/authentication) for storage and renewal.
 
 ## Select an organization
 
@@ -72,6 +75,11 @@ The CLI selects the first configured URL from:
 3. The employee's saved configuration file.
 4. The managed configuration file supplied by IT.
 
+Login uses the configured address directly, including an explicitly configured
+Cloud address. With no configured address, `widefleet login` starts in Cloud and
+uses your email to find an installation. After login, API commands use the saved
+address.
+
 | Operating system | Employee's file                                                                       | Managed file                                         |
 | ---------------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------- |
 | Windows          | `%APPDATA%\widefleet\config.json`                                                     | `%PROGRAMDATA%\widefleet\config.json`                |
@@ -91,10 +99,11 @@ saved; keep supplying the URL or select a writable `--config-file` to remember i
 The JSON format is:
 
 ```json
-{
-  "platform_url": "https://platform.example.com"
-}
+{ "platform_url": "https://platform.example.com" }
 ```
+
+Use `--organization` or `PLATFORM_ORGANIZATION` to select the working
+organization for API commands.
 
 Use an HTTPS origin without a path, query, fragment or credentials. HTTP on a
 loopback address is allowed for local development. An invalid file reports an
@@ -110,14 +119,27 @@ An explicit URL flag or environment variable still overrides a saved URL. Check
 `widefleet config show` if changing the file appears to have no effect. Logging
 out removes the selected session but retains the URL for the next login.
 
-## Discover your company
+## Start in the browser
 
-With no configured URL, `widefleet login` asks for a work email or company domain
-in an interactive terminal. Agents and noninteractive shells can supply either:
+Run `widefleet login` and open its link in your browser. With no configured
+platform, enter your email to find your company's installation or continue in
+Widefleet Cloud. Sign in, check the device code and approve. Keep the CLI running
+until it confirms the connection and saves the selected address.
+
+For a private installation, connect both your browser and the CLI environment to
+the required network or VPN. A configured company URL connects directly; see
+[files and precedence](#files-and-precedence) to inspect or change it.
+
+If login is interrupted or expires, run `widefleet login` again. When using an
+agent, follow [agent login](/reference/authentication#agent-login).
+
+## Discover locally when needed
+
+If the company domain is already known, these optional flags run discovery from
+the CLI environment. They are useful for private DNS and direct self-hosted login:
 
 ```sh
 widefleet login --email employee@example.com
-# Or, when the company domain is already known:
 widefleet login --domain example.com
 ```
 
@@ -125,22 +147,16 @@ These explicit discovery options select a company even when a URL is saved. They
 cannot be combined with `--url` or `PLATFORM_URL`; remove that override first.
 Discovery does not change the saved URL until login succeeds.
 
-The CLI queries `_widefleet.example.com` for a TXT record through the operating
-system's DNS resolver. If no record exists, DNS fails, or it takes longer than
-five seconds, the CLI requests `https://example.com/.well-known/widefleet`.
-The HTTPS request uses the environment's proxy settings and has a ten-second
-timeout. It requires a valid TLS certificate, accepts at most 8 KiB of JSON and
-does not follow redirects. Malformed or conflicting TXT records stop discovery
-without trying a second source. A valid TXT record takes precedence over HTTPS.
+The CLI checks the company's DNS TXT record, then its HTTPS discovery document.
+If neither provides an address, Cloud resolves the domain and supplies the
+company address or the Cloud default. These requests use only the domain from
+`--email`. A successful local lookup connects directly to the company.
 
-Only the domain is used in discovery requests. The email's local part is neither
-sent nor saved, and discovery requests carry no login credentials. There is no
-fallback to a public DNS provider or a Widefleet-operated directory. The DNS
-resolver and the company's HTTPS endpoint can observe the requests they receive.
-
-Regular API commands use the selected URL and do not rediscover it. Missing
-configuration directs the employee or agent to login. Automatic company-domain
-detection from a network or VPN is not implemented.
+If discovery reports an invalid or conflicting record, ask IT to correct it.
+To connect to a known address directly, use
+`widefleet login --url https://platform.example.com`. See
+[company setup](/self-hosting/company-setup) for discovery records and network
+requirements.
 
 ## Company setup
 
