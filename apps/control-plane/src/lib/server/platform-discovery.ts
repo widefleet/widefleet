@@ -259,26 +259,17 @@ export const discoverPlatform = async (
 ) => {
   const domain = companyDomain.parse(input);
 
-  const dnsResult = await deadline(
-    dns.resolveTxt(`_widefleet.${domain}.`).catch(absentRecord),
-  ).then(
-    (records) => ({ records, available: true }),
-    () => ({ records: [], available: false }),
-  );
-
-  const published = platformFromTxt(dnsResult.records);
+  const records = await deadline(dns.resolveTxt(`_widefleet.${domain}.`)).catch(() => []);
+  // A published Widefleet record is an explicit configuration. Invalid or
+  // conflicting records still need correction instead of guessing their target.
+  const published = platformFromTxt(records);
 
   if (published) return published;
-  const document = await platformFromHttps(domain, transport);
 
-  if (document) return document;
-
-  if (!dnsResult.available)
-    throw new Error(
-      "Company discovery is unavailable. Retry or use your company's direct sign-in link",
-    );
-
-  return cloudPlatformUrl;
+  // The company's website is optional discovery, not a prerequisite for Cloud.
+  // HTML fallbacks, redirects and outages supply no usable mapping. Keep the
+  // transport's address checks, limits and redirect prohibition in effect.
+  return (await platformFromHttps(domain, transport).catch(() => null)) ?? cloudPlatformUrl;
 };
 
 export const companySignInUrl = (origin: string, email: string, next = "/") => {

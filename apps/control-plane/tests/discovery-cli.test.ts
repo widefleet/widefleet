@@ -551,29 +551,42 @@ describe.runIf(
     });
   });
 
-  it("rejects an invalid HTTPS destination before sending credentials or starting login", async () => {
-    document = JSON.stringify({ platform_url: "http://localhost" });
-    await expect(cli(["login", "--domain", domain])).rejects.toThrow(
-      "Discovery must specify one HTTPS platform origin",
-    );
-    expect(requests.map((request) => request.path)).toEqual(["/.well-known/widefleet"]);
-    await expect(readFile(configFile)).rejects.toMatchObject({ code: "ENOENT" });
-  });
+  it.each(["<html>Company homepage</html>", '{"platform_url":"http://localhost"}'])(
+    "continues in Cloud when the website has no usable discovery document",
+    async (body) => {
+      document = body;
+      const result = await cli(["login", "--domain", domain, "--no-wait", "--json"]);
+      expect(loginState(result.stdout).status).toBe("awaiting_selection");
+      expect(requests.map(({ path }) => path)).toEqual([
+        "/.well-known/widefleet",
+        `/api/platform-discovery?domain=${domain}`,
+        "/api/auth/cli-login/start",
+      ]);
+      expect(requests.every(({ authorization }) => authorization === undefined)).toBe(true);
+      await expect(readFile(configFile)).rejects.toMatchObject({ code: "ENOENT" });
+    },
+  );
 
   it.each([302, 401, 503])(
-    "reports HTTPS status %s without following a redirect or starting login",
+    "continues in Cloud for website HTTP status %s without following redirects",
     async (status) => {
       httpsStatus = status;
-      await expect(cli(["login", "--domain", domain])).rejects.toThrow(
-        `HTTPS discovery returned ${status}`,
-      );
-      expect(connections).toEqual([`${domain}:443`]);
-      expect(requests.map((request) => request.path)).toEqual(["/.well-known/widefleet"]);
+      const result = await cli(["login", "--domain", domain, "--no-wait", "--json"]);
+      expect(loginState(result.stdout).status).toBe("awaiting_selection");
+      expect(connections).toContain(`${domain}:443`);
+      expect(
+        connections.every((host) => host === `${domain}:443` || host === "app.widefleet.com:443"),
+      ).toBe(true);
+      expect(requests.map(({ path }) => path)).toEqual([
+        "/.well-known/widefleet",
+        `/api/platform-discovery?domain=${domain}`,
+        "/api/auth/cli-login/start",
+      ]);
     },
   );
 
   it.each([404, 410])(
-    "uses Cloud only after both discovery sources are absent (%s)",
+    "resolves the Cloud entry after local discovery is absent (%s)",
     async (status) => {
       await writeFile(responseFile, dnsResponse([], domain));
       httpsStatus = status;
@@ -605,7 +618,7 @@ describe.runIf(
     },
   );
 
-  it("does not select Cloud when TXT lookup fails and the HTTPS document is absent", async () => {
+  it("reports an unavailable shared resolver without changing the saved platform", async () => {
     httpsStatus = 404;
     cloudStatus = 503;
     await writeFile(configFile, JSON.stringify({ platform_url: "https://previous.example.test" }));
@@ -654,7 +667,7 @@ describe.runIf(
         (cause: unknown) => z.object({ stderr: z.string() }).parse(cause),
       );
 
-      expect(failure?.stderr).toContain("Could not discover Widefleet");
+      expect(failure?.stderr).toContain("Checking Widefleet Cloud");
       expect(failure?.stderr).toContain("HTTP request failed");
       expect(failure?.stderr).toContain("Caused by:");
       expect(failure?.stderr).toMatch(/certificate|issuer/i);
@@ -683,7 +696,7 @@ describe.runIf(
       (cause: unknown) => z.object({ stderr: z.string() }).parse(cause),
     );
 
-    expect(failure?.stderr).toContain("Could not discover Widefleet");
+    expect(failure?.stderr).toContain("Checking Widefleet Cloud");
     expect(failure?.stderr).toContain("HTTP request failed");
     expect(failure?.stderr).toContain("Caused by:");
     expect(failure?.stderr).toMatch(/connection refused|actively refused/i);

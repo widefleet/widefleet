@@ -53,12 +53,15 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Company discovery i
     },
   );
 
-  it("rejects HTTPS redirects", async () => {
-    const response = await worker.fetch("/?scenario=redirect");
-    expect(await response.json()).toMatchObject({
-      error: "HTTPS discovery returned 302",
-      requests: ["https://example.test/.well-known/widefleet"],
-    });
-    expect(response.status).toBe(503);
-  });
+  it.each(["redirect", "html", "unavailable", "server-error"])(
+    "continues in Cloud for %s without following redirects",
+    async (scenario) => {
+      const response = await worker.fetch(`/?scenario=${scenario}`);
+      expect(await response.json()).toMatchObject({
+        platform_url: "https://app.widefleet.com",
+        requests: ["https://example.test/.well-known/widefleet"],
+      });
+      expect(response.status).toBe(200);
+    },
+  );
 });

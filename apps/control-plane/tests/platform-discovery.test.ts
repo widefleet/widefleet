@@ -110,9 +110,9 @@ describe("Company platform discovery", () => {
     const ipv4 = vi.spyOn(dns, "resolve4").mockResolvedValue(["93.184.216.34", "127.0.0.1"]);
     vi.spyOn(dns, "resolve6").mockResolvedValue([]);
     const request = vi.spyOn(https, "get");
-    await expect(discoverPlatform("example.test")).rejects.toThrow("public addresses");
+    expect(await discoverPlatform("example.test")).toBe(cloudPlatformUrl);
     ipv4.mockRejectedValue({ code: "ETIMEOUT" });
-    await expect(discoverPlatform("example.test")).rejects.toMatchObject({ code: "ETIMEOUT" });
+    expect(await discoverPlatform("example.test")).toBe(cloudPlatformUrl);
     expect(request).not.toHaveBeenCalled();
   });
 
@@ -242,7 +242,7 @@ describe("Company discovery over HTTPS", () => {
   });
 
   it.each([404, 410])(
-    "uses Cloud only for an absent TXT record and an absent document (%s)",
+    "uses Cloud for an absent document even if TXT lookup was unavailable (%s)",
     async (missing) => {
       const { txt } = fixture();
       status = missing;
@@ -250,9 +250,7 @@ describe("Company discovery over HTTPS", () => {
       txt.mockRejectedValue({ code: "ENOTFOUND" });
       expect(await discoverPlatform("example.test")).toBe(cloudPlatformUrl);
       txt.mockRejectedValue({ code: "ETIMEOUT" });
-      await expect(discoverPlatform("example.test")).rejects.toThrow(
-        "Company discovery is unavailable",
-      );
+      expect(await discoverPlatform("example.test")).toBe(cloudPlatformUrl);
     },
   );
 
@@ -272,23 +270,27 @@ describe("Company discovery over HTTPS", () => {
   });
 
   it.each([301, 302, 401, 403, 500, 503])(
-    "rejects HTTPS status %s without following redirects or defaulting to Cloud",
+    "continues in Cloud for HTTPS status %s without following redirects",
     async (failure) => {
       fixture();
       status = failure;
-      await expect(discoverPlatform("example.test")).rejects.toThrow(
-        `HTTPS discovery returned ${failure}`,
-      );
+      expect(await discoverPlatform("example.test")).toBe(cloudPlatformUrl);
       expect(requests).toHaveLength(1);
     },
   );
 
-  it.each(["{}", '{"platform_url":"http://localhost"}', "x".repeat(8193)])(
-    "rejects invalid and oversized discovery documents",
+  it.each([
+    "<html>Company homepage</html>",
+    "{}",
+    '{"platform_url":"http://localhost"}',
+    "x".repeat(8193),
+  ])(
+    "continues in Cloud when the website does not provide a usable discovery document",
     async (document) => {
       fixture();
       body = document;
-      await expect(discoverPlatform("example.test")).rejects.toThrow();
+      expect(await discoverPlatform("example.test")).toBe(cloudPlatformUrl);
+      expect(requests).toHaveLength(1);
     },
   );
 });

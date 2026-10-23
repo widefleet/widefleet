@@ -36,6 +36,12 @@ export default {
 
       if (scenario === "absent") return new Response(null, { status: 404 });
 
+      if (scenario === "html") return new Response("<html>Company homepage</html>");
+
+      if (scenario === "unavailable") throw new Error("Synthetic network failure");
+
+      if (scenario === "server-error") return new Response(null, { status: 503 });
+
       if (scenario === "redirect")
         return new Response(null, {
           status: 302,

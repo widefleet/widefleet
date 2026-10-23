@@ -62,7 +62,6 @@ test.beforeAll(async () => {
   await writeFile(
     records,
     JSON.stringify({
-      "_widefleet.cloud.test.": `url=${cloudOrigin}`,
       "_widefleet.company.test.": `url=${companyOrigin}`,
     }),
   );

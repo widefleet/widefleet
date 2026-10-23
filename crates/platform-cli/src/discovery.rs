@@ -146,7 +146,6 @@ pub async fn resolve(domain: &Domain) -> Result<String> {
 }
 
 async fn resolve_with(domain: &Domain, dns: DnsLookup, client: &Client) -> Result<String> {
-    let dns_available = matches!(&dns, DnsLookup::Records(_));
     let dns_reason = match dns {
         DnsLookup::Records(records) => match from_txt(&records)? {
             Some(origin) => return Ok(origin),
@@ -155,29 +154,19 @@ async fn resolve_with(domain: &Domain, dns: DnsLookup, client: &Client) -> Resul
         DnsLookup::Unavailable(reason) => format!("System DNS unavailable: {reason}"),
     };
     eprintln!("{dns_reason}. Checking {}", domain.endpoint());
-    let discovered = from_https(client, &domain.endpoint()).await.inspect_err(|_| {
-        eprintln!(
-            "Could not discover Widefleet for {}. Ask IT to publish a discovery record or configure the CLI in this environment",
-            domain.0,
-        );
-    })?;
-    match discovered {
-        Some(origin) => Ok(origin),
-        None if dns_available => {
-            // Confirm the default through the same resolver as Cloud sign-in.
-            // Apple's DNS API can conflate SERVFAIL with an absent TXT record.
-            // Positive local discovery never contacts Cloud.
-            let endpoint = format!("{CLOUD_ORIGIN}/api/platform-discovery?domain={}", domain.0);
-            let origin = from_https(client, &endpoint).await?.ok_or_else(|| {
-                Error::invalid("Widefleet Cloud discovery is unavailable. Retry or use --url".into())
-            })?;
-            eprintln!("Connecting to {origin}");
-            Ok(origin)
-        }
-        None => Err(Error::invalid(
-            "Company discovery is unavailable. Retry or use --url; the Cloud default requires a successful check for company discovery records".into(),
-        )),
+    if let Ok(Some(origin)) = from_https(client, &domain.endpoint()).await {
+        return Ok(origin);
     }
+    // Ordinary websites and unavailable resolvers must not block Cloud login.
+    // Use the browser's resolver when local discovery supplies no usable target.
+    // Positive local discovery never contacts Cloud.
+    eprintln!("No usable local discovery. Checking Widefleet Cloud");
+    let endpoint = format!("{CLOUD_ORIGIN}/api/platform-discovery?domain={}", domain.0);
+    let origin = from_https(client, &endpoint).await?.ok_or_else(|| {
+        Error::invalid("Widefleet Cloud discovery is unavailable. Retry or use --url".into())
+    })?;
+    eprintln!("Connecting to {origin}");
+    Ok(origin)
 }
 
 fn discovered_origin(value: &str) -> Result<String> {

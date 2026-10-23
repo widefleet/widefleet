@@ -129,9 +129,9 @@ test("routes an email to its company before requesting a Cloud sign-in code", as
   expect(authRequests).toEqual([]);
 });
 
-test("keeps Cloud users in the existing email sign-in flow", async ({ page }) => {
+test("keeps users without a published company mapping in Cloud", async ({ page }) => {
   await page.goto(`${cloud}/sign-in`);
-  await page.getByLabel("Email", { exact: true }).fill("employee@cloud.test");
+  await page.getByLabel("Email", { exact: true }).fill("employee@unpublished.test");
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(page.getByLabel("Sign-in code", { exact: true })).toBeVisible();
   await expect(page).toHaveURL(`${cloud}/sign-in`);
@@ -166,7 +166,7 @@ test("does not carry an existing Cloud device grant to another installation", as
   expect(authRequests).toEqual([]);
 });
 
-test("exposes the same result and fail-closed errors through the discovery API", async ({
+test("exposes Cloud defaults and explicit configuration errors through the discovery API", async ({
   request,
 }) => {
   const headers = { "x-forwarded-proto": "https", "x-forwarded-host": "app.widefleet.com" };
@@ -177,6 +177,13 @@ test("exposes the same result and fail-closed errors through the discovery API",
 
   expect(await found.json()).toEqual({ platform_url: "https://platform.example.test" });
   expect(found.headers()["cache-control"]).toBe("private, no-store");
+
+  const absent = await request.get(`${local}/api/platform-discovery?domain=unpublished.test`, {
+    headers,
+  });
+
+  expect(absent.status()).toBe(200);
+  expect(await absent.json()).toEqual({ platform_url: cloud });
   expect(
     (await request.get(`${local}/api/platform-discovery?domain=broken.test`, { headers })).status(),
   ).toBe(503);
