@@ -5,7 +5,7 @@ lastModified: 2026-10-23
 ---
 
 Use this flow on an installation with email delivery and organization invitations enabled.
-It requires an unreleased build containing organization sign-in and the matching CLI.
+Use platform and CLI **0.4.0 or newer**.
 Without company SSO, an owner or administrator must invite you first. With verified company SSO, users
 admitted by that provider can join as members on their first sign-in without an invitation.
 

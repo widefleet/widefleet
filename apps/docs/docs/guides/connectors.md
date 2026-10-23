@@ -1,7 +1,7 @@
 ---
 title: IT connectors
-description: Find integrations, inspect app connections and manage native RPC bindings.
-lastModified: 2026-10-20
+description: Deploy Dynamic Worker integrations and grant apps access to their APIs.
+lastModified: 2026-10-23
 ---
 
 IT can deploy a Worker from its own repository with `widefleet connector deploy`. Apps receive a native service binding and call its methods directly, for example `env.ERP.listCustomers()`. Connector code runs as a regular Worker in the shared fleet, with its own declared resources. It is independent of the Widefleet runtime and Rust agent releases.
@@ -43,9 +43,8 @@ After choosing a connector, ask an administrator to [give the app its binding](#
 
 ## Manage connectors in an organization
 
-This section describes unreleased organization-scoped management and browser
-forms. It requires a matching control-plane and CLI release that includes these
-capabilities; version 0.3.3 does not include them.
+Organization-scoped management and browser forms require platform and CLI
+**0.4.0 or newer**.
 
 An owner or administrator of the selected organization can deploy and update its
 connectors, set and remove connector secrets, assign app bindings and read
@@ -79,7 +78,7 @@ connectors:
    output.
 3. Under **Secrets**, add or replace a value, or remove an existing name. Values
    are never returned by status queries or failed form responses. Secret values
-   are limited to 5000 UTF-8 bytes in this unreleased version.
+   are limited to 5000 UTF-8 bytes.
 
 To assign a connector, open an app’s **Connections** tab, then **Browse
 connectors**. Under **Add or replace a connection**, choose the connector, enter

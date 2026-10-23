@@ -4,7 +4,7 @@ description: Install, configure, upgrade and recover a company installation.
 lastModified: 2026-10-23
 ---
 
-This Compose deployment is the reference installation. Use Linux x86-64, Docker Engine 29.8.1, Docker Compose 2.20.0 or newer (including v5), and a checkout of the matching release. Published images contain the required runtime and setup tools; the operator host needs no Node, pnpm or Rust installation. The operator owns DNS, certificates, identity-provider registrations, backups and upgrades. Commands below change the selected installation; choose its environment file deliberately.
+This guide installs Widefleet **0.4.0** with its bundled app runtime **0.3.0** using the reference Compose deployment. Use Linux x86-64, Docker Engine 29.8.1, Docker Compose 2.20.0 or newer (including v5), and a checkout of the matching release. Published images contain the required runtime and setup tools; the operator host needs no Node, pnpm or Rust installation. The operator owns DNS, certificates, identity-provider registrations, backups and upgrades. Commands below change the selected installation; choose its environment file deliberately.
 
 This page describes local PostgreSQL, RustFS and operator-provided certificates. [External services and automatic HTTPS](/self-hosting/external-services) use the same maintained base configuration with selectable service files.
 
@@ -12,31 +12,7 @@ Docker 29.8.1 is the tested host baseline, pinned in CI. Its network address all
 
 ## Infrastructure and first start
 
-For unreleased organization sign-in builds, settings and encrypted credentials are
-scoped to the selected organization. Before upgrading a serving installation from fleet
-ownership, complete and verify an explicit runtime-state migration first. See the
-[organization ownership upgrade requirements](/reference/runtime#organization-ownership-upgrade)
-for its scope.
-The database migration preserves the installation settings under `widefleet`. Startup then
-moves the saved workspace SSO registration into the native provider store and removes the
-old editable identity document. The shared registration replaces the former separate app
-credentials, so register both callbacks on the saved workspace client. Directory credentials
-are retained. This does not move object storage or local node state.
-Updating components or redeploying apps alone cannot migrate that state.
-After completing the state migration, upgrade the control plane,
-agent and runtime together; register the newly displayed app callback URL
-(`https://auth.APP_DOMAIN/oauth2/widefleet/callback` for the installation organization),
-reapply sign-in settings and redeploy existing apps to publish their organization-bound
-auth routes. Management callbacks now use `/api/auth/sso/callback/PROVIDER_ID`; copy the
-exact URL from Settings into the IdP registration. Saved providers are not automatically
-marked domain-verified. Use the installation [recovery link](#secrets-and-administrator-recovery) if no email-code login is available, enter the company domain, save, complete DNS verification and activate company SSO. Existing app sessions and CLI tokens require a fresh sign-in.
-Local password authentication is removed in these builds. The migration deletes password
-credentials and the former database flag while preserving users, memberships and SSO accounts.
-Before upgrading, configure email-code delivery, explicitly choose `LOGIN_CODE_DELIVERY=console`,
-or verify that company SSO works. Remove `owner.password` from any pending bootstrap file.
-Company SSO and directory settings remain organization-scoped database configuration.
-These builds also support [member invitations and company sign-in](/guides/members)
-when an email adapter is configured; the default self-hosted build does not add a mail service.
+Start with a new installation. For an existing installation with apps or runtime data, read the [0.4.0 upgrade requirements](#upgrade-deliberately) before changing images or starting the new services.
 
 Copy `infra/deployment.env.example` to a private file outside version control. Set the database/storage credentials, `PLATFORM_URL`, `APP_DOMAIN` and the absolute `PLATFORM_DATA_DIRECTORY`. The management hostname must be outside the app domain, for example `platform.example.test` and `*.apps.example.test`. Configure DNS and provide `${PLATFORM_DATA_DIRECTORY}/tls/fullchain.pem` and `privkey.pem`, or select [automatic HTTPS](/self-hosting/external-services#automatic-https-with-cloudflare).
 
@@ -160,7 +136,7 @@ The command requires an existing Owner or Admin and prints a one-use link. It op
 
 1. In the Microsoft Entra admin center, open **App registrations** and select the shared Widefleet registration.
 2. Open **Token configuration → Add groups claim** and select the group types the apps need. For security-group permissions, select **Security groups** (`groupMembershipClaims: "SecurityGroup"`).
-3. Configure the **ID token** to emit **Group ID** in the `groups` claim. Keep object IDs rather than group names and do not select **Emit groups as role claims**: the current proxy reads `groups`.
+3. Configure the **ID token** to emit **Group ID** in the `groups` claim. Keep object IDs rather than group names and do not select **Emit groups as role claims**: the runtime reads `groups`.
 4. After a new app-SSO sign-in, verify that an intended group member receives the expected IDs in server-side `locals.user.groups`. The app implements its own authorization using these IDs. An app's management collaboration grants do not configure these claims.
 
 Entra limits JWT group claims to **200 group memberships per user**, including nested groups. Above that limit, it omits the entire group list and provides an overage indicator for a Microsoft Graph lookup; it does not return the first 200 groups. The app runtime's Entra integration resolves that indicator, including all result pages. Grant the app-SSO registration the delegated **User.Read** permission and consent to it. A failed overage lookup fails the login. Missing group claims without an overage indicator still become `locals.user.groups = []`, so an empty array does not establish that the user has no directory memberships. App authorization must require the expected group explicitly rather than grant access when the list is empty.
@@ -185,100 +161,66 @@ Search returns Entra object IDs, matching app tokens configured to emit Group ID
 
 ## Pull the release images
 
-Releases provide four public Linux amd64 images on Docker Hub. Pulling them does not require a GitHub account or registry login:
+Release 0.4.0 provides three public Linux amd64 images on Docker Hub. Pulling them does not require a registry login:
 
-| Image                               | Purpose                                                                             |
-| ----------------------------------- | ----------------------------------------------------------------------------------- |
-| `docker.io/widefleet/control-plane` | Management server, API, database/storage initialization and edge configuration tool |
-| `docker.io/widefleet/agent`         | Deployment agent and its matching celld publish executable                          |
-| `docker.io/widefleet/sso`           | Independent OAuth2 Proxy and configuration supervisor                               |
-| `docker.io/widefleet/runtime`       | celld runtime used for the shared fleet                                             |
+| Image                               | Purpose                                                |
+| ----------------------------------- | ------------------------------------------------------ |
+| `docker.io/widefleet/control-plane` | Management UI, API and installation initialization     |
+| `docker.io/widefleet/agent`         | Deployment agent and matching celld publish executable |
+| `docker.io/widefleet/runtime`       | Shared celld runtime, including app sign-in            |
 
-Every image has the same release tag, for example `0.3.0`, and OCI labels for its source repository, source commit and version. Installation uses exact digests from the release attachment `widefleet-images-VERSION.env`, verified with its accompanying `.sha256` file. There is no floating `latest` tag and no automatic update of running installations.
+All three use the platform release tag `0.4.0`. The JavaScript app runtime bundled inside the release has its own version, `0.3.0`. Installation pins container images by digest using the release manifest.
 
-Open the selected [GitHub release](https://github.com/widefleet/widefleet/releases) and download `widefleet-images-VERSION.env` and `widefleet-images-VERSION.env.sha256` into the repository root. Replace `VERSION` with that release's version, then select the matching configuration and verify the manifest:
-
-```sh
-git checkout vVERSION
-sha256sum --check widefleet-images-VERSION.env.sha256
-```
-
-The non-secret configuration manifest contains the four `docker.io/widefleet/` image references pinned by SHA-256 digest. Keep it with the private deployment environment and supply both files to Compose. Pull **all four images**, including the runtime used by new app containers:
+Open [release v0.4.0](https://github.com/widefleet/widefleet/releases/tag/v0.4.0) and download `widefleet-images-0.4.0.env` and `widefleet-images-0.4.0.env.sha256` into the repository root. Select the matching configuration and verify the manifest:
 
 ```sh
-docker compose --env-file widefleet-images-VERSION.env --env-file /absolute/path/deployment.env -f infra/compose.yaml --profile agent --profile images pull
+git checkout v0.4.0
+sha256sum --check widefleet-images-0.4.0.env.sha256
+docker compose --env-file widefleet-images-0.4.0.env --env-file /absolute/path/deployment.env -f infra/compose.yaml --profile agent pull
 ```
 
-The `runtime-image` service is a pull target, not a long-running service. The agent uses that exact `PLATFORM_RUNTIME_IMAGE` on the same Docker daemon. The agent expects this image to be present locally. For multiple agent hosts, pull the runtime on each host using its own Docker context.
+Keep the image manifest with the private deployment environment and supply both files to Compose. The pull includes the three Widefleet images and the PostgreSQL, RustFS and Traefik dependencies. Compose starts the `runtime` service directly; app sign-in runs inside it.
 
 ## Start services
 
-Create the data directory and its `objects`, `agent`, `postgres` and `tls` subdirectories. Configuration, authentication keys and ACME state use named Docker volumes. RustFS runs as container UID/GID `10001`; grant that identity ownership of `objects`. With rootless Docker, do this through a temporary container in the same Docker context rather than guessing the host's mapped UID:
+Create the data directory and its `objects`, `agent`, `postgres` and `tls` subdirectories. Authentication keys, edge configuration, runtime configuration and runtime state use named Docker volumes. Automatic HTTPS adds an `acme` volume. RustFS runs as container UID/GID `10001`; grant that identity ownership of `objects`. With rootless Docker, do this through a temporary container in the same Docker context rather than guessing the host's mapped UID:
 
 ```sh
 docker run --rm --user 0 \
   -v /absolute/data/path/objects:/data \
   debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 \
   chown 10001:10001 /data
-docker compose --env-file widefleet-images-VERSION.env --env-file /absolute/path/deployment.env -f infra/compose.yaml up -d postgres storage
-docker compose --env-file widefleet-images-VERSION.env --env-file /absolute/path/deployment.env -f infra/compose.yaml run --rm control-plane node tools/initialize-storage.ts
-docker compose --env-file widefleet-images-VERSION.env --env-file /absolute/path/deployment.env -f infra/compose.yaml up -d control-plane oauth2-proxy proxy
+docker compose --env-file widefleet-images-0.4.0.env --env-file /absolute/path/deployment.env -f infra/compose.yaml up -d control-plane proxy
+docker compose --env-file widefleet-images-0.4.0.env --env-file /absolute/path/deployment.env -f infra/compose.yaml ps --all
 ```
 
-Management creates the schema, CLI registration and static edge configuration at startup. The edge and SSO containers need neither a Docker socket nor a connection to the management database. Initial SSO waits until the administrator supplies its settings. Infrastructure changes such as domains or TLS mode still require recreating the affected services through Compose.
+Compose starts PostgreSQL and storage, then runs the one-time `initialize` service to prepare storage, the database schema, keys and edge/runtime configuration. The runtime starts after initialization succeeds; management waits for the runtime health check. Expect `initialize` to exit successfully and `runtime` and `control-plane` to become healthy. If startup fails, inspect `docker compose ... logs initialize runtime control-plane`. Open `PLATFORM_URL` and complete [first setup](#infrastructure-and-first-start). Infrastructure changes such as domains or TLS mode require recreating the affected services through Compose.
 
 Sign in to management, register an agent, and copy its one-time token into `PLATFORM_AGENT_TOKEN`. Start it with:
 
 ```sh
-docker compose --env-file widefleet-images-VERSION.env --env-file /absolute/path/deployment.env -f infra/compose.yaml --profile agent up -d agent
+docker compose --env-file widefleet-images-0.4.0.env --env-file /absolute/path/deployment.env -f infra/compose.yaml --profile agent up -d agent
 ```
 
-App creators use the installation's default fleet. Agent registration authorizes an executor for that fleet while preserving app and storage identities. Use the same Docker host, node-state directory, routing directory and storage configuration when replacing an executor. A replacement can claim pending or expired jobs without changing apps. The installer manages one runtime node.
+Apps belong to the installation organization. Agent registration authorizes an executor for that organization while preserving app and storage identities. Use the same Docker host, node-state directory, routing directory and storage configuration when replacing an executor. A replacement can claim pending or expired jobs without changing apps. The installer manages one runtime node.
 
-Only ports 80 and 443 are published. PostgreSQL, object storage and runtime operator APIs have no host ports. The agent's Docker socket grants host-level control and is available only to the agent. Apps run in separate V8 isolates with app-scoped resource bindings inside a shared fleet container and Docker network. The trusted proxy and storage container join that network.
+Only ports 80 and 443 are published. PostgreSQL, object storage and runtime operator APIs have no host ports. The agent's Docker socket grants host-level control and is available only to the agent. Apps run in separate V8 isolates with app-scoped resource bindings inside the shared runtime container. Compose connects it to the private management and edge networks.
 
 The reference installation is designed for trusted company app creators. Its installation-wide storage credentials are passed to celld, not to app Worker bindings. The runtime has a read-only root filesystem and a persistent writable node-state directory. No additional platform CPU, memory or request-concurrency limits are imposed.
 
 ## Upgrade deliberately
 
-When moving from fleet ownership to the unreleased organization ownership build, complete
-the [state migration requirements](/reference/runtime#organization-ownership-upgrade)
-before recreating services or redeploying existing apps.
+### Moving from 0.3.x to 0.4.0
 
-Container publication does not change a running installation. Select the intended source checkout and matching image manifest, back up the deployment, pull its images and recreate the affected services. The control plane applies its schema at startup. Preserve the keys and runtime volumes; selecting an older image does not reverse a schema change. Recreate Traefik for changes to static TLS configuration or ACME environment.
+Version 0.4.0 changes runtime ownership, persistent storage layout and connector execution. It does **not** provide an in-place migration procedure for an existing installation with apps or runtime data. Keep that installation on its current version until its state can be migrated and recovery verified. A new installation can use 0.4.0 directly. See the [organization ownership upgrade boundary](/reference/runtime#organization-ownership-upgrade).
 
-The Widefleet JavaScript loader has its own release lifecycle. Use `widefleet runtime status`, `widefleet runtime update VERSION` and `widefleet runtime rollback PREVIOUS_VERSION` with the normal administrator login. These commands manage the default fleet and handle artifact transfer and activation automatically; no UUID, release file or revision number is required. See [application runtime](/reference/runtime).
+The authentication changes also remove password login. A migrated installation needs email-code delivery, explicit `LOGIN_CODE_DELIVERY=console`, or working company SSO. Remove `owner.password` from a pending bootstrap file. Company SSO uses one provider registration for management and apps: register both callbacks shown in Settings, verify the company domain and activate SSO. Existing browser sessions and CLI credentials require a fresh sign-in.
 
-`PLATFORM_RUNTIME_IMAGE` identifies the celld container image, separate from that JavaScript release. Existing fleet containers retain their image until recreation. Changing celld itself requires a reviewed migration procedure for native storage and node state. The current runtime is pinned to celld 0.6.2; the agent image inherits the same binary for publishing deployments.
+### Platform and runtime versions
 
-Before changing fleet storage, recovering an interrupted activation or publishing a deployment, the agent checks the publisher binary, the selected runtime image and retained fleet-container images with `celld --version`. Image checks capture output directly from disposable containers with stored logging disabled, without network access or fleet-state mounts; new fleet containers use the verified immutable image ID. A mismatch fails the job with the required version and the component to replace. Updating a JavaScript package does not upgrade celld or recreate an incompatible native container.
+Use matching 0.4.0 control-plane, agent and CLI releases with app runtime 0.3.0. The native runtime is celld 0.6.2. Keep the matching source checkout and image manifest with every backup; restoring older images alone does not reverse database or storage changes.
 
-### Upgrading from 0.2.1 to 0.3.0
-
-This release pairs platform and CLI 0.3.0 with app runtime 0.2.1. The native runtime remains celld 0.6.2, so this upgrade does not require a native storage migration or replacement of an existing compatible fleet container.
-
-1. Drain deployment jobs and stop the agent. Back up PostgreSQL, cloud object storage, local fleet state, authentication/configuration volumes and secrets before changing the installation.
-2. Select the 0.3.0 source and verified image manifest. Recreate the management server, SSO and agent through the existing Compose configuration, preserving installation keys, volumes and operator settings. Management applies the additive migrations for app migrations, access groups, the preview-parent index, the catalog and Workflow operations. Upgrade management and the agent together before configuring access groups or deploying Workflows.
-3. Install CLI 0.3.0 and use an administrator session to run `widefleet runtime update 0.2.1`. Verify that `widefleet runtime status` reports active version 0.2.1 and successful activation before deploying Workflow bindings. Check an existing app and its persisted data after activation.
-
-Existing apps retain company SSO access: their initial group lists are empty, meaning all users admitted by company SSO. Previews inherit their original app's policy. Catalog publication is opt-in and existing apps remain unlisted. See [app access](/reference/app-access) and [App Workflows](/guides/workflows) for configuration and compatibility limits.
-
-Runtime downgrades without Workflow support are rejected while published apps retain Workflow versions. Selecting older container images does not undo database migrations; a full rollback requires restoring the matching backup and platform components together. Installations older than 0.2.1 must first follow the native runtime upgrade below.
-
-### Upgrading from 0.2.0 to 0.2.1
-
-This upgrade pairs the 0.2.1 platform and CLI with app runtime 0.1.1 and celld 0.6.2. The previous app runtime 0.1.0 requires celld 0.6.1 and cannot be selected by the new platform. Upstream celld supports upgrading 0.6.1 to 0.6.2 without replacing native storage, but Widefleet requires an explicit fleet-container replacement.
-
-1. Prevent new requests and deployments, drain queued/running jobs, and stop the agent, management and fleet container. Capture a consistent backup of PostgreSQL, cloud object storage, local fleet state, authentication/configuration volumes, secrets and the previous container configuration. Keep an encrypted copy outside the host.
-2. Install the matching 0.2.1 source and verified image manifest. Recreate management and SSO through the existing Compose selection, preserving the project name, data paths, volumes and operator settings. Management applies the additive installation-reporting migration; reporting defaults and opt-outs are described in [installation reporting](/self-hosting/installation-reporting).
-3. Replace the stopped fleet container with the selected 0.2.1 runtime image while preserving its command, environment, mounts, labels, network address and security settings. Retain the old container with automatic restart disabled and a name outside the agent's active/recovery container names. Never run both containers against the same fleet storage.
-4. Start the replacement, then use the 0.2.1 CLI and an administrator session to queue `widefleet runtime update 0.1.1 --no-wait`. Start the matching agent and verify that `widefleet runtime status` reports active version 0.1.1 and a successful update. Restore public traffic after checking the saved apps and their data.
-
-An older image or `widefleet runtime rollback 0.1.0` is insufficient to undo this upgrade. A full rollback must restore the matching database, object storage and local-state backup with the old platform, runtime package and native container together.
-
-App-tail telemetry configuration is included in app snapshots at deployment. Enabling or changing it does not require recreating the fleet container. See [telemetry](/self-hosting/runtime-logs) for capture limits.
-
-Use the matching [CLI release](/getting-started/installation) to access the settings commands.
+The JavaScript app runtime has a separate release lifecycle from the container images. Check the selected and active versions with `widefleet runtime status`. Updates and rollbacks use the [runtime commands](/reference/runtime#versions-and-updates) and require an independently published runtime package. Upgrading the control-plane image does not change an organization's already selected JavaScript runtime.
 
 ## Management members and app collaboration
 
@@ -302,29 +244,29 @@ The **App catalog** link opens the catalog for all signed-in management members.
 
 The CLI offers the same operations as JSON: `widefleet catalog list`, `widefleet catalog publish APP_UUID` and `widefleet catalog unpublish APP_UUID`. The corresponding authenticated API endpoints are `GET /api/v1/catalog` and `PUT /api/v1/apps/{appId}/catalog` with `{ "listed": true }` or `{ "listed": false }`. Publication requires the app owner or an administrator through every interface.
 
-Traefik clears client-supplied identity headers, checks SSO through OAuth2 Proxy, copies only the verified identity, then removes `Cookie`, `Authorization` and token headers before forwarding to an app. App responses cannot set cookies. The SvelteKit starter populates `locals.user` from the verified identity through its included server identity helper.
+The shared runtime handles app sign-in using the organization's published configuration. It removes client-supplied identity headers and forwards verified identity to the app; authentication cookies and tokens do not reach app code. The SvelteKit starter exposes the verified identity as `locals.user`.
 
-App-side cookie sessions and frameworks requiring server cookies are unsupported. The management login has its own host-only cookies. App SSO uses a one-hour encrypted cookie with no stored OAuth tokens and no refresh token; after expiry, the browser returns through the identity provider. Disabling a user there does not invalidate an already-issued app cookie immediately. `/oauth2/*` and the `auth` app hostname are reserved for the proxy.
+App access rules are separate from management permissions. Configure them on the app's **Access** tab. See [published app sign-in](/guides/members#opening-published-apps) for login modes, session lifetime and access revocation, and [app access](/reference/app-access) for group rules.
 
 ## Logs and recovery
 
-`docker compose ... logs agent` reports job progress. The management UI and `widefleet events` show persisted deployment events. `docker logs platform-fleet-<fleet-id>` shows the runtime. Keep logs private; user code may log application data.
+`docker compose ... logs agent` reports job progress. The management UI and `widefleet events` show persisted deployment events. `docker compose ... logs runtime` shows the shared runtime. Keep logs private; user code may log application data.
 
 With [ClickHouse telemetry](/self-hosting/runtime-logs) enabled, `widefleet logs --level error --since 1h --json` queries server and browser failures with private source-map resolution. `widefleet logs --follow` follows incoming telemetry. These commands use current app permissions; ordinary app users do not receive diagnostic access automatically.
 
-App requests and ordinary runtime restarts use persisted routes, runtime artifacts and fleet storage independently of management and the executor. Rejected activation restores the serving deployment. An interrupted activation is recovered by the next executor before new work; allow that recovery before deliberately restarting a node with an unfinished update. See [activation and recovery](/reference/runtime#activation-and-recovery).
+App requests and ordinary runtime restarts use persisted routes, runtime artifacts and runtime storage independently of management and the executor. Rejected activation restores the serving deployment. An interrupted activation is recovered by the next executor before new work; allow that recovery before deliberately restarting a node with an unfinished update. See [activation and recovery](/reference/runtime#activation-and-recovery).
 
 ## Whole-installation backup and restore
 
 Use an operator-managed, encrypted backup outside this host. Back up a **stopped, consistent installation**, not selected D1 object prefixes. Capture the environment/secrets, pinned image digests, repository revision, PostgreSQL directory, complete object-store directory, runtime state directories, proxy routes and TLS material together.
 
-1. Stop incoming traffic by stopping the proxy. Stop new deploy submissions and wait until the deployment queue has no active jobs. Record the fleet ID, active runtime version and each app's successful artifact ID.
-2. Stop the agent and control plane. Gracefully stop the `platform-fleet-<fleet-id>` container with a timeout of at least 30 seconds. Save the exact list of stopped containers and `docker inspect` output in the protected backup.
-3. Stop OAuth2 Proxy and, if enabled, the OpenTelemetry Collector and ClickHouse; then stop PostgreSQL and RustFS. Archive the complete `PLATFORM_DATA_DIRECTORY`, the `platform-state`, `edge-config`, `app-auth` and optional `acme` named volumes, preserving ownership and permissions, plus the private deployment environment, an externally supplied encryption key if configured, and infrastructure secrets such as the Cloudflare token. The encrypted database alone cannot restore provider secrets. Do not run `docker compose down --volumes`.
-4. Copy the encrypted archive off-host. Restart storage, PostgreSQL and any telemetry services, then the existing app containers, management, agent, OAuth2 Proxy and finally the edge proxy. Verify a saved note and photo.
+1. Stop incoming traffic at the proxy, stop new deploy submissions and wait for active deployment jobs to finish. Record the organization ID, active runtime version and deployed app versions.
+2. Stop the agent and control plane. Stop the `runtime` service gracefully, allowing its configured 45-second shutdown period. If enabled, stop the OpenTelemetry Collector and ClickHouse; then stop PostgreSQL and RustFS.
+3. Archive the complete `PLATFORM_DATA_DIRECTORY` and the `platform-state`, `edge-config`, `runtime-config`, `runtime-state` and optional `acme` volumes, preserving ownership and permissions. Include the Compose project name and overrides, private environment, image manifest and any externally supplied encryption key or infrastructure secrets. The database and its encryption key must be restored together. Do not run `docker compose down --volumes`.
+4. Copy the encrypted archive off-host. Start the control plane through Compose, which starts its storage, initialization and runtime dependencies. Start any telemetry services and the agent, then the proxy. Verify an existing database record and its associated file.
 
-To restore on the existing host, stop the same services, restore the complete matching snapshot and environment, and restart with the recorded image versions. Do not combine PostgreSQL, fleet storage or node-state directories from different snapshots. Do not copy live PostgreSQL data files.
+To restore on the existing host, stop the same services, restore the complete matching snapshot and environment, and restart with the recorded source and image versions. Do not mix database, object-store or runtime-state snapshots. Do not copy live PostgreSQL data files.
 
-On a replacement host, restore the same absolute data path and ownership, install the pinned images, and start PostgreSQL, storage and management. During recovery, restrict the proxy to the restore operator so the CLI can reach its configured HTTPS management origin while app users remain excluded. Restore the agent credential. Queue the recorded successful artifact for every restored app with `widefleet rollback <app-id> <artifact-id> --no-wait`; start the agent to restore the shared runtime and app routes. This republishes code while retaining the restored fleet data. Enable general access only after verifying identities, a database record and the corresponding private file. Never run old and restored fleet nodes against the same bucket simultaneously.
+On a replacement host, restore the same absolute data path, Compose project name, named volumes and ownership before starting services. Restore the saved agent credential in the private environment. Start management and its dependencies, then telemetry and the agent. Restrict proxy access to the restore operator while checking sign-in, `widefleet runtime status`, an existing app, a database record and the corresponding private file. The restored runtime state and routes retain the installed deployments. Enable general access after these checks pass. Never run the old and restored runtime against the same storage simultaneously.
 
 Before relying on the backup, complete a restore drill using the installation's actual storage and backup target.

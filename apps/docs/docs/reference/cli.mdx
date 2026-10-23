@@ -1,7 +1,7 @@
 ---
 title: CLI
 description: Common Widefleet commands, app selection, authentication and deployment output.
-lastModified: 2026-10-20
+lastModified: 2026-10-23
 ---
 
 For installation and your first deployment, start with [CLI setup](/getting-started/installation).
@@ -19,8 +19,8 @@ Each command also accepts `--help`; newer commands require matching platform com
 | `widefleet config set-url URL` / `unset-url`        | Save or clear the platform URL without changing credentials.                                              |
 | `PLATFORM_CONFIG_FILE` / `--config-file PATH`       | Use one explicit configuration file instead of the user and managed defaults.                             |
 | `widefleet whoami`                                  | Inspect the authenticated user.                                                                           |
-| `widefleet organizations`                           | List available organizations (unreleased).                                                                |
-| `PLATFORM_ORGANIZATION` / `--organization ID`       | Select an organization for API commands (unreleased).                                                     |
+| `widefleet organizations`                           | List available organizations (0.4.0 or newer).                                                            |
+| `PLATFORM_ORGANIZATION` / `--organization ID`       | Select an organization for API commands (0.4.0 or newer).                                                 |
 | `widefleet logout`                                  | Revoke the stored refresh token and remove the saved session.                                             |
 | `PLATFORM_SESSION_FILE` / `--session-file PATH`     | Explicit, unencrypted session file for headless Unix use instead of the OS credential store.              |
 | `PLATFORM_ACCESS_TOKEN`                             | Externally supplied token; overrides saved credentials for API commands and does not renew automatically. |
@@ -38,7 +38,7 @@ for prerequisites, precedence and access recovery.
 
 ## App commands
 
-Unreleased organization sign-in builds also provide `widefleet account`,
+Platform and CLI 0.4.0 or newer also provide `widefleet account`,
 `widefleet members` and `widefleet invitations`. See [member management](/guides/members)
 for complete examples and permissions. `widefleet account` prints your link status and
 the browser URL for company sign-in. Accounts with matching verified company email are linked during SSO.

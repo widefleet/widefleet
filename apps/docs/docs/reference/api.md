@@ -10,8 +10,7 @@ Clients must send `Origin: <PLATFORM_URL>` for OAuth form requests and Worker up
 
 ## Organization context
 
-This section describes unreleased organization-selection behavior and requires
-a platform build containing that capability.
+Organization selection requires platform **0.4.0 or newer**.
 
 `GET /api/v1/organizations` requires an authenticated session or a token with
 `platform:read`. It works before an organization is selected and returns only
@@ -64,7 +63,7 @@ an administrator to grant access.
 
 ## Members, invitations and company sign-in
 
-These endpoints require an unreleased build containing organization invitations.
+These endpoints require platform **0.4.0 or newer**.
 Reads require `platform:read`, writes require `platform:write`; browser requests use
 session authentication. Administrator operations use the
 selected organization and the owner restrictions described in [member management](/guides/members).
@@ -113,7 +112,7 @@ See [activation](/guides/members#activate-company-sso).
 Use the returned `hostname` and `url`; do not derive addresses from the app slug or
 organization name. Organization hostname suffixes can place apps and named previews
 under the shared app domain. See [preview addresses](/reference/previews#organization-addresses)
-for naming and required builds. Occupied complete hostnames return `409 CONFLICT`;
+for naming and version requirements. Occupied complete hostnames return `409 CONFLICT`;
 invalid or overlong hostnames return `400 BAD_REQUEST` before app creation.
 
 Upload sessions expire after one hour. Repeating an identical publish within its valid session returns the original deployment. A session's Worker content is immutable. Asset hashes follow Wrangler's BLAKE3 algorithm over base64 content plus the case-sensitive file extension; modules use SHA-256. Preview apps have separate identities and artifact prefixes.

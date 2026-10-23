@@ -1,7 +1,7 @@
 ---
 title: Previews
 description: Preview names, flags, isolation, DNS and cleanup.
-lastModified: 2026-10-20
+lastModified: 2026-10-23
 ---
 
 Run these commands from an existing app project:
@@ -30,8 +30,7 @@ Previews start with their own empty D1, R2, KV and Queue resources. Plain-text v
 
 ## Organization addresses
 
-This section describes unreleased organization hostname suffixes and requires matching
-CLI and control-plane builds containing that capability.
+Organization hostname suffixes require platform and CLI **0.4.0 or newer**.
 
 An installation can assign a stable hostname suffix to an organization. With suffix `acme`
 and `APP_DOMAIN=apps.example.com`, an app named `notes` has address

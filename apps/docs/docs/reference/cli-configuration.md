@@ -1,7 +1,7 @@
 ---
 title: CLI configuration
 description: Inspect, change and distribute the platform URL used by the Widefleet CLI.
-lastModified: 2026-10-20
+lastModified: 2026-10-23
 ---
 
 Company discovery and saved configuration require CLI 0.3.2 or newer. Check
@@ -12,8 +12,7 @@ in the operating system's credential store or the explicitly selected session fi
 
 ## Select an organization
 
-Organization selection is unreleased and requires matching platform and CLI builds
-that include this capability. Check `widefleet --help` for `--organization`.
+Organization selection requires platform and CLI **0.4.0 or newer**. Check `widefleet --help` for `--organization`.
 
 After logging in, list the organizations available to your account:
 

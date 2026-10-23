@@ -1,14 +1,16 @@
 ---
 title: Application runtime
 description: Runtime versions, activation, recovery, storage and supported app APIs.
-lastModified: 2026-10-20
+lastModified: 2026-10-23
 ---
 
-The installation's celld runtime runs apps and previews as separate Dynamic Workers. The installer manages one node. In the unreleased organization ownership model, apps, connectors and agents belong directly to an organization with one execution configuration. Registering, disabling or replacing an agent does not change that ownership. A replacement agent reuses the same Docker host, persistent node state, routing directory and runtime storage.
+The installation's celld runtime runs apps and previews as separate Dynamic Workers. The installer manages one node. Starting with platform 0.4.0, apps, connectors and agents belong directly to an organization with one execution configuration. Registering, disabling or replacing an agent does not change that ownership. A replacement agent reuses the same Docker host, persistent node state, routing directory and runtime storage.
 
 ## Versions and updates
 
 The Widefleet loader and built-in binding adapters are JavaScript built from `packages/app-runtime`. They are versioned separately from the Rust agent. `widefleet runtime update VERSION` downloads the matching `runtime-vVERSION` GitHub release, verifies its published checksum and uploads the package through the authenticated API. If the release repository requires authentication, supply a repository-read token using `GH_TOKEN` or `GITHUB_TOKEN`. That token is used only for GitHub; the Widefleet credential is used only for the management API.
+
+Platform 0.4.0 bundles app runtime 0.3.0 for new installations. Its separate `runtime-v0.3.0` GitHub release is not yet published, so `widefleet runtime update 0.3.0` cannot download it. Use the commands below only with a published runtime release compatible with the installed platform.
 
 ```sh
 widefleet login
@@ -23,23 +25,15 @@ The control plane keeps package bytes in Object Storage and only checksums/versi
 
 If an update returns `409: Runtime versions are immutable`, the installation already stores different bytes under that version. This can happen when a source checkout builds a modified runtime without changing its version, including changes to bundled license notices. Use a matching published platform build or a newly versioned runtime release; do not overwrite stored packages or edit their checksums. `runtime rollback` selects the installation's existing package, not the download from GitHub.
 
-The unreleased organization ownership build requires runtime installation protocol 2 for celld 0.6.2. Control plane, agent and runtime must be updated together; runtime packages using protocol 1 are rejected. Workflow support additionally requires a deployment agent that provisions Workflow protocol 1 bindings. A compatible loader/adapter update within installed capabilities needs no Rust rebuild; a new installation protocol or celld binary requires a separately reviewed platform update.
+Platform 0.4.0 includes app runtime 0.3.0, using installation protocol 2 and celld 0.6.2. Use matching 0.4.0 control-plane, agent and CLI releases; older protocol-1 runtime packages cannot run on this platform. Workflow support additionally requires a deployment agent that provisions Workflow protocol 1 bindings. A compatible loader/adapter update within installed capabilities needs no Rust rebuild; a new installation protocol or celld binary requires a separately reviewed platform update.
 
 Runtime 0.2.1 forwards incoming HTTP request cancellation explicitly to the loaded app. If the client disconnects before response headers, the app's `request.signal` is aborted. App code must pass that signal to any downstream requests it wants to cancel, for example `env.SERVICE.fetch(url, { signal: request.signal })`. A timeout after a fetch has returned still needs explicit cancellation of the response body.
 
 ## Organization ownership upgrade
 
-This change is unreleased. Migration `0021_organization_ownership` transfers existing
-resource ownership, runtime settings and stored operation contexts to the organization.
-It preserves PostgreSQL records and removes the separate fleet identity. Multiple old
-fleets belonging to one organization are ambiguous and are not merged automatically.
+Platform 0.4.0 moves app and connector ownership from fleets to organizations. Its database migration preserves resource ownership and settings, but it does not migrate object storage, local runtime state or existing native connector deployments.
 
-The migration does not move object storage or local node state, rewrite immutable
-connector artifacts, or change parameters already accepted by Cloudflare Workflows.
-It therefore does not provide an in-place upgrade for an already serving runtime.
-Keep existing state intact until it has been explicitly migrated or the development
-installation can be recreated. A successful database migration alone is not proof
-that an old runtime can resume serving.
+Version 0.4.0 provides no supported in-place migration procedure for an installation already serving apps. Updating images or redeploying code does not transfer the existing runtime data. Keep the previous installation and a complete backup intact until a state migration and recovery procedure is available. New installations can use 0.4.0 directly.
 
 ## Activation and recovery
 
@@ -47,7 +41,7 @@ App code is selected through immutable snapshots. The loader binds only the app'
 
 An app-code update can select a new snapshot without a native reload. Changes to native resources, event subscriptions or runtime code also publish and reload celld configuration. The installer validates the candidate before publishing its host reference. Runtime updates evaluate every published app snapshot before acceptance. Requests already using an older snapshot can finish on it. Native reloads retain the old generation during transition; long-lived connections remain subject to celld's generation drain behavior.
 
-Activation uses a persistent journal. Rejected runtime updates restore the last serving native deployment so a subsequent cold restart uses that version. If an executor is interrupted mid-activation, the next executor recovers the journal before doing new work. For an interrupted update, allow that recovery to complete before deliberately restarting the node. Successfully published apps and ordinary node restarts require neither management nor a running executor; proxy, SSO/identity service and fleet storage remain operational dependencies.
+Activation uses a persistent journal. Rejected runtime updates restore the last serving native deployment so a subsequent cold restart uses that version. If an executor is interrupted mid-activation, the next executor recovers the journal before doing new work. For an interrupted update, allow that recovery to complete before deliberately restarting the node. Successfully published apps and ordinary node restarts require neither management nor a running executor; the edge proxy, runtime storage and the configured identity provider remain operational dependencies.
 
 Cron schedule and queue attachment changes use two native phases: validate new resources with the published apps’ previous schedules and subscriptions, then select the app and final schedules/subscriptions. Removed consumers are detached before removing their code. Newly attached, unpaused queues are resumed through celld's supported queue command so existing backlog is delivered. Intentionally paused queues remain paused.
 
@@ -65,7 +59,7 @@ The [celld/Cloudflare comparison](/reference/runtime-compatibility) separates na
 | Dynamic capacity | celld 0.6.1 has a native limit of 256 loaded dynamic instances per process, with at most 255 from one loader generation. The limit counts loaded instances; unreferenced instances are eligible for collection.                                |
 | Scaling          | One managed node initially; no automatic node provisioning or load balancing. A node failure affects all apps on it.                                                                                                                           |
 
-[App Workflows](/guides/workflows) require a compatible agent and runtime with Workflow support. Native Durable Object namespaces inside dynamic apps are not part of this app contract. [IT connectors](/guides/connectors) run as independent regular Workers and can declare their own Durable Object classes. The trusted loader enforces [backend network permissions and browser CSP](/guides/network).
+[App Workflows](/guides/workflows) require a compatible agent and runtime with Workflow support. Native Durable Object namespaces inside dynamic apps are not part of this app contract. [IT connectors](/guides/connectors) run as Dynamic Workers and can declare their own Durable Object classes. The trusted loader enforces [backend network permissions and browser CSP](/guides/network).
 
 ## App removal
 
