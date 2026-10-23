@@ -35,38 +35,34 @@ The result selects a login destination and grants no access. Obtain device codes
 and tokens directly from that destination. Do not send existing tokens to the
 discovery endpoint or follow an HTTP redirect to move an authenticated API request.
 
-## Browser login for CLI clients
+## Browser discovery for unconfigured CLI clients
 
-These endpoints are part of the unreleased browser-login flow. Prefer the CLI's
-[agent login commands](/reference/authentication#agents-and-interrupted-login)
-unless implementing a separate client.
+These endpoints are part of the unreleased browser-discovery flow. Prefer
+`widefleet login` unless implementing a separate client. Configured clients use
+their installation's ordinary device authorization endpoints directly.
 
-1. Generate a PKCE S256 challenge and a separate random polling secret. Persist
-   both secrets before requesting `POST /api/auth/cli-login/start` at Cloud with
-   JSON `{ "code_challenge": "CHALLENGE", "poll_hash": "SHA256_HEX", "scope": "openid profile offline_access platform:read platform:write" }`.
-2. Present the returned `verification_uri` and `user_code`. The user chooses their
-   installation through email discovery, signs in there and approves. Starting
-   again with the same challenge, polling hash and scopes recovers the same link.
-3. Poll Cloud's `POST /api/auth/cli-login/poll` with JSON
-   `{ "request_id": "CHALLENGE", "poll_token": "POLL_SECRET" }` at the returned
-   interval. `authorized` supplies `platform_url` and an authorization `code`.
-   Never send the PKCE verifier or existing access tokens to the Cloud handoff.
-4. Exchange that code directly at the selected installation's
-   `/api/auth/oauth2/token` with `grant_type=authorization_code`,
-   `client_id=platform-cli`, `code_verifier` and
-   `redirect_uri=https://app.widefleet.com/cli-login/callback`.
-5. With the resulting Bearer access token, read
-   `GET /api/cli-login/context?request=CHALLENGE` at that same installation to get
-   `organization_id` and `organization_name`. Save the organization as the working
-   default; it does not change the token's authorization.
+1. Call `POST https://app.widefleet.com/api/auth/cli-login/start` without a body.
+   Keep the returned `request_id` and `cli_token` in the running process. Show
+   `verification_uri` to the user, who enters their email in the browser.
+2. Poll Cloud's `POST /api/auth/cli-login/poll` with JSON
+   `{ "request_id": "REQUEST", "cli_token": "SECRET" }` at the returned interval.
+   `platform_url` is null until the browser selects an installation, then stays fixed.
+3. Request a device code directly from that installation's `/api/auth/device/code`,
+   with `client_id=platform-cli`, the required scopes and `resource=PLATFORM_URL/api/v1`.
+   Retain the secret `device_code` locally and print the public verification link/code.
+4. Send only the public `user_code` to Cloud's `POST /api/auth/cli-login/ready`:
+   `{ "request_id": "REQUEST", "cli_token": "SECRET", "user_code": "CODE" }`.
+   The waiting browser continues to the selected installation's `/device` page.
+5. Poll `/api/auth/oauth2/token` directly at the destination using
+   `grant_type=urn:ietf:params:oauth:grant-type:device_code`, `client_id=platform-cli`
+   and the secret `device_code`. Respect the provider's interval and `slow_down`
+   responses. Save tokens and the destination only after successful approval.
 
-The request lasts 30 minutes and the approval result at most nine minutes.
-Cloud never exchanges the self-hosted authorization code: the selected issuer,
-callback state and PKCE bind the handoff. The callback only accepts the issuer
-selected for that request. Start and poll endpoints run only on canonical Cloud,
-with limits of three starts and 60 polls per minute per client IP. Responses are
-not cached. Context lookup requires the approving user, the same organization
-for organization-bound credentials, and current membership.
+The browser ticket and CLI secret are distinct. Cloud stores their hashes, the
+selected origin and public approval code for at most 30 minutes. It does not
+receive device secrets or self-hosted tokens. Routing is enabled only on Cloud;
+start and poll are limited to three starts and 60 polls per minute per client IP.
+Responses are not cached. Restarting a terminated command starts a new request.
 
 ## Organization context
 

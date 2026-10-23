@@ -5,54 +5,29 @@ lastModified: 2026-10-23
 ---
 
 Run `widefleet login` and open the printed link in your browser. With no configured
-platform, the browser asks for your email and routes to your installation. An
-existing self-hosted configuration starts device login there directly. Check the
+platform, the browser asks for your email and routes to your installation. Any
+configured URL starts device login there directly, including Cloud. Check the
 platform and code before approving. The default scopes are
 `platform:read platform:write`; select additional scopes explicitly when needed.
 See [CLI configuration and availability](/reference/cli-configuration).
 
-## Agents and interrupted login
+## Agent login
 
-An agent needs neither your email nor the platform URL to start:
+An agent starts `widefleet login` without needing your email or platform URL.
+It keeps the command running and presents its browser link. With no configured
+platform, you enter your email in the browser; the CLI then prints the device
+verification link and code for the discovered installation. Approve that code
+in your own browser. Configured targets start device login immediately.
 
-```sh
-widefleet login --no-wait --json
-```
+The agent can run the waiting command in a background terminal session while
+you sign in. After it exits successfully, verify access with `widefleet whoami`
+and continue the requested task. If the command is stopped, denied or expires,
+run `widefleet login` again. Open login requests are not saved for resumption.
+Already completed logins remain available through their saved credentials.
 
-Give the user `verification_uri` and `user_code`. After they approve in their own
-browser, continue in the same environment:
-
-```sh
-widefleet login --status --json
-widefleet whoami
-```
-
-`--status` checks or completes the saved request once and exits. It never starts
-a new request. Repeat it while authorization is pending, respecting the polling
-interval enforced by the CLI. A normal `widefleet login` waits and resumes a
-pending request; `--no-wait` returns after one step. A terminated process does not
-discard the request. `--restart` explicitly creates a new one.
-
-JSON reports `awaiting_selection`, `awaiting_authorization`, `finishing`,
-`connected`, `denied`, `expired`, `not_started` or `not_signed_in`, with the
-available browser link, code, destination, organization, expiry, credential-file
-path and `next_action`. Transient operation errors report `failed` and exit
-nonzero; retry the saved request. `--no-wait` and `--status` can exit successfully
-while login is still pending or denied: check `status`, not only the exit code.
-Waiting `--json` prints a JSON object for each changed state. The one-step flags
-are simpler for agents to parse.
-
-Only `connected` means credentials and the selected target are ready. Check the
-command's exit status too: saving configuration can fail after authorization;
-the error explains how to recover. A pending or approved request does not mean an
-app was deployed. Continue the requested task after login succeeds.
-
-Cloud requests expire after 30 minutes; approved codes must be collected within
-nine minutes. Direct device login follows the expiry returned by its server.
-Keep the same config profile and credential storage when resuming. Pending
-secrets use the credential store or a private file; an explicit session file has
-a private `.login` companion. An ephemeral sandbox that loses this state needs a
-new login. Old links expire even after a local `--restart`.
+The Cloud discovery request expires after 30 minutes. Device login uses the
+expiry returned by its server. Saving the destination can fail after tokens have
+been saved; the error explains how to supply `--url` or repair the configuration.
 
 With platform and CLI 0.4.0 or newer, a CLI approved through company SSO retains
 that organization's authority through token refresh. Another organization selection

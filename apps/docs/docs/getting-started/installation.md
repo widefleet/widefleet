@@ -62,12 +62,13 @@ widefleet deploy
 If IT configured your agent or computer, the CLI uses that address directly.
 Otherwise it prints a browser link to Widefleet Cloud. Open it in your own
 browser, enter your email and continue to the installation published by your
-company. Check the platform and matching code, select your working organization
-and approve. The CLI saves the selected platform and organization.
+company. Keep the CLI running, check its device code and approve in the browser.
+The CLI saves the selected platform after successful authorization.
 
-An agent can run `widefleet login --no-wait --json`, give you the link and code,
-then resume with `widefleet login --status --json`. It does not need to ask you
-for a URL or email first. See [agent login and resuming](/reference/authentication#agents-and-interrupted-login).
+An agent can keep `widefleet login` running in a background terminal session and
+share its browser link and device code. It does not need to ask for a URL or
+email first. After the command succeeds, it can continue the deployment. See
+[agent login](/reference/authentication#agent-login).
 
 When discovery finds no usable company installation, the browser continues in
 Cloud. An ordinary website page, redirect or temporary lookup failure does not

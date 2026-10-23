@@ -28,18 +28,17 @@ Each command also accepts `--help`; newer commands require matching platform com
 Keep session files outside projects and shared artifacts. The CLI restricts file
 permissions and renews saved sessions automatically. See [headless login](/getting-started/installation#headless-login).
 
-Login reuses a configured self-hosted URL directly. With no configured URL it
-starts in Cloud, where the browser asks for an email and routes to the company
-installation. Successful browser login saves the actual URL and selected working
-organization. `--organization` / `PLATFORM_ORGANIZATION` overrides that default.
-See [CLI configuration](/reference/cli-configuration) for precedence and the
-unreleased feature's version requirements.
+Login uses any configured URL directly, including Cloud. With no configured URL,
+it starts in Cloud, where the browser asks for an email and finds the company
+installation. The CLI then uses device authorization at that installation and
+saves its URL after success. Use `--organization` / `PLATFORM_ORGANIZATION` to
+select the working organization for API commands. See
+[CLI configuration](/reference/cli-configuration) for precedence and availability.
 
-For agents, use `widefleet login --no-wait --json`, present the browser link and
-code to the user, then run `widefleet login --status --json`. A normal login waits
-and resumes a pending request; `--restart` starts a new request. Check the JSON
-`status` before continuing: an exit code of zero alone does not mean approval.
-See [login status and expiry](/reference/authentication#agents-and-interrupted-login).
+For agents, keep `widefleet login` running and present the browser link and
+verification code to the user. Continue after the command exits successfully.
+If it is stopped or expires, start a new login. See
+[agent login](/reference/authentication#agent-login).
 
 See [organization selection](/reference/cli-configuration#select-an-organization)
 for prerequisites, precedence and access recovery.

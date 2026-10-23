@@ -118,33 +118,30 @@ company-only resolver or fetch a private discovery website. The published
 platform itself may still require the employee's VPN. Both the browser and the
 agent's CLI environment need access to it.
 
-For the new default CLI flow, Cloud first creates a browser request. The employee
-enters their email there; routing happens before authorization starts at the
-selected installation. Upgrade that installation and Cloud to support the CLI's
-PKCE authorization and organization selection before rolling out the new CLI.
-An older self-hosted server still supports direct login with its configured URL.
-No callback listener on the employee's computer or agent sandbox is needed.
+For the default CLI flow, Cloud finds the installation in the browser. The
+running CLI requests a device code directly from that installation, and the
+browser continues there to sign in and approve. Upgrade Cloud for browser
+discovery before rolling out the new CLI. The destination uses its existing
+device authorization flow.
 
-Explicit organization sign-in links retain their target, including for guests
-whose email belongs to another company. Existing device grants and OAuth or
-invitation continuations are not forwarded between installations. If a device
-login was started at the wrong platform, the page explains how to restart it
-with `widefleet login --domain example.com`.
+Explicit organization links retain their target, including for guests whose
+email belongs to another company. An existing device grant also stays at its
+issuer: the email entered during sign-in does not change its destination.
+OAuth and invitation continuations are not forwarded between installations.
 
 ## Agent instructions and verification
 
-Have the agent run `widefleet login --no-wait --json` when it needs authentication.
-It presents `verification_uri` and `user_code` to the employee, who completes the
-browser flow. The agent then checks `widefleet login --status --json` until
-`status` is `connected` and continues the deployment. It does not need to know
-the employee's email or choose between Cloud and self-hosting.
+Have the agent run `widefleet login` and keep it running while the employee
+opens its browser link and approves the device code. The agent continues after
+the command succeeds. It does not need to know the employee's email or choose
+between Cloud and self-hosting. A stopped command requires a new login.
 
 For private-only discovery, distribute the platform configuration or a known
 `widefleet login --domain example.com` command. A managed file is a default,
 not a policy lock: explicit overrides and the employee's saved URL take precedence.
 
 Verify login from each supported environment, including remote sandboxes. After
-success, `widefleet config show` reports the saved URL and working organization;
+success, `widefleet config show` reports the saved URL;
 `widefleet whoami` identifies the employee. Configuration contains no tokens.
 Credentials remain in the employee's credential store or private Unix file. See
-[storage and interrupted login](/reference/authentication).
+[credential storage](/reference/authentication).
