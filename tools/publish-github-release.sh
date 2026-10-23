@@ -5,6 +5,7 @@ test "${GITHUB_REPOSITORY:?}" = widefleet/widefleet
 test "${RELEASE_TAG:?}" = "v${VERSION:?}"
 cli=${CLI_RELEASE_DIRECTORY:?}
 images=${RELEASE_IMAGES:?}
+runtime=${RELEASE_RUNTIME:?}
 
 assets=("$cli/widefleet-$VERSION.tgz")
 for platform in linux-x64-gnu darwin-arm64 darwin-x64 win32-x64-msvc; do
@@ -20,8 +21,13 @@ done
   cd "$images"
   sha256sum --check "widefleet-images-$VERSION.env.sha256"
 )
+(
+  cd "$runtime"
+  sha256sum --check release.json.sha256
+  jq -e --arg version "$VERSION" '.version == $version' release.json
+)
 
-assets+=("$images/widefleet-images-$VERSION.env")
+assets+=("$images/widefleet-images-$VERSION.env" "$runtime/release.json")
 attachments=()
 for asset in "${assets[@]}"; do
   attachments+=("$asset" "$asset.sha256")

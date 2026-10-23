@@ -21,7 +21,7 @@ pub struct Options {
 enum Command {
     /// Show the selected and active runtime versions and the latest update result.
     Status,
-    /// Download and activate a published Widefleet runtime version.
+    /// Download and activate the runtime from a published Widefleet release.
     Update {
         version: String,
         #[arg(long)]
@@ -74,7 +74,7 @@ async fn download(version: &str) -> Result<RuntimeRelease> {
             .any(|part| part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()))
     {
         return Err(Error::invalid(
-            "Use a published runtime version, such as 0.1.0".into(),
+            "Use a published Widefleet version, such as 0.4.1".into(),
         ));
     }
     // GitHub credentials are attached only to API requests, never to the platform.
@@ -113,13 +113,13 @@ async fn download_release(
         }
     };
     let response = request(
-        &format!("/releases/tags/runtime-v{version}"),
+        &format!("/releases/tags/v{version}"),
         "application/vnd.github+json",
     )
     .send()
     .await?;
     if response.status() == reqwest::StatusCode::NOT_FOUND {
-        return Err(Error::invalid("Runtime release is unavailable. Check the version; if repository access is restricted, set GH_TOKEN or GITHUB_TOKEN with repository read access".into()));
+        return Err(Error::invalid("Widefleet release is unavailable. Check the version; if repository access is restricted, set GH_TOKEN or GITHUB_TOKEN with repository read access".into()));
     }
     let release: GitHubRelease = response.error_for_status()?.json().await?;
     let asset = |name: &str| -> Result<String> {
@@ -128,7 +128,9 @@ async fn download_release(
             .iter()
             .find(|asset| asset.name == name)
             .map(|asset| format!("/releases/assets/{}", asset.id))
-            .ok_or_else(|| Error::invalid(format!("Runtime release is missing {name}")))
+            .ok_or_else(|| {
+                Error::invalid(format!("Widefleet release is missing runtime asset {name}"))
+            })
     };
     let bytes = request(&asset("release.json")?, "application/octet-stream")
         .send()
@@ -265,7 +267,7 @@ mod tests {
             let origin = format!("http://{}", github.local_addr()?);
             let api_server = std::thread::spawn(move || -> std::io::Result<()> {
                 for path in [
-                    "/releases/tags/runtime-v0.1.0",
+                    "/releases/tags/v0.1.0",
                     "/releases/assets/1",
                     "/releases/assets/2",
                 ] {
