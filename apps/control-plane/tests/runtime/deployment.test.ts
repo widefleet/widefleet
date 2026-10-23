@@ -18,6 +18,7 @@ import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
 import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { createServer, request as upstreamRequest } from "node:http";
+import { createServer as createHttpsServer } from "node:https";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1851,7 +1852,6 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
         main: "worker.ts",
         compatibility_date: "2026-10-01",
         assets: { directory: "public", binding: "ASSETS" },
-        kv_namespaces: [{ binding: "KV", id: "browser-fixture" }],
       }),
     );
     const app = await createApp("browser-network");
@@ -1863,10 +1863,59 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     const edgeName = `widefleet-browser-test-${crypto.randomUUID()}`;
     const routePath = join(state, "routes/browser-fixture.yaml");
     let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+    await execute("openssl", [
+      "req",
+      "-x509",
+      "-newkey",
+      "rsa:2048",
+      "-nodes",
+      "-keyout",
+      join(state, "browser-key.pem"),
+      "-out",
+      join(state, "browser-cert.pem"),
+      "-days",
+      "1",
+      "-subj",
+      "/CN=localhost",
+    ]);
+    const received: string[] = [];
+
+    // Synthetic external endpoints record requests independently of app storage.
+    const resources = createHttpsServer(
+      {
+        key: await readFile(join(state, "browser-key.pem")),
+        cert: await readFile(join(state, "browser-cert.pem")),
+      },
+      (request, response) => {
+        const url = new URL(request.url ?? "/", "https://resources.localhost");
+
+        if (!url.pathname.startsWith("/resource/")) {
+          response.writeHead(404).end();
+
+          return;
+        }
+
+        const kind = url.pathname.slice("/resource/".length);
+        received.push(`${url.searchParams.get("phase")}:${request.headers.host}:${kind}`);
+        response.setHeader("access-control-allow-origin", "*");
+        response.setHeader("cache-control", "no-store");
+
+        if (kind === "image") {
+          response.setHeader("content-type", "image/svg+xml");
+          response.end('<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>');
+        } else if (kind === "font") {
+          // Request delivery matters here; decoding a real font is unnecessary.
+          response.setHeader("content-type", "font/woff2");
+          response.end("synthetic font bytes");
+        } else response.end("fixture");
+      },
+    );
 
     try {
-      // Use a real fixture login for this CSP test. Synthetic resource origins
-      // share the app backend; the browser still enforces its actual network policy.
+      resources.listen(0, "127.0.0.1");
+      await once(resources, "listening");
+      const resourcePort = z.object({ port: z.number() }).parse(resources.address()).port;
+      // Use a real fixture login for this CSP test.
       await writeFile(
         routePath,
         JSON.stringify({
@@ -1894,13 +1943,6 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
                 rule: `Host(\`${app.hostname}\`)`,
                 priority: 1000,
                 middlewares: ["fixture-host"],
-                entryPoints: ["websecure"],
-                tls: {},
-                service: "browser-fixture",
-              },
-              resources: {
-                middlewares: ["fixture-host"],
-                rule: "Host(`connect.localhost`) || Host(`images.localhost`) || Host(`fonts.localhost`) || Host(`denied.localhost`)",
                 entryPoints: ["websecure"],
                 tls: {},
                 service: "browser-fixture",
@@ -1938,7 +1980,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
         { host: "denied", grant: "none" },
       ].map((destination) => ({
         ...destination,
-        origin: `https://${destination.host}.localhost:${port}`,
+        origin: `https://${destination.host}.localhost:${resourcePort}`,
       }));
 
       browser = await chromium.launch({
@@ -1979,7 +2021,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
               await Promise.all(
                 destinations.flatMap((destination) =>
                   ["connect", "image", "font"].map(async (kind) => {
-                    const url = `${destination.origin}/resource/${kind}?phase=${phase}&destination=${new URL(destination.origin).host}`;
+                    const url = `${destination.origin}/resource/${kind}?phase=${phase}`;
 
                     if (kind === "connect") await fetch(url).catch(() => null);
                     else if (kind === "font")
@@ -2014,18 +2056,17 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
             grants && destination.grant !== "none"
               ? []
               : [
-                  `${kind === "image" ? "img" : kind}-src:${destination.origin}/resource/${kind}?phase=${phase}&destination=${new URL(destination.origin).host}`,
+                  `${kind === "image" ? "img" : kind}-src:${destination.origin}/resource/${kind}?phase=${phase}`,
                 ],
           ),
         );
 
         expect(violations).toEqual(expectedBlocked.sort());
 
-        const received = z
-          .array(z.string())
-          .parse(JSON.parse((await appRequest(app.id, "GET", `/observed?phase=${phase}`)).stdout));
-
-        expect(received.sort(), resourceEvents.join("\n")).toEqual(
+        expect(
+          received.filter((entry) => entry.startsWith(`${phase}:`)).sort(),
+          resourceEvents.join("\n"),
+        ).toEqual(
           grants
             ? destinations
                 .flatMap((destination) =>
@@ -2097,6 +2138,12 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       console.info("browser-network: closing Chromium and Traefik");
       await browser?.close();
       await execute("docker", ["rm", "-f", edgeName]).catch(() => undefined);
+      resources.closeAllConnections();
+
+      if (resources.listening)
+        await new Promise<void>((resolve, reject) =>
+          resources.close((error) => (error ? reject(error) : resolve())),
+        );
       console.info("browser-network: Chromium and Traefik closed");
     }
 
