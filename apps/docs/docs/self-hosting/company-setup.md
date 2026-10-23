@@ -1,7 +1,7 @@
 ---
 title: Company setup
 description: Configure employees' agents and computers so they do not need to know the platform URL.
-lastModified: 2026-10-12
+lastModified: 2026-10-23
 ---
 
 Employees should be able to run `widefleet login` without knowing the management
@@ -98,6 +98,25 @@ Publish DNS and website changes through your normal versioned infrastructure
 and deployment process. Allow the agent to reach the company's discovery website
 and platform API through its network policy. A public discovery record does not
 make a private platform reachable from a cloud sandbox.
+
+### Employees arriving at Widefleet Cloud
+
+Cloud sign-in can use the same public DNS record or HTTPS document to route
+employees who arrive at `https://app.widefleet.com`. After an employee enters a
+work email, Cloud checks that domain and opens the published platform's sign-in
+page before requesting a Cloud email code. No registration of the company in a
+separate Widefleet directory is required. See [availability and Cloud defaults](/reference/cli-configuration).
+
+Publish discovery where public resolvers and the Cloud service can read it.
+Private DNS continues to work for local CLI discovery, but Cloud cannot use a
+company-only resolver or fetch a private discovery website. The published
+platform itself may still require the employee's VPN.
+
+Explicit organization sign-in links retain their target, including for guests
+whose email belongs to another company. Existing device grants and OAuth or
+invitation continuations are not forwarded between installations. If a device
+login was started at the wrong platform, the page explains how to restart it
+with `widefleet login --domain example.com`.
 
 ## Agent instructions and verification
 

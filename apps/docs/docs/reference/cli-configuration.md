@@ -7,6 +7,10 @@ lastModified: 2026-10-23
 Company discovery and saved configuration require CLI 0.3.2 or newer. Check
 `widefleet --version`; `widefleet login --help` lists `--email` and `--domain`.
 
+Cloud defaults and browser routing described below are unreleased. CLI 0.4.0
+supports company discovery and saved URLs, but requires an explicit Cloud URL
+when no company discovery record exists.
+
 The CLI remembers the platform URL after a successful login. Credentials stay
 in the operating system's credential store or the explicitly selected session file.
 
@@ -133,10 +137,24 @@ timeout. It requires a valid TLS certificate, accepts at most 8 KiB of JSON and
 does not follow redirects. Malformed or conflicting TXT records stop discovery
 without trying a second source. A valid TXT record takes precedence over HTTPS.
 
-Only the domain is used in discovery requests. The email's local part is neither
-sent nor saved, and discovery requests carry no login credentials. There is no
-fallback to a public DNS provider or a Widefleet-operated directory. The DNS
-resolver and the company's HTTPS endpoint can observe the requests they receive.
+If the TXT lookup succeeds without a record and the HTTPS endpoint returns
+`404` or `410`, the CLI asks `https://app.widefleet.com/api/platform-discovery`
+to confirm the destination. This uses the same public discovery rules as Cloud
+sign-in. A published company URL takes precedence; otherwise the result is
+`https://app.widefleet.com`. The CLI starts device authorization at the resulting
+platform and saves that URL only after login succeeds.
+
+DNS failures, invalid or conflicting records, redirects, TLS failures and server
+errors do not select Cloud. A valid HTTPS discovery document can still resolve
+the company when native DNS is unavailable. If the shared Cloud endpoint is
+unavailable, retry or use an explicit `--url`.
+
+Only the domain is used in CLI discovery requests. The email's local part is
+neither sent nor saved, and discovery requests carry no login credentials.
+The DNS resolver and company website can observe their requests. Cloud also
+receives the domain when confirming an otherwise absent company target. Valid
+local company discovery, saved URLs and managed configuration connect directly
+without contacting Cloud.
 
 Regular API commands use the selected URL and do not rediscover it. Missing
 configuration directs the employee or agent to login. Automatic company-domain

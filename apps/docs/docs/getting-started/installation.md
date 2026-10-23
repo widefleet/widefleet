@@ -1,7 +1,7 @@
 ---
 title: Installation
 description: Set up the Widefleet CLI and create an app for an existing installation.
-lastModified: 2026-10-12
+lastModified: 2026-10-23
 ---
 
 Use the Widefleet CLI to create and deploy apps from your own machine. You need
@@ -64,6 +64,11 @@ Otherwise, it asks for your work email or company domain and looks up the compan
 discovery record. An agent or noninteractive terminal can supply
 `widefleet login --email employee@example.com` or
 `widefleet login --domain example.com`. These commands also work in PowerShell and Fish.
+
+With [Cloud discovery support](/reference/cli-configuration), a successful check
+that finds no company installation selects Widefleet Cloud. You do not need to
+know its URL or choose between Cloud and self-hosting. Discovery errors stop
+login rather than selecting a different installation.
 
 Approve the device code in your browser. The CLI remembers the platform URL and stores credentials in your
 operating system's credential store: Keychain on macOS, Credential Manager on

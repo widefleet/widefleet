@@ -8,6 +8,30 @@ Authenticated clients can fetch `/api/v1/openapi.json`. The document covers mana
 
 Clients must send `Origin: <PLATFORM_URL>` for OAuth form requests and Worker uploads.
 
+## Platform discovery before authentication
+
+`GET https://app.widefleet.com/api/platform-discovery?domain=example.com` resolves
+the company's public TXT record or HTTPS discovery document. It requires no
+credentials and accepts a domain, not a full email address. See
+[feature availability](/reference/cli-configuration).
+
+A successful response has the form:
+
+```json
+{ "platform_url": "https://platform.example.com" }
+```
+
+The result is the published company origin, or `https://app.widefleet.com` when
+TXT is absent and the HTTPS document returns `404` or `410`. The endpoint returns
+`400` for an invalid domain and `503` when discovery fails, including malformed
+records, conflicting targets, redirects and network errors. It is available on
+the canonical Cloud installation; other installations return `404`. Responses
+are not cached.
+
+The result selects a login destination and grants no access. Obtain device codes
+and tokens directly from that destination. Do not send existing tokens to the
+discovery endpoint or follow an HTTP redirect to move an authenticated API request.
+
 ## Organization context
 
 Organization selection requires platform **0.4.0 or newer**.
