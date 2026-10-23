@@ -4,7 +4,7 @@ description: Install, configure and recover a company installation.
 lastModified: 2026-10-23
 ---
 
-This guide installs Widefleet **0.4.1** using the reference Compose deployment. Use Linux x86-64, Docker Engine 29.8.1, Docker Compose 2.20.0 or newer (including v5), and a checkout of the matching release. Published images contain the required runtime and setup tools; the operator host needs no Node, pnpm or Rust installation. The operator owns DNS, certificates, identity-provider registrations, backups and upgrades. Commands below change the selected installation; choose its environment file deliberately.
+This guide installs Widefleet **0.4.2** using the reference Compose deployment. Use Linux x86-64, Docker Engine 29.8.1, Docker Compose 2.20.0 or newer (including v5), and a checkout of the matching release. Published images contain the required runtime and setup tools; the operator host needs no Node, pnpm or Rust installation. The operator owns DNS, certificates, identity-provider registrations, backups and upgrades. Commands below change the selected installation; choose its environment file deliberately.
 
 This page describes local PostgreSQL, RustFS and operator-provided certificates. [External services and automatic HTTPS](/self-hosting/external-services) use the same maintained base configuration with selectable service files.
 
@@ -159,7 +159,7 @@ Search returns Entra object IDs, matching app tokens configured to emit Group ID
 
 ## Pull the release images
 
-Release 0.4.1 provides three public Linux amd64 images on Docker Hub. Pulling them does not require a registry login:
+Release 0.4.2 provides three public Linux amd64 images on Docker Hub. Pulling them does not require a registry login:
 
 | Image                               | Purpose                                                |
 | ----------------------------------- | ------------------------------------------------------ |
@@ -167,14 +167,14 @@ Release 0.4.1 provides three public Linux amd64 images on Docker Hub. Pulling th
 | `docker.io/widefleet/agent`         | Deployment agent and matching celld publish executable |
 | `docker.io/widefleet/runtime`       | Shared celld runtime, including app sign-in            |
 
-All three images and the bundled app runtime use version `0.4.1`. Installation pins container images by digest using the release manifest.
+All three images and the bundled app runtime use version `0.4.2`. Installation pins container images by digest using the release manifest.
 
-Open [release v0.4.1](https://github.com/widefleet/widefleet/releases/tag/v0.4.1) and download `widefleet-images-0.4.1.env` and `widefleet-images-0.4.1.env.sha256` into the repository root. Select the matching configuration and verify the manifest:
+Open [release v0.4.2](https://github.com/widefleet/widefleet/releases/tag/v0.4.2) and download `widefleet-images-0.4.2.env` and `widefleet-images-0.4.2.env.sha256` into the repository root. Select the matching configuration and verify the manifest:
 
 ```sh
-git checkout v0.4.1
-sha256sum --check widefleet-images-0.4.1.env.sha256
-docker compose --env-file widefleet-images-0.4.1.env --env-file /absolute/path/deployment.env -f infra/compose.yaml --profile agent pull
+git checkout v0.4.2
+sha256sum --check widefleet-images-0.4.2.env.sha256
+docker compose --env-file widefleet-images-0.4.2.env --env-file /absolute/path/deployment.env -f infra/compose.yaml --profile agent pull
 ```
 
 Keep the image manifest with the private deployment environment and supply both files to Compose. The pull includes the three Widefleet images and the PostgreSQL, RustFS and Traefik dependencies. Compose starts the `runtime` service directly; app sign-in runs inside it.
@@ -188,8 +188,8 @@ docker run --rm --user 0 \
   -v /absolute/data/path/objects:/data \
   debian:bookworm-slim@sha256:3783cc01769c7b2b1b83a5c5ad96c815348e28ed7da68e2e3687004faa906251 \
   chown 10001:10001 /data
-docker compose --env-file widefleet-images-0.4.1.env --env-file /absolute/path/deployment.env -f infra/compose.yaml up -d control-plane proxy
-docker compose --env-file widefleet-images-0.4.1.env --env-file /absolute/path/deployment.env -f infra/compose.yaml ps --all
+docker compose --env-file widefleet-images-0.4.2.env --env-file /absolute/path/deployment.env -f infra/compose.yaml up -d control-plane proxy
+docker compose --env-file widefleet-images-0.4.2.env --env-file /absolute/path/deployment.env -f infra/compose.yaml ps --all
 ```
 
 Compose starts PostgreSQL and storage, then runs the one-time `initialize` service to prepare storage, the database schema, keys and edge/runtime configuration. The runtime starts after initialization succeeds; management waits for the runtime health check. Expect `initialize` to exit successfully and `runtime` and `control-plane` to become healthy. If startup fails, inspect `docker compose ... logs initialize runtime control-plane`. Open `PLATFORM_URL` and complete [first setup](#infrastructure-and-first-start). Infrastructure changes such as domains or TLS mode require recreating the affected services through Compose.
@@ -197,7 +197,7 @@ Compose starts PostgreSQL and storage, then runs the one-time `initialize` servi
 Sign in to management, register an agent, and copy its one-time token into `PLATFORM_AGENT_TOKEN`. Start it with:
 
 ```sh
-docker compose --env-file widefleet-images-0.4.1.env --env-file /absolute/path/deployment.env -f infra/compose.yaml --profile agent up -d agent
+docker compose --env-file widefleet-images-0.4.2.env --env-file /absolute/path/deployment.env -f infra/compose.yaml --profile agent up -d agent
 ```
 
 Apps belong to the installation organization. Agent registration authorizes an executor for that organization while preserving app and storage identities. Use the same Docker host, node-state directory, routing directory and storage configuration when replacing an executor. A replacement can claim pending or expired jobs without changing apps. The installer manages one runtime node.
@@ -208,7 +208,7 @@ The reference installation is designed for trusted company app creators. Its ins
 
 ## Versions and updates
 
-Use matching 0.4.1 control-plane, agent, CLI and app runtime releases. The native runtime is celld 0.6.2. Keep the matching source checkout and image manifest with every backup; restoring older images alone does not reverse database or storage changes.
+Use matching 0.4.2 control-plane, agent, CLI and app runtime releases. The native runtime is celld 0.6.2. Keep the matching source checkout and image manifest with every backup; restoring older images alone does not reverse database or storage changes.
 
 Check the selected and active versions with `widefleet runtime status`. Use the [runtime commands](/reference/runtime#versions-and-updates) to update or roll back with an administrator login. Updating container images and activating a runtime remain separate actions.
 
