@@ -1,7 +1,7 @@
 ---
 title: Single-host installation
 description: Install, configure, upgrade and recover a company installation.
-lastModified: 2026-10-12
+lastModified: 2026-10-23
 ---
 
 This Compose deployment is the reference installation. Use Linux x86-64, Docker Engine 29.8.1, Docker Compose 2.20.0 or newer (including v5), and a checkout of the matching release. Published images contain the required runtime and setup tools; the operator host needs no Node, pnpm or Rust installation. The operator owns DNS, certificates, identity-provider registrations, backups and upgrades. Commands below change the selected installation; choose its environment file deliberately.
@@ -153,12 +153,10 @@ Releases provide four public Linux amd64 images on Docker Hub. Pulling them does
 
 Every image has the same release tag, for example `0.3.0`, and OCI labels for its source repository, source commit and version. Installation uses exact digests from the release attachment `widefleet-images-VERSION.env`, verified with its accompanying `.sha256` file. There is no floating `latest` tag and no automatic update of running installations.
 
-From the repository root, use the matching release configuration and download its digest manifest. Replace `VERSION` with the release version. The files are also available on [GitHub Releases](https://github.com/widefleet/widefleet/releases).
+Open the selected [GitHub release](https://github.com/widefleet/widefleet/releases) and download `widefleet-images-VERSION.env` and `widefleet-images-VERSION.env.sha256` into the repository root. Replace `VERSION` with that release's version, then select the matching configuration and verify the manifest:
 
 ```sh
 git checkout vVERSION
-curl --fail --location --remote-name https://github.com/widefleet/widefleet/releases/download/vVERSION/widefleet-images-VERSION.env
-curl --fail --location --remote-name https://github.com/widefleet/widefleet/releases/download/vVERSION/widefleet-images-VERSION.env.sha256
 sha256sum --check widefleet-images-VERSION.env.sha256
 ```
 
