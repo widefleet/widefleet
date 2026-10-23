@@ -164,7 +164,7 @@ async fn reads_https_document_shape_without_credentials_and_checks_body_limits()
     ))?;
     assert_eq!(
         from_https(&client, &endpoint).await?,
-        "https://platform.example.test"
+        Some("https://platform.example.test".into())
     );
     let request = join_request(thread)?;
     assert!(request.starts_with("GET /.well-known/widefleet HTTP/1.1\r\n"));
@@ -205,7 +205,7 @@ async fn rejects_redirects_and_http_errors() -> Result<()> {
         .redirect(reqwest::redirect::Policy::none())
         .timeout(Duration::from_secs(2))
         .build()?;
-    for status in ["302 Found", "404 Not Found", "503 Service Unavailable"] {
+    for status in ["302 Found", "401 Unauthorized", "503 Service Unavailable"] {
         let (endpoint, thread) = serve(format!(
             "HTTP/1.1 {status}\r\nLocation: http://127.0.0.1:1/\r\nContent-Length: 0\r\n\r\n"
         ))?;
@@ -214,6 +214,17 @@ async fn rejects_redirects_and_http_errors() -> Result<()> {
                 .await
                 .is_err_and(|error| error.to_string().contains(status))
         );
+        join_request(thread)?;
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn only_missing_https_documents_allow_the_cloud_default() -> Result<()> {
+    let client = Client::builder().no_proxy().build()?;
+    for status in ["404 Not Found", "410 Gone"] {
+        let (endpoint, thread) = serve(format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\n\r\n"))?;
+        assert_eq!(from_https(&client, &endpoint).await?, None);
         join_request(thread)?;
     }
     Ok(())

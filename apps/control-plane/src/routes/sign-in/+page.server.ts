@@ -10,7 +10,7 @@ import { localDestination } from "#server/navigation";
 import { installationOrganizationId } from "#lib/organization";
 
 export const load: PageServerLoad = async ({ url, setHeaders }) => {
-  setHeaders({ "cache-control": "private, no-store" });
+  setHeaders({ "cache-control": "private, no-store", "referrer-policy": "no-referrer" });
   const runtime = await getRuntime();
 
   if (!(await readInstallation(runtime.database.db)).ownerId) redirect(303, "/setup");

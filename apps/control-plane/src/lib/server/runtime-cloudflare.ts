@@ -33,6 +33,7 @@ export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
   const storage = createArtifactStorage(createR2Storage(bindings.ARTIFACTS));
 
   const options: Parameters<typeof createRuntime>[0] = {
+    discoveryTransport: "cloudflare",
     ...extension,
     configuration,
     database,

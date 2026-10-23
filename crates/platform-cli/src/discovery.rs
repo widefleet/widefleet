@@ -10,6 +10,7 @@ const DNS_TIMEOUT: Duration = Duration::from_secs(5);
 const HTTPS_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_DOCUMENT_BYTES: usize = 8192;
 const TXT: u16 = 16;
+const CLOUD_ORIGIN: &str = "https://app.widefleet.com";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Domain(String);
@@ -168,6 +169,7 @@ pub async fn resolve(domain: &Domain) -> Result<String> {
 }
 
 async fn resolve_with(domain: &Domain, dns: DnsLookup, client: &Client) -> Result<String> {
+    let dns_available = matches!(&dns, DnsLookup::Records(_));
     let dns_reason = match dns {
         DnsLookup::Records(records) => match from_txt(&records)? {
             Some(origin) => return Ok(origin),
@@ -176,12 +178,29 @@ async fn resolve_with(domain: &Domain, dns: DnsLookup, client: &Client) -> Resul
         DnsLookup::Unavailable(reason) => format!("System DNS unavailable: {reason}"),
     };
     eprintln!("{dns_reason}. Checking {}", domain.endpoint());
-    from_https(client, &domain.endpoint()).await.inspect_err(|_| {
+    let discovered = from_https(client, &domain.endpoint()).await.inspect_err(|_| {
         eprintln!(
             "Could not discover Widefleet for {}. Ask IT to publish a discovery record or configure the CLI in this environment",
             domain.0,
         );
-    })
+    })?;
+    match discovered {
+        Some(origin) => Ok(origin),
+        None if dns_available => {
+            // Confirm the default through the same resolver as Cloud sign-in.
+            // Apple's DNS API can conflate SERVFAIL with an absent TXT record.
+            // Positive local discovery never contacts Cloud.
+            let endpoint = format!("{CLOUD_ORIGIN}/api/platform-discovery?domain={}", domain.0);
+            let origin = from_https(client, &endpoint).await?.ok_or_else(|| {
+                Error::invalid("Widefleet Cloud discovery is unavailable. Retry or use --url".into())
+            })?;
+            eprintln!("Connecting to {origin}");
+            Ok(origin)
+        }
+        None => Err(Error::invalid(
+            "Company discovery is unavailable. Retry or use --url; the Cloud default requires a successful check for company discovery records".into(),
+        )),
+    }
 }
 
 fn discovered_origin(value: &str) -> Result<String> {
@@ -242,14 +261,17 @@ struct Document {
     platform_url: String,
 }
 
-async fn from_https(client: &Client, endpoint: &str) -> Result<String> {
+async fn from_https(client: &Client, endpoint: &str) -> Result<Option<String>> {
     // No session, email, or platform access token is attached to discovery.
     let mut response = client
         .get(endpoint)
         .header("accept", "application/json")
         .send()
         .await?;
-    if !response.status().is_success() {
+    if matches!(response.status().as_u16(), 404 | 410) {
+        return Ok(None);
+    }
+    if response.status() != reqwest::StatusCode::OK {
         return Err(Error::invalid(format!(
             "HTTPS discovery returned {}",
             response.status()
@@ -275,7 +297,7 @@ async fn from_https(client: &Client, endpoint: &str) -> Result<String> {
     let document: Document = serde_json::from_slice(&bytes).map_err(|_| {
         Error::invalid("HTTPS discovery must contain JSON with a single platform_url field".into())
     })?;
-    discovered_origin(&document.platform_url)
+    discovered_origin(&document.platform_url).map(Some)
 }
 
 #[cfg(test)]

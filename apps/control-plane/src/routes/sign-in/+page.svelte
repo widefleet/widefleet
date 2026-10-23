@@ -1,8 +1,9 @@
 <script lang="ts">
   import { z } from "zod";
   import { onMount } from "svelte";
+  import { isHttpError } from "@sveltejs/kit";
   import { authClient } from "#lib/auth-client";
-  import { findSignInProvider } from "#lib/sign-in.remote";
+  import { findSignInDestination } from "#lib/sign-in.remote";
   import { goto } from "$app/navigation";
   import AuthLayout from "#shadcn/components/AuthLayout.svelte";
   import Feedback from "#shadcn/components/Feedback.svelte";
@@ -45,13 +46,19 @@
       if (sentTo === null) {
         const recipient = email.trim().toLowerCase();
 
-        const provider = data.organizationSlug
+        const destination = data.organizationSlug
           ? null
-          : await findSignInProvider({ email: recipient });
+          : await findSignInDestination({ email: recipient, next: data.next });
 
-        if (provider) {
+        if (destination?.url) {
+          window.location.assign(destination.url);
+
+          return;
+        }
+
+        if (destination?.provider) {
           const result = await authClient.signIn.sso({
-            providerId: provider,
+            providerId: destination.provider,
             email: recipient,
             callbackURL: data.next,
           });
@@ -79,8 +86,9 @@
           await goto(data.next, { invalidateAll: true });
       }
     } catch (cause) {
-      message =
-        cause instanceof Error
+      message = isHttpError(cause)
+        ? cause.body.message
+        : cause instanceof Error
           ? cause.message
           : "Sign-in is temporarily unavailable. Check your connection.";
     } finally {
