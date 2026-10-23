@@ -184,8 +184,6 @@ If activation fails, check `widefleet connector show NAME` to inspect the servin
 
 Installed code, configuration, bindings and state remain in the data plane. Serving apps and ordinary runtime restarts work without the control plane or deployment agent. App deletion removes that app's references, not a shared connector or its data.
 
-The Dynamic connector format replaces the earlier native connector format. There is no automatic migration for existing native connectors.
-
 `vars` are ordinary package configuration; use the dedicated secret commands for credentials. Connector cron/queue configuration, cross-organization bindings and connector removal commands are not implemented here. Runtime updates preserve installed connectors. Native RPC/DO/telemetry differences are described in the [celld compatibility notes](/reference/runtime-compatibility).
 
 ## API
