@@ -170,6 +170,61 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
     expect(response.status).toBe(200);
   });
 
+  it("handles a bodyless CLI discovery start before rejecting a non-Cloud installation", async () => {
+    // workerd exposes a body stream even for this empty POST. The Node adapter
+    // omits it, which previously hid Better Auth's 415 response without Content-Type.
+    const response = await fetch(`${origin}/api/auth/cli-login/start`, {
+      method: "POST",
+      headers: { origin },
+    });
+
+    expect(response.status, await response.clone().text()).toBe(404);
+  });
+
+  it("starts Cloud discovery without Content-Type and polls the persisted request", async () => {
+    const cloudOrigin = "https://app.widefleet.com";
+    const { unstable_dev } = await import("wrangler");
+
+    const cloud = await unstable_dev(join(directory, "fixture.ts"), {
+      config: join(directory, "wrangler.json"),
+      vars: { PLATFORM_URL: cloudOrigin },
+      local: true,
+      persist: false,
+      ip: "127.0.0.1",
+      port: 0,
+      inspectorPort: 0,
+      logLevel: "error",
+      experimental: { disableExperimentalWarning: true, disableDevRegistry: true, watch: false },
+    });
+
+    try {
+      const response = await cloud.fetch(`${cloudOrigin}/api/auth/cli-login/start`, {
+        method: "POST",
+        headers: { origin: cloudOrigin },
+      });
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+
+      const started = z
+        .object({ request_id: z.string(), cli_token: z.string(), verification_uri: z.string() })
+        .parse(await response.json());
+
+      expect(new URL(started.verification_uri).origin).toBe(cloudOrigin);
+
+      const polled = await cloud.fetch(`${cloudOrigin}/api/auth/cli-login/poll`, {
+        method: "POST",
+        headers: { origin: cloudOrigin, "content-type": "application/json" },
+        body: JSON.stringify({ request_id: started.request_id, cli_token: started.cli_token }),
+      });
+
+      expect(polled.status, await polled.clone().text()).toBe(200);
+      expect(await polled.json()).toEqual({ platform_url: null });
+    } finally {
+      await cloud.stop();
+    }
+  }, 30_000);
+
   it("limits login attempts across independent Worker requests for the same IP", async () => {
     const signIn = (ip: string) =>
       fetch(`${origin}/api/auth/sign-in/email-otp`, {

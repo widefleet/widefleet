@@ -27,6 +27,46 @@ describe("CLI discovery followed by Better Auth device authorization", () => {
     return { ...started, ticket };
   };
 
+  it.each([
+    { name: "no body", body: null },
+    { name: "empty body stream", body: new Uint8Array() },
+  ])("starts discovery without Content-Type for $name", async ({ body }) => {
+    const response = await cloud.auth.handler(
+      new Request(`${cloudOrigin}/api/auth/cli-login/start`, {
+        method: "POST",
+        headers: { origin: cloudOrigin },
+        body,
+      }),
+    );
+
+    expect(response.status, await response.clone().text()).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+
+    const started = z
+      .object({ request_id: z.string(), cli_token: z.string(), verification_uri: z.string() })
+      .parse(await response.json());
+
+    const url = new URL(started.verification_uri);
+    expect(url.origin).toBe(cloudOrigin);
+    expect(url.pathname).toBe("/cli-login");
+    expect(await cloud.cliLogin.poll(started.request_id, started.cli_token)).toEqual({
+      platform_url: null,
+    });
+  });
+
+  it("keeps origin checks for cookie-bearing discovery starts", async () => {
+    const response = await cloud.auth.handler(
+      new Request(`${cloudOrigin}/api/auth/cli-login/start`, {
+        method: "POST",
+        headers: { origin: "https://untrusted.example.test", cookie: "untrusted=fixture" },
+        body: new Uint8Array(),
+      }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ code: "INVALID_ORIGIN" });
+  });
+
   it.each(["company", "cloud"])(
     "uses the selected %s's standard device grant and keeps credentials out of routing",
     async (destination) => {
