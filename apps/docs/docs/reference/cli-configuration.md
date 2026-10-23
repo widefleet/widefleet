@@ -4,8 +4,10 @@ description: Inspect, change and distribute the platform URL used by the Widefle
 lastModified: 2026-10-23
 ---
 
-Company discovery and saved configuration require CLI 0.3.2 or newer. Check
-`widefleet --version`; `widefleet login --help` lists `--email` and `--domain`.
+Browser-based destination selection and automatic Unix credential-file fallback
+require CLI **0.4.3 or newer**. Company discovery with `--email` or `--domain`
+and saved configuration require CLI 0.3.2 or newer. Check `widefleet --version`;
+`widefleet login --help` lists `--email` and `--domain`.
 
 The CLI remembers the platform URL after a successful login. Credentials stay
 in the operating system's credential store or a private Unix credential file.
