@@ -10,7 +10,7 @@ The installation's celld runtime runs apps and previews as separate Dynamic Work
 
 The Widefleet loader and built-in binding adapters are JavaScript built from `packages/app-runtime`. They are versioned separately from the Rust agent. `widefleet runtime update VERSION` downloads the matching `runtime-vVERSION` GitHub release, verifies its published checksum and uploads the package through the authenticated API. If the release repository requires authentication, supply a repository-read token using `GH_TOKEN` or `GITHUB_TOKEN`. That token is used only for GitHub; the Widefleet credential is used only for the management API.
 
-Platform 0.4.0 bundles app runtime 0.3.0 for new installations. Its separate `runtime-v0.3.0` GitHub release is not yet published, so `widefleet runtime update 0.3.0` cannot download it. Use the commands below only with a published runtime release compatible with the installed platform.
+Platform 0.4.0 bundles app runtime 0.3.0 for new installations. Its separate `runtime-v0.3.0` GitHub release is not yet published, so `widefleet runtime update 0.3.0` cannot download it. The `update` command needs a published runtime release compatible with the installed platform. `rollback` selects a compatible version already stored by the installation and does not download a release.
 
 ```sh
 widefleet login
@@ -28,12 +28,6 @@ If an update returns `409: Runtime versions are immutable`, the installation alr
 Platform 0.4.0 includes app runtime 0.3.0, using installation protocol 2 and celld 0.6.2. Use matching 0.4.0 control-plane, agent and CLI releases; older protocol-1 runtime packages cannot run on this platform. Workflow support additionally requires a deployment agent that provisions Workflow protocol 1 bindings. A compatible loader/adapter update within installed capabilities needs no Rust rebuild; a new installation protocol or celld binary requires a separately reviewed platform update.
 
 Runtime 0.2.1 forwards incoming HTTP request cancellation explicitly to the loaded app. If the client disconnects before response headers, the app's `request.signal` is aborted. App code must pass that signal to any downstream requests it wants to cancel, for example `env.SERVICE.fetch(url, { signal: request.signal })`. A timeout after a fetch has returned still needs explicit cancellation of the response body.
-
-## Organization ownership upgrade
-
-Platform 0.4.0 moves app and connector ownership from fleets to organizations. Its database migration preserves resource ownership and settings, but it does not migrate object storage, local runtime state or existing native connector deployments.
-
-Version 0.4.0 provides no supported in-place migration procedure for an installation already serving apps. Updating images or redeploying code does not transfer the existing runtime data. Keep the previous installation and a complete backup intact until a state migration and recovery procedure is available. New installations can use 0.4.0 directly.
 
 ## Activation and recovery
 
@@ -64,5 +58,3 @@ The [celld/Cloudflare comparison](/reference/runtime-compatibility) separates na
 ## App removal
 
 Deletion queues cleanup for the app and all its previews. Each cleanup removes the route, app references, deployment artifacts, snapshots and safely removable R2 objects; unrelated apps and the shared fleet remain running. Native D1/KV/Queue cells may remain without app references because celld 0.6.1 exposes no supported per-app physical purge. Do not delete files owned by a running native cell. Provider snapshots/version history and telemetry retention have their own lifecycle.
-
-Upgrading from the earlier per-app runtime requires a fresh installation. The shared-fleet migrations reject existing apps; network migration `0008` also rejects selected runtimes and running jobs. There is no automatic data migration or downgrade.

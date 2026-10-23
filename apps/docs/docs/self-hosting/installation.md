@@ -1,6 +1,6 @@
 ---
 title: Single-host installation
-description: Install, configure, upgrade and recover a company installation.
+description: Install, configure and recover a company installation.
 lastModified: 2026-10-23
 ---
 
@@ -11,8 +11,6 @@ This page describes local PostgreSQL, RustFS and operator-provided certificates.
 Docker 29.8.1 is the tested host baseline, pinned in CI. Its network address allocation supports the fleet's fixed app addresses; see the [29.x release notes](https://docs.docker.com/engine/release-notes/29/#2904).
 
 ## Infrastructure and first start
-
-Start with a new installation. For an existing installation with apps or runtime data, read the [0.4.0 upgrade requirements](#upgrade-deliberately) before changing images or starting the new services.
 
 Copy `infra/deployment.env.example` to a private file outside version control. Set the database/storage credentials, `PLATFORM_URL`, `APP_DOMAIN` and the absolute `PLATFORM_DATA_DIRECTORY`. The management hostname must be outside the app domain, for example `platform.example.test` and `*.apps.example.test`. Configure DNS and provide `${PLATFORM_DATA_DIRECTORY}/tls/fullchain.pem` and `privkey.pem`, or select [automatic HTTPS](/self-hosting/external-services#automatic-https-with-cloudflare).
 
@@ -208,19 +206,11 @@ Only ports 80 and 443 are published. PostgreSQL, object storage and runtime oper
 
 The reference installation is designed for trusted company app creators. Its installation-wide storage credentials are passed to celld, not to app Worker bindings. The runtime has a read-only root filesystem and a persistent writable node-state directory. No additional platform CPU, memory or request-concurrency limits are imposed.
 
-## Upgrade deliberately
-
-### Moving from 0.3.x to 0.4.0
-
-Version 0.4.0 changes runtime ownership, persistent storage layout and connector execution. It does **not** provide an in-place migration procedure for an existing installation with apps or runtime data. Keep that installation on its current version until its state can be migrated and recovery verified. A new installation can use 0.4.0 directly. See the [organization ownership upgrade boundary](/reference/runtime#organization-ownership-upgrade).
-
-The authentication changes also remove password login. A migrated installation needs email-code delivery, explicit `LOGIN_CODE_DELIVERY=console`, or working company SSO. Remove `owner.password` from a pending bootstrap file. Company SSO uses one provider registration for management and apps: register both callbacks shown in Settings, verify the company domain and activate SSO. Existing browser sessions and CLI credentials require a fresh sign-in.
-
-### Platform and runtime versions
+## Versions and updates
 
 Use matching 0.4.0 control-plane, agent and CLI releases with app runtime 0.3.0. The native runtime is celld 0.6.2. Keep the matching source checkout and image manifest with every backup; restoring older images alone does not reverse database or storage changes.
 
-The JavaScript app runtime has a separate release lifecycle from the container images. Check the selected and active versions with `widefleet runtime status`. Updates and rollbacks use the [runtime commands](/reference/runtime#versions-and-updates) and require an independently published runtime package. Upgrading the control-plane image does not change an organization's already selected JavaScript runtime.
+The JavaScript app runtime has a separate release lifecycle from the container images. Check the selected and active versions with `widefleet runtime status`. Use the [runtime commands](/reference/runtime#versions-and-updates) to update or roll back. An update downloads an independently published runtime package; rollback selects a version already stored by the installation. Upgrading the control-plane image does not change an organization's already selected JavaScript runtime.
 
 ## Management members and app collaboration
 
