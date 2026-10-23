@@ -157,11 +157,17 @@ export const cliLoginPlugin = (login: ReturnType<typeof createCliLogin>) => ({
     { pathMatcher: (path: string) => path === "/cli-login/poll", window: 60, max: 60 },
   ],
   endpoints: {
-    startCliLogin: createAuthEndpoint("/cli-login/start", { method: "POST" }, async (context) => {
-      context.setHeader("cache-control", "no-store");
+    startCliLogin: createAuthEndpoint(
+      "/cli-login/start",
+      // No input is consumed. workerd can expose an empty body stream for the
+      // CLI's bodyless POST, which must not trigger JSON Content-Type validation.
+      { method: "POST", disableBody: true },
+      async (context) => {
+        context.setHeader("cache-control", "no-store");
 
-      return context.json(await login.start());
-    }),
+        return context.json(await login.start());
+      },
+    ),
     pollCliLogin: createAuthEndpoint(
       "/cli-login/poll",
       { method: "POST", body: credentials },
