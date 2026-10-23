@@ -47,7 +47,7 @@ Configure company SSO, directory credentials and browser editability in **Settin
 For interactive first setup, choose a sign-in-code transport before starting the containers:
 
 - `LOGIN_CODE_DELIVERY=email` is the default. It requires a configured email adapter; the standard self-hosted build does not include a mail service.
-- `LOGIN_CODE_DELIVERY=console` explicitly prints sign-in codes to the control-plane log. The example deployment environment selects this operator mode. Read it with `docker compose ... logs --since=5m control-plane`. Log readers can use the codes, so keep logs private. Console delivery does not prove control of the email inbox, although Better Auth marks a successful email-code login as email-verified. Use email delivery or company SSO for ordinary users.
+- `LOGIN_CODE_DELIVERY=console` explicitly prints sign-in codes to the control-plane log. The example deployment environment selects this operator mode. Read it with `docker compose ... logs --since=5m control-plane`. Log readers can use the codes, so keep logs private. Console delivery does not prove control of the email inbox. Use email delivery or company SSO for ordinary users.
 
 This setting controls sign-in codes only. Invitations still require an email adapter. Mail failures never switch delivery to the console. Changing the transport requires recreating the control-plane container and does not revoke existing sessions.
 
@@ -63,15 +63,12 @@ Customer administrators can change their own SSO and directory settings without 
 
 Company sign-in automatically enrolls users admitted by the organization's provider as Members who can create apps, including external guests. Restrict the shared IdP registration to the intended users. Existing memberships keep their roles, and pending invitations retain their acceptance flow. Without company SSO, customers join through invitations. Apps enforce their own access rules and business permissions using the verified user and group context.
 
-Management uses Better Auth's SSO plugin for OIDC discovery, callbacks, provider registration and DNS verification. Existing accounts with a matching email in the verified company domain are linked automatically, retaining their membership and role. External guests admitted by the provider can join, but a different email domain does not establish trusted linking to an existing account. See [company SSO activation](/guides/members#activate-company-sso) for CLI commands and provider replacement behavior.
+Existing accounts with a matching email in the verified company domain are linked automatically, retaining their membership and role. External guests admitted by the provider can join, but a different email domain does not establish trusted linking to an existing account. See [company SSO activation](/guides/members#activate-company-sso) for CLI commands and provider replacement behavior.
 
 Known runtime limitation: celld `0.6.2` drops incoming header values containing non-ASCII bytes. Display names can therefore be empty in Workers; the stable user identifier remains available for authorization.
 
-For unreleased organization sign-in builds, the Node control plane uses Better Auth's
-in-memory request limiter. Counters are per process, reset on restart, and do not use
-PostgreSQL. Requests from the same IP share an endpoint's limit; users behind a shared
-proxy can therefore affect each other. A `429` response includes an `X-Retry-After`
-delay. The per-email-code attempt limit remains in the stored verification record.
+If sign-in returns `429`, wait for the delay in the `X-Retry-After` header before retrying.
+Users behind a shared proxy share an IP-based request limit.
 
 ### Automated first setup
 
@@ -113,7 +110,7 @@ services:
       - /absolute/private/bootstrap.json:/run/widefleet/bootstrap.json:ro
 ```
 
-The bootstrap file initializes the administrator and the optional settings once. If initialization fails after creating the administrator, the next start resumes with that account. Keep the file mounted, correct the reported configuration or provider failure, and restart until initialization succeeds. After successful initialization, the file is ignored and can be removed; later UI/API changes survive restarts. The bootstrap file does not prove domain ownership. File initialization uses a short-lived operator session that is closed afterwards; it does not send a code or mark the owner’s email as verified. Use an email-code login or a recovery link to complete DNS verification and test the company login.
+The bootstrap file initializes the administrator and the optional settings once. If initialization fails after creating the administrator, the next start resumes with that account. Keep the file mounted, correct the reported configuration or provider failure, and restart until initialization succeeds. After successful initialization, the file is ignored and can be removed; later UI/API changes survive restarts. Use an email-code login or a recovery link to complete DNS verification and test the company login.
 
 ### UI, API and CLI configuration
 
@@ -128,7 +125,7 @@ widefleet settings external-management true
 widefleet settings external-management false
 ```
 
-The CLI and external integrations use `GET/PUT /api/v1/settings`, `POST /api/v1/settings/plan` and `PUT /api/v1/settings/external-management`. The UI uses SvelteKit remote functions that call the same settings service. Administrator permission is required through either entry point. Exports omit the SSO secret, which the native provider preserves when unchanged. Set `sso.oidcConfig.clientSecret` to replace it. Directory exports omit `clientSecret`; leaving it out of an update preserves the selected organization's saved secret. Stored secret values are never returned.
+The CLI and external integrations use `GET/PUT /api/v1/settings`, `POST /api/v1/settings/plan` and `PUT /api/v1/settings/external-management`. Administrator permission is required for UI, API and CLI changes. Exports omit the SSO secret; leaving it out of an update preserves the saved value. Set `sso.oidcConfig.clientSecret` to replace it. Directory exports omit `clientSecret`; leaving it out of an update preserves the selected organization's saved secret. Stored secret values are never returned.
 
 External management makes the settings UI read-only; API/CLI writes and app management remain available. An administrator can turn browser editing back on.
 
@@ -137,8 +134,7 @@ without restarting. Activation status describes the published app sign-in config
 With email-code sign-in enabled, it can be active while company-domain verification is
 pending because apps still use Widefleet sign-in. Check DNS verification and SSO enforcement
 separately under company sign-in. If
-publication fails, correct the runtime connection and save again. A future runtime requiring
-a restart must report it through the same plan and acknowledgement flow.
+publication fails, correct the runtime connection and save again.
 
 The app runtime keeps the published authentication configuration and validates company
 logins directly with the IdP. Company app sign-in does not contact the control plane or its
@@ -286,7 +282,7 @@ Use the matching [CLI release](/getting-started/installation) to access the sett
 
 ## Management members and app collaboration
 
-Widefleet uses Better Auth's Organization plugin with one automatically provisioned installation organization. No organization selection is required in the browser or CLI.
+Widefleet provisions one installation organization automatically. No organization selection is required in the browser or CLI.
 
 | Role   | Permissions                                                                   |
 | ------ | ----------------------------------------------------------------------------- |
@@ -294,7 +290,7 @@ Widefleet uses Better Auth's Organization plugin with one automatically provisio
 | Admin  | Manage all apps, deployment agents and member roles, except Owner assignments |
 | Owner  | Admin permissions plus appointing and changing Owners                         |
 
-After the first verified management sign-in, the person appears under **Members**. Owners and admins can search by name or email and change their role there. Role changes apply to existing browser and CLI sessions on their next API request. At least one Owner must remain, using Better Auth's native owner checks. Only Owners can change Owner assignments.
+After the first verified management sign-in, the person appears under **Members**. Owners and admins can search by name or email and change their role there. Role changes apply to existing browser and CLI sessions on their next API request. At least one Owner must remain. Only Owners can change Owner assignments.
 
 On an app's **Access** tab, **Management access** lets you search members by name or email and grant or revoke app collaboration. A collaborator can deploy, roll back and delete that app; only its owner or an organization administrator can change its grants. Organization administrators retain access independently of individual grants. The CLI's existing `grant` and `revoke` commands remain compatible.
 

@@ -1,12 +1,12 @@
 ---
 title: API and uploads
 description: Authentication, app publication and the Worker upload contract.
-lastModified: 2026-10-20
+lastModified: 2026-10-23
 ---
 
 Authenticated clients can fetch `/api/v1/openapi.json`. The document covers management operations, agent jobs, binary assets and multipart Workers.
 
-Clients must send `Origin: <PLATFORM_URL>` for OAuth form requests and Worker uploads. SvelteKit's CSRF protection and Better Auth's protections remain enabled.
+Clients must send `Origin: <PLATFORM_URL>` for OAuth form requests and Worker uploads.
 
 ## Organization context
 
@@ -66,7 +66,7 @@ an administrator to grant access.
 
 These endpoints require an unreleased build containing organization invitations.
 Reads require `platform:read`, writes require `platform:write`; browser requests use
-the same services with session authentication. Administrator operations use the
+session authentication. Administrator operations use the
 selected organization and the owner restrictions described in [member management](/guides/members).
 
 | Endpoint                                         | Operation                                                         |
@@ -83,9 +83,11 @@ selected organization and the owner restrictions described in [member management
 
 Reading or accepting your own invitation does not require an existing membership or
 organization selection. A company-scoped sign-in cannot accept another organization's
-invitation. Acceptance does not change the account name.
-Expired or processed invitations cannot be accepted again. Native Better Auth organization
-mutation endpoints are unavailable; use the shared API above.
+invitation. Expired or processed invitations cannot be accepted again.
+
+To resend a pending invitation, use `POST /api/v1/invitations` with its email and role
+and `"resend": true`. See [invitation delivery](/guides/members#invite-and-manage-members)
+if the email does not arrive.
 
 Company accounts with matching email addresses are linked during verified company SSO.
 An active company provider requires SSO authority for organization access; email credentials
@@ -97,8 +99,8 @@ Organization administrators use `POST /api/v1/settings/domain-verification` to o
 After publishing the record, `POST /api/v1/settings/verify-domain` verifies ownership.
 `POST /api/v1/settings/activate-sso` separately makes company SSO required; it requires
 verified DNS but does not require a completed test login. These operations accept the
-same browser or CLI write credentials as settings changes and operate on the selected organization; raw Better Auth
-SSO management routes are not exposed. See [activation](/guides/members#activate-company-sso).
+same browser or CLI write credentials as settings changes and operate on the selected organization.
+See [activation](/guides/members#activate-company-sso).
 
 ## Publish an app
 
