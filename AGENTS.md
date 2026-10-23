@@ -67,6 +67,7 @@ Discuss new dependencies and architectural decisions with lasting consequences w
 Ask for explicit approval before any command that can modify production systems or production data.
 Never send email or chat messages.
 Keep deployment changes in versioned configuration and follow the intended deployment process.
+Creating or updating a PR includes monitoring CI and review, fixing failures and actionable feedback, and verifying the latest commit before handing work back. Use a PR watcher when available. Do not hand work back while CI or review is pending unless explicitly asked.
 
 ## Checks
 
