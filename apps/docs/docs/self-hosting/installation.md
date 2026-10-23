@@ -89,7 +89,7 @@ widefleet settings external-management true
 widefleet settings external-management false
 ```
 
-The CLI and external integrations use `GET/PUT /api/v1/settings`, `POST /api/v1/settings/plan` and `PUT /api/v1/settings/external-management`. The UI uses SvelteKit remote functions that call the same settings service. Administrator permission is required through either entry point. Exports contain secret references, never stored secret values; those references belong to this installation.
+The CLI and external integrations use `GET/PUT /api/v1/settings`, `POST /api/v1/settings/plan` and `PUT /api/v1/settings/external-management`. Administrator permission is required for UI, API and CLI changes. Exports contain secret references, never stored secret values; those references belong to this installation.
 
 External management makes the settings UI read-only; API/CLI writes and app management remain available. An administrator can turn browser editing back on.
 
@@ -235,7 +235,7 @@ Use the matching [CLI release](/getting-started/installation) to access the sett
 
 ## Management members and app collaboration
 
-Widefleet uses Better Auth's Organization plugin with one automatically provisioned installation organization. No organization selection is required in the browser or CLI.
+Widefleet provisions one installation organization automatically. No organization selection is required in the browser or CLI.
 
 | Role   | Permissions                                                                   |
 | ------ | ----------------------------------------------------------------------------- |
