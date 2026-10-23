@@ -96,7 +96,7 @@ jobs:
         run: RUN_EDGE_TESTS=1 RUN_INSTALLATION_TESTS=1 RUN_ENTRA_TESTS=1 pnpm exec vitest run --no-file-parallelism apps/control-plane/tests/edge apps/control-plane/tests/installation
       - name: Test browser login and management
         if: matrix.suite == 'integration'
-        run: pnpm --filter @platform/control-plane test:e2e
+        run: pnpm --filter @platform/control-plane test:e2e --grep-invert cli-login.spec.ts
       - name: Build the control-plane image
         if: matrix.suite == 'packaged-runtime'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -152,6 +152,9 @@ jobs:
           cargo test --workspace
           cargo build --workspace
           RUN_CLI_TESTS=1 pnpm exec vitest run apps/control-plane/tests/cli.test.ts apps/control-plane/tests/network-cli.test.ts apps/control-plane/tests/access-cli.test.ts apps/control-plane/tests/connector-cli.test.ts apps/control-plane/tests/connector-scope.integration.test.ts apps/control-plane/tests/workflows-cli.test.ts apps/control-plane/tests/auth-cli.test.ts apps/control-plane/tests/configuration-cli.test.ts apps/control-plane/tests/discovery-cli.test.ts apps/control-plane/tests/auth-cli.integration.test.ts apps/control-plane/tests/organization-selection.integration.test.ts apps/control-plane/tests/organization-login.integration.test.ts apps/control-plane/tests/reporting-cli.test.ts
+      - name: Test CLI login through the browser
+        if: matrix.suite == 'rust-runtime'
+        run: pnpm --filter @platform/control-plane test:e2e cli-login.spec.ts
       - name: Build the runtime image
         if: matrix.suite == 'rust-runtime'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
