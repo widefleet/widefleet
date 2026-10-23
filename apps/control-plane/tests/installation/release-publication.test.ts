@@ -28,11 +28,13 @@ const fixture = async () => {
     "widefleet-cli-0.3.0-darwin-x64.tar.gz",
     "widefleet-cli-0.3.0-win32-x64.tar.gz",
     "widefleet-images-0.3.0.env",
+    "release.json",
   ];
 
   for (const name of assets) {
-    await writeFile(join(local, name), name);
-    const hash = createHash("sha256").update(name).digest("hex");
+    const content = name === "release.json" ? JSON.stringify({ version: "0.3.0" }) : name;
+    await writeFile(join(local, name), content);
+    const hash = createHash("sha256").update(content).digest("hex");
     await writeFile(join(local, `${name}.sha256`), `${hash}  ${name}\n`);
   }
 
@@ -83,7 +85,7 @@ case "$operation" in
   edit)
     [[ " $* " == *" --draft=false "* ]]
     [[ " $* " == *" --verify-tag "* ]]
-    jq -e '.isDraft == true and (.assets | length) == 20' "$FIXTURE/metadata.json" > /dev/null
+    jq -e '.isDraft == true and (.assets | length) == 22' "$FIXTURE/metadata.json" > /dev/null
     jq '.isDraft = false' "$FIXTURE/metadata.json" > "$FIXTURE/updated.json"
     mv "$FIXTURE/updated.json" "$FIXTURE/metadata.json"
     # Simulate a server-side success followed by a lost response.
@@ -107,6 +109,7 @@ esac
         REVISION: "a".repeat(40),
         CLI_RELEASE_DIRECTORY: local,
         RELEASE_IMAGES: local,
+        RELEASE_RUNTIME: local,
         GITHUB_STEP_SUMMARY: join(directory, "summary"),
         ...environment,
       },
@@ -128,7 +131,7 @@ it("creates a draft and publishes only after every platform's verified assets ar
     expect(JSON.parse(await readFile(join(directory, "metadata.json"), "utf8"))).toMatchObject({
       isDraft: false,
     });
-    expect(await readdir(join(directory, "remote"))).toHaveLength(20);
+    expect(await readdir(join(directory, "remote"))).toHaveLength(22);
     const commands = await readFile(join(directory, "gh.log"), "utf8");
     expect(commands.lastIndexOf("release download")).toBeLessThan(commands.indexOf("release edit"));
   } finally {
@@ -190,27 +193,31 @@ it("does not create a release when GitHub lookup fails", async () => {
   }
 });
 
-it("leaves a partial upload in draft and completes it on a rerun", async () => {
-  const { directory, run } = await fixture();
+it.each([
+  { asset: "widefleet-images-0.3.0.env", uploaded: 18 },
+  { asset: "release.json", uploaded: 20 },
+])(
+  "resumes a failed upload of $asset without publishing an incomplete release",
+  async ({ asset, uploaded }) => {
+    const { directory, run } = await fixture();
 
-  try {
-    await run("prepare-release.sh");
-    await expect(
-      run("publish-github-release.sh", { FAIL_UPLOAD: "widefleet-images-0.3.0.env" }),
-    ).rejects.toThrow();
-    expect(JSON.parse(await readFile(join(directory, "metadata.json"), "utf8"))).toMatchObject({
-      isDraft: true,
-    });
-    expect(await readdir(join(directory, "remote"))).toHaveLength(18);
-    expect(await readFile(join(directory, "gh.log"), "utf8")).not.toContain("release edit");
-    await run("publish-github-release.sh");
-    expect(JSON.parse(await readFile(join(directory, "metadata.json"), "utf8"))).toMatchObject({
-      isDraft: false,
-    });
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-});
+    try {
+      await run("prepare-release.sh");
+      await expect(run("publish-github-release.sh", { FAIL_UPLOAD: asset })).rejects.toThrow();
+      expect(JSON.parse(await readFile(join(directory, "metadata.json"), "utf8"))).toMatchObject({
+        isDraft: true,
+      });
+      expect(await readdir(join(directory, "remote"))).toHaveLength(uploaded);
+      expect(await readFile(join(directory, "gh.log"), "utf8")).not.toContain("release edit");
+      await run("publish-github-release.sh");
+      expect(JSON.parse(await readFile(join(directory, "metadata.json"), "utf8"))).toMatchObject({
+        isDraft: false,
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
 
 it("recovers after a lost publication response without modifying a published release", async () => {
   const { directory, run } = await fixture();
@@ -225,7 +232,7 @@ it("recovers after a lost publication response without modifying a published rel
     const commands = await readFile(join(directory, "gh.log"), "utf8");
     expect(commands).not.toContain("release upload");
     expect(commands).not.toContain("release edit");
-    expect(commands.match(/release download/g)).toHaveLength(20);
+    expect(commands.match(/release download/g)).toHaveLength(22);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -235,12 +242,46 @@ it.each([
   "widefleet-images-0.3.0.env",
   "widefleet-darwin-arm64-0.3.0.tgz",
   "widefleet-cli-0.3.0-win32-x64.tar.gz",
+  "release.json",
 ])("keeps the release in draft if %s has an invalid checksum", async (asset) => {
   const { directory, local, run } = await fixture();
 
   try {
     await run("prepare-release.sh");
     await writeFile(join(local, asset), "corrupt");
+    await expect(run("publish-github-release.sh")).rejects.toThrow();
+    expect(await readdir(join(directory, "remote"))).toEqual([]);
+    expect(await readFile(join(directory, "gh.log"), "utf8")).not.toContain("release edit");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("keeps the release in draft when the runtime download is missing", async () => {
+  const { directory, local, run } = await fixture();
+
+  try {
+    await run("prepare-release.sh");
+    await rm(join(local, "release.json"));
+    await expect(run("publish-github-release.sh")).rejects.toThrow();
+    expect(await readdir(join(directory, "remote"))).toEqual([]);
+    expect(await readFile(join(directory, "gh.log"), "utf8")).not.toContain("release edit");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("rejects a runtime from another version even with a valid checksum", async () => {
+  const { directory, local, run } = await fixture();
+
+  try {
+    await run("prepare-release.sh");
+    const content = JSON.stringify({ version: "0.2.0" });
+    await writeFile(join(local, "release.json"), content);
+    await writeFile(
+      join(local, "release.json.sha256"),
+      `${createHash("sha256").update(content).digest("hex")}  release.json\n`,
+    );
     await expect(run("publish-github-release.sh")).rejects.toThrow();
     expect(await readdir(join(directory, "remote"))).toEqual([]);
     expect(await readFile(join(directory, "gh.log"), "utf8")).not.toContain("release edit");

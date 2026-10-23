@@ -1,6 +1,6 @@
 # CLI release publishing
 
-Publish the CLI and platform images from a checked commit on `main`. Pushing a stable `vVERSION` tag starts [Publish Widefleet](../.github/workflows/publish-cli.yaml), which publishes to npm and Docker Hub before making the completed GitHub Release public. Configure the npm and GitHub destinations below and [Docker Hub publishing](container-releases.md#configure-docker-hub-publishing) first. App creators use the [installation guide](https://widefleet.com/docs/getting-started/installation).
+Publish the CLI, platform images and app runtime from a checked commit on `main`. Pushing a stable `vVERSION` tag starts [Publish Widefleet](../.github/workflows/publish-cli.yaml), which publishes to npm and Docker Hub before making the completed GitHub Release public. Configure the npm and GitHub destinations below and [Docker Hub publishing](container-releases.md#configure-docker-hub-publishing) first. App creators use the [installation guide](https://widefleet.com/docs/getting-started/installation).
 
 ## Configure npm publishing
 
@@ -32,7 +32,7 @@ Enable **Settings → General → Releases → Enable release immutability**. Al
 
 ## Publish a version
 
-1. Update `package.json` and the Cargo workspace version together and merge the change into `main`.
+1. Update the root `package.json` and the Cargo workspace version together and merge the change into `main`. The app runtime build reads that same root product version.
 2. Push a stable `vVERSION` tag pointing to that commit on `main`. For example, version `0.3.0` uses `v0.3.0`. Replace `VERSION` and `COMMIT_SHA` below with the version and the checked commit:
 
    ```sh
@@ -42,7 +42,7 @@ Enable **Settings → General → Releases → Enable release immutability**. Al
    ```
 
 3. Wait for **Publish Widefleet** to succeed. It creates a draft with generated release notes, or preserves an existing draft and its notes. All four native CLI targets, the Linux deployment tests and packaged image tests must pass before either registry publication starts. The GitHub Release becomes public only after both registry publications and every attachment verification succeed; do not publish the draft manually.
-4. Verify `pnpm add --global widefleet@VERSION` and `widefleet --version` on a supported host. pnpm installs the matching exact-version optional native package, including with install scripts disabled. The completed GitHub Release contains five npm archives, four standalone CLI archives, the image digest manifest and their checksums.
+4. Verify `pnpm add --global widefleet@VERSION` and `widefleet --version` on a supported host. pnpm installs the matching exact-version optional native package, including with install scripts disabled. The completed GitHub Release contains five npm archives, four standalone CLI archives, the image digest manifest, the app runtime `release.json` and their checksums. The runtime download must match the package in both the tested runtime and control-plane images; it is attached before the release becomes public.
 
 Ordinary pushes to `main` and GitHub Release events do not publish packages. Tags outside the `vMAJOR.MINOR.PATCH` format are rejected. Both project versions must match the tag, and its commit must be reachable from `main`. An existing published release is rejected during preparation.
 

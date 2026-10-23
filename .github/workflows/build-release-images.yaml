@@ -252,6 +252,7 @@ jobs:
       - name: Prepare packaged tests
         run: |
           echo "RELEASE_IMAGES=$RUNNER_TEMP/release-images" >> "$GITHUB_ENV"
+          echo "RELEASE_RUNTIME=$RUNNER_TEMP/app-runtime" >> "$GITHUB_ENV"
           echo "VERSION=$(jq -er .version package.json)" >> "$GITHUB_ENV"
           echo "REVISION=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
           npm install --global pnpm@12.4.2
@@ -267,6 +268,13 @@ jobs:
         run: bash "$RELEASE_TOOLS"/load-release-images.sh
       - name: Test the exact images before publishing
         run: bash "$RELEASE_TOOLS"/test-release-images.sh
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tested-app-runtime
+          path: ${{ env.RELEASE_RUNTIME }}
+          if-no-files-found: error
+          retention-days: 3
+          overwrite: true
       - name: Stop disposable services
         if: always()
         run: docker compose -f infra/test/compose.yaml down --volumes

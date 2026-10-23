@@ -50,4 +50,4 @@ Previews have independent app resources within the same fleet. Long-running Work
 
 Backend network enforcement lives in the trusted loader outside app code, while browser restrictions depend on response CSP. See [backend egress](../packages/app-runtime/src/egress.ts), [browser policy](../packages/app-runtime/src/csp.ts) and the public [network guide](https://widefleet.com/docs/guides/network).
 
-The JavaScript runtime is versioned separately from the agent, but its package protocol and celld version must match the agent's supported contract. Contract changes require a matching agent release. Before upgrading celld, review the [native runtime pitfalls](runtime-implementation.md).
+The JavaScript runtime and agent share the product version. Runtime activation can happen independently, but the package protocol and celld version must match the agent's supported contract. Contract changes require a matching agent release. Before upgrading celld, review the [native runtime pitfalls](runtime-implementation.md).

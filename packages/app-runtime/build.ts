@@ -10,7 +10,7 @@ const license = [
 
 const { version } = z
   .object({ version: z.string() })
-  .parse(JSON.parse(await readFile(new URL("package.json", import.meta.url), "utf8")));
+  .parse(JSON.parse(await readFile(new URL("../../package.json", import.meta.url), "utf8")));
 
 const compile = async (entry: string, define: Record<string, string>) => {
   const result = await build({
