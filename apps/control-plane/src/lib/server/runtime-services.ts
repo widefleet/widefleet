@@ -25,6 +25,7 @@ import { createSignInEmail, type SendEmail } from "./email.ts";
 import { createInvitationService } from "./members.ts";
 import { createAuthenticationAdmission } from "./auth-admission.ts";
 import { discoverPlatform } from "./platform-discovery.ts";
+import { createCliLogin } from "./cli-login.ts";
 
 export const createRuntime = ({
   configuration,
@@ -81,6 +82,7 @@ export const createRuntime = ({
     emailSignIn: Boolean(createSignInEmail(configuration, sendEmail)),
     signInProvider: createAuthenticationAdmission(database.db, organizationAccess).signInProvider,
     discoverPlatform: (domain: string) => discoverPlatform(domain, discoveryTransport),
+    cliLogin: createCliLogin(database.db, configuration),
     apps: createAppService(database.db, configuration, execution),
     agents: createAgentService(database.db),
     jobs: createJobService(database.db, storage, encryptionKey, reporting.operation),

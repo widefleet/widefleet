@@ -122,6 +122,15 @@ describe("Company platform discovery", () => {
     );
   });
 
+  it("allows Cloud for a mail domain with no TXT mapping or website addresses", async () => {
+    vi.spyOn(dns, "resolveTxt").mockResolvedValue([]);
+    vi.spyOn(dns, "resolve4").mockRejectedValue({ code: "ENODATA" });
+    vi.spyOn(dns, "resolve6").mockResolvedValue([]);
+    const request = vi.spyOn(https, "get");
+    expect(await discoverPlatform("example.test")).toBe(cloudPlatformUrl);
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it("does not transfer device grants, invitations or OAuth continuations to a different issuer", () => {
     for (const next of [
       "/device?user_code=SECRET",
@@ -246,6 +255,21 @@ describe("Company discovery over HTTPS", () => {
       );
     },
   );
+
+  it("keeps all checked IPv4 and IPv6 addresses available for connection fallback", async () => {
+    const { request } = fixture();
+    vi.mocked(dns.resolve4).mockResolvedValue(["93.184.216.34", "93.184.216.35"]);
+    vi.mocked(dns.resolve6).mockResolvedValue(["2606:4700:4700::1111"]);
+    expect(await discoverPlatform("example.test")).toBe("https://platform.example.test");
+    const options = request.mock.calls[0]?.[1];
+    const callback = vi.fn();
+    options?.lookup?.("example.test", { all: true }, callback);
+    expect(callback).toHaveBeenCalledWith(null, [
+      { address: "93.184.216.34", family: 4 },
+      { address: "93.184.216.35", family: 4 },
+      { address: "2606:4700:4700::1111", family: 6 },
+    ]);
+  });
 
   it.each([301, 302, 401, 403, 500, 503])(
     "rejects HTTPS status %s without following redirects or defaulting to Cloud",

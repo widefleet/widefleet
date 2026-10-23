@@ -105,7 +105,7 @@ export const authenticationOptions = (
         ];
 
         const current =
-          ["/device/approve", "/device/deny"].includes(context.path) ||
+          ["/device/approve", "/device/deny", "/oauth2/consent"].includes(context.path) ||
           accountPaths.includes(context.path)
             ? await getSessionFromCtx(context)
             : null;
@@ -159,7 +159,8 @@ export const authenticationOptions = (
           }
         }
 
-        if (!["/device/approve", "/device/deny"].includes(context.path)) return undefined;
+        if (!["/device/approve", "/device/deny", "/oauth2/consent"].includes(context.path))
+          return undefined;
         const approvalSession = context.headers?.get("x-widefleet-approval-session");
 
         if (approvalSession && approvalSession !== current?.session.id)
@@ -168,7 +169,7 @@ export const authenticationOptions = (
             error_description: "Your sign-in changed. Reload this page before connecting the CLI.",
           });
 
-        if (context.path !== "/device/approve") return undefined;
+        if (context.path === "/device/deny") return undefined;
 
         if (current?.session["recovery"] === true)
           throw new APIError("FORBIDDEN", {

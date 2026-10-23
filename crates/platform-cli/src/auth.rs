@@ -8,11 +8,13 @@ use serde::{Deserialize, Serialize};
 use std::{
     fs::{File, OpenOptions},
     path::PathBuf,
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH},
 };
-use tokio::time::Instant;
 
 mod file;
+mod login;
+
+pub use login::login;
 
 #[derive(Clone)]
 pub struct Credentials {
@@ -27,7 +29,7 @@ impl Credentials {
     }
 
     async fn lock(&self, origin: String) -> Result<File> {
-        if let Some(file) = self.session_file.clone() {
+        if let Some(file) = self.stored_file(&origin)? {
             return tokio::task::spawn_blocking(move || file.lock())
                 .await
                 .map_err(|error| Error::credentials(error.to_string()))?;
@@ -36,18 +38,50 @@ impl Credentials {
     }
 
     async fn prepare(&self, origin: String) -> Result<()> {
-        let file = self.session_file.clone();
+        let file = self.stored_file(&origin)?;
         tokio::task::spawn_blocking(move || {
             if let Some(file) = file {
                 let _lock = file.lock()?;
                 read_file_session(&file, &origin)?;
             } else {
-                credential_entry(&origin)?;
+                match credential_entry(&origin)?.get_password() {
+                    Ok(_) | Err(keyring::Error::NoEntry) => {}
+                    Err(error) => return Err(Error::credentials(error.to_string())),
+                }
             }
             Ok(())
         })
         .await
         .map_err(|error| Error::credentials(error.to_string()))?
+    }
+
+    fn stored_file(&self, origin: &str) -> Result<Option<file::SessionFile>> {
+        if self.session_file.is_some() {
+            return Ok(self.session_file.clone());
+        }
+        #[cfg(unix)]
+        if let Ok(file) = private_file(origin)
+            && file.0.try_exists()?
+        {
+            return Ok(Some(file));
+        }
+        Ok(None)
+    }
+
+    async fn for_login(&self, origin: &str) -> Result<Self> {
+        if self.prepare(origin.to_owned()).await.is_ok() {
+            return Ok(self.clone());
+        }
+        #[cfg(unix)]
+        if self.session_file.is_none() {
+            let credentials = Self {
+                session_file: Some(private_file(origin)?),
+            };
+            credentials.prepare(origin.to_owned()).await?;
+            return Ok(credentials);
+        }
+        self.prepare(origin.to_owned()).await?;
+        Ok(self.clone())
     }
 }
 
@@ -58,11 +92,23 @@ pub struct LoginOptions {
     /// API scopes to request, separated by spaces or commas. Replaces the defaults.
     #[arg(long = "scope", value_delimiter = ',', num_args = 1.., default_values = ["platform:read", "platform:write"])]
     scopes: Vec<String>,
+    /// Return the current login state, completing an approved login if possible.
+    #[arg(long, conflicts_with = "restart")]
+    status: bool,
+    /// Print the link or current state and return without waiting for approval.
+    #[arg(long)]
+    no_wait: bool,
+    /// Replace a pending login with a new request.
+    #[arg(long)]
+    restart: bool,
+    /// Emit login states as JSON, without printing credentials.
+    #[arg(long)]
+    json: bool,
 }
 
 const CLIENT_ID: &str = "platform-cli";
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct DeviceCode {
     device_code: String,
     user_code: String,
@@ -84,6 +130,8 @@ struct Tokens {
 struct Session {
     tokens: Tokens,
     expires_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    login_id: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -133,7 +181,7 @@ fn credential_entry(origin: &str) -> Result<keyring::Entry> {
 }
 
 async fn read_session(origin: String, credentials: &Credentials) -> Result<Session> {
-    let file = credentials.session_file.clone();
+    let file = credentials.stored_file(&origin)?;
     tokio::task::spawn_blocking(move || {
         if let Some(file) = file {
             return read_file_session(&file, &origin)?.ok_or_else(|| Error::credentials(
@@ -154,6 +202,7 @@ async fn save_session(
     origin: String,
     tokens: Tokens,
     credentials: &Credentials,
+    login_id: Option<String>,
 ) -> Result<Session> {
     if tokens.refresh_token.is_empty() {
         return Err(Error::invalid(
@@ -171,8 +220,9 @@ async fn save_session(
     let session = Session {
         expires_at: epoch()?.saturating_add(tokens.expires_in),
         tokens,
+        login_id,
     };
-    let file = credentials.session_file.clone();
+    let file = credentials.stored_file(&origin)?;
     tokio::task::spawn_blocking(move || {
         if let Some(file) = file {
             // Recheck the origin under the same lock used by refresh and logout.
@@ -220,97 +270,45 @@ async fn lock(origin: String) -> Result<File> {
     .map_err(|error| Error::credentials(error.to_string()))?
 }
 
-pub async fn login(api: &Api, credentials: &Credentials, options: LoginOptions) -> Result<()> {
+#[cfg(unix)]
+fn private_file(key: &str) -> Result<file::SessionFile> {
+    let base = std::env::var_os("XDG_STATE_HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .filter(|value| !value.is_empty())
+                .map(|home| PathBuf::from(home).join(".local/state"))
+        })
+        .ok_or_else(|| Error::credentials("No user state directory is configured".into()))?;
+    if !base.is_absolute() {
+        return Err(Error::credentials(
+            "The user state directory must be absolute".into(),
+        ));
+    }
+    Ok(file::SessionFile(
+        base.join("widefleet/credentials")
+            .join(format!("{}.json", sha256(key.as_bytes()))),
+    ))
+}
+
+fn login_scope(options: &LoginOptions) -> Result<String> {
     let mut scopes = vec![
         "openid".to_owned(),
         "profile".to_owned(),
         "offline_access".to_owned(),
     ];
-    for scope in options.scopes {
+    for scope in &options.scopes {
         if scope.is_empty() || scope.chars().any(char::is_whitespace) {
             return Err(Error::invalid(
                 "Pass each scope as a separate argument or comma-separated value".into(),
             ));
         }
-        if !scopes.contains(&scope) {
-            scopes.push(scope);
+        if !scopes.contains(scope) {
+            scopes.push(scope.clone());
         }
     }
-    let scope = scopes.join(" ");
-    credentials.prepare(api.origin_text()).await?;
-    let resource = format!("{}/api/v1", api.origin_text());
-    let device: DeviceCode = json(
-        api.request(Method::POST, "/api/auth/device/code")
-            .form(&[
-                ("client_id", CLIENT_ID),
-                ("scope", &scope),
-                ("resource", &resource),
-            ])
-            .send()
-            .await?,
-    )
-    .await?;
-    let verification = reqwest::Url::parse(&device.verification_uri)
-        .map_err(|error| Error::invalid(error.to_string()))?;
-    if verification.origin() != api.origin.origin() || verification.path() != "/device" {
-        return Err(Error::invalid(
-            "The device verification URL does not belong to this platform".into(),
-        ));
-    }
-    println!("Open {} and enter code: {}", verification, device.user_code);
-    println!("Approve only the code shown by this command.");
-    let deadline = Instant::now() + Duration::from_secs(device.expires_in.min(1800));
-    let mut interval = device.interval.max(1);
-    loop {
-        tokio::time::sleep(Duration::from_secs(interval)).await;
-        if Instant::now() >= deadline {
-            return Err(Error::invalid(
-                "Device login expired. Run login again".into(),
-            ));
-        }
-        let response = api
-            .request(Method::POST, "/api/auth/oauth2/token")
-            .form(&[
-                ("client_id", CLIENT_ID),
-                ("device_code", &device.device_code),
-                ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
-            ])
-            .send()
-            .await?;
-        if response.status().is_success() {
-            let tokens = json(response).await?;
-            let _lock = credentials.lock(api.origin_text()).await?;
-            save_session(api.origin_text(), tokens, credentials).await?;
-            if let Some(file) = &credentials.session_file {
-                println!(
-                    "Connected. Credentials are stored unencrypted in {} (owner-only access).",
-                    file.0.display()
-                );
-            } else {
-                println!(
-                    "Connected. Credentials are stored in the operating system's credential store."
-                );
-            }
-            return Ok(());
-        }
-        #[derive(Deserialize)]
-        struct Failure {
-            error: String,
-        }
-        let failure: Failure = response.json().await?;
-        match failure.error.as_str() {
-            "authorization_pending" => {}
-            "slow_down" => interval = interval.saturating_add(5),
-            "access_denied" => return Err(Error::invalid("Device login was denied".into())),
-            "expired_token" => return Err(Error::invalid("Device login expired".into())),
-            _ => {
-                return Err(Error::invalid(format!(
-                    "Device login failed: {}",
-                    failure.error
-                )));
-            }
-        }
-    }
+    Ok(scopes.join(" "))
 }
 
 pub async fn access_token(api: &Api, credentials: &Credentials) -> Result<String> {
@@ -320,6 +318,10 @@ pub async fn access_token(api: &Api, credentials: &Credentials) -> Result<String
         }
         return Ok(token);
     }
+    stored_access_token(api, credentials).await
+}
+
+async fn stored_access_token(api: &Api, credentials: &Credentials) -> Result<String> {
     let _lock = credentials.lock(api.origin_text()).await?;
     let session = read_session(api.origin_text(), credentials).await?;
     if session.expires_at > epoch()?.saturating_add(45) {
@@ -338,10 +340,12 @@ pub async fn access_token(api: &Api, credentials: &Credentials) -> Result<String
             .await?,
     )
     .await?;
-    Ok(save_session(api.origin_text(), tokens, credentials)
-        .await?
-        .tokens
-        .access_token)
+    Ok(
+        save_session(api.origin_text(), tokens, credentials, session.login_id)
+            .await?
+            .tokens
+            .access_token,
+    )
 }
 
 pub async fn logout(api: &Api, credentials: &Credentials) -> Result<()> {
@@ -358,7 +362,7 @@ pub async fn logout(api: &Api, credentials: &Credentials) -> Result<()> {
         .await?;
     response.error_for_status()?;
     let origin = api.origin_text();
-    let file = credentials.session_file.clone();
+    let file = credentials.stored_file(&origin)?;
     tokio::task::spawn_blocking(move || {
         if let Some(file) = file {
             return file.delete();

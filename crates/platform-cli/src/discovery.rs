@@ -1,10 +1,7 @@
 use platform_core::{Error, Result, http::Api};
 use reqwest::{Client, Url};
 use serde::Deserialize;
-use std::{
-    io::{BufRead, IsTerminal, Read, Write},
-    time::Duration,
-};
+use std::time::Duration;
 
 const DNS_TIMEOUT: Duration = Duration::from_secs(5);
 const HTTPS_TIMEOUT: Duration = Duration::from_secs(10);
@@ -92,26 +89,6 @@ fn invalid_domain() -> Error {
 
 fn invalid_email() -> Error {
     Error::invalid("Enter a work email such as employee@example.com".into())
-}
-
-pub fn prompt() -> Result<Domain> {
-    if !std::io::stdin().is_terminal() || !std::io::stderr().is_terminal() {
-        return Err(Error::invalid(
-            "No platform is configured. Run widefleet login --email employee@example.com or widefleet login --domain example.com; an agent can use the employee's known company domain".into(),
-        ));
-    }
-    eprint!("Work email or company domain: ");
-    std::io::stderr().flush()?;
-    let mut input = String::new();
-    std::io::stdin().lock().take(321).read_line(&mut input)?;
-    if input.len() > 320 {
-        return Err(invalid_domain());
-    }
-    if input.contains('@') {
-        Domain::from_email(&input)
-    } else {
-        Domain::parse(&input)
-    }
 }
 
 enum DnsLookup {

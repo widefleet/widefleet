@@ -127,7 +127,11 @@ const platformFromHttps = async (domain: string, transport: "node" | "cloudflare
     )
   ).flat();
 
-  if (!addresses.length || !addresses.every(isPublicRoutableHost))
+  // A successful negative A/AAAA answer proves there is no HTTPS discovery
+  // service. Mail-only domains do not need to host a website to use Cloud.
+  if (!addresses.length) return null;
+
+  if (!addresses.every(isPublicRoutableHost))
     throw new Error("Company discovery must resolve to public addresses");
 
   const address = addresses[0];
@@ -182,7 +186,8 @@ const platformFromHttps = async (domain: string, transport: "node" | "cloudflare
   }
 
   return new Promise<string | null>((resolve, reject) => {
-    // Pin the checked address on Node to prevent DNS rebinding.
+    // Pin every checked address while allowing Node to try alternate families.
+    // Resolving the hostname again here would reintroduce DNS rebinding.
     const request = https.get(
       `https://${domain}/.well-known/widefleet`,
       {
@@ -192,7 +197,11 @@ const platformFromHttps = async (domain: string, transport: "node" | "cloudflare
         lookup: (_hostname, options, callback) => {
           const family = isIP(address);
 
-          if (options.all) callback(null, [{ address, family }]);
+          if (options.all)
+            callback(
+              null,
+              addresses.map((address) => ({ address, family: isIP(address) })),
+            );
           else callback(null, address, family);
         },
       },

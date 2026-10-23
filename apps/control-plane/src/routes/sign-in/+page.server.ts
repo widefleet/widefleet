@@ -8,6 +8,8 @@ import { organization, ssoProvider } from "#server/auth-schema";
 import { organizationSettings } from "#server/schema";
 import { localDestination } from "#server/navigation";
 import { installationOrganizationId } from "#lib/organization";
+import { cliConsent } from "#server/cli-consent";
+import { remoteOperation } from "#server/remote-support";
 
 export const load: PageServerLoad = async ({ url, setHeaders }) => {
   setHeaders({ "cache-control": "private, no-store", "referrer-policy": "no-referrer" });
@@ -32,6 +34,13 @@ export const load: PageServerLoad = async ({ url, setHeaders }) => {
 
   const provider = target?.verified ? target.providerId : null;
 
+  const consent =
+    url.searchParams.get("client_id") === "platform-cli"
+      ? await remoteOperation(() =>
+          cliConsent(url.searchParams, runtime.configuration, runtime.database.db),
+        )
+      : null;
+
   return {
     provider,
     label:
@@ -43,8 +52,10 @@ export const load: PageServerLoad = async ({ url, setHeaders }) => {
     organizationSlug: slug,
     organizationName: target?.name ?? null,
     emailSignIn: runtime.emailSignIn && !(slug && provider && target?.required),
-    email: url.searchParams.get("email") ?? "",
+    email: url.searchParams.get("email") ?? url.searchParams.get("login_hint") ?? "",
     codeDelivery: runtime.configuration.LOGIN_CODE_DELIVERY,
-    next: localDestination(url.searchParams.get("next")),
+    next: consent
+      ? `/device?${consent.oauthQuery}`
+      : localDestination(url.searchParams.get("next")),
   };
 };
