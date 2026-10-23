@@ -29,8 +29,6 @@ enum Action {
 struct Configuration {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     platform_url: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    organization_id: Option<String>,
 }
 
 pub struct Files {
@@ -41,7 +39,6 @@ pub struct Files {
 #[derive(Serialize)]
 pub struct Selection {
     pub platform_url: String,
-    pub organization_id: Option<String>,
     source: &'static str,
 }
 
@@ -50,7 +47,6 @@ pub fn explicit(origin: Option<&str>) -> Result<Option<Selection>> {
         .map(|origin| {
             Ok(Selection {
                 platform_url: Api::new(origin)?.origin_text(),
-                organization_id: None,
                 source: "override",
             })
         })
@@ -58,11 +54,6 @@ pub fn explicit(origin: Option<&str>) -> Result<Option<Selection>> {
 }
 
 impl Files {
-    pub fn login_profile(&self) -> Result<String> {
-        Ok(std::path::absolute(&self.user)?
-            .to_string_lossy()
-            .into_owned())
-    }
     pub fn locate(path: Option<&Path>) -> Result<Self> {
         if let Some(path) = path {
             if path.as_os_str().is_empty() {
@@ -114,19 +105,17 @@ impl Files {
     }
 
     pub fn selection(&self) -> Result<Option<Selection>> {
-        if let Some((platform_url, organization_id)) = read(&self.user)? {
+        if let Some(platform_url) = read(&self.user)? {
             return Ok(Some(Selection {
                 platform_url,
-                organization_id,
                 source: "user",
             }));
         }
         if let Some(path) = &self.managed
-            && let Some((platform_url, organization_id)) = read(path)?
+            && let Some(platform_url) = read(path)?
         {
             return Ok(Some(Selection {
                 platform_url,
-                organization_id,
                 source: "managed",
             }));
         }
@@ -134,16 +123,8 @@ impl Files {
     }
 
     pub fn save(&self, origin: Option<&str>) -> Result<()> {
-        self.save_login(origin, None)
-    }
-
-    pub fn save_login(&self, origin: Option<&str>, organization: Option<&str>) -> Result<()> {
         let platform_url = origin
-            .map(|origin| {
-                Api::new(origin)?
-                    .with_organization(organization)
-                    .map(|api| api.origin_text())
-            })
+            .map(|origin| Api::new(origin).map(|api| api.origin_text()))
             .transpose()?;
         let parent = self
             .user
@@ -152,13 +133,7 @@ impl Files {
             .unwrap_or_else(|| Path::new("."));
         fs::create_dir_all(parent)?;
         let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
-        serde_json::to_writer_pretty(
-            &mut temporary,
-            &Configuration {
-                platform_url,
-                organization_id: organization.map(str::to_owned),
-            },
-        )?;
+        serde_json::to_writer_pretty(&mut temporary, &Configuration { platform_url })?;
         temporary.write_all(b"\n")?;
         temporary.as_file().sync_all()?;
         temporary
@@ -180,7 +155,6 @@ impl Files {
         };
         crate::print_json(&serde_json::json!({
             "platform_url": selected.as_ref().map(|selected| &selected.platform_url),
-            "organization_id": selected.as_ref().and_then(|selected| selected.organization_id.as_ref()),
             "source": selected.as_ref().map(|selected| selected.source),
             "config_file": self.user,
             "managed_config_file": self.managed,
@@ -188,7 +162,7 @@ impl Files {
     }
 }
 
-fn read(path: &Path) -> Result<Option<(String, Option<String>)>> {
+fn read(path: &Path) -> Result<Option<String>> {
     let bytes = match fs::read(path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -204,8 +178,7 @@ fn read(path: &Path) -> Result<Option<(String, Option<String>)>> {
         .platform_url
         .map(|origin| {
             Api::new(&origin)
-                .and_then(|api| api.with_organization(configuration.organization_id.as_deref()))
-                .map(|api| (api.origin_text(), configuration.organization_id))
+                .map(|api| api.origin_text())
                 .map_err(|_| {
                     Error::invalid(format!(
                         "Invalid platform_url in {}; use an HTTPS origin, or HTTP on loopback for development",

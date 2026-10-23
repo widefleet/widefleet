@@ -22,7 +22,7 @@ import { createAuthenticationAdmission } from "./auth-admission.ts";
 import type { OrganizationAccess } from "./application-context.ts";
 import { companySsoOrigins, companySsoPlugin } from "./company-sso.ts";
 import { pluginAuthentication, managedPluginPaths } from "./plugin-authentication.ts";
-import { cliCallbackUrl, cliLoginPlugin, createCliLogin } from "./cli-login.ts";
+import { cliLoginPlugin, createCliLogin } from "./cli-login.ts";
 
 export const companyLoginRevision = (
   connection: Awaited<ReturnType<typeof readSsoConfiguration>>,
@@ -221,11 +221,10 @@ export const registerCli = async (database: Database, configuration: Configurati
         name: "Widefleet CLI",
         applicationType: "native",
         tokenEndpointAuthMethod: "none",
-        grantTypes: [DEVICE_CODE_GRANT_TYPE, "authorization_code", "refresh_token"],
+        grantTypes: [DEVICE_CODE_GRANT_TYPE, "refresh_token"],
         scopes: cliScopes,
-        redirectUris: [cliCallbackUrl],
-        responseTypes: ["code"],
-        requirePKCE: true,
+        redirectUris: [],
+        responseTypes: [],
         skipConsent: false,
         disabled: false,
         createdAt: new Date(),
@@ -234,15 +233,7 @@ export const registerCli = async (database: Database, configuration: Configurati
     } else {
       await transaction
         .update(authSchema.oauthClient)
-        .set({
-          name: "Widefleet CLI",
-          scopes: cliScopes,
-          grantTypes: [DEVICE_CODE_GRANT_TYPE, "authorization_code", "refresh_token"],
-          redirectUris: [cliCallbackUrl],
-          responseTypes: ["code"],
-          requirePKCE: true,
-          updatedAt: new Date(),
-        })
+        .set({ name: "Widefleet CLI", scopes: cliScopes, updatedAt: new Date() })
         .where(eq(authSchema.oauthClient.clientId, cliClientId));
     }
 

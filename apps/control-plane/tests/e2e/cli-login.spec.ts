@@ -1,6 +1,5 @@
 import { expect, test as base } from "@playwright/test";
 import { spawn } from "node:child_process";
-import { createHash, randomBytes } from "node:crypto";
 import { once } from "node:events";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer as createProxy, request as httpRequest } from "node:http";
@@ -10,7 +9,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { cliCallbackUrl } from "../../src/lib/server/cli-login.ts";
 import { createTestEnvironment } from "../environment.ts";
 import { createCertificates } from "../installation/certificates.ts";
 import { organizationSettings } from "../../src/lib/server/schema.ts";
@@ -228,114 +226,137 @@ test.afterEach(async ({ browserName }, info) => {
       });
 });
 
-for (const destination of ["cloud", "company"] as const) {
-  test(`opens one link, signs in and approves at ${destination} before the CLI resumes`, async ({
-    page,
-  }) => {
-    const cloud = fixtures.find(({ origin }) => origin === cloudOrigin);
+for (const mode of [
+  "automatic-cloud",
+  "automatic-company",
+  "explicit-cloud",
+  "saved-company",
+] as const) {
+  test(`running CLI completes device authorization for ${mode}`, async ({ page }) => {
+    const isCloud = mode.endsWith("cloud");
+    const automatic = mode.startsWith("automatic");
 
     const target = fixtures.find(
-      ({ origin }) => origin === (destination === "cloud" ? cloudOrigin : companyOrigin),
+      ({ origin }) => origin === (isCloud ? cloudOrigin : companyOrigin),
     );
 
-    if (!cloud || !target) throw new Error("Missing local fixtures");
-    const email = `${crypto.randomUUID()}@${destination}.test`;
+    if (!target) throw new Error("Missing local fixture");
+    // The explicit Cloud case uses a company email that would otherwise redirect.
+    const email = `${crypto.randomUUID()}@${mode === "automatic-cloud" ? "cloud" : "company"}.test`;
     const person = target.environment.users.createUser({ email });
     await target.environment.users.saveUser(person);
     await target.environment.linkMicrosoftUser(person.id);
-    const verifier = randomBytes(32).toString("base64url");
-    const pollToken = randomBytes(32).toString("base64url");
+    const config = join(directory, `${mode}.json`);
 
-    const started = await cloud.environment.cliLogin.start({
-      code_challenge: createHash("sha256").update(verifier).digest("base64url"),
-      poll_hash: createHash("sha256").update(pollToken).digest("hex"),
-      scope: "openid profile offline_access platform:read platform:write",
-    });
+    if (mode === "saved-company")
+      await writeFile(config, JSON.stringify({ platform_url: companyOrigin }));
 
-    await page.goto(started.verification_uri);
-    await page.getByLabel("Email", { exact: true }).fill(email);
-    await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await expect(page).toHaveURL(new RegExp(`^${target.origin.replaceAll(".", "\\.")}/sign-in\\?`));
-    await expect(page.getByLabel("Email", { exact: true })).toHaveValue(email);
-
-    if (destination === "cloud") {
-      await page.getByLabel("Email", { exact: true }).fill("employee@company.test");
-      await page.getByRole("button", { name: "Continue", exact: true }).click();
-      await expect(page.getByRole("alert")).toContainText("widefleet login --domain company.test");
-      await expect(page).toHaveURL(new RegExp(`^${cloudOrigin.replaceAll(".", "\\.")}/sign-in\\?`));
-      await page.getByLabel("Email", { exact: true }).fill(email);
-    }
-
-    await page.getByRole("button", { name: "Continue", exact: true }).click();
-    await expect
-      .poll(
-        () =>
-          target.logs
-            .split(`Widefleet sign-in code for ${email}:`)
-            .at(-1)
-            ?.match(/code is (\d{6})/)?.[1],
-      )
-      .toBeTruthy();
-
-    const code = z.string().parse(
-      target.logs
-        .split(`Widefleet sign-in code for ${email}:`)
-        .at(-1)
-        ?.match(/code is (\d{6})/)?.[1],
-    );
-
-    await page.getByLabel("Sign-in code", { exact: true }).fill(code);
-    await page.getByRole("button", { name: "Sign in", exact: true }).click();
-    await expect(page).toHaveURL(new RegExp(`^${target.origin.replaceAll(".", "\\.")}/device\\?`));
-    await expect(page.getByText(started.user_code, { exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Authorize CLI", exact: true })).toBeDisabled();
-    await page.getByLabel("I started this request on my device and verified the code.").check();
-    await page.getByRole("button", { name: "Authorize CLI", exact: true }).click();
-    await expect(
-      page.getByRole("heading", { name: "Sign-in approved", exact: true }),
-    ).toBeVisible();
-    await expect(page).toHaveURL(`${cloudOrigin}/cli-login/done?status=authorized`);
-    const result = await cloud.environment.cliLogin.poll(started.request_id, pollToken);
-    expect(result.status).toBe("authorized");
-    expect(result.platform_url).toBe(target.origin);
-
-    const exchanged = await target.environment.auth.handler(
-      new Request(`${target.origin}/api/auth/oauth2/token`, {
-        method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          grant_type: "authorization_code",
-          client_id: "platform-cli",
-          redirect_uri: cliCallbackUrl,
-          code: z.string().parse(result.code),
-          code_verifier: verifier,
-        }),
-      }),
-    );
-
-    expect(exchanged.status, await exchanged.clone().text()).toBe(200);
-    const tokens = z.object({ access_token: z.string() }).parse(await exchanged.json());
-
-    const context = await fetch(
-      `${target.local}/api/cli-login/context?request=${started.request_id}`,
+    const child = spawn(
+      fileURLToPath(new URL("../../../../target/debug/widefleet", import.meta.url)),
+      mode === "explicit-cloud" ? ["--url", cloudOrigin, "login"] : ["login"],
       {
-        headers: {
-          "x-forwarded-proto": "https",
-          "x-forwarded-host": new URL(target.origin).host,
-          authorization: `Bearer ${tokens.access_token}`,
+        env: {
+          ...process.env,
+          PLATFORM_URL: undefined,
+          PLATFORM_ORGANIZATION: undefined,
+          PLATFORM_CONFIG_FILE: config,
+          PLATFORM_SESSION_FILE: join(directory, mode, "session.json"),
+          PLATFORM_ACCESS_TOKEN: "synthetic-environment-token-must-not-be-used",
+          WIDEFLEET_TELEMETRY_DISABLED: "1",
+          SSL_CERT_FILE: join(directory, "ca.pem"),
+          HTTPS_PROXY: proxyUrl,
+          https_proxy: proxyUrl,
+          HTTP_PROXY: proxyUrl,
+          http_proxy: proxyUrl,
+          ALL_PROXY: undefined,
+          all_proxy: undefined,
+          NO_PROXY: "",
+          no_proxy: "",
         },
+        stdio: ["ignore", "pipe", "pipe"],
       },
     );
 
-    expect(context.status, await context.clone().text()).toBe(200);
-    expect(await context.json()).toMatchObject({ organization_id: "widefleet" });
+    let output = "";
+    let errors = "";
+    child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+      output += chunk;
+    });
+    child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+      errors += chunk;
+    });
+    const exited = once(child, "exit");
 
-    if (destination === "company") {
+    try {
+      await expect
+        .poll(() => {
+          if (child.exitCode !== null) throw new Error(errors);
+
+          return output.match(/Open (https:\/\/\S+)/)?.[1];
+        })
+        .toBeTruthy();
+      const link = z.string().parse(output.match(/Open (https:\/\/\S+)/)?.[1]);
+      await page.goto(link);
+
+      if (automatic) {
+        await page.getByLabel("Email", { exact: true }).fill(email);
+        await page.getByRole("button", { name: "Continue", exact: true }).click();
+      }
+
+      await expect(page).toHaveURL(
+        new RegExp(`^${target.origin.replaceAll(".", "\\.")}/sign-in\\?`),
+      );
+
+      if (automatic) await expect(page.getByLabel("Email", { exact: true })).toHaveValue(email);
+      await page.getByLabel("Email", { exact: true }).fill(email);
+      await page.getByRole("button", { name: "Continue", exact: true }).click();
+      await expect
+        .poll(
+          () =>
+            target.logs
+              .split(`Widefleet sign-in code for ${email}:`)
+              .slice(1)
+              .at(-1)
+              ?.match(/code is (\d{6})/)?.[1],
+        )
+        .toBeTruthy();
+
+      const otp = z.string().parse(
+        target.logs
+          .split(`Widefleet sign-in code for ${email}:`)
+          .slice(1)
+          .at(-1)
+          ?.match(/code is (\d{6})/)?.[1],
+      );
+
+      await page.getByLabel("Sign-in code", { exact: true }).fill(otp);
+      await page.getByRole("button", { name: "Sign in", exact: true }).click();
+      await expect(page).toHaveURL(
+        new RegExp(`^${target.origin.replaceAll(".", "\\.")}/device\\?`),
+      );
+      const userCode = await page.getByLabel("Device code", { exact: true }).inputValue();
+      expect(output).toContain(`verify code: ${userCode}`);
+      await page.getByRole("button", { name: "Check code", exact: true }).click();
+      await expect(page.getByRole("button", { name: "Authorize CLI", exact: true })).toBeDisabled();
+      await page.getByLabel("I started this request on my device and verified the code.").check();
+      await page.getByRole("button", { name: "Authorize CLI", exact: true }).click();
+      await expect(page.getByText("CLI connected. You can close this window.")).toBeVisible();
+      await expect.poll(() => child.exitCode).toBe(0);
+      expect(JSON.parse(await readFile(config, "utf8"))).toEqual({ platform_url: target.origin });
       expect(
-        requests.filter(
-          ({ origin, path }) => origin === cloudOrigin && path.startsWith("/api/auth/"),
-        ),
-      ).toEqual([]);
+        requests
+          .filter(
+            ({ path }) => path === "/api/auth/device/code" || path === "/api/auth/oauth2/token",
+          )
+          .every(({ origin }) => origin === target.origin),
+      ).toBe(true);
+      expect(requests.some(({ path }) => path === "/api/auth/oauth2/authorize")).toBe(false);
+
+      if (!automatic)
+        expect(requests.some(({ path }) => path.startsWith("/api/auth/cli-login/"))).toBe(false);
+    } finally {
+      if (child.exitCode === null) child.kill("SIGTERM");
+      await exited;
     }
   });
 }

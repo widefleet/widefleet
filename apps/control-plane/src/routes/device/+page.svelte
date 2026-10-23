@@ -1,7 +1,5 @@
 <script lang="ts">
   import { authClient } from "#lib/auth-client";
-  import { selectCliOrganization } from "#lib/cli-login.remote";
-  import { isHttpError } from "@sveltejs/kit";
   import { untrack } from "svelte";
   import { page } from "$app/state";
   import CopyValue from "#shadcn/components/CopyValue.svelte";
@@ -11,7 +9,6 @@
   import { Input } from "#shadcn/components/ui/input/index.js";
   import { Label } from "#shadcn/components/ui/label/index.js";
   import { Checkbox } from "#shadcn/components/ui/checkbox/index.js";
-  import { NativeSelect, NativeSelectOption } from "#shadcn/components/ui/native-select/index.js";
   import Terminal from "@lucide/svelte/icons/terminal";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
   import type { PageData } from "./$types";
@@ -31,14 +28,6 @@
   let message = $state("");
 
   let done = $state(false);
-
-  let selectedOrganization = $state(untrack(() => data.selectedOrganization ?? ""));
-
-  const displayed = $derived(
-    data.consent
-      ? { client_id: "platform-cli", scope: data.consent.scope, resource: data.consent.resource }
-      : authorization,
-  );
 
   const verify = async (event: SubmitEvent) => {
     event.preventDefault();
@@ -70,24 +59,6 @@
     try {
       const options = { headers: { "x-widefleet-approval-session": data.sessionId } };
 
-      if (data.consent) {
-        if (allow)
-          await selectCliOrganization({
-            oauthQuery: data.consent.oauthQuery,
-            sessionId: data.sessionId,
-            organizationId: selectedOrganization,
-          });
-
-        const result = await authClient.oauth2.consent(
-          { accept: allow, oauth_query: data.consent.oauthQuery },
-          options,
-        );
-
-        if (result.error) message = result.error.message ?? "Could not complete this request.";
-
-        return;
-      }
-
       const result = allow
         ? await authClient.device.approve({ userCode: code }, options)
         : await authClient.device.deny({ userCode: code }, options);
@@ -102,10 +73,8 @@
           ? "CLI connected. You can close this window."
           : "Request denied. You can close this window.";
       }
-    } catch (cause) {
-      message = isHttpError(cause)
-        ? cause.body.message
-        : "This request is temporarily unavailable. Check your connection and try again.";
+    } catch {
+      message = "This request is temporarily unavailable. Check your connection and try again.";
     } finally {
       busy = false;
     }
@@ -113,7 +82,7 @@
 </script>
 
 <svelte:head><title>Connect CLI · Widefleet</title></svelte:head>
-<AuthLayout wide={Boolean(displayed)}>
+<AuthLayout wide={Boolean(authorization)}>
   <div class="bg-primary/5 text-primary mb-5 grid size-10 place-items-center rounded-xl">
     <Terminal class="size-5" />
   </div>
@@ -124,9 +93,9 @@
         >Back to overview<ArrowRight /></Button
       >
     </div>
-  {:else if displayed}
+  {:else if authorization}
     <p class="text-muted-foreground mt-3 text-sm leading-6">
-      Check that this code matches the code in your terminal or coding assistant.
+      Check that this code matches the code in your terminal.
     </p>
     <p
       class="bg-muted/50 my-6 rounded-xl border py-5 text-center font-mono text-3xl font-medium tracking-[0.2em]"
@@ -135,48 +104,18 @@
     </p>
     <dl class="grid grid-cols-[110px_minmax(0,1fr)] gap-x-4 gap-y-3 text-xs leading-5">
       <dt class="text-muted-foreground">Application</dt>
-      <dd class="wrap-anywhere">{displayed.client_id}</dd>
-      <dt class="text-muted-foreground">Platform</dt>
-      <dd class="wrap-anywhere">{data.platformUrl}</dd>
+      <dd class="wrap-anywhere">{authorization.client_id}</dd>
       <dt class="text-muted-foreground">Permissions</dt>
-      <dd class="wrap-anywhere">{displayed.scope}</dd>
+      <dd class="wrap-anywhere">{authorization.scope}</dd>
       <dt class="text-muted-foreground">Organizations</dt>
       <dd class="wrap-anywhere">{data.organization ?? "Your Widefleet memberships"}</dd>
       <dt class="text-muted-foreground">API</dt>
       <dd class="wrap-anywhere">
-        {Array.isArray(displayed.resource) ? displayed.resource.join(", ") : displayed.resource}
+        {Array.isArray(authorization.resource)
+          ? authorization.resource.join(", ")
+          : authorization.resource}
       </dd>
     </dl>
-    {#if data.consent}
-      <div class="mt-5 space-y-2">
-        <Label for="cli-organization">Organization for CLI commands</Label>
-        <NativeSelect
-          id="cli-organization"
-          bind:value={selectedOrganization}
-          class="w-full"
-          disabled={busy}
-        >
-          <NativeSelectOption value="" disabled>Select an organization</NativeSelectOption>
-          {#each data.organizations as organization (organization.id)}
-            <NativeSelectOption value={organization.id} disabled={organization.ssoRequired}
-              >{organization.name}{organization.ssoRequired
-                ? " — company sign-in required"
-                : ""}</NativeSelectOption
-            >
-          {/each}
-        </NativeSelect>
-        <p class="text-muted-foreground text-xs leading-5">
-          Saved as the default for CLI commands. Your membership permissions remain unchanged.
-        </p>
-        {#each data.organizations.filter((organization) => organization.ssoRequired) as organization (organization.id)}
-          <a
-            class="text-primary block text-sm underline"
-            href={`/sign-in?organization=${encodeURIComponent(organization.slug)}&next=${encodeURIComponent(page.url.pathname + page.url.search)}`}
-            >Sign in to {organization.name}</a
-          >
-        {/each}
-      </div>
-    {/if}
     <div class="mt-6 flex items-start gap-3 border-t pt-5">
       <Checkbox id="device-confirm" bind:checked={confirmed} class="mt-1" /><Label
         for="device-confirm"
@@ -187,9 +126,7 @@
       Only approve requests you started yourself. Do not enter codes from someone else's messages.
     </p>
     <div class="mt-6 flex flex-wrap gap-3">
-      <Button
-        onclick={() => decide(true)}
-        disabled={busy || !confirmed || (Boolean(data.consent) && !selectedOrganization)}
+      <Button onclick={() => decide(true)} disabled={busy || !confirmed}
         >{busy ? "Processing request …" : "Authorize CLI"}<ArrowRight /></Button
       ><Button variant="outline" onclick={() => decide(false)} disabled={busy}>Deny</Button>
     </div>

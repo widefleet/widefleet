@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getRuntime } from "#server/runtime";
 import { remoteOperation } from "#server/remote-support";
 import { error } from "@sveltejs/kit";
+import { localDestination } from "#server/navigation";
 import { cloudPlatformUrl, companySignInUrl } from "#server/platform-discovery";
 
 export const findSignInDestination = command(
@@ -13,7 +14,11 @@ export const findSignInDestination = command(
   async ({ email, next }) => {
     const runtime = await getRuntime();
 
-    if (runtime.configuration.PLATFORM_URL === cloudPlatformUrl) {
+    // Device grants already belong to one installation. Never rediscover their issuer.
+    const path = new URL(localDestination(next), runtime.configuration.PLATFORM_URL).pathname;
+    const deviceLogin = path === "/device";
+
+    if (runtime.configuration.PLATFORM_URL === cloudPlatformUrl && !deviceLogin) {
       const domain = email.slice(email.lastIndexOf("@") + 1);
       let origin: string;
 

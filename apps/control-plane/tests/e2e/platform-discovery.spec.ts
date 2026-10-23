@@ -160,10 +160,9 @@ test("does not carry an existing Cloud device grant to another installation", as
   await page.goto(`${cloud}/sign-in?next=${encodeURIComponent("/device?user_code=SECRET")}`);
   await page.getByLabel("Email", { exact: true }).fill("employee@company.test");
   await page.getByRole("button", { name: "Continue", exact: true }).click();
-  await expect(
-    page.getByText("widefleet login --domain company.test", { exact: false }),
-  ).toBeVisible();
-  expect(authRequests).toEqual([]);
+  await expect(page.getByLabel("Sign-in code", { exact: true })).toBeVisible();
+  expect(new URL(page.url()).origin).toBe(cloud);
+  expect(authRequests).toContain("/api/auth/email-otp/send-verification-otp");
 });
 
 test("exposes Cloud defaults and explicit configuration errors through the discovery API", async ({

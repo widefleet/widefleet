@@ -1,40 +1,29 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { and, eq, gt, like, lt } from "drizzle-orm";
 import { APIError, createAuthEndpoint } from "better-auth/api";
 import { z } from "zod";
 import { verification } from "./auth-schema.ts";
-import { cliScopes } from "./auth-options.ts";
 import type { Configuration } from "./config.ts";
 import type { DatabaseExecutor } from "./database.ts";
 import { cloudPlatformUrl, discoveredPlatformUrl } from "./platform-discovery.ts";
 
-export const cliCallbackUrl = `${cloudPlatformUrl}/cli-login/callback`;
-
-const prefix = "cli-login:";
-
-const challenge = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
-
-const token = z.string().regex(/^[A-Za-z0-9_-]{43,128}$/);
-
-const hash = (value: string) => createHash("sha256").update(value).digest("hex");
+const prefix = "cli-routing:";
 
 const secret = () => randomBytes(32).toString("base64url");
 
-export const cliApprovalCode = (value: string) =>
-  `${value.slice(0, 4)}-${value.slice(4, 8)}`.toUpperCase();
+const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 
-const startInput = z.object({
-  code_challenge: challenge,
-  poll_hash: z.string().regex(/^[a-f0-9]{64}$/),
-  scope: z.string().min(1).max(512),
-});
+const token = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
 
-const storedLogin = startInput.extend({
-  browserToken: token,
-  callbackState: token,
+const userCode = z.string().min(1).max(128);
+
+const credentials = z.object({ request_id: token, cli_token: token });
+
+const stored = z.object({
+  browserHash: z.string(),
+  cliHash: z.string(),
   platformUrl: discoveredPlatformUrl.nullable(),
-  status: z.enum(["awaiting_selection", "awaiting_authorization", "authorized", "denied"]),
-  code: z.string().max(2048).nullable(),
+  userCode: userCode.nullable(),
 });
 
 export const createCliLogin = (database: DatabaseExecutor, configuration: Configuration) => {
@@ -42,198 +31,121 @@ export const createCliLogin = (database: DatabaseExecutor, configuration: Config
     if (configuration.PLATFORM_URL !== cloudPlatformUrl) throw new APIError("NOT_FOUND");
   };
 
-  const read = async (id: string) => {
+  const read = async (id: string, credential: string, channel: "browserHash" | "cliHash") => {
     enabled();
 
     const [row] = await database
       .select()
       .from(verification)
-      .where(eq(verification.id, prefix + challenge.parse(id)));
+      .where(eq(verification.id, prefix + token.parse(id)));
 
     if (!row || row.expiresAt <= new Date())
-      throw new APIError("GONE", { message: "This login expired. Run widefleet login --restart." });
+      throw new APIError("GONE", { message: "This login expired. Run widefleet login again." });
+    const value = stored.parse(JSON.parse(row.value));
 
-    return { row, value: storedLogin.parse(JSON.parse(row.value)) };
+    if (!timingSafeEqual(Buffer.from(hash(token.parse(credential))), Buffer.from(value[channel])))
+      throw new APIError("UNAUTHORIZED", { message: "Invalid CLI login request" });
+
+    return { row, value };
   };
 
-  const browser = async (id: string, ticket: string) => {
-    const login = await read(id);
+  const save = async (login: Awaited<ReturnType<typeof read>>, value: z.infer<typeof stored>) => {
+    const changed = await database
+      .update(verification)
+      .set({ value: JSON.stringify(value) })
+      .where(
+        and(
+          eq(verification.id, login.row.id),
+          eq(verification.value, login.row.value),
+          gt(verification.expiresAt, new Date()),
+        ),
+      )
+      .returning({ id: verification.id });
 
-    if (hash(token.parse(ticket)) !== hash(login.value.browserToken))
-      throw new APIError("UNAUTHORIZED", { message: "Invalid login link" });
-
-    return login;
+    if (!changed.length)
+      throw new APIError("CONFLICT", { message: "This login changed. Reload the page." });
   };
 
-  const authorizationUrl = (value: z.infer<typeof storedLogin>, email: string) => {
-    if (!value.platformUrl) throw new APIError("CONFLICT");
-    const url = new URL("/api/auth/oauth2/authorize", value.platformUrl);
-    url.search = new URLSearchParams({
-      client_id: "platform-cli",
-      response_type: "code",
-      redirect_uri: cliCallbackUrl,
-      code_challenge_method: "S256",
-      code_challenge: value.code_challenge,
-      state: value.callbackState,
-      scope: value.scope,
-      resource: `${value.platformUrl}/api/v1`,
-      prompt: "consent",
-      login_hint: email,
-    }).toString();
+  const inspect = (value: z.infer<typeof stored>) => {
+    let url: URL | null = null;
 
-    return url.href;
+    if (value.platformUrl && value.userCode) {
+      url = new URL("/device", value.platformUrl);
+      url.searchParams.set("user_code", value.userCode);
+    }
+
+    return { platformUrl: value.platformUrl, verificationUri: url?.href ?? null };
   };
 
   return {
-    async start(input: z.infer<typeof startInput>) {
+    async start() {
       enabled();
-      const scopes = input.scope.split(" ");
-
-      if (
-        !scopes.every((scope) => cliScopes.includes(scope)) ||
-        !["openid", "offline_access"].every((scope) => scopes.includes(scope))
-      )
-        throw new APIError("BAD_REQUEST", { message: "Unsupported CLI permissions" });
-
-      // These are short-lived rendezvous records, not credentials. The PKCE
-      // verifier and platform tokens never pass through this service.
+      const id = secret();
+      const browserToken = secret();
+      const cliToken = secret();
+      // Routing only: device grants and tokens are issued directly by Better Auth
+      // at the selected installation. This record holds only the public user code.
       await database
         .delete(verification)
         .where(and(like(verification.id, `${prefix}%`), lt(verification.expiresAt, new Date())));
-
-      const value = storedLogin.parse({
-        ...input,
-        browserToken: secret(),
-        callbackState: secret(),
-        platformUrl: null,
-        status: "awaiting_selection",
-        code: null,
+      await database.insert(verification).values({
+        id: prefix + id,
+        identifier: prefix + id,
+        value: JSON.stringify({
+          browserHash: hash(browserToken),
+          cliHash: hash(cliToken),
+          platformUrl: null,
+          userCode: null,
+        }),
+        expiresAt: new Date(Date.now() + 30 * 60_000),
       });
-
-      await database
-        .insert(verification)
-        .values({
-          id: prefix + input.code_challenge,
-          identifier: prefix + value.callbackState,
-          value: JSON.stringify(value),
-          expiresAt: new Date(Date.now() + 30 * 60_000),
-        })
-        .onConflictDoNothing();
-      const login = await read(input.code_challenge);
-
-      if (login.value.poll_hash !== input.poll_hash || login.value.scope !== input.scope)
-        throw new APIError("CONFLICT", { message: "This login request already exists" });
       const url = new URL("/cli-login", cloudPlatformUrl);
-      url.searchParams.set("request", input.code_challenge);
-      url.searchParams.set("ticket", login.value.browserToken);
+      url.searchParams.set("request", id);
+      url.searchParams.set("ticket", browserToken);
 
       return {
-        request_id: input.code_challenge,
+        request_id: id,
+        cli_token: cliToken,
         verification_uri: url.href,
-        user_code: cliApprovalCode(input.code_challenge),
-        expires_in: Math.max(0, Math.floor((login.row.expiresAt.getTime() - Date.now()) / 1000)),
-        interval: 3,
+        expires_in: 1800,
+        interval: 2,
       };
     },
-
     async inspect(id: string, ticket: string) {
-      const { value } = await browser(id, ticket);
-
-      return { status: value.status, platformUrl: value.platformUrl, code: cliApprovalCode(id) };
+      return inspect((await read(id, ticket, "browserHash")).value);
     },
-
-    async select(id: string, ticket: string, origin: string, email: string) {
-      const { row, value } = await browser(id, ticket);
+    async select(id: string, ticket: string, origin: string) {
+      const login = await read(id, ticket, "browserHash");
       const platformUrl = discoveredPlatformUrl.parse(origin);
 
-      if (value.status !== "awaiting_selection") {
-        if (value.status === "awaiting_authorization" && value.platformUrl === platformUrl)
-          return authorizationUrl(value, email);
-        throw new APIError("CONFLICT", { message: "This login already has a destination" });
+      if (login.value.platformUrl) {
+        if (login.value.platformUrl !== platformUrl)
+          throw new APIError("CONFLICT", { message: "This login already has a destination" });
+
+        return inspect(login.value);
       }
 
-      const selected = { ...value, platformUrl, status: "awaiting_authorization" as const };
+      const value = { ...login.value, platformUrl };
+      await save(login, value);
 
-      const changed = await database
-        .update(verification)
-        .set({ value: JSON.stringify(selected) })
-        .where(
-          and(
-            eq(verification.id, row.id),
-            eq(verification.value, row.value),
-            gt(verification.expiresAt, new Date()),
-          ),
-        )
-        .returning({ id: verification.id });
-
-      if (!changed.length)
-        throw new APIError("CONFLICT", { message: "This login changed. Reload the page." });
-
-      return authorizationUrl(selected, email);
+      return inspect(value);
     },
-
-    async complete(input: {
-      state: string;
-      issuer: string;
-      code?: string | null;
-      error?: string | null;
-    }) {
-      enabled();
-
-      const [row] = await database
-        .select()
-        .from(verification)
-        .where(eq(verification.identifier, prefix + token.parse(input.state)));
-
-      if (!row || row.expiresAt <= new Date()) throw new APIError("GONE");
-      const value = storedLogin.parse(JSON.parse(row.value));
-
-      if (
-        !value.platformUrl ||
-        input.issuer !== `${value.platformUrl}/api/auth` ||
-        Boolean(input.code) === Boolean(input.error)
-      )
-        throw new APIError("BAD_REQUEST", { message: "Invalid login callback" });
-      const denied = Boolean(input.error);
-      const code = input.code ? z.string().min(1).max(2048).parse(input.code) : null;
-
-      if (
-        (value.status === "authorized" && !denied && value.code === code) ||
-        (value.status === "denied" && denied)
-      )
-        return value.status;
-
-      if (value.status !== "awaiting_authorization")
-        throw new APIError("BAD_REQUEST", { message: "Invalid login callback" });
-
-      const changed = await database
-        .update(verification)
-        .set({
-          value: JSON.stringify({ ...value, status: denied ? "denied" : "authorized", code }),
-          // The provider's authorization codes last ten minutes. Leave a margin
-          // and retain the result for retries after a lost polling response.
-          expiresAt: new Date(Math.min(row.expiresAt.getTime(), Date.now() + 9 * 60_000)),
-        })
-        .where(and(eq(verification.id, row.id), eq(verification.value, row.value)))
-        .returning({ id: verification.id });
-
-      if (!changed.length) throw new APIError("CONFLICT", { message: "Login already completed" });
-
-      return denied ? "denied" : "authorized";
+    async poll(id: string, cliToken: string) {
+      return { platform_url: (await read(id, cliToken, "cliHash")).value.platformUrl };
     },
+    async ready(id: string, cliToken: string, code: string) {
+      const login = await read(id, cliToken, "cliHash");
 
-    async poll(id: string, pollToken: string) {
-      const { value, row } = await read(id);
+      if (!login.value.platformUrl)
+        throw new APIError("CONFLICT", { message: "Select an installation first" });
+      const parsed = userCode.parse(code);
 
-      if (hash(token.parse(pollToken)) !== value.poll_hash)
-        throw new APIError("UNAUTHORIZED", { message: "Invalid login request" });
+      if (login.value.userCode && login.value.userCode !== parsed)
+        throw new APIError("CONFLICT", { message: "This login already has a device code" });
 
-      return {
-        status: value.status,
-        platform_url: value.platformUrl,
-        code: value.code,
-        expires_at: row.expiresAt.toISOString(),
-      };
+      if (!login.value.userCode) await save(login, { ...login.value, userCode: parsed });
+
+      return { success: true };
     },
   };
 };
@@ -245,22 +157,33 @@ export const cliLoginPlugin = (login: ReturnType<typeof createCliLogin>) => ({
     { pathMatcher: (path: string) => path === "/cli-login/poll", window: 60, max: 60 },
   ],
   endpoints: {
-    startCliLogin: createAuthEndpoint(
-      "/cli-login/start",
-      { method: "POST", body: startInput },
-      async (context) => {
-        context.setHeader("cache-control", "no-store");
+    startCliLogin: createAuthEndpoint("/cli-login/start", { method: "POST" }, async (context) => {
+      context.setHeader("cache-control", "no-store");
 
-        return context.json(await login.start(context.body));
-      },
-    ),
+      return context.json(await login.start());
+    }),
     pollCliLogin: createAuthEndpoint(
       "/cli-login/poll",
-      { method: "POST", body: z.object({ request_id: challenge, poll_token: token }) },
+      { method: "POST", body: credentials },
       async (context) => {
         context.setHeader("cache-control", "no-store");
 
-        return context.json(await login.poll(context.body.request_id, context.body.poll_token));
+        return context.json(await login.poll(context.body.request_id, context.body.cli_token));
+      },
+    ),
+    readyCliLogin: createAuthEndpoint(
+      "/cli-login/ready",
+      { method: "POST", body: credentials.extend({ user_code: userCode }) },
+      async (context) => {
+        context.setHeader("cache-control", "no-store");
+
+        return context.json(
+          await login.ready(
+            context.body.request_id,
+            context.body.cli_token,
+            context.body.user_code,
+          ),
+        );
       },
     ),
   },

@@ -1,6 +1,7 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { isHttpError } from "@sveltejs/kit";
-  import { chooseCliPlatform } from "#lib/cli-login.remote";
+  import { chooseCliPlatform, inspectCliLogin } from "#lib/cli-login.remote";
   import AuthLayout from "#shadcn/components/AuthLayout.svelte";
   import Feedback from "#shadcn/components/Feedback.svelte";
   import { Button } from "#shadcn/components/ui/button/index.js";
@@ -16,7 +17,52 @@
 
   let busy = $state(false);
 
+  let selected = $state(false);
+
   let message = $state("");
+
+  const failure = (cause: unknown) =>
+    isHttpError(cause)
+      ? cause.body.message
+      : "Could not continue sign-in. Check your connection and reload this page.";
+
+  const continueToDevice = (uri: string) => {
+    const url = new URL(uri);
+
+    if (email) url.searchParams.set("email", email);
+    window.location.assign(url.href);
+  };
+
+  onMount(() => {
+    selected = Boolean(data.platformUrl);
+
+    if (data.verificationUri) continueToDevice(data.verificationUri);
+    let stopped = false;
+    let checking = false;
+    const status = inspectCliLogin({ request: data.request, ticket: data.ticket });
+
+    const timer = setInterval(async () => {
+      if (!selected || checking) return;
+      checking = true;
+
+      try {
+        await status.refresh();
+        const login = await status;
+
+        if (!stopped && login.verificationUri) continueToDevice(login.verificationUri);
+      } catch (cause) {
+        if (!stopped) message = failure(cause);
+        clearInterval(timer);
+      } finally {
+        checking = false;
+      }
+    }, 2000);
+
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  });
 
   const proceed = async (event: SubmitEvent) => {
     event.preventDefault();
@@ -26,12 +72,13 @@
     message = "";
 
     try {
-      const url = await chooseCliPlatform({ request: data.request, ticket: data.ticket, email });
-      window.location.assign(url);
+      const login = await chooseCliPlatform({ request: data.request, ticket: data.ticket, email });
+      selected = true;
+
+      if (login.verificationUri) continueToDevice(login.verificationUri);
     } catch (cause) {
-      message = isHttpError(cause)
-        ? cause.body.message
-        : "Could not start sign-in. Check your connection and try again.";
+      message = failure(cause);
+    } finally {
       busy = false;
     }
   };
@@ -43,21 +90,14 @@
     <Terminal class="size-5" />
   </div>
   <h1 class="text-2xl font-semibold tracking-tight">Connect your CLI</h1>
-  {#if data.status === "authorized"}
+  {#if selected}
     <p class="text-muted-foreground mt-3 text-sm leading-6">
-      Sign-in approved. Your CLI can finish connecting. You can close this window.
-    </p>
-  {:else if data.status === "denied"}
-    <p class="text-muted-foreground mt-3 text-sm leading-6">
-      This request was denied. Run widefleet login --restart to start again.
+      Waiting for your CLI to prepare sign-in. Keep the login command running; this page will
+      continue automatically.
     </p>
   {:else}
     <p class="text-muted-foreground mt-3 text-sm leading-6">
-      Enter your email to continue to your Widefleet sign-in. Your company's installation is found
-      automatically.
-    </p>
-    <p class="text-muted-foreground mt-3 text-xs leading-6">
-      Request <span class="font-mono">{data.code}</span>. Continue only if you started this request
+      Enter your email to find your Widefleet installation. Continue only if you started this login
       in your terminal or coding assistant.
     </p>
     <form onsubmit={proceed} class="mt-6 space-y-4">
@@ -72,10 +112,10 @@
           disabled={busy}
         />
       </div>
-      {#if message}<Feedback kind="error">{message}</Feedback>{/if}
-      <Button type="submit" disabled={busy} class="w-full">
-        {busy ? "Finding sign-in …" : "Continue"}<ArrowRight />
-      </Button>
+      <Button type="submit" disabled={busy} class="w-full"
+        >{busy ? "Finding sign-in …" : "Continue"}<ArrowRight /></Button
+      >
     </form>
   {/if}
+  {#if message}<div class="mt-5"><Feedback kind="error">{message}</Feedback></div>{/if}
 </AuthLayout>

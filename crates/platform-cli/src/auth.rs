@@ -92,23 +92,11 @@ pub struct LoginOptions {
     /// API scopes to request, separated by spaces or commas. Replaces the defaults.
     #[arg(long = "scope", value_delimiter = ',', num_args = 1.., default_values = ["platform:read", "platform:write"])]
     scopes: Vec<String>,
-    /// Return the current login state, completing an approved login if possible.
-    #[arg(long, conflicts_with = "restart")]
-    status: bool,
-    /// Print the link or current state and return without waiting for approval.
-    #[arg(long)]
-    no_wait: bool,
-    /// Replace a pending login with a new request.
-    #[arg(long)]
-    restart: bool,
-    /// Emit login states as JSON, without printing credentials.
-    #[arg(long)]
-    json: bool,
 }
 
 const CLIENT_ID: &str = "platform-cli";
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize)]
 struct DeviceCode {
     device_code: String,
     user_code: String,
@@ -130,8 +118,6 @@ struct Tokens {
 struct Session {
     tokens: Tokens,
     expires_at: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    login_id: Option<String>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -202,7 +188,6 @@ async fn save_session(
     origin: String,
     tokens: Tokens,
     credentials: &Credentials,
-    login_id: Option<String>,
 ) -> Result<Session> {
     if tokens.refresh_token.is_empty() {
         return Err(Error::invalid(
@@ -220,7 +205,6 @@ async fn save_session(
     let session = Session {
         expires_at: epoch()?.saturating_add(tokens.expires_in),
         tokens,
-        login_id,
     };
     let file = credentials.stored_file(&origin)?;
     tokio::task::spawn_blocking(move || {
@@ -318,10 +302,6 @@ pub async fn access_token(api: &Api, credentials: &Credentials) -> Result<String
         }
         return Ok(token);
     }
-    stored_access_token(api, credentials).await
-}
-
-async fn stored_access_token(api: &Api, credentials: &Credentials) -> Result<String> {
     let _lock = credentials.lock(api.origin_text()).await?;
     let session = read_session(api.origin_text(), credentials).await?;
     if session.expires_at > epoch()?.saturating_add(45) {
@@ -340,12 +320,10 @@ async fn stored_access_token(api: &Api, credentials: &Credentials) -> Result<Str
             .await?,
     )
     .await?;
-    Ok(
-        save_session(api.origin_text(), tokens, credentials, session.login_id)
-            .await?
-            .tokens
-            .access_token,
-    )
+    Ok(save_session(api.origin_text(), tokens, credentials)
+        .await?
+        .tokens
+        .access_token)
 }
 
 pub async fn logout(api: &Api, credentials: &Credentials) -> Result<()> {

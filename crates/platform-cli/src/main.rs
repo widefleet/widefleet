@@ -66,7 +66,6 @@ enum Command {
         #[arg(long, value_enum, default_value = "sveltekit")]
         template: installation::Template,
     },
-    /// Sign in through your browser. Works without a configured platform or terminal input.
     Login(auth::LoginOptions),
     Logout,
     Whoami,
@@ -178,7 +177,7 @@ async fn run(args: Arguments) -> Result<()> {
         Command::Login(options) => options.discovery.domain(),
         _ => None,
     };
-    let mut organization = args.organization.clone();
+    let mut automatic_login = false;
     let origin = if let Some(domain) = domain {
         if args.url.is_some() {
             return Err(platform_core::Error::invalid(
@@ -190,20 +189,18 @@ async fn run(args: Arguments) -> Result<()> {
         match configuration::explicit(args.url.as_deref())? {
             Some(selected) => selected.platform_url,
             None => match configuration::Files::locate(args.config_file.as_deref())?.selection()? {
-                Some(selected) => {
-                    if organization.is_none() { organization = selected.organization_id; }
-                    selected.platform_url
-                },
+                Some(selected) => selected.platform_url,
                 None if matches!(args.command, Command::Login(_)) => {
+                    automatic_login = true;
                     "https://app.widefleet.com".to_owned()
                 }
                 None => return Err(platform_core::Error::invalid(
-                    "No platform is configured. Run widefleet login; it prints a browser link and saves the selected platform after approval".into(),
+                    "No platform is configured. Run widefleet login; it opens company discovery in your browser".into(),
                 )),
             },
         }
     };
-    let api = Api::new(&origin)?.with_organization(organization.as_deref())?;
+    let api = Api::new(&origin)?.with_organization(args.organization.as_deref())?;
     let credentials = auth::Credentials::new(args.session_file);
     match args.command {
         Command::Login(options) => {
@@ -217,14 +214,9 @@ async fn run(args: Arguments) -> Result<()> {
                 }
                 Err(error) => return Err(error),
             };
-            let profile = files
-                .as_ref()
-                .map(configuration::Files::login_profile)
-                .transpose()?
-                .unwrap_or_else(|| api.origin_text());
-            let connected = auth::login(&api, &credentials, options, &profile).await?;
-            if let (Some(files), Some(connection)) = (files, connected) {
-                files.save_login(Some(&connection.platform_url), connection.organization_id.as_deref().or(organization.as_deref()))
+            let connected = auth::login(&api, &credentials, options, automatic_login).await?;
+            if let Some(files) = files {
+                files.save(Some(&connected))
                 .map_err(|error| {
                     platform_core::Error::invalid(format!(
                         "Login succeeded, but the platform URL could not be saved: {error}. Use --url for subsequent commands or fix the configuration file permissions"
