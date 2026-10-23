@@ -4,9 +4,7 @@ description: Supported runtime integrations and verified differences from Cloudf
 lastModified: 2026-10-23
 ---
 
-Widefleet currently uses celld **0.6.2**. Dynamic Worker and deployment tests exercise the new
-version, including outbound requests, resources, activation and restarts. Additional
-regressions cover `self` in loaded Workers and incoming request cancellation.
+Widefleet currently uses celld **0.6.2**.
 See the [native release notes](https://github.com/denoland/celld/releases/tag/v0.6.2)
 and [platform version requirements](/self-hosting/installation#versions-and-updates).
 
@@ -29,6 +27,11 @@ This reference compares Widefleet with Cloudflare's hosted platform, its local
 
 Sources: [celld Dynamic Workers](https://github.com/denoland/celld/blob/v0.6.1/docs/services/dynamic-workers.md), [celld RPC und Streams](https://github.com/denoland/celld/blob/v0.6.1/docs/cloudflare-compat.md#rpc), [native Stream-Übertragung](https://github.com/denoland/celld/blob/v0.6.1/crates/celld/js/harness.js#L3580), [KV](https://github.com/denoland/celld/blob/v0.6.1/docs/services/kv.md), [R2](https://github.com/denoland/celld/blob/v0.6.1/docs/services/r2.md), [D1](https://github.com/denoland/celld/blob/v0.6.1/docs/services/d1.md), [Cloudflare Dynamic-Worker-Limits](https://developers.cloudflare.com/dynamic-workers/platform/limits/), [Cloudflare RPC](https://developers.cloudflare.com/workers/runtime-apis/rpc/), [Cloudflare Egress](https://developers.cloudflare.com/dynamic-workers/usage/egress-control/), [Dynamic-Worker-Observability](https://developers.cloudflare.com/dynamic-workers/usage/observability/), [Cloudflare KV](https://developers.cloudflare.com/kv/concepts/how-kv-works/), [Cloudflare D1](https://developers.cloudflare.com/d1/worker-api/d1-database/#dump).
 
+App and connector packages support ES modules and Wasm on **celld 0.6.2**.
+Local workerd also loads separate text and binary data modules; celld rejects them
+with “must be a string or wasm bytes”. Uploads allow up to 32 runtime modules and
+500 source maps, with at most 20 MiB per file.
+
 ## Widefleet implementation limits
 
 Widefleet integrates the native runtime as follows:
@@ -36,12 +39,18 @@ Widefleet integrates the native runtime as follows:
 - App tails export HTTP logs and errors through ingestion scoped to each app.
   Native fleet OTLP export is disabled. See [runtime logs](/self-hosting/runtime-logs)
   for capture coverage and delivery behavior.
-- Provisioning manages one node per fleet. celld itself supports multiple nodes.
+- Provisioning manages one node per installation. celld itself supports multiple nodes.
 - [Workflows](/guides/workflows) use the usual `WorkflowEntrypoint` and step APIs
   through a platform adapter on unchanged celld. Automatic facets are excluded.
-  [Connectors](/guides/connectors) run as regular Workers and may declare their own
-  Durable Objects. Class names must be unique within the fleet; a default Worker
-  export is required even with named RPC entrypoints.
+- With platform 0.4.0 and app runtime 0.3.0, [connectors](/guides/connectors) run as Dynamic Workers on celld
+  and Cloudflare. Their Durable Objects use persistent facets, isolated by organization,
+  connector and class; different connectors can reuse class names. A default
+  Worker export is required even with named RPC entrypoints. The common RPC
+  contract transfers values, with `fetch()` for streaming bodies. Callbacks,
+  returned RPC objects and WebSockets are outside that contract; celld 0.6.2
+  facets cannot hibernate WebSocket connections.
+  Storage alarms are unavailable on celld 0.6.2 and the tested local workerd runtime.
+  See [connector logs](/guides/connectors#connector-logs) for log coverage and troubleshooting.
 - App removal clears deletable files and active references. Native D1/KV/Queue cells and shared deployment
   history may remain. See [app removal](/reference/runtime#app-removal).
 - Widefleet adds no blanket CPU/RAM, request, Worker-cache or origin-count caps.
