@@ -6,7 +6,7 @@ lastModified: 2026-10-23
 
 IT can deploy a Worker from its own repository with `widefleet connector deploy`. Apps receive a scoped binding and call its methods directly, for example `env.ERP.listCustomers()`. Connector code runs as a Dynamic Worker with its own declared resources on both self-hosted celld and Cloudflare. After installation, connector code and secret updates activate independently of platform releases.
 
-Dynamic connectors require platform and CLI **0.4.0 or newer**, matching control-plane and agent images, and app runtime **0.3.0 or newer**.
+Use matching platform, CLI and app runtime **0.4.1 or newer**.
 
 ## Find connectors and inspect your app
 

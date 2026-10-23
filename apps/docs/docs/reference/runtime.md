@@ -8,9 +8,7 @@ The installation's celld runtime runs apps and previews as separate Dynamic Work
 
 ## Versions and updates
 
-The Widefleet loader and built-in binding adapters are JavaScript built from `packages/app-runtime`. They are versioned separately from the Rust agent. `widefleet runtime update VERSION` downloads the matching `runtime-vVERSION` GitHub release, verifies its published checksum and uploads the package through the authenticated API. If the release repository requires authentication, supply a repository-read token using `GH_TOKEN` or `GITHUB_TOKEN`. That token is used only for GitHub; the Widefleet credential is used only for the management API.
-
-Platform 0.4.0 bundles app runtime 0.3.0 for new installations. Its separate `runtime-v0.3.0` GitHub release is not yet published, so `widefleet runtime update 0.3.0` cannot download it. The `update` command needs a published runtime release compatible with the installed platform. `rollback` selects a compatible version already stored by the installation and does not download a release.
+Use platform and CLI **0.4.1 or newer**. The app runtime shares the Widefleet version. `widefleet runtime update VERSION` downloads the runtime package from the matching `vVERSION` GitHub release, verifies its checksum and activates it through the management API. Use the Widefleet release version for `VERSION`; runtime activation remains independent of container updates.
 
 ```sh
 widefleet login
@@ -25,7 +23,7 @@ The control plane keeps package bytes in Object Storage and only checksums/versi
 
 If an update returns `409: Runtime versions are immutable`, the installation already stores different bytes under that version. This can happen when a source checkout builds a modified runtime without changing its version, including changes to bundled license notices. Use a matching published platform build or a newly versioned runtime release; do not overwrite stored packages or edit their checksums. `runtime rollback` selects the installation's existing package, not the download from GitHub.
 
-Platform 0.4.0 includes app runtime 0.3.0, using installation protocol 2 and celld 0.6.2. Use matching 0.4.0 control-plane, agent and CLI releases; older protocol-1 runtime packages cannot run on this platform. Workflow support additionally requires a deployment agent that provisions Workflow protocol 1 bindings. A compatible loader/adapter update within installed capabilities needs no Rust rebuild; a new installation protocol or celld binary requires a separately reviewed platform update.
+Widefleet 0.4.1 includes app runtime 0.4.1 and celld 0.6.2. Use matching control-plane, agent and CLI releases. The platform checks runtime compatibility before activation.
 
 Runtime 0.2.1 forwards incoming HTTP request cancellation explicitly to the loaded app. If the client disconnects before response headers, the app's `request.signal` is aborted. App code must pass that signal to any downstream requests it wants to cancel, for example `env.SERVICE.fetch(url, { signal: request.signal })`. A timeout after a fetch has returned still needs explicit cancellation of the response body.
 

@@ -6,7 +6,7 @@ lastModified: 2026-10-23
 
 Connect Widefleet to existing cloud services using the same maintained Compose configuration as the local PostgreSQL/RustFS installation. Provision the host, cloud databases, object stores, IAM and permanent DNS records before following this guide. Use Linux x86-64, the supported Docker baseline from [operations](/self-hosting/installation), and Docker Compose 2.20.0 or newer.
 
-This guide targets release `v0.4.0` with its matching source checkout and image manifest. See the [operations guide](/self-hosting/installation#pull-the-release-images) for downloading and verifying the release manifest.
+This guide targets release `v0.4.1` with its matching source checkout and image manifest. See the [operations guide](/self-hosting/installation#pull-the-release-images) for downloading and verifying the release manifest.
 
 ## Select the installation
 

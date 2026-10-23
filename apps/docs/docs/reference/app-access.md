@@ -107,7 +107,7 @@ return `403`.
 
 ## Installation and verification
 
-Use the matching platform 0.4.0 control-plane, agent and runtime images. The standard Compose topology includes app authentication in the shared runtime.
+Use matching control-plane, agent and runtime images from the [installation guide](/self-hosting/installation). The standard Compose topology includes app authentication in the shared runtime.
 
 For a custom topology, configure the agent's `PLATFORM_APP_RUNTIME_URL` (default `http://runtime:8080/`) and `PLATFORM_PROXY_URL` (default `https://app-platform-proxy:8443`) as private origins reachable by the relevant services. Preserve the runtime control-key mount from the Compose configuration.
 
