@@ -1,5 +1,6 @@
 import type { OrganizationAccess } from "./application-context.ts";
 import type { BetterAuthOptions } from "better-auth";
+import type { sveltekitCookies } from "better-auth/svelte-kit";
 import { createAuthentication } from "./auth.ts";
 import { createIdentityService } from "./identity.ts";
 import { createAppService } from "./apps.ts";
@@ -40,6 +41,7 @@ export const createRuntime = ({
   sendEmail,
   authRateLimit,
   authIpAddressHeaders,
+  authCookies,
   discoveryTransport = "node",
 }: {
   configuration: Configuration & { BETTER_AUTH_SECRET: string };
@@ -53,6 +55,7 @@ export const createRuntime = ({
   sendEmail?: SendEmail;
   authRateLimit?: BetterAuthOptions["rateLimit"];
   authIpAddressHeaders?: string[];
+  authCookies?: ReturnType<typeof sveltekitCookies>;
   hostedLogs?: ReturnType<typeof createCloudflareLogs>;
   discoveryTransport?: "node" | "cloudflare";
 }) => {
@@ -63,6 +66,8 @@ export const createRuntime = ({
   if (authRateLimit) authOptions.rateLimit = authRateLimit;
 
   if (authIpAddressHeaders) authOptions.ipAddressHeaders = authIpAddressHeaders;
+
+  if (authCookies) authOptions.cookies = authCookies;
 
   if (organizationAccess) authOptions.organizationAccess = organizationAccess;
   const auth = createAuthentication(configuration, database.db, authOptions);

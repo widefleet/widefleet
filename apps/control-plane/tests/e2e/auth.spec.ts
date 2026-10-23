@@ -202,6 +202,87 @@ test.afterEach(async ({ browserName }, info) => {
     await info.attach(`${browserName}-server-log`, { body: logs, contentType: "text/plain" });
 });
 
+test("renews the browser cookie on page requests using Better Auth session defaults", async ({
+  page,
+  context,
+}) => {
+  const login = await environment.users.login({ userId: environment.owner.id });
+  const current = await environment.auth.api.getSession({ headers: login.headers });
+
+  if (!current) throw new Error("Expected owner session");
+  const lifetime = 7 * 24 * 60 * 60;
+  expect(current.session.expiresAt.getTime() - Date.now()).toBeGreaterThan((lifetime - 10) * 1000);
+  expect(current.session.expiresAt.getTime() - Date.now()).toBeLessThanOrEqual(lifetime * 1000);
+  const { authCookies } = await environment.auth.$context;
+  const cookieName = authCookies.sessionToken.name;
+
+  for (const age of [23, 25]) {
+    const previousExpiry = new Date(Date.now() + (lifetime - age * 60 * 60) * 1000);
+    await environment.database.db
+      .update(authSession)
+      .set({ expiresAt: previousExpiry })
+      .where(eq(authSession.id, current.session.id));
+    await context.addCookies(
+      login.cookies.map((cookie) => ({
+        ...cookie,
+        domain: "localhost",
+        sameSite: "Lax",
+        secure: false,
+        expires: Math.floor(previousExpiry.getTime() / 1000),
+      })),
+    );
+
+    const response = await page.goto("/organizations");
+    expect(response?.status()).toBe(200);
+    await expect(page.getByRole("heading", { name: "Choose an organization" })).toBeVisible();
+    const browserCookie = (await context.cookies()).find((cookie) => cookie.name === cookieName);
+
+    const [stored] = await environment.database.db
+      .select({ expiresAt: authSession.expiresAt })
+      .from(authSession)
+      .where(eq(authSession.id, current.session.id));
+
+    if (!browserCookie || !stored) throw new Error("Expected persisted browser session");
+
+    if (age === 23) {
+      expect(stored.expiresAt).toEqual(previousExpiry);
+      expect(browserCookie.expires).toBe(Math.floor(previousExpiry.getTime() / 1000));
+    } else {
+      expect(stored.expiresAt.getTime() - Date.now()).toBeGreaterThan((lifetime - 10) * 1000);
+      expect(browserCookie.expires - Date.now() / 1000).toBeGreaterThan(lifetime - 10);
+      expect(Math.abs(browserCookie.expires - stored.expiresAt.getTime() / 1000)).toBeLessThan(2);
+      expect(browserCookie.httpOnly).toBe(true);
+      expect(browserCookie.sameSite).toBe("Lax");
+    }
+  }
+});
+
+test("clears an expired browser session and requires sign-in", async ({ page, context }) => {
+  const login = await environment.users.login({ userId: environment.owner.id });
+  const current = await environment.auth.api.getSession({ headers: login.headers });
+
+  if (!current) throw new Error("Expected owner session");
+  await context.addCookies(
+    login.cookies.map((cookie) => ({
+      ...cookie,
+      domain: "localhost",
+      sameSite: "Lax",
+      secure: false,
+    })),
+  );
+  await environment.database.db
+    .update(authSession)
+    .set({ expiresAt: new Date(Date.now() - 1000) })
+    .where(eq(authSession.id, current.session.id));
+
+  await page.goto("/organizations");
+  await expect(page).toHaveURL(/\/sign-in\?next=%2Forganizations$/);
+  const { authCookies } = await environment.auth.$context;
+  expect((await context.cookies()).map((cookie) => cookie.name)).not.toContain(
+    authCookies.sessionToken.name,
+  );
+});
+
 test("selects an organization, repairs stale selection and explains removed access", async ({
   page,
   context,

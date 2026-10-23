@@ -5,6 +5,7 @@ import { APIError } from "better-auth/api";
 import type { JSONWebKeySet } from "jose";
 import { installationOrganizationId } from "../organization.ts";
 import { betterAuth } from "better-auth";
+import type { sveltekitCookies } from "better-auth/svelte-kit";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { eq, sql } from "drizzle-orm";
 import {
@@ -45,6 +46,7 @@ export const createAuthentication = (
   options: Parameters<typeof authenticationOptions>[1] & {
     organizationAccess?: OrganizationAccess;
     encryptionKey?: string;
+    cookies?: ReturnType<typeof sveltekitCookies>;
   } = {},
 ) => {
   const settings = authenticationOptions(configuration, {
@@ -104,6 +106,8 @@ export const createAuthentication = (
           ],
         },
       },
+      // Cookie propagation must run after every other authentication hook.
+      ...(options.cookies ? [options.cookies] : []),
     ],
     database: drizzleAdapter(database, { provider: "pg", schema: authSchema, transaction: true }),
     databaseHooks: {

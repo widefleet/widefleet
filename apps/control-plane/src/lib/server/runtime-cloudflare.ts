@@ -1,3 +1,5 @@
+import { getRequestEvent } from "$app/server";
+import { sveltekitCookies } from "better-auth/svelte-kit";
 import { createRuntimeExtension } from "#runtime-extension";
 import { createCloudflareEmail } from "./email-cloudflare.ts";
 import { createArtifactStorage } from "./artifact-storage.ts";
@@ -45,6 +47,7 @@ export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
     encryptionKey: configuration.PLATFORM_ENCRYPTION_KEY,
     authRateLimit: cloudflareAuthRateLimit(bindings, configuration.PLATFORM_URL),
     authIpAddressHeaders: ["cf-connecting-ip"],
+    authCookies: sveltekitCookies(getRequestEvent),
   };
 
   if (sendEmail) options.sendEmail = sendEmail;
