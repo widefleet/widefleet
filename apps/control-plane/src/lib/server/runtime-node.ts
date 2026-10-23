@@ -1,3 +1,5 @@
+import { getRequestEvent } from "$app/server";
+import { sveltekitCookies } from "better-auth/svelte-kit";
 import { initializeRuntime } from "./runtime-initialization.ts";
 import { createReporting } from "./reporting.ts";
 import { createRuntime } from "./runtime-services.ts";
@@ -33,6 +35,7 @@ const startRuntime = async () => {
     storage,
     reporting,
     encryptionKey,
+    authCookies: sveltekitCookies(getRequestEvent),
   });
 };
 

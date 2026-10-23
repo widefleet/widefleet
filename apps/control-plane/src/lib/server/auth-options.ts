@@ -190,8 +190,6 @@ export const authenticationOptions = (
       },
     },
     session: {
-      expiresIn: 60 * 60 * 8,
-      updateAge: 60 * 30,
       additionalFields: {
         identityOrganizationId: { type: "string", required: false, input: false },
         recovery: { type: "boolean", defaultValue: false, input: false },

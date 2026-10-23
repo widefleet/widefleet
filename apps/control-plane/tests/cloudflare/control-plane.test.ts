@@ -170,6 +170,58 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
     expect(response.status).toBe(200);
   });
 
+  it("renews browser session cookies through the Worker page response", async () => {
+    const state = await administrator.storageState();
+
+    const current = await environment.auth.api.getSession({
+      headers: new Headers({
+        cookie: state.cookies.map(({ name, value }) => `${name}=${value}`).join("; "),
+      }),
+    });
+
+    if (!current) throw new Error("Expected administrator session");
+    const lifetime = 7 * 24 * 60 * 60;
+    const previousExpiry = new Date(Date.now() + (lifetime - 25 * 60 * 60) * 1000);
+    await environment.database.db
+      .update(session)
+      .set({ expiresAt: previousExpiry })
+      .where(eq(session.id, current.session.id));
+
+    const client = await request.newContext({
+      baseURL: origin,
+      storageState: {
+        ...state,
+        cookies: state.cookies.map((cookie) => ({
+          ...cookie,
+          expires: Math.floor(previousExpiry.getTime() / 1000),
+        })),
+      },
+    });
+
+    try {
+      const response = await client.get("/organizations");
+      expect(response.status()).toBe(200);
+      const { authCookies } = await environment.auth.$context;
+
+      const renewed = (await client.storageState()).cookies.find(
+        (cookie) => cookie.name === authCookies.sessionToken.name,
+      );
+
+      if (!renewed) throw new Error("Expected renewed browser cookie");
+      expect(renewed.expires - Date.now() / 1000).toBeGreaterThan(lifetime - 10);
+
+      const [stored] = await environment.database.db
+        .select({ expiresAt: session.expiresAt })
+        .from(session)
+        .where(eq(session.id, current.session.id));
+
+      if (!stored) throw new Error("Expected persisted session");
+      expect(Math.abs(renewed.expires - stored.expiresAt.getTime() / 1000)).toBeLessThan(2);
+    } finally {
+      await client.dispose();
+    }
+  });
+
   it("limits login attempts across independent Worker requests for the same IP", async () => {
     const signIn = (ip: string) =>
       fetch(`${origin}/api/auth/sign-in/email-otp`, {
