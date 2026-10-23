@@ -76,8 +76,10 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       "prints %s errors before telemetry and honors opt-out",
       async (command) => {
         await execute(binary, ["telemetry", "enable"], { env: environment() });
+        // Fail locally before login can start company discovery or contact Cloud.
+        const args = command === "login" ? [command, "--scope", "invalid scope"] : [command];
 
-        const failure = await execute(binary, [command], {
+        const failure = await execute(binary, args, {
           env: environment(),
         }).then(
           () => null,
@@ -89,9 +91,15 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         expect(failure?.stderr).toContain('"event":"$exception"');
         expect(failure?.stderr).not.toContain('"message":');
         const diagnostic = failure?.stderr.split("[widefleet telemetry]")[0];
-        expect(diagnostic).toMatch(/^No platform is configured\..*\n$/);
-        expect(diagnostic).toContain("widefleet login --email employee@example.com");
-        expect(diagnostic).toContain("widefleet login --domain example.com");
+
+        if (command === "apps") {
+          expect(diagnostic).toMatch(/^No platform is configured\..*\n$/);
+          expect(diagnostic).toContain("Run widefleet login;");
+        } else {
+          expect(diagnostic).toMatch(
+            /^Pass each scope as a separate argument or comma-separated value\n$/,
+          );
+        }
 
         const line = failure?.stderr
           .split("\n")
@@ -122,12 +130,12 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
           .parse(JSON.parse(z.string().parse(line).slice("[widefleet telemetry] ".length)));
 
         expect(captured.properties.$exception_list[0]?.stacktrace.frames[0]?.filename).toBe(
-          `crates/platform-cli/src/${command === "login" ? "discovery" : "main"}.rs`,
+          `crates/platform-cli/src/${command === "login" ? "auth" : "main"}.rs`,
         );
 
         await execute(binary, ["telemetry", "disable"], { env: environment() });
 
-        const disabled = await execute(binary, [command], {
+        const disabled = await execute(binary, args, {
           env: environment(),
         }).then(
           () => null,

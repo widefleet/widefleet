@@ -55,12 +55,12 @@ impl Credentials {
         .map_err(|error| Error::credentials(error.to_string()))?
     }
 
-    fn stored_file(&self, origin: &str) -> Result<Option<file::SessionFile>> {
+    fn stored_file(&self, _origin: &str) -> Result<Option<file::SessionFile>> {
         if self.session_file.is_some() {
             return Ok(self.session_file.clone());
         }
         #[cfg(unix)]
-        if let Ok(file) = private_file(origin)
+        if let Ok(file) = private_file(_origin)
             && file.0.try_exists()?
         {
             return Ok(Some(file));
