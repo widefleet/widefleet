@@ -9,7 +9,7 @@ platform, the browser asks for your email and routes to your installation. Any
 configured URL starts device login there directly, including Cloud. Check the
 platform and code before approving. The default scopes are
 `platform:read platform:write`; select additional scopes explicitly when needed.
-See [CLI configuration and availability](/reference/cli-configuration).
+See [CLI configuration](/reference/cli-configuration).
 
 ## Agent login
 
@@ -43,8 +43,7 @@ the preferred saved credential stores. Linux Secret Service requires a session
 D-Bus. On Unix, if the store is unavailable, login automatically uses a private,
 unencrypted file under `$XDG_STATE_HOME/widefleet/credentials/`, or
 `~/.local/state/widefleet/credentials/` when that variable is unset. The CLI prints
-the chosen location and reuses it for later commands. This automatic fallback
-is part of the unreleased browser-login changes.
+the chosen location and reuses it for later commands.
 
 To choose the location explicitly, select a Unix session file. This requires CLI 0.2.1 or newer; `widefleet --help` lists `--session-file`. These commands use Bash syntax:
 

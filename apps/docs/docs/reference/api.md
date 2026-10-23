@@ -13,7 +13,7 @@ Clients must send `Origin: <PLATFORM_URL>` for OAuth form requests and Worker up
 `GET https://app.widefleet.com/api/platform-discovery?domain=example.com` resolves
 the company's public TXT record or HTTPS discovery document. It requires no
 credentials and accepts a domain, not a full email address. See
-[feature availability](/reference/cli-configuration).
+[company discovery](/reference/cli-configuration).
 
 A successful response has the form:
 
@@ -37,8 +37,7 @@ discovery endpoint or follow an HTTP redirect to move an authenticated API reque
 
 ## Browser discovery for unconfigured CLI clients
 
-These endpoints are part of the unreleased browser-discovery flow. Prefer
-`widefleet login` unless implementing a separate client. Configured clients use
+Prefer `widefleet login` unless implementing a separate client. Configured clients use
 their installation's ordinary device authorization endpoints directly.
 
 1. Call `POST https://app.widefleet.com/api/auth/cli-login/start` without a body.

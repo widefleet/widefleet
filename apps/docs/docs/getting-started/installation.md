@@ -51,7 +51,7 @@ local URL printed by `pnpm dev`, then stop that server with Ctrl-C before contin
 
 ## Connect and deploy
 
-Connect and deploy using the [browser-login version requirements](/reference/cli-configuration):
+Connect and deploy using [browser login](/reference/cli-configuration):
 
 ```sh
 widefleet login

@@ -110,7 +110,7 @@ Cloud sign-in can use the same public DNS record or HTTPS document to route
 employees who arrive at `https://app.widefleet.com`. After an employee enters a
 work email, Cloud checks that domain and opens the published platform's sign-in
 page before requesting a Cloud email code. No registration of the company in a
-separate Widefleet directory is required. See [availability and Cloud defaults](/reference/cli-configuration).
+separate Widefleet directory is required. See [Cloud defaults](/reference/cli-configuration).
 
 Publish discovery where public resolvers and the Cloud service can read it.
 Private DNS continues to work for local CLI discovery, but Cloud cannot use a

@@ -7,13 +7,6 @@ lastModified: 2026-10-23
 Company discovery and saved configuration require CLI 0.3.2 or newer. Check
 `widefleet --version`; `widefleet login --help` lists `--email` and `--domain`.
 
-Automatic Cloud entry, browser discovery and automatic Unix credential files
-below are **unreleased**. They require a CLI release containing these changes
-and an upgraded Cloud deployment. Authentication at the chosen installation
-uses the existing Better Auth device authorization flow. CLI 0.4.0 supports
-company discovery and saved URLs, but requires an explicit Cloud URL when no
-company discovery record exists.
-
 The CLI remembers the platform URL after a successful login. Credentials stay
 in the operating system's credential store or a private Unix credential file.
 See [CLI authentication](/reference/authentication) for storage and renewal.
