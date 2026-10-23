@@ -63,7 +63,7 @@ Create this record in the `example.com` DNS zone:
 | Name    | `_widefleet`                       |
 | Content | `url=https://platform.example.com` |
 
-The CLI queries the fully qualified name `_widefleet.example.com.` through the
+`widefleet login --domain example.com` queries the fully qualified name `_widefleet.example.com.` through the
 operating system's resolver. Publish a TXT record directly at that name. Strings
 within one TXT record are concatenated; separate records must identify the same
 platform URL. A missing record or unavailable resolver allows HTTPS fallback.
@@ -110,7 +110,15 @@ separate Widefleet directory is required. See [availability and Cloud defaults](
 Publish discovery where public resolvers and the Cloud service can read it.
 Private DNS continues to work for local CLI discovery, but Cloud cannot use a
 company-only resolver or fetch a private discovery website. The published
-platform itself may still require the employee's VPN.
+platform itself may still require the employee's VPN. Both the browser and the
+agent's CLI environment need access to it.
+
+For the new default CLI flow, Cloud first creates a browser request. The employee
+enters their email there; routing happens before authorization starts at the
+selected installation. Upgrade that installation and Cloud to support the CLI's
+PKCE authorization and organization selection before rolling out the new CLI.
+An older self-hosted server still supports direct login with its configured URL.
+No callback listener on the employee's computer or agent sandbox is needed.
 
 Explicit organization sign-in links retain their target, including for guests
 whose email belongs to another company. Existing device grants and OAuth or
@@ -120,14 +128,18 @@ with `widefleet login --domain example.com`.
 
 ## Agent instructions and verification
 
-Have the agent check `widefleet config show` first. If no address is configured,
-it can use a work domain or email already available in its authorized context.
-Otherwise, it should ask the employee for their work email or company domain,
-then run `widefleet login --email employee@example.com` or
-`widefleet login --domain example.com`. It should not ask for the platform URL
-as the first onboarding step.
+Have the agent run `widefleet login --no-wait --json` when it needs authentication.
+It presents `verification_uri` and `user_code` to the employee, who completes the
+browser flow. The agent then checks `widefleet login --status --json` until
+`status` is `connected` and continues the deployment. It does not need to know
+the employee's email or choose between Cloud and self-hosting.
 
-Verify login from each environment you support, including remote sandboxes.
-After successful login, `widefleet config show` should report the saved URL and
-`widefleet whoami` should identify the employee. The configuration file contains
-only the URL. Credentials remain in the employee's selected credential store.
+For private-only discovery, distribute the platform configuration or a known
+`widefleet login --domain example.com` command. A managed file is a default,
+not a policy lock: explicit overrides and the employee's saved URL take precedence.
+
+Verify login from each supported environment, including remote sandboxes. After
+success, `widefleet config show` reports the saved URL and working organization;
+`widefleet whoami` identifies the employee. Configuration contains no tokens.
+Credentials remain in the employee's credential store or private Unix file. See
+[storage and interrupted login](/reference/authentication).

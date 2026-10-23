@@ -13,7 +13,7 @@ Each command also accepts `--help`; newer commands require matching platform com
 | Setting or command                                  | Meaning                                                                                                   |
 | --------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | `PLATFORM_URL` / `--url URL`                        | Explicit management origin; overrides saved and managed configuration.                                    |
-| `widefleet login`                                   | Browser device login; requests `platform:read platform:write` by default.                                 |
+| `widefleet login`                                   | Browser login with no required URL or email; requests `platform:read platform:write` by default.          |
 | `widefleet login --email EMAIL` / `--domain DOMAIN` | Discover the installation using a work email or company domain, then log in.                              |
 | `widefleet config show`                             | Inspect the selected platform URL, its source and configuration paths.                                    |
 | `widefleet config set-url URL` / `unset-url`        | Save or clear the platform URL without changing credentials.                                              |
@@ -22,18 +22,24 @@ Each command also accepts `--help`; newer commands require matching platform com
 | `widefleet organizations`                           | List available organizations (0.4.0 or newer).                                                            |
 | `PLATFORM_ORGANIZATION` / `--organization ID`       | Select an organization for API commands (0.4.0 or newer).                                                 |
 | `widefleet logout`                                  | Revoke the stored refresh token and remove the saved session.                                             |
-| `PLATFORM_SESSION_FILE` / `--session-file PATH`     | Explicit, unencrypted session file for headless Unix use instead of the OS credential store.              |
+| `PLATFORM_SESSION_FILE` / `--session-file PATH`     | Choose an unencrypted Unix session file instead of automatic credential storage.                          |
 | `PLATFORM_ACCESS_TOKEN`                             | Externally supplied token; overrides saved credentials for API commands and does not renew automatically. |
 
 Keep session files outside projects and shared artifacts. The CLI restricts file
 permissions and renews saved sessions automatically. See [headless login](/getting-started/installation#headless-login).
 
-Login reuses configured or saved URLs and otherwise asks for a work email or
-company domain. Company discovery selects the published installation; when both
-discovery sources are absent, Cloud confirms the destination before login.
-After a successful login the CLI saves the actual platform URL. See
-[CLI configuration](/reference/cli-configuration) for precedence, native file paths
-and feature availability, or [company setup](/self-hosting/company-setup) to configure employees' agents.
+Login reuses a configured self-hosted URL directly. With no configured URL it
+starts in Cloud, where the browser asks for an email and routes to the company
+installation. Successful browser login saves the actual URL and selected working
+organization. `--organization` / `PLATFORM_ORGANIZATION` overrides that default.
+See [CLI configuration](/reference/cli-configuration) for precedence and the
+unreleased feature's version requirements.
+
+For agents, use `widefleet login --no-wait --json`, present the browser link and
+code to the user, then run `widefleet login --status --json`. A normal login waits
+and resumes a pending request; `--restart` starts a new request. Check the JSON
+`status` before continuing: an exit code of zero alone does not mean approval.
+See [login status and expiry](/reference/authentication#agents-and-interrupted-login).
 
 See [organization selection](/reference/cli-configuration#select-an-organization)
 for prerequisites, precedence and access recovery.

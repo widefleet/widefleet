@@ -22,7 +22,8 @@ A successful response has the form:
 ```
 
 The result is the published company origin, or `https://app.widefleet.com` when
-TXT is absent and the HTTPS document returns `404` or `410`. The endpoint returns
+TXT is absent and the HTTPS document returns `404` or `410`, or a successful
+address lookup finds no website addresses. The endpoint returns
 `400` for an invalid domain and `503` when discovery fails, including malformed
 records, conflicting targets, redirects and network errors. It is available on
 the canonical Cloud installation; other installations return `404`. Responses
@@ -31,6 +32,39 @@ are not cached.
 The result selects a login destination and grants no access. Obtain device codes
 and tokens directly from that destination. Do not send existing tokens to the
 discovery endpoint or follow an HTTP redirect to move an authenticated API request.
+
+## Browser login for CLI clients
+
+These endpoints are part of the unreleased browser-login flow. Prefer the CLI's
+[agent login commands](/reference/authentication#agents-and-interrupted-login)
+unless implementing a separate client.
+
+1. Generate a PKCE S256 challenge and a separate random polling secret. Persist
+   both secrets before requesting `POST /api/auth/cli-login/start` at Cloud with
+   JSON `{ "code_challenge": "CHALLENGE", "poll_hash": "SHA256_HEX", "scope": "openid profile offline_access platform:read platform:write" }`.
+2. Present the returned `verification_uri` and `user_code`. The user chooses their
+   installation through email discovery, signs in there and approves. Starting
+   again with the same challenge, polling hash and scopes recovers the same link.
+3. Poll Cloud's `POST /api/auth/cli-login/poll` with JSON
+   `{ "request_id": "CHALLENGE", "poll_token": "POLL_SECRET" }` at the returned
+   interval. `authorized` supplies `platform_url` and an authorization `code`.
+   Never send the PKCE verifier or existing access tokens to the Cloud handoff.
+4. Exchange that code directly at the selected installation's
+   `/api/auth/oauth2/token` with `grant_type=authorization_code`,
+   `client_id=platform-cli`, `code_verifier` and
+   `redirect_uri=https://app.widefleet.com/cli-login/callback`.
+5. With the resulting Bearer access token, read
+   `GET /api/cli-login/context?request=CHALLENGE` at that same installation to get
+   `organization_id` and `organization_name`. Save the organization as the working
+   default; it does not change the token's authorization.
+
+The request lasts 30 minutes and the approval result at most nine minutes.
+Cloud never exchanges the self-hosted authorization code: the selected issuer,
+callback state and PKCE bind the handoff. The callback only accepts the issuer
+selected for that request. Start and poll endpoints run only on canonical Cloud,
+with limits of three starts and 60 polls per minute per client IP. Responses are
+not cached. Context lookup requires the approving user, the same organization
+for organization-bound credentials, and current membership.
 
 ## Organization context
 

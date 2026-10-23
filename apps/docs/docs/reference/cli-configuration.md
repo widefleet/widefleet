@@ -7,12 +7,16 @@ lastModified: 2026-10-23
 Company discovery and saved configuration require CLI 0.3.2 or newer. Check
 `widefleet --version`; `widefleet login --help` lists `--email` and `--domain`.
 
-Cloud defaults and browser routing described below are unreleased. CLI 0.4.0
-supports company discovery and saved URLs, but requires an explicit Cloud URL
-when no company discovery record exists.
+Browser-first Cloud login, resumable authorization, automatic Unix credential
+files and saved organization selection below are **unreleased**. They require a
+CLI release containing these changes and upgraded Cloud and destination servers.
+CLI 0.4.0 supports company discovery and saved URLs, but requires an explicit
+Cloud URL when no company discovery record exists. Older self-hosted servers
+remain usable through direct device login with `--url`.
 
 The CLI remembers the platform URL after a successful login. Credentials stay
-in the operating system's credential store or the explicitly selected session file.
+in the operating system's credential store or a private Unix credential file.
+See [CLI authentication](/reference/authentication) for storage and renewal.
 
 ## Select an organization
 
@@ -63,7 +67,7 @@ widefleet config unset-url
 ```
 
 These commands work without a login. `show` returns JSON with the effective URL,
-its source and configuration file paths. `set-url` saves an address without
+its source, saved working organization and configuration file paths. `set-url` saves an address without
 authenticating. `unset-url` clears the saved address; an administrator's default
 can still apply. Neither command changes or removes credentials.
 
@@ -75,6 +79,10 @@ The CLI selects the first configured URL from:
 2. The `PLATFORM_URL` environment variable.
 3. The employee's saved configuration file.
 4. The managed configuration file supplied by IT.
+
+With none configured, `login` starts at `https://app.widefleet.com`. Other API
+commands ask you to run `widefleet login`; they do not send work to Cloud before
+login chooses and saves a destination.
 
 | Operating system | Employee's file                                                                       | Managed file                                         |
 | ---------------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------- |
@@ -96,9 +104,17 @@ The JSON format is:
 
 ```json
 {
-  "platform_url": "https://platform.example.com"
+  "platform_url": "https://platform.example.com",
+  "organization_id": "example-company"
 }
 ```
+
+`organization_id` is optional. Browser login saves the organization selected on
+the approval page. `--organization` or `PLATFORM_ORGANIZATION` overrides that
+default for API commands. It chooses the working organization, without expanding
+or narrowing the token's permissions. `config set-url` clears the saved
+organization; an explicit URL override does not inherit the saved organization's
+ID from another installation.
 
 Use an HTTPS origin without a path, query, fragment or credentials. HTTP on a
 loopback address is allowed for local development. An invalid file reports an
@@ -114,14 +130,42 @@ An explicit URL flag or environment variable still overrides a saved URL. Check
 `widefleet config show` if changing the file appears to have no effect. Logging
 out removes the selected session but retains the URL for the next login.
 
-## Discover your company
+## Start in the browser
 
-With no configured URL, `widefleet login` asks for a work email or company domain
-in an interactive terminal. Agents and noninteractive shells can supply either:
+Run `widefleet login` without any URL, email or domain. If a self-hosted URL is
+already configured, login connects there directly. Otherwise the CLI prints a
+Cloud browser link and matching code. Open the link in your own browser, even
+when the CLI is running in a remote agent sandbox.
+
+Enter your email in the browser. Cloud resolves its domain's published TXT or
+HTTPS discovery information and sends you to the selected installation. Sign in
+there, check the platform and matching code, select your working organization
+and approve. The CLI exchanges the authorization code directly at that
+installation, then saves its URL and selected organization. No Cloud account is
+required for a discovered self-hosted installation.
+
+Cloud sees the entered email, selected installation and a short-lived
+authorization code bound to the CLI's PKCE secret. That secret, access token and
+refresh token stay out of the Cloud handoff for self-hosted login. Cloud needs
+public discovery records; the browser and CLI need network access to the selected
+installation. The CLI does not use a localhost callback.
+
+If public TXT is absent and HTTPS returns `404` or `410`, or a successful address
+lookup finds no website addresses, Cloud remains the destination. Invalid or
+conflicting records, timeouts, redirects, TLS failures and server errors stop
+routing. They never silently turn a failed company lookup into a Cloud login.
+
+A request lasts 30 minutes. After browser approval, resume the CLI within nine
+minutes to exchange the code. See [resuming login](/reference/authentication#agents-and-interrupted-login)
+for commands and machine-readable status.
+
+## Discover locally when needed
+
+If the company domain is already known, these optional flags run discovery from
+the CLI environment. They are useful for private DNS and direct self-hosted login:
 
 ```sh
 widefleet login --email employee@example.com
-# Or, when the company domain is already known:
 widefleet login --domain example.com
 ```
 
@@ -141,15 +185,16 @@ If the TXT lookup succeeds without a record and the HTTPS endpoint returns
 `404` or `410`, the CLI asks `https://app.widefleet.com/api/platform-discovery`
 to confirm the destination. This uses the same public discovery rules as Cloud
 sign-in. A published company URL takes precedence; otherwise the result is
-`https://app.widefleet.com`. The CLI starts device authorization at the resulting
-platform and saves that URL only after login succeeds.
+`https://app.widefleet.com`. For a self-hosted result, the CLI starts direct device authorization. A Cloud
+result starts the browser flow above; the employee enters their email there.
+The URL is saved only after login succeeds.
 
 DNS failures, invalid or conflicting records, redirects, TLS failures and server
 errors do not select Cloud. A valid HTTPS discovery document can still resolve
 the company when native DNS is unavailable. If the shared Cloud endpoint is
 unavailable, retry or use an explicit `--url`.
 
-Only the domain is used in CLI discovery requests. The email's local part is
+Only the domain is used in these optional CLI discovery requests. The email's local part is
 neither sent nor saved, and discovery requests carry no login credentials.
 The DNS resolver and company website can observe their requests. Cloud also
 receives the domain when confirming an otherwise absent company target. Valid

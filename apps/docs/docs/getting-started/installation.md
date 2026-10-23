@@ -51,7 +51,7 @@ local URL printed by `pnpm dev`, then stop that server with Ctrl-C before contin
 
 ## Connect and deploy
 
-Connect to your company and deploy with CLI 0.3.2 or newer:
+Connect and deploy using the [browser-login version requirements](/reference/cli-configuration):
 
 ```sh
 widefleet login
@@ -59,20 +59,20 @@ pnpm check
 widefleet deploy
 ```
 
-If IT has configured your agent or computer, the CLI uses that platform address.
-Otherwise, it asks for your work email or company domain and looks up the company's
-discovery record. An agent or noninteractive terminal can supply
-`widefleet login --email employee@example.com` or
-`widefleet login --domain example.com`. These commands also work in PowerShell and Fish.
+If IT configured your agent or computer, the CLI uses that address directly.
+Otherwise it prints a browser link to Widefleet Cloud. Open it in your own
+browser, enter your email and continue to the installation published by your
+company. Check the platform and matching code, select your working organization
+and approve. The CLI saves the selected platform and organization.
 
-With [Cloud discovery support](/reference/cli-configuration), a successful check
-that finds no company installation selects Widefleet Cloud. You do not need to
-know its URL or choose between Cloud and self-hosting. Discovery errors stop
-login rather than selecting a different installation.
+An agent can run `widefleet login --no-wait --json`, give you the link and code,
+then resume with `widefleet login --status --json`. It does not need to ask you
+for a URL or email first. See [agent login and resuming](/reference/authentication#agents-and-interrupted-login).
 
-Approve the device code in your browser. The CLI remembers the platform URL and stores credentials in your
-operating system's credential store: Keychain on macOS, Credential Manager on
-Windows, and Secret Service on Linux. The store must be available and unlocked.
+With no published company installation, the browser continues in Cloud.
+Discovery failures ask you to retry or use your company's direct address.
+Credentials use the OS credential store, with an automatic private-file fallback
+on headless Unix systems.
 
 Run `widefleet config show` to inspect the selected URL. If discovery is not set
 up, IT can [configure company discovery or distribute configuration](/self-hosting/company-setup).
@@ -90,8 +90,10 @@ For ongoing development, follow [app development](/guides/app-development).
 
 ## Headless login
 
-On Linux and macOS without an available credential store the CLI supports an
-explicit session file. Set it before login and keep it set for subsequent commands:
+On Linux and macOS without an available credential store, the new login flow
+chooses a private credential file automatically and prints its path. You can
+also select a path explicitly; this works with CLI 0.2.1 or newer. Keep that
+selection for subsequent commands:
 
 ```sh
 export PLATFORM_SESSION_FILE="$HOME/.local/state/widefleet/session.json"
