@@ -4,9 +4,9 @@ description: Deploy Dynamic Worker integrations and grant apps access to their A
 lastModified: 2026-10-23
 ---
 
-IT can deploy a Worker from its own repository with `widefleet connector deploy`. Apps receive a scoped binding and call its methods directly, for example `env.ERP.listCustomers()`. Connector code runs as a Dynamic Worker with its own declared resources on both self-hosted celld and Cloudflare. Once the supporting platform release is installed, connector code and secret updates activate independently of platform releases.
+IT can deploy a Worker from its own repository with `widefleet connector deploy`. Apps receive a scoped binding and call its methods directly, for example `env.ERP.listCustomers()`. Connector code runs as a Dynamic Worker with its own declared resources on both self-hosted celld and Cloudflare. After installation, connector code and secret updates activate independently of platform releases.
 
-**Unreleased:** Dynamic connector activation requires matching control-plane, CLI, agent and app-runtime releases containing this implementation. The deployment, state and secret-storage behavior below describes that implementation, rather than the currently published releases.
+Dynamic connectors require platform and CLI **0.4.0 or newer**, matching control-plane and agent images, and app runtime **0.3.0 or newer**.
 
 ## Find connectors and inspect your app
 
@@ -174,7 +174,7 @@ An optional Wrangler `database_id` selects D1's logical identity, falling back t
 
 Implement state in a `DurableObject` and declare its class in `durable_objects.bindings`. Widefleet hosts each object as a persistent facet behind a shared runtime Durable Object. Connector classes do not need native class migrations; the CLI removes Wrangler `migrations` from the published package, so a project can retain them for local native development.
 
-Keep the fleet, connector, class name and object ID stable to preserve state across deployments. Different connectors can use the same class name without sharing data. Within one connector, bindings to the same class share its namespace. Address the same object deliberately, for example `env.STATE.getByName("erp-connection")`. Object IDs are opaque platform identifiers; use `idFromString()` to restore a saved ID. Renaming a connector or class creates a different namespace and does not migrate stored data.
+Keep the organization, connector, class name and object ID stable to preserve state across deployments. Different connectors can use the same class name without sharing data. Within one connector, bindings to the same class share its namespace. Address the same object deliberately, for example `env.STATE.getByName("erp-connection")`. Object IDs are opaque platform identifiers; use `idFromString()` to restore a saved ID. Renaming a connector or class creates a different namespace and does not migrate stored data.
 
 Connector objects support SQLite and key-value storage, RPC and `fetch()`. Active calls, response streams and `waitUntil` work finish before an object switches code versions. Storage alarms and WebSockets are outside the connector contract; see [runtime compatibility](/reference/runtime-compatibility).
 
@@ -186,7 +186,7 @@ Installed code, configuration, bindings and state remain in the data plane. Serv
 
 The Dynamic connector format replaces the earlier native connector format. There is no automatic migration for existing native connectors.
 
-`vars` are ordinary package configuration; use the dedicated secret commands for credentials. Connector cron/queue configuration, cross-fleet bindings and connector removal commands are not implemented here. Runtime updates preserve installed connectors. Native RPC/DO/telemetry differences are described in the [celld compatibility notes](/reference/runtime-compatibility).
+`vars` are ordinary package configuration; use the dedicated secret commands for credentials. Connector cron/queue configuration, cross-organization bindings and connector removal commands are not implemented here. Runtime updates preserve installed connectors. Native RPC/DO/telemetry differences are described in the [celld compatibility notes](/reference/runtime-compatibility).
 
 ## API
 

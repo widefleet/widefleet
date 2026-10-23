@@ -39,11 +39,11 @@ Widefleet integrates the native runtime as follows:
 - App tails export HTTP logs and errors through ingestion scoped to each app.
   Native fleet OTLP export is disabled. See [runtime logs](/self-hosting/runtime-logs)
   for capture coverage and delivery behavior.
-- Provisioning manages one node per fleet. celld itself supports multiple nodes.
+- Provisioning manages one node per installation. celld itself supports multiple nodes.
 - [Workflows](/guides/workflows) use the usual `WorkflowEntrypoint` and step APIs
   through a platform adapter on unchanged celld. Automatic facets are excluded.
-- **Unreleased:** [Connectors](/guides/connectors) run as Dynamic Workers on celld
-  and Cloudflare. Their Durable Objects use persistent facets, isolated by fleet,
+- With platform 0.4.0 and app runtime 0.3.0, [connectors](/guides/connectors) run as Dynamic Workers on celld
+  and Cloudflare. Their Durable Objects use persistent facets, isolated by organization,
   connector and class; different connectors can reuse class names. A default
   Worker export is required even with named RPC entrypoints. The common RPC
   contract transfers values, with `fetch()` for streaming bodies. Callbacks,
