@@ -1,7 +1,7 @@
 ---
 title: IT connectors
-description: Find integrations, inspect app connections and manage native RPC bindings.
-lastModified: 2026-10-12
+description: Deploy Dynamic Worker integrations and grant apps access to their APIs.
+lastModified: 2026-10-23
 ---
 
 IT can deploy a Worker from its own repository with `widefleet connector deploy`. Apps receive a native service binding and call its methods directly, for example `env.ERP.listCustomers()`. Connector code runs as a regular Worker in the shared fleet, with its own declared resources. It is independent of the Widefleet runtime and Rust agent releases.
@@ -40,6 +40,59 @@ Connector changes have a separate activation state:
 A pending or failed removal remains visible with its currently active connector. If the serving bindings cannot be confirmed, the view says so rather than treating saved bindings as active. In CLI JSON, `connectors` contains the desired bindings and activation state; `activeConnectors` contains the confirmed serving bindings, or `null` when unavailable. `resources` contains the active deployment's resources and `deploymentId` identifies that deployment.
 
 After choosing a connector, ask an administrator to [give the app its binding](#give-an-app-its-binding). The connector author supplies the corresponding TypeScript interface or package.
+
+## Manage connectors in an organization
+
+Organization-scoped management and browser forms require platform and CLI
+**0.4.0 or newer**.
+
+An owner or administrator of the selected organization can deploy and update its
+connectors, set and remove connector secrets, assign app bindings and read
+connector logs. Members can browse the catalog and inspect apps they can access.
+Installation settings, runtime upgrades and deployment-agent administration remain
+operator responsibilities.
+
+Connector names are unique within an organization. Two organizations may
+both deploy `erp`; their code, secrets, activation jobs and app bindings remain
+separate. Select the organization in the workspace header or use
+[CLI organization selection](/reference/cli-configuration#select-an-organization):
+
+```sh
+widefleet --organization ORGANIZATION_ID connector list
+widefleet --organization ORGANIZATION_ID connector deploy
+```
+
+For API calls, send `X-Widefleet-Organization` as described in
+[request context](/reference/api#organization-context). The same membership and
+role checks apply to browser, CLI and API operations, including direct app IDs.
+
+### Manage a connector in the browser
+
+Deploy or update connectors from their source projects with the
+[CLI deployment workflow](#deploy-from-a-project). The browser manages existing
+connectors:
+
+1. Open **Connectors** in the selected organization and choose **Manage connector**
+   for the connector you want to inspect.
+2. Use **Refresh status** to check activation or **View logs** to inspect runtime
+   output.
+3. Under **Secrets**, add or replace a value, or remove an existing name. Values
+   are never returned by status queries or failed form responses. Secret values
+   are limited to 5000 UTF-8 bytes.
+
+To assign a connector, open an app’s **Connections** tab, then **Browse
+connectors**. Under **Add or replace a connection**, choose the connector, enter
+an available entrypoint and a binding name, and select **Save connection**.
+**Disconnect** removes a saved binding. The app’s connection view distinguishes
+saved changes from currently active bindings.
+
+Deployments, secret changes and changes to active app bindings activate
+asynchronously. A submitted change is not confirmation that the new version is
+serving. On failure, inspect the status or logs and retry; the previous serving
+configuration remains active. There is no operation to delete a connector itself.
+
+If another tab changes the selected organization, an old form is rejected before
+writing. Reload the page and check the organization before trying again.
 
 ## Deploy from a project
 

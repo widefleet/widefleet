@@ -1,7 +1,7 @@
 ---
 title: Previews
 description: Preview names, flags, isolation, DNS and cleanup.
-lastModified: 2026-10-12
+lastModified: 2026-10-23
 ---
 
 Run these commands from an existing app project:
@@ -14,7 +14,7 @@ widefleet preview
 widefleet preview --name review
 ```
 
-For an app at `notes.apps.example.com`, the second command deploys to `review.notes.apps.example.com`. The app is resolved from `name` in `wrangler.jsonc` and the selected platform URL. It must already be registered; a preview never creates or deploys the parent app. Use `--app NAME_OR_UUID` to choose another parent. Previews cannot themselves be preview parents.
+On a standard installation, for an app at `notes.apps.example.com`, the second command deploys to `review.notes.apps.example.com`. The app is resolved from `name` in `wrangler.jsonc` and the selected platform URL. It must already be registered; a preview never creates or deploys the parent app. Use `--app NAME_OR_UUID` to choose another parent. Previews cannot themselves be preview parents.
 
 The command builds locally, creates or reuses the preview, uploads the build, waits for activation and prints the server-provided URL. Failed builds do not create previews. A name belonging to an unrelated app, a deleting app or a legacy preview at another hostname is rejected before uploading code.
 
@@ -22,11 +22,28 @@ The command builds locally, creates or reuses the preview, uploads the build, wa
 
 Explicit names contain 1–48 lowercase letters, digits or internal hyphens. Git branch names are converted to lowercase DNS labels; changed names receive a hash suffix so branches such as `feature/login` and `feature-login` remain distinct. Without Git or on a detached HEAD, pass `--name` explicitly.
 
-Each preview has a stable app ID and an internal slug based on the parent slug and preview name. Long slugs are shortened with a hash suffix to fit the existing 48-character limit. This does not shorten the preview hostname's two separate labels. Deploying the same name again preserves its data and deployment history.
+Each preview has a stable app ID and an internal slug based on the parent slug and preview name. Long slugs are shortened with a hash suffix to fit the existing 48-character limit. This does not shorten the hostname. Deploying the same name again preserves its data and deployment history.
 
 Manage access groups on the original app with `widefleet access set --group GROUP_ID`. Its previews inherit the rule and all later changes automatically. See [app access](/reference/app-access).
 
 Previews start with their own empty D1, R2, KV and Queue resources. Plain-text variables and resource declarations come from the project configuration being deployed. Configure network permissions and connector bindings separately for the preview's own app ID when needed.
+
+## Organization addresses
+
+Organization hostname suffixes require platform and CLI **0.4.0 or newer**.
+
+An installation can assign a stable hostname suffix to an organization. With suffix `acme`
+and `APP_DOMAIN=apps.example.com`, an app named `notes` has address
+`notes-acme.apps.example.com`; its named preview `review` has address
+`review-notes-acme.apps.example.com`. Both use one label below the shared app domain,
+so its `*.apps.example.com` certificate covers both. Renaming the organization does
+not change the stored organization suffix.
+
+The combined app or preview label must fit the DNS limit of 63 characters. If the
+server rejects an address as too long, choose a shorter app or preview name.
+Different combinations of names can produce the same complete hostname; the
+server rejects an occupied hostname instead of assigning another app's address.
+Use the URL returned by the server or CLI.
 
 ## Flags and cleanup
 

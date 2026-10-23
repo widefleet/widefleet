@@ -1,14 +1,14 @@
 ---
 title: Runtime compatibility
 description: Supported runtime integrations and verified differences from Cloudflare.
-lastModified: 2026-10-12
+lastModified: 2026-10-23
 ---
 
 Widefleet currently uses celld **0.6.2**. Dynamic Worker and deployment tests exercise the new
 version, including outbound requests, resources, activation and restarts. Additional
 regressions cover `self` in loaded Workers and incoming request cancellation.
 See the [native release notes](https://github.com/denoland/celld/releases/tag/v0.6.2)
-and [upgrade instructions](/self-hosting/installation#upgrade-deliberately).
+and [platform version requirements](/self-hosting/installation#versions-and-updates).
 
 This reference compares Widefleet with Cloudflare's hosted platform, its local
 `workerd` runtime and Cloudflare OS.

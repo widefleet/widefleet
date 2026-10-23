@@ -1,7 +1,7 @@
 ---
 title: CLI
 description: Common Widefleet commands, app selection, authentication and deployment output.
-lastModified: 2026-10-12
+lastModified: 2026-10-23
 ---
 
 For installation and your first deployment, start with [CLI setup](/getting-started/installation).
@@ -19,6 +19,8 @@ Each command also accepts `--help`; newer commands require matching platform com
 | `widefleet config set-url URL` / `unset-url`        | Save or clear the platform URL without changing credentials.                                              |
 | `PLATFORM_CONFIG_FILE` / `--config-file PATH`       | Use one explicit configuration file instead of the user and managed defaults.                             |
 | `widefleet whoami`                                  | Inspect the authenticated user.                                                                           |
+| `widefleet organizations`                           | List available organizations (0.4.0 or newer).                                                            |
+| `PLATFORM_ORGANIZATION` / `--organization ID`       | Select an organization for API commands (0.4.0 or newer).                                                 |
 | `widefleet logout`                                  | Revoke the stored refresh token and remove the saved session.                                             |
 | `PLATFORM_SESSION_FILE` / `--session-file PATH`     | Explicit, unencrypted session file for headless Unix use instead of the OS credential store.              |
 | `PLATFORM_ACCESS_TOKEN`                             | Externally supplied token; overrides saved credentials for API commands and does not renew automatically. |
@@ -31,7 +33,15 @@ company domain. After a successful login it saves the URL. See
 [CLI configuration](/reference/cli-configuration) for precedence, native file paths
 and discovery behavior, or [company setup](/self-hosting/company-setup) to configure employees' agents.
 
+See [organization selection](/reference/cli-configuration#select-an-organization)
+for prerequisites, precedence and access recovery.
+
 ## App commands
+
+Platform and CLI 0.4.0 or newer also provide `widefleet account`,
+`widefleet members` and `widefleet invitations`. See [member management](/guides/members)
+for complete examples and permissions. `widefleet account` prints your link status and
+the browser URL for company sign-in. Accounts with matching verified company email are linked during SSO.
 
 `APP_UUID`, `DEPLOYMENT_UUID` and `ARTIFACT_UUID` below are placeholders. Find app
 IDs with `widefleet apps` and deployment IDs and artifact IDs with `widefleet history APP_UUID`.
@@ -55,7 +65,7 @@ IDs with `widefleet apps` and deployment IDs and artifact IDs with `widefleet hi
 | `widefleet catalog list`                         | List published app launch URLs.                                      |
 | `widefleet delete APP_UUID --yes`                | Request removal of an app and all its previews.                      |
 
-The target is the selected platform URL plus `name` in `wrangler.jsonc`. The first deploy creates that app; subsequent deploys update it after checking the user's app permissions. A changed name selects a different app. The server assigns the host, and existing apps keep their host and data.
+The target is the selected platform URL, organization context and `name` in `wrangler.jsonc`. The first deploy creates that app; subsequent deploys update it after checking the user's app permissions. A changed name selects a different app. The server assigns the host, and existing apps keep their host and data.
 Logs, access, network, connections and migrations also use project context; history, events and
 rollback require IDs. Each command's help lists its selection options.
 

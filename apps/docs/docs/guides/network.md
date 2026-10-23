@@ -1,7 +1,7 @@
 ---
 title: Network permissions
 description: Allow external destinations and understand backend and browser enforcement.
-lastModified: 2026-10-12
+lastModified: 2026-10-23
 ---
 
 New apps start with no external destinations allowed. The trusted runtime checks backend requests; browser responses carry a platform-controlled Content Security Policy (CSP). D1, R2, KV, Queues and static asset bindings continue to work without granting a network origin.
@@ -55,4 +55,4 @@ Use `target: "browser"` or `action: "deny"` as appropriate. The server locks the
 
 A configuration job takes the serving code when it runs, after earlier fleet jobs. It creates an immutable app snapshot and validates its network revision before activation. Failed evaluation retains the serving snapshot. New requests use the selected snapshot; in-flight requests can finish under their previous permissions. Activation does not interrupt those requests. A code rollback keeps current network permissions, and previews have independent lists. Ordinary network edits do not require a celld reload.
 
-Install matching management, executor and runtime components. The runtime reports the network revision during readiness checks before activation. Published snapshots enforce their rules with the control plane and executor stopped. For upgrades from the earlier per-app runtime, see [runtime migration requirements](/reference/runtime#app-removal).
+Install matching management, executor and runtime components. The runtime reports the network revision during readiness checks before activation. Published snapshots enforce their rules with the control plane and executor stopped.
