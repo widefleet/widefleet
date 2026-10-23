@@ -1,6 +1,7 @@
 ---
 title: Single-host installation
 description: Install, configure, upgrade and recover a company installation.
+lastModified: 2026-10-23
 ---
 
 This Compose deployment is the reference MVP installation. Use Linux x86-64, Docker Engine 29.8.1, Docker Compose 2.20.0 or newer (including v5), and a checkout of the matching release. Published images contain the required runtime and setup tools; the operator host needs no Node, pnpm or Rust installation. The operator owns DNS, certificates, identity-provider registrations, backups and upgrades. Commands below change the selected installation; choose its environment file deliberately.
@@ -88,7 +89,7 @@ widefleet settings external-management true
 widefleet settings external-management false
 ```
 
-The CLI and external integrations use `GET/PUT /api/v1/settings`, `POST /api/v1/settings/plan` and `PUT /api/v1/settings/external-management`. The UI uses SvelteKit remote functions that call the same settings service. Administrator permission is required through either entry point. Exports contain secret references, never stored secret values; those references belong to this installation. A future Terraform provider can use this API.
+The CLI and external integrations use `GET/PUT /api/v1/settings`, `POST /api/v1/settings/plan` and `PUT /api/v1/settings/external-management`. Administrator permission is required for UI, API and CLI changes. Exports contain secret references, never stored secret values; those references belong to this installation.
 
 External management makes the settings UI read-only; API/CLI writes and app management remain available. An administrator can explicitly turn browser editing back on. This is a configuration workflow switch, not an additional permission role.
 
@@ -100,7 +101,7 @@ The SSO image contains the pinned, unmodified OAuth2 Proxy binary and a small pr
 
 Entered provider secrets are encrypted in PostgreSQL. `PLATFORM_ENCRYPTION_KEY` or `PLATFORM_ENCRYPTION_KEY_FILE` can supply an operator-managed key; otherwise Widefleet creates `encryption.key` in `platform-state`. Use one source. The database and the same key are both required for restoration.
 
-Enter and replace provider secrets through Settings or the settings API/CLI. The one-time bootstrap accepts initial values too. Saving applies the change without periodic polling by the control plane. External Key Vault/Secrets Manager integrations can extend the secret-reference resolver in the future; they are not included.
+Enter and replace provider secrets through Settings or the settings API/CLI. The one-time bootstrap accepts initial values too. Saving applies the change directly.
 
 If company SSO is broken, run on the selected installation's host:
 
@@ -112,14 +113,14 @@ The command requires an existing Owner or Admin and prints a one-use link. It op
 
 ### App group claims
 
-**Enable group claims on both the management and app-SSO registrations before assigning app roles to groups.** Successful SSO does not imply that Entra sends group memberships. Widefleet reads verified group claims but does not enable them in Entra. A registration with `groupMembershipClaims: null` does not request them. Delegated `User.Read` permission alone does not add group claims or cause Widefleet to query Graph when the token has no overage indicator.
+**Enable group claims on both the management and app-SSO registrations before assigning app roles to groups.** Follow these steps to include memberships in sign-ins:
 
 1. In the Microsoft Entra admin center, open **App registrations**. Apply steps 2–3 to both the management sign-in registration and the registration selected for **Published app sign-in**.
 2. Open **Token configuration → Add groups claim** and select the group types the apps need. For security-group permissions, select **Security groups** (`groupMembershipClaims: "SecurityGroup"`).
 3. Configure the **ID token** to emit **Group ID** in the `groups` claim. Keep object IDs rather than group names and do not select **Emit groups as role claims**: the current proxy reads `groups`.
 4. Sign in again to management and verify that a member of a group assigned Developer or App admin permissions can perform the corresponding app operations. After a new app-SSO sign-in, verify the expected IDs in server-side `locals.user.groups`. The app can use those IDs for its own business permissions. Assigning a Widefleet role does not change directory membership.
 
-Entra limits JWT group claims to **200 group memberships per user**, including nested groups. Above that limit, it omits the entire group list and provides an overage indicator for a Microsoft Graph lookup; it does not return the first 200 groups. The generated Widefleet configuration uses OAuth2 Proxy's native Entra provider to resolve that indicator, including all result pages. Grant both the management and app-SSO registrations the delegated **User.Read** permission and consent to it. For management roles, Widefleet reads the signed-in user’s group IDs through `/me/transitiveMemberOf` when the verified token indicates overage; results expire with that token. A failed management lookup rejects the browser or CLI request after sign-in; a failed app-SSO lookup fails the app login. Successful management sign-in alone does not verify group-based permissions. Missing group claims without an overage indicator still become `locals.user.groups = []`, so an empty array does not establish that the user has no directory memberships. App authorization must require the expected group explicitly rather than grant access when the list is empty.
+For users with more than **200 group memberships**, including nested groups, Entra returns an overage indicator instead of a group list. Widefleet retrieves those memberships from Microsoft Graph. Grant both registrations the delegated **User.Read** permission and consent to it. If the lookup fails, management requests or app sign-in are rejected; check permission consent and sign in again. Missing group claims without an overage indicator produce `locals.user.groups = []`; app authorization must require the expected group explicitly.
 
 For large directories, **Groups assigned to the application** can restrict the emitted set to groups assigned to each enterprise application. When using this mode, assign the required groups to both the management and app-SSO enterprise applications. This mode includes direct memberships only; nested memberships are not included. Choose it only if that matches the apps' permission model.
 
@@ -152,12 +153,10 @@ Releases provide four public Linux amd64 images on Docker Hub. Pulling them does
 
 Every image has the same release tag, for example `0.3.0`, and OCI labels for its source repository, source commit and version. Installation uses exact digests from the release attachment `widefleet-images-VERSION.env`, verified with its accompanying `.sha256` file. There is no floating `latest` tag and no automatic update of running installations.
 
-From the repository root, use the matching release configuration and download its digest manifest. Replace `VERSION` with the release version. The files are also available on [GitHub Releases](https://github.com/widefleet/widefleet/releases).
+Open the selected [GitHub release](https://github.com/widefleet/widefleet/releases) and download `widefleet-images-VERSION.env` and `widefleet-images-VERSION.env.sha256` into the repository root. Replace `VERSION` with that release's version, then select the matching configuration and verify the manifest:
 
 ```sh
 git checkout vVERSION
-curl --fail --location --remote-name https://github.com/widefleet/widefleet/releases/download/vVERSION/widefleet-images-VERSION.env
-curl --fail --location --remote-name https://github.com/widefleet/widefleet/releases/download/vVERSION/widefleet-images-VERSION.env.sha256
 sha256sum --check widefleet-images-VERSION.env.sha256
 ```
 
@@ -244,7 +243,7 @@ Use the matching [CLI release](/getting-started/installation) to access the sett
 
 ## Management members and app collaboration
 
-Widefleet uses Better Auth's Organization plugin with one automatically provisioned installation organization. No organization selection is required in the browser or CLI.
+Widefleet provisions one installation organization automatically. No organization selection is required in the browser or CLI.
 
 | Role   | Permissions                                                                   |
 | ------ | ----------------------------------------------------------------------------- |
@@ -289,4 +288,4 @@ To restore on the existing host, stop the same services, restore the complete ma
 
 On a replacement host, restore the same absolute data path and ownership, install the pinned images, and start PostgreSQL, storage and management. During recovery, restrict the proxy to the restore operator so the CLI can reach its configured HTTPS management origin while app users remain excluded. Restore the agent credential. Queue the recorded successful artifact for every restored app with `widefleet rollback <app-id> <artifact-id> --no-wait`; start the agent to restore the shared runtime and app routes. This republishes code while retaining the restored fleet data. Enable general access only after verifying identities, a database record and the corresponding private file. Never run old and restored fleet nodes against the same bucket simultaneously.
 
-A full disaster-recovery drill with the operator's actual storage and backup target remains a deployment prerequisite. Local automated tests currently verify code rollback, preserved D1/R2 data, cold restart without management, executor replacement and app-scoped removal; those checks do not by themselves prove a complete installation backup.
+Run a full recovery drill with the installation's storage and backup target before relying on the backup.

@@ -1,11 +1,11 @@
 ---
 title: App roles and access
 description: App roles, administration handover, access rules and gateway activation.
+lastModified: 2026-10-23
 ---
 
 Widefleet assigns a role to a person or company SSO group for a specific app.
-Assignments are additive. Group membership comes from company sign-in; Widefleet
-does not maintain a separate team directory.
+Assignments are additive. Group membership comes from company sign-in.
 
 | Role      | Permissions                                                                                                        |
 | --------- | ------------------------------------------------------------------------------------------------------------------ |
@@ -19,11 +19,8 @@ add or revoke other admins. To hand over administration, grant the new person or
 group App admin first, then revoke the previous assignment. Other assignments
 remain effective, including access through groups.
 
-At least one admin assignment must remain, including during concurrent changes.
-This protects an assignment, not the existence or membership of its directory
-group. If the last group's members leave or the group is deleted, a platform
+At least one admin assignment must remain. If the last admin group's members leave or the group is deleted, a platform
 administrator can add a replacement admin before removing the obsolete grant.
-Concurrent writes use the same revision and return `409` when another change wins.
 
 Previews inherit roles and app access from the original app. They have
 no independent role assignments. Network and connector grants retain their own
@@ -47,22 +44,19 @@ Entra groups. Stable provider IDs can also be entered directly. Installation
 members without a verified company account use the `widefleet` namespace for
 management permissions; those local identities cannot authenticate at app SSO.
 
-Management reads group claims from the provider ID token stored by Better Auth
-after verified sign-in. The issuer's token expiry bounds those group permissions.
-A Widefleet session or CLI token refresh does not extend that deadline. Company
-sign-in renews the claims, and the identity provider decides whether this requires
-user interaction. Personal assignments and platform recovery do not depend on a
-group snapshot. Entra group overage is resolved using delegated `User.Read` and
-Microsoft Graph's `/me/transitiveMemberOf`, including transitive group IDs.
-In-flight requests and results are shared for the same verified token; app role
-changes do not repeat the lookup. Results cannot outlive that ID token. A complete
-lookup is bounded to 20 pages and ten seconds; failed or incomplete lookups deny
-the request rather than return partial permissions. Both Entra registrations need
-their group claims configured; the management registration also requests `User.Read`.
+Group-based management permissions expire with the company sign-in's ID token.
+Sign in through the company provider again to renew them; refreshing the CLI token
+alone does not renew group permissions. Personal assignments and administrator
+recovery remain available independently.
+
+Configure Entra group claims and the required Graph permissions using
+[App group claims](/self-hosting/installation#app-group-claims). A failed or
+incomplete group lookup denies the request; check the provider configuration and
+permission consent before signing in again.
 
 App SSO retains its configured session lifetime (currently a one-hour cookie
 without refresh). Directory membership changes are visible when that session is
-renewed. No additional fixed hourly management reauthentication policy is imposed.
+renewed.
 
 After a replacement company issuer starts successfully, the control plane creates
 new access revisions for apps and previews. Failed SSO activation retains the
@@ -108,13 +102,8 @@ New apps have a closed audience. All app roles include `app:use`. Access for
 every authenticated company user is a separate explicit switch; empty person
 and group lists never open access. Anonymous access is never enabled.
 
-The control plane derives a revisioned access snapshot from app roles and the
-explicit audience switch. The agent persists it in each app's Traefik route.
-The local authorizer runs in the existing SSO container and compares verified
-OAuth2 Proxy identities against that snapshot. It has no control-plane or
-database connection. The agent can stop, or management and PostgreSQL can be
-unreachable, while the last installed rules continue protecting running apps.
-The SSO container and its persisted configuration must remain available.
+Running apps continue enforcing the last activated permissions while management,
+PostgreSQL or the agent is unavailable. Keep the gateway and SSO services available.
 
 Saving permissions and activating them are separate outcomes. `saved` means
 first-deployment rules; `pending` means an update awaits confirmation; `active`
@@ -125,15 +114,11 @@ prove that the preceding revision is still serving.
 
 Revocations take effect at the gateway only when the new rule reaches it. An
 isolated gateway retains the previous policy, including its previous grants.
-Established connections and already delivered data cannot be recalled. Queued
-operations authorized before a role change may finish. Deployments and rollbacks
+Established connections and operations authorized before a role change may continue. Deployments and rollbacks
 always use the current access snapshot, independently of the code version.
 
-Incoming identity headers are stripped. Only the verified SSO service supplies
-identity; SSO cookies and OAuth tokens do not reach app code. Internal cron,
-queue and connector calls retain their existing capability boundaries. Business
-permissions inside an app remain the app's responsibility. Deployment approvals
-belong in the company's Git/CI workflow.
+App code receives the verified identity without SSO cookies or OAuth tokens.
+Business permissions inside an app remain the app's responsibility.
 
 ## API
 
@@ -163,8 +148,7 @@ A role grant body contains `principal`, `role` and `revision`:
 Revocation carries `revision`. Removing the last admin returns `403`; add
 a replacement admin first.
 An access change contains only `revision` and `allAuthenticated`. Read the
-current revision before writing; conflicts are never retried as overwrites.
-UI remote functions and HTTP handlers call the same authorization services.
+current revision before writing; concurrent edits return `409`.
 
 ## Installation
 
