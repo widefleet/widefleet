@@ -1,15 +1,13 @@
 use platform_core::{Error, Result, http::Api};
 use reqwest::{Client, Url};
 use serde::Deserialize;
-use std::{
-    io::{BufRead, IsTerminal, Read, Write},
-    time::Duration,
-};
+use std::time::Duration;
 
 const DNS_TIMEOUT: Duration = Duration::from_secs(5);
 const HTTPS_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_DOCUMENT_BYTES: usize = 8192;
 const TXT: u16 = 16;
+const CLOUD_ORIGIN: &str = "https://app.widefleet.com";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Domain(String);
@@ -93,26 +91,6 @@ fn invalid_email() -> Error {
     Error::invalid("Enter a work email such as employee@example.com".into())
 }
 
-pub fn prompt() -> Result<Domain> {
-    if !std::io::stdin().is_terminal() || !std::io::stderr().is_terminal() {
-        return Err(Error::invalid(
-            "No platform is configured. Run widefleet login --email employee@example.com or widefleet login --domain example.com; an agent can use the employee's known company domain".into(),
-        ));
-    }
-    eprint!("Work email or company domain: ");
-    std::io::stderr().flush()?;
-    let mut input = String::new();
-    std::io::stdin().lock().take(321).read_line(&mut input)?;
-    if input.len() > 320 {
-        return Err(invalid_domain());
-    }
-    if input.contains('@') {
-        Domain::from_email(&input)
-    } else {
-        Domain::parse(&input)
-    }
-}
-
 enum DnsLookup {
     Records(Vec<Vec<u8>>),
     Unavailable(String),
@@ -176,12 +154,19 @@ async fn resolve_with(domain: &Domain, dns: DnsLookup, client: &Client) -> Resul
         DnsLookup::Unavailable(reason) => format!("System DNS unavailable: {reason}"),
     };
     eprintln!("{dns_reason}. Checking {}", domain.endpoint());
-    from_https(client, &domain.endpoint()).await.inspect_err(|_| {
-        eprintln!(
-            "Could not discover Widefleet for {}. Ask IT to publish a discovery record or configure the CLI in this environment",
-            domain.0,
-        );
-    })
+    if let Ok(Some(origin)) = from_https(client, &domain.endpoint()).await {
+        return Ok(origin);
+    }
+    // Ordinary websites and unavailable resolvers must not block Cloud login.
+    // Use the browser's resolver when local discovery supplies no usable target.
+    // Positive local discovery never contacts Cloud.
+    eprintln!("No usable local discovery. Checking Widefleet Cloud");
+    let endpoint = format!("{CLOUD_ORIGIN}/api/platform-discovery?domain={}", domain.0);
+    let origin = from_https(client, &endpoint).await?.ok_or_else(|| {
+        Error::invalid("Widefleet Cloud discovery is unavailable. Retry or use --url".into())
+    })?;
+    eprintln!("Connecting to {origin}");
+    Ok(origin)
 }
 
 fn discovered_origin(value: &str) -> Result<String> {
@@ -242,14 +227,17 @@ struct Document {
     platform_url: String,
 }
 
-async fn from_https(client: &Client, endpoint: &str) -> Result<String> {
+async fn from_https(client: &Client, endpoint: &str) -> Result<Option<String>> {
     // No session, email, or platform access token is attached to discovery.
     let mut response = client
         .get(endpoint)
         .header("accept", "application/json")
         .send()
         .await?;
-    if !response.status().is_success() {
+    if matches!(response.status().as_u16(), 404 | 410) {
+        return Ok(None);
+    }
+    if response.status() != reqwest::StatusCode::OK {
         return Err(Error::invalid(format!(
             "HTTPS discovery returned {}",
             response.status()
@@ -275,7 +263,7 @@ async fn from_https(client: &Client, endpoint: &str) -> Result<String> {
     let document: Document = serde_json::from_slice(&bytes).map_err(|_| {
         Error::invalid("HTTPS discovery must contain JSON with a single platform_url field".into())
     })?;
-    discovered_origin(&document.platform_url)
+    discovered_origin(&document.platform_url).map(Some)
 }
 
 #[cfg(test)]

@@ -1544,9 +1544,52 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
 
     expect(await read("/?operation=kv")).toMatchObject({ bytes: [0, 128, 255], count: 3 });
     await read("/?operation=enqueue");
-    await expect
-      .poll(() => read("/?operation=queue-result"), { timeout: 20000 })
-      .toMatchObject({ implicit: true, retried: true, dead: true, background: true });
+
+    try {
+      await expect
+        .poll(() => read("/?operation=queue-result"), { timeout: 20000 })
+        .toMatchObject({ implicit: true, retried: true, dead: true, background: true });
+    } catch (cause) {
+      const queues = await Promise.all(
+        ["fixture", "dead"].map(async (queue) => {
+          const identity = `r${createHash("sha256").update(`${app.id}/queue/${queue}`).digest("hex").slice(0, 40)}`;
+
+          try {
+            const info = await execute("docker", [
+              "exec",
+              `platform-execution-${organizationId}`,
+              "celld",
+              "queue",
+              "info",
+              identity,
+              "--bucket",
+              `s3://${environment.configuration.S3_BUCKET}/organizations/${organizationId}`,
+              "--endpoint",
+              "http://internal-app-platform-test-rustfs-1:9000",
+              "--json",
+            ]);
+
+            return `${queue}: ${info.stdout}`;
+          } catch (error) {
+            return `${queue}: ${String(error)}`;
+          }
+        }),
+      );
+
+      const logs = await execute("docker", [
+        "logs",
+        "--tail",
+        "150",
+        `platform-execution-${organizationId}`,
+      ]);
+
+      throw new Error(
+        `Queue delivery state:\n${queues.join("\n")}\n${logs.stdout}\n${logs.stderr}`,
+        {
+          cause,
+        },
+      );
+    }
 
     const config = z
       .record(z.string(), z.json())

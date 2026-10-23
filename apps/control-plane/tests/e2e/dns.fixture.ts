@@ -15,4 +15,13 @@ dns.resolveTxt = async (name) => {
   return [[value]];
 };
 
+// Unpublished test domains have no website. Keep address lookups synthetic too.
+const noAddress = async () => {
+  throw Object.assign(new Error("Synthetic address record not found"), { code: "ENODATA" });
+};
+
+dns.resolve4 = noAddress;
+
+dns.resolve6 = noAddress;
+
 syncBuiltinESMExports();

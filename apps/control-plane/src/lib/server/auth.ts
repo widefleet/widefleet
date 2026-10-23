@@ -22,6 +22,7 @@ import { createAuthenticationAdmission } from "./auth-admission.ts";
 import type { OrganizationAccess } from "./application-context.ts";
 import { companySsoOrigins, companySsoPlugin } from "./company-sso.ts";
 import { pluginAuthentication, managedPluginPaths } from "./plugin-authentication.ts";
+import { cliLoginPlugin, createCliLogin } from "./cli-login.ts";
 
 export const companyLoginRevision = (
   connection: Awaited<ReturnType<typeof readSsoConfiguration>>,
@@ -77,6 +78,7 @@ export const createAuthentication = (
       companySsoOrigins(database, configuration.PLATFORM_URL, encryptionKey, request),
     plugins: [
       ...settings.plugins,
+      cliLoginPlugin(createCliLogin(database, configuration)),
       companySsoPlugin(database, encryptionKey, options.organizationAccess),
       {
         id: "management-credentials",

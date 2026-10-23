@@ -58,6 +58,17 @@ describe.runIf(
   let responseFile: string;
   let httpsStatus = 200;
   let document = "";
+  let cloudStatus = 200;
+  let cloudOrigin = "https://app.widefleet.com";
+  let routeSelected = true;
+  let tokenFailure: string | null = null;
+
+  // Unix tests use an isolated session file. Windows has no file-backed store,
+  // so successful broker logins must target the reserved synthetic origin.
+  const selectedOrigin = () =>
+    process.platform === "win32" ? "https://platform.example.test" : cloudOrigin;
+
+  const requestBodies: { host: string; path: string; body: string }[] = [];
   let server: ReturnType<typeof createServer>;
   const proxy = createProxy();
   const sockets = new Set<Socket>();
@@ -111,6 +122,7 @@ describe.runIf(
 
     certificates = await createCertificates(directory, [
       nativeResolver ? `*.${nativeResolver.zone}` : "example.test",
+      "app.widefleet.com",
     ]);
 
     ca = certificates.ca;
@@ -134,6 +146,14 @@ describe.runIf(
         cert: await readFile(certificates.certificate),
       },
       (request, response) => {
+        let body = "";
+        request.setEncoding("utf8");
+        request.on("data", (chunk: string) => {
+          body += chunk;
+        });
+        request.on("end", () => {
+          requestBodies.push({ host: request.headers.host ?? "", path: request.url ?? "", body });
+        });
         request.resume();
         requests.push({
           host: request.headers.host ?? "",
@@ -142,7 +162,30 @@ describe.runIf(
         });
         response.setHeader("content-type", "application/json");
 
+        if (request.url?.startsWith("/api/platform-discovery?")) {
+          response.writeHead(cloudStatus).end(JSON.stringify({ platform_url: selectedOrigin() }));
+
+          return;
+        }
+
         switch (request.url) {
+          case "/api/auth/cli-login/start":
+            response.end(
+              JSON.stringify({
+                request_id: "A".repeat(43),
+                cli_token: "B".repeat(43),
+                verification_uri: `https://app.widefleet.com/cli-login?request=${"A".repeat(43)}&ticket=${"C".repeat(43)}`,
+                expires_in: 60,
+                interval: 1,
+              }),
+            );
+            break;
+          case "/api/auth/cli-login/poll":
+            response.end(JSON.stringify({ platform_url: routeSelected ? selectedOrigin() : null }));
+            break;
+          case "/api/auth/cli-login/ready":
+            response.end(JSON.stringify({ success: true }));
+            break;
           case "/.well-known/widefleet":
             response.setHeader("location", "https://unexpected.example.test/");
             response.writeHead(httpsStatus).end(document);
@@ -152,13 +195,18 @@ describe.runIf(
               JSON.stringify({
                 device_code: "synthetic-device-code",
                 user_code: "TEST-CODE",
-                verification_uri: "https://platform.example.test/device",
+                verification_uri: `https://${request.headers.host}/device`,
                 expires_in: 60,
                 interval: 1,
               }),
             );
             break;
           case "/api/auth/oauth2/token":
+            if (tokenFailure) {
+              response.writeHead(400).end(JSON.stringify({ error: tokenFailure }));
+              break;
+            }
+
             response.end(
               JSON.stringify({
                 access_token: "synthetic-access-token",
@@ -187,7 +235,11 @@ describe.runIf(
     proxy.on("connect", (request, downstream, head) => {
       connections.push(request.url ?? "");
 
-      if (![`${domain}:443`, "platform.example.test:443"].includes(request.url ?? "")) {
+      if (
+        ![`${domain}:443`, "platform.example.test:443", "app.widefleet.com:443"].includes(
+          request.url ?? "",
+        )
+      ) {
         downstream.end("HTTP/1.1 403 Forbidden\r\n\r\n");
 
         return;
@@ -221,6 +273,11 @@ describe.runIf(
     await writeFile(dnsLog, "");
     document = JSON.stringify({ platform_url: "https://platform.example.test" });
     httpsStatus = 200;
+    cloudStatus = 200;
+    cloudOrigin = "https://app.widefleet.com";
+    routeSelected = true;
+    tokenFailure = null;
+    requestBodies.length = 0;
     requests.length = 0;
     connections.length = 0;
   });
@@ -309,6 +366,119 @@ describe.runIf(
     expect(connections.every((host) => host === "platform.example.test:443")).toBe(true);
   });
 
+  it("discovers in the browser without stdin and uses the selected server's device grant", async () => {
+    cloudOrigin = "https://platform.example.test";
+    routeSelected = false;
+    const running = cli(["login"]);
+
+    try {
+      await expect
+        .poll(() => requests.some(({ path }) => path === "/api/auth/cli-login/poll"), {
+          timeout: 5000,
+        })
+        .toBe(true);
+      expect(requests.some(({ path }) => path === "/api/auth/device/code")).toBe(false);
+    } finally {
+      routeSelected = true;
+      await running;
+    }
+
+    const result = await running;
+    expect(result.stdout).toContain("https://app.widefleet.com/cli-login?");
+    expect(result.stdout).toContain("TEST-CODE");
+    expect(JSON.parse(await readFile(configFile, "utf8"))).toEqual({ platform_url: cloudOrigin });
+    expect(
+      requests
+        .filter(({ path }) => path === "/api/auth/device/code" || path === "/api/auth/oauth2/token")
+        .every(({ host }) => host === "platform.example.test"),
+    ).toBe(true);
+    expect(
+      requestBodies
+        .filter(({ host }) => host === "app.widefleet.com")
+        .every(
+          ({ body }) =>
+            !body.includes("synthetic-device-code") && !body.includes("synthetic-access-token"),
+        ),
+    ).toBe(true);
+    expect(requests.every(({ authorization }) => authorization === undefined)).toBe(true);
+  });
+
+  it.each(["flag", "environment", "saved"])(
+    "keeps a selfhost supplied by %s fixed",
+    async (source) => {
+      const origin = "https://platform.example.test";
+
+      if (source === "saved") await writeFile(configFile, JSON.stringify({ platform_url: origin }));
+      await cli(
+        source === "flag" ? ["--url", origin, "login"] : ["login"],
+        source === "environment" ? { PLATFORM_URL: origin } : {},
+      );
+      expect(requests.map(({ path }) => path)).toEqual([
+        "/api/auth/device/code",
+        "/api/auth/oauth2/token",
+      ]);
+      expect(connections.every((host) => host === "platform.example.test:443")).toBe(true);
+    },
+  );
+
+  it.runIf(process.platform !== "win32").each(["flag", "environment", "saved"])(
+    "keeps Cloud supplied by %s fixed",
+    async (source) => {
+      const origin = "https://app.widefleet.com";
+
+      if (source === "saved") await writeFile(configFile, JSON.stringify({ platform_url: origin }));
+      await cli(
+        source === "flag" ? ["--url", origin, "login"] : ["login"],
+        source === "environment" ? { PLATFORM_URL: origin } : {},
+      );
+      expect(requests.map(({ path }) => path)).toEqual([
+        "/api/auth/device/code",
+        "/api/auth/oauth2/token",
+      ]);
+      expect(connections.every((host) => host === "app.widefleet.com:443")).toBe(true);
+    },
+  );
+
+  it("does not save a destination when device approval is denied", async () => {
+    tokenFailure = "access_denied";
+    await expect(cli(["login"])).rejects.toThrow("Device login was denied");
+    await expect(readFile(configFile)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("has no status command that can restore an old destination", async () => {
+    await writeFile(
+      configFile,
+      JSON.stringify({ platform_url: "https://replacement.example.test" }),
+    );
+    await expect(cli(["login", "--status"])).rejects.toThrow("unexpected argument");
+    expect(
+      z.object({ platform_url: z.string() }).parse(JSON.parse(await readFile(configFile, "utf8")))
+        .platform_url,
+    ).toBe("https://replacement.example.test");
+    expect(requests).toEqual([]);
+  });
+
+  it.runIf(process.platform === "linux")(
+    "uses the private credential file automatically without a running keyring",
+    async () => {
+      cloudOrigin = "https://platform.example.test";
+
+      const overrides = {
+        PLATFORM_SESSION_FILE: undefined,
+        PLATFORM_ACCESS_TOKEN: undefined,
+        DBUS_SESSION_BUS_ADDRESS: `unix:path=${join(directory, "missing-bus")}`,
+      };
+
+      const result = await cli(["login"], overrides);
+      expect(result.stdout).toContain("widefleet/credentials/");
+      expect(JSON.parse((await cli(["whoami"], overrides)).stdout)).toMatchObject({
+        email: "employee@example.test",
+      });
+      await cli(["logout"], overrides);
+      await expect(cli(["whoami"], overrides)).rejects.toThrow();
+    },
+  );
+
   it.each(["unavailable", "absent"])(
     "uses company HTTPS through the proxy when native DNS is %s",
     async (kind) => {
@@ -365,24 +535,104 @@ describe.runIf(
     });
   });
 
-  it("rejects an invalid HTTPS destination before sending credentials or starting login", async () => {
-    document = JSON.stringify({ platform_url: "http://localhost" });
-    await expect(cli(["login", "--domain", domain])).rejects.toThrow(
-      "Discovery must specify one HTTPS platform origin",
-    );
-    expect(requests.map((request) => request.path)).toEqual(["/.well-known/widefleet"]);
-    await expect(readFile(configFile)).rejects.toMatchObject({ code: "ENOENT" });
+  it.each(["<html>Company homepage</html>", '{"platform_url":"http://localhost"}'])(
+    "continues in Cloud when the website has no usable discovery document",
+    async (body) => {
+      document = body;
+      const result = await cli(["login", "--domain", domain]);
+      expect(result.stdout).toContain("Connected to");
+      expect(requests.map(({ path }) => path)).toEqual([
+        "/.well-known/widefleet",
+        `/api/platform-discovery?domain=${domain}`,
+        "/api/auth/device/code",
+        "/api/auth/oauth2/token",
+      ]);
+      expect(requests.every(({ authorization }) => authorization === undefined)).toBe(true);
+      expect(
+        z.object({ platform_url: z.string() }).parse(JSON.parse(await readFile(configFile, "utf8")))
+          .platform_url,
+      ).toBe(selectedOrigin());
+    },
+  );
+
+  it.each([302, 401, 503])(
+    "continues in Cloud for website HTTP status %s without following redirects",
+    async (status) => {
+      httpsStatus = status;
+      const result = await cli(["login", "--domain", domain]);
+      expect(result.stdout).toContain("Connected to");
+      expect(connections).toContain(`${domain}:443`);
+      expect(
+        connections.every(
+          (host) =>
+            host === `${domain}:443` ||
+            host === "app.widefleet.com:443" ||
+            host === "platform.example.test:443",
+        ),
+      ).toBe(true);
+      expect(requests.map(({ path }) => path)).toEqual([
+        "/.well-known/widefleet",
+        `/api/platform-discovery?domain=${domain}`,
+        "/api/auth/device/code",
+        "/api/auth/oauth2/token",
+      ]);
+    },
+  );
+
+  it.each([404, 410])(
+    "resolves the Cloud entry after local discovery is absent (%s)",
+    async (status) => {
+      await writeFile(responseFile, dnsResponse([], domain));
+      httpsStatus = status;
+      await cli(["login", "--email", `employee@${domain}`]);
+      expect(requests.map(({ host, path }) => ({ host, path }))).toEqual([
+        { host: domain, path: "/.well-known/widefleet" },
+        { host: "app.widefleet.com", path: `/api/platform-discovery?domain=${domain}` },
+        { host: new URL(selectedOrigin()).host, path: "/api/auth/device/code" },
+        { host: new URL(selectedOrigin()).host, path: "/api/auth/oauth2/token" },
+      ]);
+      expect(requests.every(({ authorization }) => authorization === undefined)).toBe(true);
+      expect(JSON.parse(await readFile(configFile, "utf8"))).toEqual({
+        platform_url: selectedOrigin(),
+      });
+      requests.length = 0;
+      await cli(["whoami"]);
+      expect(requests).toHaveLength(1);
+      expect(requests[0]?.host).toBe(new URL(selectedOrigin()).host);
+    },
+  );
+
+  it("reports an unavailable shared resolver without changing the saved platform", async () => {
+    httpsStatus = 404;
+    cloudStatus = 503;
+    await writeFile(configFile, JSON.stringify({ platform_url: "https://previous.example.test" }));
+    await expect(cli(["login", "--domain", domain])).rejects.toThrow();
+    expect(requests.every(({ path }) => !path.startsWith("/api/auth/"))).toBe(true);
+    expect(JSON.parse(await readFile(configFile, "utf8"))).toEqual({
+      platform_url: "https://previous.example.test",
+    });
+  });
+
+  it("uses the shared Cloud resolver's company result before requesting any device code", async () => {
+    await writeFile(responseFile, dnsResponse([], domain));
+    httpsStatus = 404;
+    cloudOrigin = "https://platform.example.test";
+    await cli(["login", "--domain", domain]);
+    expect(
+      requests.flatMap(({ host, path }) => (path.startsWith("/api/auth/") ? [host] : [])),
+    ).toEqual(["platform.example.test", "platform.example.test"]);
+    expect(JSON.parse(await readFile(configFile, "utf8"))).toEqual({ platform_url: cloudOrigin });
   });
 
   it.each([302, 404, 503])(
-    "reports HTTPS status %s without following a redirect or starting login",
+    "never starts Cloud login when shared discovery returns %s",
     async (status) => {
-      httpsStatus = status;
-      await expect(cli(["login", "--domain", domain])).rejects.toThrow(
-        `HTTPS discovery returned ${status}`,
-      );
-      expect(connections).toEqual([`${domain}:443`]);
-      expect(requests.map((request) => request.path)).toEqual(["/.well-known/widefleet"]);
+      await writeFile(responseFile, dnsResponse([], domain));
+      httpsStatus = 404;
+      cloudStatus = status;
+      await expect(cli(["login", "--domain", domain])).rejects.toThrow();
+      expect(requests.every(({ path }) => !path.startsWith("/api/auth/"))).toBe(true);
+      await expect(readFile(configFile)).rejects.toMatchObject({ code: "ENOENT" });
     },
   );
 
@@ -401,7 +651,7 @@ describe.runIf(
         (cause: unknown) => z.object({ stderr: z.string() }).parse(cause),
       );
 
-      expect(failure?.stderr).toContain("Could not discover Widefleet");
+      expect(failure?.stderr).toContain("Checking Widefleet Cloud");
       expect(failure?.stderr).toContain("HTTP request failed");
       expect(failure?.stderr).toContain("Caused by:");
       expect(failure?.stderr).toMatch(/certificate|issuer/i);
@@ -430,18 +680,12 @@ describe.runIf(
       (cause: unknown) => z.object({ stderr: z.string() }).parse(cause),
     );
 
-    expect(failure?.stderr).toContain("Could not discover Widefleet");
+    expect(failure?.stderr).toContain("Checking Widefleet Cloud");
     expect(failure?.stderr).toContain("HTTP request failed");
     expect(failure?.stderr).toContain("Caused by:");
     expect(failure?.stderr).toMatch(/connection refused|actively refused/i);
     expect(failure?.stderr).not.toContain("synthetic-proxy-user");
     expect(failure?.stderr).not.toContain("synthetic-proxy-secret");
-    expect(requests).toEqual([]);
-  });
-
-  it("explains noninteractive onboarding without waiting for stdin", async () => {
-    await expect(cli(["login"])).rejects.toThrow("widefleet login --email");
-    expect(await readFile(dnsLog, "utf8")).toBe("");
     expect(requests).toEqual([]);
   });
 

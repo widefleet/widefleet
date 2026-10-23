@@ -24,6 +24,8 @@ import type { HostedExecution } from "./deployment-execution.ts";
 import { createSignInEmail, type SendEmail } from "./email.ts";
 import { createInvitationService } from "./members.ts";
 import { createAuthenticationAdmission } from "./auth-admission.ts";
+import { discoverPlatform } from "./platform-discovery.ts";
+import { createCliLogin } from "./cli-login.ts";
 
 export const createRuntime = ({
   configuration,
@@ -38,6 +40,7 @@ export const createRuntime = ({
   sendEmail,
   authRateLimit,
   authIpAddressHeaders,
+  discoveryTransport = "node",
 }: {
   configuration: Configuration & { BETTER_AUTH_SECRET: string };
   database: ReturnType<typeof createDatabase>;
@@ -51,6 +54,7 @@ export const createRuntime = ({
   authRateLimit?: BetterAuthOptions["rateLimit"];
   authIpAddressHeaders?: string[];
   hostedLogs?: ReturnType<typeof createCloudflareLogs>;
+  discoveryTransport?: "node" | "cloudflare";
 }) => {
   const authOptions: NonNullable<Parameters<typeof createAuthentication>[2]> = { encryptionKey };
 
@@ -77,6 +81,8 @@ export const createRuntime = ({
     invitations: createInvitationService(database.db, configuration, sendEmail, organizationAccess),
     emailSignIn: Boolean(createSignInEmail(configuration, sendEmail)),
     signInProvider: createAuthenticationAdmission(database.db, organizationAccess).signInProvider,
+    discoverPlatform: (domain: string) => discoverPlatform(domain, discoveryTransport),
+    cliLogin: createCliLogin(database.db, configuration),
     apps: createAppService(database.db, configuration, execution),
     agents: createAgentService(database.db),
     jobs: createJobService(database.db, storage, encryptionKey, reporting.operation),
