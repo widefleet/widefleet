@@ -32,6 +32,7 @@ pnpm exec playwright install chromium
 pnpm check
 pnpm exec vitest run
 pnpm build
+bash tools/cargo.sh build -p platform-cli
 pnpm --filter @platform/control-plane test:e2e
 bash tools/cargo.sh fmt --all --check
 bash tools/cargo.sh clippy --workspace --all-targets -- -D warnings
