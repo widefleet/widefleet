@@ -1,12 +1,12 @@
 ---
 title: External services and HTTPS
 description: Configure external PostgreSQL, object storage and automatic HTTPS.
-lastModified: 2026-10-12
+lastModified: 2026-10-23
 ---
 
 Connect Widefleet to existing cloud services using the same maintained Compose configuration as the local PostgreSQL/RustFS installation. Provision the host, cloud databases, object stores, IAM and permanent DNS records before following this guide. Use Linux x86-64, the supported Docker baseline from [operations](/self-hosting/installation), and Docker Compose 2.20.0 or newer.
 
-Use release `v0.1.8` or newer with its matching source checkout and image manifest. See the [operations guide](/self-hosting/installation#pull-the-release-images) for downloading and verifying the release manifest.
+This guide targets release `v0.4.2` with its matching source checkout and image manifest. See the [operations guide](/self-hosting/installation#pull-the-release-images) for downloading and verifying the release manifest.
 
 ## Select the installation
 
@@ -14,18 +14,18 @@ Copy `infra/deployment.env.example` to a private file outside Git and fill the a
 
 `COMPOSE_FILE` in that private env file selects the maintained configurations, separated by `:` on the supported Linux host. Always start with `infra/compose.base.yaml`. Select one storage backend and optionally local PostgreSQL:
 
-| File                              | Purpose                                                             |
-| --------------------------------- | ------------------------------------------------------------------- |
-| `compose.base.yaml`               | Management, app SSO, Traefik, agent and configuration tool          |
-| `compose.postgres.yaml`           | Add local PostgreSQL; omit for an external `DATABASE_URL`           |
-| `compose.s3.yaml`                 | S3 settings for external storage or local RustFS                    |
-| `compose.rustfs.yaml`             | Add local RustFS; combine with `compose.s3.yaml`                    |
-| `compose.azure.yaml`              | Native Azure Blob settings, with no local object-store service      |
-| `compose.gcs.yaml`                | Native GCS settings, with no local object-store service             |
-| `compose.storage-credential.yaml` | Read-only credential-file mounts for Azure workload identity or GCS |
-| `compose.database-ca.yaml`        | Read-only PostgreSQL CA-bundle mount                                |
-| `compose.acme-cloudflare.yaml`    | Automatic HTTPS using Cloudflare DNS validation                     |
-| `compose.telemetry.yaml`          | ClickHouse and an internal OpenTelemetry Collector for runtime logs |
+| File                              | Purpose                                                                        |
+| --------------------------------- | ------------------------------------------------------------------------------ |
+| `compose.base.yaml`               | Management, shared runtime with app sign-in, Traefik, agent and initialization |
+| `compose.postgres.yaml`           | Add local PostgreSQL; omit for an external `DATABASE_URL`                      |
+| `compose.s3.yaml`                 | S3 settings for external storage or local RustFS                               |
+| `compose.rustfs.yaml`             | Add local RustFS; combine with `compose.s3.yaml`                               |
+| `compose.azure.yaml`              | Native Azure Blob settings, with no local object-store service                 |
+| `compose.gcs.yaml`                | Native GCS settings, with no local object-store service                        |
+| `compose.storage-credential.yaml` | Read-only credential-file mounts for Azure workload identity or GCS            |
+| `compose.database-ca.yaml`        | Read-only PostgreSQL CA-bundle mount                                           |
+| `compose.acme-cloudflare.yaml`    | Automatic HTTPS using Cloudflare DNS validation                                |
+| `compose.telemetry.yaml`          | ClickHouse and an internal OpenTelemetry Collector for runtime logs            |
 
 Examples for the private env file:
 
@@ -81,7 +81,7 @@ AZURE_STORAGE_CONTAINER=widefleet-artifacts
 FLEET_AZURE_CONTAINER=widefleet-fleets
 ```
 
-Omit identity/key variables for a system-assigned VM managed identity. Set `AZURE_CLIENT_ID` for a user-assigned identity. Alternatively, set only `AZURE_STORAGE_ACCESS_KEY` for account-key authentication. The identity needs blob data access to the containers, and its metadata endpoint must be reachable from management, agent and app containers.
+Omit identity/key variables for a system-assigned VM managed identity. Set `AZURE_CLIENT_ID` for a user-assigned identity. Alternatively, set only `AZURE_STORAGE_ACCESS_KEY` for account-key authentication. The identity needs blob data access to the containers, and its metadata endpoint must be reachable from initialization, management, agent and runtime containers.
 
 For GCS, set `GCS_BUCKET` and `FLEET_GCS_BUCKET`. An attached VM service account is the default. Give it the required object and bucket-metadata permissions. GCS external-account / Workload Identity Federation credential files remain unsupported by the pinned fleet clients.
 
@@ -90,9 +90,9 @@ For file credentials, add `compose.storage-credential.yaml` and set `FLEET_CREDE
 - GCS: `GOOGLE_APPLICATION_CREDENTIALS=/run/widefleet/storage-credential`.
 - Azure workload identity: `AZURE_FEDERATED_TOKEN_FILE=/run/widefleet/storage-credential`, plus `AZURE_CLIENT_ID` and `AZURE_TENANT_ID`.
 
-The file must exist and be readable by the management container's `node` user and the agent/runtime users. Check mapped IDs for rootless Docker. Mounts are read-only and fail if the host path is absent. The agent receives the host path for its runtime mounts. Preserve the inode during token refresh; atomic file replacement requires recreating affected containers, as described in [storage backends](/self-hosting/storage).
+The file must exist and be readable by the management container's `node` user and the agent/runtime users. Check mapped IDs for rootless Docker. Mounts are read-only and fail if the host path is absent. Compose mounts the credential file into initialization, management, agent and runtime services. Preserve the inode during token refresh; atomic file replacement requires recreating affected containers, as described in [storage backends](/self-hosting/storage).
 
-For external S3, set `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `FLEET_S3_BUCKET`, `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY`. `FLEET_RUNTIME_S3_ENDPOINT` is only needed if app containers use a different endpoint. Omit `compose.rustfs.yaml`. Only local RustFS configurations attach the storage container to each app network.
+For external S3, set `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `FLEET_S3_BUCKET`, `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY`. `FLEET_RUNTIME_S3_ENDPOINT` is only needed if the runtime container uses a different endpoint. Omit `compose.rustfs.yaml`. The local RustFS service shares the private management network with the runtime.
 
 ## Automatic HTTPS with Cloudflare
 
@@ -112,26 +112,26 @@ Add `compose.acme-cloudflare.yaml` and start the selected services. Management g
 
 Check issuance using the staging CA first. Its certificates are intentionally not trusted by browsers, the CLI or the agent. Do not weaken their TLS verification to finish a staging installation. After checking issuance logs, set `ACME_ENVIRONMENT=production`, recreate management to render the static configuration, then recreate Traefik before starting normal clients. The default when the variable is omitted is `production`.
 
-Traefik requests management and `*.APP_DOMAIN` together. Regular app routes use that certificate store. A nested [preview](/reference/previews) additionally requests `*.<parent-app>.APP_DOMAIN`; all previews of that parent share the certificate. The ACME overlay passes `TLS_MODE=cloudflare` to the agent, and the base Compose configuration supplies `APP_DOMAIN`. Issuance and renewal are handled by Traefik's built-in [ACME resolver](https://doc.traefik.io/traefik/reference/install-configuration/tls/certificate-resolvers/acme/).
+Traefik requests management and `*.APP_DOMAIN` together. A nested preview such as `review.notes.apps.example.com` additionally requires `*.notes.apps.example.com`; Traefik requests it when the preview is deployed. Organizations with a hostname suffix use [flat preview addresses](/reference/previews#organization-addresses), already covered by `*.APP_DOMAIN`. The ACME overlay passes `TLS_MODE=cloudflare` to the agent, and the base Compose configuration supplies `APP_DOMAIN`. Issuance and renewal are handled by Traefik's built-in [ACME resolver](https://doc.traefik.io/traefik/reference/install-configuration/tls/certificate-resolvers/acme/).
 
 The persistent named volume `acme` holds separate `staging.json` and `production.json` files with ACME account keys and certificates. Traefik owns renewal and creates its files with mode `0600`. Back up this volume encrypted, keep it out of Git, and do not share one account file between simultaneously running Traefik instances. Monitor proxy logs and certificate expiration; failed renewals need operator attention.
 
-Omit the ACME file to use existing certificates. Place `fullchain.pem` and `privkey.pem` under `${PLATFORM_DATA_DIRECTORY}/tls`. The certificate must cover both management and the app wildcard, plus the nested preview hosts or their parent wildcards when used, and the chain must be trusted by clients. Recreate Traefik after replacing supplied certificate files. A Cloudflare Origin CA certificate is suitable only behind its proxy, not for direct browser/CLI connections.
+Omit the ACME file to use existing certificates. Place `fullchain.pem` and `privkey.pem` under `${PLATFORM_DATA_DIRECTORY}/tls`. The certificate must cover management, the app wildcard and any nested preview hosts or their parent wildcards. Its chain must be trusted by clients. Recreate Traefik after replacing supplied certificate files. A Cloudflare Origin CA certificate is suitable only behind its proxy, not for direct browser/CLI connections.
 
 ## Start and verify
 
-Create the host data directory and `agent` and `tls` subdirectories. Widefleet uses named volumes for keys, generated configuration and ACME state. For local services, also prepare the PostgreSQL/RustFS paths and ownership from [operations](/self-hosting/installation). Place external credential/CA/token files before starting their consumers.
+Create the host data directory and `agent` and `tls` subdirectories. Widefleet uses named volumes for keys, generated edge/runtime configuration, runtime state and optional ACME state. For local services, also prepare the PostgreSQL/RustFS paths and ownership from [operations](/self-hosting/installation). Place external credential/CA/token files before starting their consumers.
 
 ```sh
-docker compose --env-file release-images.env --env-file /absolute/deployment.env --profile agent --profile images pull
+docker compose --env-file release-images.env --env-file /absolute/deployment.env --profile agent pull
 docker compose --env-file release-images.env --env-file /absolute/deployment.env config --quiet
 ```
 
-If selected, start local PostgreSQL and/or RustFS before initialization. For entirely external services, both should already be reachable:
+Ensure external services are reachable, then start management and the proxy. Compose starts any selected local PostgreSQL/RustFS services, runs `initialize`, starts the runtime and waits for its health check before starting management:
 
 ```sh
-docker compose --env-file release-images.env --env-file /absolute/deployment.env run --rm --no-deps control-plane node tools/initialize-storage.ts
-docker compose --env-file release-images.env --env-file /absolute/deployment.env up -d control-plane oauth2-proxy proxy
+docker compose --env-file release-images.env --env-file /absolute/deployment.env up -d control-plane proxy
+docker compose --env-file release-images.env --env-file /absolute/deployment.env ps --all
 ```
 
 Complete the staging/production certificate check if using ACME. Then verify `https://platform.example.com/healthz`, sign in to management, register the agent, and store its returned token in the private environment file. Start the agent:
@@ -140,14 +140,6 @@ Complete the staging/production certificate check if using ACME. Then verify `ht
 docker compose --env-file release-images.env --env-file /absolute/deployment.env --profile agent up -d agent
 ```
 
-Acceptance: log in with the CLI, deploy an app, complete app SSO, write/read D1 and R2 data, and repeat those reads after a normal runtime restart. Check that selected external services are used and that PostgreSQL/RustFS containers are absent when not selected. Only ports 80/443 are public. Startup initializes the management database schema; actual deployment exercises storage separately.
+Acceptance: log in with the CLI, deploy an app, complete app SSO, write/read D1 and R2 data, and repeat those reads after a normal runtime restart. Check that selected external services are used and that PostgreSQL/RustFS containers are absent when not selected. Only ports 80/443 are public. The `initialize` service prepares storage and the database schema before the runtime starts; deployment verifies app data access.
 
 Restart Traefik after infrastructure changes to TLS mode or ACME environment. Keep generated app routes and ACME account state in their named volumes. Product SSO settings are managed through the UI/API, independently of these deployment settings. See [first setup and recovery](/self-hosting/installation).
-
-## Verification boundary
-
-Run `RUN_INSTALLATION_TESTS=1 pnpm exec vitest run apps/control-plane/tests/installation` to validate the Compose combinations, credential isolation, PostgreSQL TLS rejection cases and repeatable migrations, and certificate loading/restart with the pinned Traefik image. These tests use synthetic credentials, temporary containers and locally generated certificates. The Traefik fixture runs offline with a preloaded test ACME certificate.
-
-Cloud acceptance with release `v0.1.8` and CLI `0.1.5` verified the Azure configuration: private PostgreSQL 18 with `verify-full`, system-assigned VM identity with container-scoped Blob data permissions, management and app Entra login, OAuth device authorization, and a CLI deployment using native Azure artifacts and fleets. D1 notes and R2 images remained readable after a normal app-container restart with its existing data disk; the image bytes matched before and after restart. Cloudflare DNS-01 issuance succeeded against both the staging and production Let's Encrypt CAs, and public HTTPS passed certificate verification.
-
-Certificate renewal, recovery after losing the data disk, other Azure credential modes and real GCS authentication/deployment remain separate acceptance checks. The local `./dev` experience and S3 deployment tests run without cloud accounts.

@@ -19,7 +19,7 @@ Inferred types over annotations. any is the enemy.
 - `apps/docs/docs/` is the canonical home for app creators and installation operators: tutorials, app/API references, self-hosting, configuration, upgrades, backups and troubleshooting. Keep these guides usable without repository-only documentation.
 - `docs/` is for contributors changing Widefleet itself: development, tests, internal architecture, release publishing and documentation-site maintenance. Split mixed pages by audience. Retain link-only compatibility pointers when released clients require an old path.
 - `AGENTS.md` holds concise contributor rules and content boundaries, not product documentation, tutorials or work logs.
-- Document implemented behavior and required versions; distinguish unreleased features and known limits. Keep roadmaps, session notes, speculative claims, customer data and secrets out of README and public docs.
+- Document implemented behavior and required versions. Keep roadmaps, session notes, speculative claims, customer data and secrets out of README and public docs.
 - Each topic has one canonical home; use short introductions and links elsewhere. When moving content, preserve useful details and update navigation, links and code that reads the files. README and repository guides link to public docs URLs for user topics; website pages use site routes. There is no automatic sync between the two folders.
 
 ## Internal documentation
@@ -44,6 +44,7 @@ Most code changes do not need an internal documentation change. Read the relevan
 
 - Keep documentation for unreleased product behavior in separate PRs from implementation. Standalone corrections and improvements for released behavior target `main` and can merge without a software release.
 - Prepare public documentation for unreleased product behavior alongside the feature in a separate draft PR. Link the implementation and docs PRs in both descriptions, and record which unreleased changes block publication.
+- Write and review draft documentation in its intended published form; it must not need release-status edits once its dependencies are available. Track unreleased status and publication blockers in PR descriptions and draft state, not in reader-facing placeholders or publication notes.
 - During development, base the docs PR on the feature branch so its diff contains only documentation changes. Do not merge it into the feature branch.
 - After the feature is squash-merged, rebase only the docs commits onto `main` and verify the diff contains only documentation changes.
 - Keep release-dependent docs in draft until a published release includes all documented changes and the required artifacts are available. A feature merge, tag or draft release alone does not unblock publication.

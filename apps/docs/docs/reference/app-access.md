@@ -1,7 +1,7 @@
 ---
 title: App access
 description: Group rules, permissions, activation and the app access API.
-lastModified: 2026-10-12
+lastModified: 2026-10-23
 ---
 
 Open an app in management and choose **Access → App access** to select which company
@@ -9,9 +9,15 @@ groups may open it. App owners and organization administrators can change these
 rules. Management collaborators can inspect them but cannot change them.
 Management permissions do not bypass the running app's access rules.
 
+Platform 0.4.0 applies these rules to the app's organization.
+Without a company IdP, Widefleet admits verified organization members and supplies no
+company group claims; use an empty group list for that mode. With company SSO, the
+app IdP registration determines who can authenticate. See [published app sign-in](/guides/members#opening-published-apps)
+for session lifetime, membership checks and control-plane availability.
+
 Each original app has one group list shared automatically with all its previews.
 A user needs membership in **any one** listed group. An empty
-list allows every user admitted by the installation's company SSO; it never
+list allows every user admitted by the organization's sign-in configuration; it never
 enables anonymous access. Use stable group IDs from the identity provider, one
 per line. The optional Entra directory connection enables searching by name.
 Generic OIDC installations can enter their configured group claim values directly.
@@ -38,7 +44,7 @@ widefleet access set --all-authenticated
 `set` replaces the complete list. Every existing and future preview inherits the
 same rule automatically. An empty command
 is rejected: use `--all-authenticated` to explicitly remove the group restriction
-while retaining company SSO. Group IDs and `--all-authenticated` are mutually exclusive.
+while retaining sign-in. Group IDs and `--all-authenticated` are mutually exclusive.
 
 The app is resolved from `name` in `wrangler.jsonc`, or from `--app NAME_OR_UUID`.
 `--config PATH` selects another project file. The CLI reads the current revision
@@ -59,19 +65,19 @@ to the same owner or administrator permissions as the management UI.
 Saving changes stores the desired rules and queues agent work. **Saved · applies from the first deployment**
 means that the rules will be used on the first deployment. **Activation pending**
 means that a published app is waiting for its new rules. **Active** means that the
-agent has confirmed the revision at Traefik. The parent page also displays each
+agent has confirmed the active runtime revision. The parent page also displays each
 preview's activation status. Use **Refresh status** to refresh it.
 
 Rules are applied independently to each hostname, not atomically across all
 previews. If a job fails or management is unreachable, the last installed rules
-remain in effect. An unconfirmed change may already have reached the proxy;
+remain in effect. An unconfirmed change may already have reached the runtime;
 check the reported error and save the same rules again to reconcile it. Code
 deployments and rollbacks always use the current access rules rather than rules
 from the old code artifact. Removing all groups is also an explicit, revisioned
 change.
 
-Traefik checks the groups through OAuth2 Proxy before forwarding requests to app
-code or static assets. User-supplied identity headers are removed, and SSO cookies
+The shared runtime checks the groups before forwarding requests to app code or
+static assets. User-supplied identity headers are removed, and SSO cookies
 and tokens do not reach the app. Internal Cron, Queue and connector invocations
 continue to use their existing capability boundaries; they are not browser SSO
 requests. Resource-level permissions inside an app remain the app's responsibility.
@@ -101,25 +107,8 @@ return `403`.
 
 ## Installation and verification
 
-Upgrade the control plane and agent together before configuring these rules.
-Agents advertise support when claiming jobs. Older agents cannot claim app jobs
-after access rules have been changed, preventing them from replacing a protected
-route with the legacy SSO-only route.
+Use matching control-plane, agent and runtime images from the [installation guide](/self-hosting/installation). The standard Compose topology includes app authentication in the shared runtime.
 
-The standard Compose topology needs no additional service. For a custom topology,
-configure these agent environment variables in its versioned deployment:
+For a custom topology, configure the agent's `PLATFORM_APP_RUNTIME_URL` (default `http://runtime:8080/`) and `PLATFORM_PROXY_URL` (default `https://app-platform-proxy:8443`) as private origins reachable by the relevant services. Preserve the runtime control-key mount from the Compose configuration.
 
-| Variable                | Default                           | Purpose                                                |
-| ----------------------- | --------------------------------- | ------------------------------------------------------ |
-| `PLATFORM_APP_AUTH_URL` | `http://oauth2-proxy:4180/`       | OAuth2 Proxy origin reachable from Traefik             |
-| `PLATFORM_PROXY_URL`    | `https://app-platform-proxy:8443` | Private Traefik origin reachable from fleet containers |
-
-The agent writes an app-specific auth middleware and revision marker in the same
-atomic route file update. For changed rules it sends a credential-free request
-through the private proxy and waits for an SSO rejection or redirect carrying
-that revision. This confirms that Traefik loaded the route before acknowledging
-activation. The probe does not follow redirects. Certificate verification is
-disabled only for this private probe because the public certificate does not
-cover Docker hostnames; restrict the fleet network to the trusted proxy as in
-the maintained Compose installation. Unchanged revision-zero routes retain the
-existing installation-wide SSO chain.
+After changing a group rule, wait for **Active** and verify access with an allowed and a disallowed account. If activation fails, check agent, runtime and proxy logs before retrying.
