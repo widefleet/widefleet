@@ -209,12 +209,16 @@ describe("Hosted resource provisioning", () => {
     }
   }, 30_000);
 
-  it("bundles the generated runtime configuration offline with app bindings retained", async () => {
+  it("bundles extra runtime variables while retaining event configuration, logging and app bindings", async () => {
     const configs = await hostedConfigurations(installation, ids, "email", {
       vars: { OBSERVER_LABEL: "installation-fixture" },
     });
 
-    expect(configs.runtime.vars).toEqual({ OBSERVER_LABEL: "installation-fixture" });
+    expect(configs.runtime.vars).toEqual({
+      WIDEFLEET_CONFIGURATION: JSON.stringify({ source: "r2" }),
+      WIDEFLEET_LOGS: "cloudflare",
+      OBSERVER_LABEL: "installation-fixture",
+    });
     expect(configs.controlPlane.vars).not.toHaveProperty("OBSERVER_LABEL");
     const directory = await mkdtemp(join(tmpdir(), "widefleet-hosted-config-"));
     const cwd = fileURLToPath(new URL("../../", import.meta.url));

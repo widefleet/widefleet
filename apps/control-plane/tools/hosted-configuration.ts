@@ -172,6 +172,10 @@ export const hostedConfigurations = async (
       },
       // Omit cron and queue-consumer declarations: app deployment owns them.
       ...runtimeOverrides,
+      vars: {
+        ...runtime.vars,
+        ...z.record(z.string(), z.json()).optional().parse(runtimeOverrides["vars"]),
+      },
     },
     controlPlane: {
       ...control,
