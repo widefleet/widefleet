@@ -2,6 +2,8 @@ import type { storedModule, workerConfiguration } from "@platform/contracts";
 import type { z } from "zod";
 import type { ParentEnvironment } from "./types.ts";
 import { loadModules } from "./worker-modules.ts";
+import { runtimeExtension } from "#runtime-extension";
+import type { WorkerIdentity } from "./runtime-extension.ts";
 
 type Definition = {
   scope: string;
@@ -65,13 +67,17 @@ export const workerDefinition = async (
 export const workerTails = (
   environment: ParentEnvironment,
   context: Pick<ExecutionContext, "exports">,
-  identity:
-    | { appId: string; deploymentId: string; buildId: string | null }
-    | { organizationId: string; connector: string; connectorVersion: string },
+  identity: WorkerIdentity,
   destination: { url: string; token: string } | null,
-) =>
-  environment["WIDEFLEET_LOGS"] === "cloudflare"
-    ? [context.exports.CloudflareTelemetry({ props: identity })]
-    : destination
-      ? [context.exports.Telemetry({ props: { ...destination, ...identity } })]
-      : [];
+) => {
+  const tails =
+    environment["WIDEFLEET_LOGS"] === "cloudflare"
+      ? [context.exports.CloudflareTelemetry({ props: identity })]
+      : destination
+        ? [context.exports.Telemetry({ props: { ...destination, ...identity } })]
+        : [];
+
+  if (runtimeExtension.tail) tails.push(context.exports.RuntimeObserver({ props: identity }));
+
+  return tails;
+};

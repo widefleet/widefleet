@@ -1,6 +1,7 @@
 import { build } from "esbuild";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { isAbsolute } from "node:path";
 import { z } from "zod";
 
 const license = [
@@ -12,7 +13,19 @@ const { version } = z
   .object({ version: z.string() })
   .parse(JSON.parse(await readFile(new URL("../../package.json", import.meta.url), "utf8")));
 
+const extension = process.env["WIDEFLEET_APP_RUNTIME_EXTENSION"];
+
+if (extension && !isAbsolute(extension))
+  throw new Error("WIDEFLEET_APP_RUNTIME_EXTENSION must be an absolute module path");
+
 const compile = async (entry: string, define: Record<string, string>) => {
+  const alias = new Map([
+    ["widefleet:app", "./__widefleet_app.js"],
+    ["widefleet:workflow", "./__widefleet_workflow.js"],
+  ]);
+
+  if (extension) alias.set("#runtime-extension", extension);
+
   const result = await build({
     entryPoints: [new URL(`src/${entry}.ts`, import.meta.url).pathname],
     bundle: true,
@@ -26,10 +39,7 @@ const compile = async (entry: string, define: Record<string, string>) => {
       "./__widefleet_workflow.js",
       "node:*",
     ],
-    alias: {
-      "widefleet:app": "./__widefleet_app.js",
-      "widefleet:workflow": "./__widefleet_workflow.js",
-    },
+    alias: Object.fromEntries(alias),
     banner: { js: `/*!\n${license}*/` },
     define,
     write: false,

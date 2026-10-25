@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, promisify } from "node:util";
@@ -30,10 +30,15 @@ import { deployHostedRuntime } from "./hosted-runtime.ts";
 
 const execute = promisify(execFile);
 
-const { positionals } = parseArgs({ allowPositionals: true, options: {} });
+const { positionals, values } = parseArgs({
+  allowPositionals: true,
+  options: { "runtime-config": { type: "string" } },
+});
 
 if (positionals.length !== 1)
-  throw new Error("Usage: node tools/deploy-hosted.ts <installation.json>");
+  throw new Error(
+    "Usage: node tools/deploy-hosted.ts <installation.json> [--runtime-config <file.json>]",
+  );
 
 const installation = await readHostedInstallation(z.string().parse(positionals[0]));
 
@@ -58,6 +63,15 @@ const secrets = z
       .transform((value) => value || undefined),
   })
   .parse(process.env);
+
+// A trusted installation may supply additional Wrangler configuration.
+const runtimeOverrides = z
+  .record(z.string(), z.json())
+  .parse(
+    values["runtime-config"]
+      ? JSON.parse(await readFile(resolve(values["runtime-config"]), "utf8"))
+      : {},
+  );
 
 const bootstrap = secrets.PLATFORM_BOOTSTRAP
   ? bootstrapConfiguration.parse(JSON.parse(secrets.PLATFORM_BOOTSTRAP))
@@ -175,7 +189,13 @@ try {
     ...(await provisionHostedResources(installation, cloudflare, wrangler)),
   });
 
-  const configs = await hostedConfigurations(installation, ids, configuration.LOGIN_CODE_DELIVERY);
+  const configs = await hostedConfigurations(
+    installation,
+    ids,
+    configuration.LOGIN_CODE_DELIVERY,
+    runtimeOverrides,
+  );
+
   const runtimeConfig = await write("runtime.json", JSON.stringify(configs.runtime));
   const controlConfig = await write("control-plane.json", JSON.stringify(configs.controlPlane));
   const initializeConfig = await write("initialize.json", JSON.stringify(configs.initialize));

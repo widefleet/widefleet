@@ -112,6 +112,7 @@ export const hostedConfigurations = async (
   installation: z.infer<typeof hostedInstallation>,
   ids: z.infer<typeof hostedResourceIds>,
   loginCodeDelivery: Configuration["LOGIN_CODE_DELIVERY"] = "email",
+  runtimeOverrides: Record<string, z.infer<ReturnType<typeof z.json>>> = {},
 ) => {
   const names = hostedResourceNames(installation);
   const controlDirectory = fileURLToPath(new URL("../", import.meta.url));
@@ -170,6 +171,11 @@ export const hostedConfigurations = async (
         },
       },
       // Omit cron and queue-consumer declarations: app deployment owns them.
+      ...runtimeOverrides,
+      vars: {
+        ...runtime.vars,
+        ...z.record(z.string(), z.json()).optional().parse(runtimeOverrides["vars"]),
+      },
     },
     controlPlane: {
       ...control,
