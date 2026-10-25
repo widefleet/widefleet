@@ -210,20 +210,12 @@ describe("Hosted resource provisioning", () => {
   }, 30_000);
 
   it("bundles the generated runtime configuration offline with app bindings retained", async () => {
-    const configs = await hostedConfigurations(
-      {
-        ...installation,
-        runtimeVpcNetworks: [
-          { binding: "PRIVATE_NETWORK", tunnel_id: "8d35ed24-64c1-4aef-8be0-14fecc144122" },
-        ],
-      },
-      ids,
-    );
+    const configs = await hostedConfigurations(installation, ids, "email", {
+      vars: { OBSERVER_LABEL: "installation-fixture" },
+    });
 
-    expect(configs.runtime.vpc_networks).toEqual([
-      { binding: "PRIVATE_NETWORK", tunnel_id: "8d35ed24-64c1-4aef-8be0-14fecc144122" },
-    ]);
-    expect(configs.controlPlane).not.toHaveProperty("vpc_networks");
+    expect(configs.runtime.vars).toEqual({ OBSERVER_LABEL: "installation-fixture" });
+    expect(configs.controlPlane.vars).not.toHaveProperty("OBSERVER_LABEL");
     const directory = await mkdtemp(join(tmpdir(), "widefleet-hosted-config-"));
     const cwd = fileURLToPath(new URL("../../", import.meta.url));
 

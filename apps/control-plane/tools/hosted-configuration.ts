@@ -13,11 +13,6 @@ export const hostedInstallation = z
     platformUrl: runtimeConfigurationSchema.shape.PLATFORM_URL,
     appDomain: z.hostname(),
     appZone: z.hostname(),
-    runtimeVpcNetworks: z
-      .array(
-        z.strictObject({ binding: z.string().regex(/^[A-Z][A-Z0-9_]*$/), tunnel_id: z.uuid() }),
-      )
-      .default([]),
     emailFrom: z.email().optional(),
     hyperdriveId: z.string().regex(/^[a-f0-9]{32}$/),
   })
@@ -117,6 +112,7 @@ export const hostedConfigurations = async (
   installation: z.infer<typeof hostedInstallation>,
   ids: z.infer<typeof hostedResourceIds>,
   loginCodeDelivery: Configuration["LOGIN_CODE_DELIVERY"] = "email",
+  runtimeOverrides: Record<string, z.infer<ReturnType<typeof z.json>>> = {},
 ) => {
   const names = hostedResourceNames(installation);
   const controlDirectory = fileURLToPath(new URL("../", import.meta.url));
@@ -159,7 +155,6 @@ export const hostedConfigurations = async (
       kv_namespaces: [{ binding: "AUTH_CONFIG", id: ids.auth }],
       r2_buckets: [{ binding: "WIDEFLEET_PACKAGES", bucket_name: names.artifacts }],
       workflows: workflows(runtime),
-      vpc_networks: installation.runtimeVpcNetworks,
       // Retain bindings provisioned by app deployments. This overrides Wrangler's
       // default keep_bindings, so secrets must be included explicitly as well.
       unsafe: {
@@ -176,6 +171,7 @@ export const hostedConfigurations = async (
         },
       },
       // Omit cron and queue-consumer declarations: app deployment owns them.
+      ...runtimeOverrides,
     },
     controlPlane: {
       ...control,

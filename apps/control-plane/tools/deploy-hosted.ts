@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, promisify } from "node:util";
@@ -30,10 +30,15 @@ import { deployHostedRuntime } from "./hosted-runtime.ts";
 
 const execute = promisify(execFile);
 
-const { positionals } = parseArgs({ allowPositionals: true, options: {} });
+const { positionals, values } = parseArgs({
+  allowPositionals: true,
+  options: { "runtime-config": { type: "string" } },
+});
 
 if (positionals.length !== 1)
-  throw new Error("Usage: node tools/deploy-hosted.ts <installation.json>");
+  throw new Error(
+    "Usage: node tools/deploy-hosted.ts <installation.json> [--runtime-config <file.json>]",
+  );
 
 const installation = await readHostedInstallation(z.string().parse(positionals[0]));
 
@@ -59,9 +64,14 @@ const secrets = z
   })
   .parse(process.env);
 
-const extensionSecrets = z
-  .record(z.string().regex(/^[A-Z][A-Z0-9_]*$/), z.string())
-  .parse(JSON.parse(process.env["WIDEFLEET_APP_RUNTIME_SECRETS"] || "{}"));
+// A trusted installation may supply additional Wrangler configuration.
+const runtimeOverrides = z
+  .record(z.string(), z.json())
+  .parse(
+    values["runtime-config"]
+      ? JSON.parse(await readFile(resolve(values["runtime-config"]), "utf8"))
+      : {},
+  );
 
 const bootstrap = secrets.PLATFORM_BOOTSTRAP
   ? bootstrapConfiguration.parse(JSON.parse(secrets.PLATFORM_BOOTSTRAP))
@@ -109,8 +119,8 @@ const childEnvironment = {
 
 const password = decodeURIComponent(new URL(secrets.DATABASE_URL).password);
 
-const sensitive = [...Object.values(secrets), ...Object.values(extensionSecrets), password].flatMap(
-  (value) => (value ? [value, JSON.stringify(value).slice(1, -1)] : []),
+const sensitive = [...Object.values(secrets), password].flatMap((value) =>
+  value ? [value, JSON.stringify(value).slice(1, -1)] : [],
 );
 
 const redact = (output: string) => {
@@ -179,7 +189,13 @@ try {
     ...(await provisionHostedResources(installation, cloudflare, wrangler)),
   });
 
-  const configs = await hostedConfigurations(installation, ids, configuration.LOGIN_CODE_DELIVERY);
+  const configs = await hostedConfigurations(
+    installation,
+    ids,
+    configuration.LOGIN_CODE_DELIVERY,
+    runtimeOverrides,
+  );
+
   const runtimeConfig = await write("runtime.json", JSON.stringify(configs.runtime));
   const controlConfig = await write("control-plane.json", JSON.stringify(configs.controlPlane));
   const initializeConfig = await write("initialize.json", JSON.stringify(configs.initialize));
@@ -187,7 +203,6 @@ try {
   const runtimeSecrets = await write(
     "runtime-secrets.json",
     JSON.stringify({
-      ...extensionSecrets,
       WIDEFLEET_CONTROL_TOKEN: secrets.WIDEFLEET_CONTROL_TOKEN,
       WIDEFLEET_CONNECTOR_KEY: secrets.WIDEFLEET_CONNECTOR_KEY,
     }),
