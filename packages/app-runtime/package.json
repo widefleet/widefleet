@@ -8,10 +8,14 @@
     "NOTICE"
   ],
   "type": "module",
+  "imports": {
+    "#runtime-extension": "./src/runtime-extension.ts"
+  },
   "exports": {
     "./release": "./dist/release.json",
     "./network": "./src/network.ts",
-    "./logs": "./src/cloudflare-logs.ts"
+    "./logs": "./src/cloudflare-logs.ts",
+    "./runtime-extension": "./src/runtime-extension.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

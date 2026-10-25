@@ -59,6 +59,10 @@ const secrets = z
   })
   .parse(process.env);
 
+const extensionSecrets = z
+  .record(z.string().regex(/^[A-Z][A-Z0-9_]*$/), z.string())
+  .parse(JSON.parse(process.env["WIDEFLEET_APP_RUNTIME_SECRETS"] || "{}"));
+
 const bootstrap = secrets.PLATFORM_BOOTSTRAP
   ? bootstrapConfiguration.parse(JSON.parse(secrets.PLATFORM_BOOTSTRAP))
   : undefined;
@@ -105,8 +109,8 @@ const childEnvironment = {
 
 const password = decodeURIComponent(new URL(secrets.DATABASE_URL).password);
 
-const sensitive = [...Object.values(secrets), password].flatMap((value) =>
-  value ? [value, JSON.stringify(value).slice(1, -1)] : [],
+const sensitive = [...Object.values(secrets), ...Object.values(extensionSecrets), password].flatMap(
+  (value) => (value ? [value, JSON.stringify(value).slice(1, -1)] : []),
 );
 
 const redact = (output: string) => {
@@ -183,6 +187,7 @@ try {
   const runtimeSecrets = await write(
     "runtime-secrets.json",
     JSON.stringify({
+      ...extensionSecrets,
       WIDEFLEET_CONTROL_TOKEN: secrets.WIDEFLEET_CONTROL_TOKEN,
       WIDEFLEET_CONNECTOR_KEY: secrets.WIDEFLEET_CONNECTOR_KEY,
     }),

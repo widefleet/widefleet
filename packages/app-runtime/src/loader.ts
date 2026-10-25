@@ -43,6 +43,8 @@ export { Telemetry } from "./telemetry.ts";
 
 export { CloudflareTelemetry } from "./telemetry-cloudflare.ts";
 
+export { RuntimeObserver } from "./runtime-observer.ts";
+
 const eventConfiguration = async (environment: ParentEnvironment) => {
   const configuration = z
     .union([appEventConfiguration, z.object({ source: z.literal("r2") })])
