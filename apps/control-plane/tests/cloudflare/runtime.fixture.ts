@@ -129,7 +129,13 @@ export default {
     }
     return env.ASSETS.fetch(request);
   },
-  async scheduled(controller, env, ctx) { ctx.waitUntil(env.KV.put('cron', controller.cron)); },
+  async scheduled(controller, env, ctx) {
+    const runs = await env.KV.get('cron-runs', 'json') ?? [];
+    ctx.waitUntil(Promise.all([
+      env.KV.put('cron', controller.cron),
+      env.KV.put('cron-runs', JSON.stringify([...runs, controller.scheduledTime])),
+    ]));
+  },
   async queue(batch, env, ctx) {
     for (const message of batch.messages) {
       ctx.waitUntil(env.KV.put('queue', message.body.value));
@@ -205,6 +211,35 @@ export default {
       if (value === null) await env.AUTH_CONFIG.delete(key);
       else await env.AUTH_CONFIG.put(key, value);
       return new Response(null, { status: 204 });
+    }
+    if (url.pathname === '/fixture/auth-route') {
+      const { hostname, value } = await request.json();
+      if (value === null) await env.AUTH_CONFIG.delete('apps/' + hostname);
+      else await env.AUTH_CONFIG.put('apps/' + hostname, value);
+      return new Response(null, { status: 204 });
+    }
+    if (url.pathname === '/fixture/scheduled') {
+      const { time, mode, reset } = await request.json();
+      if (reset) await Promise.all([env.KV.delete('cron-runs'), env.PREVIEW_KV.delete('cron-runs')]);
+      let error = null;
+      try {
+        await runtime.scheduled({cron:'* * * * *',scheduledTime:time}, {
+          ...env,
+          WIDEFLEET_HTTP_AVAILABILITY: mode === 'disabled' ? '' : env.WIDEFLEET_HTTP_AVAILABILITY,
+          AUTH_CONFIG: {
+            get(key, ...args) {
+              if (mode === 'disabled'
+                || (mode === 'status-error' && key === 'organizations/widefleet/http-availability')
+                || (mode === 'route-error' && key === 'apps/app.example.test'))
+                throw new Error('Synthetic cron KV failure');
+              return env.AUTH_CONFIG.get(key, ...args);
+            },
+          },
+        }, ctx);
+      } catch (cause) { error = cause.message; }
+      return Response.json({error, runs: await Promise.all([
+        env.KV.get('cron-runs', 'json'), env.PREVIEW_KV.get('cron-runs', 'json'),
+      ])});
     }
     if (url.pathname === '/fixture/pause-workflow') {
       const id = url.searchParams.get('id');

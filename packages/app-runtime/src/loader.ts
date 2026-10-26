@@ -1,5 +1,5 @@
 import { createAuthHandler, manageAuthConfiguration } from "@platform/auth-proxy";
-import { authControlPath } from "@platform/auth-proxy/publication";
+import { authControlPath, authRoute, authRouteKey } from "@platform/auth-proxy/publication";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { appEventConfiguration } from "@platform/contracts";
 import { organizationHttpAvailability, organizationHttpAvailabilityKey } from "@platform/contracts";
@@ -101,6 +101,24 @@ const readHttpAvailability = async (environment: ParentEnvironment, organization
 
     return null;
   }
+};
+
+const cronBlocked = async (environment: ParentEnvironment, app: PublishedApp) => {
+  if (environment["WIDEFLEET_HTTP_AVAILABILITY"] !== "kv") return false;
+
+  const value = await environment.AUTH_CONFIG.get(authRouteKey(app.hostname));
+
+  if (value === null) throw new Error("Cron app organization is not published");
+  const route = authRoute.parse(JSON.parse(value));
+
+  if (route.appId !== app.appId) throw new Error("Cron app authorization is being updated");
+
+  // Cron admission uses the same organization suspension as HTTP admission.
+  const availability = await readHttpAvailability(environment, route.organizationId);
+
+  if (availability === null) throw new Error("Cron app availability could not be read");
+
+  return availability.blocked;
 };
 
 const dispatchApp = async (
@@ -296,6 +314,8 @@ export default {
           const app = await readApp(environment, `hosts/${host}.json`);
 
           if (!app || !app.metadata.crons.includes(controller.cron)) return;
+
+          if (await cronBlocked(environment, app)) return;
 
           const result = await run(app, environment, context, (worker) =>
             worker
