@@ -1,7 +1,7 @@
 ---
 title: Workflows
 description: Declare durable background work and manage Workflow instances.
-lastModified: 2026-10-26
+lastModified: 2026-10-27
 ---
 
 ## Declare and export a Workflow
@@ -106,7 +106,7 @@ POST bodies contain a `request` object, for example `{"request":{"action":"creat
 
 With app runtime 0.4.8 or newer, installations using organization suspension reject new Workflow starts, batch creation, restarts and explicit resumes while an organization is suspended. This applies to app bindings and management through the CLI, API and UI.
 
-Already-started executions continue. Their status, events, pause, terminate and delete operations remain available through management. Recovery of an unconfirmed start is also subject to suspension, including recovery triggered by a status query or listing.
+Already-started executions continue. Their status, events, pause, terminate and delete operations remain available through management. Recovery is blocked only when it would start a new instance, including recovery triggered by a status query or listing.
 
 After the organization is unblocked and the updated status reaches the runtime, new starts, restarts and resumes are allowed again. Paused instances do not resume automatically. If the runtime cannot read the organization status or resolve the app's organization, execution admission fails until that information is available.
 
