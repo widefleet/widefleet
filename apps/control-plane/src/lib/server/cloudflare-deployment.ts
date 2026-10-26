@@ -22,6 +22,7 @@ import { deploymentCommand, operationId } from "./deployment-execution.ts";
 import { DatabaseUnavailable, InvalidOperation } from "./errors.ts";
 import {
   apps,
+  organizationRuntimes,
   artifacts,
   cloudflareOperations,
   deploymentEvents,
@@ -285,6 +286,16 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
             const published = contract.publishedApp.parse({ ...selected, version });
             const body = JSON.stringify(published);
 
+            const [execution] = await transaction
+              .select({ httpBlocked: organizationRuntimes.httpBlocked })
+              .from(organizationRuntimes)
+              .where(eq(organizationRuntimes.organizationId, app.organizationId));
+
+            if (!execution) throw new Error("Organization runtime is missing");
+            // Availability is mutable host state; immutable versions stay independent
+            // so a status change cannot invalidate a candidate or its readiness check.
+            const hostBody = JSON.stringify({ ...published, httpBlocked: execution.httpBlocked });
+
             const customMetadata = {
               widefleet_deployment_sequence: String(
                 command.kind === "deploy" ? sequence : servingSequence,
@@ -366,7 +377,7 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               access,
             });
 
-            if (currentBody !== body) {
+            if (currentBody !== hostBody) {
               if (command.kind === "deploy" && !current)
                 await withCloudflareDatabase(bindings, async ({ db: history }) => {
                   const [operation] = await history
@@ -391,7 +402,7 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
                 });
 
               // CAS also protects against a timed-out PUT arriving after this SQL lock was released.
-              const activated = await bindings.ARTIFACTS.put(hostKey, body, {
+              const activated = await bindings.ARTIFACTS.put(hostKey, hostBody, {
                 onlyIf: current ? { etagMatches: current.etag } : { etagDoesNotMatch: "*" },
                 httpMetadata: { contentType: "application/json" },
                 customMetadata,

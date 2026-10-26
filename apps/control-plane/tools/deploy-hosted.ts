@@ -32,12 +32,12 @@ const execute = promisify(execFile);
 
 const { positionals, values } = parseArgs({
   allowPositionals: true,
-  options: { "runtime-config": { type: "string" } },
+  options: { "runtime-config": { type: "string" }, "control-config": { type: "string" } },
 });
 
 if (positionals.length !== 1)
   throw new Error(
-    "Usage: node tools/deploy-hosted.ts <installation.json> [--runtime-config <file.json>]",
+    "Usage: node tools/deploy-hosted.ts <installation.json> [--runtime-config <file.json>] [--control-config <file.json>]",
   );
 
 const installation = await readHostedInstallation(z.string().parse(positionals[0]));
@@ -70,6 +70,14 @@ const runtimeOverrides = z
   .parse(
     values["runtime-config"]
       ? JSON.parse(await readFile(resolve(values["runtime-config"]), "utf8"))
+      : {},
+  );
+
+const controlOverrides = z
+  .record(z.string(), z.json())
+  .parse(
+    values["control-config"]
+      ? JSON.parse(await readFile(resolve(values["control-config"]), "utf8"))
       : {},
   );
 
@@ -194,6 +202,7 @@ try {
     ids,
     configuration.LOGIN_CODE_DELIVERY,
     runtimeOverrides,
+    controlOverrides,
   );
 
   const runtimeConfig = await write("runtime.json", JSON.stringify(configs.runtime));

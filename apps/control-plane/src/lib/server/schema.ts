@@ -22,6 +22,8 @@ export const organizationRuntimes = pgTable(
       .primaryKey()
       .references(() => organization.id),
     appHostnameSuffix: text("app_hostname_suffix").unique(),
+    httpBlocked: boolean("http_blocked").notNull().default(false),
+    httpAvailabilityPending: boolean("http_availability_pending").notNull().default(false),
     executor: text({ enum: ["agent", "cloudflare"] })
       .notNull()
       .default("agent"),

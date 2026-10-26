@@ -142,6 +142,12 @@ const dispatchApp = async (
 
   if (candidate) return new Response(null, { status: 403 });
 
+  if (app.httpBlocked)
+    return new Response("Application HTTP access is suspended", {
+      status: 429,
+      headers: { "cache-control": "no-store" },
+    });
+
   if (request.method === "GET" || request.method === "HEAD") {
     const asset = await serveAsset(request, environment, app);
 

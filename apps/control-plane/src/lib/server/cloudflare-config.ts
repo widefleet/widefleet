@@ -1,4 +1,11 @@
-import type { SendEmail, Fetcher, Hyperdrive, R2Bucket, Workflow } from "@cloudflare/workers-types";
+import type {
+  SendEmail,
+  Fetcher,
+  Hyperdrive,
+  R2Bucket,
+  Workflow,
+  RateLimit,
+} from "@cloudflare/workers-types";
 import { z } from "zod";
 import { runtimeConfigurationSchema } from "./config.ts";
 import type { cloudflareAppOperation } from "./cloudflare-app-operation-command.ts";
@@ -6,6 +13,16 @@ import type { deploymentWorkflowCommand } from "./cloudflare-connector-command.t
 import type { CloudflareAuthRateLimitBindings } from "./auth-rate-limit-cloudflare.ts";
 
 export interface CloudflareBindings extends CloudflareAuthRateLimitBindings {
+  [binding: string]:
+    | string
+    | Fetcher
+    | Hyperdrive
+    | R2Bucket
+    | SendEmail
+    | RateLimit
+    | Workflow<z.infer<typeof cloudflareAppOperation>>
+    | Workflow<z.infer<typeof deploymentWorkflowCommand>>
+    | undefined;
   HYPERDRIVE: Hyperdrive;
   EMAIL?: SendEmail;
   EMAIL_FROM?: string;

@@ -190,6 +190,13 @@
       "when": 1792972800000,
       "tag": "0026_app_removal",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1792972800001,
+      "tag": "0027_http_availability",
+      "breakpoints": true
     }
   ]
 }

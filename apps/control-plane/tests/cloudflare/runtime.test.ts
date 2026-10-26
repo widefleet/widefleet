@@ -379,6 +379,29 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
     expect((await fetchApp("/env", undefined, "missing.example.test")).status).toBe(404);
   });
 
+  it("blocks app HTTP and assets while keeping management and scheduled dispatch available", async () => {
+    await publish({ ...app, httpBlocked: true });
+
+    try {
+      for (const path of ["/", "/asset.txt"]) {
+        const response = await fetchApp(path);
+        expect(response.status).toBe(429);
+        expect(response.headers.get("cache-control")).toBe("no-store");
+      }
+
+      expect(await json("/.well-known/widefleet/ready")).toMatchObject({ version: app.version });
+      expect(
+        (await fetchApp(`/__scheduled?${new URLSearchParams({ cron: "* * * * *" })}`)).status,
+      ).toBe(200);
+      expect((await fetchApp("/asset.txt", undefined, previewHostname)).status).toBe(200);
+    } finally {
+      await publish(app);
+    }
+
+    expect((await fetchApp("/asset.txt")).status).toBe(200);
+    expect(await json("/cron")).toBe("* * * * *");
+  });
+
   it("preserves the original application error", async () => {
     const response = await fetchApp("/throw", {
       headers: { "MF-Experimental-Error-Stack": "true" },

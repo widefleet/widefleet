@@ -467,6 +467,7 @@ export const runtimeStatus = z.strictObject({
 export const runtimeUpdate = z.strictObject({ version: runtimeVersion });
 
 export const publishedApp = artifact.extend({
+  httpBlocked: z.boolean().optional(),
   network: networkSnapshot,
   capabilities: z.record(bindingName, publishedCapability).default({}),
   capabilityRevision: z.number().int().nonnegative().default(0),
