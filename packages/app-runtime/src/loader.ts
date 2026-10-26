@@ -2,7 +2,6 @@ import { createAuthHandler, manageAuthConfiguration } from "@platform/auth-proxy
 import { authControlPath, authRoute, authRouteKey } from "@platform/auth-proxy/publication";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { appEventConfiguration } from "@platform/contracts";
-import { organizationHttpAvailability, organizationHttpAvailabilityKey } from "@platform/contracts";
 import { publishedApp } from "@platform/contracts";
 import { z } from "zod";
 import { workflowJson } from "./workflow-json.ts";
@@ -16,6 +15,7 @@ import type { WorkflowRunner } from "./workflow-runner.ts";
 import type { Events } from "./events.ts";
 import type { ParentEnvironment, PublishedApp, Json } from "./types.ts";
 import { manageConnector } from "./connector-catalog.ts";
+import { readOrganizationAvailability } from "./availability.ts";
 
 export { ConnectorCatalog, ConnectorGateway } from "./connector-catalog.ts";
 
@@ -87,22 +87,6 @@ const managementRequest = (request: Request, environment: ParentEnvironment) => 
   return token.success && request.headers.get("authorization") === `Bearer ${token.data}`;
 };
 
-const readHttpAvailability = async (environment: ParentEnvironment, organizationId: string) => {
-  try {
-    const value = await environment.AUTH_CONFIG.get(
-      organizationHttpAvailabilityKey(organizationId),
-    );
-
-    return value === null
-      ? { blocked: false }
-      : organizationHttpAvailability.parse(JSON.parse(value));
-  } catch {
-    console.error("Organization HTTP availability could not be read");
-
-    return null;
-  }
-};
-
 const cronBlocked = async (environment: ParentEnvironment, app: PublishedApp) => {
   if (environment["WIDEFLEET_HTTP_AVAILABILITY"] !== "kv") return false;
 
@@ -114,7 +98,7 @@ const cronBlocked = async (environment: ParentEnvironment, app: PublishedApp) =>
   if (route.appId !== app.appId) throw new Error("Cron app authorization is being updated");
 
   // Cron admission uses the same organization suspension as HTTP admission.
-  const availability = await readHttpAvailability(environment, route.organizationId);
+  const availability = await readOrganizationAvailability(environment, route.organizationId);
 
   if (availability === null) throw new Error("Cron app availability could not be read");
 
@@ -144,8 +128,8 @@ const dispatchApp = async (
 
   const [app, availability] = await Promise.all([
     readApp(environment, key),
-    authenticated && environment["WIDEFLEET_HTTP_AVAILABILITY"] === "kv"
-      ? readHttpAvailability(environment, authenticated.organizationId)
+    authenticated
+      ? readOrganizationAvailability(environment, authenticated.organizationId)
       : { blocked: false },
   ]);
 

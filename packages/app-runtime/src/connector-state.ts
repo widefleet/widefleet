@@ -6,6 +6,7 @@ import { connectorGeneration, readConnector } from "./connector-publication.ts";
 import { loadConnectorWorker } from "./connector-code.ts";
 import { invokeConnector, type ConnectorValue } from "./connector-rpc.ts";
 import type { ParentEnvironment } from "./types.ts";
+import { requireOrganizationAvailability } from "./availability.ts";
 
 const stateIdentity = connectorActivation
   .omit({ version: true })
@@ -21,6 +22,7 @@ export class ConnectorState extends WorkerEntrypoint<
 > {
   async #target(objectId: string) {
     const { organizationId, name, version, className } = this.ctx.props;
+    await requireOrganizationAvailability(this.env, organizationId);
     const generation = await connectorCatalog(this.env, organizationId, name).generation(version);
     const identity = { ...generation, className, objectId };
     const namespace = this.env.WIDEFLEET_CONNECTOR_STATE;

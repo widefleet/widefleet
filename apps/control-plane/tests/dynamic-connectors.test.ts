@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
   connectorActivation,
@@ -31,8 +31,14 @@ const organizationId = "11111111-1111-4111-8111-111111111111";
 
 const connectorSource = (version: string) => `
 import { WorkerEntrypoint, DurableObject } from 'cloudflare:workers';
+async function availabilityHold(env, kind) {
+  await env.KV.put('availability-started-' + kind, 'yes');
+  while (!await env.KV.get('availability-release')) await new Promise(resolve => setTimeout(resolve, 10));
+  return kind;
+}
 export class Counter extends DurableObject {
   constructor(ctx, env) { super(ctx, env); console.info('facet-constructor'); }
+  availabilityHold() { return availabilityHold(this.env, 'facet'); }
   waiting;
   releaseWaiter;
   async hold() {
@@ -109,6 +115,7 @@ export class Counter extends DurableObject {
 }
 export class Reader extends WorkerEntrypoint { read() { console.info('named-rpc'); return 'reader'; } }
 export default class Connector extends WorkerEntrypoint {
+  availabilityHold() { return availabilityHold(this.env, 'connector'); }
   #private = 'private-field';
   own = 'instance-secret';
   echo(value) { return value; }
@@ -368,10 +375,10 @@ describe.runIf(process.env["RUN_CONNECTOR_TESTS"] === "1").each(["celld", "worke
       return z.json().parse(JSON.parse(text));
     };
 
-    const stage = async (candidate: z.infer<typeof connectorPackage>) => {
+    const stage = async (candidate: z.infer<typeof connectorPackage>, owner = organizationId) => {
       for (const module of connectorFiles(candidate)) {
         if (module.type === "sourcemap") continue;
-        const key = `connectors/${organizationId}/${candidate.name}/modules/${hash(module.bytes)}`;
+        const key = `connectors/${owner}/${candidate.name}/modules/${hash(module.bytes)}`;
 
         const response = await (hosted ? hosted.fetch : fetch)(
           `${origin}/fixture/module?key=${encodeURIComponent(key)}`,
@@ -387,15 +394,16 @@ describe.runIf(process.env["RUN_CONNECTOR_TESTS"] === "1").each(["celld", "worke
       secret: string,
       name = "fixture",
       resources = nativeBindings,
+      owner = organizationId,
     ) => {
       const candidate = release(version, name);
-      await stage(candidate);
+      await stage(candidate, owner);
 
       return connectorActivation.parse(
         z.object({ result: connectorActivation }).parse(
           await json("/fixture/manage", {
             action: "prepare",
-            organizationId,
+            organizationId: owner,
             version: crypto.randomUUID(),
             release: candidate,
             nativeBindings: resources,
@@ -513,8 +521,27 @@ describe.runIf(process.env["RUN_CONNECTOR_TESTS"] === "1").each(["celld", "worke
         join(directory, "index.js"),
         `
 import * as workers from 'cloudflare:workers';
-import runtime, {ConnectorSupervisor as NativeConnectorSupervisor} from './runtime.js';
+import runtime, {
+  ConnectorSupervisor as NativeConnectorSupervisor,
+  ConnectorGateway as NativeConnectorGateway,
+  ConnectorState as NativeConnectorState,
+} from './runtime.js';
 export * from './runtime.js';
+const availabilityEnvironment = env => ({
+  ...env,
+  AUTH_CONFIG: {
+    async get(key) {
+      if (await env.KV.get('availability-read-error')) throw new Error('Synthetic KV read failure');
+      return env.AUTH_CONFIG.get(key);
+    },
+  },
+});
+export class ConnectorGateway extends NativeConnectorGateway {
+  constructor(ctx, env) { super(ctx, availabilityEnvironment(env)); }
+}
+export class ConnectorState extends NativeConnectorState {
+  constructor(ctx, env) { super(ctx, availabilityEnvironment(env)); }
+}
 export class ConnectorSupervisor extends NativeConnectorSupervisor {
   invoke(identity, method, args) {
     const result = super.invoke(identity, method, args);
@@ -524,6 +551,35 @@ export class ConnectorSupervisor extends NativeConnectorSupervisor {
 }
 export default { async fetch(request, env, ctx) {
   const url = new URL(request.url);
+  if (url.pathname === '/fixture/availability') {
+    const input = await request.json();
+    const key = 'organizations/' + input.organizationId + '/http-availability';
+    if (input.value === null) await env.AUTH_CONFIG.delete(key);
+    else await env.AUTH_CONFIG.put(key, input.value);
+    if (input.readError) await env.KV.put('availability-read-error', 'yes');
+    else await env.KV.delete('availability-read-error');
+    return Response.json(true);
+  }
+  if (url.pathname === '/fixture/connector-call') {
+    const input = await request.json();
+    const gateway = ctx.exports.ConnectorGateway({props: {
+      organizationId: input.identity.organizationId, connector: input.identity.name,
+      entrypoint: input.entrypoint ?? 'default',
+    }});
+    const state = ctx.exports.ConnectorState({props: {...input.identity, className: 'Counter'}});
+    try {
+      if (input.kind === 'fetch') return await gateway.fetch(new Request('https://connector.invalid/path'));
+      if (input.kind === 'state-fetch') return await state.fetch(new Request('https://object.invalid/path', {headers: {'x-widefleet-object-id': 'availability-test'}}));
+      if (input.kind === 'state-rpc') return Response.json(await state.invoke('availability-test', input.method ?? 'increment', []));
+      return Response.json(await gateway.invoke(input.method ?? 'echo', input.args ?? ['available']));
+    } catch (error) { return Response.json({error: error.message}, {status: 500}); }
+  }
+  if (url.pathname === '/fixture/reset-started') {
+    await env.KV.delete('availability-started-connector');
+    await env.KV.delete('availability-started-facet');
+    await env.KV.delete('availability-release');
+    return Response.json(true);
+  }
   if (url.pathname === '/fixture/release') { await env.KV.put(url.searchParams.get('key'), 'yes'); return Response.json(true); }
   if (url.pathname === '/fixture/manage') return ctx.exports.RuntimeManagement({props:{}}).fetch(new Request('https://runtime.internal/.well-known/widefleet/connectors', request));
   if (url.pathname === '/fixture/started') return Response.json(await env.KV.get(url.searchParams.get('key') ?? 'started'));
@@ -587,6 +643,7 @@ export default { async fetch(request, env, ctx) {
             WIDEFLEET_CONTROL_TOKEN: token,
             WIDEFLEET_CONNECTOR_KEY: "ab".repeat(32),
             WIDEFLEET_CONFIGURATION: '{"crons":{},"queues":{}}',
+            WIDEFLEET_HTTP_AVAILABILITY: "kv",
             PRIVATE_ROOT_SECRET: "parent-only",
           },
           worker_loaders: [{ binding: "WIDEFLEET_LOADER" }],
@@ -1165,6 +1222,155 @@ export default { async fetch(request, env, ctx) {
       await activate(identity);
       expect(await json("/fetch")).toEqual(expected);
     });
+    describe("organization suspension", () => {
+      let identity: z.infer<typeof connectorActivation>;
+      let other: z.infer<typeof connectorActivation>;
+      const calls = ["rpc", "fetch", "state-rpc", "state-fetch", "named"] as const;
+
+      const availability = async (value: string | null, readError = false) => {
+        const response = await (hosted ? hosted.fetch : fetch)(`${origin}/fixture/availability`, {
+          method: "POST",
+          body: JSON.stringify({ organizationId, value, readError }),
+        });
+
+        expect(response.status).toBe(200);
+      };
+
+      const call = (kind: (typeof calls)[number], target = identity, method?: string) =>
+        (hosted ? hosted.fetch : fetch)(`${origin}/fixture/connector-call`, {
+          method: "POST",
+          body: JSON.stringify({
+            identity: target,
+            kind,
+            method: kind === "named" ? "read" : method,
+            entrypoint: kind === "named" ? "Reader" : "default",
+          }),
+        });
+
+      beforeAll(async () => {
+        identity = await prepare("availability", "availability-secret", "availability");
+        await activate(identity);
+        other = await prepare(
+          "other-availability",
+          "other-secret",
+          "availability",
+          nativeBindings,
+          "22222222-2222-4222-8222-222222222222",
+        );
+        await activate(other);
+      });
+
+      afterEach(async () => {
+        await availability(null);
+      });
+
+      it("blocks new connector and facet calls, preserves state and resumes after release", async () => {
+        expect(await (await call("rpc")).json()).toBe("available");
+        expect(await (await call("fetch")).text()).toBe("connector:/path");
+        expect(await (await call("named")).json()).toBe("reader");
+        expect(await (await call("state-fetch")).text()).toBe("/path");
+        expect(await (await call("state-rpc")).json()).toMatchObject({ n: 1, rows: 1 });
+
+        await availability('{"blocked":true}');
+
+        for (const kind of calls) {
+          const response = await call(kind);
+          expect(response.status).toBe(500);
+          expect(await response.text()).toContain("Organization execution is suspended");
+        }
+
+        await availability('{"blocked":false}');
+        expect(await (await call("state-rpc")).json()).toMatchObject({ n: 2, rows: 2 });
+
+        for (const kind of calls.filter((kind) => kind !== "state-rpc"))
+          expect((await call(kind)).status).toBe(200);
+
+        await availability(null);
+        expect(await (await call("state-rpc")).json()).toMatchObject({ n: 3, rows: 3 });
+      });
+
+      it("keeps same-named connectors in another organization available", async () => {
+        await availability('{"blocked":true}');
+
+        for (const kind of calls) {
+          expect((await call(kind)).status).toBe(500);
+          expect((await call(kind, other)).status).toBe(200);
+        }
+      });
+
+      it("rejects calls on invalid or failed status reads and recovers", async () => {
+        for (const value of ["{", '{"blocked":"yes"}']) {
+          await availability(value);
+
+          for (const kind of calls) {
+            const response = await call(kind);
+            expect(response.status).toBe(500);
+            expect(await response.text()).toContain("Organization availability could not be read");
+          }
+        }
+
+        await availability(null, true);
+
+        for (const kind of calls) {
+          const response = await call(kind);
+          expect(response.status).toBe(500);
+          expect(await response.text()).toContain("Organization availability could not be read");
+        }
+
+        await availability('{"blocked":false}');
+
+        for (const kind of calls) expect((await call(kind)).status).toBe(200);
+      });
+
+      it("allows already-running connector and facet methods to finish", async () => {
+        await json("/fixture/reset-started");
+        const connector = call("rpc", identity, "availabilityHold");
+        const facet = call("state-rpc", identity, "availabilityHold");
+
+        try {
+          await vi.waitFor(async () => {
+            expect(await json("/fixture/started?key=availability-started-connector")).toBe("yes");
+            expect(await json("/fixture/started?key=availability-started-facet")).toBe("yes");
+          });
+          await availability('{"blocked":true}');
+          expect((await call("rpc")).status).toBe(500);
+          expect((await call("state-rpc")).status).toBe(500);
+        } finally {
+          await json("/fixture/release?key=availability-release");
+        }
+
+        expect(await (await connector).json()).toBe("connector");
+        expect(await (await facet).json()).toBe("facet");
+      });
+
+      it.runIf(runtime === "workerd")(
+        "does not read status when the existing gate is disabled",
+        async () => {
+          if (!hosted) throw new Error("Missing hosted fixture");
+
+          await hosted.update({
+            workers: [
+              {
+                configPath: join(directory, "wrangler.json"),
+                vars: { WIDEFLEET_HTTP_AVAILABILITY: "" },
+              },
+            ],
+          });
+
+          try {
+            await availability('{"blocked":true}', true);
+
+            for (const kind of calls) expect((await call(kind)).status).toBe(200);
+          } finally {
+            await availability(null);
+            await hosted.update({
+              workers: [{ configPath: join(directory, "wrangler.json") }],
+            });
+          }
+        },
+      );
+    });
+
     it.runIf(runtime === "celld")(
       "preserves the native rejection of text and data modules",
       async () => {
