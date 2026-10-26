@@ -292,9 +292,14 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               .where(eq(organizationRuntimes.organizationId, app.organizationId));
 
             if (!execution) throw new Error("Organization runtime is missing");
+
             // Availability is mutable host state; immutable versions stay independent
             // so a status change cannot invalidate a candidate or its readiness check.
-            const hostBody = JSON.stringify({ ...published, httpBlocked: execution.httpBlocked });
+            const hostBody = JSON.stringify({
+              ...published,
+              httpBlocked: execution.httpBlocked,
+              publicationId: crypto.randomUUID(),
+            });
 
             const customMetadata = {
               widefleet_deployment_sequence: String(
@@ -378,7 +383,7 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
             });
 
             if (currentBody !== hostBody) {
-              if (command.kind === "deploy" && !current)
+              if (command.kind === "deploy" && !serving)
                 await withCloudflareDatabase(bindings, async ({ db: history }) => {
                   const [operation] = await history
                     .select()

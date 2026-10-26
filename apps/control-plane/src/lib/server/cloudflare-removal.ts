@@ -66,17 +66,18 @@ export const createCloudflareRemover = (bindings: CloudflareBindings, transport 
           if (entry && !("deleted" in entry) && entry.appId !== target.id)
             throw new Error("Hostname belongs to another app");
 
-          if (entry && "deleted" in entry && entry.appId === target.id) {
-            await removeAuthRoute(bindings, target.hostname);
-
-            return true;
-          }
-
           // Keep this fence after cleanup. Removing the key would allow a delayed
           // first publication (If-None-Match: *) to resurrect the deleted app.
+          // Rotate existing inactive markers too: a first PUT may expect their ETag.
           const written = await bindings.ARTIFACTS.put(
             key,
-            JSON.stringify(contract.deletedApp.parse({ deleted: true, appId: target.id })),
+            JSON.stringify(
+              contract.deletedApp.parse({
+                deleted: true,
+                appId: target.id,
+                publicationId: crypto.randomUUID(),
+              }),
+            ),
             {
               onlyIf: current ? { etagMatches: current.etag } : { etagDoesNotMatch: "*" },
               httpMetadata: { contentType: "application/json" },

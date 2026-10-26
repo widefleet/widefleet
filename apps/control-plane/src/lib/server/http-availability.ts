@@ -54,22 +54,30 @@ export const publishOrganizationHttpAvailability = async (
         const key = `hosts/${app.hostname}.json`;
         const current = await storage.get(key);
 
-        if (!current) continue;
-        const entry = publishedHost.parse(await current.json());
+        const entry = current
+          ? publishedHost.parse(await current.json())
+          : { deleted: true, appId: app.id };
 
-        if ("deleted" in entry) continue;
+        if (!("deleted" in entry) && entry.appId !== app.id)
+          throw new Error("Hostname belongs to another app");
 
-        if (entry.appId !== app.id) throw new Error("Hostname belongs to another app");
-
-        if ((entry.httpBlocked ?? false) === execution.httpBlocked) continue;
+        // Fence every host before clearing pending, even if its status already
+        // matches. A timed-out PUT can still carry the current ETag. Unique body
+        // bytes prevent an older condition from matching after an ABA cycle.
+        // Unpublished hosts receive an inactive marker to fence late first PUTs.
+        const publicationId = crypto.randomUUID();
 
         const written = await storage.put(
           key,
-          JSON.stringify({ ...entry, httpBlocked: execution.httpBlocked }),
+          JSON.stringify(
+            "deleted" in entry
+              ? { ...entry, publicationId }
+              : { ...entry, httpBlocked: execution.httpBlocked, publicationId },
+          ),
           {
-            onlyIf: { etagMatches: current.etag },
-            httpMetadata: current.httpMetadata ?? {},
-            customMetadata: current.customMetadata ?? {},
+            onlyIf: current ? { etagMatches: current.etag } : { etagDoesNotMatch: "*" },
+            httpMetadata: current?.httpMetadata ?? {},
+            customMetadata: current?.customMetadata ?? {},
           },
         );
 
