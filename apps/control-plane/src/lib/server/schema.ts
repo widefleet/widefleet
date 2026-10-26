@@ -92,7 +92,7 @@ export const apps = pgTable(
       .notNull()
       .references(() => organization.id),
     ownerId: text("owner_id").notNull(),
-    hostname: text().notNull().unique(),
+    hostname: text().notNull(),
     state: text({ enum: ["created", "active", "deleting"] })
       .notNull()
       .default("created"),
@@ -111,10 +111,16 @@ export const apps = pgTable(
     appliedCapabilityRevision: integer("applied_capability_revision"),
     capabilityError: text("capability_error"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    removedAt: timestamp("removed_at", { withTimezone: true }),
   },
   (table) => [
     index("app_parent_idx").on(table.parentId),
-    uniqueIndex("app_organization_slug_unique").on(table.organizationId, table.slug),
+    uniqueIndex("app_organization_slug_unique")
+      .on(table.organizationId, table.slug)
+      .where(sql`${table.removedAt} IS NULL`),
+    uniqueIndex("app_hostname_unique")
+      .on(table.hostname)
+      .where(sql`${table.removedAt} IS NULL`),
   ],
 );
 

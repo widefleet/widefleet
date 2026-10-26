@@ -2200,9 +2200,15 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           { timeout: 60000, interval: 100 },
         )
         .toBe("complete");
+      expect(await environment.database.db.select().from(apps).where(eq(apps.id, appId))).toEqual([
+        expect.objectContaining({
+          id: appId,
+          activeDeploymentId: null,
+        }),
+      ]);
       expect(
-        await environment.database.db.select().from(apps).where(eq(apps.id, appId)),
-      ).toHaveLength(0);
+        (await environment.database.db.select().from(apps).where(eq(apps.id, appId)))[0]?.removedAt,
+      ).toBeInstanceOf(Date);
     };
 
     it("authorizes removal before admission and leaves an app active when native admission fails", async () => {
@@ -2316,7 +2322,11 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       for (const entry of [root, child, grandchild]) {
         expect(
           await environment.database.db.select().from(apps).where(eq(apps.id, entry.appId)),
-        ).toHaveLength(0);
+        ).toEqual([expect.objectContaining({ id: entry.appId })]);
+        expect(
+          (await environment.database.db.select().from(apps).where(eq(apps.id, entry.appId)))[0]
+            ?.removedAt,
+        ).toBeInstanceOf(Date);
         expect((await host(entry.hostname))?.body).toEqual({ deleted: true, appId: entry.appId });
         const stored = await worker.fetch(`http://fixture/storage?prefix=apps/${entry.appId}/`);
         expect(await stored.json()).toEqual([]);

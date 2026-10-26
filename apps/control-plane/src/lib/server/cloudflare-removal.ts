@@ -1,6 +1,6 @@
 import type { CloudflareWorkersModule } from "@cloudflare/workers-types";
 import * as contract from "@platform/contracts";
-import { and, eq, gt } from "drizzle-orm";
+import { and, eq, gt, isNull } from "drizzle-orm";
 import { z } from "zod";
 import type { CloudflareBindings } from "./cloudflare-config.ts";
 import { withCloudflareDatabase } from "./cloudflare-database.ts";
@@ -12,6 +12,7 @@ import { updateCloudflareBindings } from "./cloudflare-binding-updates.ts";
 import { createCloudflareEvents } from "./cloudflare-events.ts";
 import { retryable } from "./cloudflare-deployment.ts";
 import { apps, artifacts, cloudflareOperations } from "./schema.ts";
+import { finishAppRemoval } from "./app-removal.ts";
 import { InvalidOperation } from "./errors.ts";
 import { removeAuthRoute } from "./cloudflare-auth-proxy.ts";
 
@@ -51,7 +52,7 @@ export const createCloudflareRemover = (bindings: CloudflareBindings, transport 
             .where(eq(apps.id, target.id))
             .for("update");
 
-          if (!app) return false;
+          if (!app || app.removedAt) return false;
 
           if (app.state !== "deleting" || app.hostname !== target.hostname)
             throw new InvalidOperation({
@@ -174,18 +175,18 @@ export const createCloudflareRemover = (bindings: CloudflareBindings, transport 
             .where(eq(apps.id, appId))
             .for("update");
 
-          if (!app) return;
+          if (!app || app.removedAt) return;
 
           if (app.state !== "deleting") throw new Error("App is no longer marked for removal");
 
           const [child] = await transaction
             .select({ id: apps.id })
             .from(apps)
-            .where(eq(apps.parentId, appId))
+            .where(and(eq(apps.parentId, appId), isNull(apps.removedAt)))
             .limit(1);
 
           if (child) throw new Error("App previews have not finished removal");
-          await transaction.delete(apps).where(eq(apps.id, appId));
+          await finishAppRemoval(transaction, appId);
         }),
       ),
     fail: (id: string, message: string) =>

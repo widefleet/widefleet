@@ -183,6 +183,13 @@
       "when": 1792694400003,
       "tag": "0025_passwordless_sign_in",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1792972800000,
+      "tag": "0026_app_removal",
+      "breakpoints": true
     }
   ]
 }

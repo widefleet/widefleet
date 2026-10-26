@@ -1179,6 +1179,21 @@ describe("Platform API with PostgreSQL and RustFS", () => {
         operation: "delete",
         outcome: "succeeded",
       });
+
+      if (!deletion.appId) throw new Error("Removal job has no app");
+      expect(
+        await environment.database.db.select().from(apps).where(eq(apps.id, deletion.appId)),
+      ).toEqual([
+        expect.objectContaining({
+          id: deletion.appId,
+          organizationId,
+          activeDeploymentId: null,
+        }),
+      ]);
+      expect(
+        (await environment.database.db.select().from(apps).where(eq(apps.id, deletion.appId)))[0]
+          ?.removedAt,
+      ).toBeInstanceOf(Date);
       removed.push(deletion.appId);
 
       const remaining = await s3.send(

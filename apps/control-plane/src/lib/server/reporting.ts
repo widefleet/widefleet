@@ -174,7 +174,8 @@ export const createReporting = (
         capability_bindings:
           sql<number>`count(*) filter (where ${apps.capabilities} <> '{}'::jsonb)`.mapWith(Number),
       })
-      .from(apps);
+      .from(apps)
+      .where(isNull(apps.removedAt));
 
     const [organizationCount] = await database
       .select({ count: count() })

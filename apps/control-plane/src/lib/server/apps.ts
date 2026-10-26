@@ -18,6 +18,7 @@ export const appVisibility = (
   principal: Pick<Principal, "id" | "application">,
 ) =>
   and(
+    isNull(apps.removedAt),
     eq(apps.organizationId, principal.application.organizationId),
     principal.application.admin
       ? sql`true`
@@ -62,7 +63,7 @@ export const lockAppDescendants = async (
     const level = await transaction
       .select()
       .from(apps)
-      .where(inArray(apps.parentId, parents))
+      .where(and(inArray(apps.parentId, parents), isNull(apps.removedAt)))
       .orderBy(apps.id)
       .for("update");
 
@@ -219,6 +220,7 @@ const provisionApp = (
       .from(apps)
       .where(
         and(
+          isNull(apps.removedAt),
           eq(apps.organizationId, principal.application.organizationId),
           eq(apps.slug, input.slug),
         ),
@@ -353,6 +355,7 @@ export const createAppService = (
         .from(apps)
         .where(
           and(
+            isNull(apps.removedAt),
             eq(apps.organizationId, principal.application.organizationId),
             eq(apps.catalogListed, true),
             isNull(apps.parentId),
