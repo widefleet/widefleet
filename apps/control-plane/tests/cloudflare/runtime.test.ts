@@ -391,7 +391,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
     ).toBe(204);
   };
 
-  it("blocks every app in an org, including new publications, without blocking management or schedules", async () => {
+  it("blocks HTTP for every app in an org, including new publications, without blocking management", async () => {
     await availability(JSON.stringify({ blocked: true }), "other-organization");
     expect((await fetchApp("/asset.txt")).status).toBe(200);
     await availability(JSON.stringify({ blocked: true }));
@@ -415,9 +415,6 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
       ).toBe(200);
 
       expect(await json("/.well-known/widefleet/ready")).toMatchObject({ version: app.version });
-      expect(
-        (await fetchApp(`/__scheduled?${new URLSearchParams({ cron: "* * * * *" })}`)).status,
-      ).toBe(200);
     } finally {
       await availability(JSON.stringify({ blocked: false }));
       await availability(null, "other-organization");
@@ -425,7 +422,6 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
 
     expect((await fetchApp("/asset.txt")).status).toBe(200);
     expect((await fetchApp("/asset.txt", undefined, previewHostname)).status).toBe(200);
-    expect(await json("/cron")).toBe("* * * * *");
     await availability(null);
   });
 
@@ -551,6 +547,144 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
     expect(response.status).toBe(200);
     expect(await json("/cron")).toBe("* * * * *");
     expect(await json("/cron", undefined, previewHostname)).toBe("* * * * *");
+  });
+
+  const scheduled = async (time: number, options: { mode?: string; reset?: boolean } = {}) =>
+    z.object({ error: z.string().nullable(), runs: z.array(z.array(z.number()).nullable()) }).parse(
+      await json("/fixture/scheduled", {
+        method: "POST",
+        body: JSON.stringify({ time, ...options }),
+      }),
+    );
+
+  const publishRoute = async (value: string | null, host = hostname) => {
+    expect(
+      (
+        await fetchApp("/fixture/auth-route", {
+          method: "POST",
+          body: JSON.stringify({ hostname: host, value }),
+        })
+      ).status,
+    ).toBe(204);
+  };
+
+  const separatePreviewOrganization = () =>
+    publishRoute(
+      JSON.stringify({
+        organizationId: "other-organization",
+        appId: preview.appId,
+        access: { revision: 1, groups: [] },
+      }),
+      previewHostname,
+    );
+
+  it("skips all cron apps of a blocked org and resumes only at the next scheduled time", async () => {
+    await availability(null);
+    expect(await scheduled(100, { reset: true })).toEqual({ error: null, runs: [[100], [100]] });
+    await availability(JSON.stringify({ blocked: true }));
+
+    try {
+      // Re-publishing an app must not bypass its organization's suspension.
+      await publish(preview);
+      expect(await scheduled(200)).toEqual({ error: null, runs: [[100], [100]] });
+      expect(await scheduled(300)).toEqual({ error: null, runs: [[100], [100]] });
+      await availability(JSON.stringify({ blocked: false }));
+      expect(await scheduled(400)).toEqual({
+        error: null,
+        runs: [
+          [100, 400],
+          [100, 400],
+        ],
+      });
+    } finally {
+      await availability(null);
+    }
+  });
+
+  it("continues cron delivery to other orgs when one org is blocked", async () => {
+    await separatePreviewOrganization();
+    await availability(JSON.stringify({ blocked: true }));
+
+    try {
+      expect(await scheduled(100, { reset: true })).toEqual({ error: null, runs: [null, [100]] });
+      await availability(JSON.stringify({ blocked: false }));
+      await availability(JSON.stringify({ blocked: true }), "other-organization");
+      expect(await scheduled(200)).toEqual({ error: null, runs: [[200], [100]] });
+    } finally {
+      await availability(null);
+      await availability(null, "other-organization");
+      await publish(preview);
+    }
+  });
+
+  it("does not read cron admission data when the existing org gate is disabled", async () => {
+    await availability(JSON.stringify({ blocked: true }));
+
+    try {
+      // The fixture throws on any AUTH_CONFIG read in this mode.
+      expect(await scheduled(100, { reset: true, mode: "disabled" })).toEqual({
+        error: null,
+        runs: [[100], [100]],
+      });
+    } finally {
+      await availability(null);
+    }
+  });
+
+  it("fails affected cron deliveries on invalid or unreadable status and still runs other orgs", async () => {
+    await separatePreviewOrganization();
+
+    try {
+      for (const value of ["broken-json", JSON.stringify({ blocked: "false" })]) {
+        await availability(value);
+        expect(await scheduled(100, { reset: true })).toEqual({
+          error: "App cron delivery failed",
+          runs: [null, [100]],
+        });
+      }
+
+      await availability(null);
+      expect(await scheduled(200, { reset: true, mode: "status-error" })).toEqual({
+        error: "App cron delivery failed",
+        runs: [null, [200]],
+      });
+      expect(await scheduled(300)).toEqual({ error: null, runs: [[300], [200, 300]] });
+    } finally {
+      await availability(null);
+      await publish(preview);
+    }
+  });
+
+  it("requires a readable org route matching the cron app before checking suspension", async () => {
+    await separatePreviewOrganization();
+
+    try {
+      for (const value of [
+        null,
+        "broken-json",
+        JSON.stringify({
+          organizationId: "widefleet",
+          appId: preview.appId,
+          access: { revision: 1, groups: [] },
+        }),
+      ]) {
+        await publishRoute(value);
+        expect(await scheduled(100, { reset: true })).toEqual({
+          error: "App cron delivery failed",
+          runs: [null, [100]],
+        });
+      }
+
+      await publish(app);
+      expect(await scheduled(200, { reset: true, mode: "route-error" })).toEqual({
+        error: "App cron delivery failed",
+        runs: [null, [200]],
+      });
+      expect(await scheduled(300)).toEqual({ error: null, runs: [[300], [200, 300]] });
+    } finally {
+      await publish(app);
+      await publish(preview);
+    }
   });
 
   it("resumes an app workflow with its own resources and connector", async () => {
