@@ -48,6 +48,8 @@ const key = (workflow: string, id: string) => `instance/${workflow}/${id}`;
 const missing = (cause: unknown) =>
   cause instanceof Error && /not.found|does not exist/i.test(cause.message);
 
+class WorkflowAdmissionError extends Error {}
+
 export const workflowCatalog = (environment: ParentEnvironment, appId: string) =>
   environment.WIDEFLEET_WORKFLOW_CATALOG.get(
     environment.WIDEFLEET_WORKFLOW_CATALOG.idFromName(appId),
@@ -56,13 +58,22 @@ export const workflowCatalog = (environment: ParentEnvironment, appId: string) =
 export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
   private async requireExecution(scope: WorkflowScope) {
     if (this.env["WIDEFLEET_HTTP_AVAILABILITY"] !== "kv") return;
-    const value = await this.env.AUTH_CONFIG.get(authRouteKey(scope.hostname));
 
-    if (value === null) throw new Error("Workflow app organization is not published");
-    const route = authRoute.parse(JSON.parse(value));
+    try {
+      const value = await this.env.AUTH_CONFIG.get(authRouteKey(scope.hostname));
 
-    if (route.appId !== scope.appId) throw new Error("Workflow app authorization is being updated");
-    await requireOrganizationAvailability(this.env, route.organizationId);
+      if (value === null) throw new Error("Workflow app organization is not published");
+      const route = authRoute.parse(JSON.parse(value));
+
+      if (route.appId !== scope.appId)
+        throw new Error("Workflow app authorization is being updated");
+      await requireOrganizationAvailability(this.env, route.organizationId);
+    } catch (cause) {
+      throw new WorkflowAdmissionError(
+        cause instanceof Error ? cause.message : "Workflow admission failed",
+        { cause },
+      );
+    }
   }
   protected async restartTarget(from: z.infer<typeof workflowRestartFrom>) {
     // celld's adapter prepares each operation in a separate native checkpoint.
@@ -82,9 +93,18 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
     return app;
   }
   private async native(record: RecordEntry) {
-    if (!record.started) {
-      // Recovery through get/status/list can also start an unconfirmed instance.
-      // Check before persisting a new instance or starting the native workflow.
+    if (record.started) return this.env.WIDEFLEET_WORKFLOWS.get(record.nativeId);
+    let instance;
+
+    // Native creation can commit before the catalog confirms it. Recover the
+    // existing instance without applying the gate for new execution.
+    try {
+      instance = await this.env.WIDEFLEET_WORKFLOWS.get(record.nativeId);
+    } catch (error) {
+      if (!missing(error)) throw error;
+    }
+
+    if (!instance) {
       await this.requireExecution(record.start);
       await this.ctx.storage.put(key(record.start.workflow, record.id), record);
 
@@ -106,22 +126,22 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
             options.retention.errorRetention = record.creation.retention.errorRetention;
         }
 
-        await this.env.WIDEFLEET_WORKFLOWS.create(options);
+        instance = await this.env.WIDEFLEET_WORKFLOWS.create(options);
       } catch (error) {
-        // A crash can leave a committed native create with an uncommitted catalogue update.
+        // A failed response does not prove native creation failed.
         try {
-          await this.env.WIDEFLEET_WORKFLOWS.get(record.nativeId);
+          instance = await this.env.WIDEFLEET_WORKFLOWS.get(record.nativeId);
         } catch {
           throw error;
         }
       }
-
-      record.started = true;
-      delete record.start.params;
-      await this.ctx.storage.put(key(record.start.workflow, record.id), record);
     }
 
-    return this.env.WIDEFLEET_WORKFLOWS.get(record.nativeId);
+    record.started = true;
+    delete record.start.params;
+    await this.ctx.storage.put(key(record.start.workflow, record.id), record);
+
+    return instance;
   }
   private async createInstance(scope: WorkflowScope, options: z.infer<typeof workflowOptions>) {
     const app = await this.active(scope);
@@ -369,30 +389,40 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
         return previous.result;
       }
 
-      // A rejected admission must not reserve the management request ID.
-      if (["create", "resume", "restart"].includes(request.action))
-        await this.requireExecution(scope);
-
       // Record intent first. A retried agent job must never send an event or
       // restart twice after an ambiguous connection failure.
       await this.ctx.storage.put(operationKey, { request: fingerprint, complete: false });
+      let result;
 
-      const result =
-        request.action === "create"
-          ? await this.createInstance(
-              scope,
-              workflowOptions.parse({ id: request.id, params: request.params }),
-            )
-          : await this.operate(
-              scope,
-              request.id,
-              request.action,
-              request.action === "sendEvent"
-                ? request.event
-                : request.action === "restart"
-                  ? { from: request.from }
-                  : undefined,
-            );
+      try {
+        result =
+          request.action === "create"
+            ? await this.createInstance(
+                scope,
+                workflowOptions.parse({ id: request.id, params: request.params }),
+              )
+            : await this.operate(
+                scope,
+                request.id,
+                request.action,
+                request.action === "sendEvent"
+                  ? request.event
+                  : request.action === "restart"
+                    ? { from: request.from }
+                    : undefined,
+              );
+      } catch (error) {
+        // Admission errors occur before native execution. Keep ambiguous native
+        // failures reserved, but let a rejected request retry after unblocking.
+        if (error instanceof WorkflowAdmissionError) {
+          await this.ctx.storage.delete(operationKey);
+          // Throwing from blockConcurrencyWhile resets the object. Persist the
+          // deletion first so that reset cannot leave the request ID reserved.
+          await this.ctx.storage.sync();
+        }
+
+        throw error;
+      }
 
       await this.ctx.storage.put(operationKey, { request: fingerprint, complete: true, result });
 

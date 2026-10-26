@@ -164,6 +164,36 @@ export class ConnectorGateway extends WorkerEntrypoint {
 }
 
 export class CloudflareWorkflowCatalog extends RuntimeWorkflowCatalog {
+  constructor(ctx, env) {
+    super(ctx, {
+      ...env,
+      AUTH_CONFIG: {
+        async get(key, ...args) {
+          if (key.endsWith('/http-availability')) {
+            const mode = await ctx.storage.get('admissionFault');
+            if (mode) {
+              const reads = (await ctx.storage.get('admissionReads') ?? 0) + 1;
+              await ctx.storage.put('admissionReads', reads);
+              if (reads > 1 && mode === 'blocked') return JSON.stringify({ blocked: true });
+              if (reads > 1 && mode === 'error') throw new Error('Synthetic admission read failure');
+            }
+          }
+          return env.AUTH_CONFIG.get(key, ...args);
+        },
+      },
+    });
+  }
+  async admissionFault(mode) {
+    await this.ctx.storage.put('admissionFault', mode);
+    await this.ctx.storage.put('admissionReads', 0);
+  }
+  async admissionReads() { return await this.ctx.storage.get('admissionReads') ?? 0; }
+  async forgetStart(scope, id) {
+    const key = 'instance/' + scope.workflow + '/' + id;
+    const record = await this.ctx.storage.get(key);
+    if (!record) throw new Error('Missing fixture Workflow record');
+    await this.ctx.storage.put(key, { ...record, started: false });
+  }
   async seedPending(scope, id) {
     const app = await (await this.env.WIDEFLEET_PACKAGES.get('hosts/' + scope.hostname + '.json')).json();
     await this.ctx.storage.put('instance/' + scope.workflow + '/' + id, {
@@ -219,9 +249,13 @@ export default {
     if (url.pathname === '/fixture/workflow-binding') {
       const { scope, method, id, options, action } = await request.json();
       try {
-        if (method === 'seedPending') {
-          await env.WIDEFLEET_WORKFLOW_CATALOG.get(env.WIDEFLEET_WORKFLOW_CATALOG.idFromName(scope.appId)).seedPending(scope, id);
-          return Response.json({ seeded: true });
+        if (['seedPending', 'forgetStart', 'admissionFault', 'admissionReads'].includes(method)) {
+          const catalog = env.WIDEFLEET_WORKFLOW_CATALOG.get(env.WIDEFLEET_WORKFLOW_CATALOG.idFromName(scope.appId));
+          if (method === 'seedPending') await catalog.seedPending(scope, id);
+          if (method === 'forgetStart') await catalog.forgetStart(scope, id);
+          if (method === 'admissionFault') await catalog.admissionFault(options);
+          if (method === 'admissionReads') return Response.json(await catalog.admissionReads());
+          return Response.json({ ok: true });
         }
         const binding = ctx.exports.WorkflowBinding({ props: scope });
         const result = method === 'create' ? await binding.create(options)

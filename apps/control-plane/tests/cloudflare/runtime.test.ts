@@ -1256,4 +1256,95 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
       await publish(preview);
     }
   });
+
+  it.each(["get", "status", "list", "sendEvent", "pause", "terminate"])(
+    "keeps %s available after native creation outlives its catalog confirmation",
+    async (action) => {
+      const id = crypto.randomUUID();
+      expect((await manageWorkflow({ action: "create", id, params: { value: 20 } })).status).toBe(
+        200,
+      );
+      await expect.poll(() => json("/workflow/steps"), { timeout: 15_000 }).toContainEqual({ id });
+      expect((await workflowBinding({ method: "forgetStart", id })).status).toBe(200);
+      await availability(JSON.stringify({ blocked: true }));
+
+      try {
+        const response =
+          action === "get"
+            ? await workflowBinding({ method: "get", id })
+            : await manageWorkflow(
+                action === "list"
+                  ? { action }
+                  : action === "sendEvent"
+                    ? { action, id, event: { type: "continue", payload: { add: 21 } } }
+                    : { action, id },
+              );
+
+        expect(response.status, await response.text()).toBe(200);
+      } finally {
+        await availability(null);
+        await manageWorkflow({ action: "delete", id });
+      }
+    },
+    30_000,
+  );
+
+  it.each(["blocked", "error"])(
+    "does not repeat management admission after reserving the request ID (%s)",
+    async (mode) => {
+      const id = crypto.randomUUID();
+      const requestId = crypto.randomUUID();
+      const request = { action: "create", id, params: { mode: "sleep" } };
+      expect((await workflowBinding({ method: "admissionFault", options: mode })).status).toBe(200);
+
+      try {
+        const response = await manageWorkflow(request, requestId);
+        expect(response.status, await response.text()).toBe(200);
+        expect(await (await workflowBinding({ method: "admissionReads" })).json()).toBe(1);
+        // The same request returns its completed result without a second admission.
+        expect(await (await manageWorkflow(request, requestId)).json()).toEqual({ result: { id } });
+        expect(await (await workflowBinding({ method: "admissionReads" })).json()).toBe(1);
+      } finally {
+        await workflowBinding({ method: "admissionFault", options: null });
+        await manageWorkflow({ action: "delete", id });
+      }
+    },
+  );
+
+  it.each(["create", "resume", "restart"])(
+    "lets management %s reuse its request ID after an availability read failure",
+    async (action) => {
+      const id = crypto.randomUUID();
+      const requestId = crypto.randomUUID();
+      const params = { value: 20 };
+      const request = action === "create" ? { action, id, params } : { action, id };
+
+      if (action !== "create") {
+        expect((await manageWorkflow({ action: "create", id, params })).status).toBe(200);
+        await expect
+          .poll(() => json("/workflow/steps"), { timeout: 15_000 })
+          .toEqual(expect.arrayContaining([{ id }]));
+
+        if (action === "resume")
+          expect((await manageWorkflow({ action: "pause", id })).status).toBe(200);
+      }
+
+      await availability("invalid-json");
+
+      try {
+        await rejectedWorkflow(
+          await manageWorkflow(request, requestId),
+          "Organization availability could not be read",
+        );
+        await availability(null);
+        const expected = { result: action === "create" ? { id } : null };
+        expect(await (await manageWorkflow(request, requestId)).json()).toEqual(expected);
+        expect(await (await manageWorkflow(request, requestId)).json()).toEqual(expected);
+      } finally {
+        await availability(null);
+        await manageWorkflow({ action: "delete", id });
+      }
+    },
+    30_000,
+  );
 });
