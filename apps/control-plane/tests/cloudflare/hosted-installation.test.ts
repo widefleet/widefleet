@@ -42,6 +42,11 @@ const configuration = {
 };
 
 describe("Hosted resource provisioning", () => {
+  it("shares the existing configuration namespace between runtime and control plane", async () => {
+    const configs = await hostedConfigurations(installation, ids);
+    expect(configs.controlPlane.kv_namespaces).toEqual(configs.runtime.kv_namespaces);
+    expect(configs.controlPlane.kv_namespaces).toEqual([{ binding: "AUTH_CONFIG", id: ids.auth }]);
+  });
   it("defaults to email and preserves explicit sign-in delivery in the deployed Worker", async () => {
     expect(
       (await hostedConfigurations(installation, ids)).controlPlane.vars.LOGIN_CODE_DELIVERY,

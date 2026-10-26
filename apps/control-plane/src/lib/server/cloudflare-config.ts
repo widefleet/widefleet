@@ -3,6 +3,7 @@ import type {
   Fetcher,
   Hyperdrive,
   R2Bucket,
+  KVNamespace,
   Workflow,
   RateLimit,
 } from "@cloudflare/workers-types";
@@ -18,6 +19,7 @@ export interface CloudflareBindings extends CloudflareAuthRateLimitBindings {
     | Fetcher
     | Hyperdrive
     | R2Bucket
+    | KVNamespace
     | SendEmail
     | RateLimit
     | Workflow<z.infer<typeof cloudflareAppOperation>>

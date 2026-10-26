@@ -178,6 +178,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
         // error behavior enabled on Workers since 2026-05-14.
         compatibility_flags: ["nodejs_compat", "workflows_preserve_non_retryable_error_message"],
         vars: {
+          WIDEFLEET_HTTP_AVAILABILITY: "kv",
           WIDEFLEET_LOGS: "cloudflare",
           PRIVATE_ROOT_SECRET: "parent-only-fixture",
           WIDEFLEET_CONTROL_TOKEN: controlToken,
@@ -379,27 +380,84 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
     expect((await fetchApp("/env", undefined, "missing.example.test")).status).toBe(404);
   });
 
-  it("blocks app HTTP and assets while keeping management and scheduled dispatch available", async () => {
-    await publish({ ...app, httpBlocked: true });
+  const availability = async (value: string | null, organizationId = "widefleet") => {
+    expect(
+      (
+        await fetchApp("/fixture/availability", {
+          method: "POST",
+          body: JSON.stringify({ organizationId, value }),
+        })
+      ).status,
+    ).toBe(204);
+  };
+
+  it("blocks every app in an org, including new publications, without blocking management or schedules", async () => {
+    await availability(JSON.stringify({ blocked: true }), "other-organization");
+    expect((await fetchApp("/asset.txt")).status).toBe(200);
+    await availability(JSON.stringify({ blocked: true }));
 
     try {
-      for (const path of ["/", "/asset.txt"]) {
-        const response = await fetchApp(path);
-        expect(response.status).toBe(429);
-        expect(response.headers.get("cache-control")).toBe("no-store");
-      }
+      for (const host of [hostname, previewHostname])
+        for (const path of ["/", "/asset.txt"]) {
+          const response = await fetchApp(path, undefined, host);
+          expect(response.status).toBe(429);
+          expect(response.headers.get("cache-control")).toBe("no-store");
+        }
+
+      await publish(preview);
+      expect((await fetchApp("/asset.txt", undefined, previewHostname)).status).toBe(429);
+      expect(
+        (
+          await fetchApp("/asset.txt", {
+            headers: { "x-fixture-storage-mode": "disabled" },
+          })
+        ).status,
+      ).toBe(200);
 
       expect(await json("/.well-known/widefleet/ready")).toMatchObject({ version: app.version });
       expect(
         (await fetchApp(`/__scheduled?${new URLSearchParams({ cron: "* * * * *" })}`)).status,
       ).toBe(200);
-      expect((await fetchApp("/asset.txt", undefined, previewHostname)).status).toBe(200);
     } finally {
-      await publish(app);
+      await availability(JSON.stringify({ blocked: false }));
+      await availability(null, "other-organization");
     }
 
     expect((await fetchApp("/asset.txt")).status).toBe(200);
+    expect((await fetchApp("/asset.txt", undefined, previewHostname)).status).toBe(200);
     expect(await json("/cron")).toBe("* * * * *");
+    await availability(null);
+  });
+
+  it("starts the KV lookup alongside the R2 host read", async () => {
+    expect(
+      (
+        await fetchApp("/asset.txt", {
+          headers: { "x-fixture-storage-mode": "parallel" },
+        })
+      ).status,
+    ).toBe(200);
+  });
+
+  it("returns 503 for unreadable or invalid status, while a missing entry allows requests", async () => {
+    try {
+      for (const value of ["broken-json", JSON.stringify({ blocked: "false" })]) {
+        await availability(value);
+        expect((await fetchApp("/asset.txt")).status).toBe(503);
+      }
+
+      await availability(null);
+
+      const failed = await fetchApp("/asset.txt", {
+        headers: { "x-fixture-storage-mode": "kv-error" },
+      });
+
+      expect(failed.status).toBe(503);
+      expect(failed.headers.get("cache-control")).toBe("no-store");
+      expect((await fetchApp("/asset.txt")).status).toBe(200);
+    } finally {
+      await availability(null);
+    }
   });
 
   it("preserves the original application error", async () => {

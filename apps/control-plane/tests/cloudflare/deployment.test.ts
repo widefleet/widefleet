@@ -538,12 +538,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       const response = await worker.fetch(`http://fixture/host?hostname=${hostname}`);
 
       return z
-        .object({
-          body: z.unknown(),
-          etag: z.string(),
-          access: z.string().nullable(),
-          metadata: z.record(z.string(), z.string()).optional(),
-        })
+        .object({ body: z.unknown(), access: z.string().nullable() })
         .nullable()
         .parse(await response.json());
     };
@@ -700,7 +695,6 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       import { createR2Storage } from ${JSON.stringify(server + "storage/r2.ts")};
       import { createAppService } from ${JSON.stringify(server + "apps.ts")};
       import { createRuntimeReleaseService } from ${JSON.stringify(server + "runtime-releases.ts")};
-      import { publishOrganizationHttpAvailability } from ${JSON.stringify(server + "http-availability.ts")};
       import { readCloudflareConfiguration } from ${JSON.stringify(server + "cloudflare-config.ts")};
       export * from './runtime.js';
       export { DeploymentWorkflow } from ${JSON.stringify(workflow)};
@@ -801,32 +795,6 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           });
           return Response.json(result.isErr() ? { error: result.error.message } : result.value, { status: result.isErr() ? 400 : 200 });
         }
-        if (url.hostname === 'fixture' && url.pathname === '/deliver-delayed-http') {
-          const object = await env.ARTIFACTS.get('fixture-delayed-http.json');
-          if (!object) throw new Error('No delayed write');
-          const args = await object.json();
-          const written = await env.ARTIFACTS.put(...args);
-          return Response.json({written: written !== null});
-        }
-        if (url.hostname === 'fixture' && url.pathname === '/http-status') {
-          const input = await request.json();
-          let writes = 0;
-          try {
-            await withCloudflareDatabase(env, ({db}) => publishOrganizationHttpAvailability(db, {
-              get: (...args) => env.ARTIFACTS.get(...args),
-              put: async (...args) => {
-                writes++;
-                if (args[0] === input.delayKey) {
-                  await env.ARTIFACTS.put("fixture-delayed-http.json", JSON.stringify(args));
-                  throw new Error("Synthetic write timeout");
-                }
-                if (writes === input.rejectAt) return null;
-                return env.ARTIFACTS.put(...args);
-              },
-            }, 'widefleet', input.blocked));
-            return Response.json({writes});
-          } catch (error) { return Response.json({error: error.message}, {status:500}); }
-        }
         if (url.hostname === 'fixture' && url.pathname === '/remove') {
           const input = await request.json();
           const modifier = await env.APP_OPERATIONS.unsafeGetInstanceModifier(input.id);
@@ -851,7 +819,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         }
         if (url.hostname === 'fixture' && url.pathname === '/stale-publication') {
           const input = await request.json();
-          const written = await env.ARTIFACTS.put('hosts/'+input.hostname+'.json',JSON.stringify(input.app),{onlyIf:input.etag ? {etagMatches:input.etag} : {etagDoesNotMatch:'*'}});
+          const written = await env.ARTIFACTS.put('hosts/'+input.hostname+'.json',JSON.stringify(input.app),{onlyIf:{etagDoesNotMatch:'*'}});
           return Response.json({written:written!==null});
         }
         if (url.hostname === 'fixture' && url.pathname === '/stale-stage') {
@@ -903,7 +871,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         if (url.hostname === 'fixture' && url.pathname === '/host') {
           const obj = await env.ARTIFACTS.get('hosts/' + url.searchParams.get('hostname') + '.json');
           const route = await env.AUTH_CONFIG.get('apps/' + url.searchParams.get('hostname'), 'json');
-          return Response.json(obj ? { body: await obj.json(), etag: obj.etag, metadata: obj.customMetadata, access: route ? JSON.stringify(route.access) : null } : null);
+          return Response.json(obj ? { body: await obj.json(), access: route ? JSON.stringify(route.access) : null } : null);
         }
         if (url.hostname === 'fixture' && url.pathname === '/workflow') {
           const instance = await (url.searchParams.has('app-operation') ? env.APP_OPERATIONS : env.DEPLOYMENTS).get(url.searchParams.get('id'));
@@ -2210,161 +2178,6 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       60_000,
     );
 
-    it("publishes HTTP suspension, preserves deployment metadata and repairs partial publication", async () => {
-      const change = (blocked: boolean, rejectAt?: number) =>
-        worker.fetch("http://fixture/http-status", {
-          method: "POST",
-          body: JSON.stringify({ blocked, rejectAt }),
-        });
-
-      const entry = await seedDeployment(environment.database.db, { bindings: [] });
-      const companion = await seedDeployment(environment.database.db, { bindings: [] });
-
-      for (const fixture of [entry, companion]) {
-        await seed(fixture);
-        await dispatch(fixture);
-        await completed(fixture.command.id);
-      }
-
-      const before = contract.publishedApp.parse((await host(entry.hostname))?.body);
-      const metadata = (await host(entry.hostname))?.metadata;
-
-      try {
-        expect((await change(true, 2)).status).toBe(500);
-        expect(
-          (
-            await environment.database.db
-              .select()
-              .from(organizationRuntimes)
-              .where(eq(organizationRuntimes.organizationId, "widefleet"))
-          )[0],
-        ).toMatchObject({ httpBlocked: true, httpAvailabilityPending: true });
-        expect((await change(true)).status).toBe(200);
-        const blocked = await authenticatedFetch(`https://${entry.hostname}/`);
-        expect(blocked.status).toBe(429);
-        expect(blocked.headers.get("cache-control")).toBe("no-store");
-        expect(await change(true).then((response) => response.json())).toEqual({ writes: 0 });
-        expect((await host(entry.hostname))?.body).toMatchObject({
-          version: before.version,
-          httpBlocked: true,
-        });
-        expect((await host(entry.hostname))?.metadata).toEqual(metadata);
-        const fresh = await seedDeployment(environment.database.db, { bindings: [] });
-        await seed(fresh);
-        await dispatch(fresh);
-        await completed(fresh.command.id);
-        expect((await authenticatedFetch(`https://${fresh.hostname}/`)).status).toBe(429);
-        expect((await change(false, 2)).status).toBe(500);
-        // Change the desired state while an earlier publication is incomplete.
-        expect((await change(true)).status).toBe(200);
-        expect((await authenticatedFetch(`https://${entry.hostname}/`)).status).toBe(429);
-      } finally {
-        expect((await change(false)).status).toBe(200);
-      }
-
-      expect((await authenticatedFetch(`https://${entry.hostname}/`)).status).toBe(200);
-      expect((await host(entry.hostname))?.body).toMatchObject({
-        version: before.version,
-        httpBlocked: false,
-      });
-      expect(
-        (
-          await environment.database.db
-            .select()
-            .from(organizationRuntimes)
-            .where(eq(organizationRuntimes.organizationId, "widefleet"))
-        )[0],
-      ).toMatchObject({ httpBlocked: false, httpAvailabilityPending: false });
-    }, 30000);
-
-    it.each([false, true])(
-      "fences a timed-out status write when restoring HTTP blocked=%s",
-      async (blocked) => {
-        const change = (desired: boolean, delayKey?: string) =>
-          worker.fetch("http://fixture/http-status", {
-            method: "POST",
-            body: JSON.stringify({ blocked: desired, delayKey }),
-          });
-
-        const entry = await seedDeployment(environment.database.db, { bindings: [] });
-        await seed(entry);
-        await dispatch(entry);
-        await completed(entry.command.id);
-
-        try {
-          expect((await change(blocked)).status).toBe(200);
-          expect((await change(!blocked, `hosts/${entry.hostname}.json`)).status).toBe(500);
-          expect((await change(blocked)).status).toBe(200);
-          const delayed = await worker.fetch("http://fixture/deliver-delayed-http");
-          expect(await delayed.json()).toEqual({ written: false });
-          expect((await authenticatedFetch(`https://${entry.hostname}/`)).status).toBe(
-            blocked ? 429 : 200,
-          );
-          expect(await change(blocked).then((response) => response.json())).toEqual({ writes: 0 });
-        } finally {
-          expect((await change(true)).status).toBe(200);
-          expect((await change(false)).status).toBe(200);
-        }
-      },
-      30000,
-    );
-
-    it.each([false, true])(
-      "fences late first deployments with an existing inactive host=%s",
-      async (inactive) => {
-        const change = (blocked: boolean) =>
-          worker.fetch("http://fixture/http-status", {
-            method: "POST",
-            body: JSON.stringify({ blocked }),
-          });
-
-        const entry = await seedDeployment(environment.database.db, { bindings: [] });
-        await seed(entry);
-
-        const stale = contract.publishedApp.parse({
-          ...entry.artifact,
-          hostname: entry.hostname,
-          deploymentId: entry.command.id,
-          version: crypto.randomUUID(),
-          nativeBindings: {},
-          network: { revision: 0, policy: { backend: [], browser: [] } },
-        });
-
-        try {
-          if (inactive) {
-            expect((await change(true)).status).toBe(200);
-            expect((await change(false)).status).toBe(200);
-          }
-
-          const previous = await host(entry.hostname);
-          expect((await change(true)).status).toBe(200);
-          expect((await host(entry.hostname))?.body).toMatchObject({
-            deleted: true,
-            appId: entry.appId,
-          });
-
-          const late = await worker.fetch("http://fixture/stale-publication", {
-            method: "POST",
-            body: JSON.stringify({ hostname: entry.hostname, app: stale, etag: previous?.etag }),
-          });
-
-          expect(await late.json()).toEqual({ written: false });
-          expect((await authenticatedFetch(`https://${entry.hostname}/`)).status).toBe(404);
-          await dispatch(entry);
-          await completed(entry.command.id);
-          expect((await operation(entry.command.id))?.targets).toEqual([
-            expect.objectContaining({ appId: entry.appId, publicationStarted: true }),
-          ]);
-          expect((await authenticatedFetch(`https://${entry.hostname}/`)).status).toBe(429);
-        } finally {
-          expect((await change(false)).status).toBe(200);
-        }
-
-        expect((await authenticatedFetch(`https://${entry.hostname}/`)).status).toBe(200);
-      },
-      30000,
-    );
-
     const remove = (appId: string, options: { actor?: string; unavailable?: boolean } = {}) =>
       worker.fetch("http://fixture/remove", {
         method: "POST",
@@ -2503,35 +2316,8 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         .where(eq(apps.id, grandchild.appId));
 
       for (const entry of [root, child, grandchild]) await seed(entry);
-      // A limit publication can create an inactive host before the first deploy.
-      // Removal must replace that marker, not accept it as an existing deletion.
-      await worker.fetch(`http://fixture/storage?key=hosts/${root.hostname}.json`, {
-        method: "PUT",
-        body: JSON.stringify({
-          deleted: true,
-          appId: root.appId,
-          publicationId: crypto.randomUUID(),
-        }),
-      });
-      const inactive = await host(root.hostname);
       expect((await remove(root.appId)).status).toBe(200);
       await removed(root.appId);
-
-      const stale = contract.publishedApp.parse({
-        ...root.artifact,
-        hostname: root.hostname,
-        deploymentId: root.command.id,
-        version: crypto.randomUUID(),
-        nativeBindings: {},
-        network: { revision: 0, policy: { backend: [], browser: [] } },
-      });
-
-      const late = await worker.fetch("http://fixture/stale-publication", {
-        method: "POST",
-        body: JSON.stringify({ hostname: root.hostname, app: stale, etag: inactive?.etag }),
-      });
-
-      expect(await late.json()).toEqual({ written: false });
 
       for (const entry of [root, child, grandchild]) {
         expect(
@@ -2541,10 +2327,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           (await environment.database.db.select().from(apps).where(eq(apps.id, entry.appId)))[0]
             ?.removedAt,
         ).toBeInstanceOf(Date);
-        expect((await host(entry.hostname))?.body).toMatchObject({
-          deleted: true,
-          appId: entry.appId,
-        });
+        expect((await host(entry.hostname))?.body).toEqual({ deleted: true, appId: entry.appId });
         const stored = await worker.fetch(`http://fixture/storage?prefix=apps/${entry.appId}/`);
         expect(await stored.json()).toEqual([]);
         expect((await authenticatedFetch(`https://${entry.hostname}/`)).status).toBe(404);
@@ -2592,10 +2375,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       const response = await remove(preview.appId);
       expect(response.status, await response.text()).toBe(200);
       await removed(preview.appId);
-      expect((await host(preview.hostname))?.body).toMatchObject({
-        deleted: true,
-        appId: preview.appId,
-      });
+      expect((await host(preview.hostname))?.body).toEqual({ deleted: true, appId: preview.appId });
       expect(await host(first.hostname)).toEqual(parentHost);
       expect((await authenticatedFetch(`https://${preview.hostname}/`)).status).toBe(404);
       expect((await authenticatedFetch(`https://${first.hostname}/`)).status).toBe(200);
@@ -2718,7 +2498,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         .where(eq(apps.id, replacement.appId));
       expect((await remove(replacement.appId)).status).toBe(200);
       await removed(replacement.appId);
-      expect((await host(preview.hostname))?.body).toMatchObject({
+      expect((await host(preview.hostname))?.body).toEqual({
         deleted: true,
         appId: replacement.appId,
       });

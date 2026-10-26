@@ -201,6 +201,7 @@ export const hostedConfigurations = async (
       services: [service],
       ...emailBindings,
       hyperdrive: [{ binding: "HYPERDRIVE", id: installation.hyperdriveId }],
+      kv_namespaces: [{ binding: "AUTH_CONFIG", id: ids.auth }],
       r2_buckets: [{ binding: "ARTIFACTS", bucket_name: names.artifacts }],
       ...controlOverrides,
       vars: {

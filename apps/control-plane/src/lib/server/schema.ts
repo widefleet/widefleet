@@ -22,14 +22,13 @@ export const organizationRuntimes = pgTable(
       .primaryKey()
       .references(() => organization.id),
     appHostnameSuffix: text("app_hostname_suffix").unique(),
-    httpBlocked: boolean("http_blocked").notNull().default(false),
-    httpAvailabilityPending: boolean("http_availability_pending").notNull().default(false),
     executor: text({ enum: ["agent", "cloudflare"] })
       .notNull()
       .default("agent"),
     runtime: jsonb(),
     appliedRuntime: jsonb("applied_runtime"),
     runtimeJobId: uuid("runtime_job_id"),
+    httpBlocked: boolean("http_blocked").notNull().default(false),
   },
   (table) => [
     check("organization_runtime_executor_check", sql`${table.executor} IN ('agent', 'cloudflare')`),

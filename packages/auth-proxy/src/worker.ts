@@ -112,7 +112,7 @@ export const manageAuthConfiguration = async (request: Request, environment: Aut
 
 export const createAuthHandler = (
   environment: AuthEnvironment,
-  runApp: (request: Request, appId: string) => Promise<Response>,
+  runApp: (request: Request, appId: string, organizationId: string) => Promise<Response>,
 ) => ({
   async fetch(request: Request) {
     const url = new URL(request.url);
@@ -178,7 +178,7 @@ export const createAuthHandler = (
           if (!route || route.organizationId !== organizationId) return reply(404, "Not found");
           phase = "app-runtime";
 
-          return runApp(forwarded, route.appId);
+          return runApp(forwarded, route.appId, route.organizationId);
         },
       });
 

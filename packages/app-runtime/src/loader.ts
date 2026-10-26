@@ -2,6 +2,7 @@ import { createAuthHandler, manageAuthConfiguration } from "@platform/auth-proxy
 import { authControlPath } from "@platform/auth-proxy/publication";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { appEventConfiguration } from "@platform/contracts";
+import { organizationHttpAvailability, organizationHttpAvailabilityKey } from "@platform/contracts";
 import { publishedApp } from "@platform/contracts";
 import { z } from "zod";
 import { workflowJson } from "./workflow-json.ts";
@@ -86,30 +87,53 @@ const managementRequest = (request: Request, environment: ParentEnvironment) => 
   return token.success && request.headers.get("authorization") === `Bearer ${token.data}`;
 };
 
+const readHttpAvailability = async (environment: ParentEnvironment, organizationId: string) => {
+  try {
+    const value = await environment.AUTH_CONFIG.get(
+      organizationHttpAvailabilityKey(organizationId),
+    );
+
+    return value === null
+      ? { blocked: false }
+      : organizationHttpAvailability.parse(JSON.parse(value));
+  } catch {
+    console.error("Organization HTTP availability could not be read");
+
+    return null;
+  }
+};
+
 const dispatchApp = async (
   request: Request,
   environment: ParentEnvironment,
   context: ExecutionContext,
-  authenticatedApp: string | null,
+  authenticated: { appId: string; organizationId: string } | null,
 ) => {
   const url = new URL(request.url);
   const candidate = request.headers.get("x-widefleet-candidate");
-  let app;
+  let key;
 
   if (candidate) {
     const [appId, version] = z
       .tuple([publishedApp.shape.appId, publishedApp.shape.version])
       .parse(candidate.split("/"));
 
-    app = await readApp(environment, `versions/${appId}/${version}.json`);
+    key = `versions/${appId}/${version}.json`;
   } else {
     if (!/^[a-z0-9.-]+$/.test(url.hostname)) return new Response(null, { status: 400 });
-    app = await readApp(environment, `hosts/${url.hostname}.json`);
+    key = `hosts/${url.hostname}.json`;
   }
+
+  const [app, availability] = await Promise.all([
+    readApp(environment, key),
+    authenticated && environment["WIDEFLEET_HTTP_AVAILABILITY"] === "kv"
+      ? readHttpAvailability(environment, authenticated.organizationId)
+      : { blocked: false },
+  ]);
 
   if (!app) return new Response("App is not published", { status: 404 });
 
-  if (authenticatedApp !== null && authenticatedApp !== app.appId)
+  if (authenticated !== null && authenticated.appId !== app.appId)
     return new Response("App authorization is being updated", { status: 503 });
 
   if (url.pathname === "/.well-known/widefleet/ready") {
@@ -142,7 +166,13 @@ const dispatchApp = async (
 
   if (candidate) return new Response(null, { status: 403 });
 
-  if (app.httpBlocked)
+  if (availability === null)
+    return new Response("Application HTTP availability is temporarily unavailable", {
+      status: 503,
+      headers: { "cache-control": "no-store" },
+    });
+
+  if (availability.blocked)
     return new Response("Application HTTP access is suspended", {
       status: 429,
       headers: { "cache-control": "no-store" },
@@ -244,8 +274,8 @@ export default {
       return manageRuntime(request, environment, context);
     }
 
-    return createAuthHandler(environment, (authenticated, appId) =>
-      dispatchApp(authenticated, environment, context, appId),
+    return createAuthHandler(environment, (authenticated, appId, organizationId) =>
+      dispatchApp(authenticated, environment, context, { appId, organizationId }),
     ).fetch(request);
   },
   async scheduled(
