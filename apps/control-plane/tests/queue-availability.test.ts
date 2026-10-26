@@ -197,4 +197,34 @@ describe("App queue delivery availability", () => {
     await expect(state.create()(["one"], false)).rejects.toThrow();
     expect(state.transport).not.toHaveBeenCalled();
   });
+
+  it.each([{}, { settings: {} }, { settings: { delivery_paused: "false" } }])(
+    "rejects an unconfirmed pause setting %j without changing delivery",
+    async (setting) => {
+      const state = fixture();
+      state.apps["one"] = registration(["jobs"]);
+      const queue = state.add("one", "jobs", true);
+      state.transport.mockResolvedValueOnce(
+        Response.json({
+          success: true,
+          result: [{ queue_id: queue.queue_id, queue_name: queue.queue_name, ...setting }],
+        }),
+      );
+      await expect(state.create()(["one"], false)).rejects.toThrow();
+      expect(queue.settings.delivery_paused).toBe(true);
+      expect(state.patches()).toHaveLength(0);
+    },
+  );
+
+  it("pauses a newly registered queue while its organization remains suspended", async () => {
+    const state = fixture();
+    state.apps["one"] = registration(["first"]);
+    state.add("one", "first");
+    await state.create()(["one"], true);
+    state.apps["one"] = registration(["first", "second"]);
+    const next = state.add("one", "second");
+    await state.create()(["one"], true);
+    expect(next.settings.delivery_paused).toBe(true);
+    expect(state.patches()).toHaveLength(2);
+  });
 });

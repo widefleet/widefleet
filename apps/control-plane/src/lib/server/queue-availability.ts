@@ -5,7 +5,7 @@ import { readCloudflareAppQueues } from "./cloudflare-events.ts";
 const queue = z.object({
   queue_id: z.string(),
   queue_name: z.string(),
-  settings: z.object({ delivery_paused: z.boolean().default(false) }).prefault({}),
+  settings: z.object({ delivery_paused: z.boolean() }),
 });
 
 // Create one publisher per evaluation. A fresh provider snapshot on the next run
