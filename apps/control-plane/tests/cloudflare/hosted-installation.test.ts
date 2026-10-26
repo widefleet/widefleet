@@ -42,6 +42,11 @@ const configuration = {
 };
 
 describe("Hosted resource provisioning", () => {
+  it("shares the existing configuration namespace between runtime and control plane", async () => {
+    const configs = await hostedConfigurations(installation, ids);
+    expect(configs.controlPlane.kv_namespaces).toEqual(configs.runtime.kv_namespaces);
+    expect(configs.controlPlane.kv_namespaces).toEqual([{ binding: "AUTH_CONFIG", id: ids.auth }]);
+  });
   it("defaults to email and preserves explicit sign-in delivery in the deployed Worker", async () => {
     expect(
       (await hostedConfigurations(installation, ids)).controlPlane.vars.LOGIN_CODE_DELIVERY,
@@ -208,6 +213,35 @@ describe("Hosted resource provisioning", () => {
       await rm(directory, { recursive: true, force: true });
     }
   }, 30_000);
+
+  it("composes control-plane scheduling and bindings without losing installation variables", async () => {
+    const configs = await hostedConfigurations(
+      installation,
+      ids,
+      "email",
+      {},
+      {
+        triggers: { crons: ["* * * * *"] },
+        vpc_networks: [{ binding: "EXAMPLE", tunnel_id: "00000000-0000-4000-8000-000000000001" }],
+        vars: { EXTENSION_LABEL: "fixture" },
+      },
+    );
+
+    expect(configs.controlPlane).toMatchObject({
+      triggers: { crons: ["* * * * *"] },
+      vpc_networks: [{ binding: "EXAMPLE" }],
+      hyperdrive: [{ binding: "HYPERDRIVE", id: installation.hyperdriveId }],
+      r2_buckets: [{ binding: "ARTIFACTS" }],
+      vars: {
+        EXTENSION_LABEL: "fixture",
+        PLATFORM_URL: installation.platformUrl,
+        APP_DOMAIN: installation.appDomain,
+        LOGIN_CODE_DELIVERY: "email",
+      },
+    });
+    expect(configs.runtime).not.toHaveProperty("triggers");
+    expect(configs.runtime.vars).not.toHaveProperty("EXTENSION_LABEL");
+  });
 
   it("bundles extra runtime variables while retaining event configuration, logging and app bindings", async () => {
     const configs = await hostedConfigurations(installation, ids, "email", {

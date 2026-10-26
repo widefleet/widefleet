@@ -1,3 +1,4 @@
+import type { z } from "zod";
 import type { OrganizationAccess } from "./application-context.ts";
 import type { Configuration } from "./config.ts";
 import type { Database } from "./database.ts";
@@ -6,6 +7,10 @@ import type { SendEmail } from "./email.ts";
 export interface RuntimeExtension {
   organizationAccess?: OrganizationAccess;
   sendEmail?: SendEmail;
+  scheduled?: (
+    event: { scheduledTime: number; cron: string },
+    binding: <Value>(name: string, schema: z.ZodType<Value>) => Value,
+  ) => Promise<void>;
 }
 
 export interface RuntimeExtensionContext {

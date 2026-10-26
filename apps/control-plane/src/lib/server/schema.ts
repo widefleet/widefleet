@@ -28,6 +28,7 @@ export const organizationRuntimes = pgTable(
     runtime: jsonb(),
     appliedRuntime: jsonb("applied_runtime"),
     runtimeJobId: uuid("runtime_job_id"),
+    httpBlocked: boolean("http_blocked").notNull().default(false),
   },
   (table) => [
     check("organization_runtime_executor_check", sql`${table.executor} IN ('agent', 'cloudflare')`),

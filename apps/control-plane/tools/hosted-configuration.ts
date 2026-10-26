@@ -113,6 +113,7 @@ export const hostedConfigurations = async (
   ids: z.infer<typeof hostedResourceIds>,
   loginCodeDelivery: Configuration["LOGIN_CODE_DELIVERY"] = "email",
   runtimeOverrides: Record<string, z.infer<ReturnType<typeof z.json>>> = {},
+  controlOverrides: Record<string, z.infer<ReturnType<typeof z.json>>> = {},
 ) => {
   const names = hostedResourceNames(installation);
   const controlDirectory = fileURLToPath(new URL("../", import.meta.url));
@@ -199,6 +200,10 @@ export const hostedConfigurations = async (
       })),
       services: [service],
       ...emailBindings,
+      hyperdrive: [{ binding: "HYPERDRIVE", id: installation.hyperdriveId }],
+      kv_namespaces: [{ binding: "AUTH_CONFIG", id: ids.auth }],
+      r2_buckets: [{ binding: "ARTIFACTS", bucket_name: names.artifacts }],
+      ...controlOverrides,
       vars: {
         ...control.vars,
         APP_RUNTIME_NAME: names.runtime,
@@ -207,9 +212,8 @@ export const hostedConfigurations = async (
         APP_DOMAIN: installation.appDomain,
         LOGIN_CODE_DELIVERY: loginCodeDelivery,
         ...emailVariables,
+        ...z.record(z.string(), z.json()).optional().parse(controlOverrides["vars"]),
       },
-      hyperdrive: [{ binding: "HYPERDRIVE", id: installation.hyperdriveId }],
-      r2_buckets: [{ binding: "ARTIFACTS", bucket_name: names.artifacts }],
     },
     initialize: await hostedInitializationConfiguration(installation, ids.account),
   };

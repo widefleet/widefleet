@@ -34,7 +34,8 @@
     "./app-sign-in-cloudflare": "./src/lib/server/app-sign-in-cloudflare.ts",
     "./cloudflare-configuration": "./src/lib/server/cloudflare-config.ts",
     "./tools/*": "./tools/*",
-    "./organization": "./src/lib/organization.ts"
+    "./organization": "./src/lib/organization.ts",
+    "./http-availability": "./src/lib/server/http-availability.ts"
   },
   "scripts": {
     "test:e2e": "playwright test",

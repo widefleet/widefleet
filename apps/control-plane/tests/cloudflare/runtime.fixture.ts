@@ -199,6 +199,13 @@ export default {
       return env.RUNTIME_MANAGEMENT.fetch(request);
     }
     if (url.pathname === '/fixture/logs') return Response.json(logRecords);
+    if (url.pathname === '/fixture/availability') {
+      const { organizationId = 'widefleet', value } = await request.json();
+      const key = 'organizations/' + organizationId + '/http-availability';
+      if (value === null) await env.AUTH_CONFIG.delete(key);
+      else await env.AUTH_CONFIG.put(key, value);
+      return new Response(null, { status: 204 });
+    }
     if (url.pathname === '/fixture/pause-workflow') {
       const id = url.searchParams.get('id');
       const instance = request.method === 'POST'
@@ -231,7 +238,39 @@ export default {
       await env.AUTH_CONFIG.put('apps/' + app.hostname, JSON.stringify({organizationId:"widefleet",appId:app.appId, access:{revision:1,groups:[]}}));
       return new Response(null, { status: 204 });
     }
-    return runtime.fetch(request, env, ctx);
+    const mode = request.headers.get('x-fixture-storage-mode');
+    if (!mode) return runtime.fetch(request, env, ctx);
+    let hostStarted = false;
+    let statusStarted = false;
+    const response = await runtime.fetch(request, {
+      ...env,
+      WIDEFLEET_HTTP_AVAILABILITY: mode === 'disabled' ? '' : env.WIDEFLEET_HTTP_AVAILABILITY,
+      WIDEFLEET_PACKAGES: new Proxy(env.WIDEFLEET_PACKAGES, {
+        get(target, name) {
+          if (name === 'get') return async (...args) => {
+            if (!args[0].startsWith('hosts/')) return target.get(...args);
+            hostStarted = true;
+            const object = await target.get(...args);
+            if (mode === 'parallel' && !statusStarted) throw new Error('KV read did not start alongside R2');
+            return object;
+          };
+          const value = target[name];
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      }),
+      AUTH_CONFIG: {
+        async get(key, ...args) {
+          if (key.endsWith('/http-availability')) {
+            statusStarted = true;
+            if (mode === 'parallel' && !hostStarted) throw new Error('R2 read has not started');
+            if (mode === 'kv-error' || mode === 'disabled') throw new Error('Synthetic KV failure');
+          }
+          return env.AUTH_CONFIG.get(key, ...args);
+        },
+      },
+    }, ctx);
+    if (mode === 'parallel' && !statusStarted) throw new Error('Missing KV read');
+    return response;
   },
 };
 `;

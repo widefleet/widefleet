@@ -481,6 +481,11 @@ export const deletedApp = z.strictObject({ deleted: z.literal(true), appId: iden
 
 export const publishedHost = z.union([publishedApp, deletedApp]);
 
+export const organizationHttpAvailability = z.strictObject({ blocked: z.boolean() });
+
+export const organizationHttpAvailabilityKey = (organizationId: string) =>
+  `organizations/${organizationIdentifier.parse(organizationId)}/http-availability`;
+
 export const agent = z.strictObject({
   id: identifier,
   name: z.string(),
