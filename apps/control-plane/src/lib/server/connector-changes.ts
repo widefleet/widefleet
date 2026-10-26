@@ -1,7 +1,7 @@
 import type { WorkerModule } from "./worker-modules.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
-import { and, eq, inArray, or, sql } from "drizzle-orm";
+import { and, eq, isNull, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
 import { managedApp } from "./apps.ts";
@@ -126,7 +126,7 @@ export const prepareConnector = async (
   const consumers = await transaction
     .select({ capabilities: apps.capabilities, applied: apps.appliedCapabilities })
     .from(apps)
-    .where(eq(apps.organizationId, execution.organizationId));
+    .where(and(eq(apps.organizationId, execution.organizationId), isNull(apps.removedAt)));
 
   for (const consumer of consumers)
     for (const grant of [

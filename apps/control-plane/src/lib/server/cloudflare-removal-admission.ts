@@ -1,5 +1,5 @@
 import { Result } from "better-result";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { managedApp, lockAppDescendants } from "./apps.ts";
 import { lockOrganizationRuntime } from "./organization-runtime.ts";
@@ -172,8 +172,8 @@ export const createCloudflareRemoval =
 
         const registered = await registerCloudflareRemoval(database, command);
 
-        // Authorization failures also use NOT_FOUND. Only a physically absent
-        // app proves that the accepted Workflow completed before this request.
+        // Authorization failures also use NOT_FOUND. Check removal independently
+        // to recognize a Workflow that finished before this request.
         if (registered.isErr()) {
           if (
             !(registered.error instanceof InvalidOperation) ||
@@ -184,7 +184,7 @@ export const createCloudflareRemoval =
           const [remaining] = await database
             .select({ id: apps.id })
             .from(apps)
-            .where(eq(apps.id, appId));
+            .where(and(eq(apps.id, appId), isNull(apps.removedAt)));
 
           if (remaining)
             throw new InvalidOperation({

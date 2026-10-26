@@ -1,3 +1,4 @@
+import { finishAppRemoval } from "./app-removal.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
 import { and, eq, gt, inArray, lt, notExists, or, sql } from "drizzle-orm";
@@ -596,7 +597,7 @@ export const createJobService = (
               target: jobReceipts.jobId,
               set: { agentId, leaseToken: result.leaseToken },
             });
-          await transaction.delete(apps).where(eq(apps.id, app.id));
+          await finishAppRemoval(transaction, app.id);
 
           return Result.ok({ accepted: true });
         }

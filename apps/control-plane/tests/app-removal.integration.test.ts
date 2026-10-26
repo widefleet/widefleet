@@ -2,7 +2,17 @@ import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createAppService, enqueueAppRemoval, managedApp } from "../src/lib/server/apps.ts";
 import { createAppAccessService } from "../src/lib/server/app-access.ts";
-import { apps, jobs } from "../src/lib/server/schema.ts";
+import { finishAppRemoval } from "../src/lib/server/app-removal.ts";
+import {
+  apps,
+  jobs,
+  appGrants,
+  uploadSessions,
+  artifacts,
+  deployments,
+  deploymentEvents,
+  cloudflareOperations,
+} from "../src/lib/server/schema.ts";
 import { createTestEnvironment } from "./environment.ts";
 
 describe("App removal trees", () => {
@@ -49,6 +59,104 @@ describe("App removal trees", () => {
 
     return { ...app, parentId };
   };
+
+  it("retains removed identity, clears dependent data and allows a fresh app to reuse the name", async () => {
+    const app = await create("reusable");
+    (await service.grant(creator, app.id, colleague.id)).unwrap();
+    const artifactId = crypto.randomUUID();
+    const deploymentId = crypto.randomUUID();
+    const db = environment.database.db;
+    await db.insert(uploadSessions).values({
+      id: crypto.randomUUID(),
+      appId: app.id,
+      userId: creator.id,
+      manifest: {},
+      expiresAt: new Date(),
+    });
+    await db
+      .insert(artifacts)
+      .values({ id: artifactId, appId: app.id, metadata: {}, manifest: {}, modules: [] });
+    await db
+      .insert(deployments)
+      .values({ id: deploymentId, appId: app.id, artifactId, requestId: "removed" });
+    await db
+      .insert(deploymentEvents)
+      .values({ deploymentId, level: "info", message: "Removed fixture" });
+    await db.insert(jobs).values({
+      id: crypto.randomUUID(),
+      appId: app.id,
+      organizationId: app.organizationId,
+      deploymentId,
+      kind: "deploy",
+    });
+    await db.insert(cloudflareOperations).values({
+      id: crypto.randomUUID(),
+      appId: app.id,
+      command: {},
+      targets: [],
+      result: {},
+      createdAt: new Date(),
+    });
+    await db.update(apps).set({ activeDeploymentId: deploymentId }).where(eq(apps.id, app.id));
+    (await service.remove(creator, app.id)).unwrap();
+    await db.transaction(async (transaction) => {
+      (await managedApp(transaction, creator, app.id)).unwrap();
+      await finishAppRemoval(transaction, app.id);
+    });
+
+    expect(await db.select().from(apps)).toEqual([
+      expect.objectContaining({
+        id: app.id,
+        organizationId: app.organizationId,
+        activeDeploymentId: null,
+      }),
+    ]);
+    expect((await db.select().from(apps))[0]?.removedAt).toBeInstanceOf(Date);
+    expect(await db.select().from(appGrants)).toEqual([]);
+    expect(await db.select().from(uploadSessions)).toEqual([]);
+    expect(await db.select().from(jobs)).toEqual([]);
+    expect(await db.select().from(cloudflareOperations)).toEqual([]);
+    expect(await db.select().from(deployments)).toEqual([]);
+    expect(await db.select().from(deploymentEvents)).toEqual([]);
+    expect(await db.select().from(artifacts)).toEqual([]);
+
+    for (const principal of [
+      creator,
+      colleague,
+      { ...creator, application: { ...creator.application, admin: true } },
+    ]) {
+      expect((await service.list(principal)).unwrap()).toEqual([]);
+      expect(await service.get(principal, app.id)).toMatchObject({ error: { code: "NOT_FOUND" } });
+      expect(await service.grant(principal, app.id, colleague.id)).toMatchObject({
+        error: { code: "NOT_FOUND" },
+      });
+    }
+
+    expect(
+      await service.create(creator, { slug: "preview", displayName: "Preview", parentId: app.id }),
+    ).toMatchObject({ error: { code: "NOT_FOUND" } });
+    const replacement = (await service.resolve(creator, app.slug)).unwrap();
+    expect(replacement.id).not.toBe(app.id);
+    expect(replacement.hostname).toBe(app.hostname);
+    expect(
+      await service.create(creator, { slug: app.slug, displayName: "Duplicate", parentId: null }),
+    ).toMatchObject({ error: { code: "CONFLICT" } });
+    expect((await service.resolve(creator, app.slug)).unwrap().id).toBe(replacement.id);
+  });
+
+  it("does not enqueue a removed preview again when removing its parent", async () => {
+    const parent = await create("parent");
+    const preview = await create("preview", parent.id);
+    (await service.remove(creator, preview.id)).unwrap();
+    await environment.database.db.transaction(async (transaction) => {
+      (await managedApp(transaction, creator, preview.id)).unwrap();
+      await finishAppRemoval(transaction, preview.id);
+    });
+    (await service.remove(creator, parent.id)).unwrap();
+    expect((await environment.database.db.select().from(jobs)).map((job) => job.appId)).toEqual([
+      parent.id,
+    ]);
+  });
 
   it("authorizes the root and includes previews owned by collaborators", async () => {
     const parent = await create("parent");

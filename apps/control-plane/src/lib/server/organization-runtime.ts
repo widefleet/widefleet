@@ -3,7 +3,7 @@ import { Result } from "better-result";
 import type { Database, DatabaseExecutor } from "./database.ts";
 import { InvalidOperation } from "./errors.ts";
 import { transact } from "./transactions.ts";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { agents, apps, organizationRuntimes, jobs } from "./schema.ts";
 import type { Transaction } from "./transactions.ts";
 
@@ -67,7 +67,7 @@ export const initializeCloudflareRuntime = (database: Database) =>
     const [app] = await transaction
       .select({ id: apps.id })
       .from(apps)
-      .where(eq(apps.organizationId, execution.organizationId))
+      .where(and(eq(apps.organizationId, execution.organizationId), isNull(apps.removedAt)))
       .limit(1);
 
     const [job] = await transaction
