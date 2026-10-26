@@ -1,7 +1,7 @@
 ---
 title: Workflows
 description: Declare durable background work and manage Workflow instances.
-lastModified: 2026-10-12
+lastModified: 2026-10-26
 ---
 
 ## Declare and export a Workflow
@@ -101,6 +101,14 @@ HTTP management endpoints are:
 | `GET /workflows/operations/{jobId}`   | Read a queued operation's state and result        |
 
 POST bodies contain a `request` object, for example `{"request":{"action":"create","workflow":"process","id":"example-1","params":{"message":"Example"}}}`. Supply a UUID `Idempotency-Key` header. All endpoints require management access to the app. Management payloads are JSON and bounded to 64 KiB; app-side bindings retain native structured-clone values. Management renders non-JSON outputs with `$type` tags (for example `BigInt`, `Map`, and binary values); repeated object references use `$ref` indices. Listings return instance summaries; use `status` for the output.
+
+## Organization suspension
+
+With app runtime 0.4.8 or newer, installations using organization suspension reject new Workflow starts, batch creation, restarts and explicit resumes while an organization is suspended. This applies to app bindings and management through the CLI, API and UI.
+
+Already-started executions continue. Their status, events, pause, terminate and delete operations remain available through management. Recovery of an unconfirmed start is also subject to suspension, including recovery triggered by a status query or listing.
+
+After the organization is unblocked and the updated status reaches the runtime, new starts, restarts and resumes are allowed again. Paused instances do not resume automatically. If the runtime cannot read the organization status or resolve the app's organization, execution admission fails until that information is available.
 
 ## Restart from a step
 
