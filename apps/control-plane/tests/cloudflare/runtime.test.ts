@@ -1030,4 +1030,230 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
       worker = await start();
     }
   }, 80_000);
+
+  const workflowBinding = (
+    input: Record<string, z.infer<ReturnType<typeof z.json>>>,
+    target = app,
+  ) =>
+    fetchApp("/fixture/workflow-binding", {
+      method: "POST",
+      body: JSON.stringify({
+        scope: { appId: target.appId, hostname: target.hostname, workflow: "fixture" },
+        ...input,
+      }),
+    });
+
+  const manageWorkflow = (
+    request: Record<string, z.infer<ReturnType<typeof z.json>>>,
+    requestId = crypto.randomUUID(),
+    target = app,
+  ) =>
+    fetchApp("/.well-known/widefleet/workflows", {
+      method: "POST",
+      body: JSON.stringify({
+        appId: target.appId,
+        hostname: target.hostname,
+        requestId,
+        request: { workflow: "fixture", ...request },
+      }),
+    });
+
+  const rejectedWorkflow = async (
+    response: Awaited<ReturnType<typeof fetchApp>>,
+    message: string,
+  ) => {
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: message });
+  };
+
+  it("blocks Workflow creation through bindings and management, then accepts the same IDs after unblock", async () => {
+    const single = crypto.randomUUID();
+    const batch = [crypto.randomUUID(), crypto.randomUUID()];
+    const managed = crypto.randomUUID();
+    const requestId = crypto.randomUUID();
+    const params = { mode: "sleep" };
+    await availability(JSON.stringify({ blocked: true }));
+
+    try {
+      await rejectedWorkflow(
+        await workflowBinding({ method: "create", options: { id: single, params } }),
+        "Organization execution is suspended",
+      );
+      await rejectedWorkflow(
+        await workflowBinding({
+          method: "createBatch",
+          options: batch.map((id) => ({ id, params })),
+        }),
+        "Organization execution is suspended",
+      );
+      await rejectedWorkflow(
+        await manageWorkflow({ action: "create", id: managed, params }, requestId),
+        "Organization execution is suspended",
+      );
+
+      const listed = z
+        .object({ result: z.object({ instances: z.array(z.object({ id: z.string() })) }) })
+        .parse(await (await manageWorkflow({ action: "list" })).json());
+
+      expect(listed.result.instances.map((record) => record.id)).not.toContain(single);
+      expect(listed.result.instances.map((record) => record.id)).not.toContain(managed);
+      await availability(JSON.stringify({ blocked: false }));
+      expect(
+        await (await workflowBinding({ method: "create", options: { id: single, params } })).json(),
+      ).toEqual({ id: single });
+      expect(
+        await (
+          await workflowBinding({
+            method: "createBatch",
+            options: batch.map((id) => ({ id, params })),
+          })
+        ).json(),
+      ).toEqual(batch.map((id) => ({ id })));
+      expect(
+        await (await manageWorkflow({ action: "create", id: managed, params }, requestId)).json(),
+      ).toEqual({ result: { id: managed } });
+    } finally {
+      await availability(null);
+
+      for (const id of [single, ...batch, managed]) await manageWorkflow({ action: "delete", id });
+    }
+  }, 30_000);
+
+  it("rejects Workflow resumes and restarts while retaining access to existing instances", async () => {
+    const id = crypto.randomUUID();
+    const terminated = crypto.randomUUID();
+    expect((await manageWorkflow({ action: "create", id, params: { value: 20 } })).status).toBe(
+      200,
+    );
+    expect(
+      (await manageWorkflow({ action: "create", id: terminated, params: { value: 20 } })).status,
+    ).toBe(200);
+    await expect
+      .poll(() => json("/workflow/steps"), { timeout: 15_000 })
+      .toEqual(expect.arrayContaining([{ id }, { id: terminated }]));
+    await availability(JSON.stringify({ blocked: true }));
+
+    try {
+      expect((await workflowBinding({ method: "get", id })).status).toBe(200);
+      expect((await workflowBinding({ method: "instance", id, action: "status" })).status).toBe(
+        200,
+      );
+      expect((await manageWorkflow({ action: "list" })).status).toBe(200);
+      expect((await manageWorkflow({ action: "pause", id })).status).toBe(200);
+      expect((await manageWorkflow({ action: "terminate", id: terminated })).status).toBe(200);
+      expect((await manageWorkflow({ action: "delete", id: terminated })).status).toBe(200);
+
+      for (const action of ["resume", "restart"]) {
+        await rejectedWorkflow(
+          await workflowBinding({ method: "instance", id, action }),
+          "Organization execution is suspended",
+        );
+        await rejectedWorkflow(
+          await manageWorkflow({ action, id }),
+          "Organization execution is suspended",
+        );
+      }
+
+      await availability(JSON.stringify({ blocked: false }));
+      expect((await manageWorkflow({ action: "resume", id })).status).toBe(200);
+      await availability(JSON.stringify({ blocked: true }));
+      // An existing execution may finish; sendEvent does not create a new instance.
+      expect(
+        (
+          await manageWorkflow({
+            action: "sendEvent",
+            id,
+            event: { type: "continue", payload: { add: 21 } },
+          })
+        ).status,
+      ).toBe(200);
+      await expect
+        .poll(async () => (await manageWorkflow({ action: "status", id })).json(), {
+          timeout: 15_000,
+        })
+        .toMatchObject({ result: { status: "complete", output: 42 } });
+      expect((await manageWorkflow({ action: "delete", id })).status).toBe(200);
+    } finally {
+      await availability(null);
+      await manageWorkflow({ action: "delete", id });
+      await manageWorkflow({ action: "delete", id: terminated });
+    }
+  }, 40_000);
+
+  it("rejects Workflow starts with invalid availability or missing and mismatched org routing", async () => {
+    try {
+      await availability("invalid-json");
+      await rejectedWorkflow(
+        await workflowBinding({ method: "create", options: { id: crypto.randomUUID() } }),
+        "Organization availability could not be read",
+      );
+      await availability(null);
+      await publishRoute(null);
+      await rejectedWorkflow(
+        await manageWorkflow({ action: "create", id: crypto.randomUUID() }),
+        "Workflow app organization is not published",
+      );
+      await publishRoute(
+        JSON.stringify({
+          organizationId: "widefleet",
+          appId: preview.appId,
+          access: { revision: 1, groups: [] },
+        }),
+      );
+      await rejectedWorkflow(
+        await workflowBinding({ method: "create", options: { id: crypto.randomUUID() } }),
+        "Workflow app authorization is being updated",
+      );
+    } finally {
+      await availability(null);
+      await publish(app);
+    }
+  });
+
+  it("does not start pending Workflow records through recovery reads while suspended", async () => {
+    const id = crypto.randomUUID();
+    expect((await workflowBinding({ method: "seedPending", id })).status).toBe(200);
+    await availability(JSON.stringify({ blocked: true }));
+
+    try {
+      await rejectedWorkflow(
+        await workflowBinding({ method: "get", id }),
+        "Organization execution is suspended",
+      );
+      await rejectedWorkflow(
+        await manageWorkflow({ action: "status", id }),
+        "Organization execution is suspended",
+      );
+      await rejectedWorkflow(
+        await manageWorkflow({ action: "list" }),
+        "Organization execution is suspended",
+      );
+      await availability(JSON.stringify({ blocked: false }));
+      expect((await workflowBinding({ method: "get", id })).status).toBe(200);
+    } finally {
+      await availability(null);
+      await manageWorkflow({ action: "delete", id });
+    }
+  });
+
+  it("allows another organization's Workflow starts during an org suspension", async () => {
+    const id = crypto.randomUUID();
+    await separatePreviewOrganization();
+    await availability(JSON.stringify({ blocked: true }));
+
+    try {
+      expect(
+        (
+          await workflowBinding(
+            { method: "create", options: { id, params: { mode: "sleep" } } },
+            preview,
+          )
+        ).status,
+      ).toBe(200);
+    } finally {
+      await availability(null);
+      await manageWorkflow({ action: "delete", id }, crypto.randomUUID(), preview);
+      await publish(preview);
+    }
+  });
 });

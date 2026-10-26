@@ -1,4 +1,5 @@
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
+import { authRoute, authRouteKey } from "@platform/auth-proxy/publication";
 import {
   workflowEventType,
   workflowInstanceId,
@@ -9,6 +10,7 @@ import {
 } from "@platform/contracts";
 import { z } from "zod";
 import { readApp } from "./catalog.ts";
+import { requireOrganizationAvailability } from "./availability.ts";
 import type { ParentEnvironment } from "./types.ts";
 import {
   workflowOptions,
@@ -52,6 +54,16 @@ export const workflowCatalog = (environment: ParentEnvironment, appId: string) =
   );
 
 export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
+  private async requireExecution(scope: WorkflowScope) {
+    if (this.env["WIDEFLEET_HTTP_AVAILABILITY"] !== "kv") return;
+    const value = await this.env.AUTH_CONFIG.get(authRouteKey(scope.hostname));
+
+    if (value === null) throw new Error("Workflow app organization is not published");
+    const route = authRoute.parse(JSON.parse(value));
+
+    if (route.appId !== scope.appId) throw new Error("Workflow app authorization is being updated");
+    await requireOrganizationAvailability(this.env, route.organizationId);
+  }
   protected async restartTarget(from: z.infer<typeof workflowRestartFrom>) {
     // celld's adapter prepares each operation in a separate native checkpoint.
     return workflowRestartFrom.parse({ name: await nativeStepName(stepId(from)), type: "do" });
@@ -71,6 +83,11 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
   }
   private async native(record: RecordEntry) {
     if (!record.started) {
+      // Recovery through get/status/list can also start an unconfirmed instance.
+      // Check before persisting a new instance or starting the native workflow.
+      await this.requireExecution(record.start);
+      await this.ctx.storage.put(key(record.start.workflow, record.id), record);
+
       try {
         const options: WorkflowInstanceCreateOptions<Start> = {
           id: record.nativeId,
@@ -133,7 +150,6 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
       start: { ...scope, id, version: app.version, params: options.params },
     };
 
-    await this.ctx.storage.put(name, record);
     await this.native(record);
 
     return { id };
@@ -231,6 +247,7 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
       return null;
     }
 
+    if (action === "resume" || action === "restart") await this.requireExecution(scope);
     const instance = await this.native(record);
 
     switch (action) {
@@ -351,6 +368,10 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
 
         return previous.result;
       }
+
+      // A rejected admission must not reserve the management request ID.
+      if (["create", "resume", "restart"].includes(request.action))
+        await this.requireExecution(scope);
 
       // Record intent first. A retried agent job must never send an event or
       // restart twice after an ambiguous connection failure.
