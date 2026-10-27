@@ -56,6 +56,11 @@ export const workflowCatalog = (environment: ParentEnvironment, appId: string) =
   );
 
 export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
+  protected createNative(
+    options: WorkflowInstanceCreateOptions<Start> & { id: string; params: Start },
+  ) {
+    return this.env.WIDEFLEET_WORKFLOWS.create(options);
+  }
   private async requireExecution(scope: WorkflowScope) {
     if (this.env["WIDEFLEET_HTTP_AVAILABILITY"] !== "kv") return;
 
@@ -129,7 +134,7 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
     let instance;
 
     try {
-      const options: WorkflowInstanceCreateOptions<Start> = {
+      const options: WorkflowInstanceCreateOptions<Start> & { id: string; params: Start } = {
         id: record.nativeId,
         params: record.start,
       };
@@ -146,7 +151,7 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
           options.retention.errorRetention = record.creation.retention.errorRetention;
       }
 
-      instance = await this.env.WIDEFLEET_WORKFLOWS.create(options);
+      instance = await this.createNative(options);
     } catch (error) {
       // A failed response does not prove creation failed. Recover an existing
       // instance, but never issue another create from a lookup.
