@@ -17,6 +17,7 @@ import {
 import { loadConnectorWorker } from "./connector-code.ts";
 import { invokeConnector, type ConnectorValue } from "./connector-rpc.ts";
 import type { ParentEnvironment } from "./types.ts";
+import { requireOrganizationAvailability } from "./availability.ts";
 
 export const connectorCatalog = (
   environment: ParentEnvironment,
@@ -123,6 +124,7 @@ export class ConnectorGateway extends WorkerEntrypoint<
 > {
   async #target() {
     const { organizationId, connector, entrypoint } = this.ctx.props;
+    await requireOrganizationAvailability(this.env, organizationId);
     const active = await connectorCatalog(this.env, organizationId, connector).current();
 
     if (!active) throw new Error("Connector is not active");
