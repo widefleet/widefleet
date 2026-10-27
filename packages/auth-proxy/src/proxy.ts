@@ -222,7 +222,11 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
 
       const result = await apps
         .fetch(new Request(request, { headers }))
-        .catch(() => response(502, "The app is temporarily unavailable."));
+        .catch((cause: unknown) => {
+          if (!renewed?.headers.getSetCookie().length) throw cause;
+
+          return response(502, "The app is temporarily unavailable.");
+        });
 
       const outgoing = new Response(result.body, result);
 

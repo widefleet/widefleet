@@ -167,8 +167,9 @@ describe("Auth proxy session lifecycle", () => {
   });
 
   it("delivers rotated credentials even when the app throws", async () => {
-    expireIdentity();
     appFailure = true;
+    await expect(visit()).rejects.toThrow("Fixture app unavailable");
+    expireIdentity();
     const failed = await visit();
 
     expect(failed.status).toBe(502);
