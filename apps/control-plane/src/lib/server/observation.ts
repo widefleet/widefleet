@@ -1,4 +1,3 @@
-import type { sanitizeReportingError } from "@platform/contracts";
 import { runExtensionEffect } from "../extension-effects.ts";
 
 export interface ObservationEvent {
@@ -17,7 +16,7 @@ export interface ObservationEvent {
 export interface Observation {
   // Capture is nonblocking; implementations drain their pending delivery in close.
   capture: (event: ObservationEvent) => void | Promise<void>;
-  exception?: (error: ReturnType<typeof sanitizeReportingError>) => void | Promise<void>;
+  exception?: (error: Error) => void | Promise<void>;
   close: () => Promise<void>;
 }
 

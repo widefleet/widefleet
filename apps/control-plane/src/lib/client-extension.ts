@@ -1,5 +1,3 @@
-import type { sanitizeReportingError } from "@platform/contracts";
-
 export interface ClientContext {
   user: { id: string } | null;
   organization: { id: string; name: string } | null;
@@ -11,7 +9,7 @@ export interface ClientContext {
 export interface ClientExtension {
   start?: () => void | (() => void | Promise<void>);
   update?: (context: ClientContext) => void | Promise<void>;
-  exception?: (error: ReturnType<typeof sanitizeReportingError>) => void | Promise<void>;
+  exception?: (error: Error) => void | Promise<void>;
   reset?: () => void | Promise<void>;
 }
 

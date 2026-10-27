@@ -14,6 +14,18 @@ afterEach(() => {
   delete clientExtension.start;
 });
 
+it("passes the original browser error to the installation observer", () => {
+  const exception = vi.fn();
+  clientExtension.exception = exception;
+
+  const error = new TypeError("Cannot read deployment status", {
+    cause: new Error("Connection refused"),
+  });
+
+  reportBrowserError(error);
+  expect(exception.mock.calls[0]?.[0]).toBe(error);
+});
+
 it("does not wait for an asynchronous capture or leak its rejection", async () => {
   const capture = vi.fn<Observation["capture"]>().mockRejectedValue(new Error("Unavailable"));
   const observer = { capture, close: async () => {} };

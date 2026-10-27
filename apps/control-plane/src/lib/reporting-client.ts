@@ -10,7 +10,7 @@ let sent = 0;
 let since = Date.now();
 
 export const reportBrowserError = (error: Error) => {
-  runExtensionEffect(() => clientExtension.exception?.(sanitizeReportingError(error)));
+  runExtensionEffect(() => clientExtension.exception?.(error));
 
   if (!enabled) return;
 

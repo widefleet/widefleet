@@ -8,6 +8,8 @@ import { eq } from "drizzle-orm";
 import { installation } from "../src/lib/server/schema.ts";
 import { createSettingsService } from "../src/lib/server/settings.ts";
 import { installationKeys } from "../src/lib/server/installation-files.ts";
+import { createRuntime } from "../src/lib/server/runtime-services.ts";
+import { createStorage } from "../src/lib/server/storage.ts";
 
 describe("Installation observation", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
@@ -16,6 +18,7 @@ describe("Installation observation", () => {
     environment = await createTestEnvironment();
   });
   afterAll(async () => {
+    await environment?.reporting.close();
     await environment?.close();
   });
 
@@ -25,6 +28,27 @@ describe("Installation observation", () => {
     admin: true,
     creator: true,
     application: { organizationId: "widefleet", admin: true },
+  });
+
+  it("passes the original runtime error to the observer independently of installation reporting", async () => {
+    const exception = vi.fn();
+
+    const runtime = await createRuntime({
+      configuration: environment.configuration,
+      database: environment.database,
+      settings: environment.settings,
+      storage: createStorage(environment.configuration),
+      reporting: environment.reporting,
+      observation: { capture: () => {}, exception, close: async () => {} },
+      encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
+    })();
+
+    const error = new TypeError("Cannot read deployment status", {
+      cause: new Error("Connection refused"),
+    });
+
+    runtime.reporting.exception(error);
+    expect(exception.mock.calls[0]?.[0]).toBe(error);
   });
 
   it("observes committed app creation once across create/resolve retries", async () => {
