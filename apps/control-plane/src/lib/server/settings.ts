@@ -3,6 +3,7 @@ import {
   settingsInput,
   settingsUpdate,
   setupOwner,
+  googleDirectoryCredentials,
 } from "@platform/contracts";
 import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -75,6 +76,7 @@ const createOrganizationSettingsService = (
         if (state.settings.directory)
           identity.directory = {
             clientId: state.settings.directory.clientId,
+            adminEmail: state.settings.directory.adminEmail,
             clientSecret: await decryptSecret(encryptionKey, stored?.directorySecret ?? ""),
           };
       }
@@ -217,10 +219,27 @@ const createOrganizationSettingsService = (
         });
     }
 
-    if (next.directory && next.sso?.appIdentityType !== "entra")
+    if (
+      next.sso?.appIdentityType === "google" &&
+      (next.sso.issuer !== "https://accounts.google.com" ||
+        !googleDirectoryCredentials
+          .omit({ clientSecret: true })
+          .safeParse(
+            next.directory
+              ? { clientId: next.directory.clientId, adminEmail: next.directory.adminEmail }
+              : null,
+          ).success)
+    )
       throw new InvalidOperation({
         code: "BAD_REQUEST",
-        message: "Microsoft Graph directory search requires Entra app identity",
+        message:
+          "Google Workspace requires its Google issuer, service account email and delegated administrator email",
+      });
+
+    if (next.directory && !["entra", "google"].includes(next.sso?.appIdentityType ?? ""))
+      throw new InvalidOperation({
+        code: "BAD_REQUEST",
+        message: "Directory access requires Microsoft Entra or Google Workspace app identity",
       });
 
     return appSignIn
@@ -263,7 +282,10 @@ const createOrganizationSettingsService = (
           code: "BAD_REQUEST",
           message: "Enter the directory client secret",
         });
-      const directory = next.directory ? { clientId: next.directory.clientId } : null;
+
+      const directory = next.directory
+        ? { clientId: next.directory.clientId, adminEmail: next.directory.adminEmail }
+        : null;
 
       await transaction
         .update(organizationSettings)

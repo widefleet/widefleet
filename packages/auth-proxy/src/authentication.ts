@@ -99,13 +99,24 @@ export const createAuthentication = async (configuration: AuthConfiguration, log
                   requireIdTokenVerification: true,
                   redirectURI: configuration.redirectUrl,
                   disableProviderLogout: true,
+                  authorizationUrlParams:
+                    configuration.provider.type === "google"
+                      ? {
+                          access_type: "offline",
+                          prompt: "consent",
+                          hd: configuration.provider.domain,
+                        }
+                      : undefined,
                   scopes: [
                     ...new Set([
                       "openid",
                       "profile",
                       "email",
-                      "offline_access",
-                      ...(configuration.scopes ?? []),
+                      ...(configuration.provider.type === "google" ? [] : ["offline_access"]),
+                      ...(configuration.scopes ?? []).filter(
+                        (scope) =>
+                          configuration.provider.type !== "google" || scope !== "offline_access",
+                      ),
                       ...(configuration.provider.type === "entra" ? ["User.Read"] : []),
                     ]),
                   ],
@@ -117,6 +128,7 @@ export const createAuthentication = async (configuration: AuthConfiguration, log
                       tokens.idToken,
                       tokens.accessToken,
                       configuration.organizationId,
+                      configuration.directory,
                     );
 
                     const expiresAt = Math.min(
