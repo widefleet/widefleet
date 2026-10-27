@@ -83,6 +83,20 @@ const configuration = (apps: z.infer<typeof registry>["apps"]) => {
   return { crons, queues };
 };
 
+export const readCloudflareAppQueues = async (storage: {
+  get: (key: string) => Promise<{ text: () => Promise<string> } | null>;
+}) => {
+  const object = await storage.get(key);
+  const apps = object ? registry.parse(JSON.parse(await object.text())).apps : {};
+
+  return new Map(
+    Object.entries(apps).map(([appId, app]) => [
+      appId,
+      Object.keys(configuration({ [appId]: app }).queues),
+    ]),
+  );
+};
+
 export const createCloudflareEvents = (
   storage: R2Bucket,
   database: Database,

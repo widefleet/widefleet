@@ -35,7 +35,8 @@
     "./cloudflare-configuration": "./src/lib/server/cloudflare-config.ts",
     "./tools/*": "./tools/*",
     "./organization": "./src/lib/organization.ts",
-    "./http-availability": "./src/lib/server/http-availability.ts"
+    "./http-availability": "./src/lib/server/http-availability.ts",
+    "./queue-availability": "./src/lib/server/queue-availability.ts"
   },
   "scripts": {
     "test:e2e": "playwright test",
