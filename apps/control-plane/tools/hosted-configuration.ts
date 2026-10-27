@@ -13,6 +13,7 @@ export const hostedInstallation = z
     platformUrl: runtimeConfigurationSchema.shape.PLATFORM_URL,
     appDomain: z.hostname(),
     appZone: z.hostname(),
+    queues: z.boolean().default(true),
     emailFrom: z.email().optional(),
     hyperdriveId: z.string().regex(/^[a-f0-9]{32}$/),
   })
@@ -210,6 +211,7 @@ export const hostedConfigurations = async (
         CLOUDFLARE_ACCOUNT_ID: ids.account,
         PLATFORM_URL: installation.platformUrl,
         APP_DOMAIN: installation.appDomain,
+        WIDEFLEET_QUEUES: String(installation.queues),
         LOGIN_CODE_DELIVERY: loginCodeDelivery,
         ...emailVariables,
         ...z.record(z.string(), z.json()).optional().parse(controlOverrides["vars"]),

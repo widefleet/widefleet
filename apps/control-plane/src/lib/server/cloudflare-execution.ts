@@ -1,4 +1,5 @@
 import { createCloudflareRemoval } from "./cloudflare-removal-admission.ts";
+import { validateAppQueues } from "./cloudflare-app-package.ts";
 import { createCloudflareRuntimeReleases } from "./cloudflare-runtime-releases.ts";
 import { resolveCloudflareCapabilities } from "./cloudflare-capabilities.ts";
 import { createCloudflareConnectors } from "./cloudflare-connectors.ts";
@@ -138,15 +139,16 @@ export const createCloudflareExecution = (
             code: "NOT_FOUND",
             message: "Deployment artifact not found",
           });
-        contract.artifact.parse(
-          contract.artifact.parse({
-            id: artifact.id,
-            appId: artifact.appId,
-            metadata: artifact.metadata,
-            manifest: artifact.manifest,
-            modules: artifact.modules,
-          }),
-        );
+
+        const release = contract.artifact.parse({
+          id: artifact.id,
+          appId: artifact.appId,
+          metadata: artifact.metadata,
+          manifest: artifact.manifest,
+          modules: artifact.modules,
+        });
+
+        validateAppQueues(bindings, release.metadata);
 
         await resolveCloudflareCapabilities(
           transaction,

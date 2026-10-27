@@ -1,4 +1,5 @@
 import { resolveCloudflareCapabilities } from "./cloudflare-capabilities.ts";
+import { validateAppQueues } from "./cloudflare-app-package.ts";
 import { checkCapabilityNames } from "./connector-changes.ts";
 import { CloudflareSubscriptionPending } from "./cloudflare-subscription-updates.ts";
 import { createCloudflareEvents } from "./cloudflare-events.ts";
@@ -133,7 +134,9 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               code: "CONFLICT",
               message: "The app is no longer available for deployment",
             });
-          const prepared = await provisioner.provision(await artifact(command.artifactId));
+          const release = await artifact(command.artifactId);
+          validateAppQueues(bindings, release.metadata);
+          const prepared = await provisioner.provision(release);
           await withCloudflareDatabase(bindings, ({ db: resources }) =>
             updateCloudflareBindings(resources, provisioner, prepared.resources),
           );
@@ -239,6 +242,10 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
 
             if (!record) throw new Error("Deployment artifact not found");
 
+            const metadata = contract.workerMetadata.parse(record.metadata);
+
+            if (command.kind === "deploy") validateAppQueues(bindings, metadata);
+
             const access = contract.appAccessSnapshot.parse({
               revision: app.accessRevision,
               groups: app.accessGroups,
@@ -254,10 +261,7 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               grants: app.capabilities,
             });
 
-            checkCapabilityNames(
-              contract.workerMetadata.parse(record.metadata),
-              capabilities.grants,
-            );
+            checkCapabilityNames(metadata, capabilities.grants);
 
             // Entrypoint removal waits for confirmed revocation. The app lock is
             // sufficient here; unrelated apps can activate concurrently.
