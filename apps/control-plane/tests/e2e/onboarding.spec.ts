@@ -222,11 +222,14 @@ test("accepts emailed owner invitations and manages members in isolated organiza
     await operator.goto("/setup");
     await operator.waitForLoadState("networkidle");
     await operator.getByLabel("Name", { exact: true }).fill("Email Setup Owner");
+    await operator.getByLabel("Organization name", { exact: true }).fill("Example Team");
     await operator.getByLabel("Email", { exact: true }).fill("email-setup@example.test");
     await operator.getByRole("button", { name: "Create account and continue" }).click();
     await expect(operator).toHaveURL(/\/sign-in\?/);
     await signIn(operator, "email-setup@example.test");
-    await expect(operator).toHaveURL(/\/settings$/);
+    await expect(operator).toHaveURL(/\/welcome$/);
+    await expect(operator.getByRole("heading", { name: "Publish your first app" })).toBeVisible();
+    await operator.getByRole("link", { name: "Organization settings", exact: true }).click();
     await expect(
       operator.getByRole("status").filter({ hasText: "The auth proxy is unavailable" }),
     ).toBeVisible();

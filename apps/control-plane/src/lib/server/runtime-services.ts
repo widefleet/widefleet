@@ -27,6 +27,7 @@ import { createInvitationService } from "./members.ts";
 import { createAuthenticationAdmission } from "./auth-admission.ts";
 import { discoverPlatform } from "./platform-discovery.ts";
 import { createCliLogin } from "./cli-login.ts";
+import { createOnboardingService, type OrganizationOnboarding } from "./onboarding.ts";
 
 export const createRuntime = ({
   configuration,
@@ -42,6 +43,8 @@ export const createRuntime = ({
   authRateLimit,
   authIpAddressHeaders,
   authCookies,
+  publicSignup = false,
+  organizationOnboarding,
   discoveryTransport = "node",
 }: {
   configuration: Configuration & { BETTER_AUTH_SECRET: string };
@@ -53,13 +56,18 @@ export const createRuntime = ({
   execution?: HostedExecution;
   organizationAccess?: OrganizationAccess;
   sendEmail?: SendEmail;
+  publicSignup?: boolean;
+  organizationOnboarding?: OrganizationOnboarding;
   authRateLimit?: BetterAuthOptions["rateLimit"];
   authIpAddressHeaders?: string[];
   authCookies?: ReturnType<typeof sveltekitCookies>;
   hostedLogs?: ReturnType<typeof createCloudflareLogs>;
   discoveryTransport?: "node" | "cloudflare";
 }) => {
-  const authOptions: NonNullable<Parameters<typeof createAuthentication>[2]> = { encryptionKey };
+  const authOptions: NonNullable<Parameters<typeof createAuthentication>[2]> = {
+    encryptionKey,
+    publicSignup,
+  };
 
   if (sendEmail) authOptions.sendEmail = sendEmail;
 
@@ -74,6 +82,8 @@ export const createRuntime = ({
 
   const runtime = {
     auth,
+    publicSignup,
+    onboarding: createOnboardingService(database.db, settings, organizationOnboarding),
     identity: createIdentityService(auth, database.db, configuration, organizationAccess),
     directory: createDirectory(
       async (organizationId) => (await settings.resolve(organizationId)).identity,

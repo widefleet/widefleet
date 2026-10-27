@@ -90,6 +90,7 @@ export const settingsUpdate = settingsInput.extend({
 export const setupOwner = z.strictObject({
   name: z.string().trim().min(1).max(100),
   email: z.email().max(254),
+  organizationName: z.string().trim().min(1).max(200).optional(),
 });
 
 export const bootstrapConfiguration = z.strictObject({

@@ -12,6 +12,8 @@
 
   let email = $state("");
 
+  let organizationName = $state("");
+
   let busy = $state(false);
 
   let message = $state("");
@@ -22,8 +24,8 @@
     message = "";
 
     try {
-      await createOwner({ name, email });
-      await goto(`/sign-in?email=${encodeURIComponent(email)}&next=/settings`);
+      await createOwner({ name, email, organizationName });
+      await goto(`/sign-in?email=${encodeURIComponent(email)}&next=/welcome`);
     } catch (cause) {
       message = cause instanceof Error ? cause.message : "Could not complete setup.";
     } finally {
@@ -35,19 +37,27 @@
 <svelte:head><title>Welcome · Widefleet</title></svelte:head>
 <AuthLayout>
   <p class="text-primary mb-3 text-xs font-medium">WELCOME TO WIDEFLEET</p>
-  <h1 class="text-2xl font-semibold leading-tight tracking-tight">
-    Your first administrator account.
-  </h1>
+  <h1 class="text-2xl font-semibold leading-tight tracking-tight">Set up your workspace.</h1>
   <p class="text-muted-foreground mt-3 text-sm leading-6">
-    Create your administrator account, then sign in with a one-time code to configure your
-    workspace.
+    Name your organization and create its first administrator. Sign in with a one-time code to get
+    started.
   </p>
   <div class="text-muted-foreground mt-6 flex items-center gap-2 text-[11px]">
     <span class="text-foreground font-medium">1. Account</span><ArrowRight class="size-3" /><span
       >2. Sign-in</span
-    ><ArrowRight class="size-3" /><span>3. Verify</span>
+    ><ArrowRight class="size-3" /><span>3. First app</span>
   </div>
   <form onsubmit={create} class="mt-7 space-y-5">
+    <div class="space-y-2">
+      <Label for="organization-name">Organization name</Label><Input
+        id="organization-name"
+        bind:value={organizationName}
+        autocomplete="organization"
+        required
+        maxlength={200}
+        class="h-10"
+      />
+    </div>
     <div class="space-y-2">
       <Label for="owner-name">Name</Label><Input
         id="owner-name"

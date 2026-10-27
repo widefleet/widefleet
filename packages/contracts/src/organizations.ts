@@ -8,6 +8,21 @@ export const organizationIdentifier = z
 
 export const organizationSelection = z.object({ organizationId: organizationIdentifier });
 
+export const createOrganizationInput = z.strictObject({
+  name: z.string().trim().min(1).max(200),
+  slug: z
+    .string()
+    .trim()
+    .max(61)
+    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+});
+
+export const onboardingOrganization = z.object({
+  id: organizationIdentifier,
+  name: z.string(),
+  slug: z.string(),
+});
+
 export const organizationChoice = z.object({
   id: z.string(),
   name: z.string(),

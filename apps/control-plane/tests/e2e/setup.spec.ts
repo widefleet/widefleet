@@ -82,6 +82,7 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
     await page.goto("/");
     await expect(page).toHaveURL(/\/setup$/);
     await page.getByLabel("Name", { exact: true }).fill("IT Admin");
+    await page.getByLabel("Organization name", { exact: true }).fill("Example Team");
     await page.getByLabel("Email", { exact: true }).fill("sso@example.test");
     await page.getByRole("button", { name: "Create account and continue" }).click();
     await expect(page).toHaveURL(/\/sign-in\?/);
@@ -91,7 +92,8 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
     const otp = z.string().parse(logs.match(/code is (\d{6})/)?.[1]);
     await page.getByLabel("Sign-in code", { exact: true }).fill(otp);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
-    await expect(page).toHaveURL(/\/settings$/);
+    await expect(page).toHaveURL(/\/welcome$/);
+    await page.getByRole("link", { name: "Organization settings", exact: true }).click();
     await page.getByRole("link", { name: "Privacy", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Improve Widefleet" })).toBeVisible();
     await expect(page.getByLabel("Share usage and configuration")).toBeEnabled();
