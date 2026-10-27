@@ -102,6 +102,17 @@ export const sessionRenewal = (verified: () => z.infer<typeof authorization> | u
           throw new APIError("SERVICE_UNAVAILABLE");
         }
 
+        // Persist rotation even if a subsequent directory lookup fails. This does
+        // not extend authorization: that still requires a verified new identity.
+        await setAccountCookie(ctx, {
+          ...account,
+          accessToken: null,
+          idToken: null,
+          refreshToken: renewed.refreshToken ?? account.refreshToken,
+          accessTokenExpiresAt: renewed.accessTokenExpiresAt,
+          refreshTokenExpiresAt: renewed.refreshTokenExpiresAt ?? account.refreshTokenExpiresAt,
+        });
+
         // Refresh responses may omit the ID token. Never reuse the old ID token's
         // authorization claims as evidence of a newly verified identity.
         if (!renewed.idToken) throw new APIError("UNAUTHORIZED");
@@ -118,14 +129,6 @@ export const sessionRenewal = (verified: () => z.infer<typeof authorization> | u
         )
           throw new APIError("UNAUTHORIZED");
 
-        await setAccountCookie(ctx, {
-          ...account,
-          accessToken: null,
-          idToken: null,
-          refreshToken: renewed.refreshToken ?? account.refreshToken,
-          accessTokenExpiresAt: renewed.accessTokenExpiresAt,
-          refreshTokenExpiresAt: renewed.refreshTokenExpiresAt ?? account.refreshTokenExpiresAt,
-        });
         const now = new Date();
 
         const user = {
