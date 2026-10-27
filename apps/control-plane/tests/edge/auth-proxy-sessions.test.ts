@@ -15,13 +15,16 @@ describe("Auth proxy session lifecycle", () => {
   let idp: Awaited<ReturnType<typeof createIdentityProvider>>;
   let configuration: z.infer<typeof authConfiguration>;
   let cookie: string;
+  let appFailure = false;
   const access = { revision: 0, groups: ["accounting"] };
 
   const apps = {
     resolve: (hostname: string) =>
       Promise.resolve(hostname === new URL(app).hostname ? access : null),
     fetch: (request: Request) =>
-      Promise.resolve(Response.json(Object.fromEntries(request.headers))),
+      appFailure
+        ? Promise.reject(new Error("Fixture app unavailable"))
+        : Promise.resolve(Response.json(Object.fromEntries(request.headers))),
   };
 
   const login = async () => {
@@ -77,6 +80,8 @@ describe("Auth proxy session lifecycle", () => {
     idp.settings.available = true;
     idp.settings.failure = "";
     idp.settings.refreshFailure = "";
+    idp.settings.rotateRefreshTokens = true;
+    appFailure = false;
     idp.settings.issueRefreshToken = true;
     idp.settings.omitRefreshIdToken = false;
     idp.settings.subject = "pairwise-subject";
@@ -159,6 +164,21 @@ describe("Auth proxy session lifecycle", () => {
     expect(unavailable.headers.getSetCookie()).toEqual([]);
     idp.settings.available = true;
     expect((await visit()).status).toBe(200);
+  });
+
+  it("delivers rotated credentials even when the app throws", async () => {
+    expireIdentity();
+    appFailure = true;
+    const failed = await visit();
+
+    expect(failed.status).toBe(502);
+    const next = cookies(failed);
+
+    expect(next).toContain(".account_data=");
+    appFailure = false;
+    vi.setSystemTime(Date.now() + 61 * 60 * 1000);
+    expect((await visit(configuration, next)).status).toBe(200);
+    expect((await visit(configuration, cookie)).status).toBe(401);
   });
 
   it.each(["invalid_grant", "missing-refresh-token"])(
@@ -281,7 +301,16 @@ describe("Auth proxy session lifecycle", () => {
 
       expect(limited.status).toBe(503);
       expect(limited.headers.get("retry-after")).toBe("5");
-      expect(limited.headers.getSetCookie()).toEqual([]);
+      expect(cookies(limited)).toContain(".account_data=");
+      expect(cookies(limited)).not.toContain(".session_data=");
+      const originalCookies = new Map(
+        cookie.split("; ").map((part) => [part.slice(0, part.indexOf("=")), part]),
+      );
+
+      for (const part of cookies(limited).split("; "))
+        originalCookies.set(part.slice(0, part.indexOf("=")), part);
+      cookie = [...originalCookies.values()].join("; ");
+      vi.setSystemTime(Date.now() + 31_000);
       idp.settings.graphFailure = "";
       idp.settings.groups = [];
       expect((await visit()).status).toBe(403);

@@ -162,6 +162,13 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
 
       let renewed: Response | undefined;
 
+      const finish = (result: Response) => {
+        for (const cookie of renewed?.headers.getSetCookie() ?? [])
+          result.headers.append("set-cookie", cookie);
+
+        return result;
+      };
+
       if (verified.success && verified.data.expiresAt <= Date.now()) {
         try {
           const refreshing = await createAuthentication(configuration, true);
@@ -172,32 +179,27 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
 
           if (renewed.status === 401) user = proxyIdentity.safeParse(null);
           else if (renewed.status === 403)
-            return response(403, "You do not have access to this app.");
+            return finish(response(403, "You do not have access to this app."));
           else if (!renewed.ok) {
             const unavailable = response(503, "Company sign-in is temporarily unavailable.");
             const retryAfter = renewed.headers.get("retry-after");
 
             if (retryAfter) unavailable.headers.set("retry-after", retryAfter);
 
-            return unavailable;
+            return finish(unavailable);
           } else user = proxyIdentity.safeParse(await renewed.json());
         } catch {
-          return response(503, "Company sign-in is temporarily unavailable.");
+          return finish(response(503, "Company sign-in is temporarily unavailable."));
         }
       }
 
       if (!user.success) {
-        return request.headers.get("accept")?.includes("text/html")
-          ? redirect(loginUrl(url))
-          : response(401, "Sign in to access this app.");
+        return finish(
+          request.headers.get("accept")?.includes("text/html")
+            ? redirect(loginUrl(url))
+            : response(401, "Sign in to access this app."),
+        );
       }
-
-      const finish = (result: Response) => {
-        for (const cookie of renewed?.headers.getSetCookie() ?? [])
-          result.headers.append("set-cookie", cookie);
-
-        return result;
-      };
 
       if (access.groups.length && !access.groups.some((group) => user.data.groups.includes(group)))
         return finish(response(403, "You do not have access to this app."));
@@ -217,7 +219,11 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
       headers.set("x-auth-request-preferred-username", user.data.name);
       headers.set("x-auth-request-email", user.data.email);
       headers.set("x-auth-request-groups", user.data.groups.join(","));
-      const result = await apps.fetch(new Request(request, { headers }));
+
+      const result = await apps
+        .fetch(new Request(request, { headers }))
+        .catch(() => response(502, "The app is temporarily unavailable."));
+
       const outgoing = new Response(result.body, result);
 
       outgoing.headers.delete("set-cookie");

@@ -26,6 +26,8 @@ export const createIdentityProvider = async (
   const publicKey = { ...(await exportJWK(keys.publicKey)), kid: "test", alg: "RS256", use: "sig" };
   const codes = new Map<string, z.infer<typeof authorization>>();
   const refreshes = new Map<string, z.infer<typeof authorization>>();
+  const replays = new Map<string, { response: string; expiresAt: number }>();
+  let queue = Promise.resolve();
 
   const settings = {
     available: true,
@@ -37,6 +39,7 @@ export const createIdentityProvider = async (
     graphFailure: "",
     issuerSuffix: "",
     refreshFailure: "",
+    rotateRefreshTokens: false,
     issueRefreshToken: true,
     omitRefreshIdToken: false,
     subject: "pairwise-subject",
@@ -118,6 +121,19 @@ export const createIdentityProvider = async (
         if (refreshing) {
           refreshRequests.push(credential);
 
+          const replay = settings.rotateRefreshTokens ? replays.get(credential) : undefined;
+
+          if (
+            replay &&
+            fields.get("client_id") === "app-login" &&
+            fields.get("client_secret") === "synthetic-client-secret"
+          ) {
+            if (replay.expiresAt > Date.now()) response.end(replay.response);
+            else response.writeHead(400).end(JSON.stringify({ error: "invalid_grant" }));
+
+            return;
+          }
+
           if (settings.refreshFailure) {
             response
               .writeHead(
@@ -195,18 +211,23 @@ export const createIdentityProvider = async (
         const refreshToken = randomUUID();
         refreshes.set(refreshToken, parameters);
 
-        response.end(
-          JSON.stringify({
-            access_token: "fixture-access-token",
-            refresh_token: settings.issueRefreshToken ? refreshToken : undefined,
-            token_type: "Bearer",
-            expires_in: 3600,
-            id_token:
-              settings.failure === "missing-token" || (refreshing && settings.omitRefreshIdToken)
-                ? undefined
-                : token,
-          }),
-        );
+        const result = JSON.stringify({
+          access_token: "fixture-access-token",
+          refresh_token: settings.issueRefreshToken ? refreshToken : undefined,
+          token_type: "Bearer",
+          expires_in: 3600,
+          id_token:
+            settings.failure === "missing-token" || (refreshing && settings.omitRefreshIdToken)
+              ? undefined
+              : token,
+        });
+
+        if (refreshing && settings.rotateRefreshTokens) {
+          refreshes.delete(credential);
+          replays.set(credential, { response: result, expiresAt: Date.now() + 30_000 });
+        }
+
+        response.end(result);
       } else if (url.pathname === "/v1.0/me/transitiveMemberOf") {
         graphRequests.push(url.href);
 
@@ -241,7 +262,9 @@ export const createIdentityProvider = async (
       } else response.writeHead(404).end();
     };
 
-    void handle().catch(() => response.writeHead(500).end());
+    queue = queue.then(handle).catch(() => {
+      response.writeHead(500).end();
+    });
   });
 
   server.listen(0, "127.0.0.1");
