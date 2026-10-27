@@ -232,10 +232,13 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
 
       if (cookies.some((value) => value.trim())) headers.set("cookie", cookies.join(";"));
 
-      const result = await apps.fetch(
-        new Request(request, { headers, redirect: "manual" }),
-        caller,
-      ).catch(() => response(502, "The app is temporarily unavailable."));
+      const result = await apps
+        .fetch(new Request(request, { headers, redirect: "manual" }), caller)
+        .catch((cause: unknown) => {
+          if (!renewed?.headers.getSetCookie().length) throw cause;
+
+          return response(502, "The app is temporarily unavailable.");
+        });
 
       const outgoing = new Response(result.body, result);
 
