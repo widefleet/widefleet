@@ -45,7 +45,12 @@ export const workerDefinition = async (
         );
         break;
       case "r2_bucket":
-        bindings.set(`WIDEFLEET_R2_${binding.name}`, context.exports.Objects(options));
+        bindings.set(
+          `WIDEFLEET_R2_${binding.name}`,
+          context.exports.Objects({
+            props: { name, binding: binding.name, identity: input.identity },
+          }),
+        );
         break;
       case "kv_namespace":
         bindings.set(

@@ -15,7 +15,7 @@ import type {
   Producer,
   StatementInput,
 } from "./storage.ts";
-import { objectListing, objectMetadata, type ObjectOperation } from "./objects.ts";
+import { objectListing, objectMetadata, type ObjectOperation } from "./object-protocol.ts";
 
 export { connectorResponse } from "./connector-response.ts";
 
