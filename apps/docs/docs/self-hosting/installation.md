@@ -28,16 +28,18 @@ This setting controls sign-in codes only. Invitations still require an email ada
 Open `PLATFORM_URL`:
 
 1. Create the first administrator with a name and email, then request a sign-in code. Read it from the selected transport and sign in. Codes expire after five minutes and allow three incorrect attempts.
-2. To use company SSO, enter the issuer URL and choose the app identity provider: Microsoft Entra, Google Workspace, or OpenID Connect for configurable group claims. The page shows both callback URLs before saving.
-3. Register both callbacks in one IdP registration and enter its client ID and secret once. Connect the Workspace directory for Google; Entra directory search is optional.
-4. Enter your company email domain and publish the DNS TXT record shown by **Get verification record**. Choose **Verify domain**, then **Test company sign-in** and authenticate with the same email as the first administrator. Widefleet links that account automatically and checks its administrator access.
-5. Choose **Activate company SSO**. Company SSO becomes required for the operator organization. Existing email-code sessions can no longer access it; the operator recovery command remains available. An email-code login cannot bypass required SSO.
+2. Follow [Set up company sign-in](/guides/company-sign-in) for Microsoft Entra,
+   Google Workspace or another OpenID Connect provider. It covers registering
+   the two redirect URIs, connecting groups, verifying your domain and testing
+   administrator access before activation.
+3. Open a published app with an allowed and a disallowed test account, as
+   described in the guide, before sharing it with colleagues.
 
 Customer administrators can change their own SSO and directory settings without restarting the platform.
 
 Company sign-in automatically enrolls users admitted by the organization's provider as Members who can create apps, including external guests. Restrict the shared IdP registration to the intended users. Existing memberships keep their roles, and pending invitations retain their acceptance flow. Without company SSO, customers join through invitations. Apps enforce their own access rules and business permissions using the verified user and group context.
 
-Existing accounts with a matching email in the verified company domain are linked automatically, retaining their membership and role. External guests admitted by the provider can join, but a different email domain does not establish trusted linking to an existing account. See [company SSO activation](/guides/members#activate-company-sso) for CLI commands and provider replacement behavior.
+Existing accounts with a matching email in the verified company domain are linked automatically, retaining their membership and role. External guests admitted by the provider can join, but a different email domain does not establish trusted linking to an existing account. See [company sign-in settings](/reference/company-sign-in) for CLI configuration and provider replacement.
 
 Known runtime limitation: celld `0.6.2` drops incoming header values containing non-ASCII bytes. Display names can therefore be empty in Workers; the stable user identifier remains available for authorization.
 
@@ -130,62 +132,22 @@ The command requires an existing Owner or Admin and prints a one-use link. It op
 
 ### App group claims
 
-For **Microsoft Entra**, grant the shared sign-in registration the delegated **User.Read** permission and consent to `openid profile email offline_access`. The proxy reads current memberships directly from Microsoft Graph at sign-in and each provider-token renewal, following all pages. Group claims and overage indicators in the ID token are not needed. Nested memberships are included by Graph's [transitive membership endpoint](https://learn.microsoft.com/en-us/graph/api/user-list-transitivememberof?view=graph-rest-1.0).
-
-Use immutable group IDs in app access rules. Verify an allowed and a disallowed account after activation, and inspect `locals.user.groups` when implementing permissions inside an app. If Graph is unavailable after the current authorization expires, requests are temporarily blocked while the login cookies are preserved.
+To set up company groups for app access, follow the
+[Microsoft Entra](/guides/company-sign-in#microsoft-entra) or
+[Google Workspace](/guides/company-sign-in#google-workspace) instructions.
+They include the required permissions and a test with allowed and disallowed accounts.
 
 ### Generic OIDC
 
-Choose **OpenID Connect** as the app identity provider in Settings, enter the issuer URL, then register both displayed callback URLs on the same client. Management requests `openid profile email` and verifies ID tokens. Changing the issuer or client identity while accounts are linked is rejected by the native SSO plugin.
-
-For apps, configure the IdP to include memberships in the ID token. The optional token fields select group, name and email claims; defaults are `groups`, `name` and `email`. The verified user identifier is `sub`. Generic OIDC uses the groups supplied in the token. Each app implements its own authorization.
-
-The app proxy requests `offline_access`. Enable refresh tokens for the client and return a newly signed ID token with current claims on refresh. For rotating refresh tokens, configure a short reuse window so concurrent browser requests can receive the same replacement token. Widefleet's built-in provider uses 30 seconds. A provider that omits a fresh ID token requires another sign-in; old claims never count as a successful identity renewal.
-
-### Google Workspace
-
-Use a Google Workspace organization with access to its Admin console and Google Cloud project:
-
-1. Enable the **Admin SDK API**. Create a web OAuth client and register both callback URLs displayed by Widefleet. Configure its consent screen for the intended Workspace users and make it available for normal use.
-2. Create a service account, enable domain-wide delegation, and obtain its private key. In the Workspace Admin console, authorize the service account's numeric OAuth client ID for `https://www.googleapis.com/auth/admin.directory.group.readonly`. Choose a delegated administrator with group-read privileges. See Google's [domain-wide delegation setup](https://developers.google.com/identity/protocols/oauth2/service-account#delegatingauthority).
-3. In Widefleet Settings, select **Google Workspace** and enter the OAuth client's ID and secret. Use issuer `https://accounts.google.com` and your Workspace domain. Under **Company directory**, enter the service account email, delegated administrator email and PEM private key from the key file's `private_key` field.
-4. Save, verify the domain, test company sign-in and activate SSO. Open an app and complete Google's consent screen. The proxy requests offline access for subsequent renewals.
-5. Search for a group under app access, select its stable ID and verify allowed and disallowed users.
-
-Google does not put Workspace groups in its OIDC token. Widefleet validates the signed `hd` domain and reads the user's **direct memberships** with [Directory `groups.list`](https://developers.google.com/workspace/admin/directory/reference/rest/v1/groups/list), including all pages. Nested group expansion is not supported. Assign users directly to the groups used for app access. The runtime receives its own published directory credentials and contacts Google directly; it needs no control-plane request or directory database.
-
-For API or CLI configuration, use the same fields in the exported settings file:
-
-```json
-{
-  "externallyManaged": false,
-  "sso": {
-    "providerId": "company-google",
-    "appIdentityType": "google",
-    "issuer": "https://accounts.google.com",
-    "domain": "example.com",
-    "oidcConfig": {
-      "clientId": "GOOGLE_OAUTH_CLIENT_ID",
-      "clientSecret": "GOOGLE_OAUTH_CLIENT_SECRET"
-    }
-  },
-  "directory": {
-    "clientId": "directory@PROJECT_ID.iam.gserviceaccount.com",
-    "adminEmail": "directory-admin@example.com",
-    "clientSecret": "PEM_PRIVATE_KEY"
-  }
-}
-```
-
-Replace `PEM_PRIVATE_KEY` with the PEM value, encoding newlines as `\n` in JSON. Protect this file and apply it with `widefleet settings plan --file settings.json` followed by `widefleet settings apply --file settings.json`. Exports omit both secrets; omitted secret fields preserve their saved encrypted values. A directory permission or delegation error blocks new identity checks until corrected. A temporary quota error returns `503` with `Retry-After`; retry after that delay.
+Follow [Set up another OpenID Connect provider](/guides/company-sign-in#another-openid-connect-provider).
+The [provider requirements](/reference/company-sign-in#openid-connect-requirements)
+cover the configuration needed to keep users signed in and update their groups.
 
 ### Optional group search
 
-For Entra, enable **Connect Microsoft Graph** in Settings to let authenticated app builders search company groups through `widefleet groups search "Einkauf" --json` or `GET /api/v1/groups?query=Einkauf`. API tokens require `platform:read`; the CLI uses the normal Widefleet login. Results contain the native group `id`, `name`, existing `description` and `source`, plus `hasMore` when the search should be narrowed. Graph is queried directly; no directory database or SCIM setup is required.
-
-Grant the directory registration Microsoft Graph **GroupMember.Read.All application permission**, with tenant admin consent. Enter the directory client ID and secret for a registration in the same tenant. Omitting `directory.clientSecret` from an API update preserves the saved encrypted secret. This application permission is separate from the app-SSO registration's delegated `User.Read` permission for app membership lookup. See Microsoft's [list groups API and permissions](https://learn.microsoft.com/en-us/graph/api/group-list?view=graph-rest-1.0).
-
-Search returns stable directory group IDs, matching the memberships delivered to apps. Google Workspace uses its configured directory connection for the same search UI, CLI and API. Entra search credentials stay in the control plane; its app membership lookup uses the signed-in user's delegated token. Google directory credentials are also published to the app runtime. Selecting an app access group controls who may open the app; business permissions inside the app still use `locals.user.groups`.
+To let app owners search Entra groups by name, follow
+[Enable searching for groups by name](/guides/company-sign-in#enable-searching-for-groups-by-name).
+Google Workspace includes group search through its required directory connection.
 
 ## Pull the release images
 
@@ -266,7 +228,7 @@ The CLI offers the same operations as JSON: `widefleet catalog list`, `widefleet
 
 The shared runtime handles app sign-in using the organization's published configuration. It removes client-supplied identity headers and forwards verified identity to the app; authentication cookies and tokens do not reach app code. The SvelteKit starter exposes the verified identity as `locals.user`.
 
-App access rules are separate from management permissions. Configure them on the app's **Access** tab. See [published app sign-in](/guides/members#opening-published-apps) for login modes, session lifetime and access revocation, and [app access](/reference/app-access) for group rules.
+App access rules are separate from management permissions. Configure them on the app's **Access** tab. Follow [sharing an app](/guides/applications) to choose who can open it and verify access. The [app access reference](/reference/app-access) covers rule activation and membership checks.
 
 ## Logs and recovery
 
