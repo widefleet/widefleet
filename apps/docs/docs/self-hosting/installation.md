@@ -1,10 +1,10 @@
 ---
 title: Single-host installation
 description: Install, configure and recover a company installation.
-lastModified: 2026-10-23
+lastModified: 2026-10-27
 ---
 
-This guide installs Widefleet **0.4.2** using the reference Compose deployment. Use Linux x86-64, Docker Engine 29.8.1, Docker Compose 2.20.0 or newer (including v5), and a checkout of the matching release. Published images contain the required runtime and setup tools; the operator host needs no Node, pnpm or Rust installation. The operator owns DNS, certificates, identity-provider registrations, backups and upgrades. Commands below change the selected installation; choose its environment file deliberately.
+This guide installs Widefleet using the reference Compose deployment. Use Linux x86-64, Docker Engine 29.8.1, Docker Compose 2.20.0 or newer (including v5), and a checkout of the current release. Published images contain the required runtime and setup tools; the operator host needs no Node, pnpm or Rust installation. The operator owns DNS, certificates, identity-provider registrations, backups and upgrades. Commands below change the selected installation; choose its environment file deliberately.
 
 This page describes local PostgreSQL, RustFS and operator-provided certificates. [External services and automatic HTTPS](/self-hosting/external-services) use the same maintained base configuration with selectable service files.
 
@@ -27,11 +27,13 @@ This setting controls sign-in codes only. Invitations still require an email ada
 
 Open `PLATFORM_URL`:
 
-1. Create the first administrator with a name and email, then request a sign-in code. Read it from the selected transport and sign in. Codes expire after five minutes and allow three incorrect attempts.
-2. To use company SSO, enter the issuer URL and choose the app identity claims: Microsoft Entra for Entra object IDs and group handling, or OpenID Connect for standard subjects and configurable group claims. The page shows both callback URLs before saving.
+1. Enter the organization name and create the first administrator with a name and email, then request a sign-in code. Read it from the selected transport and sign in. Codes expire after five minutes and allow three incorrect attempts.
+2. After sign-in, **Publish your first app** shows CLI connection and deployment commands. Connect an enabled deployment agent before deploying. To use company SSO, open **Organization settings**, enter the issuer URL and choose the app identity claims: Microsoft Entra for Entra object IDs and group handling, or OpenID Connect for standard subjects and configurable group claims. The page shows both callback URLs before saving.
 3. Register both callbacks in one IdP registration and enter its client ID and secret once. Enable directory search only if needed.
 4. Enter your company email domain and publish the DNS TXT record shown by **Get verification record**. Choose **Verify domain**, then **Test company sign-in** and authenticate with the same email as the first administrator. Widefleet links that account automatically and checks its administrator access.
 5. Choose **Activate company SSO**. Company SSO becomes required for the operator organization. Existing email-code sessions can no longer access it; the operator recovery command remains available. An email-code login cannot bypass required SSO.
+
+The standard installation contains one organization and keeps ordinary registration closed. Invite colleagues or configure company SSO; no Widefleet Cloud account is required. Upgrading does not open registration.
 
 Customer administrators can change their own SSO and directory settings without restarting the platform.
 
@@ -52,7 +54,8 @@ Mount a JSON file read-only into the control-plane container and set `PLATFORM_B
 {
   "owner": {
     "name": "IT Administrator",
-    "email": "admin@example.com"
+    "email": "admin@example.com",
+    "organizationName": "Example Company"
   },
   "settings": {
     "externallyManaged": false,
@@ -71,7 +74,7 @@ Mount a JSON file read-only into the control-plane container and set `PLATFORM_B
 }
 ```
 
-`settings` is optional. SSO credentials belong to the native provider configuration; directory credentials, when used, accept a `clientSecret` string. Both are encrypted before storage. A Compose override can mount the bootstrap file; it must not mount the host Docker socket into management.
+`owner.organizationName` optionally names the installation organization. `settings` is optional. SSO credentials belong to the native provider configuration; directory credentials, when used, accept a `clientSecret` string. Both are encrypted before storage. A Compose override can mount the bootstrap file; it must not mount the host Docker socket into management.
 
 For example, add this override to the selected Compose files (the source paths must already exist):
 
