@@ -16,6 +16,8 @@ export type KeyValueObservation = {
 };
 
 export interface RuntimeExtension {
+  // Runs in the parent request context. KV calls do not await delivery, but
+  // synchronous work in the callback still contributes to request latency.
   keyValue?: (
     event: KeyValueObservation,
     identity: WorkerIdentity,

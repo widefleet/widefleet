@@ -24,7 +24,8 @@ const compile = async (entry: string, define: Record<string, string>) => {
     ["widefleet:workflow", "./__widefleet_workflow.js"],
   ]);
 
-  if (extension) alias.set("#runtime-extension", extension);
+  // Runtime extensions belong to the parent, never to embedded child modules.
+  if (extension && entry === "loader") alias.set("#runtime-extension", extension);
 
   const result = await build({
     entryPoints: [new URL(`src/${entry}.ts`, import.meta.url).pathname],

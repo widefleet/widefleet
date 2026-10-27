@@ -1,6 +1,6 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import * as z from "zod";
-import { nativeBinding } from "./storage.ts";
+import { nativeBinding } from "./native-binding.ts";
 import type { BindingProperties, ParentEnvironment } from "./types.ts";
 
 const httpMetadata = z.strictObject({

@@ -86,6 +86,24 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Runtime observer in
       const { port } = z.object({ port: z.number() }).parse(collector.address());
       const runtime = import.meta.resolve("@platform/app-runtime/runtime-extension");
       const main = join(directory, "index.js");
+      const extension = fileURLToPath(new URL("../fixtures/observer-extension.ts", runtime));
+
+      const child = async (entry: string) => {
+        const result = await build({
+          entryPoints: [fileURLToPath(new URL(`${entry}.ts`, runtime))],
+          bundle: true,
+          format: "esm",
+          platform: "browser",
+          external: ["cloudflare:*", "node:*", "./__widefleet_app.js"],
+          // Even when aliased, the child import graph must not reach the extension.
+          alias: { "#runtime-extension": extension, "widefleet:app": "./__widefleet_app.js" },
+          write: false,
+        });
+
+        return z.string().parse(result.outputFiles[0]?.text);
+      };
+
+      const bindingsSource = await child("bindings");
       await build({
         entryPoints: [fileURLToPath(new URL("../fixtures/observer.ts", runtime))],
         outfile: main,
@@ -93,10 +111,11 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Runtime observer in
         format: "esm",
         platform: "browser",
         external: ["cloudflare:*", "node:*"],
-        alias: {
-          "#runtime-extension": fileURLToPath(
-            new URL("../fixtures/observer-extension.ts", runtime),
-          ),
+        alias: { "#runtime-extension": extension },
+        define: {
+          WIDEFLEET_BINDINGS_SOURCE: JSON.stringify(bindingsSource),
+          WIDEFLEET_EVENTS_SOURCE: JSON.stringify(await child("events")),
+          WIDEFLEET_WORKFLOW_SOURCE: JSON.stringify(""),
         },
       });
       const config = join(directory, "wrangler.json");
@@ -109,6 +128,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Runtime observer in
           compatibility_flags: ["nodejs_compat"],
           worker_loaders: [{ binding: "WIDEFLEET_LOADER" }],
           kv_namespaces: [{ binding: "OBSERVER_KV", id: "observer-kv-fixture" }],
+          r2_buckets: [{ binding: "WIDEFLEET_PACKAGES", bucket_name: "observer-packages" }],
           vars: {
             OBSERVER_ORIGIN: `http://127.0.0.1:${port}`,
             OBSERVER_LABEL: "parent-only-fixture",
@@ -233,6 +253,34 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Runtime observer in
       expect(JSON.stringify(keyValues)).not.toMatch(
         /secret-key|secret-value|secret-metadata|absent-key/,
       );
+
+      for (const path of ["/app/production-kv", "/connector/production-kv"]) {
+        const response = await worker.fetch(`http://fixture${path}`);
+        expect(response.status, await response.clone().text()).toBe(200);
+        expect(await response.json()).toEqual({ value: null, observerBindingVisible: false });
+      }
+
+      await expect.poll(() => keyValues.length, { timeout: 8_000 }).toBe(26);
+      expect(
+        keyValues.slice(24).map(({ identity, event: { timestamp, ...event } }) => {
+          expect(timestamp).toBeGreaterThan(0);
+
+          return { identity, event };
+        }),
+      ).toEqual(
+        expect.arrayContaining(
+          observations.slice(0, 2).map(({ identity }) => ({
+            identity,
+            event: {
+              binding: "APP_KV",
+              operation: "read",
+              count: 1,
+              outcome: "ok",
+            },
+          })),
+        ),
+      );
+      expect(bindingsSource).not.toContain("OBSERVER_LABEL");
 
       // A rejected observer request must not change the already successful KV results.
       for (const response of pending) response.writeHead(503).end();

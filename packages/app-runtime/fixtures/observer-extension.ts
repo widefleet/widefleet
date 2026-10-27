@@ -1,34 +1,42 @@
 import { z } from "zod";
+import { env } from "cloudflare:workers";
 import type { RuntimeExtension } from "../src/runtime-extension.ts";
 
-export const runtimeExtension: RuntimeExtension = {
-  async keyValue(event, identity, binding) {
-    const origin = binding("OBSERVER_ORIGIN", z.url());
+const createCollector = (): RuntimeExtension => {
+  // This setup must run only in the parent, where the observer configuration exists.
+  z.object({ OBSERVER_LABEL: z.literal("parent-only-fixture") }).parse(env);
 
-    const response = await fetch(`${origin}/key-value`, {
-      method: "POST",
-      body: JSON.stringify({ identity, event }),
-    });
+  return {
+    async keyValue(event, identity, binding) {
+      const origin = binding("OBSERVER_ORIGIN", z.url());
 
-    await response.body?.cancel();
+      const response = await fetch(`${origin}/key-value`, {
+        method: "POST",
+        body: JSON.stringify({ identity, event }),
+      });
 
-    if (!response.ok) throw new Error("KV observer fixture rejected");
-  },
-  async tail(events, identity, binding) {
-    const origin = binding("OBSERVER_ORIGIN", z.url());
-    const label = binding("OBSERVER_LABEL", z.string());
+      await response.body?.cancel();
 
-    const response = await fetch(`${origin}/observer`, {
-      method: "POST",
-      body: JSON.stringify({
-        identity,
-        label,
-        events: events.map(({ outcome, cpuTime, wallTime }) => ({ outcome, cpuTime, wallTime })),
-      }),
-    });
+      if (!response.ok) throw new Error("KV observer fixture rejected");
+    },
+    async tail(events, identity, binding) {
+      const origin = binding("OBSERVER_ORIGIN", z.url());
+      const label = binding("OBSERVER_LABEL", z.string());
 
-    await response.body?.cancel();
+      const response = await fetch(`${origin}/observer`, {
+        method: "POST",
+        body: JSON.stringify({
+          identity,
+          label,
+          events: events.map(({ outcome, cpuTime, wallTime }) => ({ outcome, cpuTime, wallTime })),
+        }),
+      });
 
-    if (!response.ok) throw new Error("Observer fixture rejected");
-  },
+      await response.body?.cancel();
+
+      if (!response.ok) throw new Error("Observer fixture rejected");
+    },
+  };
 };
+
+export const runtimeExtension = createCollector();

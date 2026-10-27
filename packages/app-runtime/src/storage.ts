@@ -1,19 +1,9 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import * as z from "zod";
-import type { BindingProperties, Json, NativeBindings, ParentEnvironment } from "./types.ts";
+import type { BindingProperties, Json, ParentEnvironment } from "./types.ts";
+import { nativeBinding } from "./native-binding.ts";
 import { runtimeExtension } from "#runtime-extension";
 import type { KeyValueObservation, WorkerIdentity } from "./runtime-extension.ts";
-
-export const nativeBinding = <K extends keyof NativeBindings>(
-  environment: ParentEnvironment,
-  name: string,
-  kind: K,
-) => {
-  if (!environment[name]) throw new Error(`Missing native ${kind} binding`);
-
-  // SAFETY: Only the trusted loader selects a native name in immutable loopback props.
-  return environment[name] as NativeBindings[K];
-};
 
 const statement = z.object({
   sql: z.string(),
@@ -105,7 +95,8 @@ export class KeyValue extends WorkerEntrypoint<
 
       return result;
     } finally {
-      // Extension delivery is background work, independent of the KV result.
+      // Do not await delivery or replace the KV result on rejection. Synchronous
+      // callback work still runs in this worker before the caller resumes.
       this.ctx.waitUntil(
         Promise.resolve().then(() =>
           observe(
