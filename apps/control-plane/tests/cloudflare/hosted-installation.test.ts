@@ -42,6 +42,17 @@ const configuration = {
 };
 
 describe("Hosted resource provisioning", () => {
+  it("configures Queue deployment admission without removing existing runtime bindings", async () => {
+    expect(installation.queues).toBe(true);
+
+    for (const queues of [true, false]) {
+      const configs = await hostedConfigurations({ ...installation, queues }, ids);
+      expect(configs.controlPlane.vars.WIDEFLEET_QUEUES).toBe(String(queues));
+      expect(configs.runtime.unsafe.metadata.keep_bindings).toContain("queue");
+      expect(configs.runtime).not.toHaveProperty("queues");
+    }
+  });
+
   it("shares the existing configuration namespace between runtime and control plane", async () => {
     const configs = await hostedConfigurations(installation, ids);
     expect(configs.controlPlane.kv_namespaces).toEqual(configs.runtime.kv_namespaces);
