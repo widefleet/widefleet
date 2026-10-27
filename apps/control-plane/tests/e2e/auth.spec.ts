@@ -202,21 +202,25 @@ test.afterEach(async ({ browserName }, info) => {
     await info.attach(`${browserName}-server-log`, { body: logs, contentType: "text/plain" });
 });
 
-test("renews the browser cookie on page requests using Better Auth session defaults", async ({
-  page,
-  context,
-}) => {
-  const login = await environment.users.login({ userId: environment.owner.id });
-  const current = await environment.auth.api.getSession({ headers: login.headers });
+// Each age needs a fresh session/context: background requests from the first page
+// can renew a reused session while the test is rewriting its expiry and cookies.
+for (const age of [23, 25])
+  test(`uses default session renewal for a ${age}-hour-old browser session`, async ({
+    page,
+    context,
+  }) => {
+    const login = await environment.users.login({ userId: environment.owner.id });
+    const current = await environment.auth.api.getSession({ headers: login.headers });
 
-  if (!current) throw new Error("Expected owner session");
-  const lifetime = 7 * 24 * 60 * 60;
-  expect(current.session.expiresAt.getTime() - Date.now()).toBeGreaterThan((lifetime - 10) * 1000);
-  expect(current.session.expiresAt.getTime() - Date.now()).toBeLessThanOrEqual(lifetime * 1000);
-  const { authCookies } = await environment.auth.$context;
-  const cookieName = authCookies.sessionToken.name;
+    if (!current) throw new Error("Expected owner session");
+    const lifetime = 7 * 24 * 60 * 60;
+    expect(current.session.expiresAt.getTime() - Date.now()).toBeGreaterThan(
+      (lifetime - 10) * 1000,
+    );
+    expect(current.session.expiresAt.getTime() - Date.now()).toBeLessThanOrEqual(lifetime * 1000);
+    const { authCookies } = await environment.auth.$context;
+    const cookieName = authCookies.sessionToken.name;
 
-  for (const age of [23, 25]) {
     const previousExpiry = new Date(Date.now() + (lifetime - age * 60 * 60) * 1000);
     await environment.database.db
       .update(authSession)
@@ -254,8 +258,7 @@ test("renews the browser cookie on page requests using Better Auth session defau
       expect(browserCookie.httpOnly).toBe(true);
       expect(browserCookie.sameSite).toBe("Lax");
     }
-  }
-});
+  });
 
 test("clears an expired browser session and requires sign-in", async ({ page, context }) => {
   const login = await environment.users.login({ userId: environment.owner.id });
