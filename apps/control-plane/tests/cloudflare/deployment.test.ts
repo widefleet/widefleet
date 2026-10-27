@@ -786,7 +786,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
             get: (id) => env.DEPLOYMENTS.get(id),
           };
           const result = await withCloudflareDatabase(env, async ({ db }) => {
-            const executor = createCloudflareExecution({ ...env, DEPLOYMENTS: deploymentBinding }, db, createArtifactStorage(createR2Storage(env.ARTIFACTS)));
+            const executor = createCloudflareExecution({ ...env, DEPLOYMENTS: deploymentBinding, WIDEFLEET_QUEUES: url.searchParams.get('mode') === 'queues-disabled' ? 'false' : 'true' }, db, createArtifactStorage(createR2Storage(env.ARTIFACTS)));
             if (command.kind === 'capabilities') return executor.connectors.bind(command.actor, command.appId, command.name, command.grant);
             if (command.kind === 'access') return executor.access(command.actor, command.appId, command.input);
             if (command.kind === 'network') return executor.network(command.actor, command.appId, command.input);
@@ -830,8 +830,15 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           } catch {return new Response(null,{status:409});}
         }
         if (url.hostname === 'fixture' && url.pathname === '/stale-provision') {
-          try {await createCloudflareDeployment(env).provision(await request.json());return new Response(null,{status:204});}
-          catch {return new Response(null,{status:409});}
+          try {await createCloudflareDeployment({...env, WIDEFLEET_QUEUES: url.searchParams.get('mode') === 'queues-disabled' ? 'false' : 'true'}).provision(await request.json());return new Response(null,{status:204});}
+          catch (error) {return Response.json({error:error.message},{status:409});}
+        }
+        if (url.hostname === 'fixture' && url.pathname === '/stale-activate') {
+          const command = await request.json();
+          const deployment = createCloudflareDeployment({...env, WIDEFLEET_QUEUES: 'false'});
+          const registered = await deployment.register(command);
+          try {await deployment.activate(command, registered.targets[0], registered.sequence, {});return new Response(null,{status:204});}
+          catch (error) {return Response.json({error:error.message},{status:409});}
         }
         if (url.hostname === 'fixture' && url.pathname === '/raw-operation') {
           const command = await request.json();
@@ -1655,6 +1662,95 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
 
       return z.json().parse(await response.json());
     };
+
+    it("rejects Queue producers, consumers and rollbacks before admission or provisioning when disabled", async () => {
+      const before = { queues: queues.size, patches, databaseCreates, schedules: scheduleWrites };
+
+      for (const producer of [true, false]) {
+        const entry = await seedDeployment(environment.database.db, {
+          bindings: producer ? [{ type: "queue", name: "JOBS", queue: "jobs" }] : [],
+          consumers: producer
+            ? []
+            : [contract.queueConsumer.parse({ queue: "jobs", dead_letter_queue: "failed" })],
+        });
+
+        for (const rollback of [false, true]) {
+          const response = await submit(
+            { ...entry, command: { ...entry.command, rollback } },
+            "queues-disabled",
+          );
+
+          expect(response.status).toBe(400);
+          expect(await response.json()).toEqual({
+            error: "Queues are disabled for this installation",
+          });
+        }
+
+        expect(
+          await environment.database.db
+            .select()
+            .from(deployments)
+            .where(eq(deployments.appId, entry.appId)),
+        ).toHaveLength(0);
+        expect(
+          await environment.database.db
+            .select()
+            .from(cloudflareOperations)
+            .where(eq(cloudflareOperations.appId, entry.appId)),
+        ).toHaveLength(0);
+        expect(
+          await (
+            await worker.fetch(`http://fixture/storage?prefix=apps/${entry.appId}/commands/`)
+          ).json(),
+        ).toEqual([]);
+
+        const provision = await worker.fetch(
+          "http://fixture/stale-provision?mode=queues-disabled",
+          {
+            method: "POST",
+            body: JSON.stringify(entry.command),
+          },
+        );
+
+        expect(provision.status).toBe(409);
+        expect(await provision.json()).toEqual({
+          error: "Queues are disabled for this installation",
+        });
+
+        const activation = await worker.fetch("http://fixture/stale-activate", {
+          method: "POST",
+          body: JSON.stringify(entry.command),
+        });
+
+        expect(activation.status).toBe(409);
+        expect(await activation.json()).toEqual({
+          error: "Queues are disabled for this installation",
+        });
+        expect(
+          await (
+            await worker.fetch(`http://fixture/storage?prefix=versions/${entry.appId}/`)
+          ).json(),
+        ).toEqual([]);
+      }
+
+      expect({ queues: queues.size, patches, databaseCreates, schedules: scheduleWrites }).toEqual(
+        before,
+      );
+    });
+
+    it("deploys apps without Queues while Queue deployments are disabled", async () => {
+      const entry = await seedDeployment(environment.database.db, {
+        bindings: [],
+        source: "export default { fetch() { return new Response('without queues'); } }",
+      });
+
+      await seed(entry);
+      await dispatch(entry, "queues-disabled");
+      await completed(entry.command.id);
+      expect(await (await authenticatedFetch(`https://${entry.hostname}/`)).text()).toBe(
+        "without queues",
+      );
+    }, 30_000);
 
     it("provisions KV, Queues, Cron and app Workflows together and isolates production from previews", async () => {
       for (const entry of [first, preview]) {
