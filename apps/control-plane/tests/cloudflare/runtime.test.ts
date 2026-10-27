@@ -1210,28 +1210,165 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
     }
   });
 
-  it("does not start pending Workflow records through recovery reads while suspended", async () => {
+  it.each([null, '{"blocked":true}', "invalid-json"])(
+    "reads an incomplete Workflow creation without starting it with availability %s",
+    async (value) => {
+      const id = crypto.randomUUID();
+      const existing = crypto.randomUUID();
+      expect(
+        (await manageWorkflow({ action: "create", id: existing, params: { mode: "sleep" } }))
+          .status,
+      ).toBe(200);
+      expect((await workflowBinding({ method: "seedPending", id })).status).toBe(200);
+      await availability(value);
+
+      try {
+        expect(await (await workflowBinding({ method: "get", id })).json()).toEqual({ id });
+        const status = { status: "unknown", error: { name: "WorkflowInstanceUnavailable" } };
+        expect(
+          await (await workflowBinding({ method: "instance", id, action: "status" })).json(),
+        ).toMatchObject(status);
+        expect(await (await manageWorkflow({ action: "status", id })).json()).toMatchObject({
+          result: status,
+        });
+
+        const listed = z
+          .object({
+            result: z.object({
+              instances: z.array(
+                z.object({
+                  id: z.string(),
+                  version: z.string(),
+                  createdAt: z.string(),
+                  status: z.string(),
+                  error: z.object({ name: z.string(), message: z.string() }).optional(),
+                }),
+              ),
+            }),
+          })
+          .parse(await (await manageWorkflow({ action: "list" })).json());
+
+        const incomplete = listed.result.instances.find((entry) => entry.id === id);
+        expect(incomplete).toMatchObject({ id, ...status });
+        expect(incomplete?.error?.message).toContain("creation was not confirmed");
+        expect(listed.result.instances.map((entry) => entry.id)).toContain(existing);
+        expect(await (await workflowBinding({ method: "nativeExists", id })).json()).toBe(false);
+        expect((await workflowBinding({ method: "instance", id, action: "delete" })).status).toBe(
+          200,
+        );
+        await availability(null);
+        expect(
+          await (
+            await workflowBinding({ method: "create", options: { id, params: { mode: "sleep" } } })
+          ).json(),
+        ).toEqual({ id });
+      } finally {
+        await availability(null);
+        await manageWorkflow({ action: "delete", id });
+        await manageWorkflow({ action: "delete", id: existing });
+      }
+    },
+  );
+
+  it.each(["pause", "sendEvent", "terminate", "resume", "restart"])(
+    "does not create a missing native instance for %s",
+    async (action) => {
+      const id = crypto.randomUUID();
+      expect((await workflowBinding({ method: "seedPending", id })).status).toBe(200);
+
+      try {
+        const request =
+          action === "sendEvent"
+            ? { action, id, event: { type: "continue", payload: { add: 21 } } }
+            : { action, id };
+
+        expect((await manageWorkflow(request)).status).toBe(400);
+        expect(await (await workflowBinding({ method: "nativeExists", id })).json()).toBe(false);
+      } finally {
+        await manageWorkflow({ action: "delete", id });
+      }
+    },
+  );
+
+  it.each(["binding", "management"])(
+    "does not retry a failed %s creation when inspecting or creating the same ID",
+    async (source) => {
+      const id = crypto.randomUUID();
+
+      const create = () =>
+        source === "binding"
+          ? workflowBinding({ method: "create", options: { id, params: { mode: "sleep" } } })
+          : manageWorkflow({ action: "create", id, params: { mode: "sleep" } });
+
+      await workflowBinding({ method: "creationFault", options: "before" });
+
+      try {
+        await rejectedWorkflow(await create(), "Synthetic Workflow creation failure");
+        await workflowBinding({ method: "creationFault", options: null });
+        expect((await workflowBinding({ method: "get", id })).status).toBe(200);
+        expect(await (await manageWorkflow({ action: "status", id })).json()).toMatchObject({
+          result: { status: "unknown" },
+        });
+        expect((await manageWorkflow({ action: "list" })).status).toBe(200);
+        await rejectedWorkflow(await create(), "Workflow instance already exists");
+        expect(await (await workflowBinding({ method: "nativeExists", id })).json()).toBe(false);
+        expect((await manageWorkflow({ action: "delete", id })).status).toBe(200);
+        expect((await create()).status).toBe(200);
+      } finally {
+        await workflowBinding({ method: "creationFault", options: null });
+        await manageWorkflow({ action: "delete", id });
+      }
+    },
+  );
+
+  it.each(["binding", "management", "batch"])(
+    "confirms a successful %s creation without a native lookup",
+    async (source) => {
+      const id = crypto.randomUUID();
+      const options = { id, params: { mode: "sleep" } };
+      await workflowBinding({ method: "creationFault", options: "lookup" });
+
+      try {
+        let response;
+
+        if (source === "binding") response = await workflowBinding({ method: "create", options });
+        else if (source === "batch")
+          response = await workflowBinding({ method: "createBatch", options: [options] });
+        else response = await manageWorkflow({ action: "create", ...options });
+
+        expect(response.status).toBe(200);
+
+        if (source === "binding") expect(await response.json()).toEqual({ id });
+        else if (source === "batch") expect(await response.json()).toEqual([{ id }]);
+        else expect(await response.json()).toEqual({ result: { id } });
+
+        await rejectedWorkflow(
+          await manageWorkflow({ action: "status", id }),
+          "Synthetic Workflow lookup failure",
+        );
+        await workflowBinding({ method: "creationFault", options: null });
+        expect((await manageWorkflow({ action: "status", id })).status).toBe(200);
+      } finally {
+        await workflowBinding({ method: "creationFault", options: null });
+        await manageWorkflow({ action: "delete", id });
+      }
+    },
+  );
+
+  it("finds the native instance after a creation response failure", async () => {
     const id = crypto.randomUUID();
-    expect((await workflowBinding({ method: "seedPending", id })).status).toBe(200);
-    await availability(JSON.stringify({ blocked: true }));
+    await workflowBinding({ method: "creationFault", options: "after" });
 
     try {
-      await rejectedWorkflow(
-        await workflowBinding({ method: "get", id }),
-        "Organization execution is suspended",
-      );
-      await rejectedWorkflow(
-        await manageWorkflow({ action: "status", id }),
-        "Organization execution is suspended",
-      );
-      await rejectedWorkflow(
-        await manageWorkflow({ action: "list" }),
-        "Organization execution is suspended",
-      );
-      await availability(JSON.stringify({ blocked: false }));
-      expect((await workflowBinding({ method: "get", id })).status).toBe(200);
+      expect(
+        await (await manageWorkflow({ action: "create", id, params: { mode: "sleep" } })).json(),
+      ).toEqual({ result: { id } });
+      expect(await (await workflowBinding({ method: "nativeExists", id })).json()).toBe(true);
+      await availability('{"blocked":true}');
+      expect((await manageWorkflow({ action: "status", id })).status).toBe(200);
     } finally {
       await availability(null);
+      await workflowBinding({ method: "creationFault", options: null });
       await manageWorkflow({ action: "delete", id });
     }
   });

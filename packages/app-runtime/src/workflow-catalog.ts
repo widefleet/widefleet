@@ -92,54 +92,72 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
 
     return app;
   }
+  private async confirm(record: RecordEntry) {
+    if (!record.started) {
+      record.started = true;
+      delete record.start.params;
+      await this.ctx.storage.put(key(record.start.workflow, record.id), record);
+    }
+  }
   private async native(record: RecordEntry) {
-    if (record.started) return this.env.WIDEFLEET_WORKFLOWS.get(record.nativeId);
+    const instance = await this.env.WIDEFLEET_WORKFLOWS.get(record.nativeId);
+
+    // Creation can succeed before the catalog confirms it. Finding that
+    // instance repairs the catalog without starting any new execution.
+    await this.confirm(record);
+
+    return instance;
+  }
+  private async readStatus(record: RecordEntry) {
+    try {
+      return await this.status(await this.native(record));
+    } catch (error) {
+      if (record.started || !missing(error)) throw error;
+
+      return {
+        status: "unknown" as const,
+        error: {
+          name: "WorkflowInstanceUnavailable",
+          message: "Workflow creation was not confirmed and its native instance is missing",
+        },
+      };
+    }
+  }
+  private async start(record: RecordEntry) {
+    await this.requireExecution(record.start);
+    await this.ctx.storage.put(key(record.start.workflow, record.id), record);
     let instance;
 
-    // Native creation can commit before the catalog confirms it. Recover the
-    // existing instance without applying the gate for new execution.
     try {
-      instance = await this.env.WIDEFLEET_WORKFLOWS.get(record.nativeId);
+      const options: WorkflowInstanceCreateOptions<Start> = {
+        id: record.nativeId,
+        params: record.start,
+      };
+
+      if (record.creation.locationHint) options.locationHint = record.creation.locationHint;
+
+      if (record.creation.retention) {
+        options.retention = {};
+
+        if (record.creation.retention.successRetention !== undefined)
+          options.retention.successRetention = record.creation.retention.successRetention;
+
+        if (record.creation.retention.errorRetention !== undefined)
+          options.retention.errorRetention = record.creation.retention.errorRetention;
+      }
+
+      instance = await this.env.WIDEFLEET_WORKFLOWS.create(options);
     } catch (error) {
-      if (!missing(error)) throw error;
-    }
-
-    if (!instance) {
-      await this.requireExecution(record.start);
-      await this.ctx.storage.put(key(record.start.workflow, record.id), record);
-
+      // A failed response does not prove creation failed. Recover an existing
+      // instance, but never issue another create from a lookup.
       try {
-        const options: WorkflowInstanceCreateOptions<Start> = {
-          id: record.nativeId,
-          params: record.start,
-        };
-
-        if (record.creation.locationHint) options.locationHint = record.creation.locationHint;
-
-        if (record.creation.retention) {
-          options.retention = {};
-
-          if (record.creation.retention.successRetention !== undefined)
-            options.retention.successRetention = record.creation.retention.successRetention;
-
-          if (record.creation.retention.errorRetention !== undefined)
-            options.retention.errorRetention = record.creation.retention.errorRetention;
-        }
-
-        instance = await this.env.WIDEFLEET_WORKFLOWS.create(options);
-      } catch (error) {
-        // A failed response does not prove native creation failed.
-        try {
-          instance = await this.env.WIDEFLEET_WORKFLOWS.get(record.nativeId);
-        } catch {
-          throw error;
-        }
+        return await this.native(record);
+      } catch {
+        throw error;
       }
     }
 
-    record.started = true;
-    delete record.start.params;
-    await this.ctx.storage.put(key(record.start.workflow, record.id), record);
+    await this.confirm(record);
 
     return instance;
   }
@@ -156,10 +174,7 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
     const name = key(scope.workflow, id);
     const previous = await this.ctx.storage.get<RecordEntry>(name);
 
-    if (previous) {
-      if (!previous.started) await this.native(previous);
-      throw new Error("Workflow instance already exists");
-    }
+    if (previous) throw new Error("Workflow instance already exists");
 
     const record = {
       creation: { retention: options.retention, locationHint: options.locationHint },
@@ -170,7 +185,7 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
       start: { ...scope, id, version: app.version, params: options.params },
     };
 
-    await this.native(record);
+    await this.start(record);
 
     return { id };
   }
@@ -242,9 +257,8 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
 
       if (!record) throw new Error("Workflow instance not found");
 
-      // Retain a handle to expired catalog entries so callers can delete them.
-      if (!record.started) await this.native(record);
-
+      // Catalog handles remain usable for inspecting and deleting failed
+      // creations or expired instances; obtaining a handle never starts work.
       return { id };
     });
   }
@@ -267,12 +281,12 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
       return null;
     }
 
+    if (action === "status") return this.readStatus(record);
+
     if (action === "resume" || action === "restart") await this.requireExecution(scope);
     const instance = await this.native(record);
 
     switch (action) {
-      case "status":
-        return this.status(instance);
       case "sendEvent":
         await instance.sendEvent(
           z.strictObject({ type: workflowEventType, payload: z.unknown() }).parse(input),
@@ -338,21 +352,24 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
 
         const instances = await Promise.all(
           page.map(async ([, record]) => {
-            let status;
-
-            try {
-              status = (await (await this.native(record)).status()).status;
-            } catch (error) {
-              if (!missing(error)) throw error;
-              status = "expired";
-            }
-
-            return {
+            const item = {
               id: record.id,
               version: record.start.version,
               createdAt: record.createdAt,
-              status,
             };
+
+            try {
+              const state = await this.readStatus(record);
+
+              if (state.status === "unknown" && state.error)
+                return { ...item, status: state.status, error: state.error };
+
+              return { ...item, status: state.status };
+            } catch (error) {
+              if (!missing(error)) throw error;
+
+              return { ...item, status: "expired" };
+            }
           }),
         );
 
