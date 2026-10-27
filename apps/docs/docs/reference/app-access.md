@@ -1,7 +1,7 @@
 ---
 title: App access
 description: Group rules, permissions, activation and the app access API.
-lastModified: 2026-10-23
+lastModified: 2026-10-27
 ---
 
 Open an app in management and choose **Access → App access** to select which company
@@ -19,7 +19,7 @@ Each original app has one group list shared automatically with all its previews.
 A user needs membership in **any one** listed group. An empty
 list allows every user admitted by the organization's sign-in configuration; it never
 enables anonymous access. Use stable group IDs from the identity provider, one
-per line. The optional Entra directory connection enables searching by name.
+per line. The Entra or Google Workspace directory connection enables searching by name.
 Generic OIDC installations can enter their configured group claim values directly.
 IDs containing commas or control characters are not supported.
 
@@ -82,9 +82,11 @@ and tokens do not reach the app. Internal Cron, Queue and connector invocations
 continue to use their existing capability boundaries; they are not browser SSO
 requests. Resource-level permissions inside an app remain the app's responsibility.
 
-Group memberships come from the existing SSO session. The current installation
-uses a one-hour cookie without refresh, so directory changes take effect at the
-next sign-in. An activated policy change applies to subsequent requests in an
+The proxy refreshes group memberships when the provider token expires and the next
+request renews it. Entra uses Graph transitive memberships, Google Workspace uses
+Directory direct memberships, and generic OIDC uses newly verified token claims.
+Provider propagation delays can add to this interval. If a required identity check
+fails temporarily, expired authorization is blocked while login cookies are retained. An activated policy change applies to subsequent requests in an
 existing session. Established connections continue under their earlier authorization.
 
 ## API

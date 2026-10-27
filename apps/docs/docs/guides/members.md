@@ -1,7 +1,7 @@
 ---
 title: Members and company sign-in
 description: Accept invitations, manage organization membership and activate verified company sign-in.
-lastModified: 2026-10-23
+lastModified: 2026-10-27
 ---
 
 Use this flow on an installation with email delivery and organization invitations enabled.
@@ -118,7 +118,7 @@ unchanged when updating the connection. Leave the other exported settings intact
 }
 ```
 
-`appIdentityType` selects the app identity format: `oidc` by default, or `entra` for Microsoft object IDs and group handling. For OIDC, `oidcConfig.mapping.extraFields.groups` names the provider claim containing app groups; change it if your provider uses a name such as `roles`. Both workspace and app sign-in use the same saved provider mapping.
+`appIdentityType` selects the app identity format: `oidc` by default, `entra` for Microsoft object IDs and Graph memberships, or `google` for Google Workspace and Directory memberships. See [Google Workspace setup](/self-hosting/installation#google-workspace) for its required directory connection. For OIDC, `oidcConfig.mapping.extraFields.groups` names the provider claim containing app groups; change it if your provider uses a name such as `roles`. Both workspace and app sign-in use the same saved provider mapping.
 
 The initial registration requires the client secret. Then plan and apply the edited file:
 
@@ -160,28 +160,37 @@ the [recovery procedure](/self-hosting/installation#secrets-and-administrator-re
 ## Opening published apps
 
 Without active, domain-verified company SSO, the app auth proxy uses Widefleet as its OIDC
-provider. New app logins require the control plane; an existing one-hour app session
-continues to work while the control plane is unavailable. Current organization
-membership is checked when a new app session is issued.
+provider. New logins and provider-token renewals require the control plane. Current
+organization membership is checked on both. Already verified authorization remains
+usable until its provider token expires; the built-in provider uses five-minute
+access tokens.
 
 With company SSO, the proxy authenticates directly at that IdP using the published
 organization configuration. The control plane is needed to change configuration,
-but is not in the app login path.
+but is not in the app login, renewal or group-lookup path.
 
 App [access rules](/reference/app-access) remain separate from management roles.
 Without company group claims, leave group restrictions empty: that allows the
 organization members admitted by Widefleet, never anonymous visitors. With company
 SSO, an empty group list allows users admitted by the app's IdP registration; restrict
-that registration to the intended users. Nonempty rules require matching group claims.
+that registration to the intended users. Nonempty rules require a matching group membership.
 
 With Widefleet app sign-in, removing a member prevents new app sessions. With company
 SSO, revoke the user's app access at the IdP or remove them from the groups required
 by the app's access rules. Removing their Widefleet membership alone does not block
 direct company app login.
 
-These membership and IdP changes do not revoke an already issued app cookie; it remains
-valid until its one-hour lifetime ends. The next app sign-in checks Widefleet membership
-or the current IdP admission and group claims, according to the configured login mode.
+App sessions use encrypted seven-day cookies. On the first request after provider-token
+expiry, the proxy refreshes the tokens, verifies the identity and updates memberships
+before granting access. A successful renewal extends the app session; inactivity beyond
+seven days or a rejected refresh grant requires another sign-in. Directory changes take
+effect at the next renewal, plus any delay at the provider.
+
+A temporary provider outage preserves the login. Once authorization has expired, app
+requests return `503` until it can be checked again; removed group membership returns
+`403`. A successful token rotation is saved even if the subsequent directory lookup or
+app request fails, so retrying can use the new credential. Browser requests with an
+invalid or revoked refresh grant go through sign-in again.
 Changing the provider configuration or shared client ID in Widefleet invalidates existing
 app sessions as soon as the new configuration is active.
 Rotating only the IdP client secret preserves existing sessions.
