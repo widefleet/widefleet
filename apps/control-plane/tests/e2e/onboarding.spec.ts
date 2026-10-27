@@ -253,7 +253,7 @@ test("accepts emailed owner invitations and manages members in isolated organiza
       await operator
         .getByLabel("Client secret", { exact: true })
         .fill(environment.environment.ENTRA_CLIENT_SECRET);
-      await operator.getByLabel("App identity claims").selectOption("entra");
+      await operator.getByLabel("App identity provider").selectOption("entra");
       await operator.getByRole("button", { name: "Save", exact: true }).click();
       await expect(
         operator.getByText("Leave blank to keep the saved secret.", { exact: true }),

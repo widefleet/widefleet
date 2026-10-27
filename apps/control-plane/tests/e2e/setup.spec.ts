@@ -114,7 +114,7 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
       .fill(
         `${environment.environment.ENTRA_AUTHORITY}/${environment.environment.ENTRA_TENANT_ID}/v2.0`,
       );
-    await page.getByLabel("App identity claims").selectOption("entra");
+    await page.getByLabel("App identity provider").selectOption("entra");
     await expect(
       page.getByText("http://localhost:25430/api/auth/sso/callback/company-widefleet", {
         exact: true,
