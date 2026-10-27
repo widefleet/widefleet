@@ -527,9 +527,11 @@
                       <Textarea
                         id="directory-secret"
                         bind:value={draft.directory.clientSecret}
-                        required={!view.settings.directory}
+                        required={!view.settings.directory ||
+                          view.sso?.appIdentityType !== draft.sso.appIdentityType}
                         autocomplete="off"
-                        placeholder={view.settings.directory
+                        placeholder={view.settings.directory &&
+                        view.sso?.appIdentityType === draft.sso.appIdentityType
                           ? "Leave blank to keep the saved key"
                           : "-----BEGIN PRIVATE KEY-----"}
                       />
@@ -538,8 +540,10 @@
                         id="directory-secret"
                         type="password"
                         bind:value={draft.directory.clientSecret}
-                        required={!view.settings.directory}
-                        placeholder={view.settings.directory
+                        required={!view.settings.directory ||
+                          view.sso?.appIdentityType !== draft.sso.appIdentityType}
+                        placeholder={view.settings.directory &&
+                        view.sso?.appIdentityType === draft.sso.appIdentityType
                           ? "Leave blank to keep the saved secret"
                           : ""}
                         autocomplete="new-password"

@@ -7,6 +7,7 @@ import {
 } from "@platform/contracts";
 import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
+import { importPKCS8 } from "jose";
 import type { OrganizationCredential } from "./organization-operations.ts";
 import { appCallbackUrl, type AppSignIn } from "./app-sign-in.ts";
 import { companyIdentity } from "./company-identity.ts";
@@ -19,7 +20,12 @@ import { decryptSecret, encryptSecret } from "./secret-encryption.ts";
 import { installationOrganizationId } from "../organization.ts";
 import { readOrganizationSettings, createInstallationOwner } from "./installation-store.ts";
 import { oauthClient } from "./auth-schema.ts";
-import { readSsoConfiguration, ssoRuntimeIdentity, saveSsoProvider } from "./sso-settings.ts";
+import {
+  readSsoConfiguration,
+  readSsoProvider,
+  ssoRuntimeIdentity,
+  saveSsoProvider,
+} from "./sso-settings.ts";
 import { appLoginClientId, readAppLogin, registerAppLogin } from "./app-login-client.ts";
 import { organizationSettings } from "./schema.ts";
 
@@ -217,6 +223,13 @@ const createOrganizationSettingsService = (
           code: "BAD_REQUEST",
           message: "Enter the directory client secret",
         });
+      const previous = await readSsoProvider(database, organizationId);
+
+      if ((previous?.appIdentityType === "google") !== (next.sso?.appIdentityType === "google"))
+        throw new InvalidOperation({
+          code: "BAD_REQUEST",
+          message: "Enter new directory credentials when changing the directory provider",
+        });
     }
 
     if (
@@ -241,6 +254,17 @@ const createOrganizationSettingsService = (
         code: "BAD_REQUEST",
         message: "Directory access requires Microsoft Entra or Google Workspace app identity",
       });
+
+    if (next.sso?.appIdentityType === "google" && next.directory?.clientSecret) {
+      try {
+        await importPKCS8(next.directory.clientSecret, "RS256");
+      } catch {
+        throw new InvalidOperation({
+          code: "BAD_REQUEST",
+          message: "Enter the Google service account's RSA private key in PEM format",
+        });
+      }
+    }
 
     return appSignIn
       ? appSignIn.plan(null)
