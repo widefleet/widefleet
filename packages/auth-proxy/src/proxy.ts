@@ -220,13 +220,11 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
       headers.set("x-auth-request-email", user.data.email);
       headers.set("x-auth-request-groups", user.data.groups.join(","));
 
-      const result = await apps
-        .fetch(new Request(request, { headers }))
-        .catch((cause: unknown) => {
-          if (!renewed?.headers.getSetCookie().length) throw cause;
+      const result = await apps.fetch(new Request(request, { headers })).catch((cause: unknown) => {
+        if (!renewed?.headers.getSetCookie().length) throw cause;
 
-          return response(502, "The app is temporarily unavailable.");
-        });
+        return response(502, "The app is temporarily unavailable.");
+      });
 
       const outgoing = new Response(result.body, result);
 
