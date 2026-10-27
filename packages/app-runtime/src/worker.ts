@@ -8,9 +8,16 @@ export const workerCode = async (
   workflow?: string,
   workflowSource = WIDEFLEET_WORKFLOW_SOURCE,
 ) => {
+  const identity = {
+    appId: app.appId,
+    deploymentId: app.deploymentId,
+    buildId: app.metadata.debug?.build_id ?? null,
+  };
+
   const worker = await workerDefinition(
     {
       scope: `apps/${app.appId}`,
+      identity,
       metadata: app.metadata,
       modules: app.modules,
       nativeBindings: app.nativeBindings,
@@ -81,15 +88,6 @@ export const workerCode = async (
     modules: Object.fromEntries(modules),
     env: Object.fromEntries(bindings),
     globalOutbound: context.exports.Gateway({ props: { origins: app.network.policy.backend } }),
-    tails: workerTails(
-      environment,
-      context,
-      {
-        appId: app.appId,
-        deploymentId: app.deploymentId,
-        buildId: app.metadata.debug?.build_id ?? null,
-      },
-      app.telemetry,
-    ),
+    tails: workerTails(environment, context, identity, app.telemetry),
   };
 };

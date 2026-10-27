@@ -22,6 +22,7 @@ export const connectorCode = async (
   const worker = await workerDefinition(
     {
       scope: connectorScope(identity),
+      identity: { organizationId, connector: release.name, connectorVersion: version },
       metadata: configuration,
       modules: release.modules,
       nativeBindings: snapshot.nativeBindings,
