@@ -303,6 +303,7 @@ describe("Auth proxy session lifecycle", () => {
       expect(limited.headers.get("retry-after")).toBe("5");
       expect(cookies(limited)).toContain(".account_data=");
       expect(cookies(limited)).not.toContain(".session_data=");
+
       const originalCookies = new Map(
         cookie.split("; ").map((part) => [part.slice(0, part.indexOf("=")), part]),
       );
