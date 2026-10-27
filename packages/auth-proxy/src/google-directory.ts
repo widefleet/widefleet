@@ -7,7 +7,9 @@ const scope = "https://www.googleapis.com/auth/admin.directory.group.readonly";
 
 const tokenEndpoint = "https://oauth2.googleapis.com/token";
 
-const tokens = new Map<string, Promise<{ value: string; expiresAt: number }>>();
+const tokens = new Map<string, { value: string; expiresAt: number }>();
+
+const exchanges = new Map<string, Promise<{ value: string; expiresAt: number }>>();
 
 const page = z.object({
   groups: z
@@ -35,25 +37,20 @@ export const createGoogleDirectory = (
 ) => {
   const credentials = googleDirectoryCredentials.parse(input);
 
+  const fingerprint = crypto.subtle
+    .digest("SHA-256", new TextEncoder().encode(JSON.stringify(credentials)))
+    .then((hash) =>
+      Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, "0")).join(""),
+    );
+
   const accessToken = async () => {
-    const fingerprint = Array.from(
-      new Uint8Array(
-        await crypto.subtle.digest(
-          "SHA-256",
-          new TextEncoder().encode(JSON.stringify(credentials)),
-        ),
-      ),
-      (byte) => byte.toString(16).padStart(2, "0"),
-    ).join("");
+    const key = await fingerprint;
+    const cached = tokens.get(key);
 
-    const cached = tokens.get(fingerprint);
+    if (cached && cached.expiresAt > Date.now() + 30_000) return cached.value;
+    const existing = exchanges.get(key);
 
-    if (cached) {
-      const token = await cached;
-
-      if (token.expiresAt > Date.now() + 30_000) return token.value;
-      tokens.delete(fingerprint);
-    }
+    if (existing) return (await existing).value;
 
     const pending = (async () => {
       const assertion = await new SignJWT({ scope })
@@ -86,14 +83,17 @@ export const createGoogleDirectory = (
 
     // Cache only the service credential, never membership decisions. Bound memory
     // across organizations and share concurrent token exchanges in this isolate.
-    if (tokens.size >= 64) tokens.delete(tokens.keys().next().value ?? "");
-    tokens.set(fingerprint, pending);
+    exchanges.set(key, pending);
 
     try {
-      return (await pending).value;
-    } catch (cause) {
-      tokens.delete(fingerprint);
-      throw cause;
+      const token = await pending;
+
+      if (tokens.size >= 64) tokens.delete(tokens.keys().next().value ?? "");
+      tokens.set(key, token);
+
+      return token.value;
+    } finally {
+      exchanges.delete(key);
     }
   };
 
@@ -101,11 +101,24 @@ export const createGoogleDirectory = (
     const url = new URL("https://admin.googleapis.com/admin/directory/v1/groups");
     url.search = parameters.toString();
 
-    const response = await request(url, {
-      headers: { authorization: `Bearer ${await accessToken()}` },
-      redirect: "error",
-      signal: AbortSignal.timeout(10_000),
-    });
+    const send = async () => {
+      const credential = await accessToken();
+
+      const response = await request(url, {
+        headers: { authorization: `Bearer ${credential}` },
+        redirect: "error",
+        signal: AbortSignal.timeout(10_000),
+      });
+
+      const key = await fingerprint;
+
+      if (response.status === 401 && tokens.get(key)?.value === credential) tokens.delete(key);
+
+      return response;
+    };
+
+    const first = await send();
+    const response = first.status === 401 ? await send() : first;
 
     requireSuccess(response);
 
