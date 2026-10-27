@@ -4,6 +4,7 @@ import type { BindingProperties, Json, ParentEnvironment } from "./types.ts";
 import { nativeBinding } from "./native-binding.ts";
 import { runtimeExtension } from "#runtime-extension";
 import type { KeyValueObservation, WorkerIdentity } from "./runtime-extension.ts";
+import { observeDatabase } from "./d1-observation.ts";
 
 const statement = z.object({
   sql: z.string(),
@@ -24,10 +25,25 @@ const databaseRequest = z.discriminatedUnion("method", [
 
 export type DatabaseRequest = z.infer<typeof databaseRequest>;
 
-export class Database extends WorkerEntrypoint<ParentEnvironment, BindingProperties> {
+export class Database extends WorkerEntrypoint<
+  ParentEnvironment,
+  BindingProperties & { binding: string; identity: WorkerIdentity }
+> {
   async query(input: DatabaseRequest, bookmark?: string) {
     const request = databaseRequest.parse(input);
-    const database = nativeBinding(this.env, this.ctx.props.name, "d1");
+    const nativeDatabase = nativeBinding(this.env, this.ctx.props.name, "d1");
+    const observe = runtimeExtension.database;
+
+    const database = observe
+      ? observeDatabase(nativeDatabase, this.ctx, (event) =>
+          observe(
+            { ...event, binding: this.ctx.props.binding, operation: request.method },
+            this.ctx.props.identity,
+            (name, schema) => schema.parse(this.env[name]),
+          ),
+        )
+      : nativeDatabase;
+
     const session = database.withSession(bookmark);
     const prepare = (input: StatementInput) => session.prepare(input.sql).bind(...input.parameters);
 

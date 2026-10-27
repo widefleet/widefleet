@@ -36,11 +36,31 @@ export type ObjectObservation = {
   outcome: "ok" | "not_found" | "precondition_failed" | "error";
 };
 
+export type DatabaseObservation = {
+  timestamp: number;
+  binding: string;
+  // The existing facade routes run() through all(). No SQL classification.
+  operation: "all" | "first" | "raw" | "batch" | "exec";
+  // One event per native _send, before first/raw/exec project away metadata.
+  // Outcome describes that native response, not subsequent JS projection errors.
+  outcome: "ok" | "error" | "unknown";
+  statements: number;
+  // Sum each returned statement once. A missing counter or response makes that
+  // entire dimension unknown. Native retry totals are never multiplied.
+  rowsRead: number | null;
+  rowsWritten: number | null;
+};
+
 export interface RuntimeExtension {
   // Same parent-context delivery semantics as keyValue. Handle-only multipart
   // resume and failures before native invocation produce no observation.
   object?: (
     event: ObjectObservation,
+    identity: WorkerIdentity,
+    binding: <Value>(name: string, schema: z.ZodType<Value>) => Value,
+  ) => Promise<void>;
+  database?: (
+    event: DatabaseObservation,
     identity: WorkerIdentity,
     binding: <Value>(name: string, schema: z.ZodType<Value>) => Value,
   ) => Promise<void>;
