@@ -100,6 +100,32 @@ describe("Public account registration and organization onboarding", () => {
     ).toThrow("requires email delivery");
   });
 
+  it("keeps a self-hosted runtime closed to organization creation without an extension", async () => {
+    const runtime = await createRuntime({
+      configuration: environment.configuration,
+      database: environment.database,
+      settings: environment.settings,
+      reporting: environment.reporting,
+      storage: createStorage(environment.configuration),
+      encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
+    })();
+
+    const { headers } = await register("self-hosted-account@mail.test");
+    headers.set("content-type", "application/json");
+    headers.set("origin", environment.configuration.PLATFORM_URL);
+
+    const response = await createApi(runtime)(
+      new Request(`${environment.configuration.PLATFORM_URL}/api/v1/organizations`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ name: "Another Team", slug: "another-team" }),
+      }),
+    );
+
+    expect(runtime.publicSignup).toBe(false);
+    expect(response.status).toBe(403);
+  });
+
   it("authenticates organization creation independently of membership and rejects foreign origins and company sessions", async () => {
     const calls: string[] = [];
     const record = { id: crypto.randomUUID(), name: "My Team", slug: "my-team" };
@@ -118,20 +144,13 @@ describe("Public account registration and organization onboarding", () => {
       reporting: environment.reporting,
       storage: createStorage(environment.configuration),
       encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
-      publicSignup: true,
       sendEmail: async (message) => {
         messages.push(message);
       },
-      organizationOnboarding: {
-        available: async () => true,
-        prepare: async (ownerId) => {
-          calls.push(ownerId);
+      createOrganization: async (ownerId) => {
+        calls.push(ownerId);
 
-          return record;
-        },
-        activate: async (id) => {
-          calls.push(id);
-        },
+        return record;
       },
     })();
 
@@ -153,13 +172,13 @@ describe("Public account registration and organization onboarding", () => {
     const response = await api(request(headers));
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(record);
-    expect(calls).toEqual([result.user.id, record.id]);
+    expect(calls).toEqual([result.user.id]);
     await environment.database.db
       .update(session)
       .set({ identityOrganizationId: "widefleet" })
       .where(eq(session.userId, result.user.id));
     expect((await api(request(headers))).status).toBe(403);
-    expect(calls).toHaveLength(2);
+    expect(calls).toHaveLength(1);
 
     const anonymous = new Headers({
       "content-type": "application/json",

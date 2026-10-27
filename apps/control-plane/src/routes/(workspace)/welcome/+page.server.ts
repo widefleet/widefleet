@@ -14,13 +14,10 @@ export const load: PageServerLoad = async ({ request, setHeaders }) => {
     .from(organizationRuntimes)
     .where(eq(organizationRuntimes.organizationId, principal.application.organizationId));
 
-  const agents = execution?.executor === "agent" ? await runtime.agents.list(principal) : null;
-
   return {
     platformUrl: runtime.configuration.PLATFORM_URL,
     organizationId: principal.application.organizationId,
-    needsAgent:
-      execution?.executor === "agent" &&
-      (!agents?.isOk() || !agents.value.some((agent) => agent.enabled)),
+    usesAgent: execution?.executor === "agent",
+    installationAdmin: principal.admin,
   };
 };

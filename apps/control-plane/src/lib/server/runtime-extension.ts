@@ -3,13 +3,12 @@ import type { OrganizationAccess } from "./application-context.ts";
 import type { Configuration } from "./config.ts";
 import type { Database } from "./database.ts";
 import type { SendEmail } from "./email.ts";
-import type { OrganizationOnboarding } from "./onboarding.ts";
+import type { CreateOrganization } from "./onboarding.ts";
 
 export interface RuntimeExtension {
   organizationAccess?: OrganizationAccess;
   sendEmail?: SendEmail;
-  publicSignup?: boolean;
-  organizationOnboarding?: OrganizationOnboarding;
+  createOrganization?: CreateOrganization;
   scheduled?: (
     event: { scheduledTime: number; cron: string },
     binding: <Value>(name: string, schema: z.ZodType<Value>) => Value,

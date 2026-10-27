@@ -16,14 +16,15 @@
   description="Connect your terminal and deploy an app to your workspace."
 />
 <div class="mt-8 max-w-2xl space-y-8">
-  {#if data.needsAgent}
+  {#if data.usesAgent}
     <section class="rounded-lg border p-4 space-y-3">
       <h2 class="font-medium">Connect your deployment agent</h2>
       <p class="text-muted-foreground text-sm">
-        This installation needs an enabled deployment agent before it can publish apps. Register the
-        agent and start it using the installation guide.
+        This installation deploys apps through an agent. Make sure your administrator has connected
+        and started it before deploying.
       </p>
-      <Button href="/agents" variant="outline">Set up agent</Button>
+      {#if data.installationAdmin}<Button href="/agents" variant="outline">Manage agents</Button
+        >{/if}
     </section>
   {/if}
   <section class="space-y-3">

@@ -110,9 +110,12 @@ test("registers a verified account, creates its organization and guides the firs
     environment.authControl.available(false);
     await page.getByRole("button", { name: "Create organization", exact: true }).click();
     await expect(
-      page.getByText("Your organization is being prepared. Retry to finish setup.", {
-        exact: true,
-      }),
+      page.getByText(
+        "Your organization was created, but app sign-in is not ready. Retry or open organization settings.",
+        {
+          exact: true,
+        },
+      ),
     ).toBeVisible();
     environment.authControl.available(true);
     await page.getByRole("button", { name: "Create organization", exact: true }).click();

@@ -154,14 +154,6 @@ export const createApi = (runtime: Runtime) => {
       .handler(async ({ context }) =>
         unwrap(await runtime.identity.organizations(context.request)),
       ),
-    onboarding: base
-      .route({ method: "GET", path: "/onboarding" })
-      .output(z.object({ canCreateOrganization: z.boolean() }))
-      .handler(async ({ context }) => ({
-        canCreateOrganization: await runtime.onboarding.available(
-          unwrap(await runtime.identity.authenticateUser(context.request, "platform:read")),
-        ),
-      })),
     createOrganization: base
       .route({ method: "POST", path: "/organizations" })
       .input(contract.createOrganizationInput)

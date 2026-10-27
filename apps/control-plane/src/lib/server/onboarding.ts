@@ -1,70 +1,67 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { createOrganizationInput, onboardingOrganization } from "@platform/contracts";
 import type { z } from "zod";
 import type { Database } from "./database.ts";
 import type { AuthenticatedUser } from "./identity.ts";
 import type { createSettingsService } from "./settings.ts";
-import { user } from "./auth-schema.ts";
+import { member, user } from "./auth-schema.ts";
 import { InvalidOperation } from "./errors.ts";
 
-// Provisioning belongs to the installation. Authentication and the browser/API
-// flow stay shared; a verified account alone never grants organization access.
-export interface OrganizationOnboarding {
-  available: (ownerId: string) => Promise<boolean>;
-  prepare: (
-    ownerId: string,
-    input: z.infer<typeof createOrganizationInput>,
-  ) => Promise<z.infer<typeof onboardingOrganization>>;
-  activate: (organizationId: string, ownerId: string) => Promise<void>;
-}
+export type CreateOrganization = (
+  ownerId: string,
+  input: z.infer<typeof createOrganizationInput>,
+) => Promise<z.infer<typeof onboardingOrganization>>;
 
 export const createOnboardingService = (
   database: Database,
   settings: Pick<ReturnType<typeof createSettingsService>, "publish">,
-  provisioning?: OrganizationOnboarding,
+  createOrganization?: CreateOrganization,
 ) => {
-  const owner = async (person: AuthenticatedUser) => {
-    if (person.identityOrganizationId !== null)
-      throw new InvalidOperation({
-        code: "FORBIDDEN",
-        message: "Sign in with an email code to create an organization",
-      });
+  const verifiedUser = async (person: AuthenticatedUser) => {
+    if (person.identityOrganizationId !== null) return false;
     const [current] = await database.select().from(user).where(eq(user.id, person.userId));
 
-    if (!current?.emailVerified)
-      throw new InvalidOperation({ code: "FORBIDDEN", message: "Verify your email first" });
-
-    return current;
+    return current?.emailVerified === true;
   };
 
   return {
     available: async (person: AuthenticatedUser) => {
-      if (!provisioning || person.identityOrganizationId !== null) return false;
-      const [current] = await database.select().from(user).where(eq(user.id, person.userId));
+      if (!createOrganization || !(await verifiedUser(person))) return false;
 
-      return current?.emailVerified === true && (await provisioning.available(current.id));
+      const [owned] = await database
+        .select({ id: member.id })
+        .from(member)
+        .where(and(eq(member.userId, person.userId), eq(member.role, "owner")))
+        .limit(1);
+
+      return !owned;
     },
     create: async (person: AuthenticatedUser, input: z.infer<typeof createOrganizationInput>) => {
-      if (!provisioning)
+      if (!createOrganization)
         throw new InvalidOperation({
           code: "FORBIDDEN",
-          message: "Organization creation is disabled",
+          message: "Organization creation is unavailable on this installation",
         });
-      const current = await owner(person);
 
-      const organization = onboardingOrganization.parse(
-        await provisioning.prepare(current.id, createOrganizationInput.parse(input)),
+      if (!(await verifiedUser(person)))
+        throw new InvalidOperation({
+          code: "FORBIDDEN",
+          message: "Sign in with a verified email code to create an organization",
+        });
+
+      const organization = await createOrganization(
+        person.userId,
+        createOrganizationInput.parse(input),
       );
 
-      // A retry resumes the prepared organization after a publication failure.
       const publication = await settings.publish(organization.id);
 
       if (publication.error || publication.activation.state !== "active")
         throw new InvalidOperation({
           code: "CONFLICT",
-          message: "Your organization is being prepared. Retry to finish setup.",
+          message:
+            "Your organization was created, but app sign-in is not ready. Retry or open organization settings.",
         });
-      await provisioning.activate(organization.id, current.id);
 
       return organization;
     },
