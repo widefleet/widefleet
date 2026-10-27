@@ -8,6 +8,7 @@ export default defineMeta({
     "cli-configuration",
     "authentication",
     "social-sign-in",
+    "company-sign-in",
     "configuration",
     "api",
     "app-access",
