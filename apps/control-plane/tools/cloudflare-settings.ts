@@ -40,6 +40,7 @@ export const connectCloudflareSettings = async (
             organizationId,
           ),
         Boolean(sendEmail),
+        selected.observation,
       ),
       invitations: createInvitationService(
         database,

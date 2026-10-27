@@ -4,7 +4,7 @@ import { readCloudflareConfiguration } from "./cloudflare-config.ts";
 import { withCloudflareDatabase } from "./cloudflare-database.ts";
 import type { deploymentWorkflowCommand } from "./cloudflare-connector-command.ts";
 import type { createRuntimeExtension } from "./runtime-extension.ts";
-import { observe } from "./observation.ts";
+import { observe, closeObservation } from "./observation.ts";
 
 export const observeDeploymentCompletion = async (
   bindings: CloudflareBindings,
@@ -33,6 +33,6 @@ export const observeDeploymentCompletion = async (
         rollback: command.rollback,
       },
     });
-    await extension.observation?.close();
+    await closeObservation(extension.observation);
   });
 };

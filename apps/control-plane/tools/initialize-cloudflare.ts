@@ -18,10 +18,13 @@ import { initializeOrganization } from "../src/lib/server/organization.ts";
 import { z } from "zod";
 import { connectCloudflareSettings } from "./cloudflare-settings.ts";
 import { loadRuntimeExtension } from "./runtime-extension.ts";
+import { closeObservation, type Observation } from "../src/lib/server/observation.ts";
 
 const configuration = cloudflareConfigurationSchema.parse(process.env);
 
 const database = createDatabase(configuration);
+
+let observation: Observation | undefined;
 
 try {
   await migrate(database.db, {
@@ -46,6 +49,7 @@ try {
     );
 
     const extension = await loadRuntimeExtension({ configuration, database: database.db });
+    observation = extension.observation;
 
     const configPath =
       process.env["WIDEFLEET_INITIALIZE_CONFIG"] ??
@@ -87,11 +91,12 @@ try {
         await services.close();
       }
     } else {
-      await createInstallationOwner(database.db, bootstrap.owner);
+      await createInstallationOwner(database.db, bootstrap.owner, false, observation);
     }
   }
 
   console.info("Hosted installation initialized");
 } finally {
+  await closeObservation(observation);
   await database.close();
 }

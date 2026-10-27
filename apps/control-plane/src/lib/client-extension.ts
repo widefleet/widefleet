@@ -9,10 +9,10 @@ export interface ClientContext {
 }
 
 export interface ClientExtension {
-  start?: () => void | (() => void);
-  update?: (context: ClientContext) => void;
-  exception?: (error: ReturnType<typeof sanitizeReportingError>) => void;
-  reset?: () => void;
+  start?: () => void | (() => void | Promise<void>);
+  update?: (context: ClientContext) => void | Promise<void>;
+  exception?: (error: ReturnType<typeof sanitizeReportingError>) => void | Promise<void>;
+  reset?: () => void | Promise<void>;
 }
 
 // Replaced only when an installation supplies a browser extension at build time.

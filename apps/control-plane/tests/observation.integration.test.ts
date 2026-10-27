@@ -4,6 +4,10 @@ import { createAppService } from "../src/lib/server/apps.ts";
 import { createAuthentication } from "../src/lib/server/auth.ts";
 import type { Principal } from "../src/lib/server/identity.ts";
 import type { ObservationEvent } from "../src/lib/server/observation.ts";
+import { eq } from "drizzle-orm";
+import { installation } from "../src/lib/server/schema.ts";
+import { createSettingsService } from "../src/lib/server/settings.ts";
+import { installationKeys } from "../src/lib/server/installation-files.ts";
 
 describe("Installation observation", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
@@ -25,7 +29,10 @@ describe("Installation observation", () => {
 
   it("observes committed app creation once across create/resolve retries", async () => {
     const events: ObservationEvent[] = [];
-    const capture = vi.fn((event: ObservationEvent) => events.push(event));
+
+    const capture = vi.fn((event: ObservationEvent) => {
+      events.push(event);
+    });
 
     const service = createAppService(
       environment.database.db,
@@ -60,21 +67,25 @@ describe("Installation observation", () => {
     expect(JSON.stringify(events)).not.toContain(environment.owner.email);
   });
 
-  it("preserves successful application operations when an observer throws", async () => {
-    const service = createAppService(
-      environment.database.db,
-      environment.configuration,
-      undefined,
-      {
-        capture: () => {
-          throw new Error("Observer unavailable");
+  it.each(["sync", "async"])(
+    "preserves successful application operations on %s observer failures",
+    async (mode) => {
+      const service = createAppService(
+        environment.database.db,
+        environment.configuration,
+        undefined,
+        {
+          capture: () => {
+            if (mode === "async") return Promise.reject(new Error("Observer unavailable"));
+            throw new Error("Observer unavailable");
+          },
+          close: async () => {},
         },
-        close: async () => {},
-      },
-    );
+      );
 
-    expect((await service.resolve(owner(), "observation-failure")).isOk()).toBe(true);
-  });
+      expect((await service.resolve(owner(), `observation-failure-${mode}`)).isOk()).toBe(true);
+    },
+  );
 
   it("emits user creation and session creation from authentication hooks", async () => {
     const events: ObservationEvent[] = [];
@@ -103,5 +114,49 @@ describe("Installation observation", () => {
     expect(events.map((event) => event.event)).toEqual(["user_created", "user_signed_in"]);
     expect(events.every((event) => event.userId === user.id)).toBe(true);
     expect(JSON.stringify(events)).not.toContain(user.email);
+  });
+
+  it("observes interactive setup only after successful owner creation", async () => {
+    const setup = await createTestEnvironment();
+    const events: ObservationEvent[] = [];
+
+    try {
+      await setup.database.db
+        .update(installation)
+        .set({ ownerId: null })
+        .where(eq(installation.id, "widefleet"));
+
+      const settings = createSettingsService(
+        { ...setup.configuration, LOGIN_CODE_DELIVERY: "console" },
+        setup.database.db,
+        (await installationKeys(setup.configuration)).encryption,
+        () => null,
+        false,
+        {
+          capture: (event) => {
+            events.push(event);
+          },
+          close: async () => {},
+        },
+      );
+
+      await expect(
+        settings.createOwner({ name: "Duplicate", email: setup.owner.email }),
+      ).rejects.toThrow();
+      expect(events).toEqual([]);
+
+      const created = await settings.createOwner({
+        name: "Observed owner",
+        email: "setup-observer@example.test",
+      });
+
+      expect(events).toEqual([{ event: "user_created", id: created.id, userId: created.id }]);
+      await expect(
+        settings.createOwner({ name: "Retry", email: "setup-observer@example.test" }),
+      ).rejects.toThrow();
+      expect(events).toHaveLength(1);
+    } finally {
+      await setup.close();
+    }
   });
 });

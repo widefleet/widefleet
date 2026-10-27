@@ -22,6 +22,7 @@ import { initializeOrganization } from "./organization.ts";
 import { createSettingsService } from "./settings.ts";
 import { installationRuntime } from "./organization-runtime.ts";
 import { z } from "zod";
+import { closeObservation } from "./observation.ts";
 
 const readBootstrap = async (configuration: Configuration) => {
   if (!configuration.PLATFORM_BOOTSTRAP_FILE) return null;
@@ -88,9 +89,10 @@ export const initializeRuntime = async (
   ) => RuntimeExtension | Promise<RuntimeExtension> = createRuntimeExtension,
 ) => {
   const { keys, configuration, database } = await prepareInstallation(input, migrationsFolder);
+  let extension: RuntimeExtension | undefined;
 
   try {
-    const extension = await createExtension({ database: database.db, configuration });
+    extension = await createExtension({ database: database.db, configuration });
 
     const settings = createSettingsService(
       configuration,
@@ -98,6 +100,7 @@ export const initializeRuntime = async (
       keys.encryption,
       (organizationId) => createAppSignIn(configuration, keys.cookie, organizationId),
       Boolean(extension.sendEmail),
+      extension.observation,
     );
 
     const state = await readInstallation(database.db);
@@ -124,6 +127,7 @@ export const initializeRuntime = async (
 
     return { configuration, database, settings, encryptionKey: keys.encryption, extension };
   } catch (cause) {
+    await closeObservation(extension?.observation);
     await database.close();
     throw cause;
   }

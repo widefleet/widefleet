@@ -1,4 +1,5 @@
 import type { sanitizeReportingError } from "@platform/contracts";
+import { runExtensionEffect } from "../extension-effects.ts";
 
 export interface ObservationEvent {
   event:
@@ -14,15 +15,29 @@ export interface ObservationEvent {
 }
 
 export interface Observation {
-  capture: (event: ObservationEvent) => void;
-  exception?: (error: ReturnType<typeof sanitizeReportingError>) => void;
+  // Capture is nonblocking; implementations drain their pending delivery in close.
+  capture: (event: ObservationEvent) => void | Promise<void>;
+  exception?: (error: ReturnType<typeof sanitizeReportingError>) => void | Promise<void>;
   close: () => Promise<void>;
 }
 
 export const observe = (observer: Observation | undefined, event: ObservationEvent) => {
+  runExtensionEffect(() => observer?.capture(event));
+};
+
+export const closeObservation = async (observer: Observation | undefined) => {
+  if (!observer) return;
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+
+  const expired = new Promise<void>((resolve) => {
+    deadline = setTimeout(resolve, 2000);
+  });
+
   try {
-    observer?.capture(event);
+    await Promise.race([Promise.resolve().then(() => observer.close()), expired]);
   } catch {
-    // Observation happens after a successful operation and cannot change its result.
+    // Failed delivery must not prevent database cleanup.
+  } finally {
+    clearTimeout(deadline);
   }
 };

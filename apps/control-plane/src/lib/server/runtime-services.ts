@@ -3,6 +3,7 @@ import type { BetterAuthOptions } from "better-auth";
 import type { sveltekitCookies } from "better-auth/svelte-kit";
 import { sanitizeReportingError } from "@platform/contracts";
 import type { Observation } from "./observation.ts";
+import { runExtensionEffect } from "../extension-effects.ts";
 import { createAuthentication } from "./auth.ts";
 import { createIdentityService } from "./identity.ts";
 import { createAppService } from "./apps.ts";
@@ -92,11 +93,7 @@ export const createRuntime = ({
       exception: (error: Error) => {
         reporting.exception(error);
 
-        try {
-          observation?.exception?.(sanitizeReportingError(error));
-        } catch {
-          /* Best effort. */
-        }
+        runExtensionEffect(() => observation?.exception?.(sanitizeReportingError(error)));
       },
     },
     storage,

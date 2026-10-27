@@ -1,6 +1,7 @@
 import { reportingPreferences, sanitizeReportingError } from "@platform/contracts";
 
 import { clientExtension } from "#client-extension";
+import { runExtensionEffect } from "./extension-effects.ts";
 
 let enabled = false;
 
@@ -9,11 +10,7 @@ let sent = 0;
 let since = Date.now();
 
 export const reportBrowserError = (error: Error) => {
-  try {
-    clientExtension.exception?.(sanitizeReportingError(error));
-  } catch {
-    // Keep the built-in reporting path independent of extensions.
-  }
+  runExtensionEffect(() => clientExtension.exception?.(sanitizeReportingError(error)));
 
   if (!enabled) return;
 
@@ -37,7 +34,7 @@ export const reportBrowserError = (error: Error) => {
 };
 
 export const startBrowserReporting = () => {
-  let stopExtension: void | (() => void);
+  let stopExtension: void | (() => void | Promise<void>);
 
   try {
     stopExtension = clientExtension.start?.();
@@ -77,11 +74,7 @@ export const startBrowserReporting = () => {
   }, 60_000);
 
   return () => {
-    try {
-      stopExtension?.();
-    } catch {
-      /* Continue cleaning up built-in reporting. */
-    }
+    runExtensionEffect(() => stopExtension?.());
 
     stopped = true;
     enabled = false;

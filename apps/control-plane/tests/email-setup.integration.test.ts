@@ -2,7 +2,9 @@ import { expect, it, vi } from "vitest";
 import { ssoProvider } from "../src/lib/server/auth-schema.ts";
 import { installationSettings } from "@platform/contracts";
 import { eq } from "drizzle-orm";
-import { writeFile } from "node:fs/promises";
+import { writeFile, readFile } from "node:fs/promises";
+import type { ObservationEvent } from "../src/lib/server/observation.ts";
+import { readInstallation } from "../src/lib/server/installation-store.ts";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
@@ -17,8 +19,16 @@ it.each(["runtime", "source command"])(
   "publishes default app sign-in during %s bootstrap",
   async (mode) => {
     const environment = await createTestEnvironment();
+    const events: ObservationEvent[] = [];
+    const eventsPath = join(environment.configuration.PLATFORM_STATE_DIRECTORY, "observed.json");
 
     const runtimeExtension = vi.spyOn(extension, "createRuntimeExtension").mockReturnValue({
+      observation: {
+        capture: (event) => {
+          events.push(event);
+        },
+        close: async () => {},
+      },
       sendEmail: async () => {
         throw new Error("Setup must not send mail");
       },
@@ -58,7 +68,13 @@ it.each(["runtime", "source command"])(
 
         await writeFile(
           extensionPath,
-          'export const createRuntimeExtension = () => ({ sendEmail: async () => { throw new Error("Setup must not send mail"); } });',
+          `import {writeFile} from 'node:fs/promises';
+          export const createRuntimeExtension = () => {
+            const events = [];
+            return { observation: { capture: event => { events.push(event); }, close: () => writeFile(${JSON.stringify(eventsPath)}, JSON.stringify(events)) },
+              sendEmail: async () => { throw new Error('Setup must not send mail'); }
+            };
+          };`,
         );
         await promisify(execFile)(process.execPath, ["apps/control-plane/tools/initialize.ts"], {
           cwd: fileURLToPath(new URL("../../../", import.meta.url)),
@@ -78,6 +94,15 @@ it.each(["runtime", "source command"])(
       );
 
       try {
+        const { ownerId } = await readInstallation(runtime.database.db);
+        const expected = [{ event: "user_created", id: ownerId, userId: ownerId }];
+
+        if (mode === "runtime") expect(events).toEqual(expected);
+        else {
+          expect(JSON.parse(await readFile(eventsPath, "utf8"))).toEqual(expected);
+          expect(events).toEqual([]);
+        }
+
         const view = await runtime.settings.inspect();
         expect(view.sso).toBeNull();
         expect(view.activation.state).toBe("active");

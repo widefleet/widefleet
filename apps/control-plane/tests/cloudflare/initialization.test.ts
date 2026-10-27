@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -124,6 +124,26 @@ describe("Hosted installation initialization", () => {
         disabled: false,
       },
     ]);
+  }, 30_000);
+
+  it("observes the first hosted administrator once and flushes before exiting", async () => {
+    const extensionPath = join(directory, "observation.mjs");
+    const eventsPath = join(directory, "events.json");
+    await writeFile(
+      extensionPath,
+      `import {writeFile} from 'node:fs/promises';
+      export const createRuntimeExtension = () => {
+        const events = [];
+        return {observation: {capture: event => {events.push(event);}, close: () => writeFile(${JSON.stringify(eventsPath)}, JSON.stringify(events))}};
+      };`,
+    );
+    const overrides = { WIDEFLEET_RUNTIME_EXTENSION: extensionPath };
+    await initialize(bootstrapPath, undefined, overrides);
+    const { ownerId } = await readInstallation(database.db);
+    const expected = [{ event: "user_created", id: ownerId, userId: ownerId }];
+    expect(JSON.parse(await readFile(eventsPath, "utf8"))).toEqual(expected);
+    await initialize(bootstrapPath, undefined, overrides);
+    expect(JSON.parse(await readFile(eventsPath, "utf8"))).toEqual(expected);
   }, 30_000);
 
   it("requires app sign-in credentials for an email-enabled owner-only bootstrap", async () => {
