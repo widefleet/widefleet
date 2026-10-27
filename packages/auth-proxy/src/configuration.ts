@@ -48,6 +48,7 @@ export const sessionVersion = async (configuration: AuthConfiguration) => {
   // Changing the identity source must invalidate identities issued by the old
   // provider. Rotating only its client secret does not change existing users.
   const source = JSON.stringify({
+    sessionFormat: 2,
     organizationId: configuration.organizationId,
     provider: configuration.provider,
     clientId: configuration.clientId,
