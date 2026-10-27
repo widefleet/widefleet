@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: App configuration fields, storage bindings and settings managed by the platform.
-lastModified: 2026-10-12
+lastModified: 2026-10-27
 ---
 
 App projects use `wrangler.jsonc`. Start with the generated starter and use the
@@ -58,6 +58,17 @@ Resources are scoped to each app or preview. Keep resource identifiers stable to
 preserve access to existing data. Native data remains after a declaration is removed.
 For Cron, Queue or Workflow handlers, export them from a custom entry module
 alongside the generated starter's HTTP handler.
+
+### Queue deployment availability
+
+Cloudflare installation operators can set `queues: false` in the hosted installation
+profile to reject app deployments with Queue producers or consumers. The setting
+defaults to `true` and belongs to the installation profile, not the app's `wrangler.jsonc`.
+
+If deployment reports `Queues are disabled for this installation`, remove the Queue
+declarations and code that requires them, or ask your installation operator to enable
+Queues. Rollbacks to artifacts that use Queues are also rejected. Existing apps keep
+running, and the setting does not delete Queue data or pause existing consumers.
 
 ## Database migrations
 
