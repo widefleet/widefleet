@@ -1321,6 +1321,40 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
     },
   );
 
+  it.each(["binding", "management", "batch"])(
+    "confirms a successful %s creation without a native lookup",
+    async (source) => {
+      const id = crypto.randomUUID();
+      const options = { id, params: { mode: "sleep" } };
+      await workflowBinding({ method: "creationFault", options: "lookup" });
+
+      try {
+        let response;
+
+        if (source === "binding") response = await workflowBinding({ method: "create", options });
+        else if (source === "batch")
+          response = await workflowBinding({ method: "createBatch", options: [options] });
+        else response = await manageWorkflow({ action: "create", ...options });
+
+        expect(response.status).toBe(200);
+
+        if (source === "binding") expect(await response.json()).toEqual({ id });
+        else if (source === "batch") expect(await response.json()).toEqual([{ id }]);
+        else expect(await response.json()).toEqual({ result: { id } });
+
+        await rejectedWorkflow(
+          await manageWorkflow({ action: "status", id }),
+          "Synthetic Workflow lookup failure",
+        );
+        await workflowBinding({ method: "creationFault", options: null });
+        expect((await manageWorkflow({ action: "status", id })).status).toBe(200);
+      } finally {
+        await workflowBinding({ method: "creationFault", options: null });
+        await manageWorkflow({ action: "delete", id });
+      }
+    },
+  );
+
   it("finds the native instance after a creation response failure", async () => {
     const id = crypto.randomUUID();
     await workflowBinding({ method: "creationFault", options: "after" });

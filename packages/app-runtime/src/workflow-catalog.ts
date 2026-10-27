@@ -92,16 +92,19 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
 
     return app;
   }
-  private async native(record: RecordEntry) {
-    const instance = await this.env.WIDEFLEET_WORKFLOWS.get(record.nativeId);
-
-    // Creation can succeed before the catalog confirms it. Finding that
-    // instance repairs the catalog without starting any new execution.
+  private async confirm(record: RecordEntry) {
     if (!record.started) {
       record.started = true;
       delete record.start.params;
       await this.ctx.storage.put(key(record.start.workflow, record.id), record);
     }
+  }
+  private async native(record: RecordEntry) {
+    const instance = await this.env.WIDEFLEET_WORKFLOWS.get(record.nativeId);
+
+    // Creation can succeed before the catalog confirms it. Finding that
+    // instance repairs the catalog without starting any new execution.
+    await this.confirm(record);
 
     return instance;
   }
@@ -123,6 +126,7 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
   private async start(record: RecordEntry) {
     await this.requireExecution(record.start);
     await this.ctx.storage.put(key(record.start.workflow, record.id), record);
+    let instance;
 
     try {
       const options: WorkflowInstanceCreateOptions<Start> = {
@@ -142,7 +146,7 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
           options.retention.errorRetention = record.creation.retention.errorRetention;
       }
 
-      await this.env.WIDEFLEET_WORKFLOWS.create(options);
+      instance = await this.env.WIDEFLEET_WORKFLOWS.create(options);
     } catch (error) {
       // A failed response does not prove creation failed. Recover an existing
       // instance, but never issue another create from a lookup.
@@ -153,7 +157,9 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
       }
     }
 
-    return this.native(record);
+    await this.confirm(record);
+
+    return instance;
   }
   private async createInstance(scope: WorkflowScope, options: z.infer<typeof workflowOptions>) {
     const app = await this.active(scope);

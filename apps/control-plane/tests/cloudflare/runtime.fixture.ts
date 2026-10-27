@@ -175,7 +175,11 @@ export class CloudflareWorkflowCatalog extends RuntimeWorkflowCatalog {
           if (fault === 'after') throw new Error('Synthetic Workflow response failure');
           return instance;
         },
-        get(id) { return env.WIDEFLEET_WORKFLOWS.get(id); },
+        async get(id) {
+          if (await ctx.storage.get('creationFault') === 'lookup')
+            throw new Error('Synthetic Workflow lookup failure');
+          return env.WIDEFLEET_WORKFLOWS.get(id);
+        },
       },
       AUTH_CONFIG: {
         async get(key, ...args) {
