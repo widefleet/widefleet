@@ -7,7 +7,12 @@ export const init: ServerInit = async () => {
   if (!building) await getRuntime();
 };
 
-export const handle: Handle = ({ event, resolve }) => {
+import { handleExtensionRequest } from "#request-extension";
+
+export const handle: Handle = async ({ event, resolve }) => {
+  const extensionResponse = await handleExtensionRequest(event.request);
+
+  if (extensionResponse) return extensionResponse;
   event.locals.runtime = createRequestRuntime(getRuntime);
 
   return resolve(event);

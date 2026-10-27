@@ -1,3 +1,4 @@
+import { observe, type Observation } from "./observation.ts";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { DEVICE_CODE_GRANT_TYPE } from "@better-auth/oauth-provider";
@@ -45,6 +46,7 @@ export const createAuthentication = (
   database: DatabaseExecutor,
   options: Parameters<typeof authenticationOptions>[1] & {
     organizationAccess?: OrganizationAccess;
+    observation?: Observation;
     encryptionKey?: string;
     cookies?: ReturnType<typeof sveltekitCookies>;
   } = {},
@@ -111,6 +113,17 @@ export const createAuthentication = (
     ],
     database: drizzleAdapter(database, { provider: "pg", schema: authSchema, transaction: true }),
     databaseHooks: {
+      user: {
+        create: {
+          after: async (record) => {
+            observe(options.observation, {
+              event: "user_created",
+              id: record.id,
+              userId: record.id,
+            });
+          },
+        },
+      },
       session: {
         update: {
           before: async (record, context) => {
@@ -126,6 +139,13 @@ export const createAuthentication = (
           },
         },
         create: {
+          after: async (record) => {
+            observe(options.observation, {
+              event: "user_signed_in",
+              id: record.id,
+              userId: record.userId,
+            });
+          },
           before: async (record, context) => {
             const providerId = context?.path.startsWith("/sso/callback/")
               ? context.params?.["providerId"]

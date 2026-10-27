@@ -241,6 +241,6 @@ export const createUploadService = (
 
     if (prepared.isErr() || !execution) return prepared;
 
-    return execution.deploy(prepared.value, requestId);
+    return execution.deploy(prepared.value, requestId, false, principal);
   },
 });

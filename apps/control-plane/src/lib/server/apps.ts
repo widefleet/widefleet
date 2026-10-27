@@ -8,6 +8,7 @@ import { member, user } from "./auth-schema.ts";
 import { findMembers } from "./member-directory.ts";
 import { InvalidOperation } from "./errors.ts";
 import type { Principal } from "./identity.ts";
+import { observe, type Observation } from "./observation.ts";
 import { appGrants, apps, artifacts, deploymentEvents, deployments, jobs } from "./schema.ts";
 import { transact, type Transaction } from "./transactions.ts";
 import { lockOrganizationRuntime, requireAgentExecution } from "./organization-runtime.ts";
@@ -203,14 +204,17 @@ export const enqueueDeployment = async (
   return Result.ok(presentDeployment(deployment));
 };
 
-const provisionApp = (
+const provisionApp = async (
   database: Database,
   configuration: Configuration,
   principal: Principal,
   input: z.infer<typeof contract.createAppInput>,
   mode: "create" | "resolve",
-) =>
-  transact(database, async (transaction) => {
+  observation?: Observation,
+) => {
+  let created = false;
+
+  const result = await transact(database, async (transaction) => {
     await transaction.execute(
       sql`select pg_advisory_xact_lock(hashtextextended(${JSON.stringify([principal.application.organizationId, input.slug])}, 0))`,
     );
@@ -340,13 +344,28 @@ const provisionApp = (
         }),
       );
 
+    created = true;
+
     return Result.ok(presentApp(record, configuration));
   });
+
+  if (created && result.isOk())
+    observe(observation, {
+      event: "app_created",
+      id: result.value.id,
+      userId: principal.id,
+      organizationId: principal.application.organizationId,
+      properties: { app_id: result.value.id, preview: input.parentId !== null },
+    });
+
+  return result;
+};
 
 export const createAppService = (
   database: Database,
   configuration: Configuration,
   execution?: HostedExecution,
+  observation?: Observation,
 ) => ({
   catalog: (principal: Principal) =>
     transact(database, async (transaction) => {
@@ -421,7 +440,7 @@ export const createAppService = (
       return Result.ok(presentApp(record.value, configuration));
     }),
   create: (principal: Principal, input: z.infer<typeof contract.createAppInput>) =>
-    provisionApp(database, configuration, principal, input, "create"),
+    provisionApp(database, configuration, principal, input, "create", observation),
   resolve: (principal: Principal, slug: string) =>
     provisionApp(
       database,
@@ -429,6 +448,7 @@ export const createAppService = (
       principal,
       { slug, displayName: slug, parentId: null },
       "resolve",
+      observation,
     ),
   history: async (principal: Principal, appId: string) => {
     const history = await transact(database, async (transaction) => {
@@ -512,7 +532,7 @@ export const createAppService = (
 
     if (prepared.isErr() || !execution) return prepared;
 
-    return execution.deploy(prepared.value, requestId, true);
+    return execution.deploy(prepared.value, requestId, true, principal);
   },
   remove: (principal: Principal, appId: string) => {
     if (execution) return execution.remove(principal, appId);

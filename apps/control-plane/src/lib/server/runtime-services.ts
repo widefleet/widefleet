@@ -1,6 +1,8 @@
 import type { OrganizationAccess } from "./application-context.ts";
 import type { BetterAuthOptions } from "better-auth";
 import type { sveltekitCookies } from "better-auth/svelte-kit";
+import { sanitizeReportingError } from "@platform/contracts";
+import type { Observation } from "./observation.ts";
 import { createAuthentication } from "./auth.ts";
 import { createIdentityService } from "./identity.ts";
 import { createAppService } from "./apps.ts";
@@ -34,6 +36,7 @@ export const createRuntime = ({
   settings,
   storage,
   reporting,
+  observation,
   encryptionKey,
   execution,
   hostedLogs,
@@ -49,6 +52,7 @@ export const createRuntime = ({
   settings: ReturnType<typeof createSettingsService>;
   storage: ArtifactStorage;
   reporting: ReturnType<typeof createReporting>;
+  observation?: Observation;
   encryptionKey: string;
   execution?: HostedExecution;
   organizationAccess?: OrganizationAccess;
@@ -60,6 +64,8 @@ export const createRuntime = ({
   discoveryTransport?: "node" | "cloudflare";
 }) => {
   const authOptions: NonNullable<Parameters<typeof createAuthentication>[2]> = { encryptionKey };
+
+  if (observation) authOptions.observation = observation;
 
   if (sendEmail) authOptions.sendEmail = sendEmail;
 
@@ -81,14 +87,25 @@ export const createRuntime = ({
     configuration,
     database,
     settings,
-    reporting,
+    reporting: {
+      ...reporting,
+      exception: (error: Error) => {
+        reporting.exception(error);
+
+        try {
+          observation?.exception?.(sanitizeReportingError(error));
+        } catch {
+          /* Best effort. */
+        }
+      },
+    },
     storage,
     invitations: createInvitationService(database.db, configuration, sendEmail, organizationAccess),
     emailSignIn: Boolean(createSignInEmail(configuration, sendEmail)),
     signInProvider: createAuthenticationAdmission(database.db, organizationAccess).signInProvider,
     discoverPlatform: (domain: string) => discoverPlatform(domain, discoveryTransport),
     cliLogin: createCliLogin(database.db, configuration),
-    apps: createAppService(database.db, configuration, execution),
+    apps: createAppService(database.db, configuration, execution, observation),
     agents: createAgentService(database.db),
     jobs: createJobService(database.db, storage, encryptionKey, reporting.operation),
     network: createNetworkService(database.db, execution),

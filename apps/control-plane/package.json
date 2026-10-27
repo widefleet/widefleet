@@ -14,7 +14,9 @@
     "#lib/*": "./src/lib/*.ts",
     "#server/*": "./src/lib/server/*.ts",
     "#shadcn/*": "./src/lib/*",
-    "#runtime-extension": "./src/lib/server/runtime-extension.ts"
+    "#runtime-extension": "./src/lib/server/runtime-extension.ts",
+    "#client-extension": "./src/lib/client-extension.ts",
+    "#request-extension": "./src/lib/server/request-extension.ts"
   },
   "exports": {
     "./application-context": "./src/lib/server/application-context.ts",
@@ -36,7 +38,9 @@
     "./tools/*": "./tools/*",
     "./organization": "./src/lib/organization.ts",
     "./http-availability": "./src/lib/server/http-availability.ts",
-    "./queue-availability": "./src/lib/server/queue-availability.ts"
+    "./queue-availability": "./src/lib/server/queue-availability.ts",
+    "./client-extension": "./src/lib/client-extension.ts",
+    "./observation": "./src/lib/server/observation.ts"
   },
   "scripts": {
     "test:e2e": "playwright test",

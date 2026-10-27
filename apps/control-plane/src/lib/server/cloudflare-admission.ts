@@ -30,6 +30,14 @@ export const acceptCloudflareWorkflow = async <
     const { createdAt: _inputTime, ...requested } = input;
     const { createdAt: _storedTime, ...stored } = command;
 
+    // A retry keeps the first accepted attribution, including commands from older
+    // releases without it. Observation metadata is not part of deployment intent.
+    if ("kind" in input && input.kind === "deploy") {
+      if ("attribution" in requested) delete requested.attribution;
+
+      if ("attribution" in stored) delete stored.attribution;
+    }
+
     if (!isDeepStrictEqual(requested, stored))
       throw new InvalidOperation({
         code: "CONFLICT",

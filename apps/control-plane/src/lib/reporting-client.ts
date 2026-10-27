@@ -1,5 +1,7 @@
 import { reportingPreferences, sanitizeReportingError } from "@platform/contracts";
 
+import { clientExtension } from "#client-extension";
+
 let enabled = false;
 
 let sent = 0;
@@ -7,6 +9,12 @@ let sent = 0;
 let since = Date.now();
 
 export const reportBrowserError = (error: Error) => {
+  try {
+    clientExtension.exception?.(sanitizeReportingError(error));
+  } catch {
+    // Keep the built-in reporting path independent of extensions.
+  }
+
   if (!enabled) return;
 
   if (Date.now() - since >= 60_000) {
@@ -29,6 +37,14 @@ export const reportBrowserError = (error: Error) => {
 };
 
 export const startBrowserReporting = () => {
+  let stopExtension: void | (() => void);
+
+  try {
+    stopExtension = clientExtension.start?.();
+  } catch {
+    // The application remains usable without optional browser observation.
+  }
+
   let stopped = false;
 
   const refresh = async () => {
@@ -61,6 +77,12 @@ export const startBrowserReporting = () => {
   }, 60_000);
 
   return () => {
+    try {
+      stopExtension?.();
+    } catch {
+      /* Continue cleaning up built-in reporting. */
+    }
+
     stopped = true;
     enabled = false;
     clearInterval(timer);

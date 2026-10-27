@@ -56,7 +56,7 @@ export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
     get: createRequestRuntime(async () => createRuntime(options)()),
     close: async () => {
       try {
-        await reporting.close();
+        await Promise.allSettled([reporting.close(), extension.observation?.close()]);
       } finally {
         await database.close();
       }

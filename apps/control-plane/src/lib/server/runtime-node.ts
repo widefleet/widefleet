@@ -21,8 +21,7 @@ const startRuntime = async () => {
   });
 
   process.once("sveltekit:shutdown", () => {
-    void reporting
-      .close()
+    void Promise.allSettled([reporting.close(), extension.observation?.close()])
       .then(() => database.close())
       .catch((cause: unknown) => console.error("Database shutdown failed", cause));
   });
