@@ -1,6 +1,8 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import * as z from "zod";
 import type { BindingProperties, Json, NativeBindings, ParentEnvironment } from "./types.ts";
+import { runtimeExtension } from "#runtime-extension";
+import type { KeyValueObservation, WorkerIdentity } from "./runtime-extension.ts";
 
 export const nativeBinding = <K extends keyof NativeBindings>(
   environment: ParentEnvironment,
@@ -81,7 +83,41 @@ const keyValueOperation = z.discriminatedUnion("method", [
 
 export type KeyValueOperation = z.infer<typeof keyValueOperation>;
 
-export class KeyValue extends WorkerEntrypoint<ParentEnvironment, BindingProperties> {
+export class KeyValue extends WorkerEntrypoint<
+  ParentEnvironment,
+  BindingProperties & { binding: string; identity: WorkerIdentity }
+> {
+  async #observe<Value>(
+    operation: KeyValueObservation["operation"],
+    count: number,
+    execute: () => Promise<Value>,
+  ) {
+    const observe = runtimeExtension.keyValue;
+
+    if (!observe) return execute();
+
+    const timestamp = Date.now();
+    let outcome: KeyValueObservation["outcome"] = "error";
+
+    try {
+      const result = await execute();
+      outcome = "ok";
+
+      return result;
+    } finally {
+      // Extension delivery is background work, independent of the KV result.
+      this.ctx.waitUntil(
+        Promise.resolve().then(() =>
+          observe(
+            { timestamp, binding: this.ctx.props.binding, operation, count, outcome },
+            this.ctx.props.identity,
+            (name, schema) => schema.parse(this.env[name]),
+          ),
+        ),
+      );
+    }
+  }
+
   override async fetch(request: Request) {
     try {
       const input = keyValueOperation.parse(
@@ -101,7 +137,9 @@ export class KeyValue extends WorkerEntrypoint<ParentEnvironment, BindingPropert
         if (input.options?.metadata !== undefined) options.metadata = input.options.metadata;
         // Native KV applies its value-size bound while consuming the body.
         // A complete buffer in the calling app would bypass that early check.
-        await namespace.put(input.key, request.body ?? new Uint8Array(), options);
+        await this.#observe("write", 1, () =>
+          namespace.put(input.key, request.body ?? new Uint8Array(), options),
+        );
 
         return new Response(null, { status: 204 });
       }
@@ -109,7 +147,10 @@ export class KeyValue extends WorkerEntrypoint<ParentEnvironment, BindingPropert
       const options: KVNamespaceGetOptions<"stream"> = { type: "stream" };
 
       if (input.cacheTtl !== undefined) options.cacheTtl = input.cacheTtl;
-      const result = await namespace.getWithMetadata<Json>(input.key, options);
+
+      const result = await this.#observe("read", 1, () =>
+        namespace.getWithMetadata<Json>(input.key, options),
+      );
 
       return new Response(result.value, {
         status: result.value === null ? 404 : 200,
@@ -129,17 +170,23 @@ export class KeyValue extends WorkerEntrypoint<ParentEnvironment, BindingPropert
     if (cacheTtl !== undefined) options.cacheTtl = cacheTtl;
 
     return [
-      ...(await nativeBinding(this.env, this.ctx.props.name, "kv_namespace").getWithMetadata<Json>(
-        keys,
-        options,
+      ...(await this.#observe("read", keys.length, () =>
+        nativeBinding(this.env, this.ctx.props.name, "kv_namespace").getWithMetadata<Json>(
+          keys,
+          options,
+        ),
       )),
     ];
   }
   list(options?: KVNamespaceListOptions) {
-    return nativeBinding(this.env, this.ctx.props.name, "kv_namespace").list<Json>(options);
+    return this.#observe("list", 1, () =>
+      nativeBinding(this.env, this.ctx.props.name, "kv_namespace").list<Json>(options),
+    );
   }
   delete(key: string) {
-    return nativeBinding(this.env, this.ctx.props.name, "kv_namespace").delete(key);
+    return this.#observe("delete", 1, () =>
+      nativeBinding(this.env, this.ctx.props.name, "kv_namespace").delete(key),
+    );
   }
 }
 

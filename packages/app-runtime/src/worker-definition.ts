@@ -7,6 +7,7 @@ import type { WorkerIdentity } from "./runtime-extension.ts";
 
 type Definition = {
   scope: string;
+  identity: WorkerIdentity;
   metadata: z.infer<typeof workerConfiguration>;
   modules: z.infer<typeof storedModule>[];
   nativeBindings: Record<string, string>;
@@ -42,7 +43,12 @@ export const workerDefinition = async (
         bindings.set(`WIDEFLEET_R2_${binding.name}`, context.exports.Objects(options));
         break;
       case "kv_namespace":
-        bindings.set(`WIDEFLEET_KV_${binding.name}`, context.exports.KeyValue(options));
+        bindings.set(
+          `WIDEFLEET_KV_${binding.name}`,
+          context.exports.KeyValue({
+            props: { name, binding: binding.name, identity: input.identity },
+          }),
+        );
         break;
       case "queue":
         bindings.set(`WIDEFLEET_QUEUE_${binding.name}`, context.exports.Producer(options));

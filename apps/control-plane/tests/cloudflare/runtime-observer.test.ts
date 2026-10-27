@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { build } from "esbuild";
 import { once } from "node:events";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { createServer } from "node:http";
+import { createServer, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +12,17 @@ const observation = z.object({
   identity: z.json(),
   label: z.string(),
   events: z.array(z.object({ outcome: z.string(), cpuTime: z.number(), wallTime: z.number() })),
+});
+
+const keyValueObservation = z.strictObject({
+  identity: z.json(),
+  event: z.strictObject({
+    timestamp: z.number(),
+    binding: z.literal("APP_KV"),
+    operation: z.enum(["read", "write", "delete", "list"]),
+    count: z.number(),
+    outcome: z.enum(["ok", "error"]),
+  }),
 });
 
 const logBatch = z.object({
@@ -32,6 +43,8 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Runtime observer in
     const observations: z.infer<typeof observation>[] = [];
     const logs: z.infer<ReturnType<typeof z.json>>[] = [];
     const errors: Error[] = [];
+    const keyValues: z.infer<typeof keyValueObservation>[] = [];
+    const pending: ServerResponse[] = [];
 
     const collector = createServer((request, response) => {
       const handle = async () => {
@@ -40,7 +53,12 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Runtime observer in
         for await (const chunk of request) chunks.push(z.instanceof(Uint8Array).parse(chunk));
         const body = z.json().parse(JSON.parse(Buffer.concat(chunks).toString()));
 
-        if (request.url === "/observer") observations.push(observation.parse(body));
+        if (request.url === "/key-value") {
+          keyValues.push(keyValueObservation.parse(body));
+          pending.push(response);
+
+          return;
+        } else if (request.url === "/observer") observations.push(observation.parse(body));
         else {
           expect(request.url).toBe("/v1/logs");
           expect(request.headers.authorization).toBe("Bearer synthetic-log-token");
@@ -90,6 +108,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Runtime observer in
           compatibility_date: "2026-10-01",
           compatibility_flags: ["nodejs_compat"],
           worker_loaders: [{ binding: "WIDEFLEET_LOADER" }],
+          kv_namespaces: [{ binding: "OBSERVER_KV", id: "observer-kv-fixture" }],
           vars: {
             OBSERVER_ORIGIN: `http://127.0.0.1:${port}`,
             OBSERVER_LABEL: "parent-only-fixture",
@@ -110,7 +129,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Runtime observer in
 
       for (const path of ["/app", "/connector"]) {
         const response = await worker.fetch(`http://fixture${path}`);
-        expect(response.status).toBe(200);
+        expect(response.status, await response.clone().text()).toBe(200);
         expect(await response.json()).toEqual([]);
       }
 
@@ -164,7 +183,63 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Runtime observer in
           }),
         ]),
       );
+
+      // Keep observation delivery pending until all KV calls have returned.
+      for (const path of ["/app/kv", "/connector/kv"]) {
+        const response = await worker.fetch(`http://fixture${path}`);
+        expect(response.status, await response.clone().text()).toBe(200);
+        expect(await response.json()).toEqual({
+          written: 204,
+          value: "secret-value",
+          missing: 404,
+          many: [
+            ["secret-key", "secret-value"],
+            ["absent-key", null],
+          ],
+          listed: 1,
+          empty: 0,
+          failedWrite: 400,
+          failedRead: 400,
+          failedBulk: true,
+          failedDelete: true,
+          bindings: ["STORE"],
+        });
+      }
+
+      await expect.poll(() => keyValues.length, { timeout: 8_000 }).toBe(24);
+
+      for (const identity of [observations[0]?.identity, observations[1]?.identity]) {
+        const events = keyValues.flatMap((item) =>
+          JSON.stringify(item.identity) === JSON.stringify(identity) ? [item.event] : [],
+        );
+
+        expect(events).toHaveLength(12);
+        expect(
+          events.map(({ operation, count, outcome }) => ({ operation, count, outcome })),
+        ).toEqual(
+          expect.arrayContaining([
+            { operation: "read", count: 3, outcome: "ok" },
+            { operation: "write", count: 1, outcome: "ok" },
+            { operation: "write", count: 1, outcome: "error" },
+            { operation: "delete", count: 1, outcome: "error" },
+          ]),
+        );
+        expect(
+          events.filter((event) => event.operation === "read" && event.outcome === "ok"),
+        ).toHaveLength(3);
+        expect(events.filter((event) => event.outcome === "error")).toHaveLength(4);
+      }
+
+      expect(JSON.stringify(keyValues)).not.toMatch(
+        /secret-key|secret-value|secret-metadata|absent-key/,
+      );
+
+      // A rejected observer request must not change the already successful KV results.
+      for (const response of pending) response.writeHead(503).end();
+      pending.length = 0;
+      expect(errors).toEqual([]);
     } finally {
+      for (const response of pending) response.writeHead(503).end();
       await worker?.stop();
       await new Promise<void>((resolve, reject) =>
         collector.close((error) => (error ? reject(error) : resolve())),
