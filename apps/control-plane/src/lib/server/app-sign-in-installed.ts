@@ -18,6 +18,7 @@ export const createInstalledAppSignIn = (
       organizationId,
       provider: identity.provider,
       scopes: identity.scopes,
+      directory: identity.provider.type === "google" ? identity.directory : undefined,
       clientId: identity.management.clientId,
       clientSecret,
       cookieSecret,
