@@ -26,6 +26,7 @@ export const createIdentityProvider = async (
   const wrongKeys = await generateKeyPair("RS256");
   const publicKey = { ...(await exportJWK(keys.publicKey)), kid: "test", alg: "RS256", use: "sig" };
   const codes = new Map<string, z.infer<typeof authorization> & { person?: "Alice" | "Bob" }>();
+  const refreshes = new Map<string, z.infer<typeof authorization> & { person?: "Alice" | "Bob" }>();
 
   const settings = {
     available: true,
@@ -37,10 +38,15 @@ export const createIdentityProvider = async (
     email: "user@example.test",
     graphFailure: "",
     issuerSuffix: "",
+    refreshFailure: "",
+    issueRefreshToken: true,
+    omitRefreshIdToken: false,
+    subject: "pairwise-subject",
   };
 
   const graphRequests: string[] = [];
   const tokenOrigins: (string | undefined)[] = [];
+  const refreshRequests: string[] = [];
 
   const server = createServer((request, response) => {
     const handle = async () => {
@@ -124,7 +130,30 @@ export const createIdentityProvider = async (
 
         for await (const chunk of request) chunks.push(z.instanceof(Buffer).parse(chunk));
         const fields = new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
-        const parameters = codes.get(fields.get("code") ?? "");
+        const refreshing = fields.get("grant_type") === "refresh_token";
+        const credential = fields.get("refresh_token") ?? "";
+
+        const parameters = refreshing
+          ? refreshes.get(credential)
+          : codes.get(fields.get("code") ?? "");
+
+        if (refreshing) {
+          refreshRequests.push(credential);
+
+          if (settings.refreshFailure) {
+            response
+              .writeHead(
+                settings.refreshFailure === "invalid_grant"
+                  ? 400
+                  : settings.refreshFailure === "access_denied"
+                    ? 403
+                    : 503,
+              )
+              .end(JSON.stringify({ error: settings.refreshFailure }));
+
+            return;
+          }
+        }
 
         codes.delete(fields.get("code") ?? "");
 
@@ -132,10 +161,11 @@ export const createIdentityProvider = async (
           !parameters ||
           fields.get("client_id") !== "app-login" ||
           fields.get("client_secret") !== "synthetic-client-secret" ||
-          fields.get("redirect_uri") !== parameters.redirect_uri ||
-          createHash("sha256")
-            .update(fields.get("code_verifier") ?? "")
-            .digest("base64url") !== parameters.code_challenge
+          (!refreshing &&
+            (fields.get("redirect_uri") !== parameters.redirect_uri ||
+              createHash("sha256")
+                .update(fields.get("code_verifier") ?? "")
+                .digest("base64url") !== parameters.code_challenge))
         ) {
           response.writeHead(400).end(JSON.stringify({ error: "invalid_grant" }));
 
@@ -184,17 +214,29 @@ export const createIdentityProvider = async (
           settings.failure === "signature" ? wrongKeys.privateKey : keys.privateKey,
         );
 
+        const refreshToken = randomUUID();
+        refreshes.set(refreshToken, parameters);
+
         response.end(
           JSON.stringify({
             access_token: "fixture-access-token",
-            refresh_token: "fixture-refresh-token",
+            refresh_token: settings.issueRefreshToken ? refreshToken : undefined,
             token_type: "Bearer",
             expires_in: 3600,
-            id_token: settings.failure === "missing-token" ? undefined : token,
+            id_token:
+              settings.failure === "missing-token" || (refreshing && settings.omitRefreshIdToken)
+                ? undefined
+                : token,
           }),
         );
       } else if (url.pathname === "/v1.0/me/transitiveMemberOf") {
         graphRequests.push(url.href);
+
+        if (settings.graphFailure === "throttled") {
+          response.writeHead(429, { "Retry-After": "5" }).end();
+
+          return;
+        }
 
         if (
           request.headers.authorization !== "Bearer fixture-access-token" ||
@@ -233,6 +275,7 @@ export const createIdentityProvider = async (
     settings,
     graphRequests,
     tokenOrigins,
+    refreshRequests,
     stop: () =>
       new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve())),

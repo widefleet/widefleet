@@ -700,6 +700,101 @@ describe("Organization SSO authority across browser and CLI sessions", () => {
     expect(ownCompany.status).toBe(403);
   });
 
+  it("renews built-in app login, tolerates duplicate refreshes and rechecks membership", async () => {
+    const organizationId = crypto.randomUUID();
+    await environment.database.db.insert(organization).values({
+      id: organizationId,
+      slug: `refresh-${organizationId}`,
+      name: "Refresh fixture",
+      createdAt: new Date(),
+    });
+    await environment.database.db
+      .insert(organizationSettings)
+      .values({ organizationId, settings: {} });
+    await environment.database.db.insert(member).values({
+      id: crypto.randomUUID(),
+      organizationId,
+      userId,
+      role: "member",
+      createdAt: new Date(),
+    });
+    await environment.database.db.transaction((transaction) =>
+      registerAppLogin(
+        transaction,
+        environment.configuration,
+        environment.environment.PLATFORM_ENCRYPTION_KEY,
+        organizationId,
+      ),
+    );
+
+    const client = await readAppLogin(
+      environment.database.db,
+      environment.configuration,
+      environment.environment.PLATFORM_ENCRYPTION_KEY,
+      organizationId,
+    );
+
+    if (!client) throw new Error("Expected an app client");
+    const global = await environment.users.login({ userId });
+    const cookie = new Headers(global.headers).get("cookie") ?? "";
+    const verifier = randomBytes(32).toString("base64url");
+    const callback = `https://auth.${environment.configuration.APP_DOMAIN}/oauth2/${organizationId}/callback`;
+
+    const parameters = new URLSearchParams({
+      client_id: client.management.clientId,
+      response_type: "code",
+      redirect_uri: callback,
+      scope: "openid profile email offline_access",
+      state: crypto.randomUUID(),
+      nonce: crypto.randomUUID(),
+      code_challenge_method: "S256",
+      code_challenge: createHash("sha256").update(verifier).digest("base64url"),
+    });
+
+    const target = new URL(
+      await redirect(await request(`/oauth2/authorize?${parameters}`, undefined, cookie)),
+    );
+
+    const issued = await request(
+      "/oauth2/token",
+      new URLSearchParams({
+        grant_type: "authorization_code",
+        client_id: client.management.clientId,
+        client_secret: client.management.clientSecret,
+        code: z.string().parse(target.searchParams.get("code")),
+        redirect_uri: callback,
+        code_verifier: verifier,
+      }),
+    );
+
+    expect(issued.status, await issued.clone().text()).toBe(200);
+    const grant = tokenResponse.parse(await issued.json());
+
+    const renew = (refreshToken: string) =>
+      request(
+        "/oauth2/token",
+        new URLSearchParams({
+          grant_type: "refresh_token",
+          client_id: client.management.clientId,
+          client_secret: client.management.clientSecret,
+          refresh_token: refreshToken,
+        }),
+      );
+
+    const renewed = await renew(grant.refresh_token);
+    expect(renewed.status, await renewed.clone().text()).toBe(200);
+    const current = tokenResponse.extend({ id_token: z.string() }).parse(await renewed.json());
+    expect(decodeJwt(current.id_token)["organization_id"]).toBe(organizationId);
+    expect(current.refresh_token).not.toBe(grant.refresh_token);
+    const duplicate = await renew(grant.refresh_token);
+    expect(duplicate.status, await duplicate.clone().text()).toBe(200);
+    expect(tokenResponse.parse(await duplicate.json()).refresh_token).toBe(current.refresh_token);
+    await environment.database.db
+      .delete(member)
+      .where(and(eq(member.organizationId, organizationId), eq(member.userId, userId)));
+    expect((await renew(current.refresh_token)).status).toBe(403);
+  });
+
   it("uses real CLI credentials for plugin operations without creating browser sessions", async () => {
     const device = await start();
     await confirmed(await approve(await consent(device.user_code, firstCookie), firstCookie));
