@@ -37,7 +37,12 @@ export const workerDefinition = async (
 
     switch (binding.type) {
       case "d1":
-        bindings.set(`WIDEFLEET_D1_${binding.name}`, context.exports.Database(options));
+        bindings.set(
+          `WIDEFLEET_D1_${binding.name}`,
+          context.exports.Database({
+            props: { name, binding: binding.name, identity: input.identity },
+          }),
+        );
         break;
       case "r2_bucket":
         bindings.set(`WIDEFLEET_R2_${binding.name}`, context.exports.Objects(options));
