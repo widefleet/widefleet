@@ -178,7 +178,7 @@ describe("D1 response observation", () => {
     ).toEqual([]);
   });
 
-  it("isolates collector failure and fails incompatible setup before SQL", async () => {
+  it("isolates collector failure without repeating SQL", async () => {
     let calls = 0;
     const response = { success: true, meta: { rows_read: 1, rows_written: 1 } };
 
@@ -197,10 +197,97 @@ describe("D1 response observation", () => {
     );
     await expect(Promise.all(test.pending)).rejects.toThrow("Collector unavailable");
     expect(calls).toBe(1);
-    Object.defineProperty(test.native.alwaysPrimarySession, "_send", { value: undefined });
-    expect(() => observeDatabase(test.database, test.context, async () => {})).toThrow(
-      "D1 observation requires the native session _send",
-    );
-    expect(calls).toBe(1);
   });
+
+  it.each(["primary", "primary-send", "session-send", "sealed-session"])(
+    "preserves native execution and errors when setup is incompatible: %s",
+    async (incompatible) => {
+      for (const fails of [false, true]) {
+        const test = fixture(async () => ({ success: true }));
+        const result = { count: 1, duration: 0 };
+        const failure = new Error("Native SQL failure");
+        let calls = 0;
+
+        const execute = async () => {
+          calls++;
+
+          if (fails) throw failure;
+
+          return result;
+        };
+
+        const nativeSession = test.native.withSession();
+        const rows: D1Result[] = [];
+        let receivedBookmark: string | undefined;
+
+        Object.defineProperty(nativeSession, "batch", {
+          async value(this: D1DatabaseSession) {
+            expect(this).toBe(nativeSession);
+            await execute();
+
+            return rows;
+          },
+        });
+        Object.defineProperty(nativeSession, "getBookmark", { value: () => "native-bookmark" });
+        Object.defineProperty(test.native, "exec", {
+          value(this: D1Database) {
+            expect(this).toBe(test.native);
+
+            return execute();
+          },
+        });
+        Object.defineProperty(test.native, "withSession", {
+          value(bookmark?: string) {
+            receivedBookmark = bookmark;
+
+            return nativeSession;
+          },
+        });
+
+        if (incompatible === "primary")
+          Object.defineProperty(test.native, "alwaysPrimarySession", { value: undefined });
+        else if (incompatible === "primary-send")
+          Object.defineProperty(test.native.alwaysPrimarySession, "_send", { value: undefined });
+        else if (incompatible === "session-send")
+          Object.defineProperty(nativeSession, "_send", { value: undefined });
+        else Object.freeze(nativeSession);
+
+        const observed = observeDatabase(
+          test.native,
+          test.context,
+          async (event) => void test.events.push(event),
+        );
+
+        const session = observed.withSession("previous-bookmark");
+        const background = Promise.allSettled(test.pending);
+
+        expect(session).toBe(nativeSession);
+        expect(receivedBookmark).toBe("previous-bookmark");
+        expect(session.getBookmark()).toBe("native-bookmark");
+        expect(calls).toBe(0);
+
+        const primary = incompatible === "primary" || incompatible === "primary-send";
+
+        if (primary) expect(observed).toBe(test.native);
+
+        const execution = primary ? observed.exec("write") : session.batch([]);
+
+        if (fails) await expect(execution).rejects.toBe(failure);
+        else expect(await execution).toBe(primary ? result : rows);
+        expect(calls).toBe(1);
+        expect(test.events).toEqual([]);
+        const failures = await background;
+
+        expect(failures).toHaveLength(1);
+
+        const rejected = z
+          .object({ status: z.literal("rejected"), reason: z.instanceof(Error) })
+          .parse(failures[0]);
+
+        expect(rejected.reason.message).toBe(
+          "D1 observation unavailable: incompatible native binding",
+        );
+      }
+    },
+  );
 });

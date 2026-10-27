@@ -298,6 +298,9 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("D1 observation in w
         expectedEvents += enabled ? 1 : 0;
 
         if (enabled) await expect.poll(() => observations.length).toBe(expectedEvents);
+        await reset();
+        expect(await read("/unobservable")).toEqual([[1, 11]]);
+        expect(await read("/state")).toEqual({ n: 1, unchanged: true });
         expect(observations).toHaveLength(expectedEvents);
         expect(JSON.stringify(observations)).not.toMatch(
           /private-|SELECT|UPDATE|INSERT|SQLITE_ERROR|parameters|results|bookmark|size_after/,

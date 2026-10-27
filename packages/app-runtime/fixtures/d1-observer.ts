@@ -4,6 +4,7 @@ import { workerCode } from "../src/worker.ts";
 import { connectorCode } from "../src/connector-code.ts";
 import { connectorSnapshot, digest } from "../src/connector-publication.ts";
 import { nativeBinding } from "../src/native-binding.ts";
+import { observeDatabase } from "../src/d1-observation.ts";
 import { exerciseDatabase } from "./d1-scenarios.ts";
 import type { ParentEnvironment } from "../src/types.ts";
 
@@ -67,6 +68,25 @@ export default {
       } catch (cause) {
         return Response.json({ error: z.instanceof(Error).parse(cause).message });
       }
+    }
+
+    if (path === "/unobservable") {
+      // Model a binding with unchanged public methods and unavailable internals.
+      const database = observeDatabase(
+        {
+          prepare: db.prepare.bind(db),
+          batch: db.batch.bind(db),
+          exec: db.exec.bind(db),
+          dump: db.dump.bind(db),
+          withSession: db.withSession.bind(db),
+        },
+        ctx,
+        async () => {
+          throw new Error("Unavailable observation must not produce a measurement");
+        },
+      );
+
+      return Response.json(await exerciseDatabase(database, "raw-write"));
     }
 
     const scope = path.startsWith("/connector") ? "connector" : "app";

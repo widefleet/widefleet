@@ -78,11 +78,15 @@ export const observeDatabase = (
   context: Pick<ExecutionContext, "waitUntil">,
   observe: (event: Call) => Promise<void>,
 ) => {
+  const unavailable = () => {
+    context.waitUntil(
+      Promise.reject(new Error("D1 observation unavailable: incompatible native binding")),
+    );
+  };
+
   const observeSession = (session: D1DatabaseSession) => {
     const parsed = send.safeParse(session);
 
-    // These are undocumented JS properties. Fail before executing SQL if they
-    // disappear; retrying through another path could repeat a committed write.
     if (!parsed.success) throw new Error("D1 observation requires the native session _send");
     const nativeSend = parsed.data._send;
 
@@ -109,19 +113,37 @@ export const observeDatabase = (
     return session;
   };
 
-  const parsed = databaseInternals.safeParse(nativeDatabase);
+  // Only adapter setup can fall back. SQL execution is outside these catches,
+  // so a result or native error can never cause a query to run a second time.
+  try {
+    const parsed = databaseInternals.safeParse(nativeDatabase);
 
-  if (!parsed.success) throw new Error("D1 observation requires the native primary session");
-  // SAFETY: Each view inherits the complete native instance. Only invocation-local
-  // properties are added; neither the shared binding nor its prototypes are edited.
-  const database = Object.create(nativeDatabase) as D1Database;
-  // SAFETY: This view inherits the validated native session's methods and state.
-  const primary = Object.create(parsed.data.alwaysPrimarySession) as D1DatabaseSession;
+    if (!parsed.success) throw new Error("D1 observation requires the native primary session");
+    // SAFETY: Each view inherits the complete native instance. Only invocation-local
+    // properties are added; neither the shared binding nor its prototypes are edited.
+    const database = Object.create(nativeDatabase) as D1Database;
+    // SAFETY: This view inherits the validated native session's methods and state.
+    const primary = Object.create(parsed.data.alwaysPrimarySession) as D1DatabaseSession;
 
-  Object.defineProperty(database, "alwaysPrimarySession", { value: observeSession(primary) });
-  Object.defineProperty(database, "withSession", {
-    value: (bookmark?: string) => observeSession(nativeDatabase.withSession(bookmark)),
-  });
+    Object.defineProperty(database, "alwaysPrimarySession", { value: observeSession(primary) });
+    Object.defineProperty(database, "withSession", {
+      value: (bookmark?: string) => {
+        const session = nativeDatabase.withSession(bookmark);
 
-  return database;
+        try {
+          return observeSession(session);
+        } catch {
+          unavailable();
+
+          return session;
+        }
+      },
+    });
+
+    return database;
+  } catch {
+    unavailable();
+
+    return nativeDatabase;
+  }
 };
