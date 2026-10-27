@@ -1,13 +1,16 @@
 ---
-title: Members and company sign-in
-description: Accept invitations, manage organization membership and activate verified company sign-in.
-lastModified: 2026-10-23
+title: Members and app sign-in
+description: Join your organization, open shared apps, invite colleagues and remove access.
+lastModified: 2026-10-27
 ---
 
-Use this flow on an installation with email delivery and organization invitations enabled.
-Use platform and CLI **0.4.0 or newer**.
-Without company SSO, an owner or administrator must invite you first. With verified company SSO, users
-admitted by that provider can join as members on their first sign-in without an invitation.
+Use your work account to join your organization and open apps shared with you.
+If your company has connected its sign-in provider, you can join on your first
+company sign-in when that provider allows access. Otherwise, ask an Owner or
+Admin for an invitation.
+
+Administrators connecting a provider for the first time should follow
+[Set up company sign-in](/guides/company-sign-in).
 
 ## Accept an invitation
 
@@ -26,6 +29,23 @@ Company SSO must return the invited email, and your account's email must be veri
 With one available organization, app commands work without an explicit selection.
 With several, use [organization selection](/reference/cli-configuration#select-an-organization).
 You can now [deploy an app](/guides/deployments) or open a shared app from the catalog.
+
+## Opening published apps
+
+Open an app from **App catalog** or follow the link a colleague shared with you.
+Sign in with your company account when prompted. If your organization does not
+use company SSO, use your Widefleet login.
+
+You stay signed in as you use apps, while Widefleet automatically checks that
+you still have access. You may need to sign in again after seven days without
+using an app, after your company revokes the login, or when your company's
+sign-in policy requires it.
+
+Permission to manage an app does not automatically let you use it. If access is
+denied, check that you chose the correct work account, then ask the app owner
+whether you belong to an allowed group. If the app is temporarily unavailable
+because sign-in cannot be checked, try again later. Contact your administrator
+if the problem continues.
 
 ## Invite and manage members
 
@@ -63,130 +83,30 @@ with their verified email. These commands require the normal read/write login sc
 
 ## Activate company SSO
 
-An organization owner or administrator configures Entra or another OIDC provider in
-**Settings → Company sign-in**. Enter the company email domain, register the displayed
-workspace and app callback URLs in one IdP registration, and enter its client ID and secret once. Save, choose
-**Get verification record**, publish the displayed DNS TXT record, then choose
-**Verify domain**.
-Until verification succeeds, the provider cannot authenticate users and an email-enabled
-organization continues using Widefleet sign-in.
+Owners and administrators can connect Microsoft Entra, Google Workspace or
+another supported provider. Follow [Set up company sign-in](/guides/company-sign-in)
+to register Widefleet, verify your domain and test access before activating it.
+For automated configuration, use the [CLI and API reference](/reference/company-sign-in).
 
-After verification, **Test company sign-in** optionally checks the connection. Email
-access remains available until an administrator chooses **Activate company SSO**.
-Activation makes company SSO required for this
-organization in the browser, API and CLI. Existing email sessions and email-authorized CLI tokens no longer grant access to
-it. Sign in through the company provider and authorize the CLI again. Existing verified
-accounts with matching company email addresses can link automatically; existing membership and role are preserved.
+## Remove someone's access
 
-Users admitted by the provider, including guests with another email domain, join as
-members without a separate invitation. An existing pending invitation retains its
-acceptance flow and invited role. An external email claim alone does not link an
-existing account. Removing a member is not a permanent SSO access block: a subsequent
-provider-authorized login can add them again. To block future SSO access, remove their
-assignment to Widefleet at the company provider.
+Owners and administrators can remove a person under **Members**. How you block
+future access depends on how the organization signs in:
 
-Settings, encrypted provider credentials and optional directory credentials belong to the
-selected organization. Directory search queries the configured provider. The equivalent CLI flow is:
+- **Widefleet sign-in:** remove their organization membership. They cannot start
+  another app session, and existing app access ends at the next membership check.
+- **Company sign-in:** revoke their access to Widefleet at the company provider,
+  then remove their Widefleet membership. Removing the membership alone allows
+  a person still admitted by the provider to join again and open apps.
+- **One app only:** remove the person from every group that grants access to that
+  app. If the app currently allows all signed-in users, first
+  [restrict it to the intended groups](/guides/applications#choose-who-can-open-it).
 
-```sh
-widefleet settings get
-widefleet settings export > settings.json
-```
+Cancel any pending invitation as well; removing its sender does not cancel it.
+Directory changes apply when Widefleet next checks membership and can be delayed
+by the company provider. See [when membership changes take effect](/reference/app-access#when-membership-changes-take-effect)
+when verifying a removal. A fresh browser profile lets you check a new sign-in
+without reusing an existing app login.
 
-For the first connection, the export contains `"sso": null`. Replace that `null`
-with the following object, adapting the domain, issuer and client credentials to your
-provider. Choose a `providerId` unique within the Widefleet installation and keep it
-unchanged when updating the connection. Leave the other exported settings intact.
-
-```json
-{
-  "providerId": "example-company",
-  "appIdentityType": "oidc",
-  "issuer": "https://login.example.com",
-  "domain": "example.com",
-  "oidcConfig": {
-    "clientId": "REPLACE_WITH_CLIENT_ID",
-    "clientSecret": "REPLACE_WITH_CLIENT_SECRET",
-    "pkce": true,
-    "scopes": ["openid", "profile", "email"],
-    "mapping": {
-      "name": "name",
-      "email": "email",
-      "extraFields": { "groups": "groups" }
-    }
-  }
-}
-```
-
-`appIdentityType` selects the app identity format: `oidc` by default, or `entra` for Microsoft object IDs and group handling. For OIDC, `oidcConfig.mapping.extraFields.groups` names the provider claim containing app groups; change it if your provider uses a name such as `roles`. Both workspace and app sign-in use the same saved provider mapping.
-
-The initial registration requires the client secret. Then plan and apply the edited file:
-
-```sh
-widefleet settings plan --file settings.json
-widefleet settings apply --file settings.json
-widefleet settings domain-verification
-# Publish the returned TXT name/value in the company's DNS.
-widefleet settings verify-domain
-# Optionally test company sign-in in the browser, then enforce it.
-widefleet settings activate-sso
-```
-
-If the plan requires it, pass `--acknowledge-restart` when applying settings. After
-activation, open the organization's company login in the browser and run `widefleet login`
-to obtain new CLI credentials. `widefleet account` reports account status and its browser URL.
-
-A company sign-in authenticates only for that company, even if the account has memberships
-elsewhere. Changing the selected organization cannot widen that authority, including
-through CLI refresh tokens. An email login can access memberships without active SSO;
-other companies with SSO require their own provider.
-
-The settings export includes the editable provider fields but omits its secret; applying that export
-preserves the saved secret. Set `sso.oidcConfig.clientSecret` to rotate it. The UI likewise
-keeps the saved secret when the field is blank. Directory credentials remain independent of company login credentials. Set
-`directory` to `{"clientId":"CLIENT_ID","clientSecret":"CLIENT_SECRET"}` when
-configuring Entra directory search. Exports omit `directory.clientSecret`; leaving it
-out of an update preserves the organization's encrypted secret. Supply a new value
-to rotate it, or set `directory` to `null` to remove the directory configuration and secret.
-
-Changes to the issuer or client identity are rejected while provider accounts are linked. Removing
-company SSO explicitly removes its provider account links. Provider updates and removal
-do not automatically revoke existing control-plane sessions or CLI refresh grants;
-current organization authorization still applies, and access tokens last five minutes.
-A self-hosted installation requires another usable login before removal. Rotating only
-the secret preserves domain proof and account links. The installation operator can use
-the [recovery procedure](/self-hosting/installation#secrets-and-administrator-recovery).
-
-## Opening published apps
-
-Without active, domain-verified company SSO, the app auth proxy uses Widefleet as its OIDC
-provider. New app logins require the control plane; an existing one-hour app session
-continues to work while the control plane is unavailable. Current organization
-membership is checked when a new app session is issued.
-
-With company SSO, the proxy authenticates directly at that IdP using the published
-organization configuration. The control plane is needed to change configuration,
-but is not in the app login path.
-
-App [access rules](/reference/app-access) remain separate from management roles.
-Without company group claims, leave group restrictions empty: that allows the
-organization members admitted by Widefleet, never anonymous visitors. With company
-SSO, an empty group list allows users admitted by the app's IdP registration; restrict
-that registration to the intended users. Nonempty rules require matching group claims.
-
-With Widefleet app sign-in, removing a member prevents new app sessions. With company
-SSO, revoke the user's app access at the IdP or remove them from the groups required
-by the app's access rules. Removing their Widefleet membership alone does not block
-direct company app login.
-
-These membership and IdP changes do not revoke an already issued app cookie; it remains
-valid until its one-hour lifetime ends. The next app sign-in checks Widefleet membership
-or the current IdP admission and group claims, according to the configured login mode.
-Changing the provider configuration or shared client ID in Widefleet invalidates existing
-app sessions as soon as the new configuration is active.
-Rotating only the IdP client secret preserves existing sessions.
-
-If settings are saved but app sign-in is unavailable, check their activation status
-and the displayed callback registration. Retry publication after resolving the error.
-If DNS verification fails, check the exact TXT name and value, allow DNS propagation,
-and retry verification.
+To give colleagues access to a new app, continue with
+[sharing an app](/guides/applications).

@@ -1,16 +1,17 @@
 ---
 title: Applications
 description: Give colleagues access to a deployed app and publish it in the app catalog.
-lastModified: 2026-10-12
+lastModified: 2026-10-27
 ---
 
-Use this guide to share a deployed app with your team. You need an authenticated
-CLI session and app-owner or organization-administrator permissions. Start with
+Use this guide to share a deployed app with your team. You need app-owner or
+organization-administrator permissions. Start with
 [your first deployment](/getting-started/installation) if the app is not running yet.
 
 ## Check the app
 
-Run these commands from the app project after logging in to your installation:
+Open the deployed app and check that it works before sharing it with colleagues.
+If you use the CLI, log in and run these commands from the app project:
 
 ```sh
 widefleet whoami
@@ -23,28 +24,41 @@ access rules for the app named in `wrangler.jsonc`.
 
 ## Choose who can open it
 
-Company sign-in is always required. An empty access-group list admits every user
-allowed by the installation's app SSO. To restrict access, obtain a stable group
-ID from your identity provider and replace `GROUP_ID` below:
+Open the app in Widefleet and choose **Access → App access**. Sign-in is always
+required. With company sign-in configured, you can restrict the app to selected
+groups:
+
+1. Search for a company group and add it to the allowed list. If your installation
+   does not offer group search, ask your identity administrator for the group ID
+   and enter it in the list.
+2. Add any other groups that should have access. Membership in any one listed
+   group is enough. For Google Workspace, people must belong directly to one of
+   those groups; membership through a nested group does not count.
+3. Choose **Save app rules** and wait for **Active**. Existing and future previews
+   inherit the same rule.
+
+An empty list allows every user admitted by the organization's sign-in
+configuration. Without company SSO, leave it empty to allow Widefleet organization
+members. If you need groups, ask an administrator to
+[set up company sign-in](/guides/company-sign-in).
+
+You can make the same change from the app project with the CLI. Replace
+`GROUP_ID` with the ID returned by group search or supplied by your administrator:
 
 ```sh
 widefleet access set --group GROUP_ID
 widefleet access
 ```
 
-`set` replaces the entire group list. Repeat `--group` to allow several groups;
-membership in any one is sufficient. The command waits for activation by default.
-Existing and future previews inherit the same rule.
+`set` replaces the entire group list. Repeat `--group` to allow several groups.
+The command waits for activation by default. To allow all authenticated users
+again, run `widefleet access set --all-authenticated`.
 
-To deliberately allow all authenticated company users again:
+With directory search configured, `widefleet groups search "Finance"` finds
+group IDs from the CLI.
 
-```sh
-widefleet access set --all-authenticated
-```
-
-You can also edit these rules in the app's **Access** tab. App usage and management
-permissions are separate: permission to edit an app does not bypass its usage
-rules. Business permissions inside the app remain the app author's responsibility.
+Permission to edit an app does not bypass its access rules. Business permissions
+inside the app remain the app author's responsibility.
 
 ## Make the app discoverable
 
@@ -62,9 +76,13 @@ SSO and group rules. Management permissions remain separate. Use
 
 ## Verify access
 
-Open the launch URL with an intended user's account. Check that an account outside
-the allowed groups is denied. After changing directory memberships, sign in again:
-existing SSO sessions can retain earlier group claims.
+Open the launch URL in a separate browser profile with an intended user's
+account. The app should open after sign-in. Use another profile for an account
+outside the allowed groups and check that access is denied.
+
+Repeat these checks after changing groups. Existing app logins pick up directory
+changes at the next automatic membership check; a fresh browser profile checks
+new sign-in behavior immediately. See [when membership changes take effect](/reference/app-access#when-membership-changes-take-effect).
 
 If access activation fails, inspect `widefleet access` and the reported error. The
 last installed rules can remain active until the change is successfully applied.

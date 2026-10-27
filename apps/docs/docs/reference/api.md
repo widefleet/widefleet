@@ -1,7 +1,7 @@
 ---
 title: API and uploads
 description: Authentication, app publication and the Worker upload contract.
-lastModified: 2026-10-23
+lastModified: 2026-10-27
 ---
 
 Authenticated clients can fetch `/api/v1/openapi.json`. The document covers management operations, agent jobs, binary assets and multipart Workers.
@@ -121,7 +121,8 @@ After publishing the record, `POST /api/v1/settings/verify-domain` verifies owne
 `POST /api/v1/settings/activate-sso` separately makes company SSO required; it requires
 verified DNS but does not require a completed test login. These operations accept the
 same browser or CLI write credentials as settings changes and operate on the selected organization.
-See [activation](/guides/members#activate-company-sso).
+See [company sign-in setup](/guides/company-sign-in#verify-and-activate) and the
+[settings reference](/reference/company-sign-in) for CLI and API configuration.
 
 ## Publish an app
 

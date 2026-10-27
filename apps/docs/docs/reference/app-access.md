@@ -1,7 +1,7 @@
 ---
 title: App access
 description: Group rules, permissions, activation and the app access API.
-lastModified: 2026-10-23
+lastModified: 2026-10-27
 ---
 
 Open an app in management and choose **Access → App access** to select which company
@@ -13,13 +13,13 @@ Platform 0.4.0 applies these rules to the app's organization.
 Without a company IdP, Widefleet admits verified organization members and supplies no
 company group claims; use an empty group list for that mode. With company SSO, the
 app IdP registration determines who can authenticate. See [published app sign-in](/guides/members#opening-published-apps)
-for session lifetime, membership checks and control-plane availability.
+for the sign-in experience and [membership checks](#when-membership-changes-take-effect) for access changes.
 
 Each original app has one group list shared automatically with all its previews.
 A user needs membership in **any one** listed group. An empty
 list allows every user admitted by the organization's sign-in configuration; it never
 enables anonymous access. Use stable group IDs from the identity provider, one
-per line. The optional Entra directory connection enables searching by name.
+per line. The Entra or Google Workspace directory connection enables searching by name.
 Generic OIDC installations can enter their configured group claim values directly.
 IDs containing commas or control characters are not supported.
 
@@ -82,10 +82,39 @@ and tokens do not reach the app. Internal Cron, Queue and connector invocations
 continue to use their existing capability boundaries; they are not browser SSO
 requests. Resource-level permissions inside an app remain the app's responsibility.
 
-Group memberships come from the existing SSO session. The current installation
-uses a one-hour cookie without refresh, so directory changes take effect at the
-next sign-in. An activated policy change applies to subsequent requests in an
-existing session. Established connections continue under their earlier authorization.
+## When membership changes take effect
+
+An activated app access rule applies to subsequent requests, including requests
+from people already signed in. Established connections continue under their
+earlier authorization.
+
+Changes to a person's directory membership take effect at the next automatic
+membership check. The first app request after the provider's access token or
+ID token expires triggers that check; the earlier expiry applies. The seven-day
+app session does not mean that permissions are kept for seven days.
+
+| Sign-in method                | Membership checked                                 | Check interval                                           |
+| ----------------------------- | -------------------------------------------------- | -------------------------------------------------------- |
+| Widefleet                     | Current organization membership                    | First request after the five-minute access token expires |
+| Microsoft Entra               | Current Graph memberships, including nested groups | First request after provider-token expiry                |
+| Google Workspace              | Current direct Directory memberships               | First request after provider-token expiry                |
+| Other OpenID Connect provider | Groups in the newly verified ID token              | First request after provider-token expiry                |
+
+Company providers control their token lifetimes and how quickly directory
+changes become visible. Allow for both when checking access removal. To verify
+new sign-in behavior immediately, use a fresh browser profile; an existing app
+login may still have earlier permissions until its next check.
+
+If a required provider check fails temporarily, requests needing that check
+receive `503`. The login is retained so the user can retry when the provider
+recovers. A user who no longer matches the app's group rules receives `403`.
+If the provider requires authentication again, browser requests return to
+sign-in.
+
+With company SSO, app sign-in and membership checks contact the provider directly.
+A control-plane outage does not prevent those checks. With Widefleet sign-in,
+new logins and membership checks need the control plane; previously checked
+access remains usable only until the provider token expires.
 
 ## API
 
