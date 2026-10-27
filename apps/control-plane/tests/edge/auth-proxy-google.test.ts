@@ -182,7 +182,8 @@ describe("Google Workspace app identity", () => {
 
     expect(unavailable.status).toBe(503);
     expect(unavailable.headers.get("retry-after")).toBe("7");
-    expect(unavailable.headers.getSetCookie()).toEqual([]);
+    expect(cookies(unavailable)).toContain(".account_data=");
+    expect(cookies(unavailable)).not.toContain(".session_data=");
     directoryStatus = 200;
     expect((await visit(cookie)).status).toBe(200);
   });
