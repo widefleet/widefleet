@@ -3,9 +3,11 @@ import {
   settingsInput,
   settingsUpdate,
   setupOwner,
+  googleDirectoryCredentials,
 } from "@platform/contracts";
 import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
+import { importPKCS8 } from "jose";
 import type { OrganizationCredential } from "./organization-operations.ts";
 import { appCallbackUrl, type AppSignIn } from "./app-sign-in.ts";
 import { companyIdentity } from "./company-identity.ts";
@@ -18,7 +20,12 @@ import { decryptSecret, encryptSecret } from "./secret-encryption.ts";
 import { installationOrganizationId } from "../organization.ts";
 import { readOrganizationSettings, createInstallationOwner } from "./installation-store.ts";
 import { oauthClient } from "./auth-schema.ts";
-import { readSsoConfiguration, ssoRuntimeIdentity, saveSsoProvider } from "./sso-settings.ts";
+import {
+  readSsoConfiguration,
+  readSsoProvider,
+  ssoRuntimeIdentity,
+  saveSsoProvider,
+} from "./sso-settings.ts";
 import { appLoginClientId, readAppLogin, registerAppLogin } from "./app-login-client.ts";
 import { organizationSettings } from "./schema.ts";
 
@@ -75,6 +82,7 @@ const createOrganizationSettingsService = (
         if (state.settings.directory)
           identity.directory = {
             clientId: state.settings.directory.clientId,
+            adminEmail: state.settings.directory.adminEmail,
             clientSecret: await decryptSecret(encryptionKey, stored?.directorySecret ?? ""),
           };
       }
@@ -215,13 +223,48 @@ const createOrganizationSettingsService = (
           code: "BAD_REQUEST",
           message: "Enter the directory client secret",
         });
+      const previous = await readSsoProvider(database, organizationId);
+
+      if ((previous?.appIdentityType === "google") !== (next.sso?.appIdentityType === "google"))
+        throw new InvalidOperation({
+          code: "BAD_REQUEST",
+          message: "Enter new directory credentials when changing the directory provider",
+        });
     }
 
-    if (next.directory && next.sso?.appIdentityType !== "entra")
+    if (
+      next.sso?.appIdentityType === "google" &&
+      (next.sso.issuer !== "https://accounts.google.com" ||
+        !googleDirectoryCredentials
+          .omit({ clientSecret: true })
+          .safeParse(
+            next.directory
+              ? { clientId: next.directory.clientId, adminEmail: next.directory.adminEmail }
+              : null,
+          ).success)
+    )
       throw new InvalidOperation({
         code: "BAD_REQUEST",
-        message: "Microsoft Graph directory search requires Entra app identity",
+        message:
+          "Google Workspace requires its Google issuer, service account email and delegated administrator email",
       });
+
+    if (next.directory && !["entra", "google"].includes(next.sso?.appIdentityType ?? ""))
+      throw new InvalidOperation({
+        code: "BAD_REQUEST",
+        message: "Directory access requires Microsoft Entra or Google Workspace app identity",
+      });
+
+    if (next.sso?.appIdentityType === "google" && next.directory?.clientSecret) {
+      try {
+        await importPKCS8(next.directory.clientSecret, "RS256");
+      } catch {
+        throw new InvalidOperation({
+          code: "BAD_REQUEST",
+          message: "Enter the Google service account's RSA private key in PEM format",
+        });
+      }
+    }
 
     return appSignIn
       ? appSignIn.plan(null)
@@ -263,7 +306,10 @@ const createOrganizationSettingsService = (
           code: "BAD_REQUEST",
           message: "Enter the directory client secret",
         });
-      const directory = next.directory ? { clientId: next.directory.clientId } : null;
+
+      const directory = next.directory
+        ? { clientId: next.directory.clientId, adminEmail: next.directory.adminEmail }
+        : null;
 
       await transaction
         .update(organizationSettings)

@@ -123,6 +123,42 @@ describe("Organization login settings", () => {
     expect((await settings.resolve(second.organizationId)).identity).toBeNull();
   });
 
+  it("requires a new directory private key when changing Entra to Google", async () => {
+    const target = await company("settings-google-switch");
+
+    const input = settingsInput.parse({
+      ...target.input,
+      sso: {
+        ...target.input.sso,
+        appIdentityType: "google",
+        issuer: "https://accounts.google.com",
+      },
+      directory: {
+        clientId: "directory@fixture.iam.gserviceaccount.com",
+        adminEmail: "admin@example.test",
+      },
+    });
+
+    await expect(settings.plan(target.principal, input)).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Enter new directory credentials when changing the directory provider",
+    });
+    await expect(
+      settings.plan(target.principal, {
+        ...input,
+        directory: {
+          ...input.directory,
+          clientId: "directory@fixture.iam.gserviceaccount.com",
+          clientSecret: "a-microsoft-client-secret",
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Enter the Google service account's RSA private key in PEM format",
+    });
+    expect((await settings.resolve(target.organizationId)).identity?.provider.type).toBe("entra");
+  });
+
   it("disables the built-in app client for company SSO and restores the encrypted secret on return", async () => {
     const target = await company("settings-toggle");
     const fallback = { ...settingsInput.parse({ sso: null }), acknowledgeRestart: false };

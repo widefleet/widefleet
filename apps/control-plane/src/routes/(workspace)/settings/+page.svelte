@@ -18,6 +18,7 @@
   import ReportingSettings from "#shadcn/ReportingSettings.svelte";
   import { Button } from "#shadcn/components/ui/button/index.js";
   import { Input } from "#shadcn/components/ui/input/index.js";
+  import { Textarea } from "#shadcn/components/ui/textarea/index.js";
   import { Label } from "#shadcn/components/ui/label/index.js";
   import { NativeSelect } from "#shadcn/components/ui/native-select/index.js";
   import { Checkbox } from "#shadcn/components/ui/checkbox/index.js";
@@ -423,21 +424,27 @@
               </p>{/if}
           </div>
           <div class="space-y-2">
-            <Label for="app-identity">App identity claims</Label>
+            <Label for="app-identity">App identity provider</Label>
             <NativeSelect
               id="app-identity"
               value={draft.sso.appIdentityType}
               onchange={(event) => {
-                draft.sso.appIdentityType =
-                  event.currentTarget.value === "entra" ? "entra" : "oidc";
-                if (draft.sso.appIdentityType !== "entra") draft.directory = null;
+                draft.sso.appIdentityType = oidcProviderInput.shape.appIdentityType.parse(
+                  event.currentTarget.value,
+                );
+                draft.directory =
+                  draft.sso.appIdentityType === "google"
+                    ? { clientId: "", clientSecret: "", adminEmail: "" }
+                    : null;
+                if (draft.sso.appIdentityType === "google")
+                  draft.sso.issuer = "https://accounts.google.com";
               }}
               ><option value="oidc">OpenID Connect</option><option value="entra"
                 >Microsoft Entra</option
-              ></NativeSelect
+              ><option value="google">Google Workspace</option></NativeSelect
             >
             <p class="text-muted-foreground text-xs">
-              Choose Entra to use Microsoft object IDs and group memberships for app access.
+              Entra and Google Workspace read company groups directly for app access.
             </p>
           </div>
           <details class="rounded-lg border p-4">
@@ -466,43 +473,82 @@
                 </div>{/if}
             </div>
           </details>
-          {#if draft.sso.appIdentityType === "entra"}
+          {#if draft.sso.appIdentityType === "entra" || draft.sso.appIdentityType === "google"}
             <details class="rounded-lg border p-4">
-              <summary class="text-sm font-medium">Directory search</summary>
+              <summary class="text-sm font-medium">Company directory</summary>
               <div class="mt-4 space-y-4">
-                <div class="flex items-center gap-3">
-                  <Checkbox
-                    id="directory"
-                    checked={draft.directory !== null}
-                    onCheckedChange={(enabled) => {
-                      draft.directory = enabled ? { clientId: "", clientSecret: "" } : null;
-                    }}
-                  /><Label for="directory">Connect Microsoft Graph</Label>
-                </div>
+                {#if draft.sso.appIdentityType === "entra"}
+                  <div class="flex items-center gap-3">
+                    <Checkbox
+                      id="directory"
+                      checked={draft.directory !== null}
+                      onCheckedChange={(enabled) => {
+                        draft.directory = enabled ? { clientId: "", clientSecret: "" } : null;
+                      }}
+                    /><Label for="directory">Connect Microsoft Graph</Label>
+                  </div>
+                {/if}
                 {#if draft.directory}
                   <p class="text-muted-foreground text-xs">
-                    Directory search needs the GroupMember.Read.All application permission with
-                    administrator consent.
+                    {#if draft.sso.appIdentityType === "google"}
+                      Use a service account with domain-wide delegation for
+                      https://www.googleapis.com/auth/admin.directory.group.readonly. The delegated
+                      administrator needs permission to read groups.
+                    {:else}
+                      Directory search needs the GroupMember.Read.All application permission with
+                      administrator consent.
+                    {/if}
                   </p>
                   <div class="space-y-2">
-                    <Label for="directory-client">Directory client ID</Label><Input
-                      id="directory-client"
-                      bind:value={draft.directory.clientId}
-                      required
-                    />
+                    <Label for="directory-client"
+                      >{draft.sso.appIdentityType === "google"
+                        ? "Service account email"
+                        : "Directory client ID"}</Label
+                    ><Input id="directory-client" bind:value={draft.directory.clientId} required />
                   </div>
+                  {#if draft.sso.appIdentityType === "google"}
+                    <div class="space-y-2">
+                      <Label for="directory-admin">Delegated administrator email</Label>
+                      <Input
+                        id="directory-admin"
+                        type="email"
+                        bind:value={draft.directory.adminEmail}
+                        required
+                      />
+                    </div>
+                  {/if}
                   <div class="space-y-2">
-                    <Label for="directory-secret">Directory client secret</Label>
-                    <Input
-                      id="directory-secret"
-                      type="password"
-                      bind:value={draft.directory.clientSecret}
-                      required={!view.settings.directory}
-                      placeholder={view.settings.directory
-                        ? "Leave blank to keep the saved secret"
-                        : ""}
-                      autocomplete="new-password"
-                    />
+                    <Label for="directory-secret"
+                      >{draft.sso.appIdentityType === "google"
+                        ? "Service account private key (PEM)"
+                        : "Directory client secret"}</Label
+                    >
+                    {#if draft.sso.appIdentityType === "google"}
+                      <Textarea
+                        id="directory-secret"
+                        bind:value={draft.directory.clientSecret}
+                        required={!view.settings.directory ||
+                          view.sso?.appIdentityType !== draft.sso.appIdentityType}
+                        autocomplete="off"
+                        placeholder={view.settings.directory &&
+                        view.sso?.appIdentityType === draft.sso.appIdentityType
+                          ? "Leave blank to keep the saved key"
+                          : "-----BEGIN PRIVATE KEY-----"}
+                      />
+                    {:else}
+                      <Input
+                        id="directory-secret"
+                        type="password"
+                        bind:value={draft.directory.clientSecret}
+                        required={!view.settings.directory ||
+                          view.sso?.appIdentityType !== draft.sso.appIdentityType}
+                        placeholder={view.settings.directory &&
+                        view.sso?.appIdentityType === draft.sso.appIdentityType
+                          ? "Leave blank to keep the saved secret"
+                          : ""}
+                        autocomplete="new-password"
+                      />
+                    {/if}
                   </div>
                 {/if}
               </div>

@@ -38,7 +38,9 @@ export const load: PageServerLoad = async ({ url, setHeaders }) => {
       target?.id === installationOrganizationId
         ? target.appIdentityType === "entra"
           ? "Microsoft"
-          : "Company SSO"
+          : target.appIdentityType === "google"
+            ? "Google Workspace"
+            : "Company SSO"
         : (target?.name ?? "your company"),
     organizationSlug: slug,
     organizationName: target?.name ?? null,

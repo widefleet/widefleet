@@ -33,6 +33,8 @@ export const createIdentityProvider = async (
     available: true,
     failure: "",
     entra: false,
+    google: false,
+    workspaceDomain: "example.test",
     groups: ["accounting"],
     name: "Example User",
     email: "user@example.test",
@@ -52,7 +54,12 @@ export const createIdentityProvider = async (
   const server = createServer((request, response) => {
     const handle = async () => {
       const url = new URL(request.url ?? "/", origin);
-      const issuer = settings.entra ? `${origin}/${tenantId}/v2.0` : origin + settings.issuerSuffix;
+
+      const issuer = settings.google
+        ? "https://accounts.google.com"
+        : settings.entra
+          ? `${origin}/${tenantId}/v2.0`
+          : origin + settings.issuerSuffix;
 
       response.setHeader("content-type", "application/json");
 
@@ -169,6 +176,7 @@ export const createIdentityProvider = async (
         const claims = new SignJWT({
           nonce: settings.failure === "nonce" ? "wrong-nonce" : parameters.nonce,
           email_verified: settings.failure !== "email",
+          hd: settings.google ? settings.workspaceDomain : undefined,
           ...(settings.entra
             ? {
                 oid: objectId,
