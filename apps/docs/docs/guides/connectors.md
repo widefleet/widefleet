@@ -1,7 +1,7 @@
 ---
 title: IT connectors
 description: Deploy Dynamic Worker integrations and grant apps access to their APIs.
-lastModified: 2026-10-23
+lastModified: 2026-10-28
 ---
 
 IT can deploy a Worker from its own repository with `widefleet connector deploy`. Apps receive a scoped binding and call its methods directly, for example `env.ERP.listCustomers()`. Connector code runs as a Dynamic Worker with its own declared resources on both self-hosted celld and Cloudflare. After installation, connector code and secret updates activate independently of platform releases.
@@ -42,6 +42,13 @@ Connector changes have a separate activation state:
 A pending or failed removal remains visible with its currently active connector. If the serving bindings cannot be confirmed, the view says so rather than treating saved bindings as active. In CLI JSON, `connectors` contains the desired bindings and activation state; `activeConnectors` contains the confirmed serving bindings, or `null` when unavailable. `resources` contains the active deployment's resources and `deploymentId` identifies that deployment.
 
 After choosing a connector, ask an administrator to [give the app its binding](#give-an-app-its-binding). The connector author supplies the corresponding TypeScript interface or package.
+
+Connectors that expose browser pages also publish a `browserUrls` map in catalog
+and status responses. Expand a connector in the catalog to open its **Browser
+addresses**, or inspect them with `widefleet connector catalog --json`.
+Administrative status from `widefleet connector show NAME --json` includes the
+desired addresses even while activation is pending; the catalog lists browser
+entrypoints present in both the active and desired versions.
 
 ## Manage connectors in an organization
 
@@ -218,6 +225,150 @@ RPC arguments and results use transferable values, including ordinary data objec
 Bindings default to the connector's `default` export. A connector package must include a default Worker export even when callers select a named entrypoint. Export a `WorkerEntrypoint` class as default, or supply a default fetch handler alongside named entrypoints. Exported Durable Object classes are excluded from the CLI's entrypoint list.
 
 A binding can be saved before the app's first deployment. Otherwise changes wait for activation, unless `--no-wait` is used. Status distinguishes saved, pending, active and failed; repeating a failed change retries it. A failed code deployment does not mark already active grants as failed. Previews start without connector grants, and app code rollback keeps current bindings. Resource-name collisions and reserved `WIDEFLEET_` names are rejected.
+
+## User identity and connector pages
+
+Connectors can implement account linking, setup pages and other interactive
+flows. Widefleet supplies the verified caller and a separate browser origin;
+the connector implements its routes, provider authorization, token storage,
+refresh and account management. An app uses the connector's documented API and
+links. Widefleet does not automatically display an account-connection dialog.
+
+Use matching control-plane, CLI, deployment-agent and app-runtime versions when
+enabling browser pages. Configure [published app sign-in](/guides/members#opening-published-apps)
+for the organization first.
+
+### Identify the caller
+
+For calls made while handling an authenticated app request, a connector
+`WorkerEntrypoint` receives `this.ctx.props.caller` with:
+
+| Field     | Use                                            |
+| --------- | ---------------------------------------------- |
+| `issuer`  | Identity provider that authenticated the user. |
+| `subject` | User ID within that identity provider.         |
+| `name`    | Display name; not a stable account identifier. |
+
+Use the pair `(issuer, subject)` to associate a user's stored connections with
+their identity. Resources are already scoped to the connector's organization.
+App code calls the ordinary binding, such as `env.ERP.listCustomers()`; it does
+not supply the caller or need an identity SDK. The runtime verifies caller
+context before passing it to the connector. Calls without an authenticated
+request context, including scheduled work, receive `caller: null`. The connector
+must decide whether such a call is allowed and which shared credentials it may
+use. The forwarded request headers are not a substitute for `ctx.props.caller`.
+
+Storing one connection per identity allows multiple apps using this connector to
+reuse it. Multiple accounts and account selection are connector behavior, not
+platform-managed settings. Keep tokens in the connector's own persistent
+resources and out of RPC results, browser responses and logs.
+
+### Enable a browser entrypoint
+
+Add `browser_entrypoints` to the connector's `wrangler.jsonc` and implement that
+entrypoint's `fetch()` handler. For example, this configuration enables the
+default export:
+
+```json
+{
+  "name": "erp",
+  "main": "worker.ts",
+  "compatibility_date": "2026-10-01",
+  "browser_entrypoints": ["default"]
+}
+```
+
+This complete `worker.ts` exposes the caller identity for verification:
+
+```ts
+import { WorkerEntrypoint } from "cloudflare:workers";
+
+interface Env {
+  WIDEFLEET_ORIGIN: string;
+}
+
+interface Props {
+  caller: { issuer: string; subject: string; name: string } | null;
+}
+
+export default class ERP extends WorkerEntrypoint<Env, Props> {
+  fetch() {
+    if (!this.ctx.props.caller) return new Response("Sign-in required", { status: 401 });
+    return Response.json({ caller: this.ctx.props.caller, origin: this.env.WIDEFLEET_ORIGIN });
+  }
+}
+```
+
+Deploy it with `widefleet connector deploy`, then inspect
+`widefleet connector show erp`. After activation succeeds, open the default
+browser address and sign in. The response shows your verified identity and the
+connector's origin. Replace the verification handler with your connector's
+pages and provider flow before using it for account connections.
+
+Each organization and connector name has one HTTPS origin under the
+installation's app domain. Connector updates and new app bindings keep that
+origin unchanged. Renaming the connector or changing the installation domain
+changes the address. `env.WIDEFLEET_ORIGIN` supplies the origin to connector code;
+register provider callbacks using that origin and your callback path. Adding an
+app binding does not require another provider callback registration.
+
+The default browser entrypoint starts at `/`. A named entrypoint starts at
+`/_widefleet/entrypoints/ENTRYPOINT/`; the connector receives that full path.
+These entrypoints share the connector's origin and cookies. Only exports listed
+in `browser_entrypoints` can receive browser traffic. Omitting the setting
+disables browser access without disabling granted backend calls.
+
+### Link from an app
+
+Find the app's binding name with `widefleet connections` or the app's
+**Connections** tab. If the connector documents a `/connect` page and the binding
+is `ERP`, the app can render:
+
+```html
+<a href="/_widefleet/connectors/ERP/connect">Connect your account</a>
+```
+
+Widefleet checks the app's access rules and active binding, then redirects the
+browser to the connector's fixed address. The suffix and query string are
+preserved. This entry link accepts `GET` and `HEAD`; forms and provider callbacks
+must target the canonical connector address. `/connect` is a route chosen by
+the connector author, not a platform-defined endpoint.
+
+Users can also open the canonical address directly, before any app has a binding.
+Access requires sign-in accepted by that organization's configuration; app group
+rules do not apply there. With company SSO, the IdP registration controls who
+can authenticate. This does not add a separate control-plane membership check.
+Other organizations' sessions do not grant access. Connector pages must enforce
+their own account ownership and action permissions.
+
+### Browser boundaries and recovery
+
+Connector pages have a different origin from apps. Widefleet removes browser
+CORS grants from connector responses, applies its Content Security Policy and
+retains any stricter connector policy. Serve scripts and assets from the
+connector's own origin: external scripts, cross-origin browser API requests,
+frames and service workers are blocked. Start provider authorization with a
+top-level navigation; server-side provider requests are independent of this CSP.
+
+The connector receives its own browser cookies, but never the platform's company
+sign-in cookies. Widefleet strips `Domain` from response cookies so they remain
+host-only and prevents replacement of company sign-in cookies. The connector
+still needs CSRF protection, secure OAuth state validation and validation of any
+return URL it accepts. Separate origins and CORS restrictions do not prevent all
+cross-origin requests.
+
+| Symptom                                                    | Check                                                                                               |
+| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Browser redirects to sign-in; an API request returns `401` | Establish the organization's sign-in session in the browser.                                        |
+| The app entry link returns `403`                           | Check the user's access to that app. Direct connector access uses organization sign-in instead.     |
+| Page or entry link returns `404`                           | Confirm activation, `browser_entrypoints`, the route path and, for an app link, the active binding. |
+| The app entry link returns `405`                           | Navigate with `GET`; submit forms to the canonical connector address.                               |
+| Activation reports a missing browser origin                | Update the deployment agent together with the platform and runtime, then redeploy the connector.    |
+
+Once the verification page works, implement the account flow in the connector
+and [give apps their bindings](#give-an-app-its-binding). Use the published
+canonical address for provider callbacks and the relative binding link for app
+navigation.
 
 ## Resources and activation
 
