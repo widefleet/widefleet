@@ -273,7 +273,7 @@ describe("Cloudflare logs through the shared authorized service", () => {
       )[0];
 
       if (!source) throw new Error("Expected a connector log fixture");
-      source[field] = crypto.randomUUID();
+      source[field] = field === "connector" ? "another-connector" : crypto.randomUUID();
       events = [{ ...logEvent(fixture.appId, fixture.deploymentId), source }];
 
       const result = await telemetry.queryConnector(
