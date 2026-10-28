@@ -109,7 +109,9 @@ resumes and events are rejected. Status, pause, terminate and delete remain avai
 through the CLI, management API and app's Workflows page.
 
 Installations that publish execution gates pause existing instances through the runtime
-catalog. Pausing is asynchronous: an instance can report `waitingForPause` while current
+catalog. Execution suspension requires `WIDEFLEET_HTTP_AVAILABILITY=kv` on the trusted
+app runtime; the management endpoint rejects gate publication when enforcement is disabled.
+Pausing is asynchronous: an instance can report `waitingForPause` while current
 work finishes. The runtime also checks availability before app execution, on every step
 attempt, around durable waits and before resource calls. A suspended operation fails
 closed even if native pausing has not finished. An interrupted step can therefore leave
