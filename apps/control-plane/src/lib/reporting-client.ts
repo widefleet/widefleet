@@ -1,7 +1,5 @@
 import { reportingPreferences, sanitizeReportingError } from "@platform/contracts";
 
-import { captureBrowserException } from "./analytics-client.ts";
-
 let enabled = false;
 
 let sent = 0;
@@ -9,8 +7,6 @@ let sent = 0;
 let since = Date.now();
 
 export const reportBrowserError = (error: Error) => {
-  captureBrowserException(error);
-
   if (!enabled) return;
 
   if (Date.now() - since >= 60_000) {

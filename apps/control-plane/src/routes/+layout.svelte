@@ -20,7 +20,6 @@
       user: principal ? { id: principal.id } : null,
       organization: organization ? { id: organization.id, name: organization.name } : null,
       role: principal?.role ?? null,
-      url: page.url.href,
       analytics: page.data.analytics ?? null,
     });
   });
