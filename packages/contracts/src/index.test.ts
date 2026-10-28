@@ -7,7 +7,6 @@ import {
   runtimePackages,
   workerMetadata,
   connectorBrowserOrigin,
-  connectorBrowserUrl,
   createAppInput,
 } from "./index.ts";
 
@@ -27,22 +26,7 @@ describe("connector secret contracts", () => {
   });
 });
 
-describe("connector browser entrypoints", () => {
-  const metadata = {
-    main_module: "worker.js",
-    compatibility_date: "2026-10-01",
-    entrypoints: ["default", "Public"],
-  };
-
-  it("leaves existing connector metadata unchanged and requires an exported entrypoint", () => {
-    expect(connectorUploadMetadata.parse(metadata)).not.toHaveProperty("browser_entrypoints");
-    expect(
-      connectorUploadMetadata.safeParse({ ...metadata, browser_entrypoints: ["Public"] }).success,
-    ).toBe(true);
-    expect(
-      connectorUploadMetadata.safeParse({ ...metadata, browser_entrypoints: ["Missing"] }).success,
-    ).toBe(false);
-  });
+describe("connector browser origins", () => {
   it("separates organization and connector identities without overlapping app hostnames", async () => {
     const origins = await Promise.all([
       connectorBrowserOrigin("one-two", "three", "apps.example.test"),
@@ -60,10 +44,6 @@ describe("connector browser entrypoints", () => {
 
     const origin = await connectorBrowserOrigin("one", "three", "apps.example.test", 8443);
     expect(new URL(origin).port).toBe("8443");
-    expect(connectorBrowserUrl(origin, "default")).toBe(`${origin}/`);
-    expect(connectorBrowserUrl(origin, "Browser")).toBe(
-      `${origin}/_widefleet/entrypoints/Browser/`,
-    );
   });
 });
 

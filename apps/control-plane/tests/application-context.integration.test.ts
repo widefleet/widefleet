@@ -1,3 +1,4 @@
+import { connectorBrowserOrigin } from "@platform/contracts";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { createTestEnvironment } from "./environment.ts";
@@ -127,7 +128,14 @@ describe("Mandatory application context", () => {
       });
     }
 
-    const catalog = [{ name: "erp", entrypoints: ["default", "FirstReader"], browserUrls: {} }];
+    const catalog = [
+      {
+        name: "erp",
+        entrypoints: ["default", "FirstReader"],
+        browserUrl: `${await connectorBrowserOrigin(first.organizationId, "erp", environment.configuration.APP_DOMAIN, environment.configuration.APP_HTTPS_PORT)}/`,
+      },
+    ];
+
     expect((await current.connectors.catalog(first.principal)).unwrap()).toEqual(catalog);
     const listing = (await current.agents.list(first.principal)).unwrap();
     expect(listing.map((agent) => agent.name)).toEqual(["First agent"]);

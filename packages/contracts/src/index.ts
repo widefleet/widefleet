@@ -1,6 +1,6 @@
 export { appEventConfiguration } from "./app-events.ts";
 
-export { connectorBrowserOrigin, connectorBrowserUrl } from "./connector-browser.ts";
+export { connectorBrowserOrigin } from "./connector-browser.ts";
 
 import { z } from "zod";
 import { organizationIdentifier } from "./organizations.ts";
@@ -304,18 +304,11 @@ export const connectorUploadMetadata = workerConfiguration
       .array(bindingName)
       .min(1)
       .refine((names) => names.includes("default"), "celld requires a default Worker export"),
-    browser_entrypoints: z.array(bindingName).optional(),
     durable_objects: z
       .array(z.strictObject({ name: bindingName, class_name: bindingName }))
       .default([]),
   })
   .superRefine((metadata, context) => {
-    if (metadata.browser_entrypoints?.some((name) => !metadata.entrypoints.includes(name)))
-      context.addIssue({
-        code: "custom",
-        message: "Browser entrypoints must be exported connector entrypoints",
-      });
-
     const names = [
       ...metadata.bindings.map((binding) => binding.name),
       ...metadata.durable_objects.map((binding) => binding.name),
@@ -381,13 +374,13 @@ export const connectorStatus = z.strictObject({
   state: z.enum(["queued", "running", "succeeded", "failed"]),
   message: z.string().nullable(),
   entrypoints: z.array(bindingName),
-  browserUrls: z.record(bindingName, z.url()).default({}),
+  browserUrl: z.url().nullable().default(null),
 });
 
 export const connectorCatalogEntry = z.strictObject({
   name: appSlug,
   entrypoints: z.array(bindingName),
-  browserUrls: z.record(bindingName, z.url()).default({}),
+  browserUrl: z.url().nullable().default(null),
 });
 
 export const connectorBrowserRoute = z.strictObject({

@@ -873,7 +873,6 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       config,
       JSON.stringify({
         name: "erp-fixture",
-        browser_entrypoints: ["default"],
         main: "worker.ts",
         compatibility_date: "2026-10-01",
         vars: { API_KEY: "ordinary-variable-is-not-a-secret" },
@@ -899,7 +898,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       JSON.parse((await cli("connector", "show", "erp-fixture")).stdout),
     );
 
-    const browserUrl = new URL(z.url().parse(browserStatus.browserUrls["default"]));
+    const browserUrl = new URL(z.url().parse(browserStatus.browserUrl));
 
     const browserPage = await execute("docker", [
       "exec",

@@ -70,9 +70,9 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
               {
                 name: "erp",
                 entrypoints: ["default"],
-                browserUrls: { default: "https://connector.apps.example.test/" },
+                browserUrl: "https://connector.apps.example.test/",
               },
-              { name: "pending", entrypoints: [], browserUrls: {} },
+              { name: "pending", entrypoints: [], browserUrl: null },
             ]),
           );
         } else if (request.url === `/api/v1/apps/${app.id}/connections`) {
@@ -288,9 +288,9 @@ export default class Connector extends WorkerEntrypoint {
         {
           name: "erp",
           entrypoints: ["default"],
-          browserUrls: { default: "https://connector.apps.example.test/" },
+          browserUrl: "https://connector.apps.example.test/",
         },
-        { name: "pending", entrypoints: [], browserUrls: {} },
+        { name: "pending", entrypoints: [], browserUrl: null },
       ]);
       expect(JSON.parse((await command("connections")).stdout)).toMatchObject({
         resources: [

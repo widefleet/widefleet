@@ -17,6 +17,3 @@ export const connectorBrowserOrigin = async (
 
   return `https://c${label.slice(0, 52)}.${domain}${port === 443 ? "" : `:${port}`}`;
 };
-
-export const connectorBrowserUrl = (origin: string, entrypoint: string) =>
-  new URL(entrypoint === "default" ? "/" : `/_widefleet/entrypoints/${entrypoint}/`, origin).href;

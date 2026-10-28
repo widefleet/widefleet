@@ -5,7 +5,6 @@ import {
   connectorManagement,
   publishedCapability,
   connectorCaller,
-  connectorBrowserUrl,
 } from "@platform/contracts";
 import { z } from "zod";
 import {
@@ -46,8 +45,6 @@ export class ConnectorCatalog extends DurableObject<ParentEnvironment> {
     const { organizationId, version, release, secrets, nativeBindings, telemetry, browserOrigin } =
       prepared;
 
-    if (release.metadata.browser_entrypoints?.length && !browserOrigin)
-      throw new Error("Connector browser origin is missing; update the deployment agent");
     const identity = { organizationId, version, name: release.name };
 
     // Omit absent origins from the hash so retries still match pre-upgrade snapshots.
@@ -121,7 +118,7 @@ export class ConnectorCatalog extends DurableObject<ParentEnvironment> {
       throw new Error("Connector version has not passed readiness checks");
 
     // This index is only a routing hint. Each browser request checks the active
-    // snapshot's origin and explicit browser entrypoints before executing code.
+    // snapshot's origin before executing code.
     if (snapshot.browserOrigin)
       await this.env.WIDEFLEET_PACKAGES.put(
         connectorBrowserKey(new URL(snapshot.browserOrigin).hostname),
@@ -169,12 +166,6 @@ export class ConnectorGateway extends WorkerEntrypoint<
     if (!active) throw new Error("Connector is not active");
     const snapshot = await readConnector(this.env, active);
 
-    if (
-      this.ctx.props.browser &&
-      !snapshot.release.metadata.browser_entrypoints?.includes(entrypoint)
-    )
-      return null;
-
     if (!snapshot.release.metadata.entrypoints.includes(entrypoint))
       throw new Error("Connector entrypoint is not available");
 
@@ -183,7 +174,7 @@ export class ConnectorGateway extends WorkerEntrypoint<
   async #target(proof?: string, origin?: string) {
     const snapshot = await this.#snapshot();
 
-    if (!snapshot || (this.ctx.props.browser && snapshot.browserOrigin !== origin)) return null;
+    if (this.ctx.props.browser && snapshot.browserOrigin !== origin) return null;
     const { organizationId, entrypoint } = this.ctx.props;
 
     if (proof && !this.ctx.props.appId && !this.ctx.props.caller)
@@ -218,12 +209,12 @@ export class ConnectorGateway extends WorkerEntrypoint<
       return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } });
     const snapshot = await this.#snapshot();
 
-    if (!snapshot?.browserOrigin) return new Response(null, { status: 404 });
+    if (!snapshot.browserOrigin) return new Response(null, { status: 404 });
     const incoming = new URL(request.url);
     const prefix = `/_widefleet/connectors/${binding}/`;
 
     if (!incoming.pathname.startsWith(prefix)) return new Response(null, { status: 404 });
-    const target = new URL(connectorBrowserUrl(snapshot.browserOrigin, this.ctx.props.entrypoint));
+    const target = new URL("/", snapshot.browserOrigin);
     target.pathname += incoming.pathname.slice(prefix.length);
     target.search = incoming.search;
 

@@ -412,6 +412,7 @@ describe.runIf(process.env["RUN_CONNECTOR_TESTS"] === "1").each(["celld", "worke
             version: crypto.randomUUID(),
             release: candidate,
             nativeBindings: resources,
+            browserOrigin: await connectorBrowserOrigin(owner, name, "apps.example.test"),
             secrets: { TOKEN: secret },
             telemetry: { url: `${telemetryUrl}/${name}`, token: "synthetic-connector-telemetry" },
           }),
@@ -797,7 +798,7 @@ export default { async fetch(request, env, ctx) {
     });
     it("isolates browser pages on one stable connector origin shared by app bindings", async () => {
       const path = "/_widefleet/connectors/CONNECTOR/browser-caller";
-      expect((await request(path)).status).toBe(404);
+      expect((await request(path)).status).toBe(302);
       expect((await request("/_widefleet/connectors/UNKNOWN/browser-caller")).status).toBe(404);
 
       const browserOrigin = await connectorBrowserOrigin(
@@ -816,27 +817,6 @@ export default { async fetch(request, env, ctx) {
           redirect: "manual",
           headers: { ...Object.fromEntries(new Headers(init.headers)), "x-fixture-host": hostname },
         });
-
-      const candidate = release("browser");
-      candidate.metadata.browser_entrypoints = ["default", "Reader"];
-      await stage(candidate);
-
-      const prepared = connectorActivation.parse(
-        z.object({ result: connectorActivation }).parse(
-          await json("/fixture/manage", {
-            action: "prepare",
-            organizationId,
-            version: crypto.randomUUID(),
-            release: candidate,
-            nativeBindings,
-            browserOrigin,
-            secrets: { TOKEN: "browser-secret" },
-            telemetry: null,
-          }),
-        ).result,
-      );
-
-      await activate(prepared);
 
       try {
         const redirected = await request(path + "?returnTo=%2Fissues");
@@ -881,16 +861,16 @@ export default { async fetch(request, env, ctx) {
         expect(response.headers.get("cross-origin-resource-policy")).toBe("same-origin");
 
         const named = await request("/_widefleet/connectors/READER/browser-caller");
-        expect(named.headers.get("location")).toBe(
-          `${browserOrigin}/_widefleet/entrypoints/Reader/browser-caller`,
-        );
+        expect(named.headers.get("location")).toBe(`${browserOrigin}/browser-caller`);
         const page = await visit("/_widefleet/entrypoints/Reader/browser-caller");
         expect(page.status).toBe(200);
         expect(await page.json()).toMatchObject({
-          path: "/_widefleet/entrypoints/Reader/browser-caller",
+          origin: browserOrigin,
           caller: { subject: "pairwise-subject" },
         });
-        expect((await visit("/_widefleet/entrypoints/Missing/browser-caller")).status).toBe(404);
+        expect((await visit("/_widefleet/entrypoints/Missing/browser-caller")).status).toBe(200);
+        const ordinaryPath = "/_widefleet/entrypoints/Reader/custom-route";
+        expect(await (await visit(ordinaryPath)).text()).toBe(`connector:${ordinaryPath}`);
 
         await json("/fixture/app-alias");
         expect(
@@ -904,8 +884,8 @@ export default { async fetch(request, env, ctx) {
         await activate(await prepare("v1", "secret-one"));
       }
 
-      expect((await request(path)).status).toBe(404);
-      expect((await visit("/browser-caller")).status).toBe(404);
+      expect((await request(path)).status).toBe(302);
+      expect((await visit("/browser-caller")).status).toBe(200);
     });
     it("reuses immutable modules across secret versions and stores only module references", async () => {
       const name = "storage-fixture";

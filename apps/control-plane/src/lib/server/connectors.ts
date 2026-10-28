@@ -4,7 +4,7 @@ import type { HostedExecution } from "./deployment-execution.ts";
 import {
   connectorAdministrator,
   connectorStatus,
-  connectorBrowserUrls,
+  connectorBrowserUrl,
   bindingState,
   prepareConnector,
   applyCapabilityChange,
@@ -71,14 +71,9 @@ export const createConnectorService = (
             // Offer only entrypoints that the binding operation can currently grant.
             return contract.connectorCatalogEntry.parse({
               name: record.name,
-              browserUrls: await connectorBrowserUrls(
-                configuration,
-                record.organizationId,
-                record.name,
-                active?.browserEntrypoints.filter((name) =>
-                  desired.browserEntrypoints.includes(name),
-                ) ?? [],
-              ),
+              browserUrl: active
+                ? await connectorBrowserUrl(configuration, record.organizationId, record.name)
+                : null,
               entrypoints:
                 active?.entrypoints.filter((name) => desired.entrypoints.includes(name)) ?? [],
             });

@@ -452,14 +452,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
     expect(patches).toBe(before);
   }, 60_000);
   it("publishes a stable browser origin independently of app bindings", async () => {
-    const browserRelease = {
-      ...release,
-      metadata: { ...release.metadata, browser_entrypoints: ["default"] },
-    };
-
-    const accepted = contract.connectorStatus.parse(
-      await command({ kind: "deploy", release: browserRelease }),
-    );
+    const accepted = contract.connectorStatus.parse(await command({ kind: "deploy", release }));
 
     await completed(accepted.jobId);
 
@@ -469,7 +462,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
       environment.environment.APP_DOMAIN,
     );
 
-    expect(accepted.browserUrls).toEqual({ default: `${browserOrigin}/` });
+    expect(accepted.browserUrl).toBe(`${browserOrigin}/`);
     expect(
       await (
         await worker.fetch(
@@ -488,7 +481,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
     );
 
     await completed(rotated.jobId);
-    expect(rotated.browserUrls).toEqual(accepted.browserUrls);
+    expect(rotated.browserUrl).toBe(accepted.browserUrl);
     const restored = contract.connectorStatus.parse(await command({ kind: "deploy", release }));
     await completed(restored.jobId);
   }, 60_000);

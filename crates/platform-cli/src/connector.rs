@@ -110,7 +110,7 @@ struct Status {
     message: Option<String>,
     entrypoints: Vec<String>,
     #[serde(default)]
-    browser_urls: std::collections::BTreeMap<String, String>,
+    browser_url: Option<String>,
     #[serde(default)]
     secrets: Vec<String>,
     #[serde(default)]
@@ -157,8 +157,8 @@ fn show(status: &Status, json_output: bool) -> Result<()> {
     }
     println!("{}: {}", status.name, status.state);
     println!("Entrypoints: {}", status.entrypoints.join(", "));
-    for (entrypoint, url) in &status.browser_urls {
-        println!("Browser ({entrypoint}): {url}");
+    if let Some(url) = &status.browser_url {
+        println!("Browser: {url}");
     }
     println!("Secrets: {}", status.secrets.join(", "));
     println!(
@@ -199,8 +199,6 @@ struct ConnectorConfiguration {
     worker: crate::worker::Configuration,
     #[serde(default)]
     durable_objects: DurableObjects,
-    #[serde(default)]
-    browser_entrypoints: Vec<String>,
     #[serde(rename = "$schema")]
     _schema: Option<String>,
     #[serde(rename = "no_bundle")]
@@ -287,7 +285,6 @@ async fn package(config: &Path) -> Result<Package> {
                 },
             ),
             entrypoints,
-            browser_entrypoints: configuration.browser_entrypoints,
             durable_objects: configuration.durable_objects.bindings,
         },
         modules,
@@ -456,7 +453,7 @@ pub async fn run(api: &Api, credentials: &auth::Credentials, options: Options) -
                 name: String,
                 entrypoints: Vec<String>,
                 #[serde(default)]
-                browser_urls: std::collections::BTreeMap<String, String>,
+                browser_url: Option<String>,
             }
             let entries: Vec<Entry> = get(api, credentials, "/connector-catalog").await?;
             if json_output {
@@ -472,8 +469,8 @@ pub async fn run(api: &Api, credentials: &auth::Credentials, options: Options) -
                         entry.entrypoints.join(", ")
                     };
                     println!("{}: {availability}", entry.name);
-                    for (entrypoint, url) in entry.browser_urls {
-                        println!("  Browser ({entrypoint}): {url}");
+                    if let Some(url) = entry.browser_url {
+                        println!("  Browser: {url}");
                     }
                 }
                 Ok(())

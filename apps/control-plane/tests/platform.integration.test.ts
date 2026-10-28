@@ -2104,7 +2104,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
 
     expect(
       await (await json("/connector-catalog", "GET", undefined, outsiderHeaders)).json(),
-    ).toContainEqual({ name: release.name, entrypoints: [], browserUrls: {} });
+    ).toContainEqual({ name: release.name, entrypoints: [], browserUrl: null });
 
     expect(
       (
@@ -2181,6 +2181,9 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     );
 
     expect(packages.connectors).toEqual([release]);
+    expect(packages.connectorOrigins).toEqual({
+      [release.name]: new URL(z.url().parse(submitted.browserUrl)).origin,
+    });
     const payload = release.modules.find((module) => module.name === "payload.bin");
 
     if (!payload) throw new Error("Missing binary fixture");
@@ -2221,7 +2224,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     ).toContainEqual({
       name: release.name,
       entrypoints: ["Customers", "default"],
-      browserUrls: {},
+      browserUrl: submitted.browserUrl,
     });
     expect(
       (await json(`${bindingPath}/ERP`, "PUT", { connector: release.name }, outsiderHeaders))

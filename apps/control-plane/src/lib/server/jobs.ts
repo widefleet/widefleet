@@ -326,20 +326,18 @@ export const createJobService = (
         ...runtime,
         connectorOrigins: Object.fromEntries(
           await Promise.all(
-            references
-              .filter((reference) => reference.browserEntrypoints.length)
-              .map(
-                async (reference) =>
-                  [
+            references.map(
+              async (reference) =>
+                [
+                  reference.name,
+                  await contract.connectorBrowserOrigin(
+                    lease.value.organizationId,
                     reference.name,
-                    await contract.connectorBrowserOrigin(
-                      lease.value.organizationId,
-                      reference.name,
-                      configuration.APP_DOMAIN,
-                      configuration.APP_HTTPS_PORT,
-                    ),
-                  ] as const,
-              ),
+                    configuration.APP_DOMAIN,
+                    configuration.APP_HTTPS_PORT,
+                  ),
+                ] as const,
+            ),
           ),
         ),
         connectorSecrets: Object.fromEntries(resolved),

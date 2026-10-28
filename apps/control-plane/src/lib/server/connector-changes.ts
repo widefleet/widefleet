@@ -26,14 +26,11 @@ import type { ArtifactStorage } from "./storage.ts";
 import type { Transaction } from "./transactions.ts";
 import type { Configuration } from "./config.ts";
 
-export const connectorBrowserUrls = async (
+export const connectorBrowserUrl = async (
   configuration: Pick<Configuration, "APP_DOMAIN" | "APP_HTTPS_PORT">,
   organizationId: string,
   name: string,
-  entrypoints: string[],
 ) => {
-  if (!entrypoints.length) return {};
-
   const origin = await contract.connectorBrowserOrigin(
     organizationId,
     name,
@@ -41,9 +38,7 @@ export const connectorBrowserUrls = async (
     configuration.APP_HTTPS_PORT,
   );
 
-  return Object.fromEntries(
-    entrypoints.map((entrypoint) => [entrypoint, contract.connectorBrowserUrl(origin, entrypoint)]),
-  );
+  return new URL("/", origin).href;
 };
 
 export const administrator = (principal: Pick<Principal, "admin">) => {
@@ -95,12 +90,7 @@ export const connectorStatus = async (
     state,
     message: result.success ? result.data.message : (operation?.error ?? null),
     entrypoints: selected.entrypoints,
-    browserUrls: await connectorBrowserUrls(
-      configuration,
-      record.organizationId,
-      record.name,
-      selected.browserEntrypoints,
-    ),
+    browserUrl: await connectorBrowserUrl(configuration, record.organizationId, record.name),
   });
 };
 
@@ -220,7 +210,6 @@ export const prepareConnector = async (
     name: release.name,
     checksum,
     entrypoints: release.metadata.entrypoints,
-    browserEntrypoints: release.metadata.browser_entrypoints ?? [],
     classes: [...new Set(release.metadata.durable_objects.map((binding) => binding.class_name))],
   });
 

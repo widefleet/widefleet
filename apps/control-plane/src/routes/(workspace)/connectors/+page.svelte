@@ -279,21 +279,16 @@
               <p class="text-muted-foreground mt-4 text-xs leading-5">
                 An administrator selects an entrypoint and a binding name when connecting your app.
               </p>
-              {#if Object.keys(entry.browserUrls).length}
-                <div class="mt-4 space-y-3">
-                  <p class="text-muted-foreground text-xs">Browser addresses</p>
-                  {#each Object.entries(entry.browserUrls) as [entrypoint, url] (entrypoint)}
-                    <div class="space-y-1 text-sm">
-                      <p class="font-medium">{entrypoint}</p>
-                      <a
-                        href={url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        class="text-muted-foreground block break-all underline underline-offset-4"
-                        >{url}</a
-                      >
-                    </div>
-                  {/each}
+              {#if entry.browserUrl}
+                <div class="mt-4 space-y-2">
+                  <p class="text-muted-foreground text-xs">Browser address</p>
+                  <a
+                    href={entry.browserUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="text-muted-foreground block break-all text-sm underline underline-offset-4"
+                    >{entry.browserUrl}</a
+                  >
                 </div>
               {/if}
             {:else}

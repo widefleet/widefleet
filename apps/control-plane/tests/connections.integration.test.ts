@@ -101,7 +101,6 @@ describe("Connector discovery and app connections", () => {
       name: "erp",
       checksum: "a".repeat(64),
       entrypoints: ["default", "NewReader"],
-      browserEntrypoints: ["default", "NewReader"],
       classes: [],
       secrets: { API_KEY: "synthetic-ciphertext" },
       secretRevision: 9,
@@ -116,7 +115,6 @@ describe("Connector discovery and app connections", () => {
         appliedPackage: {
           ...reference,
           entrypoints: ["default", "OldReader"],
-          browserEntrypoints: ["default", "OldReader"],
         },
       },
       {
@@ -131,11 +129,9 @@ describe("Connector discovery and app connections", () => {
       {
         name: "erp",
         entrypoints: ["default"],
-        browserUrls: {
-          default: `${await contract.connectorBrowserOrigin(app.organizationId, "erp", environment.configuration.APP_DOMAIN, environment.configuration.APP_HTTPS_PORT)}/`,
-        },
+        browserUrl: `${await contract.connectorBrowserOrigin(app.organizationId, "erp", environment.configuration.APP_DOMAIN, environment.configuration.APP_HTTPS_PORT)}/`,
       },
-      { name: "pending", entrypoints: [], browserUrls: {} },
+      { name: "pending", entrypoints: [], browserUrl: null },
     ]);
     expect(await service.list(creator)).toMatchObject({ error: { code: "FORBIDDEN" } });
     expect(await service.read(creator, "erp")).toMatchObject({ error: { code: "FORBIDDEN" } });

@@ -1,15 +1,4 @@
-import { bindingName } from "@platform/contracts";
 import { browserPolicy } from "./csp.ts";
-
-export const browserEntrypoint = (pathname: string) => {
-  const prefix = "/_widefleet/entrypoints/";
-
-  if (!pathname.startsWith(prefix)) return "default";
-  const match = /^([^/]+)\//.exec(pathname.slice(prefix.length));
-  const parsed = bindingName.safeParse(match?.[1]);
-
-  return parsed.success && parsed.data !== "default" ? parsed.data : null;
-};
 
 export const connectorBrowserResponse = (response: Response) => {
   const policy = response.headers.get("content-security-policy");

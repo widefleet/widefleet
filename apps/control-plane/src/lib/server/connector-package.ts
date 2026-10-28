@@ -10,7 +10,6 @@ export const connectorReference = z.strictObject({
   name: contract.appSlug,
   checksum: contract.checksum,
   entrypoints: contract.connectorUploadMetadata.shape.entrypoints,
-  browserEntrypoints: z.array(contract.bindingName).default([]),
   classes: z.array(z.string()),
   // Ciphertexts belong to the activation snapshot, independently of login settings.
   secrets: z.record(contract.connectorSecretName, z.string().min(1)).default({}),

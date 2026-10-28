@@ -149,14 +149,12 @@ export const createCloudflareConnectorDeployment = (
               nativeBindings,
               secrets,
               telemetry: null,
-            };
-
-            if (release.metadata.browser_entrypoints?.length)
-              preparation.browserOrigin = await connectorBrowserOrigin(
+              browserOrigin: await connectorBrowserOrigin(
                 command.organizationId,
                 release.name,
                 bindings.APP_DOMAIN,
-              );
+              ),
+            };
 
             const prepared = await manage({ action: "prepare", ...preparation });
 
