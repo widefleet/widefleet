@@ -30,6 +30,7 @@ const apiOperation = async <T>(operation: () => Promise<T>) => {
       throw new ORPCError("AUTH_OPERATION_FAILED", {
         status: cause.statusCode,
         message: cause.message,
+        cause,
       });
     throw cause;
   }
@@ -40,7 +41,7 @@ const unwrap = <T, E extends { message: string }>(result: Result<T, E>) => {
   const error = result.error;
 
   if (error instanceof DirectoryUnavailable)
-    throw new ORPCError("SERVICE_UNAVAILABLE", { message: error.message });
+    throw new ORPCError("SERVICE_UNAVAILABLE", { message: error.message, cause: error });
 
   if (error instanceof TelemetryNotConfigured)
     throw new ORPCError("TELEMETRY_NOT_CONFIGURED", { status: 503, message: error.message });
@@ -992,11 +993,15 @@ export const createApi = (runtime: Runtime) => {
 
       return response;
     } catch (cause) {
-      if (cause instanceof ORPCError)
+      if (cause instanceof ORPCError) {
+        if (cause.status >= 500 && cause.code !== "TELEMETRY_NOT_CONFIGURED")
+          runtime.reporting.exception(cause.cause instanceof Error ? cause.cause : cause);
+
         return Response.json(
           { code: z.string().parse(cause.code), message: cause.message },
           { status: cause.status },
         );
+      }
 
       if (cause instanceof z.ZodError)
         return Response.json(

@@ -1,5 +1,6 @@
 import type { AuthenticationExtension } from "./runtime-extension.ts";
 import { observe, type Observation } from "./observation.ts";
+import { runExtensionEffect } from "../extension-effects.ts";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { DEVICE_CODE_GRANT_TYPE } from "@better-auth/oauth-provider";
@@ -96,6 +97,14 @@ export const createAuthentication = (
 
   const auth = betterAuth({
     ...settings,
+    onAPIError: {
+      onError: (error, context) => {
+        if (error instanceof Error && (!(error instanceof APIError) || error.statusCode >= 500)) {
+          context.logger.error("Authentication failed", error);
+          runExtensionEffect(() => options.observation?.exception?.(error));
+        }
+      },
+    },
     disabledPaths: [...settings.disabledPaths, ...managedPluginPaths],
     trustedOrigins: (request) =>
       companySsoOrigins(database, configuration.PLATFORM_URL, encryptionKey, request),
