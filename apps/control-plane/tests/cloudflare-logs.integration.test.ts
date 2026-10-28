@@ -121,10 +121,18 @@ describe("Cloudflare logs through the shared authorized service", () => {
           ? events.findIndex((entry) => entry.$metadata.id === body.offset) + 1
           : 0;
 
-        return Response.json({
-          success: true,
-          result: { events: { events: events.slice(start, start + body.limit) } },
-        });
+        // Workers Logs omits null-valued fields from the queried JSON, including nested records.
+        return new Response(
+          JSON.stringify(
+            {
+              success: true,
+              result: { events: { events: events.slice(start, start + body.limit) } },
+            },
+            (_key, value: z.infer<ReturnType<typeof z.json>>) =>
+              value === null ? undefined : value,
+          ),
+          { headers: { "content-type": "application/json" } },
+        );
       }),
     );
   });
@@ -184,6 +192,12 @@ describe("Cloudflare logs through the shared authorized service", () => {
       message: "connector message",
       connectorVersion: version,
       deploymentId: null,
+      stack: null,
+      buildId: null,
+      traceId: null,
+      spanId: null,
+      route: null,
+      status: null,
     });
     expect(requests[0]?.parameters.filters).toEqual(
       expect.arrayContaining([
@@ -203,6 +217,76 @@ describe("Cloudflare logs through the shared authorized service", () => {
 
     expect(foreign.isErr() && foreign.error).toBeInstanceOf(TelemetryUnavailable);
   });
+
+  it("restores nullable log fields omitted by Workers Logs", async () => {
+    const event = events[0];
+
+    if (!event?.source) throw new Error("Expected a log fixture");
+
+    for (const key of [
+      "stack",
+      "buildId",
+      "deploymentId",
+      "connectorVersion",
+      "requestId",
+      "traceId",
+      "spanId",
+      "route",
+      "status",
+    ] as const)
+      event.source.record[key] = null;
+
+    const page = (await query()).unwrap();
+    expect(page.entries).toEqual([{ ...event.source.record, id: event.$metadata.id, frames: [] }]);
+  });
+
+  it("preserves present empty text and zero-valued metadata", async () => {
+    const event = events[0];
+
+    if (!event?.source) throw new Error("Expected a log fixture");
+
+    for (const key of ["stack", "buildId", "requestId", "traceId", "spanId", "route"] as const)
+      event.source.record[key] = "";
+    event.source.record.status = 0;
+
+    const page = (await query()).unwrap();
+    expect(page.entries).toEqual([{ ...event.source.record, id: event.$metadata.id, frames: [] }]);
+  });
+
+  it.each(["organizationId", "connector", "appId"] as const)(
+    "rejects connector logs with foreign %s after restoring omitted fields",
+    async (field) => {
+      const source = cloudflareLogRecords(
+        {
+          logs: [{ timestamp: now, level: "info", message: ["connector message"] }],
+          exceptions: [],
+          eventTimestamp: now,
+          outcome: "ok",
+          truncated: false,
+        },
+        {
+          organizationId: fixture.organizationId,
+          connector: "fixture-connector",
+          connectorVersion: crypto.randomUUID(),
+        },
+        now + 1000,
+      )[0];
+
+      if (!source) throw new Error("Expected a connector log fixture");
+      source[field] = crypto.randomUUID();
+      events = [{ ...logEvent(fixture.appId, fixture.deploymentId), source }];
+
+      const result = await telemetry.queryConnector(
+        { ...principal, application: { ...principal.application, admin: true } },
+        contract.connectorLogQuery.parse({ name: "fixture-connector" }),
+      );
+
+      expect(result.isErr() && result.error).toBeInstanceOf(TelemetryUnavailable);
+      expect(result.isErr() && result.error.cause).toMatchObject({
+        message: "Cloudflare returned logs outside the authorized source",
+      });
+    },
+  );
 
   it("scopes every query to this installation's runtime and authorized app", async () => {
     const page = (await query()).unwrap();
