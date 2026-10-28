@@ -56,6 +56,14 @@ export const createOnboardingService = (
         createOrganizationInput.parse(input),
       );
 
+      observe(observation, {
+        event: "organization_created",
+        id: organization.id,
+        userId: person.userId,
+        organizationId: organization.id,
+        properties: { source: "self_service" },
+      });
+
       const publication = await settings.publish(organization.id);
 
       if (publication.error || publication.activation.state !== "active")
@@ -64,14 +72,6 @@ export const createOnboardingService = (
           message:
             "Your organization was created, but app sign-in is not ready. Retry or open organization settings.",
         });
-
-      observe(observation, {
-        event: "organization_created",
-        id: organization.id,
-        userId: person.userId,
-        organizationId: organization.id,
-        properties: { source: "self_service" },
-      });
 
       return organization;
     },
