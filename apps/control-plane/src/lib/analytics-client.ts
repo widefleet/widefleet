@@ -11,7 +11,7 @@ export interface ClientContext {
 let initialized = false;
 
 export const resetClientContext = () => {
-  if (initialized) posthog.reset();
+  if (initialized && posthog.get_distinct_id().startsWith("user:")) posthog.reset();
 };
 
 export const updateClientContext = ({ user, organization, role, analytics }: ClientContext) => {

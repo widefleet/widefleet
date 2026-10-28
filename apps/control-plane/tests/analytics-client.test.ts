@@ -67,7 +67,7 @@ it("uses SDK defaults with only deployment and enabled-feature configuration", (
   expect(sdk.capture).not.toHaveBeenCalled();
 });
 
-it("preserves identity across organization selection and resets only for account changes or logout", () => {
+it("preserves organization transitions and clears identified sessions without resetting anonymous visits", () => {
   analytics.updateClientContext(context);
   analytics.updateClientContext({ ...context, user: null, organization: null, role: null });
   expect(sdk.reset).not.toHaveBeenCalled();
@@ -86,6 +86,9 @@ it("preserves identity across organization selection and resets only for account
   analytics.updateClientContext({ ...context, user: { id: "b" } });
   expect(sdk.reset).toHaveBeenCalledOnce();
   expect(sdk.identify).toHaveBeenLastCalledWith("user:b");
+  analytics.resetClientContext();
+  expect(sdk.reset).toHaveBeenCalledTimes(2);
+  sdk.get_distinct_id.mockReturnValue("anonymous-id");
   analytics.resetClientContext();
   expect(sdk.reset).toHaveBeenCalledTimes(2);
 });

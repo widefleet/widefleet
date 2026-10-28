@@ -3,6 +3,7 @@
   import { onMount } from "svelte";
   import { isHttpError } from "@sveltejs/kit";
   import { authClient } from "#lib/auth-client";
+  import { resetClientContext } from "#lib/analytics-client";
   import { findSignInDestination } from "#lib/sign-in.remote";
   import { goto } from "$app/navigation";
   import AuthLayout from "#shadcn/components/AuthLayout.svelte";
@@ -15,6 +16,10 @@
   import type { PageData } from "./$types";
 
   let { data }: { data: PageData } = $props();
+
+  $effect(() => {
+    if (data.signedOut) resetClientContext();
+  });
 
   let busy = $state(false);
 

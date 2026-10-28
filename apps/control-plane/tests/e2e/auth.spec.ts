@@ -260,31 +260,53 @@ for (const age of [23, 25])
     }
   });
 
-test("clears an expired browser session and requires sign-in", async ({ page, context }) => {
-  const login = await environment.users.login({ userId: environment.owner.id });
-  const current = await environment.auth.api.getSession({ headers: login.headers });
+for (const navigation of ["document", "client"])
+  test(`clears an expired browser session on ${navigation} navigation and requires sign-in`, async ({
+    page,
+    context,
+  }) => {
+    const login = await environment.users.login({ userId: environment.owner.id });
+    const current = await environment.auth.api.getSession({ headers: login.headers });
 
-  if (!current) throw new Error("Expected owner session");
-  await context.addCookies(
-    login.cookies.map((cookie) => ({
-      ...cookie,
-      domain: "localhost",
-      sameSite: "Lax",
-      secure: false,
-    })),
-  );
-  await environment.database.db
-    .update(authSession)
-    .set({ expiresAt: new Date(Date.now() - 1000) })
-    .where(eq(authSession.id, current.session.id));
+    if (!current) throw new Error("Expected owner session");
+    await context.addCookies(
+      login.cookies.map((cookie) => ({
+        ...cookie,
+        domain: "localhost",
+        sameSite: "Lax",
+        secure: false,
+      })),
+    );
 
-  await page.goto("/organizations");
-  await expect(page).toHaveURL(/\/sign-in\?next=%2Forganizations$/);
-  const { authCookies } = await environment.auth.$context;
-  expect((await context.cookies()).map((cookie) => cookie.name)).not.toContain(
-    authCookies.sessionToken.name,
-  );
-});
+    if (navigation === "client") {
+      await page.goto("/");
+      await expect(
+        page.getByRole("link", { name: "Choose organization: Widefleet" }),
+      ).toBeVisible();
+      await page.evaluate(() => {
+        document.documentElement.dataset["sessionFixture"] = "same-document";
+      });
+    }
+
+    await environment.database.db
+      .update(authSession)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(eq(authSession.id, current.session.id));
+
+    if (navigation === "client") {
+      await page.getByRole("link", { name: "Choose organization: Widefleet" }).click();
+      await expect(page).toHaveURL(/\/sign-in\?/);
+      await expect(page.locator("html")).toHaveAttribute("data-session-fixture", "same-document");
+    } else {
+      await page.goto("/organizations");
+      await expect(page).toHaveURL(/\/sign-in\?next=%2Forganizations$/);
+    }
+
+    const { authCookies } = await environment.auth.$context;
+    expect((await context.cookies()).map((cookie) => cookie.name)).not.toContain(
+      authCookies.sessionToken.name,
+    );
+  });
 
 test("selects an organization, repairs stale selection and explains removed access", async ({
   page,
