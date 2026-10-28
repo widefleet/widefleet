@@ -744,6 +744,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       import { createR2Storage } from ${JSON.stringify(server + "storage/r2.ts")};
       import { createAppService } from ${JSON.stringify(server + "apps.ts")};
       import { createRuntimeReleaseService } from ${JSON.stringify(server + "runtime-releases.ts")};
+      import { runScheduledExtension } from ${JSON.stringify(server + "scheduled-extension.ts")};
       import { readCloudflareConfiguration } from ${JSON.stringify(server + "cloudflare-config.ts")};
       export * from './runtime.js';
       export { DeploymentWorkflow } from ${JSON.stringify(workflow)};
@@ -779,6 +780,12 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         if (request.headers.get('x-fixture-management') === 'true') {
           request.headers.delete('x-fixture-management');
           return env.APP_RUNTIME.fetch(request);
+        }
+        if (url.hostname === 'fixture' && url.pathname === '/scheduled-extension') {
+          try {
+            await runScheduledExtension(env, {cron:'7 * * * *',scheduledTime:Date.now()}, () => ({scheduled:async () => {throw new Error('Scheduled fixture failed');}}));
+            return new Response(null,{status:204});
+          } catch (error) { return Response.json({error:error.message},{status:500}); }
         }
         if (url.hostname === 'fixture' && url.pathname === '/runtime') {
           const input = request.method === 'GET' ? null : await request.json();
@@ -826,7 +833,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
             finally { modifier[Symbol.dispose]?.(); }
           }
           if (url.searchParams.get('mode') === 'accepted-only') {
-            await env.DEPLOYMENTS.create({ id: command.id, params: command });
+            await env.DEPLOYMENTS.create({ id: url.searchParams.get('instanceId') ?? command.id, params: command });
             return new Response(null, { status: 200 });
           }
           const deploymentBinding = {
@@ -898,7 +905,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           const command = await request.json();
           const modifier = await env.APP_OPERATIONS.unsafeGetInstanceModifier(command.id);
           try { await modifier.disableRetryDelays(); } finally { modifier[Symbol.dispose]?.(); }
-          await env.APP_OPERATIONS.create({id:command.id,params:command});
+          await env.APP_OPERATIONS.create({id:url.searchParams.get('instanceId') ?? command.id,params:command});
           return new Response(null,{status:204});
         }
         if (url.hostname === 'fixture' && url.pathname === '/operation') {
@@ -2670,6 +2677,16 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         .from(apps)
         .where(eq(apps.id, delayed.appId));
 
+      const reported = exceptions.filter((event) => event.properties["workflow_id"] === id);
+      expect(reported).toHaveLength(1);
+      expect(reported[0]).toMatchObject({
+        distinct_id: "user:fixture-owner",
+        properties: {
+          operation: "remove",
+          app_id: delayed.appId,
+          $groups: { organization: delayed.organizationId },
+        },
+      });
       expect(record?.state).toBe("deleting");
       expect((await operation(id))?.error).toBe("Cloudflare could not complete app removal");
       expect((await authenticatedFetch(`https://${delayed.hostname}/`)).status).toBe(404);
@@ -2834,14 +2851,14 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       );
 
       expect(reported).toMatchObject({
-        distinct_id: "installation:control-plane",
+        distinct_id: "user:fixture-owner",
         properties: {
           workflow_id: selected.jobId,
           operation: "runtime",
-          $process_person_profile: false,
+          $process_person_profile: true,
+          $groups: { organization: first.organizationId },
         },
       });
-      expect(reported?.properties).not.toHaveProperty("$groups");
       runtimeUploadMode = "normal";
       const retried = await selectRuntime({ version: "99.3.0" });
       expect(retried.jobId).not.toBe(selected.jobId);
@@ -3075,5 +3092,64 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       await completed(entry.command.id);
       expect((await host(entry.hostname))?.body).toMatchObject({ deploymentId: entry.command.id });
     }, 20000);
+    it("reports scheduled extension errors without changing their response", async () => {
+      const before = exceptions.length;
+      const response = await worker.fetch("http://fixture/scheduled-extension");
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({ error: "Scheduled fixture failed" });
+      expect(exceptions.slice(before)).toMatchObject([
+        { event: "$exception", properties: { operation: "scheduled", cron: "7 * * * *" } },
+      ]);
+      expect(exceptions[before]?.properties["$exception_list"]).toEqual(
+        expect.arrayContaining([expect.objectContaining({ value: "Scheduled fixture failed" })]),
+      );
+    });
+
+    it.each(["malformed", "identity", "deployment-malformed", "deployment-identity"])(
+      "reports early workflow %s failures",
+      async (kind) => {
+        const id = crypto.randomUUID();
+
+        const command = kind.endsWith("malformed")
+          ? { id }
+          : kind.startsWith("deployment")
+            ? { ...first.command, id: crypto.randomUUID() }
+            : {
+                id: crypto.randomUUID(),
+                appId: first.appId,
+                createdAt: new Date().toISOString(),
+                actor: { id: "fixture-owner", admin: false, application: environment.application },
+                kind: "workflows",
+                request: { action: "list", workflow: "example" },
+              };
+
+        const deployment = kind.startsWith("deployment");
+        const endpoint = deployment ? "start?mode=accepted-only&" : "raw-operation?";
+        expect(
+          (
+            await worker.fetch(`http://fixture/${endpoint}instanceId=${id}`, {
+              method: "POST",
+              body: JSON.stringify(command),
+            })
+          ).status,
+        ).toBe(deployment ? 200 : 204);
+        await expect
+          .poll(
+            async () => {
+              const response = await worker.fetch(
+                `http://fixture/workflow?${deployment ? "" : "app-operation&"}id=${id}`,
+              );
+
+              return z.object({ status: z.string() }).parse(await response.json()).status;
+            },
+            { timeout: 15000 },
+          )
+          .toBe("errored");
+        const reported = exceptions.filter((event) => event.properties["workflow_id"] === id);
+        expect(reported).toHaveLength(1);
+        expect(reported[0]?.event).toBe("$exception");
+      },
+      20000,
+    );
   },
 );

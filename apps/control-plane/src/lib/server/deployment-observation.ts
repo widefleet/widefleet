@@ -2,17 +2,19 @@ import { createProductAnalytics } from "./analytics.ts";
 import type { AnalyticsEnvironment } from "../analytics-config.ts";
 import type { z } from "zod";
 import type { deploymentWorkflowCommand } from "./cloudflare-connector-command.ts";
+import type { cloudflareAppOperation } from "./cloudflare-app-operation-command.ts";
 import { observe } from "./observation.ts";
 
-export const observeDeploymentCompletion = async (
+export const observeWorkflowCompletion = async (
   configuration: AnalyticsEnvironment & { PLATFORM_URL: string },
-  command: z.infer<typeof deploymentWorkflowCommand>,
+  workflowId: string,
+  command: z.infer<typeof deploymentWorkflowCommand | typeof cloudflareAppOperation> | undefined,
   outcome: "succeeded" | "failed",
   error?: Error,
 ) => {
   const observation = createProductAnalytics(configuration);
 
-  if (command.kind === "deploy" && command.attribution) {
+  if (command?.kind === "deploy" && command.attribution) {
     const actor = command.attribution;
 
     const properties = {
@@ -29,14 +31,25 @@ export const observeDeploymentCompletion = async (
       organizationId: actor.organizationId,
       properties,
     });
+  }
 
-    if (error)
-      observation.exception(error, `user:${actor.userId}`, {
-        ...properties,
-        $groups: { organization: actor.organizationId },
-      });
-  } else if (error) {
-    observation.exception(error, undefined, { workflow_id: command.id, operation: command.kind });
+  if (error) {
+    const userId = command?.kind === "deploy" ? command.attribution?.userId : command?.actor.id;
+
+    const organizationId =
+      command?.kind === "deploy"
+        ? command.attribution?.organizationId
+        : command?.actor.application.organizationId;
+
+    observation.exception(error, userId ? `user:${userId}` : undefined, {
+      workflow_id: workflowId,
+      operation: command?.kind,
+      outcome,
+      app_id: command && "appId" in command ? command.appId : undefined,
+      deployment_id: command?.kind === "deploy" ? command.id : undefined,
+      rollback: command?.kind === "deploy" ? command.rollback : undefined,
+      $groups: organizationId ? { organization: organizationId } : undefined,
+    });
   }
 
   await observation.close();
