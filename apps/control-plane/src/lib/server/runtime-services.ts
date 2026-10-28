@@ -38,7 +38,7 @@ export const createRuntime = ({
   encryptionKey,
   execution,
   hostedLogs,
-  organizationAccess,
+  organizationAccess: extensionOrganizationAccess,
   sendEmail,
   authRateLimit,
   authIpAddressHeaders,
@@ -63,6 +63,14 @@ export const createRuntime = ({
   discoveryTransport?: "node" | "cloudflare";
 }) => {
   const publicSignup = Boolean(createOrganization);
+
+  const organizationAccess =
+    extensionOrganizationAccess ??
+    (createOrganization
+      ? ({
+          filterOrganizations: async (candidates) => candidates.map(({ id }) => id),
+        } satisfies OrganizationAccess)
+      : undefined);
 
   const authOptions: NonNullable<Parameters<typeof createAuthentication>[2]> = {
     encryptionKey,

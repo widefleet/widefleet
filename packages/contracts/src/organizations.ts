@@ -13,7 +13,8 @@ export const createOrganizationInput = z.strictObject({
   slug: z
     .string()
     .trim()
-    .max(61)
+    // Leave room for the guided 12-character app name and its separating hyphen.
+    .max(50)
     .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
 });
 

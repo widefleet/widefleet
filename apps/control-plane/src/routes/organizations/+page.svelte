@@ -140,13 +140,13 @@
             id="organization-slug"
             bind:value={slug}
             required
-            maxlength={61}
+            maxlength={50}
             pattern="[a-z0-9]+(-[a-z0-9]+)*"
             placeholder="my-team"
             disabled={pending}
           />
           <p class="text-muted-foreground text-xs">
-            Lowercase letters, numbers and hyphens. Used in your apps’ addresses.
+            Up to 50 lowercase letters, numbers and hyphens. Used in your apps’ addresses.
           </p>
         </div>
         <Button type="submit" class="w-full" disabled={pending}

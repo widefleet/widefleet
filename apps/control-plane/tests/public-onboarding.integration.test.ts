@@ -6,7 +6,8 @@ import { createIdentityService } from "../src/lib/server/identity.ts";
 import { createRuntime } from "../src/lib/server/runtime-services.ts";
 import { createApi } from "../src/lib/server/api.ts";
 import { createStorage } from "../src/lib/server/storage.ts";
-import { member, session, user } from "../src/lib/server/auth-schema.ts";
+import { member, organization, session, user } from "../src/lib/server/auth-schema.ts";
+import { organizationRuntimes } from "../src/lib/server/schema.ts";
 import type { EmailMessage } from "../src/lib/server/email.ts";
 
 describe("Public account registration and organization onboarding", () => {
@@ -128,7 +129,7 @@ describe("Public account registration and organization onboarding", () => {
 
   it("authenticates organization creation independently of membership and rejects foreign origins and company sessions", async () => {
     const calls: string[] = [];
-    const record = { id: crypto.randomUUID(), name: "My Team", slug: "my-team" };
+    const record = { id: crypto.randomUUID(), name: "My Team", slug: "a".repeat(50) };
 
     const runtime = await createRuntime({
       configuration: environment.configuration,
@@ -149,6 +150,19 @@ describe("Public account registration and organization onboarding", () => {
       },
       createOrganization: async (ownerId) => {
         calls.push(ownerId);
+        await environment.database.db
+          .insert(organization)
+          .values({ ...record, createdAt: new Date() });
+        await environment.database.db.insert(member).values({
+          id: crypto.randomUUID(),
+          userId: ownerId,
+          organizationId: record.id,
+          role: "owner",
+          createdAt: new Date(),
+        });
+        await environment.database.db
+          .insert(organizationRuntimes)
+          .values({ organizationId: record.id, appHostnameSuffix: record.slug });
 
         return record;
       },
@@ -169,10 +183,34 @@ describe("Public account registration and organization onboarding", () => {
     expect((await api(request(headers))).status).toBe(403);
     expect(calls).toEqual([]);
     headers.set("origin", environment.configuration.PLATFORM_URL);
+
+    const overlong = new Request(`${environment.configuration.PLATFORM_URL}/api/v1/organizations`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ name: record.name, slug: "a".repeat(51) }),
+    });
+
+    expect((await api(overlong)).status).toBe(400);
+    expect(calls).toEqual([]);
     const response = await api(request(headers));
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(record);
     expect(calls).toEqual([result.user.id]);
+    const selected = await runtime.identity.selectOrganization(request(headers), record.id);
+    expect(selected.isOk()).toBe(true);
+
+    const app = (
+      await runtime.apps.create(selected.unwrap(), {
+        slug: "my-first-app",
+        displayName: "My first app",
+        parentId: null,
+      })
+    ).unwrap();
+
+    expect(app.hostname.split(".")[0]).toHaveLength(63);
+    expect(await runtime.identity.selectOrganization(request(headers), "widefleet")).toMatchObject({
+      error: { code: "FORBIDDEN" },
+    });
     await environment.database.db
       .update(session)
       .set({ identityOrganizationId: "widefleet" })

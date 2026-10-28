@@ -11,7 +11,7 @@ import { createRuntimeExtension as emailExtension } from "./onboarding-extension
 export const createRuntimeExtension = ({
   database,
 }: RuntimeExtensionContext): RuntimeExtension => ({
-  ...emailExtension(),
+  sendEmail: emailExtension().sendEmail,
   createOrganization: (ownerId, input) =>
     database.transaction(async (transaction) => {
       await transaction.select().from(user).where(eq(user.id, ownerId)).for("update");
