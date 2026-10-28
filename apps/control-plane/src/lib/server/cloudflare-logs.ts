@@ -21,6 +21,21 @@ const numeric = (key: string, operation: "eq" | "gte" | "lte" | "lt", value: num
   type: "number" as const,
 });
 
+// Workers Logs omits null-valued fields in query responses. Restore them at this boundary.
+const queriedLog = cloudflareLog.extend({
+  appId: cloudflareLog.shape.appId.default(null),
+  record: cloudflareLog.shape.record.extend({
+    stack: contract.runtimeLog.shape.stack.default(null),
+    buildId: contract.runtimeLog.shape.buildId.default(null),
+    deploymentId: contract.runtimeLog.shape.deploymentId.default(null),
+    requestId: contract.runtimeLog.shape.requestId.default(null),
+    traceId: contract.runtimeLog.shape.traceId.default(null),
+    spanId: contract.runtimeLog.shape.spanId.default(null),
+    route: contract.runtimeLog.shape.route.default(null),
+    status: contract.runtimeLog.shape.status.default(null),
+  }),
+});
+
 const responseSchema = z.object({
   success: z.literal(true),
   result: z.object({
@@ -29,7 +44,7 @@ const responseSchema = z.object({
         z.object({
           $metadata: z.object({ id: z.string().min(1).max(256) }),
           $workers: z.object({ scriptName: z.string() }),
-          source: cloudflareLog,
+          source: queriedLog,
         }),
       ),
     }),
