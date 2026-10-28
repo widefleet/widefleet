@@ -17,7 +17,7 @@
     );
 
     updateClientContext({
-      user: principal ? { id: principal.id } : null,
+      user: principal ?? null,
       organization: organization ? { id: organization.id, name: organization.name } : null,
       role: principal?.role ?? null,
       analytics: page.data.analytics ?? null,

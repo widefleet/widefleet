@@ -22,7 +22,7 @@ let analytics: typeof import("../src/lib/analytics-client.ts");
 
 const context = {
   analytics: config,
-  user: { id: "a" },
+  user: { id: "a", name: "Alex Example", email: "alex@example.test" },
   organization: { id: "org-a", name: "Alpha" },
   role: "member",
 };
@@ -59,7 +59,10 @@ it("uses SDK defaults with only deployment and enabled-feature configuration", (
     capture_performance: { web_vitals: true },
     disable_session_recording: false,
   });
-  expect(sdk.identify).toHaveBeenCalledWith("user:a");
+  expect(sdk.identify).toHaveBeenCalledWith("user:a", {
+    name: "Alex Example",
+    email: "alex@example.test",
+  });
   expect(sdk.group).toHaveBeenCalledWith("organization", "org-a", { name: "Alpha" });
   expect(sdk.reset).not.toHaveBeenCalled();
   analytics.updateClientContext({ ...context, role: "owner" });
@@ -77,20 +80,42 @@ it("preserves organization transitions and clears identified sessions without re
     role: "owner",
   });
   expect(sdk.reset).not.toHaveBeenCalled();
-  expect(sdk.identify).toHaveBeenLastCalledWith("user:a");
+  expect(sdk.identify).toHaveBeenLastCalledWith("user:a", {
+    name: "Alex Example",
+    email: "alex@example.test",
+  });
   expect(sdk.group).toHaveBeenLastCalledWith("organization", "org-b", { name: "Beta" });
   expect(sdk.register).toHaveBeenLastCalledWith({
     scope: config.scope,
     organization_role: "owner",
   });
-  analytics.updateClientContext({ ...context, user: { id: "b" } });
+  analytics.updateClientContext({
+    ...context,
+    user: { id: "b", name: "Blair Example", email: "blair@example.test" },
+  });
   expect(sdk.reset).toHaveBeenCalledOnce();
-  expect(sdk.identify).toHaveBeenLastCalledWith("user:b");
+  expect(sdk.identify).toHaveBeenLastCalledWith("user:b", {
+    name: "Blair Example",
+    email: "blair@example.test",
+  });
   analytics.resetClientContext();
   expect(sdk.reset).toHaveBeenCalledTimes(2);
   sdk.get_distinct_id.mockReturnValue("anonymous-id");
   analytics.resetClientContext();
   expect(sdk.reset).toHaveBeenCalledTimes(2);
+});
+
+it("updates profile properties without changing user identity or resetting the session", () => {
+  analytics.updateClientContext(context);
+  analytics.updateClientContext({
+    ...context,
+    user: { ...context.user, name: "Alex Updated", email: "updated@example.test" },
+  });
+  expect(sdk.identify).toHaveBeenLastCalledWith("user:a", {
+    name: "Alex Updated",
+    email: "updated@example.test",
+  });
+  expect(sdk.reset).not.toHaveBeenCalled();
 });
 
 it("passes original errors and enables replay only when configured", () => {
