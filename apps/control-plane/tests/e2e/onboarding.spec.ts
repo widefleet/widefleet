@@ -227,9 +227,7 @@ test("accepts emailed owner invitations and manages members in isolated organiza
     await operator.getByRole("button", { name: "Create account and continue" }).click();
     await expect(operator).toHaveURL(/\/sign-in\?/);
     await signIn(operator, "email-setup@example.test");
-    await expect(operator).toHaveURL(/\/welcome$/);
-    await expect(operator.getByRole("heading", { name: "Publish your first app" })).toBeVisible();
-    await operator.getByRole("link", { name: "Organization settings", exact: true }).click();
+    await expect(operator).toHaveURL(/\/settings$/);
     await expect(
       operator.getByRole("status").filter({ hasText: "The auth proxy is unavailable" }),
     ).toBeVisible();
