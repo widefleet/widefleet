@@ -20,6 +20,7 @@ patchedDependencies:
   miniflare@5.20261001.0-alpha: patches/miniflare@5.20261001.0-alpha.patch
 
 allowBuilds:
+  core-js: false
   esbuild: true
   sharp: true
   workerd: true

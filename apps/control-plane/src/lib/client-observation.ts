@@ -1,11 +1,11 @@
-import { clientExtension } from "#client-extension";
-import type { ClientContext } from "./client-extension.ts";
+import { browserAnalytics } from "./analytics-client.ts";
+import type { ClientContext } from "./analytics-client.ts";
 import { runExtensionEffect } from "./extension-effects.ts";
 
 export const updateClientContext = (context: ClientContext) => {
-  runExtensionEffect(() => clientExtension.update?.(context));
+  runExtensionEffect(() => browserAnalytics.update?.(context));
 };
 
 export const resetClientContext = () => {
-  runExtensionEffect(() => clientExtension.reset?.());
+  runExtensionEffect(() => browserAnalytics.reset?.());
 };

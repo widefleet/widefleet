@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { closeObservation, observe, type Observation } from "../src/lib/server/observation.ts";
-import { clientExtension } from "../src/lib/client-extension.ts";
+import { browserAnalytics } from "../src/lib/analytics-client.ts";
 import { updateClientContext, resetClientContext } from "../src/lib/client-observation.ts";
 import { reportBrowserError, startBrowserReporting } from "../src/lib/reporting-client.ts";
 
@@ -8,15 +8,11 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.useRealTimers();
-  delete clientExtension.update;
-  delete clientExtension.reset;
-  delete clientExtension.exception;
-  delete clientExtension.start;
 });
 
 it("passes the original browser error to the installation observer", () => {
   const exception = vi.fn();
-  clientExtension.exception = exception;
+  vi.spyOn(browserAnalytics, "exception").mockImplementation(exception);
 
   const error = new TypeError("Cannot read deployment status", {
     cause: new Error("Connection refused"),
@@ -37,15 +33,15 @@ it("does not wait for an asynchronous capture or leak its rejection", async () =
   expect(capture).toHaveBeenCalledTimes(2);
 });
 
-it("absorbs rejected browser hooks while still cleaning up reporting", async () => {
-  const fail = vi.fn(async () => {
+it("absorbs browser reporting failures while still cleaning up reporting", () => {
+  const fail = vi.fn(() => {
     throw new Error("Unavailable");
   });
 
-  clientExtension.update = fail;
-  clientExtension.reset = fail;
-  clientExtension.exception = fail;
-  clientExtension.start = () => fail;
+  vi.spyOn(browserAnalytics, "update").mockImplementation(fail);
+  vi.spyOn(browserAnalytics, "reset").mockImplementation(fail);
+  vi.spyOn(browserAnalytics, "exception").mockImplementation(fail);
+  vi.spyOn(browserAnalytics, "start").mockReturnValue(fail);
   const browser = { addEventListener: vi.fn(), removeEventListener: vi.fn() };
   vi.stubGlobal("window", browser);
   vi.stubGlobal(
@@ -54,6 +50,7 @@ it("absorbs rejected browser hooks while still cleaning up reporting", async () 
   );
   const stop = startBrowserReporting();
   updateClientContext({
+    analytics: null,
     user: null,
     organization: null,
     role: null,
@@ -63,7 +60,6 @@ it("absorbs rejected browser hooks while still cleaning up reporting", async () 
   reportBrowserError(new Error("Synthetic"));
   resetClientContext();
   stop();
-  await new Promise<void>((resolve) => setTimeout(resolve, 0));
   expect(fail).toHaveBeenCalledTimes(4);
   expect(browser.removeEventListener).toHaveBeenCalledTimes(2);
 });

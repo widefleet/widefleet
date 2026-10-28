@@ -274,6 +274,9 @@ importers:
       pg:
         specifier: 8.23.1
         version: 8.23.1
+      posthog-js:
+        specifier: 1.438.23
+        version: 1.438.23(@types/react@19.3.0)(react@19.3.0)
       posthog-node:
         specifier: 5.55.0
         version: 5.55.0
@@ -358,7 +361,7 @@ importers:
     dependencies:
       blume:
         specifier: 2.1.1
-        version: 2.1.1(patch_hash=2c0ac8744c28a89c517113155d46a029e40470a816a9d26331d8ea4e056e49f2)(@aws-sdk/credential-provider-web-identity@3.972.78)(@azure/identity@4.13.3(supports-color@10.2.2))(@azure/storage-blob@12.34.0(supports-color@10.2.2))(@emnapi/runtime@1.11.3)(@shikijs/themes@4.5.0)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(@vercel/functions@3.9.11(@aws-sdk/credential-provider-web-identity@3.972.78)(ws@8.21.0))(csstype@3.2.3)(esbuild@0.28.2)(prettier@3.9.9)(supports-color@10.2.2)(svelte@5.57.1)(vite@8.3.2(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))(ws@8.21.0)(yaml@2.9.1)
+        version: 2.1.1(patch_hash=2c0ac8744c28a89c517113155d46a029e40470a816a9d26331d8ea4e056e49f2)(@aws-sdk/credential-provider-web-identity@3.972.78)(@azure/identity@4.13.3(supports-color@10.2.2))(@azure/storage-blob@12.34.0(supports-color@10.2.2))(@emnapi/runtime@1.11.3)(@shikijs/themes@4.5.0)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(@vercel/functions@3.9.11(@aws-sdk/credential-provider-web-identity@3.972.78)(ws@8.21.0))(csstype@3.2.3)(esbuild@0.28.2)(preact@10.29.8)(prettier@3.9.9)(supports-color@10.2.2)(svelte@5.57.1)(vite@8.3.2(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))(ws@8.21.0)(yaml@2.9.1)
     devDependencies:
       fast-xml-parser:
         specifier: 5.11.2
@@ -2389,11 +2392,20 @@ packages:
   '@poppinss/exception@1.2.3':
     resolution: {integrity: sha512-dCED+QRChTVatE9ibtoaxc+WkdzOSjYTKi/+uacHWIsfodVfpsueo3+DKpgU5Px8qXjgmXkSvhXvSCz3fnP9lw==}
 
+  '@posthog/browser-common@0.9.12':
+    resolution: {integrity: sha512-pKYLYgV0o4UK5PAQ3OTlZpQnKvcBpG+UOqWYa+W41Omec8TlI6FXzGMHdYMTmaymxii0vi9R4jLVi7JQSr4vnQ==}
+
   '@posthog/core@1.57.1':
     resolution: {integrity: sha512-0RQvInX+TlsETdwCnmpdu9Ji2BSqe/NyxxxiEHjsp6iA3W3UtyJ2yUYyZnadjYMArP3LvudEwhN1oSQYMw2pzQ==}
 
+  '@posthog/core@1.61.0':
+    resolution: {integrity: sha512-FxOHbuxCZCFGb/46KdcBtilTX5ROeB4Gs8ZrWESzyNlCCxLw4/5xBVh8nfmPjbztuPvxRs5tOcpQ1kNnr2nlAA==}
+
   '@posthog/types@1.415.1':
     resolution: {integrity: sha512-7Qs2wcqipl8KcFpIkIKE1Wcj1djX4dEB3cfq907HrNpKK7/xKh3U4N4bkOD6h9+8j3SxWWrj9JNpE8CZXsE35w==}
+
+  '@posthog/types@1.416.1':
+    resolution: {integrity: sha512-PG06HE2axHNyyZ9CKSSHKSW4pWfQwEtPA1dewFqIwggcIgk1BsQ+tHSNqvZz+IvE2WnBZ8OcOkF9SWI55VxQfA==}
 
   '@rolldown/binding-android-arm-eabi@1.2.12':
     resolution: {integrity: sha512-dB/a1214qKfHMXCpgqR4OZT+jS4kTyEXbQGJPqzobt5EwH5rX080pxE37alt3RzvR1bf1Yz/yGqRfrYAxuPw0A==}
@@ -3826,6 +3838,9 @@ packages:
     resolution: {integrity: sha512-yuToqVvRrj6pfDXREyQAAv8SkAEk/8GS3jQRTiUMm66TVtBYmqQeoEjL2Lmq8Rpo6271vH76InTChTitEAm65w==}
     engines: {node: '>=22'}
 
+  core-js@3.51.0:
+    resolution: {integrity: sha512-7bDKx/5jm5MxzsXxc93g6Z2+4ZsuT/MddrfRmTDJNAkWsYWHU8EVNEsBiIEWnMAMCHMmRfUEjkuo3jeNBOIHRw==}
+
   core-util-is@1.0.3:
     resolution: {integrity: sha512-ZQBvi1DcpJ4GDqanjucZ2Hj3wEO5pZDS89BWbkcrvdxksJorwUDDZamX9ldFkp9aw2lmBDLgkObEA4DWNJ9FYQ==}
 
@@ -4489,6 +4504,9 @@ packages:
 
   fetchdts@0.1.7:
     resolution: {integrity: sha512-YoZjBdafyLIop9lSxXVI33oLD5kN31q4Td+CasofLLYeLXRFeOsuOw0Uo+XNRi9PZlbfdlN2GmRtm4tCEQ9/KA==}
+
+  fflate@0.4.9:
+    resolution: {integrity: sha512-zdxgIEddhfsyCaWpJ2SdXEP8ZMrKJ6+5jl4OupODcywU0IhRk6gdXuVGcPICyfx2H97hVK7xmJtRLPjkxAX8Vw==}
 
   file-uri-to-path@1.0.0:
     resolution: {integrity: sha512-0Zt+s3L7Vf1biwWZ29aARiVYLx7iMGnEUl9x33fbB/j3jR81u/O2LbqK+Bm1CDSNDKVtJ/YjwY7TUd5SkeLQLw==}
@@ -5681,6 +5699,17 @@ packages:
     resolution: {integrity: sha512-9ZhXKM/rw350N1ovuWHbGxnGh/SNJ4cnxHiM0rxE4VN41wsg8P8zWn9hv/buK00RP4WvlOyr/RBDiptyxVbkZQ==}
     engines: {node: '>=0.10.0'}
 
+  posthog-js@1.438.23:
+    resolution: {integrity: sha512-dwpAxwqqFUbpucLo5fpSvAosNB59w4FvnJ5zXHCBfb6temCf4LDWl0pvBUpn5twvQQaoWThKS6rak0+JhH9e5g==}
+    peerDependencies:
+      '@types/react': '>=16.8.0'
+      react: '>=16.8.0'
+    peerDependenciesMeta:
+      '@types/react':
+        optional: true
+      react:
+        optional: true
+
   posthog-node@5.55.0:
     resolution: {integrity: sha512-8dFtlDTqs0CKGZ8t4mUnk4NdShAgzru3B9D0MfM/NTBzlRyAjctivzWINLtMLRQxYjvgBohxy7RTwiQf4mPycQ==}
     engines: {node: ^20.20.0 || >=22.22.0}
@@ -5688,6 +5717,14 @@ packages:
       rxjs: ^7.0.0
     peerDependenciesMeta:
       rxjs:
+        optional: true
+
+  preact@10.29.8:
+    resolution: {integrity: sha512-ej2aVZ+vZ8WO7tvlQWRM9N63A0KzF9q4mWJfDUHgYaIofWY9hu74QdnQrjoPMmZi2/nZ5gN0bJCQF49xQqx09Q==}
+    peerDependencies:
+      preact-render-to-string: '>=5'
+    peerDependenciesMeta:
+      preact-render-to-string:
         optional: true
 
   prettier@3.9.9:
@@ -5720,6 +5757,9 @@ packages:
   qs@6.16.0:
     resolution: {integrity: sha512-h6fhOIaRrID2CbEY2fqs+7t+UXZo+MLAnU5gRIq85uFtdiUPCdsApMlHhXogKVM4HM2DVbIjGNTTYH2OcmP1vA==}
     engines: {node: '>=0.6'}
+
+  query-selector-shadow-dom@1.0.1:
+    resolution: {integrity: sha512-lT5yCqEBgfoMYpf3F2xQRK7zEr1rhIIZuceDK6+xRkJQ4NMbHTwXqk4NkwDwQMNqXgG9r9fyHnzwNVs6zV5KRw==}
 
   radash@12.1.1:
     resolution: {integrity: sha512-h36JMxKRqrAxVD8201FrCpyeNuUY9Y5zZwujr20fFO77tpUtGa6EZzfKw/3WaiBX95fq7+MpsuMLNdSnORAwSA==}
@@ -6670,6 +6710,12 @@ packages:
   web-streams-polyfill@3.3.3:
     resolution: {integrity: sha512-d2JWLCivmZYTSIoge9MsgFCZrt571BikcWGYkjC1khllbTeDlGqZ2D8vD8E/lJa8WGWbb7Plm8/XJYV7IJHZZw==}
     engines: {node: '>= 8'}
+
+  web-vitals@6.2.1:
+    resolution: {integrity: sha512-rLcLXA2sx6+9dE88NHFubwTtGxpK4yYBLj6qHPdFoCaLr0cXGb4efOqtKLlm4loGA4OEKHIQKMKzZkKyOh5ctw==}
+
+  web-vitals@6.2.3:
+    resolution: {integrity: sha512-Dmy+vdO1UPMqXiAtZSNayhl4f794Bxfd94W4HIj2HlYtczEQfEOon969memlcpcHrTuOKLa5baFjX7WbgmOq+A==}
 
   webidl-conversions@3.0.1:
     resolution: {integrity: sha512-2JAn3z8AR6rjK8Sm8orRC0h/bcl/DqL7tRPdGZ4I1CjdF+EaMLmYxBHyXuKL849eucPFhvBoxMsflfOb8kxaeQ==}
@@ -8611,11 +8657,25 @@ snapshots:
 
   '@poppinss/exception@1.2.3': {}
 
+  '@posthog/browser-common@0.9.12':
+    dependencies:
+      '@posthog/core': 1.61.0
+      '@posthog/types': 1.416.1
+      preact: 10.29.8
+    transitivePeerDependencies:
+      - preact-render-to-string
+
   '@posthog/core@1.57.1':
     dependencies:
       '@posthog/types': 1.415.1
 
+  '@posthog/core@1.61.0':
+    dependencies:
+      '@posthog/types': 1.416.1
+
   '@posthog/types@1.415.1': {}
+
+  '@posthog/types@1.416.1': {}
 
   '@rolldown/binding-android-arm-eabi@1.2.12':
     optional: true
@@ -9015,9 +9075,9 @@ snapshots:
   '@takumi-rs/core-win32-x64-msvc@2.14.0':
     optional: true
 
-  '@takumi-rs/core@2.14.0(csstype@3.2.3)(react@19.3.0)':
+  '@takumi-rs/core@2.14.0(csstype@3.2.3)(preact@10.29.8)(react@19.3.0)':
     dependencies:
-      '@takumi-rs/helpers': 2.14.0(react@19.3.0)
+      '@takumi-rs/helpers': 2.14.0(preact@10.29.8)(react@19.3.0)
     optionalDependencies:
       '@takumi-rs/core-darwin-arm64': 2.14.0
       '@takumi-rs/core-darwin-x64': 2.14.0
@@ -9032,13 +9092,14 @@ snapshots:
       - preact
       - react
 
-  '@takumi-rs/helpers@2.14.0(react@19.3.0)':
+  '@takumi-rs/helpers@2.14.0(preact@10.29.8)(react@19.3.0)':
     optionalDependencies:
+      preact: 10.29.8
       react: 19.3.0
 
-  '@takumi-rs/wasm@2.14.0(csstype@3.2.3)(react@19.3.0)':
+  '@takumi-rs/wasm@2.14.0(csstype@3.2.3)(preact@10.29.8)(react@19.3.0)':
     dependencies:
-      '@takumi-rs/helpers': 2.14.0(react@19.3.0)
+      '@takumi-rs/helpers': 2.14.0(preact@10.29.8)(react@19.3.0)
     optionalDependencies:
       csstype: 3.2.3
     transitivePeerDependencies:
@@ -10031,7 +10092,7 @@ snapshots:
 
   blake3-wasm@2.1.5: {}
 
-  blume@2.1.1(patch_hash=2c0ac8744c28a89c517113155d46a029e40470a816a9d26331d8ea4e056e49f2)(@aws-sdk/credential-provider-web-identity@3.972.78)(@azure/identity@4.13.3(supports-color@10.2.2))(@azure/storage-blob@12.34.0(supports-color@10.2.2))(@emnapi/runtime@1.11.3)(@shikijs/themes@4.5.0)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(@vercel/functions@3.9.11(@aws-sdk/credential-provider-web-identity@3.972.78)(ws@8.21.0))(csstype@3.2.3)(esbuild@0.28.2)(prettier@3.9.9)(supports-color@10.2.2)(svelte@5.57.1)(vite@8.3.2(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))(ws@8.21.0)(yaml@2.9.1):
+  blume@2.1.1(patch_hash=2c0ac8744c28a89c517113155d46a029e40470a816a9d26331d8ea4e056e49f2)(@aws-sdk/credential-provider-web-identity@3.972.78)(@azure/identity@4.13.3(supports-color@10.2.2))(@azure/storage-blob@12.34.0(supports-color@10.2.2))(@emnapi/runtime@1.11.3)(@shikijs/themes@4.5.0)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(@vercel/functions@3.9.11(@aws-sdk/credential-provider-web-identity@3.972.78)(ws@8.21.0))(csstype@3.2.3)(esbuild@0.28.2)(preact@10.29.8)(prettier@3.9.9)(supports-color@10.2.2)(svelte@5.57.1)(vite@8.3.2(@types/node@22.20.5)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))(ws@8.21.0)(yaml@2.9.1):
     dependencies:
       '@astrojs/check': 0.9.10(@emnapi/runtime@1.11.3)(prettier@3.9.9)(typescript@6.0.3)
       '@astrojs/markdown-satteri': 0.4.2
@@ -10106,7 +10167,7 @@ snapshots:
       string-width: 8.3.0
       sucrase: 3.35.1
       tailwindcss: 4.3.3
-      takumi-js: 2.14.0(csstype@3.2.3)(react@19.3.0)
+      takumi-js: 2.14.0(csstype@3.2.3)(preact@10.29.8)(react@19.3.0)
       tinyglobby: 0.2.17
       twoslash: 0.3.9(supports-color@10.2.2)(typescript@6.0.3)
       typescript: 6.0.3
@@ -10307,6 +10368,8 @@ snapshots:
   cookie@1.1.1: {}
 
   cookie@2.0.1: {}
+
+  core-js@3.51.0: {}
 
   core-util-is@1.0.3: {}
 
@@ -10976,6 +11039,8 @@ snapshots:
       web-streams-polyfill: 3.3.3
 
   fetchdts@0.1.7: {}
+
+  fflate@0.4.9: {}
 
   file-uri-to-path@1.0.0: {}
 
@@ -12363,9 +12428,29 @@ snapshots:
     dependencies:
       xtend: 4.0.2
 
+  posthog-js@1.438.23(@types/react@19.3.0)(react@19.3.0):
+    dependencies:
+      '@posthog/browser-common': 0.9.12
+      '@posthog/core': 1.61.0
+      '@posthog/types': 1.416.1
+      core-js: 3.51.0
+      dompurify: 3.4.16
+      fflate: 0.4.9
+      preact: 10.29.8
+      query-selector-shadow-dom: 1.0.1
+      web-vitals: 6.2.3
+      web-vitals-soft-navs: web-vitals@6.2.1
+    optionalDependencies:
+      '@types/react': 19.3.0
+      react: 19.3.0
+    transitivePeerDependencies:
+      - preact-render-to-string
+
   posthog-node@5.55.0:
     dependencies:
       '@posthog/core': 1.57.1
+
+  preact@10.29.8: {}
 
   prettier@3.9.9: {}
 
@@ -12389,6 +12474,8 @@ snapshots:
     dependencies:
       es-define-property: 1.0.1
       side-channel: 1.1.1
+
+  query-selector-shadow-dom@1.0.1: {}
 
   radash@12.1.1: {}
 
@@ -12965,11 +13052,11 @@ snapshots:
 
   tailwindcss@4.3.3: {}
 
-  takumi-js@2.14.0(csstype@3.2.3)(react@19.3.0):
+  takumi-js@2.14.0(csstype@3.2.3)(preact@10.29.8)(react@19.3.0):
     dependencies:
-      '@takumi-rs/core': 2.14.0(csstype@3.2.3)(react@19.3.0)
-      '@takumi-rs/helpers': 2.14.0(react@19.3.0)
-      '@takumi-rs/wasm': 2.14.0(csstype@3.2.3)(react@19.3.0)
+      '@takumi-rs/core': 2.14.0(csstype@3.2.3)(preact@10.29.8)(react@19.3.0)
+      '@takumi-rs/helpers': 2.14.0(preact@10.29.8)(react@19.3.0)
+      '@takumi-rs/wasm': 2.14.0(csstype@3.2.3)(preact@10.29.8)(react@19.3.0)
     transitivePeerDependencies:
       - csstype
       - preact
@@ -13395,6 +13482,10 @@ snapshots:
   vscode-uri@3.2.0: {}
 
   web-streams-polyfill@3.3.3: {}
+
+  web-vitals@6.2.1: {}
+
+  web-vitals@6.2.3: {}
 
   webidl-conversions@3.0.1: {}
 

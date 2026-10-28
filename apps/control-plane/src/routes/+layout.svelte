@@ -22,6 +22,7 @@
       role: principal?.role ?? null,
       route: page.route.id,
       url: page.url.href,
+      analytics: page.data.analytics ?? null,
     });
   });
 

@@ -1,3 +1,4 @@
+import { createProductAnalytics } from "../src/lib/server/analytics.ts";
 import { unstable_readConfig } from "wrangler";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -49,7 +50,8 @@ try {
     );
 
     const extension = await loadRuntimeExtension({ configuration, database: database.db });
-    observation = extension.observation;
+    observation = extension.observation ?? createProductAnalytics(configuration);
+    extension.observation = observation;
 
     const configPath =
       process.env["WIDEFLEET_INITIALIZE_CONFIG"] ??

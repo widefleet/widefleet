@@ -1,3 +1,4 @@
+import { createProductAnalytics } from "./analytics.ts";
 import { createRuntimeExtension } from "#runtime-extension";
 import type { RuntimeExtension, RuntimeExtensionContext } from "./runtime-extension.ts";
 import { organizationIdentifier } from "@platform/contracts";
@@ -93,6 +94,7 @@ export const initializeRuntime = async (
 
   try {
     extension = await createExtension({ database: database.db, configuration });
+    extension.observation ??= createProductAnalytics(configuration);
 
     const settings = createSettingsService(
       configuration,

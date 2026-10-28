@@ -7,12 +7,16 @@ export const init: ServerInit = async () => {
   if (!building) await getRuntime();
 };
 
-import { handleExtensionRequest } from "#request-extension";
+import { proxyAnalyticsRequest } from "#server/analytics-proxy";
+import { analyticsEnvironmentSchema, readAnalyticsConfiguration } from "#lib/analytics-config";
 
 export const handle: Handle = async ({ event, resolve }) => {
-  const extensionResponse = await handleExtensionRequest(event.request);
+  event.locals.analytics = readAnalyticsConfiguration(
+    analyticsEnvironmentSchema.parse(process.env),
+  );
+  const analyticsResponse = await proxyAnalyticsRequest(event.request, event.locals.analytics);
 
-  if (extensionResponse) return extensionResponse;
+  if (analyticsResponse) return analyticsResponse;
   event.locals.runtime = createRequestRuntime(getRuntime);
 
   return resolve(event);

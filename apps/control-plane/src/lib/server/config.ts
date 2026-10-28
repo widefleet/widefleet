@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { analyticsEnvironmentSchema } from "../analytics-config.ts";
 import { artifactStorageSchema } from "./storage/config.ts";
 
 const telemetryUrl = z.url().refine((value) => {
@@ -15,6 +16,7 @@ const telemetryUrl = z.url().refine((value) => {
 }, "Expected an HTTP(S) origin without credentials, path, query or fragment");
 
 export const runtimeConfigurationSchema = z.object({
+  ...analyticsEnvironmentSchema.shape,
   DATABASE_URL: z.url(),
   PLATFORM_USAGE_REPORTING: z
     .enum(["true", "false", ""])

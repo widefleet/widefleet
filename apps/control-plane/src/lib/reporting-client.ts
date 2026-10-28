@@ -1,6 +1,6 @@
 import { reportingPreferences, sanitizeReportingError } from "@platform/contracts";
 
-import { clientExtension } from "#client-extension";
+import { browserAnalytics } from "./analytics-client.ts";
 import { runExtensionEffect } from "./extension-effects.ts";
 
 let enabled = false;
@@ -10,7 +10,7 @@ let sent = 0;
 let since = Date.now();
 
 export const reportBrowserError = (error: Error) => {
-  runExtensionEffect(() => clientExtension.exception?.(error));
+  runExtensionEffect(() => browserAnalytics.exception?.(error));
 
   if (!enabled) return;
 
@@ -37,7 +37,7 @@ export const startBrowserReporting = () => {
   let stopExtension: void | (() => void | Promise<void>);
 
   try {
-    stopExtension = clientExtension.start?.();
+    stopExtension = browserAnalytics.start?.();
   } catch {
     // The application remains usable without optional browser observation.
   }
