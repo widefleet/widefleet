@@ -2,6 +2,7 @@ packages:
   - apps/*
   - packages/*
   - starters/*
+  - examples/connectors/*
 
 strictPeerDependencies: true
 

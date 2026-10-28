@@ -1,0 +1,29 @@
+{
+  "name": "@widefleet/example-gmail-connector",
+  "version": "1.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build": "esbuild src/connector.ts --bundle --format=esm --platform=browser --target=es2022 --external:cloudflare:* --external:node:* --outfile=dist/connector.js"
+  },
+  "dependencies": {
+    "better-auth": "1.7.12",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261003.1",
+    "@tsconfig/strictest": "2.0.8",
+    "@types/node": "26.6.4",
+    "esbuild": "0.28.2",
+    "miniflare": "5.20261001.0-alpha",
+    "typescript": "6.0.3",
+    "vitest": "5.0.3"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@12.4.2"
+}
