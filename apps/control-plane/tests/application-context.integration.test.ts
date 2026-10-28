@@ -127,7 +127,7 @@ describe("Mandatory application context", () => {
       });
     }
 
-    const catalog = [{ name: "erp", entrypoints: ["default", "FirstReader"] }];
+    const catalog = [{ name: "erp", entrypoints: ["default", "FirstReader"], browserUrls: {} }];
     expect((await current.connectors.catalog(first.principal)).unwrap()).toEqual(catalog);
     const listing = (await current.agents.list(first.principal)).unwrap();
     expect(listing.map((agent) => agent.name)).toEqual(["First agent"]);
