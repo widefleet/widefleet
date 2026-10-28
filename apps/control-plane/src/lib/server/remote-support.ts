@@ -54,7 +54,11 @@ export const remoteOperation = async <T>(operation: () => Promise<T>) => {
   } catch (cause) {
     if (cause instanceof InvalidOperation) pageFailure(cause);
 
-    if (cause instanceof APIError) error(cause.statusCode, cause.message);
+    if (cause instanceof APIError) {
+      if (cause.statusCode >= 500) (await getRuntime()).reporting.exception(cause);
+      error(cause.statusCode, cause.message);
+    }
+
     throw cause;
   }
 };

@@ -71,6 +71,11 @@ export const createRuntime = ({
 }) => {
   const publicSignup = Boolean(createOrganization);
 
+  const reportException = (error: Error) => {
+    reporting.exception(error);
+    runExtensionEffect(() => observation?.exception?.(error));
+  };
+
   const organizationAccess =
     extensionOrganizationAccess ??
     (createOrganization
@@ -82,6 +87,7 @@ export const createRuntime = ({
   const authOptions: NonNullable<Parameters<typeof createAuthentication>[2]> = {
     encryptionKey,
     publicSignup,
+    reportException,
   };
 
   if (observation) authOptions.observation = observation;
@@ -118,11 +124,7 @@ export const createRuntime = ({
     settings,
     reporting: {
       ...reporting,
-      exception: (error: Error) => {
-        reporting.exception(error);
-
-        runExtensionEffect(() => observation?.exception?.(error));
-      },
+      exception: reportException,
     },
     storage,
     invitations: createInvitationService(database.db, configuration, sendEmail, organizationAccess),

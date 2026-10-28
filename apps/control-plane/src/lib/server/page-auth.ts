@@ -2,6 +2,7 @@ import { error, redirect } from "@sveltejs/kit";
 import type { DatabaseUnavailable, InvalidOperation, StorageUnavailable } from "./errors.ts";
 import { getRuntime } from "./runtime.ts";
 import { AuthenticationFailed } from "./identity.ts";
+import { runExtensionEffect } from "../extension-effects.ts";
 
 const chooseOrganization = (request: Request): never => {
   const url = new URL(request.url);
@@ -12,7 +13,12 @@ export const identityFailure = (
   cause: AuthenticationFailed | DatabaseUnavailable,
   request: Request,
 ): never => {
-  if (cause._tag === "DatabaseUnavailable") error(503, "Sign-in is temporarily unavailable.");
+  if (cause._tag === "DatabaseUnavailable") {
+    runExtensionEffect(async () => {
+      (await getRuntime()).reporting.exception(cause.cause instanceof Error ? cause.cause : cause);
+    });
+    error(503, "Sign-in is temporarily unavailable.");
+  }
 
   if (cause.code === "SSO_REQUIRED") {
     const url = new URL(request.url);
@@ -92,6 +98,11 @@ const operationStatus = { NOT_FOUND: 404, FORBIDDEN: 403, CONFLICT: 409, BAD_REQ
 export const pageFailure = (
   cause: DatabaseUnavailable | InvalidOperation | StorageUnavailable,
 ): never => {
+  if (cause._tag !== "InvalidOperation")
+    runExtensionEffect(async () => {
+      (await getRuntime()).reporting.exception(cause.cause instanceof Error ? cause.cause : cause);
+    });
+
   if (cause._tag === "DatabaseUnavailable") error(503, "The database is temporarily unavailable.");
 
   if (cause._tag === "StorageUnavailable") error(503, "File storage is temporarily unavailable.");
