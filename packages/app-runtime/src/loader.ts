@@ -248,6 +248,12 @@ const manageRuntime = async (
   if (url.pathname === "/.well-known/widefleet/execution") {
     if (request.method !== "POST") return new Response(null, { status: 405 });
 
+    if (environment["WIDEFLEET_HTTP_AVAILABILITY"] !== "kv")
+      return Response.json(
+        { error: "Execution suspension requires WIDEFLEET_HTTP_AVAILABILITY=kv" },
+        { status: 409 },
+      );
+
     const input = z
       .strictObject({ appId: z.uuid(), blocked: z.boolean() })
       .parse(await request.json());

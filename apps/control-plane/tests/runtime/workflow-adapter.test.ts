@@ -32,6 +32,7 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
     const records: z.infer<typeof observation>[] = [];
 
     const fetchCounts = new Map<string, number>();
+    const releases = new Map<string, () => void>();
 
     const listen = async (server: ReturnType<typeof createServer>) => {
       server.listen(0, "127.0.0.1");
@@ -80,8 +81,7 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
       );
     };
 
-    // Every operation goes through a Dynamic Worker's ordinary env.WORKFLOW
-    // methods. The test does not call the native Workflow binding directly.
+    // App operations go through a Dynamic Worker's ordinary env.WORKFLOW methods.
     const call = async (operation: string, id: string, fields: Record<string, string> = {}) => {
       const response = await fetch(
         `${origin}/${operation}?${new URLSearchParams({ id, ...fields })}`,
@@ -128,12 +128,18 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
           const entry = observation.parse(Object.fromEntries(url.searchParams));
           records.push(entry);
           response.setHeader("content-type", "application/json");
-          response.end(
-            JSON.stringify({
-              ok: true,
-              count: labels(entry.id).filter((label) => label === entry.label).length,
-            }),
-          );
+
+          const body = JSON.stringify({
+            ok: true,
+            count: labels(entry.id).filter((label) => label === entry.label).length,
+          });
+
+          if (entry.label === "suspension-start")
+            releases.set(entry.id, () => {
+              releases.delete(entry.id);
+              response.end(body);
+            });
+          else response.end(body);
 
           return;
         } else if (url.pathname === "/reorder") {
@@ -209,9 +215,15 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
       await writeFile(
         join(directory, "index.js"),
         `
-        import runtime, { Gateway as RuntimeGateway } from './runtime.js';
+        import runtime, { Gateway as RuntimeGateway, WidefleetWorkflowCatalog as RuntimeCatalog } from './runtime.js';
         import { WorkerEntrypoint } from 'cloudflare:workers';
         export * from './runtime.js';
+        export class WidefleetWorkflowCatalog extends RuntimeCatalog {
+          async nativeEvent(id) {
+            const record = await this.ctx.storage.get('instance/fixture/' + id);
+            await (await this.env.WIDEFLEET_WORKFLOWS.get(record.nativeId)).sendEvent({ type: 'continue', payload: {} });
+          }
+        }
         export class Gateway extends RuntimeGateway {
           async fetch(request) {
             if (new URL(request.url).origin !== ${JSON.stringify(delayedOrigin)}) return super.fetch(request);
@@ -233,6 +245,14 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
           if (incoming.pathname === '/.well-known/widefleet/ready') headers.set('authorization', 'Bearer ' + env.WIDEFLEET_CONTROL_TOKEN);
           request = new Request(incoming, new Request(request, {headers}));
           const path = new URL(request.url).pathname;
+          if (path === '/fixture/availability') {
+            await env.AUTH_CONFIG.put('organizations/widefleet/http-availability', JSON.stringify({ blocked: incoming.searchParams.get('blocked') === 'true' }));
+            return new Response(null, { status: 204 });
+          }
+          if (path === '/fixture/native-event') {
+            await env.WIDEFLEET_WORKFLOW_CATALOG.get(env.WIDEFLEET_WORKFLOW_CATALOG.idFromName(${JSON.stringify(appId)})).nativeEvent(incoming.searchParams.get('id'));
+            return new Response(null, { status: 204 });
+          }
           if (path === '/fixture/init') {
             const app = ${JSON.stringify(app)};
             await env.WIDEFLEET_PACKAGES.put('apps/${appId}/modules/${hash}', ${JSON.stringify(applicationSource)});
@@ -254,7 +274,7 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
             await env.WIDEFLEET_PACKAGES.put('hosts/fixture.apps.example.test.json', JSON.stringify(next));
             return Response.json({ version: next.version });
           }
-          return runtime.fetch(request, env, ctx);
+          return runtime.fetch(request, request.headers.has('x-fixture-disabled') ? { ...env, WIDEFLEET_HTTP_AVAILABILITY: undefined } : env, ctx);
         } };
       `,
       );
@@ -279,6 +299,7 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
             PLATFORM_SECRET: "synthetic-host-only",
             WIDEFLEET_CONTROL_TOKEN: authToken,
             WIDEFLEET_MANAGEMENT_HTTP: "true",
+            WIDEFLEET_HTTP_AVAILABILITY: "kv",
             WIDEFLEET_CONFIGURATION: '{"crons":{},"queues":{}}',
           },
           worker_loaders: [{ binding: "WIDEFLEET_LOADER" }],
@@ -341,6 +362,89 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
 
       return result;
     };
+
+    const availability = async (blocked: boolean) => {
+      expect((await fetch(`${origin}/fixture/availability?blocked=${blocked}`)).status).toBe(204);
+    };
+
+    const suspended = async (id: string) => {
+      await expect
+        .poll(() => manage({ action: "status", workflow: "fixture", id }), { timeout: 10_000 })
+        .toMatchObject({
+          result: {
+            status: "errored",
+            error: { name: "NonRetryableError", message: "Organization execution is suspended" },
+          },
+        });
+    };
+
+    it("rejects suspension publication when execution enforcement is disabled", async () => {
+      const response = await fetch(`${origin}/.well-known/widefleet/execution`, {
+        method: "POST",
+        headers: {
+          authorization: "Bearer native-runtime-fixture-control-token-never-deploy",
+          "content-type": "application/json",
+          "x-fixture-disabled": "true",
+        },
+        body: JSON.stringify({ appId, blocked: true }),
+      });
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({
+        error: "Execution suspension requires WIDEFLEET_HTTP_AVAILABILITY=kv",
+      });
+      // No gate was persisted and no pause was scheduled by the rejected request.
+      expect(await status(await create("loop"), "complete")).toMatchObject({ output: 3 });
+    });
+
+    it("stops retries with a native non-retryable error when execution is suspended", async () => {
+      const id = await create("suspension-retry");
+
+      try {
+        await expect.poll(() => releases.has(id)).toBe(true);
+        await availability(true);
+        releases.get(id)?.();
+        await suspended(id);
+        expect(labels(id)).toEqual(["suspension-start"]);
+      } finally {
+        releases.get(id)?.();
+        releases.delete(id);
+        await availability(false);
+        await manage({ action: "delete", workflow: "fixture", id });
+      }
+    });
+
+    it.each(["sleep", "until", "event"])(
+      "rejects %s wakeups before returning control to suspended app code",
+      async (wait) => {
+        const id = await create(`suspension-${wait}`);
+
+        try {
+          await status(id, "waiting");
+          await availability(true);
+
+          if (wait === "event") {
+            await expect(
+              manage({
+                action: "sendEvent",
+                workflow: "fixture",
+                id,
+                event: { type: "continue", payload: {} },
+              }),
+            ).rejects.toThrow("Organization execution is suspended");
+            // Model an event accepted by the provider before the gate was published.
+            expect((await fetch(`${origin}/fixture/native-event?id=${id}`)).status).toBe(204);
+          }
+
+          await suspended(id);
+          expect(labels(id)).toEqual(["first"]);
+        } finally {
+          await availability(false);
+          await manage({ action: "delete", workflow: "fixture", id });
+        }
+      },
+      15000,
+    );
 
     it("retains committed steps and receives events after an abrupt process restart", async () => {
       const id = await create("sequential");
