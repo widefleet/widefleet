@@ -102,7 +102,13 @@ test("registers a verified account, creates its organization and guides the firs
         exact: true,
       }),
     ).toBeVisible();
-    await page.getByLabel("Verification code", { exact: true }).fill(otp);
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.evaluate((code) => navigator.clipboard.writeText(code), otp);
+    const codeInput = page.getByLabel("Verification code", { exact: true });
+    await codeInput.focus();
+    await codeInput.press("ControlOrMeta+a");
+    await codeInput.press("ControlOrMeta+v");
+    await expect(codeInput).toHaveValue(otp);
     await page.getByRole("button", { name: "Verify email and continue" }).click();
     await expect(page.getByRole("heading", { name: "Create your organization" })).toBeVisible();
     await page.getByLabel("Organization name", { exact: true }).fill("Example Builders");

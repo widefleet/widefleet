@@ -1,6 +1,7 @@
 <script lang="ts">
   import { z } from "zod";
   import { onMount } from "svelte";
+  import { REGEXP_ONLY_DIGITS } from "bits-ui";
   import { isHttpError } from "@sveltejs/kit";
   import { authClient } from "#lib/auth-client";
   import { findSignInDestination } from "#lib/sign-in.remote";
@@ -8,6 +9,7 @@
   import Feedback from "#shadcn/components/Feedback.svelte";
   import { Button } from "#shadcn/components/ui/button/index.js";
   import { Input } from "#shadcn/components/ui/input/index.js";
+  import * as InputOTP from "#shadcn/components/ui/input-otp/index.js";
   import { Label } from "#shadcn/components/ui/label/index.js";
 
   let {
@@ -50,7 +52,7 @@
   const emailSignIn = async (event: SubmitEvent) => {
     event.preventDefault();
 
-    if (busy) return;
+    if (busy || (sentTo !== null && otp.length !== 6)) return;
     busy = true;
     message = "";
 
@@ -152,19 +154,31 @@
     </p>
     <div class="space-y-2">
       <Label for="sign-in-code">{register ? "Verification code" : "Sign-in code"}</Label>
-      <Input
-        id="sign-in-code"
+      <InputOTP.Root
+        inputId="sign-in-code"
         bind:value={otp}
         inputmode="numeric"
         autocomplete="one-time-code"
-        pattern={"[0-9]{6}"}
+        pattern={REGEXP_ONLY_DIGITS}
         minlength={6}
         maxlength={6}
+        disabled={busy}
         required
-      />
+      >
+        {#snippet children({ cells })}
+          <InputOTP.Group>
+            {#each cells as cell (cell)}
+              <InputOTP.Slot {cell} />
+            {/each}
+          </InputOTP.Group>
+        {/snippet}
+      </InputOTP.Root>
     </div>
   {/if}
-  <Button type="submit" disabled={busy || !ready} class="w-full"
+  <Button
+    type="submit"
+    disabled={busy || !ready || (sentTo !== null && otp.length !== 6)}
+    class="w-full"
     >{busy
       ? "Please wait …"
       : sentTo !== null
