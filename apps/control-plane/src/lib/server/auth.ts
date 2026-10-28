@@ -52,7 +52,7 @@ export const createAuthentication = (
   } = {},
 ) => {
   const settings = authenticationOptions(configuration, {
-    ...createAuthenticationAdmission(database, options.organizationAccess),
+    ...createAuthenticationAdmission(database, options.organizationAccess, options.publicSignup),
     ...options,
   });
 

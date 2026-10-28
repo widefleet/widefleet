@@ -2,7 +2,7 @@ import { installationSettings, setupOwner } from "@platform/contracts";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { installationOrganizationId } from "../organization.ts";
-import { member, user } from "./auth-schema.ts";
+import { member, user, organization } from "./auth-schema.ts";
 import type { Database, DatabaseExecutor } from "./database.ts";
 import { InvalidOperation } from "./errors.ts";
 import { installation, organizationSettings } from "./schema.ts";
@@ -99,6 +99,12 @@ export const createInstallationOwner = async (
       .update(installation)
       .set({ ownerId: userId, bootstrapPending })
       .where(eq(installation.id, installationId));
+
+    if (owner.organizationName)
+      await transaction
+        .update(organization)
+        .set({ name: owner.organizationName })
+        .where(eq(organization.id, installationOrganizationId));
 
     return { id: userId, name: owner.name, email: owner.email.toLowerCase() };
   });

@@ -9,8 +9,7 @@ import { authControlPath, configurationRevision } from "@platform/auth-proxy/pub
 // Settings/API/browser fixtures exercise HTTP publication. Packaged tests use the real worker.
 export const createAuthControl = async (directory: string) => {
   const key = "local-auth-control-key-never-deploy";
-  let configuration: AuthConfiguration | null = null;
-  let revision = "";
+  const configurations = new Map<string, { configuration: AuthConfiguration; revision: string }>();
   let available = true;
   let publications = 0;
 
@@ -33,7 +32,11 @@ export const createAuthControl = async (directory: string) => {
       return;
     }
 
-    if (request.url !== `${authControlPath}/organizations/widefleet/configuration`) {
+    const organizationId = request.url?.match(
+      new RegExp(`^${authControlPath}/organizations/([a-zA-Z0-9_-]+)/configuration$`),
+    )?.[1];
+
+    if (!organizationId) {
       response.writeHead(404).end();
 
       return;
@@ -43,11 +46,17 @@ export const createAuthControl = async (directory: string) => {
       const chunks: Buffer[] = [];
 
       for await (const chunk of request) chunks.push(z.instanceof(Buffer).parse(chunk));
-      configuration = authConfiguration.parse(JSON.parse(Buffer.concat(chunks).toString()));
-      revision = await configurationRevision(configuration);
+      const configuration = authConfiguration.parse(JSON.parse(Buffer.concat(chunks).toString()));
+      const revision = await configurationRevision(configuration);
+      configurations.set(organizationId, { configuration, revision });
       publications++;
       response.writeHead(204).end();
     } else {
+      const { configuration, revision } = configurations.get(organizationId) ?? {
+        configuration: null,
+        revision: "",
+      };
+
       response.setHeader("content-type", "application/json");
       response.end(
         JSON.stringify({
@@ -71,7 +80,11 @@ export const createAuthControl = async (directory: string) => {
 
   return {
     url: `http://127.0.0.1:${address.port}`,
-    read: () => ({ configuration, revision, publications }),
+    read: (organizationId = "widefleet") => ({
+      configuration: configurations.get(organizationId)?.configuration ?? null,
+      revision: configurations.get(organizationId)?.revision ?? "",
+      publications,
+    }),
     available: (value: boolean) => {
       available = value;
     },

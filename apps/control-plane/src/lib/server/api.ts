@@ -154,6 +154,18 @@ export const createApi = (runtime: Runtime) => {
       .handler(async ({ context }) =>
         unwrap(await runtime.identity.organizations(context.request)),
       ),
+    createOrganization: base
+      .route({ method: "POST", path: "/organizations" })
+      .input(contract.createOrganizationInput)
+      .output(contract.onboardingOrganization)
+      .handler(async ({ context, input }) =>
+        apiOperation(async () =>
+          runtime.onboarding.create(
+            unwrap(await runtime.identity.authenticateUser(context.request, "platform:write")),
+            input,
+          ),
+        ),
+      ),
     selectOrganization: base
       .route({ method: "PUT", path: "/organization" })
       .input(contract.organizationSelection)

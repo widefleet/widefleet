@@ -131,11 +131,12 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
     expect(response.status).toBe(204);
   };
 
-  const start = async () => {
+  const start = async (logs = "cloudflare") => {
     const { unstable_dev } = await import("wrangler");
 
     return unstable_dev(join(directory, "index.js"), {
       config: join(directory, "wrangler.json"),
+      vars: { WIDEFLEET_LOGS: logs },
       local: true,
       persist: true,
       persistTo: join(directory, "state"),
@@ -699,6 +700,219 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
     expect(await json("/workflow/steps")).toEqual([{ id }]);
   }, 35_000);
 
+  const workflowWorkers = async (id: string) =>
+    z
+      .array(z.object({ instanceId: z.string(), key: z.string().nullable(), loads: z.number() }))
+      .parse(await json("/fixture/workflow-workers"))
+      .filter((record) => record.instanceId === id);
+
+  it("reuses a Worker across sequential and concurrent instances without sharing step state", async () => {
+    const warmId = crypto.randomUUID();
+    const warm = `/workflow?id=${warmId}&mode=worker-cache&value=10`;
+    await json(warm, { method: "POST" });
+    await expect
+      .poll(() => json(warm), { timeout: 15_000 })
+      .toMatchObject({ status: "complete", output: { instanceId: warmId, value: 10 } });
+    const [warmed] = await workflowWorkers(warmId);
+    expect(warmed?.key).toMatch(/^cloudflare-workflow\/[a-f0-9]{64}$/);
+
+    const instances = [20, 30].map((value) => {
+      const id = crypto.randomUUID();
+
+      return { id, value, path: `/workflow?id=${id}&mode=worker-cache&wait=true&value=${value}` };
+    });
+
+    await Promise.all(instances.map(({ path }) => json(path, { method: "POST" })));
+
+    for (const { id, value, path } of instances) {
+      await expect
+        .poll(() => json(`/workflow/attempts?id=${id}`), { timeout: 15_000 })
+        .toEqual([{ label: "started", attempt: 1 }]);
+      expect(await workflowWorkers(id)).toEqual([{ instanceId: id, key: warmed?.key, loads: 0 }]);
+      await json(path, { method: "PUT" });
+      await expect
+        .poll(() => json(path), { timeout: 15_000 })
+        .toMatchObject({
+          status: "complete",
+          output: { instanceId: id, value, workflowName: "fixture", handler: "example" },
+        });
+    }
+  }, 35_000);
+
+  it("separates cached Workers by app and workflow even when version IDs match", async () => {
+    const multiple = publishedApp.parse({
+      ...app,
+      version: crypto.randomUUID(),
+      metadata: {
+        ...app.metadata,
+        bindings: [
+          ...app.metadata.bindings,
+          { type: "workflow", name: "OTHER", workflow_name: "other", class_name: "OtherWorkflow" },
+        ],
+      },
+    });
+
+    await publish(multiple);
+    await publish(publishedApp.parse({ ...preview, version: multiple.version }));
+
+    try {
+      const id = crypto.randomUUID();
+
+      // Invoke bindings directly so this checks the Workflow cache independently
+      // of the HTTP loader's globally unique publication-version IDs.
+      for (const { target, workflowName, handler } of [
+        { target: multiple, workflowName: "fixture", handler: "example" },
+        { target: multiple, workflowName: "other", handler: "other" },
+        { target: preview, workflowName: "fixture", handler: "example" },
+      ]) {
+        const scope = { appId: target.appId, hostname: target.hostname, workflow: workflowName };
+        await json("/fixture/workflow-binding", {
+          method: "POST",
+          body: JSON.stringify({
+            scope,
+            method: "create",
+            options: { id, params: { mode: "worker-cache" } },
+          }),
+        });
+        await expect
+          .poll(
+            () =>
+              json("/fixture/workflow-binding", {
+                method: "POST",
+                body: JSON.stringify({ scope, method: "instance", id, action: "status" }),
+              }),
+            { timeout: 15_000 },
+          )
+          .toMatchObject({ status: "complete", output: { instanceId: id, workflowName, handler } });
+      }
+
+      const keys = (await workflowWorkers(id)).map((record) => record.key);
+      expect(keys).toHaveLength(3);
+      expect(new Set(keys).size).toBe(3);
+    } finally {
+      await publish(app);
+      await publish(preview);
+    }
+  }, 35_000);
+
+  it("refreshes outbound policy when a pinned workflow resumes with a warm Worker cache", async () => {
+    const id = crypto.randomUUID();
+    const path = `/workflow?id=${id}&mode=worker-cache&wait=true`;
+    await json(path, { method: "POST" });
+    await expect
+      .poll(() => json(`/workflow/attempts?id=${id}`), { timeout: 15_000 })
+      .toEqual([{ label: "started", attempt: 1 }]);
+    const [original] = await workflowWorkers(id);
+    await json(`${path}&action=pause`, { method: "PUT" });
+    await expect.poll(() => json(path), { timeout: 15_000 }).toMatchObject({ status: "paused" });
+    await publish(
+      publishedApp.parse({
+        ...app,
+        version: crypto.randomUUID(),
+        network: { ...app.network, revision: 2, policy: { backend: [], browser: [] } },
+      }),
+    );
+
+    try {
+      await json(path, { method: "PUT" });
+      await json(`${path}&action=resume`, { method: "PUT" });
+      await expect
+        .poll(() => json(path), { timeout: 15_000 })
+        .toMatchObject({ status: "complete", output: { network: 403, connector: true } });
+      const resumed = (await workflowWorkers(id)).at(-1);
+      expect(resumed?.key).not.toBe(original?.key);
+      expect(await json(`/workflow/attempts?id=${id}`)).toEqual([{ label: "started", attempt: 1 }]);
+    } finally {
+      await publish(app);
+    }
+  }, 35_000);
+
+  it.each(["url", "token"])(
+    "refreshes a cached workflow's collector %s without exposing it in its ID",
+    async (field) => {
+      const telemetry = {
+        url:
+          field === "url"
+            ? "https://collector.example.test/new"
+            : "https://collector.example.test/old",
+        token: field === "token" ? "synthetic-new-token" : "synthetic-old-token",
+      };
+
+      const original = publishedApp.parse({
+        ...app,
+        version: crypto.randomUUID(),
+        telemetry: { url: "https://collector.example.test/old", token: "synthetic-old-token" },
+      });
+
+      await publish(original);
+      await worker.stop();
+      worker = await start("");
+
+      const collect = async (id: string) =>
+        z
+          .array(z.object({ url: z.string(), authorization: z.string(), body: z.string() }))
+          .parse(await json("/fixture/collector-requests"))
+          .filter((request) => request.body.includes(`worker-cache:${id}`));
+
+      try {
+        const warmId = crypto.randomUUID();
+        const warm = `/workflow?id=${warmId}&mode=worker-cache`;
+        await json(warm, { method: "POST" });
+        await expect
+          .poll(() => json(warm), { timeout: 15_000 })
+          .toMatchObject({ status: "complete" });
+        await expect
+          .poll(() => collect(warmId), { timeout: 5000 })
+          .toMatchObject([
+            {
+              url: "https://collector.example.test/old/v1/logs",
+              authorization: "Bearer synthetic-old-token",
+            },
+          ]);
+        const [warmed] = await workflowWorkers(warmId);
+        const id = crypto.randomUUID();
+        const path = `/workflow?id=${id}&mode=worker-cache&wait=true`;
+        await json(path, { method: "POST" });
+        await expect
+          .poll(() => json(`/workflow/attempts?id=${id}`), { timeout: 15_000 })
+          .toEqual([{ label: "started", attempt: 1 }]);
+        expect(await workflowWorkers(id)).toEqual([{ instanceId: id, key: warmed?.key, loads: 0 }]);
+        await json(`${path}&action=pause`, { method: "PUT" });
+        await expect
+          .poll(() => json(path), { timeout: 15_000 })
+          .toMatchObject({ status: "paused" });
+        await publish(
+          publishedApp.parse({
+            ...original,
+            version: crypto.randomUUID(),
+            telemetry,
+          }),
+        );
+        await json(path, { method: "PUT" });
+        await json(`${path}&action=resume`, { method: "PUT" });
+        await expect
+          .poll(() => json(path), { timeout: 15_000 })
+          .toMatchObject({ status: "complete" });
+        await expect
+          .poll(() => collect(id), { timeout: 5000 })
+          .toMatchObject([
+            {
+              url: `${telemetry.url}/v1/logs`,
+              authorization: `Bearer ${telemetry.token}`,
+            },
+          ]);
+        const resumed = (await workflowWorkers(id)).at(-1);
+        expect(resumed?.key).toMatch(/^cloudflare-workflow\/[a-f0-9]{64}$/);
+        expect(resumed?.key).not.toBe(warmed?.key);
+      } finally {
+        await publish(app);
+        await worker.stop();
+        worker = await start();
+      }
+    },
+    55_000,
+  );
+
   it("rejects corrupt module bytes before evaluating the app", async () => {
     const corrupt = publishedApp.parse({
       ...app,
@@ -890,15 +1104,17 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
     expect(await json(`/workflow/attempts?id=${id}`)).toEqual([{ label: "failure", attempt: 1 }]);
   }, 55_000);
 
-  it("rechecks connector grants when a pinned workflow resumes", async () => {
+  it("rechecks connector grants when a pinned workflow resumes with a warm Worker cache", async () => {
     const id = crypto.randomUUID();
     const path = `/workflow?id=${id}&mode=permissions`;
     await json(path, { method: "POST" });
+    await expect
+      .poll(async () => (await workflowWorkers(id))[0]?.key, { timeout: 15_000 })
+      .toMatch(/^cloudflare-workflow\//);
+    const [original] = await workflowWorkers(id);
     await json(`${path}&action=pause`, { method: "PUT" });
     await expect.poll(() => json(path), { timeout: 15_000 }).toMatchObject({ status: "paused" });
     await publish(publishedApp.parse({ ...app, version: crypto.randomUUID(), capabilities: {} }));
-    await worker.stop();
-    worker = await start();
 
     try {
       await json(path, { method: "PUT" });
@@ -909,16 +1125,18 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
           status: "complete",
           output: { connector: false, secret: null },
         });
+      expect((await workflowWorkers(id)).at(-1)?.key).not.toBe(original?.key);
     } finally {
       await publish(app);
     }
   }, 55_000);
 
-  it("resumes pinned code after a deployment while new instances use the new version", async () => {
+  it("resumes cached pinned code after a deployment while new instances use the new version", async () => {
     const id = crypto.randomUUID();
     const path = `/workflow?id=${id}`;
     await json(path, { method: "POST" });
     await expect.poll(() => json("/workflow/steps"), { timeout: 15_000 }).toContainEqual({ id });
+    const [original] = await workflowWorkers(id);
     await json(`${path}&action=pause`, { method: "PUT" });
     await expect.poll(() => json(path), { timeout: 15_000 }).toMatchObject({ status: "paused" });
 
@@ -943,8 +1161,6 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
       }),
       source,
     );
-    await worker.stop();
-    worker = await start();
 
     try {
       await json(path, { method: "PUT" });
@@ -952,12 +1168,19 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
       await expect
         .poll(() => json(path), { timeout: 15_000 })
         .toMatchObject({ status: "complete", output: 42 });
-      const next = `/workflow?id=${crypto.randomUUID()}`;
+      expect((await workflowWorkers(id)).at(-1)).toEqual({
+        instanceId: id,
+        key: original?.key,
+        loads: 0,
+      });
+      const nextId = crypto.randomUUID();
+      const next = `/workflow?id=${nextId}`;
       await json(next, { method: "POST" });
       await json(next, { method: "PUT" });
       await expect
         .poll(() => json(next), { timeout: 15_000 })
         .toMatchObject({ status: "complete", output: 142 });
+      expect((await workflowWorkers(nextId))[0]?.key).not.toBe(original?.key);
     } finally {
       await publish(app);
     }

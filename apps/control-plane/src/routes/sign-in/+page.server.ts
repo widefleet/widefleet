@@ -35,6 +35,7 @@ export const load: PageServerLoad = async ({ request, url, setHeaders }) => {
   return {
     signedOut: !(await runtime.auth.api.getSession({ headers: request.headers })),
     provider,
+    publicSignup: runtime.publicSignup && !slug,
     label:
       target?.id === installationOrganizationId
         ? target.appIdentityType === "entra"

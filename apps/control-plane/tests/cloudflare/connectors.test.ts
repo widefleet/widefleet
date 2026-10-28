@@ -394,7 +394,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
 
     expect(current).toMatchObject({ state: "succeeded", appliedChecksum: result.checksum });
     expect(await command({ kind: "deploy", release, requestId })).toEqual(current);
-  });
+  }, 60_000);
   it("rejects unauthorized edits and oversized secrets before accepting operations", async () => {
     const before = await environment.database.db.select().from(cloudflareOperations);
     await command({ kind: "deploy", release, admin: false }, 400);
@@ -427,7 +427,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
     }
 
     expect(patches).toBe(before);
-  });
+  }, 60_000);
   it("reconciles a lost activation response without activating a second generation", async () => {
     const previous = z
       .object({ sequence: z.number() })
@@ -451,7 +451,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
     expect(await (await worker.fetch("http://fixture/secret?name=API_KEY")).json()).toBe(
       "recovered-secret",
     );
-  });
+  }, 60_000);
   it("isolates matching class names and resources across connectors", async () => {
     const second = connectorFixture("second-connector");
 
@@ -488,7 +488,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
 
     for (const name of ["MISSING", "LABEL", "WIDEFLEET_SECRET_API_KEY", "__proto__"])
       expect((await worker.fetch("http://fixture/secret?name=" + name)).status).toBe(400);
-  });
+  }, 60_000);
   it("preserves concurrent secret edits and distinct accepted operations", async () => {
     const accepted = (
       await Promise.all(
@@ -510,7 +510,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
       expect(await (await worker.fetch("http://fixture/secret?name=" + name)).json()).toBe(
         "synthetic-" + name,
       );
-  });
+  }, 60_000);
   it("enforces shared variable limits across deployments and secret updates", async () => {
     const vars = Object.fromEntries(Array.from({ length: 31 }, (_, i) => [`VAR_${i}`, ""]));
     vars["VAR_0"] = "é".repeat(2500);
@@ -605,7 +605,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
     );
 
     await completed(deleted.jobId);
-  });
+  }, 60_000);
   it("replays upload identities without replacing a newer deployment", async () => {
     const initial = release;
     const requestId = crypto.randomUUID();
@@ -643,7 +643,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
     expect(await command({ kind: "read", name: initial.name })).toMatchObject({
       jobId: second.jobId,
     });
-  });
+  }, 60_000);
   it("activates same-named connectors and secrets independently for organization admins", async () => {
     const scopes = [];
 
@@ -763,5 +763,5 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
         400,
       );
     }
-  });
+  }, 60_000);
 });

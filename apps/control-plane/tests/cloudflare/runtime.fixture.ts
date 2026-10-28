@@ -11,6 +11,18 @@ export class ExampleWorkflow extends WorkflowEntrypoint {
       await this.env.DB.prepare('INSERT INTO workflow_attempts VALUES (?, ?, ?)').bind(event.instanceId, label, context.attempt).run();
       return context;
     };
+    if (mode === 'worker-cache') {
+      await step.do('started', context => record('started', context));
+      if (event.payload.wait) await step.waitForEvent('continue', { type: 'continue', timeout: '5 minutes' });
+      return step.do('inspect', async () => {
+        console.info('worker-cache:' + event.instanceId);
+        return {
+          handler: 'example', instanceId: event.instanceId, value: event.payload.value,
+          workflowName: event.workflowName, connector: !!this.env.CONNECTOR,
+          network: (await fetch('https://allowed.example.test/ok')).status,
+        };
+      });
+    }
     if (mode === 'fatal' || mode === 'caught') {
       try {
         return await step.do('failure', { retries: { limit: 2, delay: 10 } }, async context => {
@@ -65,6 +77,10 @@ export class ExampleWorkflow extends WorkflowEntrypoint {
   }
 }
 
+export class OtherWorkflow extends ExampleWorkflow {
+  async run(event, step) { return { ...await super.run(event, step), handler: 'other' }; }
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -109,7 +125,7 @@ export default {
     if (url.pathname === '/cron') return Response.json(await env.KV.get('cron'));
     if (url.pathname === '/workflow') {
       const id = url.searchParams.get('id');
-      if (request.method === 'POST') return Response.json({ id: (await env.WORKFLOW.create({ id, params: { value: 20, mode: url.searchParams.get('mode') } })).id });
+      if (request.method === 'POST') return Response.json({ id: (await env.WORKFLOW.create({ id, params: { value: Number(url.searchParams.get('value') ?? 20), mode: url.searchParams.get('mode'), wait: url.searchParams.get('wait') === 'true' } })).id });
       const instance = await env.WORKFLOW.get(id);
       if (request.method === 'PUT') {
         const action = url.searchParams.get('action');
@@ -146,11 +162,13 @@ export default {
 `;
 
 export const parentSource = `
-import runtime, { CloudflareWorkflowCatalog as RuntimeWorkflowCatalog } from './runtime.js';
+import runtime, { CloudflareWorkflowCatalog as RuntimeWorkflowCatalog, CloudflareAppWorkflow as RuntimeAppWorkflow } from './runtime.js';
 import { WorkerEntrypoint, WorkflowEntrypoint } from 'cloudflare:workers';
 import { connect } from 'cloudflare:sockets';
 export * from './runtime.js';
 const logRecords = [];
+const workflowWorkers = [];
+const collectorRequests = [];
 for (const level of ['log', 'debug', 'info', 'warn', 'error']) {
   const originalLog = console[level];
   console[level] = (...args) => {
@@ -161,6 +179,24 @@ for (const level of ['log', 'debug', 'info', 'warn', 'error']) {
 
 export class ConnectorGateway extends WorkerEntrypoint {
   invoke(method, [a, b]) { return a + b; }
+}
+
+export class CloudflareAppWorkflow extends RuntimeAppWorkflow {
+  run(event, step) {
+    const record = { instanceId: event.payload.id, key: null, loads: 0 };
+    workflowWorkers.push(record);
+    const loader = this.env.WIDEFLEET_LOADER;
+    return new RuntimeAppWorkflow(this.ctx, {
+      ...this.env,
+      WIDEFLEET_LOADER: {
+        get(key, callback) {
+          record.key = key;
+          return loader.get(key, () => { record.loads++; return callback(); });
+        },
+        load(code) { record.loads++; return loader.load(code); },
+      },
+    }).run(event, step);
+  }
 }
 
 export class CloudflareWorkflowCatalog extends RuntimeWorkflowCatalog {
@@ -254,6 +290,10 @@ export class PauseWorkflow extends WorkflowEntrypoint {
 globalThis.fetch = async (input, init) => {
   const request = new Request(input, init);
   const url = new URL(request.url);
+  if (url.origin === 'https://collector.example.test') {
+    collectorRequests.push({ url: request.url, authorization: request.headers.get('authorization'), body: await request.text() });
+    return new Response(null, { status: 204 });
+  }
   if (url.origin !== 'https://allowed.example.test') throw new Error('Unapproved fixture transport');
   if (request.redirect !== 'manual') throw new Error('Gateway followed redirects in the parent');
   if (url.pathname === '/redirect') return new Response(null, { status: 302, headers: { location: 'https://denied.example.test/private' } });
@@ -272,6 +312,8 @@ export default {
       return env.RUNTIME_MANAGEMENT.fetch(request);
     }
     if (url.pathname === '/fixture/logs') return Response.json(logRecords);
+    if (url.pathname === '/fixture/workflow-workers') return Response.json(workflowWorkers);
+    if (url.pathname === '/fixture/collector-requests') return Response.json(collectorRequests);
     if (url.pathname === '/fixture/workflow-binding') {
       const { scope, method, id, options, action } = await request.json();
       try {

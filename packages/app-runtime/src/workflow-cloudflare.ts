@@ -9,7 +9,7 @@ import type { z } from "zod";
 import { workflowApp } from "./workflow-app.ts";
 import { workerCode } from "./worker.ts";
 import { WorkflowCatalog } from "./workflow-catalog.ts";
-import type { ParentEnvironment } from "./types.ts";
+import type { ParentEnvironment, PublishedApp } from "./types.ts";
 import { restore, type Start, type StepConfig, type StepContext } from "./workflow-protocol.ts";
 import type { WorkflowRunner } from "./workflow-cloudflare-runner.ts";
 import { workflowObserver } from "./workflow-observation.ts";
@@ -20,6 +20,29 @@ import {
   nativeWorkflowFault,
   type WorkflowResult,
 } from "./workflow-cloudflare-errors.ts";
+
+const workflowWorkerKey = async (
+  app: PublishedApp,
+  workflow: string,
+  environment: ParentEnvironment,
+) => {
+  // The pinned version fixes code and resource bindings, but workflowApp applies
+  // current permissions and telemetry. Those must also identify a cached Worker.
+  const configuration = JSON.stringify([
+    WIDEFLEET_RUNTIME_VERSION,
+    app.appId,
+    app.version,
+    workflow,
+    app.network.policy.backend,
+    app.capabilities,
+    environment["WIDEFLEET_LOGS"] === "cloudflare" ? "cloudflare" : app.telemetry,
+  ]);
+
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(configuration));
+
+  // Hash the configuration so collector credentials never appear in a Worker ID.
+  return `cloudflare-workflow/${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+};
 
 // Forward directly to the native engine. Only error transport is adapted;
 // the engine owns step identities, checkpoints, retries and resumption.
@@ -75,14 +98,10 @@ export class CloudflareAppWorkflow extends WorkflowEntrypoint<ParentEnvironment,
     const start = event.payload;
     const app = await workflowApp(start, this.env);
 
-    const worker = this.env.WIDEFLEET_LOADER.load(
-      await workerCode(
-        app,
-        this.env,
-        this.ctx,
-        start.workflow,
-        WIDEFLEET_CLOUDFLARE_WORKFLOW_SOURCE,
-      ),
+    const worker = this.env.WIDEFLEET_LOADER.get(
+      await workflowWorkerKey(app, start.workflow, this.env),
+      () =>
+        workerCode(app, this.env, this.ctx, start.workflow, WIDEFLEET_CLOUDFLARE_WORKFLOW_SOURCE),
     );
 
     const result = await worker.getEntrypoint<WorkflowRunner>("WorkflowRunner").run(

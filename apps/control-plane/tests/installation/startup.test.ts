@@ -112,7 +112,7 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")("First container 
         const setup = await fetch("http://127.0.0.1:3000/setup");
         const body = await setup.text();
         const auth = await stat("/var/lib/widefleet/runtime");
-        console.log(JSON.stringify({setup: setup.status, form: body.includes("Your first administrator account"), key: createHash("sha256").update(await readFile(key)).digest("hex"), mode: owner.mode & 511, authOwner: auth.uid}));
+        console.log(JSON.stringify({setup: setup.status, form: ["organization-name", "owner-name", "owner-email"].every(id => body.includes('id="' + id + '"')), key: createHash("sha256").update(await readFile(key)).digest("hex"), mode: owner.mode & 511, authOwner: auth.uid}));
       `,
       );
 
@@ -145,7 +145,7 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")("First container 
           import {get} from "node:https";
           await new Promise((resolve,reject) => {
             const request=get({hostname:"proxy",port:8443,path:"/setup",servername:"platform.example.test",ca:process.argv[1],headers:{host:"platform.example.test"}}, response => {
-              let body=""; response.on("data", chunk=>body+=chunk); response.on("end",()=>{console.log(JSON.stringify({status:response.statusCode,form:body.includes("Your first administrator account")}));resolve();});
+              let body=""; response.on("data", chunk=>body+=chunk); response.on("end",()=>{console.log(JSON.stringify({status:response.statusCode,form:["organization-name", "owner-name", "owner-email"].every(id => body.includes('id="' + id + '"'))}));resolve();});
             }); request.on("error",reject);
           });
         `,
