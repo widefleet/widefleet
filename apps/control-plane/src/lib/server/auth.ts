@@ -1,3 +1,4 @@
+import type { AuthenticationExtension } from "./runtime-extension.ts";
 import { observe, type Observation } from "./observation.ts";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
@@ -46,14 +47,30 @@ export const createAuthentication = (
   database: DatabaseExecutor,
   options: Parameters<typeof authenticationOptions>[1] & {
     organizationAccess?: OrganizationAccess;
+    authentication?: AuthenticationExtension;
     observation?: Observation;
     encryptionKey?: string;
     cookies?: ReturnType<typeof sveltekitCookies>;
   } = {},
 ) => {
+  const admission = createAuthenticationAdmission(
+    database,
+    options.organizationAccess,
+    options.publicSignup,
+  );
+
   const settings = authenticationOptions(configuration, {
-    ...createAuthenticationAdmission(database, options.organizationAccess, options.publicSignup),
+    ...admission,
     ...options,
+    tokenClaims: async (input) => {
+      if (
+        options.authentication?.allowUser &&
+        (!input.user || !(await options.authentication.allowUser(input.user.id)))
+      )
+        throw new APIError("FORBIDDEN", { message: "This account is unavailable" });
+
+      return (options.tokenClaims ?? admission.tokenClaims)(input);
+    },
   });
 
   const encryptionKey =
@@ -73,6 +90,7 @@ export const createAuthentication = (
     encryptionKey,
     () => readKeys(),
     options.organizationAccess,
+    options.authentication?.allowUser,
   );
 
   const auth = betterAuth({
@@ -81,6 +99,7 @@ export const createAuthentication = (
     trustedOrigins: (request) =>
       companySsoOrigins(database, configuration.PLATFORM_URL, encryptionKey, request),
     plugins: [
+      ...(options.authentication?.plugins ?? []),
       ...settings.plugins,
       cliLoginPlugin(createCliLogin(database, configuration)),
       companySsoPlugin(database, encryptionKey, options.organizationAccess),
@@ -111,7 +130,11 @@ export const createAuthentication = (
       // Cookie propagation must run after every other authentication hook.
       ...(options.cookies ? [options.cookies] : []),
     ],
-    database: drizzleAdapter(database, { provider: "pg", schema: authSchema, transaction: true }),
+    database: drizzleAdapter(database, {
+      provider: "pg",
+      schema: { ...authSchema, ...options.authentication?.schema },
+      transaction: true,
+    }),
     databaseHooks: {
       user: {
         create: {

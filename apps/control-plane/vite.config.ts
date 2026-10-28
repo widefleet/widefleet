@@ -11,14 +11,25 @@ const release = z
   .object({ version: z.string() })
   .parse(JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")));
 
+const clientExtension = process.env["WIDEFLEET_AUTH_CLIENT_EXTENSION"];
+
+if (clientExtension && !isAbsolute(clientExtension))
+  throw new Error("WIDEFLEET_AUTH_CLIENT_EXTENSION must be an absolute module path");
+
 const extension = process.env["WIDEFLEET_RUNTIME_EXTENSION"];
 
 if (extension && !isAbsolute(extension))
   throw new Error("WIDEFLEET_RUNTIME_EXTENSION must be an absolute module path");
 
+const aliases: Record<string, string> = {};
+
+if (extension) aliases["#runtime-extension"] = extension;
+
+if (clientExtension) aliases["#auth-client-extension"] = clientExtension;
+
 export const controlPlaneConfig = (target: "node" | "cloudflare") =>
   defineConfig({
-    resolve: { alias: extension ? { "#runtime-extension": extension } : {} },
+    resolve: { alias: aliases },
     define: { "process.env.WIDEFLEET_BUILD_VERSION": JSON.stringify(release.version) },
     build: { sourcemap: "hidden" },
     plugins: [

@@ -3,6 +3,7 @@
   import { onMount } from "svelte";
   import { REGEXP_ONLY_DIGITS } from "bits-ui";
   import { isHttpError } from "@sveltejs/kit";
+  import { authClientExtension } from "#auth-client-extension";
   import { authClient } from "#lib/auth-client";
   import { findSignInDestination } from "#lib/sign-in.remote";
   import { goto } from "$app/navigation";
@@ -42,9 +43,15 @@
 
   let message = $state("");
 
+  let extensionContainer = $state<HTMLDivElement>();
+
   onMount(() => {
     email = initialEmail;
     ready = true;
+
+    return extensionContainer
+      ? authClientExtension.mountEmailCodeForm?.(extensionContainer)
+      : undefined;
   });
 
   const oauthRedirect = z.object({ redirect: z.literal(true), url: z.url() });
@@ -88,7 +95,8 @@
           type: "sign-in",
         });
 
-        if (result.error) message = "Could not send a sign-in code. Please try again.";
+        if (result.error)
+          message = result.error.message ?? "Could not send a sign-in code. Please try again.";
         else {
           email = recipient;
           sentTo = recipient;
@@ -102,7 +110,9 @@
         if (register) input["name"] = name.trim();
         const result = await authClient.signIn.emailOtp(input);
 
-        if (result.error) message = "Invalid or expired code. Request another code and try again.";
+        if (result.error)
+          message =
+            result.error.message ?? "Invalid or expired code. Request another code and try again.";
         else if (!oauthRedirect.safeParse(result.data).success)
           await goto(next, { invalidateAll: true });
       }
@@ -175,6 +185,7 @@
       </InputOTP.Root>
     </div>
   {/if}
+  {#if authClientExtension.mountEmailCodeForm}<div bind:this={extensionContainer}></div>{/if}
   <Button
     type="submit"
     disabled={busy || !ready || (sentTo !== null && otp.length !== 6)}

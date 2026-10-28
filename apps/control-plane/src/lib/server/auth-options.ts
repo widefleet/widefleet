@@ -200,6 +200,7 @@ export const authenticationOptions = (
     },
     session: {
       additionalFields: {
+        activeOrganizationId: { type: "string", required: false, input: false },
         identityOrganizationId: { type: "string", required: false, input: false },
         recovery: { type: "boolean", defaultValue: false, input: false },
         companyConfiguration: { type: "string", defaultValue: "", input: false },

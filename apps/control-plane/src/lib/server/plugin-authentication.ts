@@ -34,6 +34,7 @@ export const pluginAuthentication = (
   encryptionKey: string,
   keys: () => Promise<JSONWebKeySet>,
   access: OrganizationAccess = { filterOrganizations: async () => [installationOrganizationId] },
+  allowUser?: (userId: string) => Promise<boolean>,
 ) =>
   createAuthMiddleware(async (context) => {
     if (!managedPluginPaths.includes(context.path)) return undefined;
@@ -74,7 +75,8 @@ export const pluginAuthentication = (
       };
     }
 
-    if (!current) throw new APIError("UNAUTHORIZED");
+    if (!current || (allowUser && !(await allowUser(current.user.id))))
+      throw new APIError("UNAUTHORIZED");
 
     const input = z
       .looseObject({

@@ -23,12 +23,25 @@ export const createProductAnalytics = (
 
   return {
     capture: (event: ObservationEvent) => {
-      if (!event.userId && !event.organizationId) return;
+      if (!event.userId && !event.organizationId && !event.anonymousId) return;
+
       sdk?.capture({
-        distinctId: event.userId ? `user:${event.userId}` : `organization:${event.organizationId}`,
+        distinctId: event.userId
+          ? `user:${event.userId}`
+          : event.organizationId
+            ? `organization:${event.organizationId}`
+            : `anonymous:${event.anonymousId}`,
         event: event.event,
         groups: event.organizationId ? { organization: event.organizationId } : {},
-        properties: { scope: config?.scope, event_id: event.id, ...event.properties },
+        properties: {
+          scope: config?.scope,
+          event_id: event.id,
+          ...event.properties,
+          $process_person_profile:
+            !event.userId && !event.organizationId
+              ? false
+              : event.properties?.["$process_person_profile"],
+        },
       });
     },
     exception: (error: Error) => {

@@ -20,8 +20,16 @@ export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
   const configuration = readCloudflareConfiguration(bindings);
   // A pool belongs to this request only; Hyperdrive owns pooling between requests.
   const database = createDatabase(configuration, 5);
-  const extension = createRuntimeExtension({ database: database.db, configuration });
   const observation = createProductAnalytics(configuration);
+  const reporting = createReporting(configuration, database.db);
+
+  const extension = createRuntimeExtension({
+    database: database.db,
+    configuration,
+    observation,
+    binding: (name, schema) => schema.parse(bindings[name]),
+  });
+
   const sendEmail = extension.sendEmail ?? createCloudflareEmail(bindings);
 
   const settings = createSettingsService(
@@ -32,8 +40,6 @@ export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
     Boolean(sendEmail),
     observation,
   );
-
-  const reporting = createReporting(configuration, database.db);
 
   const storage = createArtifactStorage(createR2Storage(bindings.ARTIFACTS));
 
@@ -56,8 +62,10 @@ export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
 
   if (sendEmail) options.sendEmail = sendEmail;
 
+  const get = createRequestRuntime(createRuntime(options));
+
   return {
-    get: createRequestRuntime(async () => createRuntime(options)()),
+    get,
     close: async () => {
       try {
         await Promise.allSettled([reporting.close(), observation.close()]);

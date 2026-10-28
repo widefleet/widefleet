@@ -1,3 +1,4 @@
+import type { AuthenticationExtension } from "./runtime-extension.ts";
 import type { OrganizationAccess } from "./application-context.ts";
 import type { BetterAuthOptions } from "better-auth";
 import type { sveltekitCookies } from "better-auth/svelte-kit";
@@ -47,6 +48,7 @@ export const createRuntime = ({
   authIpAddressHeaders,
   authCookies,
   createOrganization,
+  authentication,
   discoveryTransport = "node",
 }: {
   configuration: Configuration & { BETTER_AUTH_SECRET: string };
@@ -60,6 +62,7 @@ export const createRuntime = ({
   organizationAccess?: OrganizationAccess;
   sendEmail?: SendEmail;
   createOrganization?: CreateOrganization;
+  authentication?: AuthenticationExtension;
   authRateLimit?: BetterAuthOptions["rateLimit"];
   authIpAddressHeaders?: string[];
   authCookies?: ReturnType<typeof sveltekitCookies>;
@@ -83,6 +86,8 @@ export const createRuntime = ({
 
   if (observation) authOptions.observation = observation;
 
+  if (authentication) authOptions.authentication = authentication;
+
   if (sendEmail) authOptions.sendEmail = sendEmail;
 
   if (authRateLimit) authOptions.rateLimit = authRateLimit;
@@ -98,7 +103,13 @@ export const createRuntime = ({
     auth,
     publicSignup,
     onboarding: createOnboardingService(database.db, settings, createOrganization, observation),
-    identity: createIdentityService(auth, database.db, configuration, organizationAccess),
+    identity: createIdentityService(
+      auth,
+      database.db,
+      configuration,
+      organizationAccess,
+      authentication?.allowUser,
+    ),
     directory: createDirectory(
       async (organizationId) => (await settings.resolve(organizationId)).identity,
     ),

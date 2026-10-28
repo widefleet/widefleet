@@ -11,7 +11,7 @@ import {
   check,
 } from "drizzle-orm/pg-core";
 
-export const user = pgTable("user", {
+export const userColumns = () => ({
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   email: text("email").notNull().unique(),
@@ -24,28 +24,30 @@ export const user = pgTable("user", {
     .notNull(),
 });
 
-export const session = pgTable(
-  "session",
-  {
-    id: text("id").primaryKey(),
-    expiresAt: timestamp("expires_at").notNull(),
-    token: text("token").notNull().unique(),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    updatedAt: timestamp("updated_at")
-      .$onUpdate(() => /* @__PURE__ */ new Date())
-      .notNull(),
-    ipAddress: text("ip_address"),
-    userAgent: text("user_agent"),
-    activeOrganizationId: text("active_organization_id"),
-    identityOrganizationId: text("identity_organization_id"),
-    recovery: boolean("recovery").notNull().default(false),
-    companyConfiguration: text("company_configuration").notNull().default(""),
-    userId: text("user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
-  },
-  (table) => [index("session_userId_idx").on(table.userId)],
-);
+export const user = pgTable("user", userColumns());
+
+export const sessionColumns = () => ({
+  id: text("id").primaryKey(),
+  expiresAt: timestamp("expires_at").notNull(),
+  token: text("token").notNull().unique(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at")
+    .$onUpdate(() => /* @__PURE__ */ new Date())
+    .notNull(),
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+  activeOrganizationId: text("active_organization_id"),
+  identityOrganizationId: text("identity_organization_id"),
+  recovery: boolean("recovery").notNull().default(false),
+  companyConfiguration: text("company_configuration").notNull().default(""),
+  userId: text("user_id")
+    .notNull()
+    .references(() => user.id, { onDelete: "cascade" }),
+});
+
+export const session = pgTable("session", sessionColumns(), (table) => [
+  index("session_userId_idx").on(table.userId),
+]);
 
 export const organization = pgTable("organization", {
   id: text("id").primaryKey(),

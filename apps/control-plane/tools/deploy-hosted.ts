@@ -32,12 +32,16 @@ const execute = promisify(execFile);
 
 const { positionals, values } = parseArgs({
   allowPositionals: true,
-  options: { "runtime-config": { type: "string" }, "control-config": { type: "string" } },
+  options: {
+    "runtime-config": { type: "string" },
+    "control-config": { type: "string" },
+    "control-secrets": { type: "string" },
+  },
 });
 
 if (positionals.length !== 1)
   throw new Error(
-    "Usage: node tools/deploy-hosted.ts <installation.json> [--runtime-config <file.json>] [--control-config <file.json>]",
+    "Usage: node tools/deploy-hosted.ts <installation.json> [--runtime-config <file.json>] [--control-config <file.json>] [--control-secrets <file.json>]",
   );
 
 const installation = await readHostedInstallation(z.string().parse(positionals[0]));
@@ -80,6 +84,19 @@ const controlOverrides = z
       ? JSON.parse(await readFile(resolve(values["control-config"]), "utf8"))
       : {},
   );
+
+// Deploy extension bindings with the Worker version that consumes them.
+// Shared credentials remain owned by the installation's standard secret schema.
+const controlSecretOverrides = z
+  .record(z.string().regex(/^[A-Z][A-Z0-9_]*$/), z.string().min(1))
+  .parse(
+    values["control-secrets"]
+      ? JSON.parse(await readFile(resolve(values["control-secrets"]), "utf8"))
+      : {},
+  );
+
+for (const name of Object.keys(controlSecretOverrides))
+  if (name in secrets) throw new Error(`Additional control-plane secrets cannot replace ${name}`);
 
 const bootstrap = secrets.PLATFORM_BOOTSTRAP
   ? bootstrapConfiguration.parse(JSON.parse(secrets.PLATFORM_BOOTSTRAP))
@@ -127,9 +144,11 @@ const childEnvironment = {
 
 const password = decodeURIComponent(new URL(secrets.DATABASE_URL).password);
 
-const sensitive = [...Object.values(secrets), password].flatMap((value) =>
-  value ? [value, JSON.stringify(value).slice(1, -1)] : [],
-);
+const sensitive = [
+  ...Object.values(secrets),
+  ...Object.values(controlSecretOverrides),
+  password,
+].flatMap((value) => (value ? [value, JSON.stringify(value).slice(1, -1)] : []));
 
 const redact = (output: string) => {
   for (const value of sensitive) output = output.replaceAll(value, "[REDACTED]");
@@ -220,6 +239,7 @@ try {
   const controlSecrets = await write(
     "control-secrets.json",
     JSON.stringify({
+      ...controlSecretOverrides,
       BETTER_AUTH_SECRET: secrets.BETTER_AUTH_SECRET,
       PLATFORM_ENCRYPTION_KEY: secrets.PLATFORM_ENCRYPTION_KEY,
       APP_COOKIE_SECRET: secrets.APP_COOKIE_SECRET,
