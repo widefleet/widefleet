@@ -106,7 +106,10 @@ export class CloudflareAppWorkflow extends WorkflowEntrypoint<ParentEnvironment,
     );
 
     const result = await worker
-      .getEntrypoint<WorkflowRunner>("WorkflowRunner", executionOptions(this.env, "workflow"))
+      .getEntrypoint<WorkflowRunner>(
+        "WorkflowRunner",
+        executionOptions(this.env.WIDEFLEET_EXECUTION_LIMITS, "workflow"),
+      )
       .run(
         {
           payload: start.params,

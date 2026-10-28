@@ -1,5 +1,4 @@
 import { z } from "zod";
-import type { ParentEnvironment } from "./types.ts";
 
 const resources = z.strictObject({
   cpuMs: z.number().int().positive(),
@@ -15,11 +14,9 @@ export const executionLimits = z.strictObject({
 });
 
 export const executionOptions = (
-  environment: Pick<ParentEnvironment, "WIDEFLEET_EXECUTION_LIMITS">,
+  configuration: string | undefined,
   profile: keyof z.infer<typeof executionLimits>,
 ) => {
-  const configuration = environment.WIDEFLEET_EXECUTION_LIMITS;
-
   if (configuration === undefined) return undefined;
 
   // Select on every invocation: loader caches must not retain an older policy,

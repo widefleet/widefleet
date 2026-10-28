@@ -84,7 +84,7 @@ export class ConnectorCatalog extends DurableObject<ParentEnvironment> {
       await worker
         .getEntrypoint<ConnectorReadiness>(
           "WIDEFLEET_READY",
-          executionOptions(this.env, "readiness"),
+          executionOptions(this.env.WIDEFLEET_EXECUTION_LIMITS, "readiness"),
         )
         .ready();
     } catch (error) {
@@ -142,7 +142,7 @@ export class ConnectorGateway extends WorkerEntrypoint<
 
     return worker.getEntrypoint(
       entrypoint === "default" ? undefined : entrypoint,
-      executionOptions(this.env, "connector"),
+      executionOptions(this.env.WIDEFLEET_EXECUTION_LIMITS, "connector"),
     );
   }
   async invoke(method: string, args: ConnectorValue[]) {

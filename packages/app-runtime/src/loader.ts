@@ -141,7 +141,12 @@ const dispatchApp = async (
 
   if (url.pathname === "/.well-known/widefleet/ready") {
     await run(app, environment, context, (worker) =>
-      worker.getEntrypoint<Events>("Events", executionOptions(environment, "readiness")).ready(),
+      worker
+        .getEntrypoint<Events>(
+          "Events",
+          executionOptions(environment.WIDEFLEET_EXECUTION_LIMITS, "readiness"),
+        )
+        .ready(),
     );
 
     for (const binding of app.metadata.bindings) {
@@ -155,7 +160,7 @@ const dispatchApp = async (
         await worker
           .getEntrypoint<WorkflowRunner>(
             "WorkflowRunner",
-            executionOptions(environment, "readiness"),
+            executionOptions(environment.WIDEFLEET_EXECUTION_LIMITS, "readiness"),
           )
           .ready();
       } finally {
@@ -197,7 +202,7 @@ const dispatchApp = async (
     // explicitly supplied to the subrequest.
     await run(app, environment, context, (worker) =>
       worker
-        .getEntrypoint(undefined, executionOptions(environment, "http"))
+        .getEntrypoint(undefined, executionOptions(environment.WIDEFLEET_EXECUTION_LIMITS, "http"))
         .fetch(request, { signal: request.signal }),
     ),
     app.network.policy.browser,
@@ -311,7 +316,10 @@ export default {
 
           const result = await run(app, environment, context, (worker) =>
             worker
-              .getEntrypoint<Events>("Events", executionOptions(environment, "cron"))
+              .getEntrypoint<Events>(
+                "Events",
+                executionOptions(environment.WIDEFLEET_EXECUTION_LIMITS, "cron"),
+              )
               .runScheduled({ cron: controller.cron, scheduledTime: controller.scheduledTime }),
           );
 

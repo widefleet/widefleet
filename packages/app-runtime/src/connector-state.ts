@@ -124,7 +124,7 @@ export class ConnectorSupervisor extends DurableObject<ParentEnvironment> {
 
     const facetClass = worker.getDurableObjectClass<LoadedConnectorFacet>(
       identity.className,
-      executionOptions(this.env, "connector"),
+      executionOptions(this.env.WIDEFLEET_EXECUTION_LIMITS, "connector"),
     );
 
     if (this.#current && this.#current.identity.version !== identity.version) {

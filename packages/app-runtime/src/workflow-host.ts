@@ -30,7 +30,7 @@ class Session extends RpcTarget {
     this.#worker = worker;
     this.#runner = worker.getEntrypoint<WorkflowRunner>(
       "WorkflowRunner",
-      executionOptions(environment, "workflow"),
+      executionOptions(environment.WIDEFLEET_EXECUTION_LIMITS, "workflow"),
     );
   }
   begin(event: AppEvent) {
