@@ -415,6 +415,38 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
     expect((await fetchApp("/env")).status).toBe(200);
   });
 
+  it("rejects invalid workflow session policies before loading a fresh Worker", async () => {
+    const body = JSON.stringify({
+      appId: app.appId,
+      version: app.version,
+      hostname,
+      workflow: "fixture",
+      id: crypto.randomUUID(),
+      params: {},
+    });
+
+    await json("/fixture/executions");
+
+    for (const policy of ["", "{}", "not-json"]) {
+      const result = z.object({ loads: z.number(), error: z.string() }).parse(
+        await json("/fixture/workflow-session", {
+          method: "POST",
+          body,
+          headers: { "x-fixture-execution-policy": policy },
+        }),
+      );
+
+      expect(result.loads).toBe(0);
+    }
+
+    expect(await json("/fixture/executions")).toEqual([]);
+
+    expect(await json("/fixture/workflow-session", { method: "POST", body })).toEqual({ loads: 1 });
+    expect(await json("/fixture/executions")).toEqual([
+      { key: null, entrypoint: "WorkflowRunner", limits: executionProfiles.workflow },
+    ]);
+  });
+
   it("captures native uncaught failures without replacing the app error", async () => {
     expect((await fetchApp("/throw")).status).toBe(500);
     await expect

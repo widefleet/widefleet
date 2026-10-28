@@ -25,13 +25,10 @@ import {
 class Session extends RpcTarget {
   #worker;
   #runner;
-  constructor(worker: WorkerStub, environment: ParentEnvironment) {
+  constructor(worker: WorkerStub, options: ReturnType<typeof executionOptions>) {
     super();
     this.#worker = worker;
-    this.#runner = worker.getEntrypoint<WorkflowRunner>(
-      "WorkflowRunner",
-      executionOptions(environment.WIDEFLEET_EXECUTION_LIMITS, "workflow"),
-    );
+    this.#runner = worker.getEntrypoint<WorkflowRunner>("WorkflowRunner", options);
   }
   begin(event: AppEvent) {
     return this.#runner.begin(event);
@@ -59,12 +56,13 @@ class Session extends RpcTarget {
 
 export class WorkflowSessions extends WorkerEntrypoint<ParentEnvironment> {
   async open(start: Start) {
+    const options = executionOptions(this.env.WIDEFLEET_EXECUTION_LIMITS, "workflow");
     const app = await workflowApp(start, this.env);
 
     // A fresh isolate per replay keeps app globals and callbacks instance-local.
     return new Session(
       this.env.WIDEFLEET_LOADER.load(await workerCode(app, this.env, this.ctx, start.workflow)),
-      this.env,
+      options,
     );
   }
 }

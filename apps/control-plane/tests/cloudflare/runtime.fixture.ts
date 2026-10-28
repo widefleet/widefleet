@@ -164,7 +164,7 @@ export default {
 `;
 
 export const parentSource = `
-import runtime, { RuntimeManagement as BaseManagement, CloudflareWorkflowCatalog as RuntimeWorkflowCatalog, CloudflareAppWorkflow as RuntimeAppWorkflow } from './runtime.js';
+import runtime, { RuntimeManagement as BaseManagement, CloudflareWorkflowCatalog as RuntimeWorkflowCatalog, CloudflareAppWorkflow as RuntimeAppWorkflow, WorkflowSessions as RuntimeWorkflowSessions } from './runtime.js';
 import { WorkerEntrypoint, WorkflowEntrypoint } from 'cloudflare:workers';
 import { connect } from 'cloudflare:sockets';
 export * from './runtime.js';
@@ -324,6 +324,22 @@ export default {
     if (url.pathname === '/fixture/executions') return Response.json(executions.splice(0));
     if (url.pathname === '/fixture/workflow-workers') return Response.json(workflowWorkers);
     if (url.pathname === '/fixture/collector-requests') return Response.json(collectorRequests);
+    if (url.pathname === '/fixture/workflow-session') {
+      let loads = 0;
+      const loader = env.WIDEFLEET_LOADER;
+      const sessions = new RuntimeWorkflowSessions(ctx, {
+        ...env,
+        WIDEFLEET_LOADER: {
+          ...loader,
+          load(code) { loads++; return loader.load(code); },
+        },
+      });
+      try {
+        const session = await sessions.open(await request.json());
+        session.close();
+        return Response.json({ loads });
+      } catch (error) { return Response.json({ loads, error: error.message }); }
+    }
     if (url.pathname === '/fixture/workflow-binding') {
       const { scope, method, id, options, action } = await request.json();
       try {
