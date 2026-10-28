@@ -84,7 +84,6 @@
   "devDependencies": {
     "@internationalized/date": "3.12.4",
     "@lucide/svelte": "1.52.0",
-    "@platform/connector-oauth-prototype": "workspace:*",
     "@sveltejs/adapter-cloudflare": "8.0.0",
     "@sveltejs/adapter-node": "6.0.0",
     "@sveltejs/kit": "3.0.0",

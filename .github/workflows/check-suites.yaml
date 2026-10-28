@@ -85,9 +85,6 @@ jobs:
       - name: Test dynamic connector publication and state in both runtimes
         if: matrix.suite == 'integration'
         run: RUN_CONNECTOR_TESTS=1 pnpm exec vitest run apps/control-plane/tests/dynamic-connectors.test.ts
-      - name: Test connector-owned OAuth in both runtimes
-        if: matrix.suite == 'integration'
-        run: pnpm --filter @platform/connector-oauth-prototype test
       - name: Test services and identity boundaries
         if: matrix.suite == 'integration'
         run: pnpm exec vitest run

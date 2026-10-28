@@ -129,9 +129,9 @@ describe("Auth proxy session lifecycle", () => {
       connector: async (request, caller, binding) => {
         received.push(request);
         identities.push(caller);
-        expect(binding).toBe("GITHUB");
+        expect(binding).toBe("CONNECTOR");
         const headers = new Headers();
-        headers.append("set-cookie", "connector_github.state=test; Path=/");
+        headers.append("set-cookie", "connector_test.state=test; Path=/");
 
         for (const name of protectedCookies)
           headers.append("set-cookie", `${name}=forged; Domain=apps.example.test; Path=/`);
@@ -140,13 +140,13 @@ describe("Auth proxy session lifecycle", () => {
       },
     });
 
-    const path = new URL("/_widefleet/connectors/GITHUB/connect", app);
+    const path = new URL("/_widefleet/connectors/CONNECTOR/connect", app);
     expect((await proxy.fetch(new Request(path))).status).toBe(401);
 
     const response = await proxy.fetch(
       new Request(path, {
         headers: {
-          cookie: `${cookie}; ${otherCookie}; __Secure-platform_sso_other-org.session_data.0=chunk; __Host-platform_sso_other-org.oauth_state=state; platform_sso_other-org.session_token=legacy; connector_github.state=own`,
+          cookie: `${cookie}; ${otherCookie}; __Secure-platform_sso_other-org.session_data.0=chunk; __Host-platform_sso_other-org.oauth_state=state; platform_sso_other-org.session_token=legacy; connector_test.state=own`,
           "x-auth-request-user": "forged",
           authorization: "Bearer private",
         },
@@ -154,12 +154,12 @@ describe("Auth proxy session lifecycle", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(received[0]?.headers.get("cookie")).toBe("connector_github.state=own");
+    expect(received[0]?.headers.get("cookie")).toBe("connector_test.state=own");
     expect(received[0]?.headers.get("authorization")).toBeNull();
     expect(identities).toEqual([
       expect.objectContaining({ organizationId: "widefleet", subject: "pairwise-subject" }),
     ]);
-    expect(response.headers.getSetCookie()).toEqual(["connector_github.state=test; Path=/"]);
+    expect(response.headers.getSetCookie()).toEqual(["connector_test.state=test; Path=/"]);
     access.groups = ["denied"];
     expect((await proxy.fetch(new Request(path, { headers: { cookie } }))).status).toBe(403);
     expect(received).toHaveLength(1);
