@@ -1,3 +1,4 @@
+import { createGunzip } from "node:zlib";
 import { companyIdentity } from "../../src/lib/server/company-identity.ts";
 import { runtimeIdentity } from "../runtime-identity.ts";
 import { connectorReference } from "../../src/lib/server/connector-package.ts";
@@ -128,7 +129,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         const url = new URL(request.url ?? "/", apiOrigin);
         let body = "";
 
-        for await (const chunk of request) body += String(chunk);
+        const stream =
+          request.headers["content-encoding"] === "gzip" ? request.pipe(createGunzip()) : request;
+
+        for await (const chunk of stream) body += String(chunk);
 
         const ok = (
           result:
@@ -166,7 +170,9 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
                 outcome: event.properties["outcome"],
                 attribution: {
                   userId: event.distinct_id.replace(/^user:/, ""),
-                  organizationId: event.properties["organization_id"],
+                  organizationId: z
+                    .object({ organization: z.string() })
+                    .parse(event.properties["$groups"]).organization,
                 },
               }),
             );

@@ -3,7 +3,7 @@
   import Feedback from "#shadcn/components/Feedback.svelte";
   import { Button } from "#shadcn/components/ui/button/index.js";
   import { selectOrganization } from "#lib/organizations.remote";
-  import { resetClientContext } from "#lib/client-observation";
+  import { resetClientContext } from "#lib/analytics-client";
   import { authClient } from "#lib/auth-client";
   import type { PageData } from "./$types";
 

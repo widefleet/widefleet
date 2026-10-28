@@ -15,7 +15,12 @@ if (destination)
     const url = new URL(request.url);
 
     if (url.origin === "https://eu.i.posthog.com") {
-      const events = batch.parse(await request.json());
+      const body =
+        request.headers.get("content-encoding") === "gzip"
+          ? request.body?.pipeThrough(new DecompressionStream("gzip"))
+          : request.body;
+
+      const events = batch.parse(await new Response(body).json());
       await appendFile(
         destination,
         events.batch.map((event) => `${JSON.stringify(event)}\n`).join(""),

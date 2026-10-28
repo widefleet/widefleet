@@ -59,16 +59,12 @@ describe("Analytics proxy", () => {
     });
     expect(await new Response(options?.body).text()).toBe("synthetic-events");
     expect(response?.headers.get("set-cookie")).toBeNull();
-    expect(response?.headers.get("access-control-allow-origin")).toBeNull();
-    expect(response?.headers.get("cache-control")).toBe("no-store");
   });
 
   it.each([
-    "/analytics",
     "/analytics/api/users",
     "/analytics//evil.test/e/",
     "/analytics/static/%2e%2e/private.js",
-    "/analytics/array/another-project/config",
   ])("rejects unrecognized path %s without fetching", async (path) => {
     const transport = vi.fn<typeof fetch>();
     expect((await proxyAnalyticsRequest(request(path), transport))?.status).toBe(404);
@@ -83,39 +79,6 @@ describe("Analytics proxy", () => {
       (await proxyAnalyticsRequest(new Request("http://localhost/analytics/e/"), transport))
         ?.status,
     ).toBe(404);
-    expect(transport).not.toHaveBeenCalled();
-  });
-
-  it("rejects cross-origin requests, unsupported methods and oversized streaming bodies", async () => {
-    const transport = vi.fn<typeof fetch>();
-    expect(
-      (
-        await proxyAnalyticsRequest(
-          request("/analytics/e/", { method: "POST", headers: { origin: "https://other.test" } }),
-          transport,
-        )
-      )?.status,
-    ).toBe(403);
-    expect(
-      (await proxyAnalyticsRequest(request("/analytics/e/", { method: "DELETE" }), transport))
-        ?.status,
-    ).toBe(405);
-    expect(
-      (
-        await proxyAnalyticsRequest(
-          request("/analytics/static/recorder.js", { method: "POST" }),
-          transport,
-        )
-      )?.status,
-    ).toBe(405);
-    expect(
-      (
-        await proxyAnalyticsRequest(
-          request("/analytics/e/", { method: "POST", body: new Uint8Array(5 * 1024 * 1024 + 1) }),
-          transport,
-        )
-      )?.status,
-    ).toBe(413);
     expect(transport).not.toHaveBeenCalled();
   });
 

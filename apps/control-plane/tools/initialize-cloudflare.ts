@@ -19,7 +19,6 @@ import { initializeOrganization } from "../src/lib/server/organization.ts";
 import { z } from "zod";
 import { connectCloudflareSettings } from "./cloudflare-settings.ts";
 import { loadRuntimeExtension } from "./runtime-extension.ts";
-import { closeObservation } from "../src/lib/server/observation.ts";
 
 const configuration = cloudflareConfigurationSchema.parse(process.env);
 
@@ -98,6 +97,6 @@ try {
 
   console.info("Hosted installation initialized");
 } finally {
-  await closeObservation(observation);
+  await observation.close();
   await database.close();
 }

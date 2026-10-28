@@ -16,7 +16,7 @@
   import type { z } from "zod";
   import type { organizationChoice } from "@platform/contracts";
   import type { Principal } from "#server/identity";
-  import { resetClientContext } from "#lib/client-observation";
+  import { resetClientContext } from "#lib/analytics-client";
   import { authClient } from "#lib/auth-client";
   import { setWorkspaceContext } from "#lib/workspace-context";
   import { Button } from "#shadcn/components/ui/button/index.js";

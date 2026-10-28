@@ -2,7 +2,7 @@ import { createProductAnalytics } from "./analytics.ts";
 import type { AnalyticsEnvironment } from "../analytics-config.ts";
 import type { z } from "zod";
 import type { deploymentWorkflowCommand } from "./cloudflare-connector-command.ts";
-import { observe, closeObservation } from "./observation.ts";
+import { observe } from "./observation.ts";
 
 export const observeDeploymentCompletion = async (
   configuration: AnalyticsEnvironment & { PLATFORM_URL: string },
@@ -27,5 +27,5 @@ export const observeDeploymentCompletion = async (
       rollback: command.rollback,
     },
   });
-  await closeObservation(observation);
+  await observation.close();
 };

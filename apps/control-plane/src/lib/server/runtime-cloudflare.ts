@@ -14,7 +14,6 @@ import { createCloudflareLogs } from "./cloudflare-logs.ts";
 import { createCloudflareExecution } from "./cloudflare-execution.ts";
 import { createCloudflareAppSignIn } from "./app-sign-in-cloudflare.ts";
 import { cloudflareAuthRateLimit } from "./auth-rate-limit-cloudflare.ts";
-import { closeObservation } from "./observation.ts";
 
 export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
   // Hyperdrive exposes its connection string only inside a request handler.
@@ -61,7 +60,7 @@ export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
     get: createRequestRuntime(async () => createRuntime(options)()),
     close: async () => {
       try {
-        await Promise.allSettled([reporting.close(), closeObservation(observation)]);
+        await Promise.allSettled([reporting.close(), observation.close()]);
       } finally {
         await database.close();
       }

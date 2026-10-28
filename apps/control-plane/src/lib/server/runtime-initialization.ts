@@ -23,7 +23,6 @@ import { initializeOrganization } from "./organization.ts";
 import { createSettingsService } from "./settings.ts";
 import { installationRuntime } from "./organization-runtime.ts";
 import { z } from "zod";
-import { closeObservation } from "./observation.ts";
 
 const readBootstrap = async (configuration: Configuration) => {
   if (!configuration.PLATFORM_BOOTSTRAP_FILE) return null;
@@ -135,7 +134,7 @@ export const initializeRuntime = async (
       observation,
     };
   } catch (cause) {
-    await closeObservation(observation);
+    await observation.close();
     await database.close();
     throw cause;
   }

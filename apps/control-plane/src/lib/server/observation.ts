@@ -23,20 +23,3 @@ export interface Observation {
 export const observe = (observer: Observation | undefined, event: ObservationEvent) => {
   runExtensionEffect(() => observer?.capture(event));
 };
-
-export const closeObservation = async (observer: Observation | undefined) => {
-  if (!observer) return;
-  let deadline: ReturnType<typeof setTimeout> | undefined;
-
-  const expired = new Promise<void>((resolve) => {
-    deadline = setTimeout(resolve, 2000);
-  });
-
-  try {
-    await Promise.race([Promise.resolve().then(() => observer.close()), expired]);
-  } catch {
-    // Failed delivery must not prevent database cleanup.
-  } finally {
-    clearTimeout(deadline);
-  }
-};

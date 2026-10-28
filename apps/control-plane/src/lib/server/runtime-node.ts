@@ -4,7 +4,6 @@ import { initializeRuntime } from "./runtime-initialization.ts";
 import { createReporting } from "./reporting.ts";
 import { createRuntime } from "./runtime-services.ts";
 import { createStorage } from "./storage.ts";
-import { closeObservation } from "./observation.ts";
 
 export type { Runtime } from "./runtime-services.ts";
 
@@ -24,7 +23,7 @@ const startRuntime = async () => {
   });
 
   process.once("sveltekit:shutdown", () => {
-    void Promise.allSettled([reporting.close(), closeObservation(observation)])
+    void Promise.allSettled([reporting.close(), observation.close()])
       .then(() => database.close())
       .catch((cause: unknown) => console.error("Database shutdown failed", cause));
   });
