@@ -1,5 +1,7 @@
 export { appEventConfiguration } from "./app-events.ts";
 
+export { connectorBrowserOrigin, connectorBrowserUrl } from "./connector-browser.ts";
+
 import { z } from "zod";
 import { organizationIdentifier } from "./organizations.ts";
 import { appAccessSnapshot } from "./app-access.ts";
@@ -152,7 +154,7 @@ export const uploadSession = z.strictObject({
   missing: z.array(assetHash),
 });
 
-const bindingName = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/);
+export const bindingName = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/);
 
 export const workerBinding = z.discriminatedUnion("type", [
   z.strictObject({
@@ -379,11 +381,19 @@ export const connectorStatus = z.strictObject({
   state: z.enum(["queued", "running", "succeeded", "failed"]),
   message: z.string().nullable(),
   entrypoints: z.array(bindingName),
+  browserUrls: z.record(bindingName, z.url()).default({}),
 });
 
 export const connectorCatalogEntry = z.strictObject({
   name: appSlug,
   entrypoints: z.array(bindingName),
+  browserUrls: z.record(bindingName, z.url()).default({}),
+});
+
+export const connectorBrowserRoute = z.strictObject({
+  organizationId: organizationIdentifier,
+  name: appSlug,
+  origin: z.url({ protocol: /^https$/ }).refine((value) => new URL(value).origin === value),
 });
 
 export const capabilityGrant = z.strictObject({
@@ -408,6 +418,7 @@ export const connectorPreparation = z.strictObject({
   version: identifier,
   release: connectorPackage,
   nativeBindings: z.record(bindingName, bindingName),
+  browserOrigin: connectorBrowserRoute.shape.origin.nullable().default(null),
   secrets: z.record(connectorSecretName, connectorSecretValue),
   telemetry: z
     .strictObject({ url: z.url(), token: z.string().min(1) })
@@ -461,6 +472,7 @@ export const capabilityPath = appPath.extend({
 export const runtimePackages = z.strictObject({
   runtime: runtimeRelease,
   connectors: z.array(connectorPackage).default([]),
+  connectorOrigins: z.record(appSlug, connectorBrowserRoute.shape.origin).default({}),
   connectorSecrets: z
     .record(appSlug, z.record(connectorSecretName, connectorSecretValue))
     .default({}),

@@ -195,11 +195,15 @@ export const createCloudflareConnectors = (
             // Another request may already have replaced the desired connector. Return
             // the command this caller submitted, not that newer request's job identity.
             return Result.ok(
-              await connectorStatus(transaction, {
-                ...record,
-                package: operation.result,
-                jobId: command.id,
-              }),
+              await connectorStatus(
+                transaction,
+                {
+                  ...record,
+                  package: operation.result,
+                  jobId: command.id,
+                },
+                { APP_DOMAIN: bindings.APP_DOMAIN, APP_HTTPS_PORT: 443 },
+              ),
             );
           })
         ).unwrap();
@@ -256,7 +260,11 @@ export const createCloudflareConnectors = (
             });
           current = await cloudflareConnectorStatus(
             bindings,
-            await connectorStatus(transaction, { ...existing, package: original, jobId: id }),
+            await connectorStatus(
+              transaction,
+              { ...existing, package: original, jobId: id },
+              { APP_DOMAIN: bindings.APP_DOMAIN, APP_HTTPS_PORT: 443 },
+            ),
           );
         } else {
           await prepareConnector(transaction, storage, execution, release, modules);

@@ -252,6 +252,7 @@ describe("Organization connector management", () => {
         background.db,
         storage,
         environment.environment.PLATFORM_ENCRYPTION_KEY,
+        environment.configuration,
       );
 
       for (const [target, published] of [
@@ -315,6 +316,7 @@ describe("Organization connector management", () => {
       environment.database.db,
       storage,
       environment.environment.PLATFORM_ENCRYPTION_KEY,
+      environment.configuration,
     );
 
     const claimed = (await worker.claim(firstAgent)).unwrap();

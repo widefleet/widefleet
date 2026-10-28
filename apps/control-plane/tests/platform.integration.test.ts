@@ -120,12 +120,14 @@ describe("Platform API with PostgreSQL and RustFS", () => {
         environment.database.db,
         storage,
         "local-integration-test-encryption-key-only",
+        configuration,
       ),
       agents: createAgentService(environment.database.db),
       jobs: createJobService(
         environment.database.db,
         storage,
         "local-integration-test-encryption-key-only",
+        configuration,
         (event) => {
           reportedOperations.push(event);
         },
@@ -2102,7 +2104,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
 
     expect(
       await (await json("/connector-catalog", "GET", undefined, outsiderHeaders)).json(),
-    ).toContainEqual({ name: release.name, entrypoints: [] });
+    ).toContainEqual({ name: release.name, entrypoints: [], browserUrls: {} });
 
     expect(
       (
@@ -2216,7 +2218,11 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     });
     expect(
       await (await json("/connector-catalog", "GET", undefined, outsiderHeaders)).json(),
-    ).toContainEqual({ name: release.name, entrypoints: ["Customers", "default"] });
+    ).toContainEqual({
+      name: release.name,
+      entrypoints: ["Customers", "default"],
+      browserUrls: {},
+    });
     expect(
       (await json(`${bindingPath}/ERP`, "PUT", { connector: release.name }, outsiderHeaders))
         .status,

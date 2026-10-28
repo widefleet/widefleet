@@ -244,6 +244,9 @@ async fn execute(
             .await?;
             prepared.activations.push(activation);
         }
+        if matches!(job.kind, JobKind::Connector | JobKind::Runtime) {
+            docker::route_connectors(configuration, &packages.connector_origins).await?;
+        }
         for app in &prepared.probes {
             docker::check_candidate(
                 docker,

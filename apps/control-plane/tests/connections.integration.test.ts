@@ -37,6 +37,7 @@ describe("Connector discovery and app connections", () => {
       environment.database.db,
       createStorage(environment.configuration),
       "local-test-only",
+      environment.configuration,
     );
     appService = createAppService(environment.database.db, environment.configuration);
     creator = await person("connection-creator");
@@ -100,6 +101,7 @@ describe("Connector discovery and app connections", () => {
       name: "erp",
       checksum: "a".repeat(64),
       entrypoints: ["default", "NewReader"],
+      browserEntrypoints: ["default", "NewReader"],
       classes: [],
       secrets: { API_KEY: "synthetic-ciphertext" },
       secretRevision: 9,
@@ -111,7 +113,11 @@ describe("Connector discovery and app connections", () => {
         organizationId: app.organizationId,
         jobId: crypto.randomUUID(),
         package: reference,
-        appliedPackage: { ...reference, entrypoints: ["default", "OldReader"] },
+        appliedPackage: {
+          ...reference,
+          entrypoints: ["default", "OldReader"],
+          browserEntrypoints: ["default", "OldReader"],
+        },
       },
       {
         name: "pending",
@@ -122,8 +128,14 @@ describe("Connector discovery and app connections", () => {
     ]);
 
     expect((await service.catalog(creator)).unwrap()).toEqual([
-      { name: "erp", entrypoints: ["default"] },
-      { name: "pending", entrypoints: [] },
+      {
+        name: "erp",
+        entrypoints: ["default"],
+        browserUrls: {
+          default: `${await contract.connectorBrowserOrigin(app.organizationId, "erp", environment.configuration.APP_DOMAIN, environment.configuration.APP_HTTPS_PORT)}/`,
+        },
+      },
+      { name: "pending", entrypoints: [], browserUrls: {} },
     ]);
     expect(await service.list(creator)).toMatchObject({ error: { code: "FORBIDDEN" } });
     expect(await service.read(creator, "erp")).toMatchObject({ error: { code: "FORBIDDEN" } });

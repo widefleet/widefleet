@@ -39,6 +39,8 @@ export const connectorCode = async (
 
   bindings.set("WIDEFLEET_SECRETS", context.exports.ConnectorSecrets({ props: identity }));
 
+  if (snapshot.browserOrigin) bindings.set("WIDEFLEET_ORIGIN", snapshot.browserOrigin);
+
   for (const binding of configuration.durable_objects)
     bindings.set(
       `WIDEFLEET_STATE_${binding.name}`,

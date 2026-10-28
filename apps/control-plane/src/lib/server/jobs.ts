@@ -25,6 +25,7 @@ import { connectorReference, loadConnector, loadConnectorArtifact } from "./conn
 import { lockOrganizationRuntime } from "./organization-runtime.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import { transact, type Transaction } from "./transactions.ts";
+import type { Configuration } from "./config.ts";
 
 const leasedJob = async (
   transaction: Transaction,
@@ -58,6 +59,7 @@ export const createJobService = (
   database: Database,
   storage: ArtifactStorage,
   encryptionKey: string,
+  configuration: Pick<Configuration, "APP_DOMAIN" | "APP_HTTPS_PORT">,
   report: (event: z.infer<typeof contract.reportingOperation>) => void = () => {},
 ) => ({
   authenticate: (token: string) =>
@@ -322,6 +324,24 @@ export const createJobService = (
 
       return Result.ok({
         ...runtime,
+        connectorOrigins: Object.fromEntries(
+          await Promise.all(
+            references
+              .filter((reference) => reference.browserEntrypoints.length)
+              .map(
+                async (reference) =>
+                  [
+                    reference.name,
+                    await contract.connectorBrowserOrigin(
+                      lease.value.organizationId,
+                      reference.name,
+                      configuration.APP_DOMAIN,
+                      configuration.APP_HTTPS_PORT,
+                    ),
+                  ] as const,
+              ),
+          ),
+        ),
         connectorSecrets: Object.fromEntries(resolved),
         connectors: await Promise.all(
           references.map((reference) => loadConnector(storage, reference)),

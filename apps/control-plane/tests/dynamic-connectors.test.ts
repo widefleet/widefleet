@@ -15,6 +15,7 @@ import {
   connectorActivation,
   connectorPackage,
   connectorManagement,
+  connectorBrowserOrigin,
   publishedApp,
 } from "@platform/contracts";
 import { encodeConfiguration } from "@platform/auth-proxy/publication";
@@ -113,7 +114,7 @@ export class Counter extends DurableObject {
   async alarm() { console.info('facet-alarm'); await this.ctx.storage.put('alarm', true); }
   async fired() { return await this.ctx.storage.get('alarm') ?? false; }
 }
-export class Reader extends WorkerEntrypoint { read() { console.info('named-rpc'); return 'reader'; } }
+export class Reader extends WorkerEntrypoint { read() { console.info('named-rpc'); return 'reader'; } fetch(request) { return Response.json({ path: new URL(request.url).pathname, caller: this.ctx.props.caller }); } }
 export default class Connector extends WorkerEntrypoint {
   availabilityHold() { return availabilityHold(this.env, 'connector'); }
   caller() { return this.ctx.props.caller; }
@@ -176,7 +177,7 @@ export default class Connector extends WorkerEntrypoint {
   fail() { throw new Error('connector failure'); }
   fetch(request) {
     console.info('connector-fetch');
-    if (new URL(request.url).pathname.endsWith('/browser-caller')) return Response.json({ caller: this.ctx.props.caller, cookie: request.headers.get('cookie') }, {headers:{'set-cookie':'connector_test.state=own; Path=/_widefleet/connectors/CONNECTOR/; Secure; HttpOnly'}});
+    if (new URL(request.url).pathname.endsWith('/browser-caller')) return Response.json({ caller: this.ctx.props.caller, cookie: request.headers.get('cookie'), origin: this.env.WIDEFLEET_ORIGIN }, {headers:{'set-cookie':'connector_test.state=own; Domain=apps.example.test; Path=/; Secure; HttpOnly', 'access-control-allow-origin': '*'}});
     if (new URL(request.url).pathname === '/fetch-failure') throw new Error('connector fetch failure');
     if (new URL(request.url).pathname === '/logging') {
     console.info('connector-request', {version: ${JSON.stringify(version)}});
@@ -366,6 +367,7 @@ describe.runIf(process.env["RUN_CONNECTOR_TESTS"] === "1").each(["celld", "worke
         headers: { "content-type": "application/json" },
         body: body ? JSON.stringify(body) : null,
         signal: AbortSignal.timeout(4000),
+        redirect: "manual",
       }).catch((cause: unknown) => {
         throw new Error(`Request failed: ${path}`, { cause });
       });
@@ -555,6 +557,20 @@ export class ConnectorSupervisor extends NativeConnectorSupervisor {
 }
 export default { async fetch(request, env, ctx) {
   const url = new URL(request.url);
+  if (url.pathname === '/fixture/app-access') {
+    const key = 'apps/fixture.apps.example.test';
+    const route = JSON.parse(await env.AUTH_CONFIG.get(key));
+    route.access.groups = url.searchParams.has('deny') ? ['denied'] : [];
+    await env.AUTH_CONFIG.put(key, JSON.stringify(route));
+    return Response.json(true);
+  }
+  if (url.pathname === '/fixture/app-alias') {
+    const app = await (await env.WIDEFLEET_PACKAGES.get('hosts/fixture.apps.example.test.json')).json();
+    app.appId = crypto.randomUUID(); app.hostname = 'second-app.apps.example.test';
+    await env.WIDEFLEET_PACKAGES.put('hosts/' + app.hostname + '.json', JSON.stringify(app));
+    await env.AUTH_CONFIG.put('apps/' + app.hostname, JSON.stringify({organizationId:${JSON.stringify(organizationId)},appId:app.appId,access:{revision:0,groups:[]}}));
+    return Response.json(true);
+  }
   if (url.pathname === '/fixture/availability') {
     const input = await request.json();
     const key = 'organizations/' + input.organizationId + '/http-availability';
@@ -621,8 +637,10 @@ export default { async fetch(request, env, ctx) {
     const identity = await request.json();
     return Response.json(await ctx.exports.ConnectorSecrets({props:identity}).get('TOKEN'));
   }
-  url.protocol = 'https:'; url.hostname = 'fixture.apps.example.test'; url.port = '';
-  const headers = new Headers(request.headers); headers.set('cookie', ${JSON.stringify(identity.cookie)});
+  url.protocol = 'https:'; url.hostname = request.headers.get('x-fixture-host') ?? 'fixture.apps.example.test'; url.port = '';
+  const headers = new Headers(request.headers);
+  if (headers.has('x-fixture-signed-out')) headers.delete('cookie');
+  else headers.set('cookie', ${JSON.stringify(identity.cookie)} + (headers.get('cookie') ? '; ' + headers.get('cookie') : ''));
   return runtime.fetch(new Request(url, new Request(request, {headers})), env, ctx);
 } };`,
       );
@@ -724,12 +742,30 @@ export default { async fetch(request, env, ctx) {
         secret: "secret-one",
       });
     });
-    it("exposes only opted-in browser entrypoints through a granted app binding", async () => {
+    it("isolates browser pages on one stable connector origin shared by app bindings", async () => {
       const path = "/_widefleet/connectors/CONNECTOR/browser-caller";
       expect((await request(path)).status).toBe(404);
       expect((await request("/_widefleet/connectors/UNKNOWN/browser-caller")).status).toBe(404);
+
+      const browserOrigin = await connectorBrowserOrigin(
+        organizationId,
+        "fixture",
+        "apps.example.test",
+      );
+
+      const visit = (
+        path: string,
+        init: { method?: string; headers?: Record<string, string> } = {},
+        hostname = new URL(browserOrigin).hostname,
+      ) =>
+        (hosted ? hosted.fetch : fetch)(`${origin}${path}`, {
+          ...init,
+          redirect: "manual",
+          headers: { ...Object.fromEntries(new Headers(init.headers)), "x-fixture-host": hostname },
+        });
+
       const candidate = release("browser");
-      candidate.metadata.browser_entrypoints = ["default"];
+      candidate.metadata.browser_entrypoints = ["default", "Reader"];
       await stage(candidate);
 
       const prepared = connectorActivation.parse(
@@ -740,6 +776,7 @@ export default { async fetch(request, env, ctx) {
             version: crypto.randomUUID(),
             release: candidate,
             nativeBindings,
+            browserOrigin,
             secrets: { TOKEN: "browser-secret" },
             telemetry: null,
           }),
@@ -747,22 +784,75 @@ export default { async fetch(request, env, ctx) {
       );
 
       await activate(prepared);
-      const response = await request(path);
-      expect(response.status).toBe(200);
-      expect(await response.json()).toEqual({
-        caller: {
-          issuer: identityIssuer,
-          subject: "pairwise-subject",
-          name: "Example User",
-        },
-        cookie: null,
-      });
-      expect(response.headers.getSetCookie()).toEqual([
-        "connector_test.state=own; Path=/_widefleet/connectors/CONNECTOR/; Secure; HttpOnly",
-      ]);
-      expect((await request("/_widefleet/connectors/READER/browser-caller")).status).toBe(404);
-      await activate(await prepare("v1", "secret-one"));
+
+      try {
+        const redirected = await request(path + "?returnTo=%2Fissues");
+        expect(redirected.status).toBe(302);
+        expect(redirected.headers.get("location")).toBe(
+          `${browserOrigin}/browser-caller?returnTo=%2Fissues`,
+        );
+        expect(redirected.headers.getSetCookie()).toEqual([]);
+        expect(await redirected.text()).toBe("");
+        expect((await visit(path, { method: "POST" }, "fixture.apps.example.test")).status).toBe(
+          405,
+        );
+
+        expect(
+          (await visit("/browser-caller", { headers: { "x-fixture-signed-out": "yes" } })).status,
+        ).toBe(401);
+
+        const login = await visit("/browser-caller", {
+          headers: { "x-fixture-signed-out": "yes", accept: "text/html" },
+        });
+
+        expect(login.status).toBe(302);
+        const loginUrl = new URL(z.url().parse(login.headers.get("location")));
+        expect(loginUrl.hostname).toBe("auth.apps.example.test");
+        expect(loginUrl.searchParams.get("rd")).toBe(`${browserOrigin}/browser-caller`);
+
+        const response = await visit("/browser-caller", {
+          headers: { cookie: "connector_test.state=own" },
+        });
+
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({
+          caller: { issuer: identityIssuer, subject: "pairwise-subject", name: "Example User" },
+          cookie: "connector_test.state=own",
+          origin: browserOrigin,
+        });
+        expect(response.headers.getSetCookie()).toEqual([
+          "connector_test.state=own; Path=/; Secure; HttpOnly",
+        ]);
+        expect(response.headers.get("access-control-allow-origin")).toBeNull();
+        expect(response.headers.get("content-security-policy")).toContain("default-src 'self'");
+        expect(response.headers.get("cross-origin-resource-policy")).toBe("same-origin");
+
+        const named = await request("/_widefleet/connectors/READER/browser-caller");
+        expect(named.headers.get("location")).toBe(
+          `${browserOrigin}/_widefleet/entrypoints/Reader/browser-caller`,
+        );
+        const page = await visit("/_widefleet/entrypoints/Reader/browser-caller");
+        expect(page.status).toBe(200);
+        expect(await page.json()).toMatchObject({
+          path: "/_widefleet/entrypoints/Reader/browser-caller",
+          caller: { subject: "pairwise-subject" },
+        });
+        expect((await visit("/_widefleet/entrypoints/Missing/browser-caller")).status).toBe(404);
+
+        await json("/fixture/app-alias");
+        expect(
+          (await visit(path, {}, "second-app.apps.example.test")).headers.get("location"),
+        ).toBe(`${browserOrigin}/browser-caller`);
+        await json("/fixture/app-access?deny");
+        expect((await request(path)).status).toBe(403);
+        expect((await visit("/browser-caller")).status).toBe(200);
+      } finally {
+        await json("/fixture/app-access");
+        await activate(await prepare("v1", "secret-one"));
+      }
+
       expect((await request(path)).status).toBe(404);
+      expect((await visit("/browser-caller")).status).toBe(404);
     });
     it("reuses immutable modules across secret versions and stores only module references", async () => {
       const name = "storage-fixture";

@@ -6,6 +6,9 @@ import {
   connectorSecretValue,
   runtimePackages,
   workerMetadata,
+  connectorBrowserOrigin,
+  connectorBrowserUrl,
+  createAppInput,
 } from "./index.ts";
 
 describe("connector secret contracts", () => {
@@ -39,6 +42,28 @@ describe("connector browser entrypoints", () => {
     expect(
       connectorUploadMetadata.safeParse({ ...metadata, browser_entrypoints: ["Missing"] }).success,
     ).toBe(false);
+  });
+  it("separates organization and connector identities without overlapping app hostnames", async () => {
+    const origins = await Promise.all([
+      connectorBrowserOrigin("one-two", "three", "apps.example.test"),
+      connectorBrowserOrigin("one", "two-three", "apps.example.test"),
+      connectorBrowserOrigin("other", "three", "apps.example.test"),
+    ]);
+
+    expect(new Set(origins).size).toBe(3);
+
+    for (const origin of origins) {
+      const url = new URL(origin);
+      expect(createAppInput.shape.slug.safeParse(url.hostname.split(".")[0]).success).toBe(false);
+      expect(url.hostname.split(".")[0]?.length).toBeLessThanOrEqual(63);
+    }
+
+    const origin = await connectorBrowserOrigin("one", "three", "apps.example.test", 8443);
+    expect(new URL(origin).port).toBe("8443");
+    expect(connectorBrowserUrl(origin, "default")).toBe(`${origin}/`);
+    expect(connectorBrowserUrl(origin, "Browser")).toBe(
+      `${origin}/_widefleet/entrypoints/Browser/`,
+    );
   });
 });
 

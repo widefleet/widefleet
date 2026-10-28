@@ -465,12 +465,16 @@ pub async fn prepare(
                 &directory.join("connectors").join(&connector.name),
             )
             .await?;
-            connector_preparations.push(json!({
+            let mut preparation = json!({
                 "action": "prepare", "organizationId": job.organization_id, "version": job.id,
                 "release": connector, "nativeBindings": native_bindings,
                 "secrets": packages.connector_secrets.get(&connector.name).cloned().unwrap_or_default(),
                 "telemetry": connector_telemetry.get(&connector.name),
-            }));
+            });
+            if let Some(origin) = packages.connector_origins.get(&connector.name) {
+                preparation["browserOrigin"] = json!(origin);
+            }
+            connector_preparations.push(preparation);
         }
     }
     for (field, resources) in &connector_resources {

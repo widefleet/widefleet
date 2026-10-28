@@ -303,6 +303,8 @@ pub struct RuntimePackages {
     pub runtime: RuntimeRelease,
     #[serde(default)]
     pub connectors: Vec<ConnectorPackage>,
+    #[serde(default, rename = "connectorOrigins")]
+    pub connector_origins: BTreeMap<String, String>,
     #[serde(default, rename = "connectorSecrets")]
     pub connector_secrets: BTreeMap<String, BTreeMap<String, String>>,
 }

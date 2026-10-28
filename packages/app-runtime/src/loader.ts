@@ -19,6 +19,8 @@ import { manageConnector } from "./connector-catalog.ts";
 import { readOrganizationAvailability } from "./availability.ts";
 import { executionOptions } from "./execution-limits.ts";
 import { signConnectorCaller } from "./connector-caller.ts";
+import { readConnectorBrowserRoute } from "./connector-publication.ts";
+import { browserEntrypoint, connectorBrowserResponse } from "./connector-browser.ts";
 
 export { ConnectorCatalog, ConnectorGateway } from "./connector-catalog.ts";
 
@@ -320,7 +322,29 @@ export default {
 
         return context.exports
           .ConnectorGateway({ props: { ...grant, appId, caller, browser: true } })
-          .fetch(authenticated);
+          .redirect(authenticated, binding);
+      },
+      {
+        resolve: (hostname) => readConnectorBrowserRoute(environment, hostname),
+        fetch: async (authenticated, route, caller) => {
+          const entrypoint = browserEntrypoint(new URL(authenticated.url).pathname);
+
+          if (!entrypoint) return new Response(null, { status: 404 });
+
+          return connectorBrowserResponse(
+            await context.exports
+              .ConnectorGateway({
+                props: {
+                  organizationId: route.organizationId,
+                  connector: route.name,
+                  entrypoint,
+                  caller,
+                  browser: true,
+                },
+              })
+              .fetch(authenticated),
+          );
+        },
       },
     ).fetch(request);
   },

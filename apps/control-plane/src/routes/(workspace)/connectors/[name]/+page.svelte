@@ -74,6 +74,26 @@
       <Button href={`/connectors/${data.name}/logs`} variant="outline" size="sm">View logs</Button>
     </div>
   </section>
+  {#if Object.keys(connector.browserUrls).length}
+    <section class="space-y-3" aria-label="Connector browser addresses">
+      <h2 class="text-base font-medium">Browser addresses</h2>
+      <p class="text-muted-foreground text-sm">
+        Addresses remain the same across connector updates and app connections. A submitted change
+        must activate before its pages are available.
+      </p>
+      {#each Object.entries(connector.browserUrls) as [entrypoint, url] (entrypoint)}
+        <div class="space-y-1 text-sm">
+          <p class="font-medium">{entrypoint}</p>
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-muted-foreground block break-all underline underline-offset-4">{url}</a
+          >
+        </div>
+      {/each}
+    </section>
+  {/if}
   <section class="space-y-4" aria-labelledby="secrets-heading">
     <div>
       <h2 id="secrets-heading" class="text-base font-medium">Secrets</h2>

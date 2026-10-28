@@ -23,12 +23,12 @@ describe("Auth proxy session lifecycle", () => {
     fetch: () => Promise.resolve(new Response("App response")),
   };
 
-  const login = async (settings = configuration) => {
-    const proxy = createAuthProxy(settings, apps);
+  const login = async (settings = configuration, target = app, destinations = apps) => {
+    const proxy = createAuthProxy(settings, destinations);
 
     const started = await proxy.fetch(
       new Request(
-        `https://auth.apps.example.test/oauth2/${settings.organizationId}/start?rd=${encodeURIComponent(app)}`,
+        `https://auth.apps.example.test/oauth2/${settings.organizationId}/start?rd=${encodeURIComponent(target)}`,
       ),
     );
 
@@ -44,7 +44,7 @@ describe("Auth proxy session lifecycle", () => {
       }),
     );
 
-    expect(completed.headers.get("location")).toBe(app);
+    expect(completed.headers.get("location")).toBe(target);
 
     return cookies(completed);
   };
@@ -105,6 +105,33 @@ describe("Auth proxy session lifecycle", () => {
     expect((await visit()).status).toBe(200);
   });
 
+  it("returns from company sign-in to a connector callback without an app grant", async () => {
+    const target =
+      "https://connector.apps.example.test/callback?code=synthetic-code&state=synthetic-state";
+
+    const destinations = {
+      resolve: async (hostname: string) =>
+        hostname === "connector.apps.example.test" ? { revision: 0, groups: [] } : null,
+      fetch: async () => new Response("Connector response"),
+    };
+
+    const session = await login(configuration, target, destinations);
+    const proxy = createAuthProxy(configuration, { ...destinations, browser: true });
+    expect((await proxy.fetch(new Request(target, { headers: { cookie: session } }))).status).toBe(
+      200,
+    );
+
+    const otherSession = await login({
+      ...configuration,
+      organizationId: "other-org",
+      redirectUrl: "https://auth.apps.example.test/oauth2/other-org/callback",
+    });
+
+    expect(
+      (await proxy.fetch(new Request(target, { headers: { cookie: otherSession } }))).status,
+    ).toBe(401);
+  });
+
   it("protects every organization's sign-in cookies on connector browser routes", async () => {
     const received: Request[] = [];
     const identities: { issuer: string; subject: string; name: string }[] = [];
@@ -126,12 +153,14 @@ describe("Auth proxy session lifecycle", () => {
 
     const proxy = createAuthProxy(configuration, {
       ...apps,
-      connector: async (request, caller, binding) => {
+      browser: true,
+      resolve: async (hostname) =>
+        hostname === "connector.apps.example.test" ? { revision: 0, groups: [] } : null,
+      fetch: async (request, caller) => {
         received.push(request);
         identities.push(caller);
-        expect(binding).toBe("CONNECTOR");
         const headers = new Headers();
-        headers.append("set-cookie", "connector_test.state=test; Path=/");
+        headers.append("set-cookie", "connector_test.state=test; Domain=apps.example.test; Path=/");
 
         for (const name of protectedCookies)
           headers.append("set-cookie", `${name}=forged; Domain=apps.example.test; Path=/`);
@@ -140,7 +169,7 @@ describe("Auth proxy session lifecycle", () => {
       },
     });
 
-    const path = new URL("/_widefleet/connectors/CONNECTOR/connect", app);
+    const path = new URL("https://connector.apps.example.test/connect");
     expect((await proxy.fetch(new Request(path))).status).toBe(401);
 
     const response = await proxy.fetch(
@@ -161,8 +190,8 @@ describe("Auth proxy session lifecycle", () => {
     ]);
     expect(response.headers.getSetCookie()).toEqual(["connector_test.state=test; Path=/"]);
     access.groups = ["denied"];
-    expect((await proxy.fetch(new Request(path, { headers: { cookie } }))).status).toBe(403);
-    expect(received).toHaveLength(1);
+    expect((await proxy.fetch(new Request(path, { headers: { cookie } }))).status).toBe(200);
+    expect(received).toHaveLength(2);
   });
 
   it("invalidates sessions when the identity source changes but preserves client-secret rotation", async () => {

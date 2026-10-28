@@ -1,5 +1,10 @@
 import type { CloudflareWorkersModule } from "@cloudflare/workers-types";
-import { connectorActivation, connectorManagement } from "@platform/contracts";
+import {
+  connectorActivation,
+  connectorManagement,
+  connectorPreparation,
+  connectorBrowserOrigin,
+} from "@platform/contracts";
 import { Result } from "better-result";
 import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
@@ -45,7 +50,7 @@ export const createCloudflareConnectorDeployment = (
 
   const storage = createArtifactStorage(createR2Storage(bindings.ARTIFACTS));
 
-  const manage = async (input: z.infer<typeof connectorManagement>) => {
+  const manage = async (input: z.input<typeof connectorManagement>) => {
     if (!bindings.APP_RUNTIME) throw new Error("App runtime is not configured");
 
     const response = await bindings.APP_RUNTIME.fetch(
@@ -137,15 +142,23 @@ export const createCloudflareConnectorDeployment = (
 
             // Plaintext only crosses the private management binding. The runtime encrypts
             // the immutable snapshot; Workflow results and SQL receipts contain IDs only.
-            const prepared = await manage({
-              action: "prepare",
+            const preparation: z.input<typeof connectorPreparation> = {
               organizationId: command.organizationId,
               version: command.id,
               release,
               nativeBindings,
               secrets,
               telemetry: null,
-            });
+            };
+
+            if (release.metadata.browser_entrypoints?.length)
+              preparation.browserOrigin = await connectorBrowserOrigin(
+                command.organizationId,
+                release.name,
+                bindings.APP_DOMAIN,
+              );
+
+            const prepared = await manage({ action: "prepare", ...preparation });
 
             await manage({ action: "activate", ...prepared });
             await transaction

@@ -8,6 +8,7 @@ export const connectorBrowserBinding = (url: URL) =>
   /^\/_widefleet\/connectors\/([A-Za-z_$][A-Za-z0-9_$]*)\//.exec(url.pathname)?.[1] ?? null;
 
 interface Apps {
+  browser?: boolean;
   resolve: (hostname: string) => Promise<z.infer<typeof appAccessSnapshot> | null>;
   fetch: (request: Request, caller: z.infer<typeof connectorCaller>) => Promise<Response>;
   connector?: (
@@ -196,29 +197,44 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
 
       const binding = connectorBrowserBinding(url);
 
-      if (binding) {
+      if (binding && !apps.browser) {
         if (!apps.connector) return response(404, "Not found");
 
+        return apps.connector(
+          new Request(request, { headers, redirect: "manual" }),
+          caller,
+          binding,
+        );
+      }
+
+      if (apps.browser) {
         const cookies = (request.headers.get("cookie") ?? "")
           .split(";")
           .filter((value) => !companyCookie(value.trim().split("=")[0] ?? ""));
 
         if (cookies.some((value) => value.trim())) headers.set("cookie", cookies.join(";"));
 
-        const result = await apps.connector(
+        const result = await apps.fetch(
           new Request(request, { headers, redirect: "manual" }),
           caller,
-          binding,
         );
 
         const outgoing = new Response(result.body, result);
         outgoing.headers.delete("set-cookie");
 
-        // Organizations share the parent app domain. Protect every company's
-        // sign-in cookies, including chunks, in both directions.
+        // Connectors may set cookies only on their own host. Company sign-in
+        // cookies remain owned by the authentication proxy, across all organizations.
         for (const cookie of result.headers.getSetCookie())
-          if (!companyCookie(cookie.split("=")[0]?.trim() ?? ""))
-            outgoing.headers.append("set-cookie", cookie);
+          if (!companyCookie(cookie.split("=")[0]?.trim() ?? "")) {
+            const attributes = cookie.split(";");
+            const value = attributes.shift();
+
+            if (value)
+              outgoing.headers.append(
+                "set-cookie",
+                [value, ...attributes.filter((part) => !/^\s*domain\s*=/i.test(part))].join(";"),
+              );
+          }
 
         return outgoing;
       }

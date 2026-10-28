@@ -5,6 +5,7 @@ import {
   connectorManagement,
   publishedCapability,
   connectorCaller,
+  connectorBrowserUrl,
 } from "@platform/contracts";
 import { z } from "zod";
 import {
@@ -14,6 +15,7 @@ import {
   digest,
   encryptConnectorSecrets,
   readConnector,
+  connectorBrowserKey,
 } from "./connector-publication.ts";
 import { loadConnectorWorker } from "./connector-code.ts";
 import { invokeConnector, type ConnectorValue } from "./connector-rpc.ts";
@@ -40,11 +42,16 @@ export class ConnectorCatalog extends DurableObject<ParentEnvironment> {
   }
   async prepare(input: z.infer<typeof connectorPreparation>) {
     const prepared = connectorPreparation.parse(input);
-    const { organizationId, version, release, secrets, nativeBindings, telemetry } = prepared;
+
+    const { organizationId, version, release, secrets, nativeBindings, telemetry, browserOrigin } =
+      prepared;
+
+    if (release.metadata.browser_entrypoints?.length && !browserOrigin)
+      throw new Error("Connector browser origin is missing; update the deployment agent");
     const identity = { organizationId, version, name: release.name };
 
     const fingerprint = await digest(
-      JSON.stringify({ release, nativeBindings, secrets, telemetry }),
+      JSON.stringify({ release, nativeBindings, secrets, telemetry, browserOrigin }),
     );
 
     const active = await this.current();
@@ -66,6 +73,7 @@ export class ConnectorCatalog extends DurableObject<ParentEnvironment> {
         release,
         nativeBindings,
         telemetry,
+        browserOrigin,
         fingerprint,
         previous: active?.version ?? null,
         ciphertext: await encryptConnectorSecrets(this.env, identity, secrets),
@@ -105,6 +113,18 @@ export class ConnectorCatalog extends DurableObject<ParentEnvironment> {
     if ((await this.ctx.storage.get(`prepared/${identity.version}`)) !== snapshot.fingerprint)
       throw new Error("Connector version has not passed readiness checks");
 
+    // This index is only a routing hint. Each browser request checks the active
+    // snapshot's origin and explicit browser entrypoints before executing code.
+    if (snapshot.browserOrigin)
+      await this.env.WIDEFLEET_PACKAGES.put(
+        connectorBrowserKey(new URL(snapshot.browserOrigin).hostname),
+        JSON.stringify({
+          organizationId: identity.organizationId,
+          name: identity.name,
+          origin: snapshot.browserOrigin,
+        }),
+      );
+
     return this.ctx.storage.transaction(async (storage) => {
       const current = connectorGeneration.nullable().parse((await storage.get("active")) ?? null);
 
@@ -134,7 +154,7 @@ export class ConnectorGateway extends WorkerEntrypoint<
     browser?: boolean;
   }
 > {
-  async #target(proof?: string) {
+  async #snapshot() {
     const { organizationId, connector, entrypoint } = this.ctx.props;
     await requireOrganizationAvailability(this.env, organizationId);
     const active = await connectorCatalog(this.env, organizationId, connector).current();
@@ -150,6 +170,14 @@ export class ConnectorGateway extends WorkerEntrypoint<
 
     if (!snapshot.release.metadata.entrypoints.includes(entrypoint))
       throw new Error("Connector entrypoint is not available");
+
+    return snapshot;
+  }
+  async #target(proof?: string, origin?: string) {
+    const snapshot = await this.#snapshot();
+
+    if (!snapshot || (this.ctx.props.browser && snapshot.browserOrigin !== origin)) return null;
+    const { organizationId, entrypoint } = this.ctx.props;
 
     if (proof && !this.ctx.props.appId && !this.ctx.props.caller)
       throw new Error("Connector caller has no originating app");
@@ -178,9 +206,28 @@ export class ConnectorGateway extends WorkerEntrypoint<
 
     return invokeConnector(target, method, args);
   }
+  async redirect(request: Request, binding: string) {
+    if (request.method !== "GET" && request.method !== "HEAD")
+      return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } });
+    const snapshot = await this.#snapshot();
+
+    if (!snapshot?.browserOrigin) return new Response(null, { status: 404 });
+    const incoming = new URL(request.url);
+    const prefix = `/_widefleet/connectors/${binding}/`;
+
+    if (!incoming.pathname.startsWith(prefix)) return new Response(null, { status: 404 });
+    const target = new URL(connectorBrowserUrl(snapshot.browserOrigin, this.ctx.props.entrypoint));
+    target.pathname += incoming.pathname.slice(prefix.length);
+    target.search = incoming.search;
+
+    return new Response(null, {
+      status: 302,
+      headers: { location: target.href, "cache-control": "no-store" },
+    });
+  }
   override async fetch(request: Request) {
     const proof = request.headers.get("x-widefleet-connector-caller") ?? undefined;
-    const target = await this.#target(proof);
+    const target = await this.#target(proof, new URL(request.url).origin);
 
     if (!target) return new Response(null, { status: 404 });
     const headers = new Headers(request.headers);

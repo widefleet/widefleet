@@ -933,7 +933,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           return Response.json(result.unwrap());
         }
         if (url.hostname === 'fixture' && url.pathname === '/connections') {
-          const result = await withCloudflareDatabase(env, async ({db}) => createConnectorService(db, createArtifactStorage(createR2Storage(env.ARTIFACTS)), env.PLATFORM_ENCRYPTION_KEY).connections({id:'fixture-owner', admin:true, application: {...${JSON.stringify(environment.application)}, admin:true}}, url.searchParams.get('appId')));
+          const result = await withCloudflareDatabase(env, async ({db}) => createConnectorService(db, createArtifactStorage(createR2Storage(env.ARTIFACTS)), env.PLATFORM_ENCRYPTION_KEY, {APP_DOMAIN: env.APP_DOMAIN, APP_HTTPS_PORT: 443}).connections({id:'fixture-owner', admin:true, application: {...${JSON.stringify(environment.application)}, admin:true}}, url.searchParams.get('appId')));
           return Response.json(result.unwrap());
         }
         if (url.hostname === 'fixture' && url.pathname === '/host') {
