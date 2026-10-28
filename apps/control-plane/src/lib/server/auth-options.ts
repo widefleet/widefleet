@@ -8,6 +8,7 @@ import { emailOTP, jwt, organization, oneTimeToken } from "better-auth/plugins";
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { z } from "zod";
 import type { Configuration } from "./config.ts";
+import type { AuthenticationExtension } from "./runtime-extension.ts";
 import { createSignInEmail, sendOrganizationInvitation, type SendEmail } from "./email.ts";
 import { hashAppClientSecret } from "./app-login-client.ts";
 import { authenticationReference } from "./authentication-context.ts";
@@ -38,6 +39,7 @@ export const authenticationOptions = (
     initializeResources = false,
     sendEmail,
     allowEmail,
+    allowUser,
     tokenClaims,
     rateLimit,
     ipAddressHeaders,
@@ -46,6 +48,7 @@ export const authenticationOptions = (
     initializeResources?: boolean;
     sendEmail?: SendEmail;
     allowEmail?: (email: string) => Promise<boolean>;
+    allowUser?: AuthenticationExtension["allowUser"];
     tokenClaims?: (
       input: OAuthClaimExtensionInput,
     ) => Promise<{ reference_id: string; organization_id?: string }>;
@@ -110,10 +113,13 @@ export const authenticationOptions = (
         ];
 
         const current =
-          ["/device/approve", "/device/deny"].includes(context.path) ||
+          ["/get-session", "/token", "/device/approve", "/device/deny"].includes(context.path) ||
           accountPaths.includes(context.path)
             ? await getSessionFromCtx(context)
             : null;
+
+        if (current && allowUser && !(await allowUser(current.user.id)))
+          throw new APIError("FORBIDDEN", { message: "This account is unavailable" });
 
         const identityOrganizationId = z
           .string()

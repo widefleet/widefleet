@@ -62,6 +62,7 @@ export const createAuthentication = (
   const settings = authenticationOptions(configuration, {
     ...admission,
     ...options,
+    allowUser: options.authentication?.allowUser,
     tokenClaims: async (input) => {
       if (
         options.authentication?.allowUser &&
@@ -170,6 +171,12 @@ export const createAuthentication = (
             });
           },
           before: async (record, context) => {
+            if (
+              options.authentication?.allowUser &&
+              !(await options.authentication.allowUser(record.userId))
+            )
+              throw new APIError("FORBIDDEN", { message: "This account is unavailable" });
+
             const providerId = context?.path.startsWith("/sso/callback/")
               ? context.params?.["providerId"]
               : undefined;

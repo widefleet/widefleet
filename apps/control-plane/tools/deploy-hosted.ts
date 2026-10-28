@@ -226,7 +226,14 @@ try {
 
   const runtimeConfig = await write("runtime.json", JSON.stringify(configs.runtime));
   const controlConfig = await write("control-plane.json", JSON.stringify(configs.controlPlane));
-  const initializeConfig = await write("initialize.json", JSON.stringify(configs.initialize));
+
+  const initializeConfig = await write(
+    "initialize.json",
+    JSON.stringify({
+      ...configs.initialize,
+      vars: configs.controlPlane.vars,
+    }),
+  );
 
   const runtimeSecrets = await write(
     "runtime-secrets.json",
@@ -311,6 +318,7 @@ try {
     PLATFORM_USAGE_REPORTING: "false",
     PLATFORM_CRASH_REPORTING: "false",
     WIDEFLEET_INITIALIZE_CONFIG: initializeConfig,
+    WIDEFLEET_INITIALIZE_SECRETS_FILE: controlSecrets,
     PLATFORM_BOOTSTRAP_FILE: bootstrapFile,
   });
   await run("pnpm", [

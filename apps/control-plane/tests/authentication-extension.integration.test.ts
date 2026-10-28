@@ -67,3 +67,51 @@ it("composes installation plugins and checks current user admission without chan
 
   expect((await standard.authenticateUser(request, "platform:read")).isOk()).toBe(true);
 });
+
+it("blocks direct account access and new sessions while still allowing sign-out", async () => {
+  let allowed = true;
+
+  const auth = createAuthentication(environment.configuration, environment.database.db, {
+    authentication: { plugins: [], allowUser: async () => allowed },
+  });
+
+  const login = await environment.users.login({ userId: environment.owner.id });
+
+  const headers = new Headers(login.headers);
+
+  headers.set("origin", environment.configuration.PLATFORM_URL);
+  headers.set("content-type", "application/json");
+
+  const request = (path: string, body?: { name?: string }) => {
+    const init: RequestInit = { method: body ? "POST" : "GET", headers };
+
+    if (body) init.body = JSON.stringify(body);
+
+    return auth.handler(
+      new Request(`${environment.configuration.PLATFORM_URL}/api/auth${path}`, init),
+    );
+  };
+
+  expect((await request("/get-session")).status).toBe(200);
+  expect((await request("/list-sessions")).status).toBe(200);
+  expect((await request("/update-user", { name: "Allowed name" })).status).toBe(200);
+  const context = await auth.$context;
+
+  expect(await context.internalAdapter.createSession(environment.owner.id)).toBeTruthy();
+
+  allowed = false;
+
+  for (const path of ["/get-session", "/list-sessions", "/list-accounts", "/token"])
+    expect((await request(path)).status).toBe(403);
+
+  expect((await request("/update-user", { name: "Blocked name" })).status).toBe(403);
+  await expect(context.internalAdapter.createSession(environment.owner.id)).rejects.toThrow(
+    "This account is unavailable",
+  );
+  expect((await context.internalAdapter.findUserById(environment.owner.id))?.name).toBe(
+    "Allowed name",
+  );
+  expect((await request("/sign-out", {})).status).toBe(200);
+  allowed = true;
+  expect(await (await request("/get-session")).json()).toBeNull();
+});

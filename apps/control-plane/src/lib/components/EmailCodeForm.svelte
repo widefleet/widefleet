@@ -95,8 +95,7 @@
           type: "sign-in",
         });
 
-        if (result.error)
-          message = result.error.message ?? "Could not send a sign-in code. Please try again.";
+        if (result.error) message = "Could not send a sign-in code. Please try again.";
         else {
           email = recipient;
           sentTo = recipient;
@@ -110,9 +109,7 @@
         if (register) input["name"] = name.trim();
         const result = await authClient.signIn.emailOtp(input);
 
-        if (result.error)
-          message =
-            result.error.message ?? "Invalid or expired code. Request another code and try again.";
+        if (result.error) message = "Invalid or expired code. Request another code and try again.";
         else if (!oauthRedirect.safeParse(result.data).success)
           await goto(next, { invalidateAll: true });
       }

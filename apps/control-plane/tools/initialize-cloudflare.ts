@@ -48,8 +48,6 @@ try {
       JSON.parse(await readFile(configuration.PLATFORM_BOOTSTRAP_FILE, "utf8")),
     );
 
-    const extension = await loadRuntimeExtension({ configuration, database: database.db });
-
     const configPath =
       process.env["WIDEFLEET_INITIALIZE_CONFIG"] ??
       fileURLToPath(new URL("../wrangler.initialize.jsonc", import.meta.url));
@@ -60,6 +58,23 @@ try {
         vars: z.record(z.string(), z.unknown()),
       })
       .parse(unstable_readConfig({ config: configPath }));
+
+    const secretsPath = process.env["WIDEFLEET_INITIALIZE_SECRETS_FILE"];
+
+    const bindings = {
+      ...process.env,
+      ...worker.vars,
+      ...z
+        .record(z.string(), z.string())
+        .parse(secretsPath ? JSON.parse(await readFile(secretsPath, "utf8")) : {}),
+    };
+
+    const extension = await loadRuntimeExtension({
+      configuration,
+      database: database.db,
+      observation,
+      binding: (name, schema) => schema.parse(bindings[name]),
+    });
 
     const emailSignIn =
       configuration.LOGIN_CODE_DELIVERY === "console" ||
