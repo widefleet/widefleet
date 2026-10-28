@@ -286,6 +286,8 @@ export const authenticationOptions = (
         resourcePrivileges: () => false,
         accessTokenExpiresIn: 300,
         refreshTokenExpiresIn: 60 * 60 * 24 * 30,
+        // Browser app requests may refresh the same cookie concurrently.
+        refreshTokenReuseInterval: 30,
       }),
       oauthDeviceAuthorization({ verificationUri: `${configuration.PLATFORM_URL}/device` }),
     ],

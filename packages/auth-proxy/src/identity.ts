@@ -1,4 +1,5 @@
 import { accessContext, appAccessGroup, companyProvider } from "@platform/contracts";
+import { APIError } from "better-auth/api";
 import { decodeJwt } from "jose";
 import { z } from "zod";
 
@@ -63,7 +64,14 @@ const graphGroups = async (accessToken: string) => {
       signal: AbortSignal.timeout(10_000),
     });
 
-    if (!response.ok) throw new Error("Unable to resolve company groups");
+    if (!response.ok)
+      throw new APIError(
+        "SERVICE_UNAVAILABLE",
+        { message: "Unable to resolve company groups" },
+        response.status === 429
+          ? { "Retry-After": response.headers.get("retry-after") ?? "1" }
+          : undefined,
+      );
 
     const page = z
       .object({
@@ -110,15 +118,11 @@ export const providerIdentity = async (
 
   const groupClaim = provider.type === "entra" ? "groups" : provider.groupsClaim;
 
-  const overage =
-    provider.type === "entra" &&
-    (claims["hasgroups"] === true ||
-      z.object({ groups: z.string() }).safeParse(claims["_claim_names"]).success);
-
-  if (overage && !accessToken) throw new Error("Company group lookup requires an access token");
+  if (provider.type === "entra" && !accessToken)
+    throw new Error("Company group lookup requires an access token");
 
   const membership =
-    overage && accessToken
+    provider.type === "entra" && accessToken
       ? await graphGroups(accessToken)
       : groups.parse(claims[groupClaim] ?? []);
 
