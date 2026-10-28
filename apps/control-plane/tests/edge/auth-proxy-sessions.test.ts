@@ -23,12 +23,12 @@ describe("Auth proxy session lifecycle", () => {
     fetch: () => Promise.resolve(new Response("App response")),
   };
 
-  const login = async () => {
-    const proxy = createAuthProxy(configuration, apps);
+  const login = async (settings = configuration) => {
+    const proxy = createAuthProxy(settings, apps);
 
     const started = await proxy.fetch(
       new Request(
-        `https://auth.apps.example.test/oauth2/widefleet/start?rd=${encodeURIComponent(app)}`,
+        `https://auth.apps.example.test/oauth2/${settings.organizationId}/start?rd=${encodeURIComponent(app)}`,
       ),
     );
 
@@ -53,7 +53,10 @@ describe("Auth proxy session lifecycle", () => {
     createAuthProxy(settings, apps).fetch(new Request(app, { headers: { cookie: session } }));
 
   beforeAll(async () => {
-    idp = await createIdentityProvider();
+    idp = await createIdentityProvider([
+      "https://auth.apps.example.test/oauth2/widefleet/callback",
+      "https://auth.apps.example.test/oauth2/other-org/callback",
+    ]);
     configuration = authConfiguration.parse({
       organizationId: "widefleet",
       provider: {
@@ -102,9 +105,24 @@ describe("Auth proxy session lifecycle", () => {
     expect((await visit()).status).toBe(200);
   });
 
-  it("passes only connector cookies and a verified caller to browser routes", async () => {
+  it("protects every organization's sign-in cookies on connector browser routes", async () => {
     const received: Request[] = [];
     const identities: { subject: string; organizationId: string }[] = [];
+
+    const otherCookie = await login({
+      ...configuration,
+      organizationId: "other-org",
+      redirectUrl: "https://auth.apps.example.test/oauth2/other-org/callback",
+      cookieSecret: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url"),
+    });
+
+    const protectedCookies = [
+      "__Secure-platform_sso_widefleet.session_data",
+      "__Secure-platform_sso_other-org.session_token",
+      "__Secure-platform_sso_other-org.session_data.0",
+      "__Host-platform_sso_other-org.oauth_state",
+      "platform_sso_other-org.session_token",
+    ];
 
     const proxy = createAuthProxy(configuration, {
       ...apps,
@@ -114,10 +132,9 @@ describe("Auth proxy session lifecycle", () => {
         expect(binding).toBe("GITHUB");
         const headers = new Headers();
         headers.append("set-cookie", "connector_github.state=test; Path=/");
-        headers.append(
-          "set-cookie",
-          "__Secure-platform_sso_widefleet.session_data=forged; Domain=apps.example.test; Path=/",
-        );
+
+        for (const name of protectedCookies)
+          headers.append("set-cookie", `${name}=forged; Domain=apps.example.test; Path=/`);
 
         return new Response("Connector", { headers });
       },
@@ -129,7 +146,7 @@ describe("Auth proxy session lifecycle", () => {
     const response = await proxy.fetch(
       new Request(path, {
         headers: {
-          cookie: `${cookie}; connector_github.state=own`,
+          cookie: `${cookie}; ${otherCookie}; __Secure-platform_sso_other-org.session_data.0=chunk; __Host-platform_sso_other-org.oauth_state=state; platform_sso_other-org.session_token=legacy; connector_github.state=own`,
           "x-auth-request-user": "forged",
           authorization: "Bearer private",
         },

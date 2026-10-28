@@ -183,13 +183,58 @@ describe
 
     // This prototype deliberately uses Better Auth's uncoordinated refresh path.
     // The test provider invalidates a refresh token immediately after its first use.
-    expect(
-      responses.map((response) => response.status).sort((left, right) => left - right),
-    ).toEqual([200, 500]);
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+
+    const results = await Promise.all(
+      responses.map(async (response) =>
+        z.object({ status: z.string() }).parse(await response.json()),
+      ),
+    );
+
+    expect(results.map((result) => result.status).sort()).toEqual([
+      "connected",
+      "reconnect_required",
+    ]);
     expect(fixture.provider.stats.refreshFailures).toBe(failures + 1);
     expect((await issues(alice)).issues[0]?.id).toBe(101);
     expect((await issues(alice, "planning")).issues[0]?.id).toBe(101);
   });
+
+  it.each([
+    { status: 503, error: "temporarily_unavailable" },
+    { status: 401, error: "invalid_client" },
+    { status: 500, error: "invalid_grant" },
+  ])("preserves unexpected refresh failures ($status / $error)", async (failure) => {
+    await fixture.inspect("expire");
+    fixture.provider.setRefreshFailure(failure);
+
+    try {
+      expect((await alice.request("/api/apps/issues")).status).toBe(500);
+    } finally {
+      fixture.provider.setRefreshFailure(null);
+    }
+
+    expect((await issues(alice)).issues[0]?.id).toBe(101);
+  });
+
+  it.each(["expired", "revoked"] as const)(
+    "requests reconnection for %s refresh credentials and recovers after linking",
+    async (reason) => {
+      await fixture.inspect("expire");
+      fixture.provider.invalidateRefresh("alice", reason);
+      const requests = fixture.provider.stats.issues;
+      expect(await issues(alice)).toEqual({ status: "reconnect_required", issues: [] });
+      expect(await issues(alice, "planning")).toEqual({
+        status: "reconnect_required",
+        issues: [],
+      });
+      expect(fixture.provider.stats.issues).toBe(requests);
+      expect((await issues(bob)).issues[0]?.id).toBe(202);
+      await connect(alice, "alice");
+      expect((await issues(alice)).issues[0]?.id).toBe(101);
+      expect((await issues(alice, "planning")).issues[0]?.id).toBe(101);
+    },
+  );
 
   it("reports revoked access and disconnects only the current user across both apps", async () => {
     fixture.provider.revoke("alice");

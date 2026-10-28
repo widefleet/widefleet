@@ -1,6 +1,6 @@
 import { appAccessSnapshot, connectorCaller } from "@platform/contracts";
 import { z } from "zod";
-import { createAuthentication, cookiePrefix } from "./authentication.ts";
+import { companyCookie, createAuthentication, cookiePrefix } from "./authentication.ts";
 import { authConfiguration, type AuthConfiguration } from "./configuration.ts";
 import { issuer, proxyIdentity } from "./identity.ts";
 
@@ -199,12 +199,6 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
 
       if (binding) {
         if (!apps.connector) return response(404, "Not found");
-        const prefix = cookiePrefix(configuration);
-
-        const companyCookie = (name: string) =>
-          [prefix, `__Secure-${prefix}`, `__Host-${prefix}`].some((value) =>
-            name.startsWith(`${value}.`),
-          );
 
         const cookies = (request.headers.get("cookie") ?? "")
           .split(";")
@@ -221,8 +215,8 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
         const outgoing = new Response(result.body, result);
         outgoing.headers.delete("set-cookie");
 
-        // Connector cookies may reach its browser route, but neither side can
-        // read or replace the company's sign-in cookies.
+        // Organizations share the parent app domain. Protect every company's
+        // sign-in cookies, including chunks, in both directions.
         for (const cookie of result.headers.getSetCookie())
           if (!companyCookie(cookie.split("=")[0]?.trim() ?? ""))
             outgoing.headers.append("set-cookie", cookie);

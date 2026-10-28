@@ -18,7 +18,7 @@ export const createProvider = async (hostname = "127.0.0.1") => {
   >();
 
   const accessTokens = new Map<string, z.infer<typeof account>>();
-  const refreshTokens = new Map<string, z.infer<typeof account>>();
+  const refreshTokens = new Map<string, { user: z.infer<typeof account>; expiresAt: number }>();
 
   const stats = {
     authorizations: 0,
@@ -30,6 +30,7 @@ export const createProvider = async (hostname = "127.0.0.1") => {
   };
 
   let refreshDelay = 0;
+  let refreshFailure: { status: number; error: string } | null = null;
   let origin = "";
   let callbackURL = "";
 
@@ -37,7 +38,7 @@ export const createProvider = async (hostname = "127.0.0.1") => {
     const accessToken = `synthetic-access-${randomUUID()}`;
     const refreshToken = `synthetic-refresh-${randomUUID()}`;
     accessTokens.set(accessToken, user);
-    refreshTokens.set(refreshToken, user);
+    refreshTokens.set(refreshToken, { user, expiresAt: Date.now() + 86_400_000 });
 
     return Response.json({
       access_token: accessToken,
@@ -109,10 +110,13 @@ export const createProvider = async (hostname = "127.0.0.1") => {
 
       if (form.get("grant_type") === "refresh_token") {
         if (refreshDelay) await new Promise((resolve) => setTimeout(resolve, refreshDelay));
-        const value = form.get("refresh_token") ?? "";
-        const user = refreshTokens.get(value);
 
-        if (!user) {
+        if (refreshFailure)
+          return Response.json({ error: refreshFailure.error }, { status: refreshFailure.status });
+        const value = form.get("refresh_token") ?? "";
+        const saved = refreshTokens.get(value);
+
+        if (!saved || saved.expiresAt <= Date.now()) {
           stats.refreshFailures++;
 
           return Response.json({ error: "invalid_grant" }, { status: 400 });
@@ -121,7 +125,7 @@ export const createProvider = async (hostname = "127.0.0.1") => {
         refreshTokens.delete(value);
         stats.refreshes++;
 
-        return issueTokens(user);
+        return issueTokens(saved.user);
       }
 
       const code = form.get("code") ?? "";
@@ -207,6 +211,17 @@ export const createProvider = async (hostname = "127.0.0.1") => {
     },
     setRefreshDelay: (milliseconds: number) => {
       refreshDelay = milliseconds;
+    },
+    setRefreshFailure: (failure: typeof refreshFailure) => {
+      refreshFailure = failure;
+    },
+    invalidateRefresh: (user: z.infer<typeof account>, reason: "expired" | "revoked") => {
+      for (const [token, saved] of refreshTokens) {
+        if (saved.user !== user) continue;
+
+        if (reason === "revoked") refreshTokens.delete(token);
+        else saved.expiresAt = 0;
+      }
     },
     revoke: (user: z.infer<typeof account>) => {
       for (const [token, owner] of accessTokens) if (owner === user) accessTokens.delete(token);

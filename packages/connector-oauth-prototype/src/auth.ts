@@ -122,3 +122,38 @@ export const authentication = async (environment: Environment, identity: z.infer
       }),
     ],
   });
+
+export const accessToken = async (
+  environment: Environment,
+  identity: z.infer<typeof caller>,
+  selection: { userId: string; accountId: string },
+) => {
+  const auth = await authentication(environment, identity);
+  const provider = (await auth.$context).socialProviders.find((entry) => entry.id === "github");
+  const refresh = provider?.refreshAccessToken;
+
+  if (!provider || !refresh) throw new Error("GitHub refresh provider is not configured");
+  let invalidGrant = false;
+
+  // Better Auth 1.7.12 replaces refresh failures with FAILED_TO_GET_ACCESS_TOKEN.
+  // Capture only the provider's invalid_grant before that conversion; provider
+  // configuration, network, storage and other errors must still fail the call.
+  // This auth instance and its provider belong only to this invocation.
+  provider.refreshAccessToken = async (...args) => {
+    try {
+      return await refresh(...args);
+    } catch (error) {
+      invalidGrant = z
+        .object({ error: z.literal("invalid_grant"), status: z.literal(400) })
+        .safeParse(error).success;
+      throw error;
+    }
+  };
+
+  try {
+    return await auth.api.getAccessToken({ body: selection });
+  } catch (error) {
+    if (invalidGrant) return null;
+    throw error;
+  }
+};

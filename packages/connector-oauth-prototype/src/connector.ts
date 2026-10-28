@@ -1,6 +1,6 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { z } from "zod";
-import { authentication, userId } from "./auth.ts";
+import { accessToken, authentication, userId } from "./auth.ts";
 import {
   appOrigins,
   basePath,
@@ -91,11 +91,13 @@ export default class GitHubConnector extends WorkerEntrypoint<Environment, Prope
     const saved = await this.#account();
 
     if (!saved) return { status: "connection_required", issues: [] };
-    const auth = await authentication(this.env, this.#identity());
 
-    const token = await auth.api.getAccessToken({
-      body: { userId: saved.userId, accountId: saved.id },
+    const token = await accessToken(this.env, this.#identity(), {
+      userId: saved.userId,
+      accountId: saved.id,
     });
+
+    if (!token) return { status: "reconnect_required", issues: [] };
 
     const response = await fetch(`${this.env.PROVIDER_API_ORIGIN}/issues`, {
       headers: { authorization: `Bearer ${token.accessToken}`, accept: "application/json" },
