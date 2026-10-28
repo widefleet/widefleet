@@ -4,7 +4,7 @@ import { runExtensionEffect } from "../extension-effects.ts";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { DEVICE_CODE_GRANT_TYPE } from "@better-auth/oauth-provider";
-import { APIError } from "better-auth/api";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import type { JSONWebKeySet } from "jose";
 import { installationOrganizationId } from "../organization.ts";
 import { betterAuth } from "better-auth";
@@ -50,6 +50,7 @@ export const createAuthentication = (
     organizationAccess?: OrganizationAccess;
     authentication?: AuthenticationExtension;
     observation?: Observation;
+    reportException?: (error: Error) => void;
     encryptionKey?: string;
     cookies?: ReturnType<typeof sveltekitCookies>;
   } = {},
@@ -95,15 +96,32 @@ export const createAuthentication = (
     options.authentication?.allowUser,
   );
 
+  const reportException = (error: Error) =>
+    runExtensionEffect(() =>
+      options.reportException
+        ? options.reportException(error)
+        : options.observation?.exception?.(error),
+    );
+
   const auth = betterAuth({
     ...settings,
     onAPIError: {
       onError: (error, context) => {
         if (error instanceof Error && (!(error instanceof APIError) || error.statusCode >= 500)) {
           context.logger.error("Authentication failed", error);
-          runExtensionEffect(() => options.observation?.exception?.(error));
+          reportException(error);
         }
       },
+    },
+    hooks: {
+      ...settings.hooks,
+      after: createAuthMiddleware(async (context) => {
+        const error = context.context.returned;
+
+        // Direct auth.api calls throw to the page/API handler instead.
+        if (context.request && error instanceof APIError && error.statusCode >= 500)
+          reportException(error);
+      }),
     },
     disabledPaths: [...settings.disabledPaths, ...managedPluginPaths],
     trustedOrigins: (request) =>
