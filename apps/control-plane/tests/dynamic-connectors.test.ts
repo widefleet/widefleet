@@ -40,6 +40,7 @@ async function availabilityHold(env, kind) {
 export class Counter extends DurableObject {
   constructor(ctx, env) { super(ctx, env); console.info('facet-constructor'); }
   availabilityHold() { return availabilityHold(this.env, 'facet'); }
+  async availabilityFinish(url) { await (await fetch(url)).text(); return 'facet'; }
   waiting;
   releaseWaiter;
   async hold() {
@@ -118,6 +119,7 @@ export class Reader extends WorkerEntrypoint { read() { console.info('named-rpc'
 export default class Connector extends WorkerEntrypoint {
   availabilityHold() { return availabilityHold(this.env, 'connector'); }
   caller() { return this.ctx.props.caller; }
+  async availabilityFinish(url) { await (await fetch(url)).text(); return 'connector'; }
   #private = 'private-field';
   own = 'instance-secret';
   echo(value) { return value; }
@@ -307,6 +309,7 @@ describe.runIf(process.env["RUN_CONNECTOR_TESTS"] === "1").each(["celld", "worke
     let initial: z.infer<typeof connectorActivation>;
     let latest: z.infer<typeof connectorActivation>;
     let telemetryUrl: string;
+    const finishes = new Map<string, () => void>();
 
     const telemetryRecords: {
       connector: string;
@@ -316,6 +319,16 @@ describe.runIf(process.env["RUN_CONNECTOR_TESTS"] === "1").each(["celld", "worke
     }[] = [];
 
     const collector = createHttpServer((request, response) => {
+      if (request.url?.startsWith("/availability-hold/")) {
+        const key = request.url.slice("/availability-hold/".length);
+        finishes.set(key, () => {
+          finishes.delete(key);
+          response.end("done");
+        });
+
+        return;
+      }
+
       void (async () => {
         const chunks: Buffer[] = [];
 
@@ -591,7 +604,7 @@ export default { async fetch(request, env, ctx) {
     try {
       if (input.kind === 'fetch') return await gateway.fetch(new Request('https://connector.invalid/path'));
       if (input.kind === 'state-fetch') return await state.fetch(new Request('https://object.invalid/path', {headers: {'x-widefleet-object-id': 'availability-test'}}));
-      if (input.kind === 'state-rpc') return Response.json(await state.invoke('availability-test', input.method ?? 'increment', []));
+      if (input.kind === 'state-rpc') return Response.json(await state.invoke('availability-test', input.method ?? 'increment', input.args ?? []));
       return Response.json(await gateway.invoke(input.method ?? 'echo', input.args ?? ['available']));
     } catch (error) { return Response.json({error: error.message}, {status: 500}); }
   }
@@ -1404,13 +1417,19 @@ export default { async fetch(request, env, ctx) {
         expect(response.status).toBe(200);
       };
 
-      const call = (kind: (typeof calls)[number], target = identity, method?: string) =>
+      const call = (
+        kind: (typeof calls)[number],
+        target = identity,
+        method?: string,
+        args?: string[],
+      ) =>
         (hosted ? hosted.fetch : fetch)(`${origin}/fixture/connector-call`, {
           method: "POST",
           body: JSON.stringify({
             identity: target,
             kind,
             method: kind === "named" ? "read" : method,
+            args,
             entrypoint: kind === "named" ? "Reader" : "default",
           }),
         });
@@ -1490,7 +1509,7 @@ export default { async fetch(request, env, ctx) {
         for (const kind of calls) expect((await call(kind)).status).toBe(200);
       });
 
-      it("allows already-running connector and facet methods to finish", async () => {
+      it("rejects subsequent resource calls from already-running connector and facet methods", async () => {
         await json("/fixture/reset-started");
         const connector = call("rpc", identity, "availabilityHold");
         const facet = call("state-rpc", identity, "availabilityHold");
@@ -1503,8 +1522,32 @@ export default { async fetch(request, env, ctx) {
           await availability('{"blocked":true}');
           expect((await call("rpc")).status).toBe(500);
           expect((await call("state-rpc")).status).toBe(500);
+
+          for (const response of await Promise.all([connector, facet])) {
+            expect(response.status).toBe(500);
+            expect(await response.text()).toContain("Organization execution is suspended");
+          }
         } finally {
           await json("/fixture/release?key=availability-release");
+        }
+      });
+
+      it("lets already-admitted work finish without further guarded resource calls", async () => {
+        const connector = call("rpc", identity, "availabilityFinish", [
+          `${telemetryUrl}/availability-hold/connector`,
+        ]);
+
+        const facet = call("state-rpc", identity, "availabilityFinish", [
+          `${telemetryUrl}/availability-hold/facet`,
+        ]);
+
+        try {
+          await expect.poll(() => [...finishes.keys()].sort()).toEqual(["connector", "facet"]);
+          await availability('{"blocked":true}');
+          expect((await call("rpc")).status).toBe(500);
+          expect((await call("state-rpc")).status).toBe(500);
+        } finally {
+          for (const finish of finishes.values()) finish();
         }
 
         expect(await (await connector).json()).toBe("connector");
