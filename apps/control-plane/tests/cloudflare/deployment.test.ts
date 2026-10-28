@@ -1469,6 +1469,21 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         .toBe("errored");
       expect((await operation(entry.command.id))?.error).toBeTruthy();
 
+      const reported = exceptions.filter(
+        (event) => event.properties["workflow_id"] === entry.command.id,
+      );
+
+      expect(reported).toHaveLength(1);
+      expect(reported[0]).toMatchObject({
+        distinct_id: "installation:control-plane",
+        properties: {
+          workflow_id: entry.command.id,
+          operation: "deploy",
+          $process_person_profile: false,
+        },
+      });
+      expect(reported[0]?.properties).not.toHaveProperty("$groups");
+
       const attempts = await environment.database.db.execute(
         sql`SELECT last_value FROM fixture_failure_attempts`,
       );
@@ -2807,6 +2822,26 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         message: "Cloudflare rejected the runtime update (HTTP 400)",
       });
       expect(runtimeUploads).toBe(before + 1);
+
+      await expect
+        .poll(() =>
+          exceptions.filter((event) => event.properties["workflow_id"] === selected.jobId),
+        )
+        .toHaveLength(1);
+
+      const reported = exceptions.find(
+        (event) => event.properties["workflow_id"] === selected.jobId,
+      );
+
+      expect(reported).toMatchObject({
+        distinct_id: "installation:control-plane",
+        properties: {
+          workflow_id: selected.jobId,
+          operation: "runtime",
+          $process_person_profile: false,
+        },
+      });
+      expect(reported?.properties).not.toHaveProperty("$groups");
       runtimeUploadMode = "normal";
       const retried = await selectRuntime({ version: "99.3.0" });
       expect(retried.jobId).not.toBe(selected.jobId);
