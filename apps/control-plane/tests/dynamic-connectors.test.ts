@@ -720,6 +720,59 @@ export default { async fetch(request, env, ctx) {
       expect(JSON.stringify(await json("/fixture/snapshots"))).not.toContain("secret-one");
       expect((await request("/.well-known/widefleet/connectors")).status).toBe(404);
     });
+    it("retries legacy snapshots before and after activation without changing their version", async () => {
+      const candidate = release("legacy-retry", "legacy-retry");
+      const secrets = { TOKEN: "legacy-retry-secret" };
+
+      const input = {
+        action: "prepare" as const,
+        organizationId,
+        version: crypto.randomUUID(),
+        release: candidate,
+        nativeBindings,
+        secrets,
+        telemetry: null,
+      };
+
+      await stage(candidate);
+
+      const identity = z
+        .object({ result: connectorActivation })
+        .parse(await json("/fixture/manage", input)).result;
+
+      const snapshots = z
+        .array(z.string())
+        .parse(await json("/fixture/snapshots"))
+        .map((value) => z.record(z.string(), z.json()).parse(JSON.parse(value)));
+
+      const snapshot = z
+        .record(z.string(), z.json())
+        .parse(snapshots.find((value) => value["version"] === identity.version));
+
+      // Reproduce the persisted format from before connector browser origins existed.
+      delete snapshot["browserOrigin"];
+      snapshot["fingerprint"] = hash(
+        JSON.stringify({ release: candidate, nativeBindings, secrets, telemetry: null }),
+      );
+
+      const seeded = await (hosted ? hosted.fetch : fetch)(`${origin}/fixture/module`, {
+        method: "POST",
+        body: JSON.stringify({
+          key: `connectors/${organizationId}/${candidate.name}/versions/${identity.version}.json`,
+          source: JSON.stringify(snapshot),
+        }),
+      });
+
+      expect(seeded.status).toBe(200);
+      expect(await json("/fixture/manage", input)).toEqual({ result: identity });
+      await activate(identity);
+      expect(await json("/fixture/manage", input)).toEqual({ result: identity });
+      await activate(identity);
+      expect(
+        (await request("/fixture/manage", { ...input, secrets: { TOKEN: "changed-secret" } }))
+          .status,
+      ).toBe(409);
+    });
     it("preserves value RPC, named grants, private fields, and fetch", async () => {
       expect(await json("/caller")).toEqual({
         issuer: identityIssuer,

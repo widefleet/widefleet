@@ -50,8 +50,15 @@ export class ConnectorCatalog extends DurableObject<ParentEnvironment> {
       throw new Error("Connector browser origin is missing; update the deployment agent");
     const identity = { organizationId, version, name: release.name };
 
+    // Omit absent origins from the hash so retries still match pre-upgrade snapshots.
     const fingerprint = await digest(
-      JSON.stringify({ release, nativeBindings, secrets, telemetry, browserOrigin }),
+      JSON.stringify({
+        release,
+        nativeBindings,
+        secrets,
+        telemetry,
+        browserOrigin: browserOrigin ?? undefined,
+      }),
     );
 
     const active = await this.current();
