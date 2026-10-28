@@ -30,6 +30,23 @@ const fixture = () => {
   return { events, transport, observer: createProductAnalytics(analyticsEnvironment, transport) };
 };
 
+it("captures anonymous decisions without creating person profiles", async () => {
+  const { events, observer } = fixture();
+  observer.capture({
+    event: "authentication_decision",
+    id: "attempt-a",
+    anonymousId: "opaque-subject",
+    properties: { rule: "verification_required", action: "challenge" },
+  });
+  await observer.close();
+  expect(events).toHaveLength(1);
+  expect(events[0]).toMatchObject({
+    event: "authentication_decision",
+    distinct_id: "anonymous:opaque-subject",
+    properties: { $process_person_profile: false, rule: "verification_required" },
+  });
+});
+
 it("sends immediately with the browser user ID and organization group", async () => {
   const { events, observer } = fixture();
   observer.capture({

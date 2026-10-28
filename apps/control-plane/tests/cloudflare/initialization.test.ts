@@ -166,6 +166,41 @@ describe("Hosted installation initialization", () => {
     expect((await readInstallation(database.db)).ownerId).toBeNull();
   });
 
+  it("supplies validated extension bindings from configuration and a secrets file on first initialization", async () => {
+    const configPath = join(directory, "initialize.json");
+
+    const secretsPath = join(directory, "secrets.json");
+
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        name: "synthetic-initialization",
+        compatibility_date: "2026-10-01",
+        vars: { FIXTURE_EXTENSION_MODE: "enabled" },
+      }),
+    );
+    await writeFile(
+      secretsPath,
+      JSON.stringify({
+        FIXTURE_EXTENSION_SECRET: "synthetic-extension-secret",
+      }),
+      { mode: 0o600 },
+    );
+
+    const result = await initialize(bootstrapPath, configPath, {
+      WIDEFLEET_RUNTIME_EXTENSION: fileURLToPath(
+        new URL("./bindings-extension.fixture.ts", import.meta.url),
+      ),
+      WIDEFLEET_INITIALIZE_SECRETS_FILE: secretsPath,
+      FIXTURE_EXTENSION_SECRET: undefined,
+      FIXTURE_EXTENSION_MODE: undefined,
+    });
+
+    expect(result.stdout).toContain("Hosted installation initialized");
+    expect(result.stdout + result.stderr).not.toContain("synthetic-extension-secret");
+    expect((await readInstallation(database.db)).ownerId).toEqual(expect.any(String));
+  });
+
   const emailExtension = fileURLToPath(new URL("./email-extension.fixture.ts", import.meta.url));
 
   it("requires app sign-in credentials when only the extension supplies email", async () => {

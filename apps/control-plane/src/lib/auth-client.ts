@@ -1,3 +1,4 @@
+import { authClientExtension } from "#auth-client-extension";
 import {
   oauthDeviceAuthorizationClient,
   oauthProviderClient,
@@ -9,6 +10,7 @@ import { organizationAccess, organizationRoles } from "./organization.ts";
 
 export const authClient = createAuthClient({
   plugins: [
+    ...(authClientExtension.plugins ?? []),
     ssoClient({ domainVerification: { enabled: true } }),
     emailOTPClient(),
     oauthProviderClient(),

@@ -6,9 +6,11 @@ export interface ObservationEvent {
     | "user_signed_in"
     | "organization_created"
     | "app_created"
-    | "deployment_completed";
+    | "deployment_completed"
+    | "authentication_decision";
   id: string;
   userId?: string;
+  anonymousId?: string;
   organizationId?: string;
   properties?: Record<string, string | number | boolean>;
 }

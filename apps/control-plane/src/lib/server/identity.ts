@@ -28,6 +28,7 @@ export const createIdentityService = (
     filterOrganizations: async () => [installationOrganizationId],
     defaultOrganizationId: installationOrganizationId,
   },
+  allowUser?: (userId: string) => Promise<boolean>,
 ) => {
   const memberships = (userId: string, identityOrganizationId: string | null) =>
     Result.tryPromise({
@@ -170,10 +171,10 @@ export const createIdentityService = (
           }),
         );
 
-        if (!current)
+        if (!current || (allowUser && !(await allowUser(current.id))))
           return yield* new AuthenticationFailed({
             code: "UNAUTHORIZED",
-            message: "The user no longer exists",
+            message: "The account is unavailable",
           });
 
         return Result.ok({
@@ -202,7 +203,7 @@ export const createIdentityService = (
         }),
       );
 
-      if (!session) {
+      if (!session || (allowUser && !(await allowUser(session.user.id)))) {
         return yield* new AuthenticationFailed({
           code: "UNAUTHORIZED",
           message: "Sign in to continue",

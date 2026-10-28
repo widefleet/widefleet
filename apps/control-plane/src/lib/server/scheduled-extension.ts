@@ -11,6 +11,7 @@ export const runScheduledExtension = (
   withCloudflareDatabase(bindings, async ({ db }) => {
     const extension = createExtension({
       database: db,
+      binding: (name, schema) => schema.parse(bindings[name]),
       configuration: readCloudflareConfiguration(bindings),
     });
 

@@ -92,7 +92,12 @@ export const initializeRuntime = async (
   const observation = createProductAnalytics(configuration);
 
   try {
-    const extension = await createExtension({ database: database.db, configuration });
+    const extension = await createExtension({
+      database: database.db,
+      configuration,
+      observation,
+      binding: (name, schema) => schema.parse(process.env[name]),
+    });
 
     const settings = createSettingsService(
       configuration,
