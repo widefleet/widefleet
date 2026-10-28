@@ -412,7 +412,7 @@ describe.runIf(process.env["RUN_CONNECTOR_TESTS"] === "1").each(["celld", "worke
             version: crypto.randomUUID(),
             release: candidate,
             nativeBindings: resources,
-            browserOrigin: await connectorBrowserOrigin(owner, name, "apps.example.test"),
+            browserOrigin: connectorBrowserOrigin(name, owner, "apps.example.test"),
             secrets: { TOKEN: secret },
             telemetry: { url: `${telemetryUrl}/${name}`, token: "synthetic-connector-telemetry" },
           }),
@@ -801,11 +801,7 @@ export default { async fetch(request, env, ctx) {
       expect((await request(path)).status).toBe(302);
       expect((await request("/_widefleet/connectors/UNKNOWN/browser-caller")).status).toBe(404);
 
-      const browserOrigin = await connectorBrowserOrigin(
-        organizationId,
-        "fixture",
-        "apps.example.test",
-      );
+      const browserOrigin = connectorBrowserOrigin("fixture", organizationId, "apps.example.test");
 
       const visit = (
         path: string,

@@ -1,3 +1,4 @@
+import { requireAvailableHostname } from "./hostnames.ts";
 import type { CloudflareWorkersModule } from "@cloudflare/workers-types";
 import {
   connectorActivation,
@@ -93,7 +94,7 @@ export const createCloudflareConnectorDeployment = (
   return {
     register: (command: z.infer<typeof connectorCommand>) =>
       withCloudflareDatabase(bindings, async ({ db }) => {
-        (await registerCloudflareConnector(db, storage, command)).unwrap();
+        (await registerCloudflareConnector(db, storage, command, bindings)).unwrap();
       }),
     provision: async (command: z.infer<typeof connectorCommand>) => {
       const prepared = await provisionConnectorResources(
@@ -115,7 +116,11 @@ export const createCloudflareConnectorDeployment = (
       withCloudflareDatabase(bindings, async ({ db }) =>
         (
           await transact(db, async (transaction) => {
-            await lockOrganizationRuntime(transaction, command.actor.application.organizationId);
+            const execution = await lockOrganizationRuntime(
+              transaction,
+              command.actor.application.organizationId,
+            );
+
             await accepted(transaction, command);
 
             const [record] = await transaction
@@ -140,6 +145,19 @@ export const createCloudflareConnectorDeployment = (
             for (const [name, ciphertext] of Object.entries(selected.secrets))
               secrets[name] = await decryptSecret(bindings.PLATFORM_ENCRYPTION_KEY, ciphertext);
 
+            const browserOrigin = connectorBrowserOrigin(
+              release.name,
+              execution.appHostnameSuffix,
+              bindings.APP_DOMAIN,
+            );
+
+            await requireAvailableHostname(
+              transaction,
+              new URL(browserOrigin).hostname,
+              bindings.APP_DOMAIN,
+              { organizationId: command.organizationId, name: release.name },
+            );
+
             // Plaintext only crosses the private management binding. The runtime encrypts
             // the immutable snapshot; Workflow results and SQL receipts contain IDs only.
             const preparation: z.input<typeof connectorPreparation> = {
@@ -149,11 +167,7 @@ export const createCloudflareConnectorDeployment = (
               nativeBindings,
               secrets,
               telemetry: null,
-              browserOrigin: await connectorBrowserOrigin(
-                command.organizationId,
-                release.name,
-                bindings.APP_DOMAIN,
-              ),
+              browserOrigin,
             };
 
             const prepared = await manage({ action: "prepare", ...preparation });

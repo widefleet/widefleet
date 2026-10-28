@@ -1,3 +1,4 @@
+import type { Configuration } from "./config.ts";
 import { operationId } from "./deployment-execution.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
@@ -28,6 +29,7 @@ export const registerCloudflareConnector = (
   database: Database,
   storage: ArtifactStorage,
   command: z.infer<typeof connectorCommand>,
+  configuration: Pick<Configuration, "APP_DOMAIN">,
 ) =>
   transact(database, async (transaction) => {
     connectorAdministrator(command.actor);
@@ -68,7 +70,8 @@ export const registerCloudflareConnector = (
 
       if (release.name !== command.change.name)
         throw new Error("Connector package identity mismatch");
-      reference = (await prepareConnector(transaction, storage, execution, release)).reference;
+      reference = (await prepareConnector(transaction, storage, execution, release, configuration))
+        .reference;
     } else {
       const [existing] = await transaction
         .select()
@@ -176,7 +179,10 @@ export const createCloudflareConnectors = (
         );
 
         const parsed = connectorCommand.parse(accepted);
-        const operation = (await registerCloudflareConnector(database, storage, parsed)).unwrap();
+
+        const operation = (
+          await registerCloudflareConnector(database, storage, parsed, bindings)
+        ).unwrap();
 
         return (
           await transact(database, async (transaction) => {
@@ -267,7 +273,7 @@ export const createCloudflareConnectors = (
             ),
           );
         } else {
-          await prepareConnector(transaction, storage, execution, release, modules);
+          await prepareConnector(transaction, storage, execution, release, bindings, modules);
         }
 
         return Result.ok({ id, organizationId: execution.organizationId, checksum, current });

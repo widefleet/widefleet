@@ -512,9 +512,16 @@ describe("Organization connector management", () => {
           },
         },
       ])
-        expect((await registerCloudflareConnector(background.db, storage, forged)).isErr()).toBe(
-          true,
-        );
+        expect(
+          (
+            await registerCloudflareConnector(
+              background.db,
+              storage,
+              forged,
+              environment.configuration,
+            )
+          ).isErr(),
+        ).toBe(true);
       expect(
         await background.db
           .select()
@@ -523,13 +530,25 @@ describe("Organization connector management", () => {
       ).toEqual([]);
 
       const accepted = (
-        await registerCloudflareConnector(background.db, storage, command)
+        await registerCloudflareConnector(
+          background.db,
+          storage,
+          command,
+          environment.configuration,
+        )
       ).unwrap();
 
       expect(accepted.organizationId).toBe(first.organizationId);
-      expect((await registerCloudflareConnector(background.db, storage, command)).unwrap().id).toBe(
-        accepted.id,
-      );
+      expect(
+        (
+          await registerCloudflareConnector(
+            background.db,
+            storage,
+            command,
+            environment.configuration,
+          )
+        ).unwrap().id,
+      ).toBe(accepted.id);
       expect(
         await background.db
           .select()

@@ -235,6 +235,7 @@ describe("Cloudflare operation history", () => {
             storage,
             execution,
             replacement,
+            environment.configuration,
             connectorFiles(replacement),
           ),
         );

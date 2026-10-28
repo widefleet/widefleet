@@ -456,9 +456,9 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
 
     await completed(accepted.jobId);
 
-    const browserOrigin = await contract.connectorBrowserOrigin(
-      organizationId,
+    const browserOrigin = contract.connectorBrowserOrigin(
       release.name,
+      null,
       environment.environment.APP_DOMAIN,
     );
 
@@ -718,7 +718,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
         .values({ id: organizationId, name, slug: organizationId, createdAt: new Date() });
       await environment.database.db
         .insert(organizationRuntimes)
-        .values({ organizationId, executor: "cloudflare" });
+        .values({ organizationId, executor: "cloudflare", appHostnameSuffix: name });
       scopes.push({ organizationId, admin: true });
     }
 
@@ -732,6 +732,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
     scoped.metadata.entrypoints = ["default"];
     const requestId = crypto.randomUUID();
     const operations = [];
+    const browserUrls = [];
 
     for (const application of scopes) {
       const published = contract.connectorStatus.parse(
@@ -740,6 +741,16 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
 
       operations.push(published.jobId);
       await completed(published.jobId);
+
+      browserUrls.push(published.browserUrl);
+      const url = new URL(z.url().parse(published.browserUrl));
+      expect(
+        await (await worker.fetch(`http://fixture/browser-route?hostname=${url.hostname}`)).json(),
+      ).toEqual({
+        organizationId: application.organizationId,
+        name: scoped.name,
+        origin: url.origin,
+      });
 
       const secret = contract.connectorStatus.parse(
         await command({
@@ -755,6 +766,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
     }
 
     expect(new Set(operations).size).toBe(2);
+    expect(browserUrls).toEqual([
+      `https://shared-scope-alpha.${environment.environment.APP_DOMAIN}/`,
+      `https://shared-scope-beta.${environment.environment.APP_DOMAIN}/`,
+    ]);
 
     const [accepted] = await environment.database.db
       .select()

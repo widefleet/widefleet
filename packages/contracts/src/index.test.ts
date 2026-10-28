@@ -7,7 +7,6 @@ import {
   runtimePackages,
   workerMetadata,
   connectorBrowserOrigin,
-  createAppInput,
 } from "./index.ts";
 
 describe("connector secret contracts", () => {
@@ -27,23 +26,12 @@ describe("connector secret contracts", () => {
 });
 
 describe("connector browser origins", () => {
-  it("separates organization and connector identities without overlapping app hostnames", async () => {
-    const origins = await Promise.all([
-      connectorBrowserOrigin("one-two", "three", "apps.example.test"),
-      connectorBrowserOrigin("one", "two-three", "apps.example.test"),
-      connectorBrowserOrigin("other", "three", "apps.example.test"),
-    ]);
-
-    expect(new Set(origins).size).toBe(3);
-
-    for (const origin of origins) {
-      const url = new URL(origin);
-      expect(createAppInput.shape.slug.safeParse(url.hostname.split(".")[0]).success).toBe(false);
-      expect(url.hostname.split(".")[0]?.length).toBeLessThanOrEqual(63);
-    }
-
-    const origin = await connectorBrowserOrigin("one", "three", "apps.example.test", 8443);
-    expect(new URL(origin).port).toBe("8443");
+  it.each([
+    { suffix: null, port: 443, expected: "https://github.apps.example.test" },
+    { suffix: "team", port: 443, expected: "https://github-team.apps.example.test" },
+    { suffix: "team", port: 8443, expected: "https://github-team.apps.example.test:8443" },
+  ])("uses the app naming convention: $expected", ({ suffix, port, expected }) => {
+    expect(connectorBrowserOrigin("github", suffix, "apps.example.test", port)).toBe(expected);
   });
 });
 

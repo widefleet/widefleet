@@ -1,6 +1,6 @@
 export { appEventConfiguration } from "./app-events.ts";
 
-export { connectorBrowserOrigin } from "./connector-browser.ts";
+export { connectorBrowserOrigin, workerHostname } from "./hostnames.ts";
 
 import { z } from "zod";
 import { organizationIdentifier } from "./organizations.ts";

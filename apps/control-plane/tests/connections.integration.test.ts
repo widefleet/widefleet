@@ -1,3 +1,5 @@
+import { memoryStorage } from "./memory-storage.fixture.ts";
+import { connectorFixture, connectorFiles } from "./cloudflare-connector.fixture.ts";
 import * as contract from "@platform/contracts";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -35,7 +37,7 @@ describe("Connector discovery and app connections", () => {
     environment = await createTestEnvironment();
     service = createConnectorService(
       environment.database.db,
-      createStorage(environment.configuration),
+      createStorage(environment.configuration, memoryStorage()),
       "local-test-only",
       environment.configuration,
     );
@@ -96,6 +98,57 @@ describe("Connector discovery and app connections", () => {
     return deploymentId;
   };
 
+  const publish = (name: string) => {
+    const release = connectorFixture(name);
+
+    return service.deploy(
+      { ...creator, application: { ...creator.application, admin: true } },
+      release,
+      connectorFiles(release),
+      crypto.randomUUID(),
+    );
+  };
+
+  it("rejects a connector whose hostname belongs to an app", async () => {
+    expect(await publish("inventory")).toMatchObject({ error: { code: "CONFLICT" } });
+    expect((await service.catalog(creator)).unwrap()).toEqual([]);
+  });
+
+  it("reserves connector addresses before activation and permits connector updates", async () => {
+    const deployed = (await publish("github")).unwrap();
+    expect(deployed.browserUrl).toBe(
+      `https://github.${environment.configuration.APP_DOMAIN}${environment.configuration.APP_HTTPS_PORT === 443 ? "" : `:${environment.configuration.APP_HTTPS_PORT}`}/`,
+    );
+    expect(
+      await appService.create(creator, {
+        slug: "github",
+        displayName: "Conflicting app",
+        parentId: null,
+      }),
+    ).toMatchObject({ error: { code: "CONFLICT" } });
+    expect((await publish("github")).isOk()).toBe(true);
+  });
+
+  it("allows exactly one owner when an app and connector claim an address concurrently", async () => {
+    const outcomes = await Promise.all([
+      publish("simultaneous"),
+      appService.create(creator, {
+        slug: "simultaneous",
+        displayName: "Concurrent app",
+        parentId: null,
+      }),
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome.isOk())).toHaveLength(1);
+    expect(outcomes.find((outcome) => outcome.isErr())).toMatchObject({
+      error: { code: "CONFLICT" },
+    });
+  });
+
+  it("keeps the organization sign-in hostname reserved", async () => {
+    expect(await publish("auth")).toMatchObject({ error: { code: "CONFLICT" } });
+  });
+
   it("offers only grantable entrypoints without exposing administrative metadata", async () => {
     const reference = connectorReference.parse({
       name: "erp",
@@ -129,7 +182,7 @@ describe("Connector discovery and app connections", () => {
       {
         name: "erp",
         entrypoints: ["default"],
-        browserUrl: `${await contract.connectorBrowserOrigin(app.organizationId, "erp", environment.configuration.APP_DOMAIN, environment.configuration.APP_HTTPS_PORT)}/`,
+        browserUrl: `${contract.connectorBrowserOrigin("erp", null, environment.configuration.APP_DOMAIN, environment.configuration.APP_HTTPS_PORT)}/`,
       },
       { name: "pending", entrypoints: [], browserUrl: null },
     ]);

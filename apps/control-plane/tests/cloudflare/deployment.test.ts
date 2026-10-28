@@ -810,7 +810,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           try {
             await withCloudflareDatabase(env, ({db}) => db.transaction(async transaction => {
               const execution = await lockOrganizationRuntime(transaction, input.organizationId);
-              await prepareConnector(transaction, createArtifactStorage(createR2Storage(env.ARTIFACTS)), execution, input.release);
+              await prepareConnector(transaction, createArtifactStorage(createR2Storage(env.ARTIFACTS)), execution, input.release, env);
             }));
             return new Response(null, {status:204});
           } catch(error) {return Response.json({error:error.message}, {status:400});}

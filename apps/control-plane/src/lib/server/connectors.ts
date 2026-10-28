@@ -26,7 +26,7 @@ import {
   validateConnectorPackage,
   validateConnectorSecret,
 } from "./connector-package.ts";
-import { artifacts, connectors, deployments, jobs } from "./schema.ts";
+import { artifacts, connectors, deployments, jobs, organizationRuntimes } from "./schema.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import { transact, type Transaction } from "./transactions.ts";
 import type { Configuration } from "./config.ts";
@@ -54,31 +54,31 @@ export const createConnectorService = (
   catalog: (principal: Principal) =>
     transact(database, async (transaction) => {
       const records = await transaction
-        .select()
+        .select({ connector: connectors, suffix: organizationRuntimes.appHostnameSuffix })
         .from(connectors)
+        .innerJoin(
+          organizationRuntimes,
+          eq(connectors.organizationId, organizationRuntimes.organizationId),
+        )
         .where(eq(connectors.organizationId, principal.application.organizationId))
         .orderBy(connectors.name);
 
       return Result.ok(
-        await Promise.all(
-          records.map(async (record) => {
-            const desired = connectorReference.parse(record.package);
+        records.map(({ connector: record, suffix }) => {
+          const desired = connectorReference.parse(record.package);
 
-            const active = record.appliedPackage
-              ? connectorReference.parse(record.appliedPackage)
-              : null;
+          const active = record.appliedPackage
+            ? connectorReference.parse(record.appliedPackage)
+            : null;
 
-            // Offer only entrypoints that the binding operation can currently grant.
-            return contract.connectorCatalogEntry.parse({
-              name: record.name,
-              browserUrl: active
-                ? await connectorBrowserUrl(configuration, record.organizationId, record.name)
-                : null,
-              entrypoints:
-                active?.entrypoints.filter((name) => desired.entrypoints.includes(name)) ?? [],
-            });
-          }),
-        ),
+          // Offer only entrypoints that the binding operation can currently grant.
+          return contract.connectorCatalogEntry.parse({
+            name: record.name,
+            browserUrl: active ? connectorBrowserUrl(configuration, record.name, suffix) : null,
+            entrypoints:
+              active?.entrypoints.filter((name) => desired.entrypoints.includes(name)) ?? [],
+          });
+        }),
       );
     }),
   connections: (principal: Principal, appId: string) =>
@@ -313,6 +313,7 @@ export const createConnectorService = (
             storage,
             target,
             release,
+            configuration,
             modules,
           );
 

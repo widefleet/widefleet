@@ -1,3 +1,4 @@
+import { requireAvailableHostname } from "./hostnames.ts";
 import { finishAppRemoval } from "./app-removal.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
@@ -309,6 +310,36 @@ export const createJobService = (
       const runtime = await loadRuntime(storage, runtimeReference.parse(lease.value.runtime));
       const references = z.array(connectorReference).parse(lease.value.connectors);
 
+      const [execution] = await transaction
+        .select()
+        .from(organizationRuntimes)
+        .where(eq(organizationRuntimes.organizationId, lease.value.organizationId));
+
+      if (!execution) throw new Error("Organization runtime is missing");
+
+      const connectorOrigins = Object.fromEntries(
+        references.map((reference) => [
+          reference.name,
+          contract.connectorBrowserOrigin(
+            reference.name,
+            execution.appHostnameSuffix,
+            configuration.APP_DOMAIN,
+            configuration.APP_HTTPS_PORT,
+          ),
+        ]),
+      );
+
+      // Check publication too: older connector records may predate shared hostname admission.
+      for (const [name, origin] of Object.entries(connectorOrigins).sort(([, left], [, right]) =>
+        left.localeCompare(right),
+      ))
+        await requireAvailableHostname(
+          transaction,
+          new URL(origin).hostname,
+          configuration.APP_DOMAIN,
+          { organizationId: lease.value.organizationId, name },
+        );
+
       const resolved = await Promise.all(
         references.map(async (reference) => {
           const values = await Promise.all(
@@ -324,22 +355,7 @@ export const createJobService = (
 
       return Result.ok({
         ...runtime,
-        connectorOrigins: Object.fromEntries(
-          await Promise.all(
-            references.map(
-              async (reference) =>
-                [
-                  reference.name,
-                  await contract.connectorBrowserOrigin(
-                    lease.value.organizationId,
-                    reference.name,
-                    configuration.APP_DOMAIN,
-                    configuration.APP_HTTPS_PORT,
-                  ),
-                ] as const,
-            ),
-          ),
-        ),
+        connectorOrigins,
         connectorSecrets: Object.fromEntries(resolved),
         connectors: await Promise.all(
           references.map((reference) => loadConnector(storage, reference)),
