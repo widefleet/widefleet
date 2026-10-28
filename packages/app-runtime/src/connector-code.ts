@@ -39,6 +39,8 @@ export const connectorCode = async (
 
   bindings.set("WIDEFLEET_SECRETS", context.exports.ConnectorSecrets({ props: identity }));
 
+  if (snapshot.browserOrigin) bindings.set("WIDEFLEET_ORIGIN", snapshot.browserOrigin);
+
   for (const binding of configuration.durable_objects)
     bindings.set(
       `WIDEFLEET_STATE_${binding.name}`,
@@ -96,7 +98,7 @@ export class WIDEFLEET_READY extends workers.WorkerEntrypoint {
   return {
     ...worker,
     // Facet response readers must observe disconnects even while a read is pending.
-    compatibilityFlags: [...configuration.compatibility_flags, "enable_request_signal"],
+    compatibilityFlags: [...worker.compatibilityFlags, "enable_request_signal"],
     mainModule: "__widefleet_connector.js",
     modules: Object.fromEntries(modules),
     env: Object.fromEntries(bindings),

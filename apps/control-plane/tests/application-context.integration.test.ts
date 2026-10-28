@@ -1,3 +1,6 @@
+import { memoryStorage } from "./memory-storage.fixture.ts";
+import { connectorFixture, connectorFiles } from "./cloudflare-connector.fixture.ts";
+import { connectorBrowserOrigin } from "@platform/contracts";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { createTestEnvironment } from "./environment.ts";
@@ -94,12 +97,41 @@ describe("Mandatory application context", () => {
       database: environment.database,
       settings: environment.settings,
       reporting: environment.reporting,
-      storage: createStorage(environment.configuration),
+      storage: createStorage(environment.configuration, memoryStorage()),
       encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
       organizationAccess: {
         filterOrganizations: async (candidates) => candidates.map((candidate) => candidate.id),
       },
     })();
+
+  it("serializes app and connector hostname collisions across organizations", async () => {
+    const target = await scope("collision-first");
+    const other = await scope("other-collision-first");
+    const current = await runtime();
+    const release = connectorFixture("github-other");
+
+    // Different names and organization suffixes still produce the same full hostname.
+    const outcomes = await Promise.all([
+      current.connectors.deploy(
+        target.principal,
+        release,
+        connectorFiles(release),
+        crypto.randomUUID(),
+      ),
+      service.create(other.principal, { slug: "github", displayName: "GitHub", parentId: null }),
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome.isOk())).toHaveLength(1);
+    expect(outcomes.find((outcome) => outcome.isErr())).toMatchObject({
+      error: { code: "CONFLICT" },
+    });
+    await environment.database.db
+      .delete(jobs)
+      .where(eq(jobs.organizationId, target.organizationId));
+    await environment.database.db
+      .delete(connectors)
+      .where(eq(connectors.organizationId, target.organizationId));
+  });
 
   it("scopes connector and agent discovery and denies installation administration", async () => {
     const current = await runtime();
@@ -127,7 +159,14 @@ describe("Mandatory application context", () => {
       });
     }
 
-    const catalog = [{ name: "erp", entrypoints: ["default", "FirstReader"] }];
+    const catalog = [
+      {
+        name: "erp",
+        entrypoints: ["default", "FirstReader"],
+        browserUrl: `${connectorBrowserOrigin("erp", "first", environment.configuration.APP_DOMAIN, environment.configuration.APP_HTTPS_PORT)}/`,
+      },
+    ];
+
     expect((await current.connectors.catalog(first.principal)).unwrap()).toEqual(catalog);
     const listing = (await current.agents.list(first.principal)).unwrap();
     expect(listing.map((agent) => agent.name)).toEqual(["First agent"]);

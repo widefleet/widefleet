@@ -1,3 +1,4 @@
+import { requireAvailableHostname } from "./hostnames.ts";
 import type { WorkerModule } from "./worker-modules.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
@@ -20,10 +21,26 @@ import {
   deployments,
   jobs,
   cloudflareOperations,
-  type organizationRuntimes,
+  organizationRuntimes,
 } from "./schema.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import type { Transaction } from "./transactions.ts";
+import type { Configuration } from "./config.ts";
+
+export const connectorBrowserUrl = (
+  configuration: Pick<Configuration, "APP_DOMAIN" | "APP_HTTPS_PORT">,
+  name: string,
+  organizationSuffix: string | null,
+) => {
+  const origin = contract.connectorBrowserOrigin(
+    name,
+    organizationSuffix,
+    configuration.APP_DOMAIN,
+    configuration.APP_HTTPS_PORT,
+  );
+
+  return new URL("/", origin).href;
+};
 
 export const administrator = (principal: Pick<Principal, "admin">) => {
   if (!principal.admin)
@@ -44,7 +61,14 @@ export const connectorAdministrator = (principal: Pick<Principal, "application">
 export const connectorStatus = async (
   transaction: Transaction,
   record: typeof connectors.$inferSelect,
+  configuration: Pick<Configuration, "APP_DOMAIN" | "APP_HTTPS_PORT">,
 ) => {
+  const [execution] = await transaction
+    .select()
+    .from(organizationRuntimes)
+    .where(eq(organizationRuntimes.organizationId, record.organizationId));
+
+  if (!execution) throw new Error("Organization runtime is missing");
   const selected = connectorReference.parse(record.package);
   const active = record.appliedPackage ? connectorReference.parse(record.appliedPackage) : null;
   const [job] = await transaction.select().from(jobs).where(eq(jobs.id, record.jobId));
@@ -73,6 +97,7 @@ export const connectorStatus = async (
     state,
     message: result.success ? result.data.message : (operation?.error ?? null),
     entrypoints: selected.entrypoints,
+    browserUrl: connectorBrowserUrl(configuration, record.name, execution.appHostnameSuffix),
   });
 };
 
@@ -112,8 +137,16 @@ export const prepareConnector = async (
   storage: ArtifactStorage,
   execution: typeof organizationRuntimes.$inferSelect,
   release: z.infer<typeof contract.connectorPackage>,
+  configuration: Pick<Configuration, "APP_DOMAIN">,
   modules?: WorkerModule[],
 ) => {
+  await requireAvailableHostname(
+    transaction,
+    contract.workerHostname(release.name, execution.appHostnameSuffix, configuration.APP_DOMAIN),
+    configuration.APP_DOMAIN,
+    { organizationId: execution.organizationId, name: release.name },
+  );
+
   const inventory = await transaction
     .select()
     .from(connectors)

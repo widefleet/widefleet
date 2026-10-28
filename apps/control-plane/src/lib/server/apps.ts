@@ -1,3 +1,4 @@
+import { requireAvailableHostname } from "./hostnames.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
 import { and, desc, eq, exists, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
@@ -261,7 +262,7 @@ const provisionApp = async (
     );
 
     const hostnameFor = (slug: string) =>
-      `${slug}${execution.appHostnameSuffix === null ? "" : `-${execution.appHostnameSuffix}`}.${configuration.APP_DOMAIN}`;
+      contract.workerHostname(slug, execution.appHostnameSuffix, configuration.APP_DOMAIN);
 
     let hostname = hostnameFor(input.slug);
     let accessGroups: string[] = [];
@@ -312,13 +313,7 @@ const provisionApp = async (
       }
     }
 
-    if (!z.hostname().safeParse(hostname).success || !URL.canParse(`https://${hostname}`))
-      return Result.err(
-        new InvalidOperation({
-          code: "BAD_REQUEST",
-          message: "The app hostname is invalid or exceeds DNS length limits",
-        }),
-      );
+    await requireAvailableHostname(transaction, hostname, configuration.APP_DOMAIN);
 
     const [record] = await transaction
       .insert(apps)

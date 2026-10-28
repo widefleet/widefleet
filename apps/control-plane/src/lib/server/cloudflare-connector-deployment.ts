@@ -1,5 +1,11 @@
+import { requireAvailableHostname } from "./hostnames.ts";
 import type { CloudflareWorkersModule } from "@cloudflare/workers-types";
-import { connectorActivation, connectorManagement } from "@platform/contracts";
+import {
+  connectorActivation,
+  connectorManagement,
+  connectorPreparation,
+  connectorBrowserOrigin,
+} from "@platform/contracts";
 import { Result } from "better-result";
 import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
@@ -45,7 +51,7 @@ export const createCloudflareConnectorDeployment = (
 
   const storage = createArtifactStorage(createR2Storage(bindings.ARTIFACTS));
 
-  const manage = async (input: z.infer<typeof connectorManagement>) => {
+  const manage = async (input: z.input<typeof connectorManagement>) => {
     if (!bindings.APP_RUNTIME) throw new Error("App runtime is not configured");
 
     const response = await bindings.APP_RUNTIME.fetch(
@@ -88,7 +94,7 @@ export const createCloudflareConnectorDeployment = (
   return {
     register: (command: z.infer<typeof connectorCommand>) =>
       withCloudflareDatabase(bindings, async ({ db }) => {
-        (await registerCloudflareConnector(db, storage, command)).unwrap();
+        (await registerCloudflareConnector(db, storage, command, bindings)).unwrap();
       }),
     provision: async (command: z.infer<typeof connectorCommand>) => {
       const prepared = await provisionConnectorResources(
@@ -110,7 +116,11 @@ export const createCloudflareConnectorDeployment = (
       withCloudflareDatabase(bindings, async ({ db }) =>
         (
           await transact(db, async (transaction) => {
-            await lockOrganizationRuntime(transaction, command.actor.application.organizationId);
+            const execution = await lockOrganizationRuntime(
+              transaction,
+              command.actor.application.organizationId,
+            );
+
             await accepted(transaction, command);
 
             const [record] = await transaction
@@ -135,17 +145,32 @@ export const createCloudflareConnectorDeployment = (
             for (const [name, ciphertext] of Object.entries(selected.secrets))
               secrets[name] = await decryptSecret(bindings.PLATFORM_ENCRYPTION_KEY, ciphertext);
 
+            const browserOrigin = connectorBrowserOrigin(
+              release.name,
+              execution.appHostnameSuffix,
+              bindings.APP_DOMAIN,
+            );
+
+            await requireAvailableHostname(
+              transaction,
+              new URL(browserOrigin).hostname,
+              bindings.APP_DOMAIN,
+              { organizationId: command.organizationId, name: release.name },
+            );
+
             // Plaintext only crosses the private management binding. The runtime encrypts
             // the immutable snapshot; Workflow results and SQL receipts contain IDs only.
-            const prepared = await manage({
-              action: "prepare",
+            const preparation: z.input<typeof connectorPreparation> = {
               organizationId: command.organizationId,
               version: command.id,
               release,
               nativeBindings,
               secrets,
               telemetry: null,
-            });
+              browserOrigin,
+            };
+
+            const prepared = await manage({ action: "prepare", ...preparation });
 
             await manage({ action: "activate", ...prepared });
             await transaction

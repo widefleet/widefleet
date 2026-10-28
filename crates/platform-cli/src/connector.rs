@@ -110,6 +110,8 @@ struct Status {
     message: Option<String>,
     entrypoints: Vec<String>,
     #[serde(default)]
+    browser_url: Option<String>,
+    #[serde(default)]
     secrets: Vec<String>,
     #[serde(default)]
     secret_revision: u64,
@@ -155,6 +157,9 @@ fn show(status: &Status, json_output: bool) -> Result<()> {
     }
     println!("{}: {}", status.name, status.state);
     println!("Entrypoints: {}", status.entrypoints.join(", "));
+    if let Some(url) = &status.browser_url {
+        println!("Browser: {url}");
+    }
     println!("Secrets: {}", status.secrets.join(", "));
     println!(
         "Secret revision: {} (active: {})",
@@ -443,9 +448,12 @@ pub async fn run(api: &Api, credentials: &auth::Credentials, options: Options) -
     match options.command {
         Command::Catalog => {
             #[derive(Deserialize, Serialize)]
+            #[serde(rename_all = "camelCase")]
             struct Entry {
                 name: String,
                 entrypoints: Vec<String>,
+                #[serde(default)]
+                browser_url: Option<String>,
             }
             let entries: Vec<Entry> = get(api, credentials, "/connector-catalog").await?;
             if json_output {
@@ -461,6 +469,9 @@ pub async fn run(api: &Api, credentials: &auth::Credentials, options: Options) -
                         entry.entrypoints.join(", ")
                     };
                     println!("{}: {availability}", entry.name);
+                    if let Some(url) = entry.browser_url {
+                        println!("  Browser: {url}");
+                    }
                 }
                 Ok(())
             }

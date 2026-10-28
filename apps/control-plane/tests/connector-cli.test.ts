@@ -67,8 +67,12 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         else if (request.url === "/api/v1/connector-catalog") {
           response.end(
             JSON.stringify([
-              { name: "erp", entrypoints: ["default"] },
-              { name: "pending", entrypoints: [] },
+              {
+                name: "erp",
+                entrypoints: ["default"],
+                browserUrl: "https://connector.apps.example.test/",
+              },
+              { name: "pending", entrypoints: [], browserUrl: null },
             ]),
           );
         } else if (request.url === `/api/v1/apps/${app.id}/connections`) {
@@ -281,8 +285,12 @@ export default class Connector extends WorkerEntrypoint {
     });
     it("browses the catalog and reads serving app resources without mutations", async () => {
       expect(JSON.parse((await cli("catalog")).stdout)).toEqual([
-        { name: "erp", entrypoints: ["default"] },
-        { name: "pending", entrypoints: [] },
+        {
+          name: "erp",
+          entrypoints: ["default"],
+          browserUrl: "https://connector.apps.example.test/",
+        },
+        { name: "pending", entrypoints: [], browserUrl: null },
       ]);
       expect(JSON.parse((await command("connections")).stdout)).toMatchObject({
         resources: [

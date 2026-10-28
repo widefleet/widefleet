@@ -1,3 +1,4 @@
+import type { Configuration } from "./config.ts";
 import { operationId } from "./deployment-execution.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
@@ -28,6 +29,7 @@ export const registerCloudflareConnector = (
   database: Database,
   storage: ArtifactStorage,
   command: z.infer<typeof connectorCommand>,
+  configuration: Pick<Configuration, "APP_DOMAIN">,
 ) =>
   transact(database, async (transaction) => {
     connectorAdministrator(command.actor);
@@ -68,7 +70,8 @@ export const registerCloudflareConnector = (
 
       if (release.name !== command.change.name)
         throw new Error("Connector package identity mismatch");
-      reference = (await prepareConnector(transaction, storage, execution, release)).reference;
+      reference = (await prepareConnector(transaction, storage, execution, release, configuration))
+        .reference;
     } else {
       const [existing] = await transaction
         .select()
@@ -176,7 +179,10 @@ export const createCloudflareConnectors = (
         );
 
         const parsed = connectorCommand.parse(accepted);
-        const operation = (await registerCloudflareConnector(database, storage, parsed)).unwrap();
+
+        const operation = (
+          await registerCloudflareConnector(database, storage, parsed, bindings)
+        ).unwrap();
 
         return (
           await transact(database, async (transaction) => {
@@ -195,11 +201,15 @@ export const createCloudflareConnectors = (
             // Another request may already have replaced the desired connector. Return
             // the command this caller submitted, not that newer request's job identity.
             return Result.ok(
-              await connectorStatus(transaction, {
-                ...record,
-                package: operation.result,
-                jobId: command.id,
-              }),
+              await connectorStatus(
+                transaction,
+                {
+                  ...record,
+                  package: operation.result,
+                  jobId: command.id,
+                },
+                { APP_DOMAIN: bindings.APP_DOMAIN, APP_HTTPS_PORT: 443 },
+              ),
             );
           })
         ).unwrap();
@@ -256,10 +266,14 @@ export const createCloudflareConnectors = (
             });
           current = await cloudflareConnectorStatus(
             bindings,
-            await connectorStatus(transaction, { ...existing, package: original, jobId: id }),
+            await connectorStatus(
+              transaction,
+              { ...existing, package: original, jobId: id },
+              { APP_DOMAIN: bindings.APP_DOMAIN, APP_HTTPS_PORT: 443 },
+            ),
           );
         } else {
-          await prepareConnector(transaction, storage, execution, release, modules);
+          await prepareConnector(transaction, storage, execution, release, bindings, modules);
         }
 
         return Result.ok({ id, organizationId: execution.organizationId, checksum, current });

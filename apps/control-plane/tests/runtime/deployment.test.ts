@@ -853,6 +853,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
         async next() { const value = (await this.ctx.storage.get('sequence') ?? 0) + 1; await this.ctx.storage.put('sequence', value); return value; }
       }
       class WIDEFLEET_Secrets extends WIDEFLEET_SecretEntrypoint {
+        fetch() { return Response.json({ caller: this.ctx.props.caller, origin: this.env.WIDEFLEET_ORIGIN }); }
         async listCustomers() { return { customers: ['fixture'], sequence: await this.env.STATE.getByName('connection').next(), rootBinding: 'WIDEFLEET_PACKAGES' in this.env }; }
         async secretProbe() { try { return { value: await this.env.WIDEFLEET_SECRETS.get('API_KEY') }; } catch (error) { return { error: error.message }; } }
         async storageProbe() {
@@ -892,6 +893,46 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     expect(JSON.parse((await cli("connector", "show", "erp-fixture")).stdout)).toMatchObject({
       state: "succeeded",
     });
+
+    const browserStatus = contract.connectorStatus.parse(
+      JSON.parse((await cli("connector", "show", "erp-fixture")).stdout),
+    );
+
+    const browserUrl = new URL(z.url().parse(browserStatus.browserUrl));
+
+    const browserPage = await execute("docker", [
+      "exec",
+      `platform-execution-${organizationId}`,
+      "curl",
+      "--silent",
+      "--show-error",
+      "--fail",
+      "--max-time",
+      "15",
+      "-H",
+      `Host: ${browserUrl.host}`,
+      "-H",
+      "X-Forwarded-Proto: https",
+      "-H",
+      `Cookie: ${identity.cookie}`,
+      "http://127.0.0.1:8080/",
+    ]);
+
+    expect(JSON.parse(browserPage.stdout)).toMatchObject({
+      caller: { subject: "pairwise-subject" },
+      origin: browserUrl.origin,
+    });
+
+    const route = await readFile(
+      join(
+        state,
+        "routes",
+        `platform-connector-${createHash("sha256").update(browserUrl.hostname).digest("hex")}.yaml`,
+      ),
+      "utf8",
+    );
+
+    expect(route).toContain(`Host(\`${browserUrl.hostname}\`)`);
     const app = await createApp("connector-consumer");
     await publish(
       app.id,

@@ -161,10 +161,12 @@ describe("Cloudflare operation history", () => {
       tokenHash: crypto.randomUUID(),
     });
     expect(
-      await createJobService(environment.database.db, storage, "unused-test-key").claim(
-        agentId,
-        true,
-      ),
+      await createJobService(
+        environment.database.db,
+        storage,
+        "unused-test-key",
+        environment.configuration,
+      ).claim(agentId, true),
     ).toMatchObject({ error: { code: "CONFLICT" } });
     await environment.database.db
       .update(organizationRuntimes)
@@ -233,6 +235,7 @@ describe("Cloudflare operation history", () => {
             storage,
             execution,
             replacement,
+            environment.configuration,
             connectorFiles(replacement),
           ),
         );

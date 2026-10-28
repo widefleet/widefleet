@@ -6,6 +6,7 @@ import {
   connectorSecretValue,
   runtimePackages,
   workerMetadata,
+  connectorBrowserOrigin,
 } from "./index.ts";
 
 describe("connector secret contracts", () => {
@@ -21,6 +22,16 @@ describe("connector secret contracts", () => {
     expect(
       runtimePackages.shape.connectorSecrets.safeParse({ erp: { API_KEY: value } }).success,
     ).toBe(accepted);
+  });
+});
+
+describe("connector browser origins", () => {
+  it.each([
+    { suffix: null, port: 443, expected: "https://github.apps.example.test" },
+    { suffix: "team", port: 443, expected: "https://github-team.apps.example.test" },
+    { suffix: "team", port: 8443, expected: "https://github-team.apps.example.test:8443" },
+  ])("uses the app naming convention: $expected", ({ suffix, port, expected }) => {
+    expect(connectorBrowserOrigin("github", suffix, "apps.example.test", port)).toBe(expected);
   });
 });
 

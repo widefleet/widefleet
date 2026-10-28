@@ -19,6 +19,8 @@ import { objectListing, objectMetadata, type ObjectOperation } from "./object-pr
 
 export { connectorResponse } from "./connector-response.ts";
 
+export { withConnectorCaller } from "./connector-context.ts";
+
 const binding = <T extends Database | KeyValue | Producer | WorkflowBinding>(name: string) => {
   // SAFETY: These service bindings are created by the trusted loader, from the same manifest.
   return (env as Record<string, T>)[name];

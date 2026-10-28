@@ -325,6 +325,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
       export default {async fetch(request, env, ctx) {
         const url = new URL(request.url);
         if (url.pathname === '/executions') return Response.json(executions.splice(0));
+        if (url.pathname === '/browser-route') return Response.json(await (await env.WIDEFLEET_PACKAGES.get('connector-hosts/' + url.searchParams.get('hostname') + '.json')).json());
         const name = url.searchParams.get('connector') ?? ${JSON.stringify(release.name)};
         const props = {organizationId: url.searchParams.get('execution') ?? ${JSON.stringify(organizationId)}, connector:name, entrypoint:'default'};
         const gateway = () => ctx.exports.ConnectorGateway({props});
@@ -359,7 +360,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
           const result = await withCloudflareDatabase(env, async ({db}) => {
             const storage = createArtifactStorage(createR2Storage(env.ARTIFACTS));
             const execution = createCloudflareExecution({...env, DEPLOYMENTS: workflow}, db, storage);
-            const service = createConnectorService(db, storage, env.PLATFORM_ENCRYPTION_KEY, execution);
+            const service = createConnectorService(db, storage, env.PLATFORM_ENCRYPTION_KEY, {APP_DOMAIN: env.APP_DOMAIN, APP_HTTPS_PORT: 443}, execution);
             const actor = {id: 'fixture-admin', admin: input.application ? false : input.admin !== false, creator: true, name: 'Fixture', email: 'fixture@example.test', role: 'admin', application: input.application ?? {...${JSON.stringify(environment.application)}, admin:input.admin !== false}};
             if (input.kind === 'deploy') return service.deploy(actor, input.release, input.modules.map(module => ({...module, bytes: new Uint8Array(module.bytes)})), input.requestId);
             if (input.kind === 'secret') return service.setSecret(actor, input.name, input.secret, input.value);
@@ -449,6 +450,40 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
     }
 
     expect(patches).toBe(before);
+  }, 60_000);
+  it("publishes a stable browser origin independently of app bindings", async () => {
+    const accepted = contract.connectorStatus.parse(await command({ kind: "deploy", release }));
+
+    await completed(accepted.jobId);
+
+    const browserOrigin = contract.connectorBrowserOrigin(
+      release.name,
+      null,
+      environment.environment.APP_DOMAIN,
+    );
+
+    expect(accepted.browserUrl).toBe(`${browserOrigin}/`);
+    expect(
+      await (
+        await worker.fetch(
+          "http://fixture/browser-route?hostname=" + new URL(browserOrigin).hostname,
+        )
+      ).json(),
+    ).toEqual({ organizationId, name: release.name, origin: browserOrigin });
+
+    const rotated = contract.connectorStatus.parse(
+      await command({
+        kind: "secret",
+        name: release.name,
+        secret: "API_KEY",
+        value: "browser-synthetic-key",
+      }),
+    );
+
+    await completed(rotated.jobId);
+    expect(rotated.browserUrl).toBe(accepted.browserUrl);
+    const restored = contract.connectorStatus.parse(await command({ kind: "deploy", release }));
+    await completed(restored.jobId);
   }, 60_000);
   it("reconciles a lost activation response without activating a second generation", async () => {
     const previous = z
@@ -683,7 +718,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
         .values({ id: organizationId, name, slug: organizationId, createdAt: new Date() });
       await environment.database.db
         .insert(organizationRuntimes)
-        .values({ organizationId, executor: "cloudflare" });
+        .values({ organizationId, executor: "cloudflare", appHostnameSuffix: name });
       scopes.push({ organizationId, admin: true });
     }
 
@@ -697,6 +732,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
     scoped.metadata.entrypoints = ["default"];
     const requestId = crypto.randomUUID();
     const operations = [];
+    const browserUrls = [];
 
     for (const application of scopes) {
       const published = contract.connectorStatus.parse(
@@ -705,6 +741,16 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
 
       operations.push(published.jobId);
       await completed(published.jobId);
+
+      browserUrls.push(published.browserUrl);
+      const url = new URL(z.url().parse(published.browserUrl));
+      expect(
+        await (await worker.fetch(`http://fixture/browser-route?hostname=${url.hostname}`)).json(),
+      ).toEqual({
+        organizationId: application.organizationId,
+        name: scoped.name,
+        origin: url.origin,
+      });
 
       const secret = contract.connectorStatus.parse(
         await command({
@@ -720,6 +766,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
     }
 
     expect(new Set(operations).size).toBe(2);
+    expect(browserUrls).toEqual([
+      `https://shared-scope-alpha.${environment.environment.APP_DOMAIN}/`,
+      `https://shared-scope-beta.${environment.environment.APP_DOMAIN}/`,
+    ]);
 
     const [accepted] = await environment.database.db
       .select()

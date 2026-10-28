@@ -1,3 +1,4 @@
+import { requireAvailableHostname } from "./hostnames.ts";
 import { finishAppRemoval } from "./app-removal.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
@@ -25,6 +26,7 @@ import { connectorReference, loadConnector, loadConnectorArtifact } from "./conn
 import { lockOrganizationRuntime } from "./organization-runtime.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import { transact, type Transaction } from "./transactions.ts";
+import type { Configuration } from "./config.ts";
 
 const leasedJob = async (
   transaction: Transaction,
@@ -58,6 +60,7 @@ export const createJobService = (
   database: Database,
   storage: ArtifactStorage,
   encryptionKey: string,
+  configuration: Pick<Configuration, "APP_DOMAIN" | "APP_HTTPS_PORT">,
   report: (event: z.infer<typeof contract.reportingOperation>) => void = () => {},
 ) => ({
   authenticate: (token: string) =>
@@ -307,6 +310,36 @@ export const createJobService = (
       const runtime = await loadRuntime(storage, runtimeReference.parse(lease.value.runtime));
       const references = z.array(connectorReference).parse(lease.value.connectors);
 
+      const [execution] = await transaction
+        .select()
+        .from(organizationRuntimes)
+        .where(eq(organizationRuntimes.organizationId, lease.value.organizationId));
+
+      if (!execution) throw new Error("Organization runtime is missing");
+
+      const connectorOrigins = Object.fromEntries(
+        references.map((reference) => [
+          reference.name,
+          contract.connectorBrowserOrigin(
+            reference.name,
+            execution.appHostnameSuffix,
+            configuration.APP_DOMAIN,
+            configuration.APP_HTTPS_PORT,
+          ),
+        ]),
+      );
+
+      // Check publication too: older connector records may predate shared hostname admission.
+      for (const [name, origin] of Object.entries(connectorOrigins).sort(([, left], [, right]) =>
+        left.localeCompare(right),
+      ))
+        await requireAvailableHostname(
+          transaction,
+          new URL(origin).hostname,
+          configuration.APP_DOMAIN,
+          { organizationId: lease.value.organizationId, name },
+        );
+
       const resolved = await Promise.all(
         references.map(async (reference) => {
           const values = await Promise.all(
@@ -322,6 +355,7 @@ export const createJobService = (
 
       return Result.ok({
         ...runtime,
+        connectorOrigins,
         connectorSecrets: Object.fromEntries(resolved),
         connectors: await Promise.all(
           references.map((reference) => loadConnector(storage, reference)),

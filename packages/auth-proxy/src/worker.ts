@@ -1,5 +1,10 @@
 import type { KVNamespace } from "@cloudflare/workers-types";
-import { organizationIdentifier } from "@platform/contracts";
+import {
+  connectorBrowserRoute,
+  connectorCaller,
+  organizationIdentifier,
+} from "@platform/contracts";
+import type { z } from "zod";
 import { authConfiguration } from "./configuration.ts";
 import {
   authControlPath,
@@ -112,7 +117,27 @@ export const manageAuthConfiguration = async (request: Request, environment: Aut
 
 export const createAuthHandler = (
   environment: AuthEnvironment,
-  runApp: (request: Request, appId: string, organizationId: string) => Promise<Response>,
+  runApp: (
+    request: Request,
+    appId: string,
+    organizationId: string,
+    caller: z.infer<typeof connectorCaller>,
+  ) => Promise<Response>,
+  runConnector?: (
+    request: Request,
+    appId: string,
+    organizationId: string,
+    caller: z.infer<typeof connectorCaller>,
+    binding: string,
+  ) => Promise<Response>,
+  browser?: {
+    resolve: (hostname: string) => Promise<z.infer<typeof connectorBrowserRoute> | null>;
+    fetch: (
+      request: Request,
+      route: z.infer<typeof connectorBrowserRoute>,
+      caller: z.infer<typeof connectorCaller>,
+    ) => Promise<Response>;
+  },
 ) => ({
   async fetch(request: Request) {
     const url = new URL(request.url);
@@ -130,15 +155,20 @@ export const createAuthHandler = (
     let phase = "app-route";
 
     try {
-      const routes = new Map<string, Promise<ReturnType<typeof authRoute.parse> | null>>();
+      const routes = new Map<
+        string,
+        Promise<z.infer<typeof authRoute> | z.infer<typeof connectorBrowserRoute> | null>
+      >();
 
       const resolve = (hostname: string) => {
         phase = "app-route";
         let route = routes.get(hostname);
 
         if (!route) {
-          route = environment.AUTH_CONFIG.get(authRouteKey(hostname)).then((value) =>
-            value ? authRoute.parse(JSON.parse(value)) : null,
+          route = environment.AUTH_CONFIG.get(authRouteKey(hostname)).then(async (value) =>
+            value
+              ? authRoute.parse(JSON.parse(value))
+              : ((await browser?.resolve(hostname)) ?? null),
           );
           routes.set(hostname, route);
         }
@@ -166,19 +196,40 @@ export const createAuthHandler = (
           : reply(404, "Not found");
 
       const proxy = createAuthProxy(installed.configuration, {
+        browser: Boolean(route && !("appId" in route)),
         resolve: async (hostname) => {
           const route = await resolve(hostname);
           phase = "authentication";
 
-          return route?.organizationId === organizationId ? route.access : null;
+          return route?.organizationId === organizationId
+            ? "appId" in route
+              ? route.access
+              : { revision: 0, groups: [] }
+            : null;
         },
-        fetch: async (forwarded) => {
+        fetch: async (forwarded, caller) => {
           const route = await resolve(new URL(forwarded.url).hostname);
 
           if (!route || route.organizationId !== organizationId) return reply(404, "Not found");
           phase = "app-runtime";
 
-          return runApp(forwarded, route.appId, route.organizationId);
+          if ("appId" in route) return runApp(forwarded, route.appId, organizationId, caller);
+
+          return browser ? browser.fetch(forwarded, route, caller) : reply(404, "Not found");
+        },
+        connector: async (forwarded, caller, binding) => {
+          const route = await resolve(new URL(forwarded.url).hostname);
+
+          if (
+            !route ||
+            !("appId" in route) ||
+            route.organizationId !== organizationId ||
+            !runConnector
+          )
+            return reply(404, "Not found");
+          phase = "app-runtime";
+
+          return runConnector(forwarded, route.appId, organizationId, caller, binding);
         },
       });
 
@@ -186,7 +237,7 @@ export const createAuthHandler = (
       const response = await proxy.fetch(request);
       const resolved = await routes.get(url.hostname);
 
-      if (resolved)
+      if (resolved && "appId" in resolved)
         response.headers.set(
           "x-widefleet-access-revision",
           `${resolved.appId}:${resolved.access.revision}`,

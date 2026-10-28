@@ -74,6 +74,22 @@
       <Button href={`/connectors/${data.name}/logs`} variant="outline" size="sm">View logs</Button>
     </div>
   </section>
+  {#if connector.browserUrl}
+    <section class="space-y-3" aria-label="Connector browser address">
+      <h2 class="text-base font-medium">Browser address</h2>
+      <p class="text-muted-foreground text-sm">
+        This address stays the same across connector updates and app connections. The connector must
+        activate before its pages are available.
+      </p>
+      <a
+        href={connector.browserUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        class="text-muted-foreground block break-all text-sm underline underline-offset-4"
+        >{connector.browserUrl}</a
+      >
+    </section>
+  {/if}
   <section class="space-y-4" aria-labelledby="secrets-heading">
     <div>
       <h2 id="secrets-heading" class="text-base font-medium">Secrets</h2>

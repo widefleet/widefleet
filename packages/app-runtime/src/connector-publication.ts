@@ -1,4 +1,9 @@
-import { connectorPreparation, connectorActivation, checksum } from "@platform/contracts";
+import {
+  connectorPreparation,
+  connectorActivation,
+  connectorBrowserRoute,
+  checksum,
+} from "@platform/contracts";
 import { z } from "zod";
 import type { ParentEnvironment } from "./types.ts";
 
@@ -17,6 +22,23 @@ export const connectorScope = (identity: { organizationId: string; name: string 
 
 export const connectorKey = (identity: z.infer<typeof connectorActivation>) =>
   `${connectorScope(identity)}/versions/${identity.version}.json`;
+
+export const connectorBrowserKey = (hostname: string) => `connector-hosts/${hostname}.json`;
+
+export const readConnectorBrowserRoute = async (
+  environment: ParentEnvironment,
+  hostname: string,
+) => {
+  const object = await environment.WIDEFLEET_PACKAGES.get(connectorBrowserKey(hostname));
+
+  if (!object) return null;
+  const route = connectorBrowserRoute.parse(await object.json());
+
+  if (new URL(route.origin).hostname !== hostname)
+    throw new Error("Connector hostname does not match its route");
+
+  return route;
+};
 
 export const digest = async (value: string) =>
   Array.from(

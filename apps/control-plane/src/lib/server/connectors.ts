@@ -4,6 +4,7 @@ import type { HostedExecution } from "./deployment-execution.ts";
 import {
   connectorAdministrator,
   connectorStatus,
+  connectorBrowserUrl,
   bindingState,
   prepareConnector,
   applyCapabilityChange,
@@ -25,18 +26,20 @@ import {
   validateConnectorPackage,
   validateConnectorSecret,
 } from "./connector-package.ts";
-import { artifacts, connectors, deployments, jobs } from "./schema.ts";
+import { artifacts, connectors, deployments, jobs, organizationRuntimes } from "./schema.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import { transact, type Transaction } from "./transactions.ts";
+import type { Configuration } from "./config.ts";
 
 export { checkCapabilityNames } from "./connector-changes.ts";
 
 const presentStatus = async (
   transaction: Transaction,
   record: typeof connectors.$inferSelect,
+  configuration: Pick<Configuration, "APP_DOMAIN" | "APP_HTTPS_PORT">,
   execution?: HostedExecution,
 ) => {
-  const current = await connectorStatus(transaction, record);
+  const current = await connectorStatus(transaction, record, configuration);
 
   return execution ? execution.connectors.status(current) : current;
 };
@@ -45,18 +48,23 @@ export const createConnectorService = (
   database: Database,
   storage: ArtifactStorage,
   encryptionKey: string,
+  configuration: Pick<Configuration, "APP_DOMAIN" | "APP_HTTPS_PORT">,
   execution?: HostedExecution,
 ) => ({
   catalog: (principal: Principal) =>
     transact(database, async (transaction) => {
       const records = await transaction
-        .select()
+        .select({ connector: connectors, suffix: organizationRuntimes.appHostnameSuffix })
         .from(connectors)
+        .innerJoin(
+          organizationRuntimes,
+          eq(connectors.organizationId, organizationRuntimes.organizationId),
+        )
         .where(eq(connectors.organizationId, principal.application.organizationId))
         .orderBy(connectors.name);
 
       return Result.ok(
-        records.map((record) => {
+        records.map(({ connector: record, suffix }) => {
           const desired = connectorReference.parse(record.package);
 
           const active = record.appliedPackage
@@ -66,6 +74,7 @@ export const createConnectorService = (
           // Offer only entrypoints that the binding operation can currently grant.
           return contract.connectorCatalogEntry.parse({
             name: record.name,
+            browserUrl: active ? connectorBrowserUrl(configuration, record.name, suffix) : null,
             entrypoints:
               active?.entrypoints.filter((name) => desired.entrypoints.includes(name)) ?? [],
           });
@@ -210,7 +219,7 @@ export const createConnectorService = (
 
           if (!record) throw new Error("Connector secret update returned no row");
 
-          return Result.ok(await presentStatus(transaction, record, execution));
+          return Result.ok(await presentStatus(transaction, record, configuration, execution));
         }),
   list: (principal: Principal) =>
     transact(database, async (transaction) => {
@@ -223,7 +232,9 @@ export const createConnectorService = (
         .orderBy(connectors.name);
 
       return Result.ok(
-        await Promise.all(records.map((record) => presentStatus(transaction, record, execution))),
+        await Promise.all(
+          records.map((record) => presentStatus(transaction, record, configuration, execution)),
+        ),
       );
     }),
   read: (principal: Principal, name: string) =>
@@ -243,7 +254,7 @@ export const createConnectorService = (
       if (!record)
         throw new InvalidOperation({ code: "NOT_FOUND", message: "Connector not found" });
 
-      return Result.ok(await presentStatus(transaction, record, execution));
+      return Result.ok(await presentStatus(transaction, record, configuration, execution));
     }),
   deploy: (
     principal: Principal,
@@ -291,6 +302,7 @@ export const createConnectorService = (
               await presentStatus(
                 transaction,
                 { ...existing, package: original, jobId: id },
+                configuration,
                 execution,
               ),
             );
@@ -301,6 +313,7 @@ export const createConnectorService = (
             storage,
             target,
             release,
+            configuration,
             modules,
           );
 
@@ -327,7 +340,7 @@ export const createConnectorService = (
 
           if (!record) throw new Error("Connector publication returned no row");
 
-          return Result.ok(await presentStatus(transaction, record, execution));
+          return Result.ok(await presentStatus(transaction, record, configuration, execution));
         }),
   bindings: (principal: Principal, appId: string) =>
     transact(database, async (transaction) => {
