@@ -43,12 +43,12 @@ A pending or failed removal remains visible with its currently active connector.
 
 After choosing a connector, ask an administrator to [give the app its binding](#give-an-app-its-binding). The connector author supplies the corresponding TypeScript interface or package.
 
-Connectors that expose browser pages also publish a `browserUrls` map in catalog
-and status responses. Expand a connector in the catalog to open its **Browser
-addresses**, or inspect them with `widefleet connector catalog --json`.
+Each connector has one browser address, exposed as `browserUrl` in status and
+catalog responses. Expand an activated connector in the catalog to open its
+**Browser address**, or inspect it with `widefleet connector catalog --json`.
 Administrative status from `widefleet connector show NAME --json` includes the
-desired addresses even while activation is pending; the catalog lists browser
-entrypoints present in both the active and desired versions.
+address while activation is pending; the catalog returns `null` until a version
+has activated.
 
 ## Manage connectors in an organization
 
@@ -263,20 +263,11 @@ reuse it. Multiple accounts and account selection are connector behavior, not
 platform-managed settings. Keep tokens in the connector's own persistent
 resources and out of RPC results, browser responses and logs.
 
-### Enable a browser entrypoint
+### Implement connector pages
 
-Add `browser_entrypoints` to the connector's `wrangler.jsonc` and implement that
-entrypoint's `fetch()` handler. For example, this configuration enables the
-default export:
-
-```json
-{
-  "name": "erp",
-  "main": "worker.ts",
-  "compatibility_date": "2026-10-01",
-  "browser_entrypoints": ["default"]
-}
-```
+Every deployed connector has a browser address. Browser requests call the
+`fetch()` handler of its default export; no additional configuration is needed.
+Implement paths such as `/connect` and `/callback` in that handler.
 
 This complete `worker.ts` exposes the caller identity for verification:
 
@@ -300,7 +291,7 @@ export default class ERP extends WorkerEntrypoint<Env, Props> {
 ```
 
 Deploy it with `widefleet connector deploy`, then inspect
-`widefleet connector show erp`. After activation succeeds, open the default
+`widefleet connector show erp`. After activation succeeds, open the
 browser address and sign in. The response shows your verified identity and the
 connector's origin. Replace the verification handler with your connector's
 pages and provider flow before using it for account connections.
@@ -312,11 +303,10 @@ changes the address. `env.WIDEFLEET_ORIGIN` supplies the origin to connector cod
 register provider callbacks using that origin and your callback path. Adding an
 app binding does not require another provider callback registration.
 
-The default browser entrypoint starts at `/`. A named entrypoint starts at
-`/_widefleet/entrypoints/ENTRYPOINT/`; the connector receives that full path.
-These entrypoints share the connector's origin and cookies. Only exports listed
-in `browser_entrypoints` can receive browser traffic. Omitting the setting
-disables browser access without disabling granted backend calls.
+All paths at this address reach the default export's `fetch()` handler unchanged.
+Named RPC entrypoints remain available through app bindings; they do not create
+separate browser routes. A connector without a default `fetch()` implementation
+cannot serve pages at its address.
 
 ### Link from an app
 
@@ -330,8 +320,9 @@ is `ERP`, the app can render:
 
 Widefleet checks the app's access rules and active binding, then redirects the
 browser to the connector's fixed address. The suffix and query string are
-preserved. This entry link accepts `GET` and `HEAD`; forms and provider callbacks
-must target the canonical connector address. `/connect` is a route chosen by
+preserved. This always reaches the default `fetch()` handler, including when
+the app binding selects a named RPC entrypoint. This entry link accepts `GET`
+and `HEAD`; forms and provider callbacks must target the canonical connector address. `/connect` is a route chosen by
 the connector author, not a platform-defined endpoint.
 
 Users can also open the canonical address directly, before any app has a binding.
@@ -357,13 +348,12 @@ still needs CSRF protection, secure OAuth state validation and validation of any
 return URL it accepts. Separate origins and CORS restrictions do not prevent all
 cross-origin requests.
 
-| Symptom                                                    | Check                                                                                               |
-| ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| Browser redirects to sign-in; an API request returns `401` | Establish the organization's sign-in session in the browser.                                        |
-| The app entry link returns `403`                           | Check the user's access to that app. Direct connector access uses organization sign-in instead.     |
-| Page or entry link returns `404`                           | Confirm activation, `browser_entrypoints`, the route path and, for an app link, the active binding. |
-| The app entry link returns `405`                           | Navigate with `GET`; submit forms to the canonical connector address.                               |
-| Activation reports a missing browser origin                | Update the deployment agent together with the platform and runtime, then redeploy the connector.    |
+| Symptom                                                    | Check                                                                                           |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| Browser redirects to sign-in; an API request returns `401` | Establish the organization's sign-in session in the browser.                                    |
+| The app entry link returns `403`                           | Check the user's access to that app. Direct connector access uses organization sign-in instead. |
+| Page or entry link returns `404`                           | Confirm activation, the route path and, for an app link, the active binding.                    |
+| The app entry link returns `405`                           | Navigate with `GET`; submit forms to the canonical connector address.                           |
 
 Once the verification page works, implement the account flow in the connector
 and [give apps their bindings](#give-an-app-its-binding). Use the published
