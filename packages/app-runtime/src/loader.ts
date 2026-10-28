@@ -3,6 +3,7 @@ import { authControlPath, authRoute, authRouteKey } from "@platform/auth-proxy/p
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { appEventConfiguration } from "@platform/contracts";
 import { publishedApp } from "@platform/contracts";
+import { connectorCaller } from "@platform/contracts";
 import { z } from "zod";
 import { workflowJson } from "./workflow-json.ts";
 import { workflowCatalog } from "./workflow-catalog.ts";
@@ -17,6 +18,7 @@ import type { ParentEnvironment, PublishedApp, Json } from "./types.ts";
 import { manageConnector } from "./connector-catalog.ts";
 import { readOrganizationAvailability } from "./availability.ts";
 import { executionOptions } from "./execution-limits.ts";
+import { signConnectorCaller } from "./connector-caller.ts";
 
 export { ConnectorCatalog, ConnectorGateway } from "./connector-catalog.ts";
 
@@ -111,6 +113,7 @@ const dispatchApp = async (
   environment: ParentEnvironment,
   context: ExecutionContext,
   authenticated: { appId: string; organizationId: string } | null,
+  caller?: z.infer<typeof connectorCaller>,
 ) => {
   const url = new URL(request.url);
   const candidate = request.headers.get("x-widefleet-candidate");
@@ -197,12 +200,19 @@ const dispatchApp = async (
     if (asset.status !== 404) return browserPolicy(asset, app.network.policy.browser);
   }
 
+  const proof = caller
+    ? await signConnectorCaller(environment.WIDEFLEET_CONTROL_TOKEN, app.appId, caller)
+    : undefined;
+
   return browserPolicy(
     // celld forwards incoming request cancellation only when the signal is
     // explicitly supplied to the subrequest.
     await run(app, environment, context, (worker) =>
       worker
-        .getEntrypoint(undefined, executionOptions(environment.WIDEFLEET_EXECUTION_LIMITS, "http"))
+        .getEntrypoint(undefined, {
+          ...executionOptions(environment.WIDEFLEET_EXECUTION_LIMITS, "http"),
+          props: { connectorCaller: proof },
+        })
         .fetch(request, { signal: request.signal }),
     ),
     app.network.policy.browser,
@@ -289,8 +299,29 @@ export default {
       return manageRuntime(request, environment, context);
     }
 
-    return createAuthHandler(environment, (authenticated, appId, organizationId) =>
-      dispatchApp(authenticated, environment, context, { appId, organizationId }),
+    return createAuthHandler(
+      environment,
+      (authenticated, appId, caller) =>
+        dispatchApp(
+          authenticated,
+          environment,
+          context,
+          { appId, organizationId: caller.organizationId },
+          caller,
+        ),
+      async (authenticated, appId, caller, binding) => {
+        const app = await readApp(environment, `hosts/${new URL(authenticated.url).hostname}.json`);
+
+        if (!app || app.appId !== appId) return new Response(null, { status: 503 });
+        const grant = app.capabilities[binding];
+
+        if (!grant || grant.organizationId !== caller.organizationId)
+          return new Response(null, { status: 404 });
+
+        return context.exports
+          .ConnectorGateway({ props: { ...grant, appId, caller, browser: true } })
+          .fetch(authenticated);
+      },
     ).fetch(request);
   },
   async scheduled(

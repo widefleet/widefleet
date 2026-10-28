@@ -27,7 +27,7 @@ const hash = (source: string | Uint8Array) => createHash("sha256").update(source
 
 const token = "dynamic-connector-fixture-control-token-never-deploy";
 
-const organizationId = "11111111-1111-4111-8111-111111111111";
+const organizationId = "widefleet";
 
 const connectorSource = (version: string) => `
 import { WorkerEntrypoint, DurableObject } from 'cloudflare:workers';
@@ -116,6 +116,7 @@ export class Counter extends DurableObject {
 export class Reader extends WorkerEntrypoint { read() { console.info('named-rpc'); return 'reader'; } }
 export default class Connector extends WorkerEntrypoint {
   availabilityHold() { return availabilityHold(this.env, 'connector'); }
+  caller() { return this.ctx.props.caller; }
   #private = 'private-field';
   own = 'instance-secret';
   echo(value) { return value; }
@@ -175,6 +176,7 @@ export default class Connector extends WorkerEntrypoint {
   fail() { throw new Error('connector failure'); }
   fetch(request) {
     console.info('connector-fetch');
+    if (new URL(request.url).pathname.endsWith('/browser-caller')) return Response.json({ caller: this.ctx.props.caller, cookie: request.headers.get('cookie') }, {headers:{'set-cookie':'connector_test.state=own; Path=/_widefleet/connectors/CONNECTOR/; Secure; HttpOnly'}});
     if (new URL(request.url).pathname === '/fetch-failure') throw new Error('connector fetch failure');
     if (new URL(request.url).pathname === '/logging') {
     console.info('connector-request', {version: ${JSON.stringify(version)}});
@@ -699,6 +701,11 @@ export default { async fetch(request, env, ctx) {
       expect((await request("/.well-known/widefleet/connectors")).status).toBe(404);
     });
     it("preserves value RPC, named grants, private fields, and fetch", async () => {
+      expect(await json("/caller")).toMatchObject({
+        organizationId,
+        subject: "pairwise-subject",
+        name: "Example User",
+      });
       expect(await json("/values")).toEqual([0, [4, 2], 42, ["b"], "42"]);
       expect(await json("/reader")).toBe("reader");
       expect(await json("/then")).toBe(true);
@@ -714,6 +721,42 @@ export default { async fetch(request, env, ctx) {
         version: "v1",
         secret: "secret-one",
       });
+    });
+    it("exposes only opted-in browser entrypoints through a granted app binding", async () => {
+      const path = "/_widefleet/connectors/CONNECTOR/browser-caller";
+      expect((await request(path)).status).toBe(404);
+      expect((await request("/_widefleet/connectors/UNKNOWN/browser-caller")).status).toBe(404);
+      const candidate = release("browser");
+      candidate.metadata.browser_entrypoints = ["default"];
+      await stage(candidate);
+
+      const prepared = connectorActivation.parse(
+        z.object({ result: connectorActivation }).parse(
+          await json("/fixture/manage", {
+            action: "prepare",
+            organizationId,
+            version: crypto.randomUUID(),
+            release: candidate,
+            nativeBindings,
+            secrets: { TOKEN: "browser-secret" },
+            telemetry: null,
+          }),
+        ).result,
+      );
+
+      await activate(prepared);
+      const response = await request(path);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        caller: { organizationId, subject: "pairwise-subject", name: "Example User" },
+        cookie: null,
+      });
+      expect(response.headers.getSetCookie()).toEqual([
+        "connector_test.state=own; Path=/_widefleet/connectors/CONNECTOR/; Secure; HttpOnly",
+      ]);
+      expect((await request("/_widefleet/connectors/READER/browser-caller")).status).toBe(404);
+      await activate(await prepare("v1", "secret-one"));
+      expect((await request(path)).status).toBe(404);
     });
     it("reuses immutable modules across secret versions and stores only module references", async () => {
       const name = "storage-fixture";

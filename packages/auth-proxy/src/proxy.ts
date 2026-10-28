@@ -1,12 +1,20 @@
-import { appAccessSnapshot } from "@platform/contracts";
+import { appAccessSnapshot, connectorCaller } from "@platform/contracts";
 import { z } from "zod";
 import { createAuthentication, cookiePrefix } from "./authentication.ts";
 import { authConfiguration, type AuthConfiguration } from "./configuration.ts";
-import { proxyIdentity } from "./identity.ts";
+import { issuer, proxyIdentity } from "./identity.ts";
+
+export const connectorBrowserBinding = (url: URL) =>
+  /^\/_widefleet\/connectors\/([A-Za-z_$][A-Za-z0-9_$]*)\//.exec(url.pathname)?.[1] ?? null;
 
 interface Apps {
   resolve: (hostname: string) => Promise<z.infer<typeof appAccessSnapshot> | null>;
-  fetch: (request: Request) => Promise<Response>;
+  fetch: (request: Request, caller: z.infer<typeof connectorCaller>) => Promise<Response>;
+  connector?: (
+    request: Request,
+    caller: z.infer<typeof connectorCaller>,
+    binding: string,
+  ) => Promise<Response>;
 }
 
 const response = (status: number, message: string) =>
@@ -179,7 +187,50 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
       headers.set("x-auth-request-preferred-username", user.data.name);
       headers.set("x-auth-request-email", user.data.email);
       headers.set("x-auth-request-groups", user.data.groups.join(","));
-      const result = await apps.fetch(new Request(request, { headers }));
+
+      const caller = connectorCaller.parse({
+        organizationId: configuration.organizationId,
+        issuer: issuer(configuration.provider),
+        subject: user.data.id,
+        name: user.data.name,
+      });
+
+      const binding = connectorBrowserBinding(url);
+
+      if (binding) {
+        if (!apps.connector) return response(404, "Not found");
+        const prefix = cookiePrefix(configuration);
+
+        const companyCookie = (name: string) =>
+          [prefix, `__Secure-${prefix}`, `__Host-${prefix}`].some((value) =>
+            name.startsWith(`${value}.`),
+          );
+
+        const cookies = (request.headers.get("cookie") ?? "")
+          .split(";")
+          .filter((value) => !companyCookie(value.trim().split("=")[0] ?? ""));
+
+        if (cookies.some((value) => value.trim())) headers.set("cookie", cookies.join(";"));
+
+        const result = await apps.connector(
+          new Request(request, { headers, redirect: "manual" }),
+          caller,
+          binding,
+        );
+
+        const outgoing = new Response(result.body, result);
+        outgoing.headers.delete("set-cookie");
+
+        // Connector cookies may reach its browser route, but neither side can
+        // read or replace the company's sign-in cookies.
+        for (const cookie of result.headers.getSetCookie())
+          if (!companyCookie(cookie.split("=")[0]?.trim() ?? ""))
+            outgoing.headers.append("set-cookie", cookie);
+
+        return outgoing;
+      }
+
+      const result = await apps.fetch(new Request(request, { headers }), caller);
       const outgoing = new Response(result.body, result);
 
       outgoing.headers.delete("set-cookie");

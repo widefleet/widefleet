@@ -102,6 +102,52 @@ describe("Auth proxy session lifecycle", () => {
     expect((await visit()).status).toBe(200);
   });
 
+  it("passes only connector cookies and a verified caller to browser routes", async () => {
+    const received: Request[] = [];
+    const identities: { subject: string; organizationId: string }[] = [];
+
+    const proxy = createAuthProxy(configuration, {
+      ...apps,
+      connector: async (request, caller, binding) => {
+        received.push(request);
+        identities.push(caller);
+        expect(binding).toBe("GITHUB");
+        const headers = new Headers();
+        headers.append("set-cookie", "connector_github.state=test; Path=/");
+        headers.append(
+          "set-cookie",
+          "__Secure-platform_sso_widefleet.session_data=forged; Domain=apps.example.test; Path=/",
+        );
+
+        return new Response("Connector", { headers });
+      },
+    });
+
+    const path = new URL("/_widefleet/connectors/GITHUB/connect", app);
+    expect((await proxy.fetch(new Request(path))).status).toBe(401);
+
+    const response = await proxy.fetch(
+      new Request(path, {
+        headers: {
+          cookie: `${cookie}; connector_github.state=own`,
+          "x-auth-request-user": "forged",
+          authorization: "Bearer private",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(received[0]?.headers.get("cookie")).toBe("connector_github.state=own");
+    expect(received[0]?.headers.get("authorization")).toBeNull();
+    expect(identities).toEqual([
+      expect.objectContaining({ organizationId: "widefleet", subject: "pairwise-subject" }),
+    ]);
+    expect(response.headers.getSetCookie()).toEqual(["connector_github.state=test; Path=/"]);
+    access.groups = ["denied"];
+    expect((await proxy.fetch(new Request(path, { headers: { cookie } }))).status).toBe(403);
+    expect(received).toHaveLength(1);
+  });
+
   it("invalidates sessions when the identity source changes but preserves client-secret rotation", async () => {
     expect((await visit({ ...configuration, clientSecret: "rotated-client-secret" })).status).toBe(
       200,

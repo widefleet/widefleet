@@ -44,7 +44,10 @@ export const workerCode = async (
       );
 
   for (const [name, grant] of Object.entries(app.capabilities))
-    bindings.set(`WIDEFLEET_CONNECTOR_${name}`, context.exports.ConnectorGateway({ props: grant }));
+    bindings.set(
+      `WIDEFLEET_CONNECTOR_${name}`,
+      context.exports.ConnectorGateway({ props: { ...grant, appId: app.appId } }),
+    );
 
   const modules = new Map(Object.entries(worker.modules));
 
@@ -52,7 +55,18 @@ export const workerCode = async (
   // Import the full namespace before linking app and platform sibling modules.
   modules.set(
     "__widefleet_bootstrap.js",
-    "import * as workers from 'cloudflare:workers'; import './__widefleet_bindings.js'; export {default} from './__widefleet_app.js'; export {Events} from './__widefleet_events.js';",
+    `import * as workers from 'cloudflare:workers';
+import { withConnectorCaller } from './__widefleet_bindings.js';
+import app from './__widefleet_app.js';
+export {Events} from './__widefleet_events.js';
+const entrypoint = app.prototype instanceof workers.WorkerEntrypoint
+  ? class extends app {
+      fetch(request) { return withConnectorCaller(this.ctx.props?.connectorCaller, () => super.fetch(request)); }
+    }
+  : { ...app, fetch(request, env, ctx) {
+      return withConnectorCaller(ctx.props?.connectorCaller, () => app.fetch(request, env, ctx));
+    } };
+export default entrypoint;`,
   );
   modules.set(
     "__widefleet_app.js",
@@ -83,7 +97,7 @@ export const workerCode = async (
     compatibilityFlags:
       workflow && !app.metadata.compatibility_flags.includes("nodejs_compat")
         ? [...new Set([...app.metadata.compatibility_flags, "nodejs_als"])]
-        : app.metadata.compatibility_flags,
+        : worker.compatibilityFlags,
     mainModule: "__widefleet_bootstrap.js",
     modules: Object.fromEntries(modules),
     env: Object.fromEntries(bindings),

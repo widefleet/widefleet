@@ -1,5 +1,6 @@
 import type { KVNamespace } from "@cloudflare/workers-types";
-import { organizationIdentifier } from "@platform/contracts";
+import { connectorCaller, organizationIdentifier } from "@platform/contracts";
+import type { z } from "zod";
 import { authConfiguration } from "./configuration.ts";
 import {
   authControlPath,
@@ -112,7 +113,17 @@ export const manageAuthConfiguration = async (request: Request, environment: Aut
 
 export const createAuthHandler = (
   environment: AuthEnvironment,
-  runApp: (request: Request, appId: string, organizationId: string) => Promise<Response>,
+  runApp: (
+    request: Request,
+    appId: string,
+    caller: z.infer<typeof connectorCaller>,
+  ) => Promise<Response>,
+  runConnector?: (
+    request: Request,
+    appId: string,
+    caller: z.infer<typeof connectorCaller>,
+    binding: string,
+  ) => Promise<Response>,
 ) => ({
   async fetch(request: Request) {
     const url = new URL(request.url);
@@ -172,13 +183,22 @@ export const createAuthHandler = (
 
           return route?.organizationId === organizationId ? route.access : null;
         },
-        fetch: async (forwarded) => {
+        fetch: async (forwarded, caller) => {
           const route = await resolve(new URL(forwarded.url).hostname);
 
           if (!route || route.organizationId !== organizationId) return reply(404, "Not found");
           phase = "app-runtime";
 
-          return runApp(forwarded, route.appId, route.organizationId);
+          return runApp(forwarded, route.appId, caller);
+        },
+        connector: async (forwarded, caller, binding) => {
+          const route = await resolve(new URL(forwarded.url).hostname);
+
+          if (!route || route.organizationId !== organizationId || !runConnector)
+            return reply(404, "Not found");
+          phase = "app-runtime";
+
+          return runConnector(forwarded, route.appId, caller, binding);
         },
       });
 

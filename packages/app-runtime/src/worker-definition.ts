@@ -74,7 +74,9 @@ export const workerDefinition = async (
 
   return {
     compatibilityDate: input.metadata.compatibility_date,
-    compatibilityFlags: input.metadata.compatibility_flags,
+    compatibilityFlags: input.metadata.compatibility_flags.includes("nodejs_compat")
+      ? input.metadata.compatibility_flags
+      : [...new Set([...input.metadata.compatibility_flags, "nodejs_als"])],
     modules: Object.fromEntries(modules),
     env: Object.fromEntries(bindings),
   };

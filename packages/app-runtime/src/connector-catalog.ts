@@ -4,6 +4,7 @@ import {
   connectorActivation,
   connectorManagement,
   publishedCapability,
+  connectorCaller,
 } from "@platform/contracts";
 import { z } from "zod";
 import {
@@ -19,6 +20,7 @@ import { invokeConnector, type ConnectorValue } from "./connector-rpc.ts";
 import type { ParentEnvironment } from "./types.ts";
 import { requireOrganizationAvailability } from "./availability.ts";
 import { executionOptions } from "./execution-limits.ts";
+import { verifyConnectorCaller } from "./connector-caller.ts";
 
 export const connectorCatalog = (
   environment: ParentEnvironment,
@@ -126,9 +128,13 @@ declare class ConnectorReadiness extends WorkerEntrypoint {
 
 export class ConnectorGateway extends WorkerEntrypoint<
   ParentEnvironment,
-  z.infer<typeof publishedCapability>
+  z.infer<typeof publishedCapability> & {
+    appId?: string;
+    caller?: z.infer<typeof connectorCaller>;
+    browser?: boolean;
+  }
 > {
-  async #target() {
+  async #target(proof?: string) {
     const { organizationId, connector, entrypoint } = this.ctx.props;
     await requireOrganizationAvailability(this.env, organizationId);
     const active = await connectorCatalog(this.env, organizationId, connector).current();
@@ -136,20 +142,53 @@ export class ConnectorGateway extends WorkerEntrypoint<
     if (!active) throw new Error("Connector is not active");
     const snapshot = await readConnector(this.env, active);
 
+    if (
+      this.ctx.props.browser &&
+      !snapshot.release.metadata.browser_entrypoints?.includes(entrypoint)
+    )
+      return null;
+
     if (!snapshot.release.metadata.entrypoints.includes(entrypoint))
       throw new Error("Connector entrypoint is not available");
+
+    if (proof && !this.ctx.props.appId && !this.ctx.props.caller)
+      throw new Error("Connector caller has no originating app");
     const worker = loadConnectorWorker(snapshot, this.env, this.ctx);
 
-    return worker.getEntrypoint(
-      entrypoint === "default" ? undefined : entrypoint,
-      executionOptions(this.env.WIDEFLEET_EXECUTION_LIMITS, "connector"),
-    );
+    const caller =
+      this.ctx.props.caller ??
+      (proof && this.ctx.props.appId
+        ? await verifyConnectorCaller(
+            this.env.WIDEFLEET_CONTROL_TOKEN,
+            this.ctx.props.appId,
+            organizationId,
+            proof,
+          )
+        : null);
+
+    return worker.getEntrypoint(entrypoint === "default" ? undefined : entrypoint, {
+      ...executionOptions(this.env.WIDEFLEET_EXECUTION_LIMITS, "connector"),
+      props: { caller },
+    });
   }
-  async invoke(method: string, args: ConnectorValue[]) {
-    return invokeConnector(await this.#target(), method, args);
+  async invoke(method: string, args: ConnectorValue[], proof?: string) {
+    const target = await this.#target(proof);
+
+    if (!target) throw new Error("Connector entrypoint is unavailable");
+
+    return invokeConnector(target, method, args);
   }
   override async fetch(request: Request) {
-    return (await this.#target()).fetch(request, { signal: request.signal });
+    const proof = request.headers.get("x-widefleet-connector-caller") ?? undefined;
+    const target = await this.#target(proof);
+
+    if (!target) return new Response(null, { status: 404 });
+    const headers = new Headers(request.headers);
+    headers.delete("x-widefleet-connector-caller");
+
+    return target.fetch(new Request(request, { headers, redirect: "manual" }), {
+      signal: request.signal,
+    });
   }
 }
 

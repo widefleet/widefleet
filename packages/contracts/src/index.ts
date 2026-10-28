@@ -302,11 +302,18 @@ export const connectorUploadMetadata = workerConfiguration
       .array(bindingName)
       .min(1)
       .refine((names) => names.includes("default"), "celld requires a default Worker export"),
+    browser_entrypoints: z.array(bindingName).optional(),
     durable_objects: z
       .array(z.strictObject({ name: bindingName, class_name: bindingName }))
       .default([]),
   })
   .superRefine((metadata, context) => {
+    if (metadata.browser_entrypoints?.some((name) => !metadata.entrypoints.includes(name)))
+      context.addIssue({
+        code: "custom",
+        message: "Browser entrypoints must be exported connector entrypoints",
+      });
+
     const names = [
       ...metadata.bindings.map((binding) => binding.name),
       ...metadata.durable_objects.map((binding) => binding.name),
@@ -388,6 +395,13 @@ export const capabilityGrants = z.record(bindingName, capabilityGrant);
 
 export const publishedCapability = capabilityGrant.extend({
   organizationId: organizationIdentifier,
+});
+
+export const connectorCaller = z.strictObject({
+  organizationId: organizationIdentifier,
+  issuer: z.url(),
+  subject: z.string().min(1),
+  name: z.string(),
 });
 
 export const connectorPreparation = z.strictObject({

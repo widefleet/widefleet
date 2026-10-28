@@ -24,6 +24,24 @@ describe("connector secret contracts", () => {
   });
 });
 
+describe("connector browser entrypoints", () => {
+  const metadata = {
+    main_module: "worker.js",
+    compatibility_date: "2026-10-01",
+    entrypoints: ["default", "Public"],
+  };
+
+  it("leaves existing connector metadata unchanged and requires an exported entrypoint", () => {
+    expect(connectorUploadMetadata.parse(metadata)).not.toHaveProperty("browser_entrypoints");
+    expect(
+      connectorUploadMetadata.safeParse({ ...metadata, browser_entrypoints: ["Public"] }).success,
+    ).toBe(true);
+    expect(
+      connectorUploadMetadata.safeParse({ ...metadata, browser_entrypoints: ["Missing"] }).success,
+    ).toBe(false);
+  });
+});
+
 describe.each([workerMetadata, connectorUploadMetadata])("shared worker variables", (schema) => {
   const metadata = { main_module: "worker.js", compatibility_date: "2026-10-01" };
 

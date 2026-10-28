@@ -20,11 +20,12 @@ export const objectId = "00000000-0000-4000-8000-000000000002";
 export const createIdentityProvider = async (
   redirectUrl: string | string[] = "https://auth.apps.example.test/oauth2/widefleet/callback",
   requireNonce = true,
+  browser?: { hostname: string },
 ) => {
   const keys = await generateKeyPair("RS256", { extractable: true });
   const wrongKeys = await generateKeyPair("RS256");
   const publicKey = { ...(await exportJWK(keys.publicKey)), kid: "test", alg: "RS256", use: "sig" };
-  const codes = new Map<string, z.infer<typeof authorization>>();
+  const codes = new Map<string, z.infer<typeof authorization> & { person?: "Alice" | "Bob" }>();
 
   const settings = {
     available: true,
@@ -57,7 +58,7 @@ export const createIdentityProvider = async (
         response.end(
           JSON.stringify({
             issuer,
-            authorization_endpoint: `${origin}/authorize`,
+            authorization_endpoint: `${browser ? origin.replace("127.0.0.1", browser.hostname) : origin}/authorize`,
             token_endpoint: `${origin}/token`,
             jwks_uri: `${origin}/jwks`,
             response_types_supported: ["code"],
@@ -72,6 +73,26 @@ export const createIdentityProvider = async (
       } else if (url.pathname === "/authorize") {
         const parameters = authorization.parse(Object.fromEntries(url.searchParams));
 
+        if (browser && request.method === "GET") {
+          response.setHeader("content-type", "text/html; charset=utf-8");
+          response.end(
+            `<!doctype html><html lang="de"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Firmenanmeldung</title><style>body{font:17px system-ui;max-width:600px;margin:80px auto;padding:24px}button{font:inherit;padding:12px 18px;margin:8px;cursor:pointer}</style><h1>Firmenanmeldung</h1><p>Lokaler OIDC-Testanbieter für Widefleet. Wähle eine Testidentität:</p><form method="post"><button name="person" value="Alice">Als Alice anmelden</button><button name="person" value="Bob">Als Bob anmelden</button></form></html>`,
+          );
+
+          return;
+        }
+
+        let person: "Alice" | "Bob" | undefined;
+
+        if (browser) {
+          const chunks: Buffer[] = [];
+
+          for await (const chunk of request) chunks.push(z.instanceof(Buffer).parse(chunk));
+          person = z
+            .enum(["Alice", "Bob"])
+            .parse(new URLSearchParams(Buffer.concat(chunks).toString()).get("person"));
+        }
+
         if (requireNonce && !parameters.nonce) throw new Error("Missing OIDC nonce");
 
         if (
@@ -82,7 +103,7 @@ export const createIdentityProvider = async (
           throw new Error("Unexpected callback URL");
         const code = randomUUID();
 
-        codes.set(code, parameters);
+        codes.set(code, person ? { ...parameters, person } : parameters);
         const target = new URL(parameters.redirect_uri);
 
         target.searchParams.set("state", parameters.state);
@@ -133,9 +154,9 @@ export const createIdentityProvider = async (
                 _claim_sources: { src1: { endpoint: "https://untrusted.example.test/groups" } },
               }
             : {
-                display_name: settings.name,
+                display_name: parameters.person ?? settings.name,
                 mail: settings.email,
-                name: settings.name,
+                name: parameters.person ?? settings.name,
                 email: settings.email,
                 roles: settings.groups,
               }),
@@ -151,7 +172,7 @@ export const createIdentityProvider = async (
                 : issuer,
           )
           .setAudience(settings.failure === "audience" ? "other-app" : "app-login")
-          .setSubject("pairwise-subject");
+          .setSubject(parameters.person?.toLowerCase() ?? "pairwise-subject");
 
         if (settings.failure !== "missing-issued-at") claims.setIssuedAt();
 
@@ -202,7 +223,7 @@ export const createIdentityProvider = async (
     void handle().catch(() => response.writeHead(500).end());
   });
 
-  server.listen(0, "127.0.0.1");
+  server.listen(0, browser?.hostname ?? "127.0.0.1");
   await once(server, "listening");
   const origin = `http://127.0.0.1:${z.object({ port: z.number() }).parse(server.address()).port}`;
 

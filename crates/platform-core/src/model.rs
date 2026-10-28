@@ -320,6 +320,8 @@ pub struct ConnectorMetadata {
     #[serde(flatten)]
     pub worker: WorkerConfiguration,
     pub entrypoints: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub browser_entrypoints: Vec<String>,
     pub durable_objects: Vec<DurableObjectBinding>,
 }
 

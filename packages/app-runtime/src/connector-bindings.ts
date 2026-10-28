@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { config } from "./config.ts";
 import { connectorProxy } from "./connector-rpc.ts";
+import { currentConnectorCaller } from "./connector-context.ts";
 import type { ConnectorGateway } from "./connector-catalog.ts";
 import type { ConnectorState } from "./connector-state.ts";
 import { z } from "zod";
@@ -23,8 +24,22 @@ for (const name of config.capabilities ?? [])
     name,
     connectorProxy(
       (method, args) =>
-        service<ConnectorGateway>(`WIDEFLEET_CONNECTOR_${name}`).invoke(method, args),
-      (request) => service<ConnectorGateway>(`WIDEFLEET_CONNECTOR_${name}`).fetch(request),
+        service<ConnectorGateway>(`WIDEFLEET_CONNECTOR_${name}`).invoke(
+          method,
+          args,
+          currentConnectorCaller(),
+        ),
+      (request) => {
+        const headers = new Headers(request.headers);
+        const proof = currentConnectorCaller();
+        headers.delete("x-widefleet-connector-caller");
+
+        if (proof) headers.set("x-widefleet-connector-caller", proof);
+
+        return service<ConnectorGateway>(`WIDEFLEET_CONNECTOR_${name}`).fetch(
+          new Request(request, { headers }),
+        );
+      },
     ),
   );
 

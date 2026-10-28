@@ -194,6 +194,8 @@ struct ConnectorConfiguration {
     worker: crate::worker::Configuration,
     #[serde(default)]
     durable_objects: DurableObjects,
+    #[serde(default)]
+    browser_entrypoints: Vec<String>,
     #[serde(rename = "$schema")]
     _schema: Option<String>,
     #[serde(rename = "no_bundle")]
@@ -280,6 +282,7 @@ async fn package(config: &Path) -> Result<Package> {
                 },
             ),
             entrypoints,
+            browser_entrypoints: configuration.browser_entrypoints,
             durable_objects: configuration.durable_objects.bindings,
         },
         modules,
