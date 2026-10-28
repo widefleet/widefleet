@@ -1,3 +1,4 @@
+import type { Observation } from "../src/lib/server/observation.ts";
 import { getPlatformProxy } from "wrangler";
 import { createCloudflareAppSignIn } from "../src/lib/server/app-sign-in-cloudflare.ts";
 import type { CloudflareBindings } from "../src/lib/server/cloudflare-config.ts";
@@ -18,6 +19,7 @@ export const connectCloudflareSettings = async (
   cookieSecret: string,
   configPath: string,
   extension?: RuntimeExtension,
+  observation?: Observation,
 ) => {
   const selected = extension ?? (await loadRuntimeExtension({ configuration, database }));
 
@@ -40,7 +42,7 @@ export const connectCloudflareSettings = async (
             organizationId,
           ),
         Boolean(sendEmail),
-        selected.observation,
+        observation,
       ),
       invitations: createInvitationService(
         database,

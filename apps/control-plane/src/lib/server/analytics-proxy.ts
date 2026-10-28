@@ -100,12 +100,19 @@ export const proxyAnalyticsRequest = async (
     const options: RequestInit = {
       method: request.method,
       headers,
-      redirect: "error",
+      redirect: "manual",
       signal: AbortSignal.timeout(10_000),
     };
 
     if (body) options.body = body;
     const response = await transport(target, options);
+
+    if (response.status >= 300 && response.status < 400) {
+      await response.body?.cancel();
+
+      return new Response("Analytics unavailable", { status: 502 });
+    }
+
     const outgoing = new Headers({ "x-content-type-options": "nosniff" });
     const contentType = response.headers.get("content-type");
 

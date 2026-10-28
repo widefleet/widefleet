@@ -41,19 +41,27 @@ describe("Hosted installation initialization", () => {
     configPath?: string,
     overrides: NodeJS.ProcessEnv = {},
   ) =>
-    execute(process.execPath, ["tools/initialize-cloudflare.ts"], {
-      cwd: fileURLToPath(new URL("../../", import.meta.url)),
-      env: {
-        ...process.env,
-        ...environment,
-        PLATFORM_BOOTSTRAP_FILE: bootstrapFile,
-        WIDEFLEET_INITIALIZE_CONFIG: configPath,
-        APP_COOKIE_SECRET: undefined,
-        WIDEFLEET_RUNTIME_EXTENSION: undefined,
-        ...overrides,
+    execute(
+      process.execPath,
+      [
+        "--import",
+        fileURLToPath(new URL("../analytics-preload.fixture.ts", import.meta.url)),
+        "tools/initialize-cloudflare.ts",
+      ],
+      {
+        cwd: fileURLToPath(new URL("../../", import.meta.url)),
+        env: {
+          ...process.env,
+          ...environment,
+          PLATFORM_BOOTSTRAP_FILE: bootstrapFile,
+          WIDEFLEET_INITIALIZE_CONFIG: configPath,
+          APP_COOKIE_SECRET: undefined,
+          WIDEFLEET_RUNTIME_EXTENSION: undefined,
+          ...overrides,
+        },
+        timeout: 15_000,
       },
-      timeout: 15_000,
-    });
+    );
 
   beforeEach(async () => {
     await admin.query(`CREATE DATABASE "${name}"`);
@@ -127,23 +135,20 @@ describe("Hosted installation initialization", () => {
   }, 30_000);
 
   it("observes the first hosted administrator once and flushes before exiting", async () => {
-    const extensionPath = join(directory, "observation.mjs");
     const eventsPath = join(directory, "events.json");
-    await writeFile(
-      extensionPath,
-      `import {writeFile} from 'node:fs/promises';
-      export const createRuntimeExtension = () => {
-        const events = [];
-        return {observation: {capture: event => {events.push(event);}, close: () => writeFile(${JSON.stringify(eventsPath)}, JSON.stringify(events))}};
-      };`,
-    );
-    const overrides = { WIDEFLEET_RUNTIME_EXTENSION: extensionPath };
+
+    const overrides = {
+      POSTHOG_PROJECT_TOKEN: "phc_synthetic",
+      POSTHOG_ORIGIN: environment.PLATFORM_URL,
+      TEST_ANALYTICS_OUTPUT: eventsPath,
+    };
+
     await initialize(bootstrapPath, undefined, overrides);
     const { ownerId } = await readInstallation(database.db);
-    const expected = [{ event: "user_created", id: ownerId, userId: ownerId }];
-    expect(JSON.parse(await readFile(eventsPath, "utf8"))).toEqual(expected);
+    const expected = `${JSON.stringify({ event: "user_created", distinct_id: `user:${ownerId}` })}\n`;
+    expect(await readFile(eventsPath, "utf8")).toBe(expected);
     await initialize(bootstrapPath, undefined, overrides);
-    expect(JSON.parse(await readFile(eventsPath, "utf8"))).toEqual(expected);
+    expect(await readFile(eventsPath, "utf8")).toBe(expected);
   }, 30_000);
 
   it("requires app sign-in credentials for an email-enabled owner-only bootstrap", async () => {

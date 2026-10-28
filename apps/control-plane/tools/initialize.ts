@@ -11,7 +11,7 @@ const runtime = await initializeRuntime(
 );
 
 try {
-  await closeObservation(runtime.extension.observation);
+  await closeObservation(runtime.observation);
 } finally {
   await runtime.database.close();
 }

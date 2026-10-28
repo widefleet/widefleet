@@ -9,7 +9,9 @@ import { closeObservation } from "./observation.ts";
 export type { Runtime } from "./runtime-services.ts";
 
 const startRuntime = async () => {
-  const { configuration, database, settings, encryptionKey, extension } = await initializeRuntime();
+  const { configuration, database, settings, encryptionKey, extension, observation } =
+    await initializeRuntime();
+
   const storage = createStorage(configuration);
 
   const reporting = createReporting(configuration, database.db);
@@ -22,13 +24,14 @@ const startRuntime = async () => {
   });
 
   process.once("sveltekit:shutdown", () => {
-    void Promise.allSettled([reporting.close(), closeObservation(extension.observation)])
+    void Promise.allSettled([reporting.close(), closeObservation(observation)])
       .then(() => database.close())
       .catch((cause: unknown) => console.error("Database shutdown failed", cause));
   });
 
   return createRuntime({
     ...extension,
+    observation,
     configuration,
     database,
     settings,

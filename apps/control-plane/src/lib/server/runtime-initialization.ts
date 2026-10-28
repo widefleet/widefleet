@@ -90,11 +90,10 @@ export const initializeRuntime = async (
   ) => RuntimeExtension | Promise<RuntimeExtension> = createRuntimeExtension,
 ) => {
   const { keys, configuration, database } = await prepareInstallation(input, migrationsFolder);
-  let extension: RuntimeExtension | undefined;
+  const observation = createProductAnalytics(configuration);
 
   try {
-    extension = await createExtension({ database: database.db, configuration });
-    extension.observation ??= createProductAnalytics(configuration);
+    const extension = await createExtension({ database: database.db, configuration });
 
     const settings = createSettingsService(
       configuration,
@@ -102,7 +101,7 @@ export const initializeRuntime = async (
       keys.encryption,
       (organizationId) => createAppSignIn(configuration, keys.cookie, organizationId),
       Boolean(extension.sendEmail),
-      extension.observation,
+      observation,
     );
 
     const state = await readInstallation(database.db);
@@ -127,9 +126,16 @@ export const initializeRuntime = async (
 
     await registerCli(database.db, configuration);
 
-    return { configuration, database, settings, encryptionKey: keys.encryption, extension };
+    return {
+      configuration,
+      database,
+      settings,
+      encryptionKey: keys.encryption,
+      extension,
+      observation,
+    };
   } catch (cause) {
-    await closeObservation(extension?.observation);
+    await closeObservation(observation);
     await database.close();
     throw cause;
   }

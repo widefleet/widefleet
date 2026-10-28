@@ -122,6 +122,21 @@ describe("Server product analytics", () => {
     expect(batches.flat().map((event) => event.distinct_id)).toContain("user:29");
   });
 
+  it("absorbs upstream redirects without following them", async () => {
+    const transport = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(null, {
+        status: 307,
+        headers: { location: "https://untrusted.example/batch/" },
+      }),
+    );
+
+    const observer = createProductAnalytics(analyticsEnvironment, transport);
+    observer.capture({ event: "user_created", id: "fixture", userId: "fixture" });
+    await expect(observer.close()).resolves.toBeUndefined();
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(transport.mock.calls[0]?.[1]?.redirect).toBe("manual");
+  });
+
   it("bounds queues and absorbs network failures", async () => {
     const transport = vi.fn<typeof fetch>().mockRejectedValue(new TypeError("unavailable"));
     const observer = createProductAnalytics(analyticsEnvironment, transport);
@@ -135,6 +150,6 @@ describe("Server product analytics", () => {
     );
 
     expect(body.batch).toHaveLength(20);
-    expect(transport.mock.calls[0]?.[1]?.redirect).toBe("error");
+    expect(transport.mock.calls[0]?.[1]?.redirect).toBe("manual");
   });
 });

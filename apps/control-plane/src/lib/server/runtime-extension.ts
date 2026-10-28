@@ -4,10 +4,7 @@ import type { Configuration } from "./config.ts";
 import type { Database } from "./database.ts";
 import type { SendEmail } from "./email.ts";
 
-import type { Observation } from "./observation.ts";
-
 export interface RuntimeExtension {
-  observation?: Observation;
   organizationAccess?: OrganizationAccess;
   sendEmail?: SendEmail;
   scheduled?: (

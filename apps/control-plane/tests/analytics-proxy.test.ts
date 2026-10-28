@@ -21,7 +21,7 @@ describe("Analytics proxy", () => {
     const transport = vi.fn<typeof fetch>().mockResolvedValue(new Response("ok"));
     expect((await proxyAnalyticsRequest(request(`${path}?v=1`), transport))?.status).toBe(200);
     expect(transport.mock.calls[0]?.[0]).toEqual(new URL(`${destination}?v=1`));
-    expect(transport.mock.calls[0]?.[1]?.redirect).toBe("error");
+    expect(transport.mock.calls[0]?.[1]?.redirect).toBe("manual");
   });
 
   it("forwards payloads without application credentials or upstream cookies", async () => {
@@ -117,6 +117,19 @@ describe("Analytics proxy", () => {
       )?.status,
     ).toBe(413);
     expect(transport).not.toHaveBeenCalled();
+  });
+
+  it("rejects redirect responses without following their destination", async () => {
+    const transport = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(null, {
+        status: 307,
+        headers: { location: "https://untrusted.example/e/" },
+      }),
+    );
+
+    expect((await proxyAnalyticsRequest(request("/analytics/e/"), transport))?.status).toBe(502);
+    expect(transport).toHaveBeenCalledTimes(1);
+    expect(transport.mock.calls[0]?.[1]?.redirect).toBe("manual");
   });
 
   it("fails closed when the upstream redirects or is unavailable", async () => {

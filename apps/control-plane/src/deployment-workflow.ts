@@ -1,3 +1,4 @@
+import { runtimeConfigurationSchema } from "./lib/server/config.ts";
 import { analyticsEnvironmentSchema, readAnalyticsConfiguration } from "./lib/analytics-config.ts";
 import { observeDeploymentCompletion } from "./lib/server/deployment-observation.ts";
 import type { CloudflareWorkersModule } from "@cloudflare/workers-types";
@@ -13,11 +14,6 @@ export class DeploymentWorkflow extends WorkflowEntrypoint<
   CloudflareBindings,
   z.infer<typeof deploymentWorkflowCommand>
 > {
-  protected observeCompletion?(
-    command: z.infer<typeof deploymentWorkflowCommand>,
-    outcome: "succeeded" | "failed",
-  ): Promise<void>;
-
   override async run(
     event: CloudflareWorkersModule.WorkflowEvent<z.infer<typeof deploymentWorkflowCommand>>,
     step: CloudflareWorkersModule.WorkflowStep,
@@ -40,22 +36,18 @@ export class DeploymentWorkflow extends WorkflowEntrypoint<
         try {
           const configuration = {
             ...analyticsEnvironmentSchema.parse(this.env),
-            PLATFORM_URL: this.env.PLATFORM_URL,
+            PLATFORM_URL: runtimeConfigurationSchema.shape.PLATFORM_URL.parse(
+              this.env.PLATFORM_URL,
+            ),
           };
 
           const analytics = readAnalyticsConfiguration(configuration);
 
-          if (
-            this.observeCompletion ||
-            (analytics && analytics.origin === configuration.PLATFORM_URL)
-          )
+          if (analytics && analytics.origin === configuration.PLATFORM_URL)
             await step.do(
               "observe-completion",
               { retries: { limit: 0, delay: "1 second" }, timeout: "5 seconds" },
-              async () => {
-                if (this.observeCompletion) await this.observeCompletion(command, outcome);
-                else await observeDeploymentCompletion(configuration, command, outcome);
-              },
+              () => observeDeploymentCompletion(configuration, command, outcome),
             );
         } catch {
           // Optional observation cannot change a durable operation's outcome.

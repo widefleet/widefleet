@@ -146,8 +146,34 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           throw new Error("Incorrect API credential");
 
         if (url.pathname === "/fixture-observation") {
-          observations.push(observation.parse(JSON.parse(body)));
-          response.end();
+          const batch = z
+            .object({
+              batch: z.array(
+                z.object({
+                  event: z.string(),
+                  distinct_id: z.string(),
+                  properties: z.record(z.string(), z.json()),
+                }),
+              ),
+            })
+            .parse(JSON.parse(body));
+
+          for (const event of batch.batch) {
+            if (event.event !== "deployment_completed") continue;
+            observations.push(
+              observation.parse({
+                id: event.properties["deployment_id"],
+                outcome: event.properties["outcome"],
+                attribution: {
+                  userId: event.distinct_id.replace(/^user:/, ""),
+                  organizationId: event.properties["organization_id"],
+                },
+              }),
+            );
+          }
+
+          // Failed analytics delivery must not change deployment outcomes.
+          response.writeHead(503).end();
         } else if (url.pathname === "/fixture-runtime-version") {
           if (runtimeVersionUnavailable && !url.searchParams.has("readiness")) {
             response.statusCode = 503;
@@ -709,16 +735,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       import { createRuntimeReleaseService } from ${JSON.stringify(server + "runtime-releases.ts")};
       import { readCloudflareConfiguration } from ${JSON.stringify(server + "cloudflare-config.ts")};
       export * from './runtime.js';
-      import { DeploymentWorkflow as BaseDeploymentWorkflow } from ${JSON.stringify(workflow)};
-      export class DeploymentWorkflow extends BaseDeploymentWorkflow {
-        async observeCompletion(command, outcome) {
-          await fetch(${JSON.stringify(apiOrigin)} + '/fixture-observation', {
-            method: 'POST', headers: {authorization: 'Bearer local-provisioning-token'},
-            body: JSON.stringify({id: command.id, outcome, attribution: command.attribution}),
-          });
-          throw new Error('Synthetic observer failure must not change the operation outcome');
-        }
-      }
+      export { DeploymentWorkflow } from ${JSON.stringify(workflow)};
       export { AppOperationWorkflow } from ${JSON.stringify(appOperation)};
       import { createMigrationService } from ${JSON.stringify(server + "migrations.ts")};
       import { createWorkflowService } from ${JSON.stringify(server + "workflows.ts")};
@@ -726,6 +743,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       globalThis.fetch = (input, init) => {
         const request = new Request(input, init);
         const url = new URL(request.url);
+        if (url.origin === 'https://eu.i.posthog.com') {
+          request.headers.set('authorization', 'Bearer local-provisioning-token');
+          return nativeFetch(new Request(${JSON.stringify(apiOrigin)} + '/fixture-observation', request));
+        }
         return nativeFetch(url.origin === 'https://api.cloudflare.com' ? new Request(${JSON.stringify(apiOrigin)} + url.pathname + url.search, request) : request);
       };
       export class RuntimeManagement extends BaseManagement {
@@ -924,6 +945,9 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           compatibility_flags: ["nodejs_compat"],
           vars: {
             ...environment.environment,
+            PLATFORM_URL: `${environment.environment.PLATFORM_URL}/`,
+            POSTHOG_PROJECT_TOKEN: "phc_synthetic",
+            POSTHOG_ORIGIN: environment.environment.PLATFORM_URL,
             CLOUDFLARE_ACCOUNT_ID: "0".repeat(32),
             CLOUDFLARE_API_TOKEN: "local-provisioning-token",
             APP_RUNTIME_NAME: "fixture-runtime",

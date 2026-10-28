@@ -25,7 +25,16 @@ export const createProductAnalytics = (
         enableExceptionAutocapture: false,
         enableLocalEvaluation: false,
         disableCompression: true,
-        fetch: (url, options) => transport(url, { ...options, redirect: "error" }),
+        fetch: async (url, options) => {
+          const response = await transport(url, { ...options, redirect: "manual" });
+
+          if (response.status >= 300 && response.status < 400) {
+            await response.body?.cancel();
+            throw new Error("Analytics redirects are not allowed");
+          }
+
+          return response;
+        },
       })
     : undefined;
 

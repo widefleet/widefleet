@@ -19,13 +19,13 @@ import { initializeOrganization } from "../src/lib/server/organization.ts";
 import { z } from "zod";
 import { connectCloudflareSettings } from "./cloudflare-settings.ts";
 import { loadRuntimeExtension } from "./runtime-extension.ts";
-import { closeObservation, type Observation } from "../src/lib/server/observation.ts";
+import { closeObservation } from "../src/lib/server/observation.ts";
 
 const configuration = cloudflareConfigurationSchema.parse(process.env);
 
 const database = createDatabase(configuration);
 
-let observation: Observation | undefined;
+const observation = createProductAnalytics(configuration);
 
 try {
   await migrate(database.db, {
@@ -50,8 +50,6 @@ try {
     );
 
     const extension = await loadRuntimeExtension({ configuration, database: database.db });
-    observation = extension.observation ?? createProductAnalytics(configuration);
-    extension.observation = observation;
 
     const configPath =
       process.env["WIDEFLEET_INITIALIZE_CONFIG"] ??
@@ -80,12 +78,13 @@ try {
         secrets.APP_COOKIE_SECRET,
         configPath,
         extension,
+        observation,
       );
 
       try {
         await initializeBootstrap(
           services.settings,
-          createAuthentication(configuration, database.db, extension),
+          createAuthentication(configuration, database.db, { ...extension, observation }),
           database.db,
           bootstrap,
         );

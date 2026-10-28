@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import * as analytics from "../src/lib/server/analytics.ts";
 import * as extension from "../src/lib/server/runtime-extension.ts";
 import { initializeRuntime } from "../src/lib/server/runtime-initialization.ts";
 import { installation, organizationSettings } from "../src/lib/server/schema.ts";
@@ -22,13 +23,15 @@ it.each(["runtime", "source command"])(
     const events: ObservationEvent[] = [];
     const eventsPath = join(environment.configuration.PLATFORM_STATE_DIRECTORY, "observed.json");
 
-    const runtimeExtension = vi.spyOn(extension, "createRuntimeExtension").mockReturnValue({
-      observation: {
-        capture: (event) => {
-          events.push(event);
-        },
-        close: async () => {},
+    const productAnalytics = vi.spyOn(analytics, "createProductAnalytics").mockReturnValue({
+      capture: (event) => {
+        events.push(event);
       },
+      exception: () => {},
+      close: async () => {},
+    });
+
+    const runtimeExtension = vi.spyOn(extension, "createRuntimeExtension").mockReturnValue({
       sendEmail: async () => {
         throw new Error("Setup must not send mail");
       },
@@ -68,24 +71,31 @@ it.each(["runtime", "source command"])(
 
         await writeFile(
           extensionPath,
-          `import {writeFile} from 'node:fs/promises';
-          export const createRuntimeExtension = () => {
-            const events = [];
-            return { observation: { capture: event => { events.push(event); }, close: () => writeFile(${JSON.stringify(eventsPath)}, JSON.stringify(events)) },
-              sendEmail: async () => { throw new Error('Setup must not send mail'); }
-            };
-          };`,
+          `export const createRuntimeExtension = () => ({
+            sendEmail: async () => { throw new Error('Setup must not send mail'); }
+          });`,
         );
-        await promisify(execFile)(process.execPath, ["apps/control-plane/tools/initialize.ts"], {
-          cwd: fileURLToPath(new URL("../../../", import.meta.url)),
-          env: {
-            ...process.env,
-            ...environment.environment,
-            PLATFORM_BOOTSTRAP_FILE: bootstrap,
-            WIDEFLEET_RUNTIME_EXTENSION: extensionPath,
+        await promisify(execFile)(
+          process.execPath,
+          [
+            "--import",
+            fileURLToPath(new URL("./analytics-preload.fixture.ts", import.meta.url)),
+            "apps/control-plane/tools/initialize.ts",
+          ],
+          {
+            cwd: fileURLToPath(new URL("../../../", import.meta.url)),
+            env: {
+              ...process.env,
+              ...environment.environment,
+              PLATFORM_BOOTSTRAP_FILE: bootstrap,
+              POSTHOG_PROJECT_TOKEN: "phc_synthetic",
+              POSTHOG_ORIGIN: environment.configuration.PLATFORM_URL,
+              TEST_ANALYTICS_OUTPUT: eventsPath,
+              WIDEFLEET_RUNTIME_EXTENSION: extensionPath,
+            },
+            timeout: 20_000,
           },
-          timeout: 20_000,
-        });
+        );
       }
 
       const runtime = await initializeRuntime(
@@ -99,7 +109,9 @@ it.each(["runtime", "source command"])(
 
         if (mode === "runtime") expect(events).toEqual(expected);
         else {
-          expect(JSON.parse(await readFile(eventsPath, "utf8"))).toEqual(expected);
+          expect(await readFile(eventsPath, "utf8")).toBe(
+            `${JSON.stringify({ event: "user_created", distinct_id: `user:${ownerId}` })}\n`,
+          );
           expect(events).toEqual([]);
         }
 
@@ -123,6 +135,7 @@ it.each(["runtime", "source command"])(
       }
     } finally {
       runtimeExtension.mockRestore();
+      productAnalytics.mockRestore();
       await environment.close();
     }
   },
