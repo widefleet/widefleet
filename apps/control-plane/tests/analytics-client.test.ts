@@ -13,7 +13,6 @@ const spySdk = async () => {
     reset: vi.spyOn(posthog, "reset").mockImplementation(() => {}),
     captureException: vi.spyOn(posthog, "captureException").mockReturnValue(undefined),
     get_distinct_id: vi.spyOn(posthog, "get_distinct_id").mockReturnValue("user:a"),
-    getGroups: vi.spyOn(posthog, "getGroups").mockReturnValue({ organization: "org-a" }),
   };
 };
 
@@ -68,14 +67,27 @@ it("uses SDK defaults with only deployment and enabled-feature configuration", (
   expect(sdk.capture).not.toHaveBeenCalled();
 });
 
-it("resets account/organization transitions and clears identity on logout", () => {
+it("preserves identity across organization selection and resets only for account changes or logout", () => {
   analytics.updateClientContext(context);
-  analytics.updateClientContext({ ...context, organization: { id: "org-b", name: "Beta" } });
+  analytics.updateClientContext({ ...context, user: null, organization: null, role: null });
+  expect(sdk.reset).not.toHaveBeenCalled();
+  analytics.updateClientContext({
+    ...context,
+    organization: { id: "org-b", name: "Beta" },
+    role: "owner",
+  });
+  expect(sdk.reset).not.toHaveBeenCalled();
+  expect(sdk.identify).toHaveBeenLastCalledWith("user:a");
+  expect(sdk.group).toHaveBeenLastCalledWith("organization", "org-b", { name: "Beta" });
+  expect(sdk.register).toHaveBeenLastCalledWith({
+    scope: config.scope,
+    organization_role: "owner",
+  });
   analytics.updateClientContext({ ...context, user: { id: "b" } });
-  expect(sdk.reset).toHaveBeenCalledTimes(2);
+  expect(sdk.reset).toHaveBeenCalledOnce();
   expect(sdk.identify).toHaveBeenLastCalledWith("user:b");
   analytics.resetClientContext();
-  expect(sdk.reset).toHaveBeenCalledTimes(3);
+  expect(sdk.reset).toHaveBeenCalledTimes(2);
 });
 
 it("passes original errors and enables replay only when configured", () => {

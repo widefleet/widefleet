@@ -15,13 +15,7 @@ export const resetClientContext = () => {
 };
 
 export const updateClientContext = ({ user, organization, role, analytics }: ClientContext) => {
-  if (!analytics || window.location.origin !== analytics.origin) return;
-
-  if (!user || !organization) {
-    if (initialized && posthog.get_distinct_id().startsWith("user:")) resetClientContext();
-
-    return;
-  }
+  if (!analytics || window.location.origin !== analytics.origin || !user || !organization) return;
 
   if (!initialized) {
     posthog.init(analytics.projectToken, {
@@ -37,13 +31,8 @@ export const updateClientContext = ({ user, organization, role, analytics }: Cli
 
   const distinctId = `user:${user.id}`;
   const previousUser = posthog.get_distinct_id();
-  const previousOrganization: unknown = posthog.getGroups()["organization"];
 
-  if (
-    (previousUser.startsWith("user:") && previousUser !== distinctId) ||
-    (previousOrganization && previousOrganization !== organization.id)
-  )
-    resetClientContext();
+  if (previousUser.startsWith("user:") && previousUser !== distinctId) resetClientContext();
 
   posthog.identify(distinctId);
   posthog.group("organization", organization.id, { name: organization.name });
