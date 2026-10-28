@@ -9,6 +9,7 @@ import { workflowApp } from "./workflow-app.ts";
 import { workerCode } from "./worker.ts";
 import type { ParentEnvironment } from "./types.ts";
 import type { WorkflowRunner } from "./workflow-runner.ts";
+import { executionOptions } from "./execution-limits.ts";
 import {
   fault,
   restore,
@@ -24,10 +25,13 @@ import {
 class Session extends RpcTarget {
   #worker;
   #runner;
-  constructor(worker: WorkerStub) {
+  constructor(worker: WorkerStub, environment: ParentEnvironment) {
     super();
     this.#worker = worker;
-    this.#runner = worker.getEntrypoint<WorkflowRunner>("WorkflowRunner");
+    this.#runner = worker.getEntrypoint<WorkflowRunner>(
+      "WorkflowRunner",
+      executionOptions(environment, "workflow"),
+    );
   }
   begin(event: AppEvent) {
     return this.#runner.begin(event);
@@ -60,6 +64,7 @@ export class WorkflowSessions extends WorkerEntrypoint<ParentEnvironment> {
     // A fresh isolate per replay keeps app globals and callbacks instance-local.
     return new Session(
       this.env.WIDEFLEET_LOADER.load(await workerCode(app, this.env, this.ctx, start.workflow)),
+      this.env,
     );
   }
 }

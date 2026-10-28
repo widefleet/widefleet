@@ -1,3 +1,5 @@
+import { executionRecorder } from "./execution-limits.fixture.ts";
+
 export const appSource = `
 import { env as importedEnv, WorkflowEntrypoint } from 'cloudflare:workers';
 import { connect } from 'cloudflare:sockets';
@@ -162,10 +164,14 @@ export default {
 `;
 
 export const parentSource = `
-import runtime, { CloudflareWorkflowCatalog as RuntimeWorkflowCatalog, CloudflareAppWorkflow as RuntimeAppWorkflow } from './runtime.js';
+import runtime, { RuntimeManagement as BaseManagement, CloudflareWorkflowCatalog as RuntimeWorkflowCatalog, CloudflareAppWorkflow as RuntimeAppWorkflow } from './runtime.js';
 import { WorkerEntrypoint, WorkflowEntrypoint } from 'cloudflare:workers';
 import { connect } from 'cloudflare:sockets';
 export * from './runtime.js';
+${executionRecorder}
+export class RuntimeManagement extends BaseManagement {
+  constructor(ctx, env) { super(ctx, recordExecution(env)); }
+}
 const logRecords = [];
 const workflowWorkers = [];
 const collectorRequests = [];
@@ -185,7 +191,7 @@ export class CloudflareAppWorkflow extends RuntimeAppWorkflow {
   run(event, step) {
     const record = { instanceId: event.payload.id, key: null, loads: 0 };
     workflowWorkers.push(record);
-    const loader = this.env.WIDEFLEET_LOADER;
+    const loader = recordExecution(this.env).WIDEFLEET_LOADER;
     return new RuntimeAppWorkflow(this.ctx, {
       ...this.env,
       WIDEFLEET_LOADER: {
@@ -303,6 +309,9 @@ globalThis.fetch = async (input, init) => {
 export default {
   ...runtime,
   async fetch(request, env, ctx) {
+    env = recordExecution(env);
+    const executionPolicy = request.headers.get('x-fixture-execution-policy');
+    if (executionPolicy !== null) env.WIDEFLEET_EXECUTION_LIMITS = executionPolicy;
     const url = new URL(request.url);
     url.protocol = "https:";
     url.port = "";
@@ -312,6 +321,7 @@ export default {
       return env.RUNTIME_MANAGEMENT.fetch(request);
     }
     if (url.pathname === '/fixture/logs') return Response.json(logRecords);
+    if (url.pathname === '/fixture/executions') return Response.json(executions.splice(0));
     if (url.pathname === '/fixture/workflow-workers') return Response.json(workflowWorkers);
     if (url.pathname === '/fixture/collector-requests') return Response.json(collectorRequests);
     if (url.pathname === '/fixture/workflow-binding') {

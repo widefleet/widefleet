@@ -17,6 +17,7 @@ import runtimeRelease from "@platform/app-runtime/release" with { type: "json" }
 import { cloudflareResourceName } from "../../src/lib/server/cloudflare-provisioning.ts";
 import { initializeCloudflareRuntime } from "../../src/lib/server/organization-runtime.ts";
 import { cloudflareOperations, organizationRuntimes, jobs } from "../../src/lib/server/schema.ts";
+import { executionProfiles, executionRecorder } from "./execution-limits.fixture.ts";
 
 const runtimeSettings = z.object({
   annotations: z.object({ "workers/tag": z.string() }).optional(),
@@ -137,6 +138,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
       WIDEFLEET_CONTROL_TOKEN: "hosted-connector-control-key-never-deploy",
       WIDEFLEET_CONNECTOR_KEY: "ab".repeat(32),
       WIDEFLEET_CONFIGURATION: '{"crons":{},"queues":{}}',
+      WIDEFLEET_EXECUTION_LIMITS: JSON.stringify(executionProfiles),
     };
 
     await writeFile(
@@ -288,7 +290,18 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
       join(directory, "fixture.ts"),
       `
       import { RuntimeManagement as BaseManagement } from './loader.js';
+      import { ConnectorCatalog as BaseCatalog, ConnectorGateway as BaseGateway, ConnectorSupervisor as BaseSupervisor } from './loader.js';
       export * from './loader.js';
+      ${executionRecorder}
+      export class ConnectorCatalog extends BaseCatalog {
+        constructor(ctx, env) { super(ctx, recordExecution(env)); }
+      }
+      export class ConnectorGateway extends BaseGateway {
+        constructor(ctx, env) { super(ctx, recordExecution(env)); }
+      }
+      export class ConnectorSupervisor extends BaseSupervisor {
+        constructor(ctx, env) { super(ctx, recordExecution(env)); }
+      }
       export class RuntimeManagement extends BaseManagement {
         async fetch(request) {
           const input = await request.clone().json();
@@ -311,6 +324,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
       globalThis.fetch = (input, init) => {const request = new Request(input, init); const url = new URL(request.url); return nativeFetch(url.origin === 'https://api.cloudflare.com' ? new Request(${JSON.stringify(origin)} + url.pathname + url.search, request) : request);};
       export default {async fetch(request, env, ctx) {
         const url = new URL(request.url);
+        if (url.pathname === '/executions') return Response.json(executions.splice(0));
         const name = url.searchParams.get('connector') ?? ${JSON.stringify(release.name)};
         const props = {organizationId: url.searchParams.get('execution') ?? ${JSON.stringify(organizationId)}, connector:name, entrypoint:'default'};
         const gateway = () => ctx.exports.ConnectorGateway({props});
@@ -394,6 +408,14 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
 
     expect(current).toMatchObject({ state: "succeeded", appliedChecksum: result.checksum });
     expect(await command({ kind: "deploy", release, requestId })).toEqual(current);
+    expect(await (await worker.fetch("http://fixture/executions")).json()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          entrypoint: "WIDEFLEET_READY",
+          limits: executionProfiles.readiness,
+        }),
+      ]),
+    );
   }, 60_000);
   it("rejects unauthorized edits and oversized secrets before accepting operations", async () => {
     const before = await environment.database.db.select().from(cloudflareOperations);
@@ -485,6 +507,13 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Hosted connectors i
     expect(await (await worker.fetch("http://fixture/native")).json()).toMatchObject({
       result: { counter: 2, count: 2 },
     });
+    expect(await (await worker.fetch("http://fixture/executions")).json()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ entrypoint: null, limits: executionProfiles.connector }),
+        expect.objectContaining({ entrypoint: "Reader", limits: executionProfiles.connector }),
+        expect.objectContaining({ facet: "Counter", limits: executionProfiles.connector }),
+      ]),
+    );
 
     for (const name of ["MISSING", "LABEL", "WIDEFLEET_SECRET_API_KEY", "__proto__"])
       expect((await worker.fetch("http://fixture/secret?name=" + name)).status).toBe(400);

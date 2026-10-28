@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseConfigFileTextToJson } from "typescript";
 import { z } from "zod";
+import { executionLimits } from "@platform/app-runtime/execution-limits";
 import { runtimeConfigurationSchema } from "../src/lib/server/config.ts";
 import type { Configuration } from "../src/lib/server/config.ts";
 
@@ -14,6 +15,7 @@ export const hostedInstallation = z
     appDomain: z.hostname(),
     appZone: z.hostname(),
     queues: z.boolean().default(true),
+    executionLimits: executionLimits.optional(),
     emailFrom: z.email().optional(),
     hyperdriveId: z.string().regex(/^[a-f0-9]{32}$/),
   })
@@ -140,6 +142,10 @@ export const hostedConfigurations = async (
 
   const emailBindings: HostedEmailBindings = {};
   const emailVariables: Record<string, string> = {};
+  const executionVariables: Record<string, string> = {};
+
+  if (installation.executionLimits)
+    executionVariables["WIDEFLEET_EXECUTION_LIMITS"] = JSON.stringify(installation.executionLimits);
 
   if (installation.emailFrom) {
     emailBindings.send_email = [
@@ -177,6 +183,7 @@ export const hostedConfigurations = async (
       vars: {
         ...runtime.vars,
         ...z.record(z.string(), z.json()).optional().parse(runtimeOverrides["vars"]),
+        ...executionVariables,
       },
     },
     controlPlane: {

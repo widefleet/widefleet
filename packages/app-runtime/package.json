@@ -15,6 +15,7 @@
     "./release": "./dist/release.json",
     "./network": "./src/network.ts",
     "./logs": "./src/cloudflare-logs.ts",
+    "./execution-limits": "./src/execution-limits.ts",
     "./runtime-extension": "./src/runtime-extension.ts"
   },
   "scripts": {

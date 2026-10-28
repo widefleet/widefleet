@@ -13,6 +13,7 @@ import release from "@platform/app-runtime/release" with { type: "json" };
 import { z } from "zod";
 import { hashAsset } from "../../src/lib/server/asset-hash.ts";
 import { appSource, parentSource } from "./runtime.fixture.ts";
+import { executionProfiles } from "./execution-limits.fixture.ts";
 
 describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in workerd", () => {
   let directory: string;
@@ -179,6 +180,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
         // error behavior enabled on Workers since 2026-05-14.
         compatibility_flags: ["nodejs_compat", "workflows_preserve_non_retryable_error_message"],
         vars: {
+          WIDEFLEET_EXECUTION_LIMITS: JSON.stringify(executionProfiles),
           WIDEFLEET_HTTP_AVAILABILITY: "kv",
           WIDEFLEET_LOGS: "cloudflare",
           PRIVATE_ROOT_SECRET: "parent-only-fixture",
@@ -346,6 +348,71 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
       { record: { source: "browser", buildId: "older-build", deploymentId: null } },
       { record: { source: "browser", buildId: "older-build", deploymentId: null } },
     ]);
+  });
+
+  it("applies per-invocation profiles to cached HTTP, readiness, cron and workflow code", async () => {
+    await json("/fixture/executions");
+    expect((await fetchApp("/asset.txt")).status).toBe(200);
+    expect(await json("/fixture/executions")).toEqual([]);
+
+    const bindings = z.object({ keys: z.array(z.string()), imported: z.array(z.string()) });
+    const visible = bindings.parse(await json("/env"));
+    expect(visible.keys).not.toContain("WIDEFLEET_EXECUTION_LIMITS");
+    expect(visible.imported).not.toContain("WIDEFLEET_EXECUTION_LIMITS");
+    expect(await json("/fixture/executions")).toEqual([
+      { key: app.version, entrypoint: null, limits: executionProfiles.http },
+    ]);
+
+    const http = { cpuMs: 25, subRequests: 5 };
+    await json("/env", {
+      headers: {
+        "x-fixture-execution-policy": JSON.stringify({ ...executionProfiles, http }),
+      },
+    });
+    expect(await json("/fixture/executions")).toEqual([
+      { key: app.version, entrypoint: null, limits: http },
+    ]);
+
+    await json("/.well-known/widefleet/ready");
+    expect(await json("/fixture/executions")).toEqual([
+      { key: app.version, entrypoint: "Events", limits: executionProfiles.readiness },
+      { key: null, entrypoint: "WorkflowRunner", limits: executionProfiles.readiness },
+    ]);
+
+    await json("/fixture/scheduled", {
+      method: "POST",
+      body: JSON.stringify({ time: 1, reset: true, mode: "disabled" }),
+    });
+    expect(await json("/fixture/executions")).toEqual(
+      expect.arrayContaining([
+        { key: app.version, entrypoint: "Events", limits: executionProfiles.cron },
+        { key: preview.version, entrypoint: "Events", limits: executionProfiles.cron },
+      ]),
+    );
+
+    const path = `/workflow?id=${crypto.randomUUID()}&mode=sleep`;
+    await json(path, { method: "POST" });
+    await expect.poll(() => json(path), { timeout: 15_000 }).toMatchObject({ status: "complete" });
+    expect(await json("/fixture/executions")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          entrypoint: "WorkflowRunner",
+          limits: executionProfiles.workflow,
+        }),
+      ]),
+    );
+  }, 30_000);
+
+  it("does not invoke cached application code when a configured execution policy is invalid", async () => {
+    await json("/env");
+    await json("/fixture/executions");
+
+    for (const policy of ["", "{}", "not-json"])
+      expect(
+        (await fetchApp("/env", { headers: { "x-fixture-execution-policy": policy } })).status,
+      ).toBe(500);
+    expect(await json("/fixture/executions")).toEqual([]);
+    expect((await fetchApp("/env")).status).toBe(200);
   });
 
   it("captures native uncaught failures without replacing the app error", async () => {

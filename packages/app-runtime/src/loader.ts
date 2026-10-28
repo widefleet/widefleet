@@ -16,6 +16,7 @@ import type { Events } from "./events.ts";
 import type { ParentEnvironment, PublishedApp, Json } from "./types.ts";
 import { manageConnector } from "./connector-catalog.ts";
 import { readOrganizationAvailability } from "./availability.ts";
+import { executionOptions } from "./execution-limits.ts";
 
 export { ConnectorCatalog, ConnectorGateway } from "./connector-catalog.ts";
 
@@ -140,7 +141,7 @@ const dispatchApp = async (
 
   if (url.pathname === "/.well-known/widefleet/ready") {
     await run(app, environment, context, (worker) =>
-      worker.getEntrypoint<Events>("Events").ready(),
+      worker.getEntrypoint<Events>("Events", executionOptions(environment, "readiness")).ready(),
     );
 
     for (const binding of app.metadata.bindings) {
@@ -151,7 +152,12 @@ const dispatchApp = async (
       );
 
       try {
-        await worker.getEntrypoint<WorkflowRunner>("WorkflowRunner").ready();
+        await worker
+          .getEntrypoint<WorkflowRunner>(
+            "WorkflowRunner",
+            executionOptions(environment, "readiness"),
+          )
+          .ready();
       } finally {
         worker.dispose?.();
       }
@@ -190,7 +196,9 @@ const dispatchApp = async (
     // celld forwards incoming request cancellation only when the signal is
     // explicitly supplied to the subrequest.
     await run(app, environment, context, (worker) =>
-      worker.getEntrypoint().fetch(request, { signal: request.signal }),
+      worker
+        .getEntrypoint(undefined, executionOptions(environment, "http"))
+        .fetch(request, { signal: request.signal }),
     ),
     app.network.policy.browser,
   );
@@ -303,7 +311,7 @@ export default {
 
           const result = await run(app, environment, context, (worker) =>
             worker
-              .getEntrypoint<Events>("Events")
+              .getEntrypoint<Events>("Events", executionOptions(environment, "cron"))
               .runScheduled({ cron: controller.cron, scheduledTime: controller.scheduledTime }),
           );
 

@@ -14,6 +14,7 @@ import { restore, type Start, type StepConfig, type StepContext } from "./workfl
 import type { WorkflowRunner } from "./workflow-cloudflare-runner.ts";
 import { workflowObserver } from "./workflow-observation.ts";
 import type { WorkflowObservation } from "./runtime-extension.ts";
+import { executionOptions } from "./execution-limits.ts";
 import {
   captureWorkflow,
   nativeWorkflowError,
@@ -104,23 +105,25 @@ export class CloudflareAppWorkflow extends WorkflowEntrypoint<ParentEnvironment,
         workerCode(app, this.env, this.ctx, start.workflow, WIDEFLEET_CLOUDFLARE_WORKFLOW_SOURCE),
     );
 
-    const result = await worker.getEntrypoint<WorkflowRunner>("WorkflowRunner").run(
-      {
-        payload: start.params,
-        timestamp: event.timestamp,
-        instanceId: start.id,
-        workflowName: start.workflow,
-      },
-      new CloudflareWorkflowSteps(
-        step,
-        workflowObserver(this.ctx, this.env, {
-          appId: start.appId,
-          version: start.version,
-          workflow: start.workflow,
-          instanceId: event.instanceId,
-        }),
-      ),
-    );
+    const result = await worker
+      .getEntrypoint<WorkflowRunner>("WorkflowRunner", executionOptions(this.env, "workflow"))
+      .run(
+        {
+          payload: start.params,
+          timestamp: event.timestamp,
+          instanceId: start.id,
+          workflowName: start.workflow,
+        },
+        new CloudflareWorkflowSteps(
+          step,
+          workflowObserver(this.ctx, this.env, {
+            appId: start.appId,
+            version: start.version,
+            workflow: start.workflow,
+            instanceId: event.instanceId,
+          }),
+        ),
+      );
 
     if (result.error)
       throw result.native ? restore(result.error) : nativeWorkflowError(result.error);
