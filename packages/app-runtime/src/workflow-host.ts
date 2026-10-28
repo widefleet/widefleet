@@ -205,6 +205,7 @@ export class AppWorkflow extends WorkflowEntrypoint<CelldWorkflowEnvironment, St
             recorded.nativeName,
             { timeout: 60000, retries: { limit: 0, delay: 0 } },
             async () => {
+              await requireExecution(this.env, start);
               await ensure();
 
               const command = commands.get(recorded.id);
@@ -219,8 +220,6 @@ export class AppWorkflow extends WorkflowEntrypoint<CelldWorkflowEnvironment, St
           const name = `execute/${recorded.nativeName}`;
 
           const execute = async () => {
-            await requireExecution(this.env, start);
-
             switch (command.kind) {
               case "do":
                 return step.do(
@@ -243,14 +242,21 @@ export class AppWorkflow extends WorkflowEntrypoint<CelldWorkflowEnvironment, St
                 );
               case "sleep":
                 await step.sleep(name, command.duration);
+                await requireExecution(this.env, start);
 
                 return undefined;
               case "sleepUntil":
                 await step.sleepUntil(name, command.deadline);
+                await requireExecution(this.env, start);
 
                 return undefined;
-              case "waitForEvent":
-                return step.waitForEvent(name, command.options);
+              case "waitForEvent": {
+                const result = await step.waitForEvent(name, command.options);
+                await requireExecution(this.env, start);
+
+                return result;
+              }
+
               default:
                 throw new Error("Invalid Workflow command");
             }
@@ -262,11 +268,7 @@ export class AppWorkflow extends WorkflowEntrypoint<CelldWorkflowEnvironment, St
             // A selective restart must invalidate checkpoints that consumed
             // the target's result, including while another branch is active.
             execute().then(
-              async (value) => {
-                await requireExecution(this.env, start);
-
-                return { id: command.id, value };
-              },
+              (value) => ({ id: command.id, value }),
               (cause: unknown) => ({ id: command.id, error: fault(cause) }),
             ),
           );

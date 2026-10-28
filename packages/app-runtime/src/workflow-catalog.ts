@@ -200,6 +200,7 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
 
       return {
         status: "unknown" as const,
+        suspension: record.suspension ?? null,
         error: {
           name: "WorkflowInstanceUnavailable",
           message: "Workflow creation was not confirmed and its native instance is missing",
