@@ -1,7 +1,7 @@
 ---
 title: Runtime compatibility
 description: Supported runtime integrations and verified differences from Cloudflare.
-lastModified: 2026-10-23
+lastModified: 2026-10-28
 ---
 
 Widefleet currently uses celld **0.6.2**.
@@ -53,8 +53,11 @@ Widefleet integrates the native runtime as follows:
   See [connector logs](/guides/connectors#connector-logs) for log coverage and troubleshooting.
 - App removal clears deletable files and active references. Native D1/KV/Queue cells and shared deployment
   history may remain. See [app removal](/reference/runtime#app-removal).
-- Widefleet adds no blanket CPU/RAM, request, Worker-cache or origin-count caps.
-  Native runtime and transport limits still apply.
+- Cloudflare installations can configure per-invocation CPU and subrequest
+  budgets through [Dynamic Worker execution limits](/reference/configuration#dynamic-worker-execution-limits).
+  These are operator-selected profiles; resource enforcement is provided by
+  Cloudflare. Native runtime and transport limits continue to apply. Widefleet
+  adds no blanket RAM, request-rate, Worker-cache or origin-count caps.
 
 ## Node.js compatibility
 
