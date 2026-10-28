@@ -1,7 +1,7 @@
 ---
 title: IT connectors
 description: Deploy Dynamic Worker integrations and grant apps access to their APIs.
-lastModified: 2026-10-28
+lastModified: 2026-10-29
 ---
 
 IT can deploy a Worker from its own repository with `widefleet connector deploy`. Apps receive a scoped binding and call its methods directly, for example `env.ERP.listCustomers()`. Connector code runs as a Dynamic Worker with its own declared resources on both self-hosted celld and Cloudflare. After installation, connector code and secret updates activate independently of platform releases.
@@ -296,9 +296,14 @@ browser address and sign in. The response shows your verified identity and the
 connector's origin. Replace the verification handler with your connector's
 pages and provider flow before using it for account connections.
 
-Each organization and connector name has one HTTPS origin under the
-installation's app domain. Connector updates and new app bindings keep that
-origin unchanged. Renaming the connector or changing the installation domain
+Connector addresses follow the same naming convention as apps. For example,
+`github` uses `https://github-team.apps.example.com` when the organization's
+existing hostname suffix is `team`, or `https://github.apps.example.com` without
+a suffix. App and connector addresses share one namespace: deployment rejects
+an address already used by another app or connector. The usual DNS hostname
+length limits apply.
+
+Connector updates and new app bindings keep that origin unchanged. Renaming the connector or changing the installation domain
 changes the address. `env.WIDEFLEET_ORIGIN` supplies the origin to connector code;
 register provider callbacks using that origin and your callback path. Adding an
 app binding does not require another provider callback registration.
