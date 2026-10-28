@@ -39,14 +39,36 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it("stays inactive without configuration, on previews and before sign-in", () => {
+it("stays inactive without configuration and on previews", () => {
   analytics.updateClientContext({ ...context, analytics: null });
-  analytics.updateClientContext({ ...context, user: null });
   vi.stubGlobal("window", { location: { origin: "http://localhost" } });
   analytics.updateClientContext(context);
   analytics.captureBrowserException(new Error("Unconfigured"));
   expect(sdk.init).not.toHaveBeenCalled();
   expect(sdk.captureException).not.toHaveBeenCalled();
+});
+
+it("captures errors before sign-in or organization selection and identifies after entry", () => {
+  sdk.get_distinct_id.mockReturnValue("anonymous-id");
+  analytics.updateClientContext({ ...context, user: null, organization: null, role: null });
+  const error = new Error("Sign-in failed");
+  analytics.captureBrowserException(error);
+  expect(sdk.init).toHaveBeenCalledOnce();
+  expect(sdk.captureException).toHaveBeenCalledWith(error);
+  expect(sdk.register).toHaveBeenCalledWith({ scope: config.scope });
+  expect(sdk.identify).not.toHaveBeenCalled();
+  expect(sdk.group).not.toHaveBeenCalled();
+
+  analytics.updateClientContext({ ...context, organization: null });
+  expect(sdk.init).toHaveBeenCalledOnce();
+  expect(sdk.group).not.toHaveBeenCalled();
+  analytics.updateClientContext(context);
+  expect(sdk.identify).toHaveBeenCalledWith("user:a", {
+    name: "Alex Example",
+    email: "alex@example.test",
+  });
+  expect(sdk.group).toHaveBeenCalledWith("organization", "org-a", { name: "Alpha" });
+  expect(sdk.reset).not.toHaveBeenCalled();
 });
 
 it("uses SDK defaults with only deployment and enabled-feature configuration", () => {

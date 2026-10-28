@@ -15,7 +15,7 @@ export const resetClientContext = () => {
 };
 
 export const updateClientContext = ({ user, organization, role, analytics }: ClientContext) => {
-  if (!analytics || window.location.origin !== analytics.origin || !user || !organization) return;
+  if (!analytics || window.location.origin !== analytics.origin) return;
 
   if (!initialized) {
     posthog.init(analytics.projectToken, {
@@ -26,8 +26,11 @@ export const updateClientContext = ({ user, organization, role, analytics }: Cli
       capture_performance: { web_vitals: true },
       disable_session_recording: !analytics.sessionReplay,
     });
+    posthog.register({ scope: analytics.scope });
     initialized = true;
   }
+
+  if (!user || !organization) return;
 
   const distinctId = `user:${user.id}`;
   const previousUser = posthog.get_distinct_id();
