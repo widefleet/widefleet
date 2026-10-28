@@ -2,7 +2,7 @@ import posthog from "posthog-js";
 import type { AnalyticsConfiguration } from "./analytics-config.ts";
 
 export interface ClientContext {
-  user: { id: string } | null;
+  user: { id: string; name: string; email: string } | null;
   organization: { id: string; name: string } | null;
   role: string | null;
   analytics: AnalyticsConfiguration | null;
@@ -34,7 +34,7 @@ export const updateClientContext = ({ user, organization, role, analytics }: Cli
 
   if (previousUser.startsWith("user:") && previousUser !== distinctId) resetClientContext();
 
-  posthog.identify(distinctId);
+  posthog.identify(distinctId, { name: user.name, email: user.email });
   posthog.group("organization", organization.id, { name: organization.name });
   posthog.register({ scope: analytics.scope, organization_role: role });
 };
