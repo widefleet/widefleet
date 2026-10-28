@@ -42,6 +42,33 @@ const configuration = {
 };
 
 describe("Hosted resource provisioning", () => {
+  it("validates and applies execution profiles only to the parent runtime", async () => {
+    const executionLimits = {
+      http: { cpuMs: 100, subRequests: 50 },
+      connector: { cpuMs: 250, subRequests: 50 },
+      cron: { cpuMs: 1000, subRequests: 200 },
+      workflow: { cpuMs: 5000, subRequests: 500 },
+      readiness: { cpuMs: 100, subRequests: 10 },
+    };
+
+    const configured = hostedInstallation.parse({ ...installation, executionLimits });
+
+    const configs = await hostedConfigurations(configured, ids, "email", {
+      vars: { OBSERVER_LABEL: "fixture", WIDEFLEET_EXECUTION_LIMITS: "stale-policy" },
+    });
+
+    expect(configs.runtime.vars["WIDEFLEET_EXECUTION_LIMITS"]).toBe(
+      JSON.stringify(executionLimits),
+    );
+    expect(configs.runtime.vars["OBSERVER_LABEL"]).toBe("fixture");
+    expect(configs.controlPlane.vars).not.toHaveProperty("WIDEFLEET_EXECUTION_LIMITS");
+    expect(configs.initialize.vars).not.toHaveProperty("WIDEFLEET_EXECUTION_LIMITS");
+    expect((await hostedConfigurations(installation, ids)).runtime.vars).not.toHaveProperty(
+      "WIDEFLEET_EXECUTION_LIMITS",
+    );
+    expect(() => hostedInstallation.parse({ ...installation, executionLimits: {} })).toThrow();
+  });
+
   it("configures Queue deployment admission without removing existing runtime bindings", async () => {
     expect(installation.queues).toBe(true);
 

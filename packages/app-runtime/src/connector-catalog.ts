@@ -18,6 +18,7 @@ import { loadConnectorWorker } from "./connector-code.ts";
 import { invokeConnector, type ConnectorValue } from "./connector-rpc.ts";
 import type { ParentEnvironment } from "./types.ts";
 import { requireOrganizationAvailability } from "./availability.ts";
+import { executionOptions } from "./execution-limits.ts";
 
 export const connectorCatalog = (
   environment: ParentEnvironment,
@@ -80,7 +81,12 @@ export class ConnectorCatalog extends DurableObject<ParentEnvironment> {
     const worker = loadConnectorWorker(snapshot, this.env, this.ctx);
 
     try {
-      await worker.getEntrypoint<ConnectorReadiness>("WIDEFLEET_READY").ready();
+      await worker
+        .getEntrypoint<ConnectorReadiness>(
+          "WIDEFLEET_READY",
+          executionOptions(this.env.WIDEFLEET_EXECUTION_LIMITS, "readiness"),
+        )
+        .ready();
     } catch (error) {
       worker.dispose?.();
       throw error;
@@ -134,7 +140,10 @@ export class ConnectorGateway extends WorkerEntrypoint<
       throw new Error("Connector entrypoint is not available");
     const worker = loadConnectorWorker(snapshot, this.env, this.ctx);
 
-    return worker.getEntrypoint(entrypoint === "default" ? undefined : entrypoint);
+    return worker.getEntrypoint(
+      entrypoint === "default" ? undefined : entrypoint,
+      executionOptions(this.env.WIDEFLEET_EXECUTION_LIMITS, "connector"),
+    );
   }
   async invoke(method: string, args: ConnectorValue[]) {
     return invokeConnector(await this.#target(), method, args);

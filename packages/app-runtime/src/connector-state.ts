@@ -7,6 +7,7 @@ import { loadConnectorWorker } from "./connector-code.ts";
 import { invokeConnector, type ConnectorValue } from "./connector-rpc.ts";
 import type { ParentEnvironment } from "./types.ts";
 import { requireOrganizationAvailability } from "./availability.ts";
+import { executionOptions } from "./execution-limits.ts";
 
 const stateIdentity = connectorActivation
   .omit({ version: true })
@@ -121,7 +122,10 @@ export class ConnectorSupervisor extends DurableObject<ParentEnvironment> {
       throw new Error("Connector Durable Object class is not declared");
     const worker = loadConnectorWorker(snapshot, this.env, this.ctx);
 
-    const facetClass = worker.getDurableObjectClass<LoadedConnectorFacet>(identity.className);
+    const facetClass = worker.getDurableObjectClass<LoadedConnectorFacet>(
+      identity.className,
+      executionOptions(this.env.WIDEFLEET_EXECUTION_LIMITS, "connector"),
+    );
 
     if (this.#current && this.#current.identity.version !== identity.version) {
       do {
