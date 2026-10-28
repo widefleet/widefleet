@@ -200,9 +200,15 @@ const dispatchApp = async (
     if (asset.status !== 404) return browserPolicy(asset, app.network.policy.browser);
   }
 
-  const proof = caller
-    ? await signConnectorCaller(environment.WIDEFLEET_CONTROL_TOKEN, app.appId, caller)
-    : undefined;
+  const proof =
+    authenticated && caller
+      ? await signConnectorCaller(
+          environment.WIDEFLEET_CONTROL_TOKEN,
+          app.appId,
+          authenticated.organizationId,
+          caller,
+        )
+      : undefined;
 
   return browserPolicy(
     // celld forwards incoming request cancellation only when the signal is
@@ -301,21 +307,15 @@ export default {
 
     return createAuthHandler(
       environment,
-      (authenticated, appId, caller) =>
-        dispatchApp(
-          authenticated,
-          environment,
-          context,
-          { appId, organizationId: caller.organizationId },
-          caller,
-        ),
-      async (authenticated, appId, caller, binding) => {
+      (authenticated, appId, organizationId, caller) =>
+        dispatchApp(authenticated, environment, context, { appId, organizationId }, caller),
+      async (authenticated, appId, organizationId, caller, binding) => {
         const app = await readApp(environment, `hosts/${new URL(authenticated.url).hostname}.json`);
 
         if (!app || app.appId !== appId) return new Response(null, { status: 503 });
         const grant = app.capabilities[binding];
 
-        if (!grant || grant.organizationId !== caller.organizationId)
+        if (!grant || grant.organizationId !== organizationId)
           return new Response(null, { status: 404 });
 
         return context.exports

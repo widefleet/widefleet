@@ -107,7 +107,7 @@ describe("Auth proxy session lifecycle", () => {
 
   it("protects every organization's sign-in cookies on connector browser routes", async () => {
     const received: Request[] = [];
-    const identities: { subject: string; organizationId: string }[] = [];
+    const identities: { issuer: string; subject: string; name: string }[] = [];
 
     const otherCookie = await login({
       ...configuration,
@@ -157,7 +157,7 @@ describe("Auth proxy session lifecycle", () => {
     expect(received[0]?.headers.get("cookie")).toBe("connector_test.state=own");
     expect(received[0]?.headers.get("authorization")).toBeNull();
     expect(identities).toEqual([
-      expect.objectContaining({ organizationId: "widefleet", subject: "pairwise-subject" }),
+      { issuer: idp.origin, subject: "pairwise-subject", name: "Example User" },
     ]);
     expect(response.headers.getSetCookie()).toEqual(["connector_test.state=test; Path=/"]);
     access.groups = ["denied"];

@@ -299,6 +299,7 @@ describe.runIf(process.env["RUN_CONNECTOR_TESTS"] === "1").each(["celld", "worke
     const application = applicationSource(imports, result);
     let directory: string;
     let origin: string;
+    let identityIssuer: string;
     let native: ReturnType<typeof spawn> | undefined;
     let hosted: TestHarness | undefined;
     let logs = "";
@@ -482,6 +483,7 @@ describe.runIf(process.env["RUN_CONNECTOR_TESTS"] === "1").each(["celld", "worke
       telemetryUrl = `http://127.0.0.1:${z.object({ port: z.number() }).parse(collector.address()).port}`;
       directory = await mkdtemp(join(tmpdir(), `dynamic-connectors-${runtime}-`));
       const identity = await runtimeIdentity();
+      identityIssuer = z.object({ issuer: z.url() }).parse(identity.configuration.provider).issuer;
       const encrypted = await encodeConfiguration(token, identity.configuration);
 
       const app = publishedApp.parse({
@@ -701,8 +703,8 @@ export default { async fetch(request, env, ctx) {
       expect((await request("/.well-known/widefleet/connectors")).status).toBe(404);
     });
     it("preserves value RPC, named grants, private fields, and fetch", async () => {
-      expect(await json("/caller")).toMatchObject({
-        organizationId,
+      expect(await json("/caller")).toEqual({
+        issuer: identityIssuer,
         subject: "pairwise-subject",
         name: "Example User",
       });
@@ -747,8 +749,12 @@ export default { async fetch(request, env, ctx) {
       await activate(prepared);
       const response = await request(path);
       expect(response.status).toBe(200);
-      expect(await response.json()).toMatchObject({
-        caller: { organizationId, subject: "pairwise-subject", name: "Example User" },
+      expect(await response.json()).toEqual({
+        caller: {
+          issuer: identityIssuer,
+          subject: "pairwise-subject",
+          name: "Example User",
+        },
         cookie: null,
       });
       expect(response.headers.getSetCookie()).toEqual([

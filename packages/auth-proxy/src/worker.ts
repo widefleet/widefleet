@@ -116,11 +116,13 @@ export const createAuthHandler = (
   runApp: (
     request: Request,
     appId: string,
+    organizationId: string,
     caller: z.infer<typeof connectorCaller>,
   ) => Promise<Response>,
   runConnector?: (
     request: Request,
     appId: string,
+    organizationId: string,
     caller: z.infer<typeof connectorCaller>,
     binding: string,
   ) => Promise<Response>,
@@ -189,7 +191,7 @@ export const createAuthHandler = (
           if (!route || route.organizationId !== organizationId) return reply(404, "Not found");
           phase = "app-runtime";
 
-          return runApp(forwarded, route.appId, caller);
+          return runApp(forwarded, route.appId, organizationId, caller);
         },
         connector: async (forwarded, caller, binding) => {
           const route = await resolve(new URL(forwarded.url).hostname);
@@ -198,7 +200,7 @@ export const createAuthHandler = (
             return reply(404, "Not found");
           phase = "app-runtime";
 
-          return runConnector(forwarded, route.appId, caller, binding);
+          return runConnector(forwarded, route.appId, organizationId, caller, binding);
         },
       });
 

@@ -189,7 +189,6 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
       headers.set("x-auth-request-groups", user.data.groups.join(","));
 
       const caller = connectorCaller.parse({
-        organizationId: configuration.organizationId,
         issuer: issuer(configuration.provider),
         subject: user.data.id,
         name: user.data.name,

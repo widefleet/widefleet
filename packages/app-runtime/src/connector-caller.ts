@@ -1,9 +1,10 @@
-import { connectorCaller } from "@platform/contracts";
+import { connectorCaller, organizationIdentifier } from "@platform/contracts";
 import { z } from "zod";
 
 const assertion = z.strictObject({
   purpose: z.literal("widefleet-connector-caller/v1"),
   appId: z.uuid(),
+  organizationId: organizationIdentifier,
   caller: connectorCaller,
   expiresAt: z.number().int(),
 });
@@ -33,6 +34,7 @@ const key = (secret: string) =>
 export const signConnectorCaller = async (
   secret: string,
   appId: string,
+  organizationId: string,
   caller: z.infer<typeof connectorCaller>,
 ) => {
   const value = new TextEncoder().encode(
@@ -40,6 +42,7 @@ export const signConnectorCaller = async (
       assertion.parse({
         purpose: "widefleet-connector-caller/v1",
         appId,
+        organizationId,
         caller,
         expiresAt: Date.now() + 300_000,
       }),
@@ -69,7 +72,7 @@ export const verifyConnectorCaller = async (
 
   if (
     result.appId !== appId ||
-    result.caller.organizationId !== organizationId ||
+    result.organizationId !== organizationId ||
     result.expiresAt <= Date.now()
   )
     throw new Error("Connector caller is expired or belongs to another app");

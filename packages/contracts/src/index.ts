@@ -398,7 +398,6 @@ export const publishedCapability = capabilityGrant.extend({
 });
 
 export const connectorCaller = z.strictObject({
-  organizationId: organizationIdentifier,
   issuer: z.url(),
   subject: z.string().min(1),
   name: z.string(),
