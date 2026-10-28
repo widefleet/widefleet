@@ -6,6 +6,7 @@ import { member, user, organization } from "./auth-schema.ts";
 import type { Database, DatabaseExecutor } from "./database.ts";
 import { InvalidOperation } from "./errors.ts";
 import { installation, organizationSettings } from "./schema.ts";
+import { observe, type Observation } from "./observation.ts";
 
 export const installationId = "widefleet";
 
@@ -55,6 +56,7 @@ export const createInstallationOwner = async (
   database: Database,
   input: z.infer<typeof setupOwner>,
   bootstrapPending = false,
+  observation?: Observation,
 ) => {
   if ((await readInstallation(database)).ownerId)
     throw new InvalidOperation({
@@ -64,7 +66,7 @@ export const createInstallationOwner = async (
 
   const owner = setupOwner.parse(input);
 
-  return database.transaction(async (transaction) => {
+  const created = await database.transaction(async (transaction) => {
     const [state] = await transaction
       .select()
       .from(installation)
@@ -106,4 +108,8 @@ export const createInstallationOwner = async (
 
     return { id: userId, name: owner.name, email: owner.email.toLowerCase() };
   });
+
+  observe(observation, { event: "user_created", id: created.id, userId: created.id });
+
+  return created;
 };

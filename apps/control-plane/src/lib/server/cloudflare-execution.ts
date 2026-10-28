@@ -123,7 +123,7 @@ export const createCloudflareExecution = (
         catch: (cause) =>
           new StorageUnavailable({ message: "Cloudflare deployment status is unavailable", cause }),
       }),
-    deploy: async (deployment, requestId, rollback = false) => {
+    deploy: async (deployment, requestId, rollback = false, actor) => {
       const valid = await transact(database, async (transaction) => {
         const [artifact] = await transaction
           .select()
@@ -161,7 +161,7 @@ export const createCloudflareExecution = (
 
       if (valid.isErr()) return valid;
 
-      const accepted = await admit({
+      const input: z.infer<typeof deploymentCommand> = {
         kind: "deploy",
         id: deployment.id,
         appId: deployment.appId,
@@ -169,7 +169,12 @@ export const createCloudflareExecution = (
         createdAt: deployment.createdAt,
         requestId,
         rollback,
-      });
+      };
+
+      if (actor)
+        input.attribution = { userId: actor.id, organizationId: actor.application.organizationId };
+
+      const accepted = await admit(input);
 
       if (accepted.isErr()) return accepted;
 

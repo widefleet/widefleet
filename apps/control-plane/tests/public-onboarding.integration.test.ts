@@ -9,6 +9,8 @@ import { createStorage } from "../src/lib/server/storage.ts";
 import { member, organization, session, user } from "../src/lib/server/auth-schema.ts";
 import { organizationRuntimes } from "../src/lib/server/schema.ts";
 import type { EmailMessage } from "../src/lib/server/email.ts";
+import type { ObservationEvent } from "../src/lib/server/observation.ts";
+import { createOnboardingService } from "../src/lib/server/onboarding.ts";
 
 describe("Public account registration and organization onboarding", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
@@ -127,8 +129,65 @@ describe("Public account registration and organization onboarding", () => {
     expect(response.status).toBe(403);
   });
 
+  it("records a created organization even when app sign-in publication fails", async () => {
+    const { auth, result, headers } = await register("publication-failure@mail.test");
+    headers.set("origin", environment.configuration.PLATFORM_URL);
+
+    const events: ObservationEvent[] = [];
+    const record = { id: crypto.randomUUID(), name: "Created Team", slug: "created-team" };
+
+    const identity = createIdentityService(
+      auth,
+      environment.database.db,
+      environment.configuration,
+    );
+
+    const person = (
+      await identity.authenticateUser(
+        new Request(environment.configuration.PLATFORM_URL, { headers }),
+        "platform:write",
+      )
+    ).unwrap();
+
+    const onboarding = createOnboardingService(
+      environment.database.db,
+      {
+        publish: async () => {
+          throw new Error("Publication failed");
+        },
+      },
+      async () => {
+        await environment.database.db
+          .insert(organization)
+          .values({ ...record, createdAt: new Date() });
+
+        return record;
+      },
+      {
+        capture: (event) => {
+          events.push(event);
+        },
+        close: async () => {},
+      },
+    );
+
+    await expect(
+      onboarding.create(person, { name: record.name, slug: record.slug }),
+    ).rejects.toThrow("Publication failed");
+    expect(events).toEqual([
+      {
+        event: "organization_created",
+        id: record.id,
+        userId: result.user.id,
+        organizationId: record.id,
+        properties: { source: "self_service" },
+      },
+    ]);
+  });
+
   it("authenticates organization creation independently of membership and rejects foreign origins and company sessions", async () => {
     const calls: string[] = [];
+    const events: ObservationEvent[] = [];
     const record = { id: crypto.randomUUID(), name: "My Team", slug: "a".repeat(50) };
 
     const runtime = await createRuntime({
@@ -166,6 +225,12 @@ describe("Public account registration and organization onboarding", () => {
 
         return record;
       },
+      observation: {
+        capture: (event) => {
+          events.push(event);
+        },
+        close: async () => {},
+      },
     })();
 
     const api = createApi(runtime);
@@ -196,6 +261,15 @@ describe("Public account registration and organization onboarding", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(record);
     expect(calls).toEqual([result.user.id]);
+    expect(events).toEqual([
+      {
+        event: "organization_created",
+        id: record.id,
+        userId: result.user.id,
+        organizationId: record.id,
+        properties: { source: "self_service" },
+      },
+    ]);
     const selected = await runtime.identity.selectOrganization(request(headers), record.id);
     expect(selected.isOk()).toBe(true);
 

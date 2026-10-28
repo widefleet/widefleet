@@ -16,6 +16,7 @@
   import type { z } from "zod";
   import type { organizationChoice } from "@platform/contracts";
   import type { Principal } from "#server/identity";
+  import { resetClientContext } from "#lib/analytics-client";
   import { authClient } from "#lib/auth-client";
   import { setWorkspaceContext } from "#lib/workspace-context";
   import { Button } from "#shadcn/components/ui/button/index.js";
@@ -89,7 +90,10 @@
       const result = await authClient.signOut();
 
       if (result.error) error = "Could not sign out. Please try again.";
-      else window.location.assign("/sign-in");
+      else {
+        resetClientContext();
+        window.location.assign("/sign-in");
+      }
     } catch {
       error = "Could not sign out. Check your connection.";
     } finally {

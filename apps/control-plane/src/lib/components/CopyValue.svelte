@@ -38,6 +38,7 @@
 <div class="bg-muted/50 flex min-w-0 items-start gap-2 rounded-lg border px-3 py-2.5">
   <code
     class="min-w-0 flex-1 self-center text-xs leading-6 whitespace-pre-wrap wrap-anywhere select-all"
+    class:ph-no-capture={secret}
     data-private={secret || undefined}>{value}</code
   >
   <Button

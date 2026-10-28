@@ -8,7 +8,9 @@ import { createStorage } from "./storage.ts";
 export type { Runtime } from "./runtime-services.ts";
 
 const startRuntime = async () => {
-  const { configuration, database, settings, encryptionKey, extension } = await initializeRuntime();
+  const { configuration, database, settings, encryptionKey, extension, observation } =
+    await initializeRuntime();
+
   const storage = createStorage(configuration);
 
   const reporting = createReporting(configuration, database.db);
@@ -21,14 +23,14 @@ const startRuntime = async () => {
   });
 
   process.once("sveltekit:shutdown", () => {
-    void reporting
-      .close()
+    void Promise.allSettled([reporting.close(), observation.close()])
       .then(() => database.close())
       .catch((cause: unknown) => console.error("Database shutdown failed", cause));
   });
 
   return createRuntime({
     ...extension,
+    observation,
     configuration,
     database,
     settings,

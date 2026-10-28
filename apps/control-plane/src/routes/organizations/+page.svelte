@@ -3,6 +3,7 @@
   import AuthLayout from "#shadcn/components/AuthLayout.svelte";
   import Feedback from "#shadcn/components/Feedback.svelte";
   import { Button } from "#shadcn/components/ui/button/index.js";
+  import { resetClientContext } from "#lib/analytics-client";
   import { selectOrganization, createOrganization } from "#lib/organizations.remote";
   import { Input } from "#shadcn/components/ui/input/index.js";
   import { Label } from "#shadcn/components/ui/label/index.js";
@@ -50,7 +51,10 @@
       const result = await authClient.signOut();
 
       if (result.error) message = "Could not sign out. Please try again.";
-      else window.location.assign("/sign-in");
+      else {
+        resetClientContext();
+        window.location.assign("/sign-in");
+      }
     } catch {
       message = "Could not sign out. Check your connection.";
     } finally {

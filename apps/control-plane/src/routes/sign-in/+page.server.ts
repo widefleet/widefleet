@@ -9,7 +9,7 @@ import { organizationSettings } from "#server/schema";
 import { localDestination } from "#server/navigation";
 import { installationOrganizationId } from "#lib/organization";
 
-export const load: PageServerLoad = async ({ url, setHeaders }) => {
+export const load: PageServerLoad = async ({ request, url, setHeaders }) => {
   setHeaders({ "cache-control": "private, no-store" });
   const runtime = await getRuntime();
 
@@ -33,6 +33,7 @@ export const load: PageServerLoad = async ({ url, setHeaders }) => {
   const provider = target?.verified ? target.providerId : null;
 
   return {
+    signedOut: !(await runtime.auth.api.getSession({ headers: request.headers })),
     provider,
     publicSignup: runtime.publicSignup && !slug,
     label:

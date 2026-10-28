@@ -1,5 +1,6 @@
 <script lang="ts">
   import { authClient } from "#lib/auth-client";
+  import { resetClientContext } from "#lib/analytics-client";
   import EmailCodeForm from "#shadcn/components/EmailCodeForm.svelte";
   import AuthLayout from "#shadcn/components/AuthLayout.svelte";
   import Feedback from "#shadcn/components/Feedback.svelte";
@@ -9,6 +10,10 @@
   import type { PageData } from "./$types";
 
   let { data }: { data: PageData } = $props();
+
+  $effect(() => {
+    if (data.signedOut) resetClientContext();
+  });
 
   let busy = $state(false);
 

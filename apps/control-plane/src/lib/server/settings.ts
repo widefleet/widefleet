@@ -21,6 +21,7 @@ import { oauthClient } from "./auth-schema.ts";
 import { readSsoConfiguration, ssoRuntimeIdentity, saveSsoProvider } from "./sso-settings.ts";
 import { appLoginClientId, readAppLogin, registerAppLogin } from "./app-login-client.ts";
 import { organizationSettings } from "./schema.ts";
+import type { Observation } from "./observation.ts";
 
 const requireAdmin = (principal: Principal, organizationId: string) => {
   if (!principal.application.admin || principal.application.organizationId !== organizationId)
@@ -404,6 +405,7 @@ export const createSettingsService = (
   encryptionKey: string,
   appSignIn: (organizationId: string) => AppSignIn | null,
   emailSignIn = false,
+  observation?: Observation,
 ) => {
   const signInEnabled = emailSignIn || configuration.LOGIN_CODE_DELIVERY === "console";
 
@@ -432,7 +434,7 @@ export const createSettingsService = (
               ? "Use the initialization command to create the hosted administrator"
               : "Configure email delivery or LOGIN_CODE_DELIVERY=console before interactive setup",
         });
-      const owner = await createInstallationOwner(database, input, bootstrapPending);
+      const owner = await createInstallationOwner(database, input, bootstrapPending, observation);
 
       if (signInEnabled) await installed.inspect(true);
 

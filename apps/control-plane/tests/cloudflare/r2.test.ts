@@ -1,4 +1,8 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import type { Workflow } from "@cloudflare/workers-types";
+import type { z } from "zod";
+import { acceptCloudflareWorkflow } from "../../src/lib/server/cloudflare-admission.ts";
+import { deploymentCommand } from "../../src/lib/server/deployment-execution.ts";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -61,6 +65,49 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Native R2 artifact 
       (await storage.get(competing)).unwrap(),
     );
     expect(await storage.get("missing")).toMatchObject({ error: { _tag: "StorageUnavailable" } });
+  });
+
+  it("preserves original attribution on retries while still rejecting different deployment intent", async () => {
+    const command = deploymentCommand.parse({
+      kind: "deploy",
+      id: crypto.randomUUID(),
+      appId: crypto.randomUUID(),
+      artifactId: crypto.randomUUID(),
+      requestId: "test-request",
+      rollback: false,
+      createdAt: new Date().toISOString(),
+    });
+
+    if (command.kind !== "deploy") throw new Error("Expected deployment fixture");
+
+    const workflow = {
+      create: vi.fn<Workflow<z.infer<typeof deploymentCommand>>["create"]>(),
+      get: vi.fn<Workflow<z.infer<typeof deploymentCommand>>["get"]>(),
+    };
+
+    await acceptCloudflareWorkflow(platform.env.ARTIFACTS, workflow, command, deploymentCommand);
+    const retry = { ...command, attribution: { userId: "user", organizationId: "organization" } };
+    expect(
+      await acceptCloudflareWorkflow(platform.env.ARTIFACTS, workflow, retry, deploymentCommand),
+    ).toEqual(command);
+    await expect(
+      acceptCloudflareWorkflow(
+        platform.env.ARTIFACTS,
+        workflow,
+        { ...retry, artifactId: crypto.randomUUID() },
+        deploymentCommand,
+      ),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+    const attributed = { ...retry, id: crypto.randomUUID() };
+    await acceptCloudflareWorkflow(platform.env.ARTIFACTS, workflow, attributed, deploymentCommand);
+    expect(
+      await acceptCloudflareWorkflow(
+        platform.env.ARTIFACTS,
+        workflow,
+        { ...attributed, attribution: { userId: "other", organizationId: "organization" } },
+        deploymentCommand,
+      ),
+    ).toEqual(attributed);
   });
 
   it("lists all pages and removes only the selected app across deletion batches", async () => {

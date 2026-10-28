@@ -6,6 +6,7 @@ import type { AuthenticatedUser } from "./identity.ts";
 import type { createSettingsService } from "./settings.ts";
 import { member, user } from "./auth-schema.ts";
 import { InvalidOperation } from "./errors.ts";
+import { observe, type Observation } from "./observation.ts";
 
 export type CreateOrganization = (
   ownerId: string,
@@ -16,6 +17,7 @@ export const createOnboardingService = (
   database: Database,
   settings: Pick<ReturnType<typeof createSettingsService>, "publish">,
   createOrganization?: CreateOrganization,
+  observation?: Observation,
 ) => {
   const verifiedUser = async (person: AuthenticatedUser) => {
     if (person.identityOrganizationId !== null) return false;
@@ -53,6 +55,14 @@ export const createOnboardingService = (
         person.userId,
         createOrganizationInput.parse(input),
       );
+
+      observe(observation, {
+        event: "organization_created",
+        id: organization.id,
+        userId: person.userId,
+        organizationId: organization.id,
+        properties: { source: "self_service" },
+      });
 
       const publication = await settings.publish(organization.id);
 

@@ -22,6 +22,9 @@ const command = z.object({
 export const deploymentCommand = z.discriminatedUnion("kind", [
   command.extend({
     kind: z.literal("deploy"),
+    attribution: z
+      .object({ userId: z.string().min(1), organizationId: z.string().min(1) })
+      .optional(),
     artifactId: z.uuid(),
     requestId: z.string().min(1).max(128),
     rollback: z.boolean(),
@@ -140,6 +143,7 @@ export type HostedExecution = {
     deployment: z.infer<typeof contract.deployment>,
     requestId: string,
     rollback?: boolean,
+    actor?: z.infer<typeof deploymentActor>,
   ) => Promise<
     Result<
       z.infer<typeof contract.deployment>,

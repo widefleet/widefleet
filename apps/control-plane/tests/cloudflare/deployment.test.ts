@@ -1,3 +1,4 @@
+import { createGunzip } from "node:zlib";
 import { companyIdentity } from "../../src/lib/server/company-identity.ts";
 import { runtimeIdentity } from "../runtime-identity.ts";
 import { connectorReference } from "../../src/lib/server/connector-package.ts";
@@ -57,6 +58,14 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
     let rejected: Awaited<ReturnType<typeof seedDeployment>>;
     let delayed: Awaited<ReturnType<typeof seedDeployment>>;
     let lostResponse: Awaited<ReturnType<typeof seedDeployment>>;
+
+    const observation = z.object({
+      id: z.string(),
+      outcome: z.enum(["succeeded", "failed"]),
+      attribution: z.object({ userId: z.string(), organizationId: z.string() }),
+    });
+
+    const observations: z.infer<typeof observation>[] = [];
 
     let appliedMigration:
       | { id: string; request: z.infer<typeof contract.migrationRequest> }
@@ -120,7 +129,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         const url = new URL(request.url ?? "/", apiOrigin);
         let body = "";
 
-        for await (const chunk of request) body += String(chunk);
+        const stream =
+          request.headers["content-encoding"] === "gzip" ? request.pipe(createGunzip()) : request;
+
+        for await (const chunk of stream) body += String(chunk);
 
         const ok = (
           result:
@@ -137,7 +149,38 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         if (request.headers.authorization !== "Bearer local-provisioning-token")
           throw new Error("Incorrect API credential");
 
-        if (url.pathname === "/fixture-runtime-version") {
+        if (url.pathname === "/fixture-observation") {
+          const batch = z
+            .object({
+              batch: z.array(
+                z.object({
+                  event: z.string(),
+                  distinct_id: z.string(),
+                  properties: z.record(z.string(), z.json()),
+                }),
+              ),
+            })
+            .parse(JSON.parse(body));
+
+          for (const event of batch.batch) {
+            if (event.event !== "deployment_completed") continue;
+            observations.push(
+              observation.parse({
+                id: event.properties["deployment_id"],
+                outcome: event.properties["outcome"],
+                attribution: {
+                  userId: event.distinct_id.replace(/^user:/, ""),
+                  organizationId: z
+                    .object({ organization: z.string() })
+                    .parse(event.properties["$groups"]).organization,
+                },
+              }),
+            );
+          }
+
+          // Failed analytics delivery must not change deployment outcomes.
+          response.writeHead(503).end();
+        } else if (url.pathname === "/fixture-runtime-version") {
           if (runtimeVersionUnavailable && !url.searchParams.has("readiness")) {
             response.statusCode = 503;
             response.end();
@@ -649,6 +692,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       ).unwrap();
 
       first = await seedDeployment(environment.database.db, { appId: parentApp.id });
+      first.command.attribution = { userId: "fixture-owner", organizationId: first.organizationId };
       preview = await seedDeployment(environment.database.db, { appId: previewApp.id });
 
       for (const [id, groups] of [
@@ -705,6 +749,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       globalThis.fetch = (input, init) => {
         const request = new Request(input, init);
         const url = new URL(request.url);
+        if (url.origin === 'https://eu.i.posthog.com') {
+          request.headers.set('authorization', 'Bearer local-provisioning-token');
+          return nativeFetch(new Request(${JSON.stringify(apiOrigin)} + '/fixture-observation', request));
+        }
         return nativeFetch(url.origin === 'https://api.cloudflare.com' ? new Request(${JSON.stringify(apiOrigin)} + url.pathname + url.search, request) : request);
       };
       export class RuntimeManagement extends BaseManagement {
@@ -791,7 +839,8 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
             if (command.kind === 'access') return executor.access(command.actor, command.appId, command.input);
             if (command.kind === 'network') return executor.network(command.actor, command.appId, command.input);
             return executor.deploy({ id: command.id, appId: command.appId, artifactId: command.artifactId, createdAt: command.createdAt,
-              status: 'queued', finishedAt: null, message: null }, command.requestId, command.rollback);
+              status: 'queued', finishedAt: null, message: null }, command.requestId, command.rollback,
+              command.attribution ? {id: command.attribution.userId, application: {organizationId: command.attribution.organizationId}} : undefined);
           });
           return Response.json(result.isErr() ? { error: result.error.message } : result.value, { status: result.isErr() ? 400 : 200 });
         }
@@ -902,6 +951,9 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           compatibility_flags: ["nodejs_compat"],
           vars: {
             ...environment.environment,
+            PLATFORM_URL: `${environment.environment.PLATFORM_URL}/`,
+            POSTHOG_PROJECT_TOKEN: "phc_synthetic",
+            POSTHOG_ORIGIN: environment.environment.PLATFORM_URL,
             CLOUDFLARE_ACCOUNT_ID: "0".repeat(32),
             CLOUDFLARE_API_TOKEN: "local-provisioning-token",
             APP_RUNTIME_NAME: "fixture-runtime",
@@ -1034,6 +1086,13 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       await Promise.all([dispatch(first), dispatch(preview)]);
       await completed(first.command.id);
       await completed(preview.command.id);
+      expect(observations).toEqual([
+        {
+          id: first.command.id,
+          outcome: "succeeded",
+          attribution: first.command.attribution,
+        },
+      ]);
       expect((await operation(first.command.id))?.targets).toEqual([
         expect.objectContaining({ appId: first.appId, publicationStarted: true }),
       ]);
@@ -1242,6 +1301,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       });
 
       rejected = entry;
+      entry.command.attribution = { userId: "fixture-owner", organizationId: entry.organizationId };
 
       await seed(entry);
       await dispatch(entry, "fast-retries");
@@ -1249,6 +1309,11 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         .poll(() => nativeStatus(entry.command.id), { timeout: 30_000, interval: 100 })
         .toBe("errored");
       expect((await operation(entry.command.id))?.error).toBeTruthy();
+      expect(observations).toContainEqual({
+        id: entry.command.id,
+        outcome: "failed",
+        attribution: entry.command.attribution,
+      });
       expect(await host(first.hostname)).toEqual(before);
       expect(await (await authenticatedFetch(`https://${first.hostname}/`)).text()).toBe(
         "deployed fixture",

@@ -9,6 +9,10 @@ const runtime = await initializeRuntime(
   loadRuntimeExtension,
 );
 
-await runtime.database.close();
+try {
+  await runtime.observation.close();
+} finally {
+  await runtime.database.close();
+}
 
 console.info("Installation initialized");

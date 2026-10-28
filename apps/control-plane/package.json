@@ -38,7 +38,9 @@
     "./tools/*": "./tools/*",
     "./organization": "./src/lib/organization.ts",
     "./http-availability": "./src/lib/server/http-availability.ts",
-    "./queue-availability": "./src/lib/server/queue-availability.ts"
+    "./queue-availability": "./src/lib/server/queue-availability.ts",
+    "./observation": "./src/lib/server/observation.ts",
+    "./analytics": "./src/lib/server/analytics.ts"
   },
   "scripts": {
     "test:e2e": "playwright test",
@@ -73,6 +75,7 @@
     "drizzle-orm": "0.45.3",
     "jose": "6.2.10",
     "pg": "8.23.1",
+    "posthog-js": "1.438.23",
     "posthog-node": "5.55.0",
     "zod": "4.6.5"
   },

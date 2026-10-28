@@ -1,3 +1,4 @@
+import { createProductAnalytics } from "./analytics.ts";
 import { getRequestEvent } from "$app/server";
 import { sveltekitCookies } from "better-auth/svelte-kit";
 import { createRuntimeExtension } from "#runtime-extension";
@@ -20,6 +21,7 @@ export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
   // A pool belongs to this request only; Hyperdrive owns pooling between requests.
   const database = createDatabase(configuration, 5);
   const extension = createRuntimeExtension({ database: database.db, configuration });
+  const observation = createProductAnalytics(configuration);
   const sendEmail = extension.sendEmail ?? createCloudflareEmail(bindings);
 
   const settings = createSettingsService(
@@ -28,6 +30,7 @@ export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
     configuration.PLATFORM_ENCRYPTION_KEY,
     (organizationId) => createCloudflareAppSignIn(configuration, bindings, organizationId),
     Boolean(sendEmail),
+    observation,
   );
 
   const reporting = createReporting(configuration, database.db);
@@ -37,6 +40,7 @@ export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
   const options: Parameters<typeof createRuntime>[0] = {
     discoveryTransport: "cloudflare",
     ...extension,
+    observation,
     configuration,
     database,
     settings,
@@ -56,7 +60,7 @@ export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
     get: createRequestRuntime(async () => createRuntime(options)()),
     close: async () => {
       try {
-        await reporting.close();
+        await Promise.allSettled([reporting.close(), observation.close()]);
       } finally {
         await database.close();
       }

@@ -1,3 +1,4 @@
+import { createProductAnalytics } from "../src/lib/server/analytics.ts";
 import { unstable_readConfig } from "wrangler";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -22,6 +23,8 @@ import { loadRuntimeExtension } from "./runtime-extension.ts";
 const configuration = cloudflareConfigurationSchema.parse(process.env);
 
 const database = createDatabase(configuration);
+
+const observation = createProductAnalytics(configuration);
 
 try {
   await migrate(database.db, {
@@ -74,12 +77,13 @@ try {
         secrets.APP_COOKIE_SECRET,
         configPath,
         extension,
+        observation,
       );
 
       try {
         await initializeBootstrap(
           services.settings,
-          createAuthentication(configuration, database.db, extension),
+          createAuthentication(configuration, database.db, { ...extension, observation }),
           database.db,
           bootstrap,
         );
@@ -87,11 +91,12 @@ try {
         await services.close();
       }
     } else {
-      await createInstallationOwner(database.db, bootstrap.owner);
+      await createInstallationOwner(database.db, bootstrap.owner, false, observation);
     }
   }
 
   console.info("Hosted installation initialized");
 } finally {
+  await observation.close();
   await database.close();
 }
