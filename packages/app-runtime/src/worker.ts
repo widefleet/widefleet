@@ -18,6 +18,7 @@ export const workerCode = async (
     {
       scope: `apps/${app.appId}`,
       identity,
+      execution: { appId: app.appId, hostname: app.hostname },
       metadata: app.metadata,
       modules: app.modules,
       nativeBindings: app.nativeBindings,
@@ -101,7 +102,12 @@ export default entrypoint;`,
     mainModule: "__widefleet_bootstrap.js",
     modules: Object.fromEntries(modules),
     env: Object.fromEntries(bindings),
-    globalOutbound: context.exports.Gateway({ props: { origins: app.network.policy.backend } }),
+    globalOutbound: context.exports.Gateway({
+      props: {
+        origins: app.network.policy.backend,
+        execution: { appId: app.appId, hostname: app.hostname },
+      },
+    }),
     tails: workerTails(environment, context, identity, app.telemetry),
   };
 };

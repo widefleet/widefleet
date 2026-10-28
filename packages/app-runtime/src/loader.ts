@@ -245,6 +245,18 @@ const manageRuntime = async (
   if (url.pathname === "/.well-known/widefleet/connectors")
     return manageConnector(request, environment);
 
+  if (url.pathname === "/.well-known/widefleet/execution") {
+    if (request.method !== "POST") return new Response(null, { status: 405 });
+
+    const input = z
+      .strictObject({ appId: z.uuid(), blocked: z.boolean() })
+      .parse(await request.json());
+
+    await workflowCatalog(environment, input.appId).suspend(input.blocked);
+
+    return new Response(null, { status: 204 });
+  }
+
   if (url.pathname === "/.well-known/widefleet/workflows") {
     if (request.method !== "POST") return new Response(null, { status: 403 });
 

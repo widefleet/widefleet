@@ -718,7 +718,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
   });
 
   it("does not read cron admission data when the existing org gate is disabled", async () => {
-    await availability(JSON.stringify({ blocked: true }));
+    await availability(null);
 
     try {
       // The fixture throws on any AUTH_CONFIG read in this mode.
@@ -1476,10 +1476,16 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
         );
       }
 
+      await rejectedWorkflow(
+        await manageWorkflow({
+          action: "sendEvent",
+          id,
+          event: { type: "continue", payload: { add: 21 } },
+        }),
+        "Organization execution is suspended",
+      );
       await availability(JSON.stringify({ blocked: false }));
       expect((await manageWorkflow({ action: "resume", id })).status).toBe(200);
-      await availability(JSON.stringify({ blocked: true }));
-      // An existing execution may finish; sendEvent does not create a new instance.
       expect(
         (
           await manageWorkflow({
@@ -1531,6 +1537,202 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
       await publish(app);
     }
   });
+
+  const execution = async (blocked: boolean, target = app) => {
+    const response = await fetchApp("/.well-known/widefleet/execution", {
+      method: "POST",
+      body: JSON.stringify({ appId: target.appId, blocked }),
+    });
+
+    expect(response.status, await response.text()).toBe(204);
+  };
+
+  it.each(["d1", "kv", "r2", "queue", "fetch", "retry", "sleep"])(
+    "rejects %s work in an already running workflow without spending its retry budget",
+    async (resource) => {
+      const id = crypto.randomUUID();
+
+      const mode =
+        resource === "retry"
+          ? "quota-retry"
+          : resource === "sleep"
+            ? "quota-sleep"
+            : "quota-resource";
+
+      expect(
+        (await manageWorkflow({ action: "create", id, params: { mode, resource } })).status,
+      ).toBe(200);
+      await expect.poll(() => json("/fixture/gates"), { timeout: 15_000 }).toContain(id);
+
+      try {
+        // Deliberately omit the pause publisher: boundary checks must stop work
+        // even if native pause delivery is unavailable.
+        if (["r2", "queue", "fetch"].includes(resource)) {
+          await workflowBinding({ method: "creationFault", options: "pause" });
+          await execution(true);
+        } else await availability(JSON.stringify({ blocked: true }));
+        await json(`/fixture/gates?id=${id}`, { method: "POST" });
+        await expect
+          .poll(async () => (await manageWorkflow({ action: "status", id })).json(), {
+            timeout: 15_000,
+          })
+          .toMatchObject({
+            result: {
+              status: "errored",
+            },
+          });
+
+        const state = z
+          .object({ result: z.object({ error: z.object({ message: z.string() }) }) })
+          .parse(await (await manageWorkflow({ action: "status", id })).json());
+
+        expect(state.result.error.message).toContain("Organization execution is suspended");
+        expect(await json(`/fixture/attempts?id=${id}`)).toEqual([
+          { label: resource === "sleep" ? "prepare" : "attempt", attempt: 1 },
+        ]);
+      } finally {
+        await availability(null);
+        await workflowBinding({ method: "creationFault", options: null });
+        await execution(false);
+        await json(`/fixture/gates?id=${id}`, { method: "POST" });
+        await manageWorkflow({ action: "delete", id });
+      }
+    },
+    30_000,
+  );
+
+  it("checks suspension after a native event wakes an existing wait", async () => {
+    const id = crypto.randomUUID();
+    expect((await manageWorkflow({ action: "create", id, params: { value: 20 } })).status).toBe(
+      200,
+    );
+    await expect.poll(() => json("/workflow/steps"), { timeout: 15_000 }).toContainEqual({ id });
+
+    try {
+      await availability(JSON.stringify({ blocked: true }));
+      // Model an event already accepted by the provider before suspension.
+      expect((await workflowBinding({ method: "nativeEvent", id })).status).toBe(200);
+      await expect
+        .poll(async () => (await manageWorkflow({ action: "status", id })).json(), {
+          timeout: 15_000,
+        })
+        .toMatchObject({
+          result: {
+            status: "errored",
+          },
+        });
+    } finally {
+      await availability(null);
+      await manageWorkflow({ action: "delete", id });
+    }
+  }, 30_000);
+
+  it("persists suspension, retries failed pauses and requires explicit resume after release", async () => {
+    const id = crypto.randomUUID();
+    expect((await manageWorkflow({ action: "create", id, params: { value: 20 } })).status).toBe(
+      200,
+    );
+    await expect.poll(() => json("/workflow/steps"), { timeout: 15_000 }).toContainEqual({ id });
+
+    try {
+      await workflowBinding({ method: "creationFault", options: "pause" });
+      await execution(true);
+      await workflowBinding({ method: "reconcile" });
+      await worker.stop();
+      worker = await start();
+      // KV still allows execution. The persisted catalog gate must survive reset.
+      await rejectedWorkflow(
+        await manageWorkflow({ action: "create", id: crypto.randomUUID() }),
+        "Organization execution is suspended",
+      );
+      await workflowBinding({ method: "creationFault", options: null });
+      await expect
+        .poll(
+          async () => {
+            await workflowBinding({ method: "reconcile" });
+
+            return (await manageWorkflow({ action: "status", id })).json();
+          },
+          { timeout: 15_000 },
+        )
+        .toMatchObject({ result: { status: "paused", suspension: { reason: "organization" } } });
+      await execution(false);
+      expect(await (await manageWorkflow({ action: "status", id })).json()).toMatchObject({
+        result: { status: "paused" },
+      });
+      expect((await manageWorkflow({ action: "resume", id })).status).toBe(200);
+      expect(
+        (
+          await manageWorkflow({
+            action: "sendEvent",
+            id,
+            event: { type: "continue", payload: { add: 21 } },
+          })
+        ).status,
+      ).toBe(200);
+      await expect
+        .poll(async () => (await manageWorkflow({ action: "status", id })).json(), {
+          timeout: 15_000,
+        })
+        .toMatchObject({ result: { status: "complete", output: 42, suspension: null } });
+      const steps = z.array(z.object({ id: z.string() })).parse(await json("/workflow/steps"));
+      expect(steps.filter((entry) => entry.id === id)).toEqual([{ id }]);
+    } finally {
+      await workflowBinding({ method: "creationFault", options: null });
+      await execution(false);
+      await manageWorkflow({ action: "delete", id });
+    }
+  }, 45_000);
+
+  it("pauses every catalog page and preserves manual pauses", async () => {
+    const manual = crypto.randomUUID();
+    const ids = [manual, ...Array.from({ length: 11 }, () => crypto.randomUUID())];
+
+    try {
+      expect(
+        (
+          await workflowBinding({
+            method: "createBatch",
+            options: ids.map((id) => ({ id, params: { value: 20 } })),
+          })
+        ).status,
+      ).toBe(200);
+      await expect
+        .poll(() => json("/workflow/steps"), { timeout: 15_000 })
+        .toEqual(expect.arrayContaining(ids.map((id) => ({ id }))));
+      expect((await manageWorkflow({ action: "pause", id: manual })).status).toBe(200);
+      await expect
+        .poll(async () => (await manageWorkflow({ action: "status", id: manual })).json())
+        .toMatchObject({ result: { status: "paused" } });
+      await execution(true);
+      await expect
+        .poll(
+          async () => {
+            await workflowBinding({ method: "reconcile" });
+
+            return Promise.all(
+              ids.map(
+                async (id) =>
+                  z
+                    .object({ result: z.object({ status: z.string() }) })
+                    .parse(await (await manageWorkflow({ action: "status", id })).json()).result
+                    .status,
+              ),
+            );
+          },
+          { timeout: 15_000 },
+        )
+        .toEqual(ids.map(() => "paused"));
+      await execution(false);
+      expect(await (await manageWorkflow({ action: "status", id: manual })).json()).toMatchObject({
+        result: { status: "paused", suspension: null },
+      });
+    } finally {
+      await execution(false);
+
+      for (const id of ids) await manageWorkflow({ action: "delete", id });
+    }
+  }, 45_000);
 
   it.each([null, '{"blocked":true}', "invalid-json"])(
     "reads an incomplete Workflow creation without starting it with availability %s",
@@ -1716,7 +1918,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
     }
   });
 
-  it.each(["get", "status", "list", "sendEvent", "pause", "terminate"])(
+  it.each(["get", "status", "list", "pause", "terminate"])(
     "keeps %s available after native creation outlives its catalog confirmation",
     async (action) => {
       const id = crypto.randomUUID();
@@ -1731,13 +1933,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
         const response =
           action === "get"
             ? await workflowBinding({ method: "get", id })
-            : await manageWorkflow(
-                action === "list"
-                  ? { action }
-                  : action === "sendEvent"
-                    ? { action, id, event: { type: "continue", payload: { add: 21 } } }
-                    : { action, id },
-              );
+            : await manageWorkflow(action === "list" ? { action } : { action, id });
 
         expect(response.status, await response.text()).toBe(200);
       } finally {
@@ -1759,10 +1955,15 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
       try {
         const response = await manageWorkflow(request, requestId);
         expect(response.status, await response.text()).toBe(200);
-        expect(await (await workflowBinding({ method: "admissionReads" })).json()).toBe(1);
-        // The same request returns its completed result without a second admission.
+        // Execution independently rechecks availability after successful admission.
+        await expect
+          .poll(async () => (await manageWorkflow({ action: "status", id })).json())
+          .toMatchObject({ result: { status: "errored" } });
+        const reads = await (await workflowBinding({ method: "admissionReads" })).json();
+        expect(reads).toBe(2);
+        // The same request returns its completed result without another admission.
         expect(await (await manageWorkflow(request, requestId)).json()).toEqual({ result: { id } });
-        expect(await (await workflowBinding({ method: "admissionReads" })).json()).toBe(1);
+        expect(await (await workflowBinding({ method: "admissionReads" })).json()).toBe(reads);
       } finally {
         await workflowBinding({ method: "admissionFault", options: null });
         await manageWorkflow({ action: "delete", id });

@@ -23,6 +23,7 @@ export const connectorCode = async (
     {
       scope: connectorScope(identity),
       identity: { organizationId, connector: release.name, connectorVersion: version },
+      execution: { organizationId },
       metadata: configuration,
       modules: release.modules,
       nativeBindings: snapshot.nativeBindings,

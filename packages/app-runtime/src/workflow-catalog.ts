@@ -41,7 +41,10 @@ type RecordEntry = {
   createdAt: string;
   start: Start;
   started: boolean;
+  suspension?: { reason: "organization"; requestedAt: string };
 };
+
+type Suspension = { blocked: boolean; since: string; cursor?: string; pending: boolean };
 
 const key = (workflow: string, id: string) => `instance/${workflow}/${id}`;
 
@@ -61,10 +64,13 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
   ) {
     return this.env.WIDEFLEET_WORKFLOWS.create(options);
   }
-  private async requireExecution(scope: WorkflowScope) {
+  async requireExecution(scope: Pick<WorkflowScope, "appId" | "hostname">) {
     if (this.env["WIDEFLEET_HTTP_AVAILABILITY"] !== "kv") return;
 
     try {
+      const suspension = await this.ctx.storage.get<Suspension>("suspension");
+
+      if (suspension?.blocked) throw new Error("Organization execution is suspended");
       const value = await this.env.AUTH_CONFIG.get(authRouteKey(scope.hostname));
 
       if (value === null) throw new Error("Workflow app organization is not published");
@@ -79,6 +85,76 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
         { cause },
       );
     }
+  }
+  suspend(blocked: boolean) {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      z.boolean().parse(blocked);
+      const previous = await this.ctx.storage.get<Suspension>("suspension");
+
+      await this.ctx.storage.put<Suspension>(
+        "suspension",
+        previous?.blocked === blocked
+          ? previous
+          : { blocked, since: new Date().toISOString(), pending: false },
+      );
+
+      // Persist the gate before acknowledging publication. Unblocking never
+      // resumes native instances; that remains an explicit management action.
+      if (blocked) {
+        if ((await this.ctx.storage.getAlarm()) === null)
+          await this.ctx.storage.setAlarm(Date.now() + 1);
+      } else await this.ctx.storage.deleteAlarm();
+      await this.ctx.storage.sync();
+    });
+  }
+  override alarm() {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      const suspension = await this.ctx.storage.get<Suspension>("suspension");
+
+      if (!suspension?.blocked) return;
+      const options: DurableObjectListOptions = { prefix: "instance/", limit: 10 };
+
+      if (suspension.cursor) options.startAfter = suspension.cursor;
+      const records = await this.ctx.storage.list<RecordEntry>(options);
+
+      for (const [name, record] of records) {
+        try {
+          const instance = await this.native(record);
+          const { status } = await this.status(instance);
+
+          if (["paused", "complete", "errored", "terminated"].includes(status)) continue;
+          suspension.pending = true;
+
+          if (status === "unknown" || status === "waitingForPause") continue;
+          record.suspension = { reason: "organization", requestedAt: suspension.since };
+          await this.ctx.storage.put(name, record);
+          await instance.pause();
+        } catch (cause) {
+          if (missing(cause)) continue;
+          suspension.pending = true;
+          console.error("Workflow suspension could not be applied", {
+            instanceId: record.nativeId,
+          });
+        }
+      }
+
+      // Continue past failed/slow instances so they cannot hold up the rest.
+      // Revisit the whole catalog until every pause is confirmed. Alarms retry
+      // automatically after a crash, independently of the quota evaluator.
+      const cursor = [...records.keys()].at(-1);
+
+      if (records.size === 10 && cursor) {
+        suspension.cursor = cursor;
+        await this.ctx.storage.setAlarm(Date.now() + 1);
+      } else {
+        delete suspension.cursor;
+
+        if (suspension.pending) await this.ctx.storage.setAlarm(Date.now() + 10_000);
+        suspension.pending = false;
+      }
+
+      await this.ctx.storage.put("suspension", suspension);
+    });
   }
   protected async restartTarget(from: z.infer<typeof workflowRestartFrom>) {
     // celld's adapter prepares each operation in a separate native checkpoint.
@@ -115,7 +191,10 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
   }
   private async readStatus(record: RecordEntry) {
     try {
-      return await this.status(await this.native(record));
+      return {
+        ...(await this.status(await this.native(record))),
+        suspension: record.suspension ?? null,
+      };
     } catch (error) {
       if (record.started || !missing(error)) throw error;
 
@@ -288,7 +367,8 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
 
     if (action === "status") return this.readStatus(record);
 
-    if (action === "resume" || action === "restart") await this.requireExecution(scope);
+    if (action === "resume" || action === "restart" || action === "sendEvent")
+      await this.requireExecution(scope);
     const instance = await this.native(record);
 
     switch (action) {
@@ -331,6 +411,11 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
         throw new Error("Unsupported Workflow operation");
     }
 
+    if (action === "resume" || action === "restart") {
+      delete record.suspension;
+      await this.ctx.storage.put(name, record);
+    }
+
     return null;
   }
   instance(scope: WorkflowScope, id: string, action: string, input?: InstanceInput) {
@@ -361,6 +446,7 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
               id: record.id,
               version: record.start.version,
               createdAt: record.createdAt,
+              suspension: record.suspension ?? null,
             };
 
             try {

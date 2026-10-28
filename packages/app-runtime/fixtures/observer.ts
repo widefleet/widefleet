@@ -159,6 +159,7 @@ export default {
                 name: "OBSERVER_KV",
                 binding: "APP_KV",
                 identity: scope === "app" ? app : connector,
+                execution: { organizationId: "fixture" },
               },
             }),
           }

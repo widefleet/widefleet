@@ -4,6 +4,7 @@ import { runtimeExtension } from "#runtime-extension";
 import type { ObjectObservation, WorkerIdentity } from "./runtime-extension.ts";
 import { nativeBinding } from "./native-binding.ts";
 import type { BindingProperties, ParentEnvironment } from "./types.ts";
+import { requireExecution } from "./execution.ts";
 
 const metadata = (object: R2Object) => ({
   key: object.key,
@@ -28,6 +29,7 @@ export class Objects extends WorkerEntrypoint<
     execute: () => Promise<Value>,
     resultOutcome: (result: Value) => ObjectObservation["outcome"] = () => "ok",
   ) {
+    await requireExecution(this.env, this.ctx.props.execution);
     const observe = runtimeExtension.object;
 
     if (!observe) return execute();

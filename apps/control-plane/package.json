@@ -39,6 +39,7 @@
     "./tools/*": "./tools/*",
     "./organization": "./src/lib/organization.ts",
     "./http-availability": "./src/lib/server/http-availability.ts",
+    "./execution-availability": "./src/lib/server/execution-availability.ts",
     "./queue-availability": "./src/lib/server/queue-availability.ts",
     "./observation": "./src/lib/server/observation.ts",
     "./analytics": "./src/lib/server/analytics.ts",
