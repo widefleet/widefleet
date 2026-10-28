@@ -24,6 +24,7 @@ export class DeploymentWorkflow extends WorkflowEntrypoint<
       throw new Error("Deployment workflow identity does not match its command");
 
     let outcome: "succeeded" | "failed" = "failed";
+    let failure: Error | undefined;
 
     try {
       if (command.kind === "runtime") await executeCloudflareRuntime(this.env, command, step);
@@ -31,8 +32,11 @@ export class DeploymentWorkflow extends WorkflowEntrypoint<
         await executeCloudflareConnector(this.env, command, step);
       else await executeCloudflareDeployment(this.env, command, step);
       outcome = "succeeded";
+    } catch (error) {
+      failure = error instanceof Error ? error : new Error(String(error));
+      throw error;
     } finally {
-      if (command.kind === "deploy" && command.attribution) {
+      if ((command.kind === "deploy" && command.attribution) || failure) {
         try {
           const configuration = {
             ...analyticsEnvironmentSchema.parse(this.env),
@@ -47,7 +51,7 @@ export class DeploymentWorkflow extends WorkflowEntrypoint<
             await step.do(
               "observe-completion",
               { retries: { limit: 0, delay: "1 second" }, timeout: "5 seconds" },
-              () => observeDeploymentCompletion(configuration, command, outcome),
+              () => observeDeploymentCompletion(configuration, command, outcome, failure),
             );
         } catch {
           // Optional observation cannot change a durable operation's outcome.

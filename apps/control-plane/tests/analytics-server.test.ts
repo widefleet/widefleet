@@ -57,6 +57,7 @@ it("stays inactive without configuration or on a different origin", async () => 
   ]) {
     const observer = createProductAnalytics(configuration, transport);
     observer.capture({ event: "user_created", id: "a", userId: "a" });
+    observer.exception(new Error("Unconfigured"), "user:a", { deployment_id: "deployment" });
     await observer.close();
   }
 
@@ -76,6 +77,31 @@ it("sends the original server exception and cause", async () => {
     ]),
   );
   expect(events[0]?.distinct_id).toBe("hosted:control-plane");
+  expect(events[0]?.properties["$process_person_profile"]).toBe(false);
+});
+
+it("attributes workflow exceptions without replacing their original message", async () => {
+  const { events, observer } = fixture();
+  const message = "Cloudflare list D1 databases failed (HTTP 401; codes 10000)";
+  observer.exception(new Error(message), "user:a", {
+    $groups: { organization: "org-a" },
+    deployment_id: "deployment",
+  });
+  await observer.close();
+  expect(events).toHaveLength(1);
+  expect(events[0]).toMatchObject({
+    event: "$exception",
+    distinct_id: "user:a",
+    properties: {
+      scope: "hosted",
+      $groups: { organization: "org-a" },
+      deployment_id: "deployment",
+      $process_person_profile: true,
+    },
+  });
+  expect(events[0]?.properties["$exception_list"]).toEqual(
+    expect.arrayContaining([expect.objectContaining({ value: message })]),
+  );
 });
 
 it("drains all captured events before closing", async () => {

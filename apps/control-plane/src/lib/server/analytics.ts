@@ -31,9 +31,15 @@ export const createProductAnalytics = (
         properties: { scope: config?.scope, event_id: event.id, ...event.properties },
       });
     },
-    exception: (error: Error) => {
-      sdk?.captureException(error, `${config?.scope}:control-plane`, {
-        $process_person_profile: false,
+    exception: (
+      error: Error,
+      distinctId?: string,
+      properties?: Parameters<PostHog["captureException"]>[2],
+    ) => {
+      sdk?.captureException(error, distinctId ?? `${config?.scope}:control-plane`, {
+        $process_person_profile: Boolean(distinctId),
+        scope: config?.scope,
+        ...properties,
       });
     },
     close: async () => {
