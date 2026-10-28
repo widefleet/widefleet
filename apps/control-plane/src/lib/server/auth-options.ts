@@ -41,6 +41,7 @@ export const authenticationOptions = (
     tokenClaims,
     rateLimit,
     ipAddressHeaders,
+    publicSignup = false,
   }: {
     initializeResources?: boolean;
     sendEmail?: SendEmail;
@@ -50,9 +51,13 @@ export const authenticationOptions = (
     ) => Promise<{ reference_id: string; organization_id?: string }>;
     rateLimit?: BetterAuthOptions["rateLimit"];
     ipAddressHeaders?: string[];
+    publicSignup?: boolean;
   } = {},
 ) => {
   const sendSignInEmail = createSignInEmail(configuration, sendEmail);
+
+  if (publicSignup && (!sendEmail || configuration.LOGIN_CODE_DELIVERY !== "email"))
+    throw new Error("Public signup requires email delivery");
 
   return {
     appName: "Widefleet",
@@ -149,7 +154,11 @@ export const authenticationOptions = (
             throw new APIError("FORBIDDEN", { message: "Email sign-in is not configured" });
 
           const input = z
-            .object({ email: z.email(), type: z.literal("sign-in").optional() })
+            .object({
+              email: z.email().max(254),
+              type: z.literal("sign-in").optional(),
+              name: z.string().trim().min(1).max(100).optional(),
+            })
             .parse(context.body);
 
           if (!(await allowEmail(input.email.toLowerCase()))) {

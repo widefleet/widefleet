@@ -34,6 +34,7 @@ export const load: PageServerLoad = async ({ url, setHeaders }) => {
 
   return {
     provider,
+    publicSignup: runtime.publicSignup && !slug,
     label:
       target?.id === installationOrganizationId
         ? target.appIdentityType === "entra"

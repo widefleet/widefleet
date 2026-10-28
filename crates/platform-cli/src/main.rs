@@ -13,6 +13,7 @@ mod logs;
 mod members;
 mod migrations;
 mod network;
+mod organizations;
 mod preview;
 mod reporting;
 mod runtime;
@@ -71,8 +72,8 @@ enum Command {
     Whoami,
     /// Show your company account link and the browser page for managing it.
     Account,
-    /// List organizations available to the signed-in account.
-    Organizations,
+    /// List your organizations or create your own workspace.
+    Organizations(organizations::Options),
     /// Manage the selected organization's members and roles.
     Members(members::Options),
     /// Invite people to your organization or accept an invitation.
@@ -231,14 +232,7 @@ async fn run(args: Arguments) -> Result<()> {
     let token = auth::access_token(&api, &credentials).await?;
     let grant = matches!(&args.command, Command::Grant { .. });
     match args.command {
-        Command::Organizations => print_json(
-            &json::<Value>(
-                api.authenticated(Method::GET, "/organizations", &token)
-                    .send()
-                    .await?,
-            )
-            .await?,
-        ),
+        Command::Organizations(options) => organizations::run(&api, &token, options).await,
         Command::Account => print_json(
             &json::<Value>(
                 api.authenticated(Method::GET, "/account", &token)
@@ -401,7 +395,7 @@ async fn main() {
         Command::Logout => "logout",
         Command::Whoami => "whoami",
         Command::Account => "account",
-        Command::Organizations => "organizations",
+        Command::Organizations(_) => "organizations",
         Command::Members(_) => "members",
         Command::Invitations(_) => "invitations",
         Command::Apps => "apps",

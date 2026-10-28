@@ -1,15 +1,9 @@
 <script lang="ts">
-  import { z } from "zod";
-  import { onMount } from "svelte";
-  import { isHttpError } from "@sveltejs/kit";
   import { authClient } from "#lib/auth-client";
-  import { findSignInDestination } from "#lib/sign-in.remote";
-  import { goto } from "$app/navigation";
+  import EmailCodeForm from "#shadcn/components/EmailCodeForm.svelte";
   import AuthLayout from "#shadcn/components/AuthLayout.svelte";
   import Feedback from "#shadcn/components/Feedback.svelte";
   import { Button } from "#shadcn/components/ui/button/index.js";
-  import { Input } from "#shadcn/components/ui/input/index.js";
-  import { Label } from "#shadcn/components/ui/label/index.js";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
   import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import type { PageData } from "./$types";
@@ -18,83 +12,7 @@
 
   let busy = $state(false);
 
-  let ready = $state(false);
-
-  onMount(() => {
-    email = data.email;
-    ready = true;
-  });
-
   let message = $state("");
-
-  let email = $state("");
-
-  let otp = $state("");
-
-  let sentTo = $state<string | null>(null);
-
-  const oauthRedirect = z.object({ redirect: z.literal(true), url: z.url() });
-
-  const emailSignIn = async (event: SubmitEvent) => {
-    event.preventDefault();
-
-    if (busy) return;
-    busy = true;
-    message = "";
-
-    try {
-      if (sentTo === null) {
-        const recipient = email.trim().toLowerCase();
-
-        const destination = data.organizationSlug
-          ? null
-          : await findSignInDestination({ email: recipient, next: data.next });
-
-        if (destination?.url) {
-          window.location.assign(destination.url);
-
-          return;
-        }
-
-        if (destination?.provider) {
-          const result = await authClient.signIn.sso({
-            providerId: destination.provider,
-            email: recipient,
-            callbackURL: data.next,
-          });
-
-          if (result.error) message = "Could not start sign-in. Please try again.";
-
-          return;
-        }
-
-        const result = await authClient.emailOtp.sendVerificationOtp({
-          email: recipient,
-          type: "sign-in",
-        });
-
-        if (result.error) message = "Could not send a sign-in code. Please try again.";
-        else {
-          email = recipient;
-          sentTo = recipient;
-        }
-      } else {
-        const result = await authClient.signIn.emailOtp({ email: sentTo, otp });
-
-        if (result.error) message = "Invalid or expired code. Request another code and try again.";
-        else if (!oauthRedirect.safeParse(result.data).success)
-          await goto(data.next, { invalidateAll: true });
-      }
-    } catch (cause) {
-      message = isHttpError(cause)
-        ? cause.body.message
-        : cause instanceof Error
-          ? cause.message
-          : "Sign-in is temporarily unavailable. Check your connection.";
-    } finally {
-      busy = false;
-    }
-  };
 
   const signIn = async () => {
     if (!data.provider || busy) return;
@@ -139,54 +57,20 @@
       >{busy ? "Opening sign-in …" : `Sign in with ${data.label}`}<ArrowRight /></Button
     >{/if}
   {#if data.emailSignIn}
-    <form onsubmit={emailSignIn} class="mt-6 space-y-4">
-      <div class="space-y-2">
-        <Label for="code-email">Email</Label>
-        <Input
-          id="code-email"
-          type="email"
-          bind:value={email}
-          disabled={!ready || busy}
-          readonly={sentTo !== null}
-          autocomplete="email"
-          required
-        />
-      </div>
-      {#if sentTo !== null}
-        <p class="text-muted-foreground text-xs leading-5">
-          {data.codeDelivery === "console"
-            ? "If this address has an invitation or membership, its six-digit code is in the server log."
-            : "If this address has an invitation or membership, a six-digit code is on its way."}
-        </p>
-        <div class="space-y-2">
-          <Label for="sign-in-code">Sign-in code</Label>
-          <Input
-            id="sign-in-code"
-            bind:value={otp}
-            inputmode="numeric"
-            autocomplete="one-time-code"
-            pattern={"[0-9]{6}"}
-            minlength={6}
-            maxlength={6}
-            required
-          />
-        </div>
-      {/if}
-      <Button type="submit" disabled={busy || !ready} class="w-full"
-        >{busy ? "Please wait …" : sentTo !== null ? "Sign in" : "Continue"}</Button
-      >
-      {#if sentTo !== null}<Button
-          type="button"
-          variant="ghost"
-          class="w-full"
-          disabled={busy}
-          onclick={() => {
-            sentTo = null;
-            otp = "";
-          }}>Use another email or request a new code</Button
-        >{/if}
-    </form>
+    <EmailCodeForm
+      next={data.next}
+      initialEmail={data.email}
+      organizationSlug={data.organizationSlug}
+      codeDelivery={data.codeDelivery}
+      publicSignup={data.publicSignup}
+    />
   {/if}
+  {#if data.publicSignup}<p class="text-muted-foreground mt-5 text-center text-sm">
+      New to Widefleet? <a
+        class="text-foreground underline underline-offset-4"
+        href={`/sign-up?${new URLSearchParams({ next: data.next })}`}>Create an account</a
+      >
+    </p>{/if}
   {#if !data.provider && !data.emailSignIn}<div class="mt-5">
       <Feedback kind="error"
         >Company sign-in is temporarily unavailable. Contact your administrator.</Feedback

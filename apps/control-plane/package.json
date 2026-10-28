@@ -29,6 +29,8 @@
     "./migrations/*": "./migrations/*",
     "./runtime-extension": "./src/lib/server/runtime-extension.ts",
     "./members": "./src/lib/server/members.ts",
+    "./onboarding": "./src/lib/server/onboarding.ts",
+    "./errors": "./src/lib/server/errors.ts",
     "./settings": "./src/lib/server/settings.ts",
     "./installation": "./src/lib/server/installation-store.ts",
     "./app-sign-in-cloudflare": "./src/lib/server/app-sign-in-cloudflare.ts",

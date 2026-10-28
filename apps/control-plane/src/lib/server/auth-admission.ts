@@ -10,10 +10,12 @@ import { organizationSettings } from "./schema.ts";
 import { invitation, member, user, ssoProvider } from "./auth-schema.ts";
 import { installationOrganizationId } from "../organization.ts";
 import { InvalidOperation } from "./errors.ts";
+import { readInstallation } from "./installation-store.ts";
 
 export const createAuthenticationAdmission = (
   database: DatabaseExecutor,
   access: OrganizationAccess = { filterOrganizations: async () => [installationOrganizationId] },
+  publicSignup = false,
 ) => ({
   signInProvider: async (email: string) => {
     const domain = email.trim().toLowerCase().split("@")[1];
@@ -37,6 +39,8 @@ export const createAuthenticationAdmission = (
     return providers[0]?.providerId ?? null;
   },
   allowEmail: async (email: string) => {
+    if (publicSignup && (await readInstallation(database)).ownerId) return true;
+
     const memberships = await database
       .select({ id: member.organizationId })
       .from(member)

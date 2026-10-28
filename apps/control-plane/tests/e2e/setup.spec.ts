@@ -82,7 +82,9 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
     await page.goto("/");
     await expect(page).toHaveURL(/\/setup$/);
     await page.getByLabel("Name", { exact: true }).fill("IT Admin");
+    await page.getByLabel("Organization name", { exact: true }).fill("Example Team");
     await page.getByLabel("Email", { exact: true }).fill("sso@example.test");
+    environment.authControl.available(false);
     await page.getByRole("button", { name: "Create account and continue" }).click();
     await expect(page).toHaveURL(/\/sign-in\?/);
     await expect(page.getByLabel("Email", { exact: true })).toHaveValue("sso@example.test");
@@ -92,6 +94,13 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
     await page.getByLabel("Sign-in code", { exact: true }).fill(otp);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await expect(page).toHaveURL(/\/settings$/);
+    await expect(page.getByRole("button", { name: "Activate Widefleet sign-in" })).toBeVisible();
+    environment.authControl.available(true);
+    await page.getByRole("button", { name: "Activate Widefleet sign-in" }).click();
+    await expect(page.getByText("Widefleet app sign-in is active.", { exact: true })).toBeVisible();
+    await page.goto("/welcome");
+    await expect(page.getByRole("heading", { name: "Publish your first app" })).toBeVisible();
+    await page.getByRole("link", { name: "Organization settings", exact: true }).click();
     await page.getByRole("link", { name: "Privacy", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Improve Widefleet" })).toBeVisible();
     await expect(page.getByLabel("Share usage and configuration")).toBeEnabled();

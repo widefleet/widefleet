@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { RuntimeExtension } from "../../src/lib/server/runtime-extension.ts";
 
 // This module is selected only by the local onboarding browser fixture.
-export const createRuntimeExtension = (): RuntimeExtension => {
+export const createRuntimeExtension = () => {
   const mailbox = new URL(z.url().parse(process.env["PLATFORM_TEST_MAILBOX"]));
 
   if (mailbox.protocol !== "http:" || mailbox.hostname !== "127.0.0.1")
@@ -21,5 +21,5 @@ export const createRuntimeExtension = (): RuntimeExtension => {
 
       if (!response.ok) throw new Error("Synthetic mailbox unavailable");
     },
-  };
+  } satisfies RuntimeExtension;
 };

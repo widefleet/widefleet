@@ -27,6 +27,7 @@ import { createInvitationService } from "./members.ts";
 import { createAuthenticationAdmission } from "./auth-admission.ts";
 import { discoverPlatform } from "./platform-discovery.ts";
 import { createCliLogin } from "./cli-login.ts";
+import { createOnboardingService, type CreateOrganization } from "./onboarding.ts";
 
 export const createRuntime = ({
   configuration,
@@ -37,11 +38,12 @@ export const createRuntime = ({
   encryptionKey,
   execution,
   hostedLogs,
-  organizationAccess,
+  organizationAccess: extensionOrganizationAccess,
   sendEmail,
   authRateLimit,
   authIpAddressHeaders,
   authCookies,
+  createOrganization,
   discoveryTransport = "node",
 }: {
   configuration: Configuration & { BETTER_AUTH_SECRET: string };
@@ -53,13 +55,27 @@ export const createRuntime = ({
   execution?: HostedExecution;
   organizationAccess?: OrganizationAccess;
   sendEmail?: SendEmail;
+  createOrganization?: CreateOrganization;
   authRateLimit?: BetterAuthOptions["rateLimit"];
   authIpAddressHeaders?: string[];
   authCookies?: ReturnType<typeof sveltekitCookies>;
   hostedLogs?: ReturnType<typeof createCloudflareLogs>;
   discoveryTransport?: "node" | "cloudflare";
 }) => {
-  const authOptions: NonNullable<Parameters<typeof createAuthentication>[2]> = { encryptionKey };
+  const publicSignup = Boolean(createOrganization);
+
+  const organizationAccess =
+    extensionOrganizationAccess ??
+    (createOrganization
+      ? ({
+          filterOrganizations: async (candidates) => candidates.map(({ id }) => id),
+        } satisfies OrganizationAccess)
+      : undefined);
+
+  const authOptions: NonNullable<Parameters<typeof createAuthentication>[2]> = {
+    encryptionKey,
+    publicSignup,
+  };
 
   if (sendEmail) authOptions.sendEmail = sendEmail;
 
@@ -74,6 +90,8 @@ export const createRuntime = ({
 
   const runtime = {
     auth,
+    publicSignup,
+    onboarding: createOnboardingService(database.db, settings, createOrganization),
     identity: createIdentityService(auth, database.db, configuration, organizationAccess),
     directory: createDirectory(
       async (organizationId) => (await settings.resolve(organizationId)).identity,

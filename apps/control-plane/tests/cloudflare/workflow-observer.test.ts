@@ -36,7 +36,8 @@ export class ExampleWorkflow extends WorkflowEntrypoint {
       return ctx.attempt;
     });
     await step.sleep('nap', 1);
-    await step.sleepUntil('deadline', Date.now() + 1);
+    // The deadline crosses RPC boundaries before the native engine validates it.
+    await step.sleepUntil('deadline', Date.now() + 1000);
     await step.waitForEvent('continue', { type: 'continue', timeout: '5 minutes' });
     return step.do('finish', async () => ({ result, secret: this.env.OBSERVER_LABEL ?? null }));
   }
