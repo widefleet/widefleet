@@ -8,24 +8,36 @@ export const observeDeploymentCompletion = async (
   configuration: AnalyticsEnvironment & { PLATFORM_URL: string },
   command: z.infer<typeof deploymentWorkflowCommand>,
   outcome: "succeeded" | "failed",
+  error?: Error,
 ) => {
-  // Older, already queued commands have no attribution; do not invent attribution.
-  if (command.kind !== "deploy" || !command.attribution) return;
-
-  const actor = command.attribution;
   const observation = createProductAnalytics(configuration);
 
-  observe(observation, {
-    event: "deployment_completed",
-    id: `${command.id}:${outcome}`,
-    userId: actor.userId,
-    organizationId: actor.organizationId,
-    properties: {
+  if (command.kind === "deploy" && command.attribution) {
+    const actor = command.attribution;
+
+    const properties = {
       app_id: command.appId,
       deployment_id: command.id,
       outcome,
       rollback: command.rollback,
-    },
-  });
+    };
+
+    observe(observation, {
+      event: "deployment_completed",
+      id: `${command.id}:${outcome}`,
+      userId: actor.userId,
+      organizationId: actor.organizationId,
+      properties,
+    });
+
+    if (error)
+      observation.exception(error, `user:${actor.userId}`, {
+        ...properties,
+        $groups: { organization: actor.organizationId },
+      });
+  } else if (error) {
+    observation.exception(error, undefined, { workflow_id: command.id, operation: command.kind });
+  }
+
   await observation.close();
 };

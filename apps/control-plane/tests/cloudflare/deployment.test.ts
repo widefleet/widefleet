@@ -67,6 +67,14 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
 
     const observations: z.infer<typeof observation>[] = [];
 
+    const analyticsEvent = z.object({
+      event: z.string(),
+      distinct_id: z.string(),
+      properties: z.record(z.string(), z.json()),
+    });
+
+    const exceptions: z.infer<typeof analyticsEvent>[] = [];
+
     let appliedMigration:
       | { id: string; request: z.infer<typeof contract.migrationRequest> }
       | undefined;
@@ -152,18 +160,15 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         if (url.pathname === "/fixture-observation") {
           const batch = z
             .object({
-              batch: z.array(
-                z.object({
-                  event: z.string(),
-                  distinct_id: z.string(),
-                  properties: z.record(z.string(), z.json()),
-                }),
-              ),
+              batch: z.array(analyticsEvent),
             })
             .parse(JSON.parse(body));
 
           for (const event of batch.batch) {
+            if (event.event === "$exception") exceptions.push(event);
+
             if (event.event !== "deployment_completed") continue;
+
             observations.push(
               observation.parse({
                 id: event.properties["deployment_id"],
@@ -1093,6 +1098,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           attribution: first.command.attribution,
         },
       ]);
+      expect(exceptions).toEqual([]);
       expect((await operation(first.command.id))?.targets).toEqual([
         expect.objectContaining({ appId: first.appId, publicationStarted: true }),
       ]);
@@ -1314,6 +1320,27 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         outcome: "failed",
         attribution: entry.command.attribution,
       });
+
+      const reported = exceptions.filter(
+        (event) => event.properties["deployment_id"] === entry.command.id,
+      );
+
+      const status = z
+        .object({ error: z.object({ message: z.string() }) })
+        .parse(await (await worker.fetch(`http://fixture/workflow?id=${entry.command.id}`)).json());
+
+      expect(reported).toHaveLength(1);
+      expect(reported[0]).toMatchObject({
+        distinct_id: "user:fixture-owner",
+        properties: {
+          $groups: { organization: entry.organizationId },
+          app_id: entry.appId,
+          outcome: "failed",
+        },
+      });
+      expect(reported[0]?.properties["$exception_list"]).toEqual(
+        expect.arrayContaining([expect.objectContaining({ value: status.error.message })]),
+      );
       expect(await host(first.hostname)).toEqual(before);
       expect(await (await authenticatedFetch(`https://${first.hostname}/`)).text()).toBe(
         "deployed fixture",
