@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { createAuthEndpoint } from "better-auth/api";
+import { eq } from "drizzle-orm";
 import { createAuthentication } from "../src/lib/server/auth.ts";
+import { session } from "../src/lib/server/auth-schema.ts";
 import { createIdentityService } from "../src/lib/server/identity.ts";
 import { createTestEnvironment } from "./environment.ts";
 
@@ -115,3 +117,35 @@ it("blocks direct account access and new sessions while still allowing sign-out"
   allowed = true;
   expect(await (await request("/get-session")).json()).toBeNull();
 });
+
+it.each([false, true])(
+  "preserves session renewal cookies with admission enabled: %s",
+  async (enabled) => {
+    const auth = enabled
+      ? createAuthentication(environment.configuration, environment.database.db, {
+          authentication: { plugins: [], allowUser: async () => true },
+        })
+      : environment.auth;
+
+    const login = await environment.users.login({ userId: environment.owner.id });
+
+    const current = await auth.api.getSession({ headers: login.headers });
+
+    if (!current) throw new Error("Expected owner session");
+    const lifetime = 7 * 24 * 60 * 60;
+
+    await environment.database.db
+      .update(session)
+      .set({
+        expiresAt: new Date(Date.now() + (lifetime - 25 * 60 * 60) * 1000),
+      })
+      .where(eq(session.id, current.session.id));
+
+    const renewed = await auth.api.getSession({ headers: login.headers, returnHeaders: true });
+
+    expect(renewed.response?.session.expiresAt.getTime()).toBeGreaterThan(
+      Date.now() + (lifetime - 10) * 1000,
+    );
+    expect(renewed.headers.get("set-cookie")).toMatch(/Max-Age=604800/i);
+  },
+);

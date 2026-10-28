@@ -113,9 +113,13 @@ export const authenticationOptions = (
         ];
 
         const current =
-          ["/get-session", "/token", "/device/approve", "/device/deny"].includes(context.path) ||
+          (allowUser && ["/get-session", "/token"].includes(context.path)) ||
+          ["/device/approve", "/device/deny"].includes(context.path) ||
           accountPaths.includes(context.path)
-            ? await getSessionFromCtx(context)
+            ? await getSessionFromCtx(context, {
+                // Leave renewal to the endpoint so its response owns the refreshed cookie.
+                disableRefresh: context.path === "/get-session",
+              })
             : null;
 
         if (current && allowUser && !(await allowUser(current.user.id)))
