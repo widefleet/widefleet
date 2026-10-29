@@ -452,9 +452,11 @@ export const createApi = (runtime: Runtime) => {
       .route({ method: "PATCH", path: "/apps/{appId}/network" })
       .input(contract.appPath.extend(contract.networkChange.shape))
       .output(contract.networkState)
-      .handler(async ({ context, input }) =>
-        unwrap(await runtime.network.change(context.principal, input.appId, input)),
-      ),
+      .handler(async ({ context, input }) => {
+        const { appId, ...change } = input;
+
+        return unwrap(await runtime.network.change(context.principal, appId, change));
+      }),
     setupStatus: base
       .route({ method: "GET", path: "/setup" })
       .output(z.object({ required: z.boolean() }))
@@ -619,9 +621,11 @@ export const createApi = (runtime: Runtime) => {
       .route({ method: "PATCH", path: "/apps/{appId}/access" })
       .input(contract.appPath.extend(contract.appAccessChange.shape))
       .output(contract.appAccessState)
-      .handler(async ({ context, input }) =>
-        unwrap(await runtime.appAccess.change(context.principal, input.appId, input)),
-      ),
+      .handler(async ({ context, input }) => {
+        const { appId, ...change } = input;
+
+        return unwrap(await runtime.appAccess.change(context.principal, appId, change));
+      }),
     grant: write
       .route({ method: "PUT", path: "/apps/{appId}/creators/{userId}" })
       .input(contract.appPath.extend({ userId: z.string().min(1).max(128) }))
