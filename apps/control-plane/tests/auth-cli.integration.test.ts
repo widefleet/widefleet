@@ -1,3 +1,5 @@
+import { createConnectionService } from "../src/lib/server/connections.ts";
+import { createAppSecrets } from "../src/lib/server/app-secrets.ts";
 import { createWorkflowService } from "../src/lib/server/workflows.ts";
 import { createMigrationService } from "../src/lib/server/migrations.ts";
 import { execFile } from "node:child_process";
@@ -23,7 +25,6 @@ import { z } from "zod";
 import { createApi } from "../src/lib/server/api.ts";
 import { createAgentService } from "../src/lib/server/agents.ts";
 import { createAppService } from "../src/lib/server/apps.ts";
-import { createConnectorService } from "../src/lib/server/connectors.ts";
 import { createDirectory } from "../src/lib/server/directory.ts";
 import { createIdentityService } from "../src/lib/server/identity.ts";
 import { createJobService } from "../src/lib/server/jobs.ts";
@@ -158,21 +159,15 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1" && process.platform !== "win
         directory: createDirectory(async (id) => (await environment.settings.resolve(id)).identity),
         apps: createAppService(database, configuration),
         agents: createAgentService(database),
-        jobs: createJobService(
-          database,
-          storage,
-          "local-integration-test-encryption-key-only",
-          configuration,
-        ),
+        jobs: createJobService(database, storage, "local-integration-test-encryption-key-only"),
         network: createNetworkService(database),
         appAccess: createAppAccessService(database),
         workflows: createWorkflowService(database),
         migrations: createMigrationService(database, storage),
-        connectors: createConnectorService(
-          database,
-          storage,
-          "local-integration-test-encryption-key-only",
-          configuration,
+        connections: createConnectionService(environment.database.db),
+        appSecrets: createAppSecrets(
+          environment.database.db,
+          environment.environment.PLATFORM_ENCRYPTION_KEY,
         ),
         releases: createRuntimeReleaseService(database, storage),
         uploads: createUploadService(database, storage, configuration),
@@ -272,7 +267,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1" && process.platform !== "win
         email: "headless@example.test",
       });
       expect(JSON.parse((await cli("apps")).stdout)).toEqual([]);
-      await cli("connector", "list");
+      await cli("services");
 
       await writeFile(sessionFile, JSON.stringify({ ...initial, expires_at: 0 }), { mode: 0o600 });
       const results = await Promise.all([cli("whoami"), cli("whoami"), cli("apps")]);

@@ -60,7 +60,7 @@
   const navigation = [
     { href: "/", label: "All apps", icon: Layers2 },
     { href: "/catalog", label: "App catalog", icon: LayoutGrid },
-    { href: "/connectors", label: "Connectors", icon: Plug },
+    { href: "/services", label: "App APIs", icon: Plug },
     { href: "/members", label: "Members", icon: Users },
     { href: "/agents", label: "Deployment agents", icon: Server },
     { href: "/settings", label: "Settings", icon: Settings2 },

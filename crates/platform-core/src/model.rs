@@ -127,6 +127,10 @@ pub struct WorkerConfiguration {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct WorkerMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web: Option<bool>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub entrypoints: Vec<String>,
     #[serde(flatten)]
     pub worker: WorkerConfiguration,
     #[serde(default)]
@@ -176,7 +180,6 @@ pub struct Artifact {
 pub enum JobKind {
     Deploy,
     Runtime,
-    Connector,
     Delete,
     Configure,
     Migrations,
@@ -236,7 +239,7 @@ pub struct NetworkSnapshot {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CapabilityGrant {
-    pub connector: String,
+    pub app: Uuid,
     pub entrypoint: String,
 }
 
@@ -249,6 +252,10 @@ pub struct CapabilitySnapshot {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublishedApp {
+    #[serde(default)]
+    pub secret_revision: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub organization_id: Option<String>,
     #[serde(flatten)]
     pub artifact: Artifact,
     pub version: Uuid,
@@ -266,6 +273,7 @@ pub struct PublishedApp {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublishedCapability {
+    pub hostname: String,
     pub organization_id: String,
     #[serde(flatten)]
     pub grant: CapabilityGrant,
@@ -300,34 +308,11 @@ pub struct RuntimeRelease {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RuntimePackages {
+    #[serde(
+        default,
+        rename = "appSecrets",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub app_secrets: Option<serde_json::Value>,
     pub runtime: RuntimeRelease,
-    #[serde(default)]
-    pub connectors: Vec<ConnectorPackage>,
-    #[serde(default, rename = "connectorOrigins")]
-    pub connector_origins: BTreeMap<String, String>,
-    #[serde(default, rename = "connectorSecrets")]
-    pub connector_secrets: BTreeMap<String, BTreeMap<String, String>>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct ConnectorPackage {
-    pub protocol: u32,
-    pub name: String,
-    pub metadata: ConnectorMetadata,
-    pub modules: Vec<Module>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct ConnectorMetadata {
-    #[serde(flatten)]
-    pub worker: WorkerConfiguration,
-    pub entrypoints: Vec<String>,
-    pub durable_objects: Vec<DurableObjectBinding>,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct DurableObjectBinding {
-    pub name: String,
-    pub class_name: String,
 }

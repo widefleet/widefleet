@@ -1,6 +1,6 @@
 export { appEventConfiguration } from "./app-events.ts";
 
-export { connectorBrowserOrigin, workerHostname } from "./hostnames.ts";
+export { workerHostname } from "./hostnames.ts";
 
 import { z } from "zod";
 import { organizationIdentifier } from "./organizations.ts";
@@ -52,6 +52,7 @@ export const app = z.strictObject({
   slug: appSlug,
   displayName: z.string(),
   catalogListed: z.boolean(),
+  web: z.boolean().default(true),
   parentId: identifier.nullable(),
   organizationId: organizationIdentifier,
   hostname: z.string(),
@@ -229,6 +230,20 @@ export const workerConfiguration = z.strictObject({
 
 export const workerMetadata = workerConfiguration
   .extend({
+    web: z.boolean().optional(),
+    entrypoints: z
+      .array(bindingName)
+      .max(32)
+      .refine(
+        (names) =>
+          new Set(names).size === names.length &&
+          names.every(
+            (name) =>
+              !name.startsWith("WIDEFLEET_") && !["Events", "WorkflowRunner"].includes(name),
+          ),
+        "Service entrypoints must be unique and cannot use platform names",
+      )
+      .optional(),
     crons: z.array(z.string().min(1)).default([]),
     queue_consumers: z.array(queueConsumer).default([]),
     assets: z.strictObject({ upload_session: identifier, binding: bindingName.default("ASSETS") }),
@@ -276,7 +291,7 @@ export const artifact = z.strictObject({
 // The release is independent of the agent executable. Protocol changes, rather
 // than JavaScript changes, determine whether an installer update is necessary.
 export const runtimeRelease = z.strictObject({
-  protocol: z.literal(2),
+  protocol: z.literal(3),
   auth: z.literal(1),
   version: z.string().regex(/^[0-9]+\.[0-9]+\.[0-9]+$/),
   celld: z.literal("0.6.2"),
@@ -294,103 +309,48 @@ export const runtimeRelease = z.strictObject({
     .min(1),
 });
 
-const connectorValueMaxBytes = 5_000;
+const appSecretMaxBytes = 5_000;
 
-export const connectorEnvironmentMaxBindings = 128;
+export const appEnvironmentMaxBindings = 128;
 
-export const connectorUploadMetadata = workerConfiguration
-  .extend({
-    entrypoints: z
-      .array(bindingName)
-      .min(1)
-      .refine((names) => names.includes("default"), "celld requires a default Worker export"),
-    durable_objects: z
-      .array(z.strictObject({ name: bindingName, class_name: bindingName }))
-      .default([]),
-  })
-  .superRefine((metadata, context) => {
-    const names = [
-      ...metadata.bindings.map((binding) => binding.name),
-      ...metadata.durable_objects.map((binding) => binding.name),
-    ];
-
-    if (new Set(names).size !== names.length)
-      context.addIssue({ code: "custom", message: "Binding names must be unique" });
-
-    if (
-      [
-        ...names,
-        ...metadata.entrypoints,
-        ...metadata.durable_objects.map((binding) => binding.class_name),
-      ].some((name) => name.startsWith("WIDEFLEET_"))
-    )
-      context.addIssue({
-        code: "custom",
-        message: "WIDEFLEET_ names are reserved for the platform",
-      });
-
-    if (
-      metadata.bindings.some((binding) => binding.type === "workflow" || binding.type === "queue")
-    )
-      context.addIssue({
-        code: "custom",
-        message: "Connector queues and workflows are not supported",
-      });
-  });
-
-export const connectorPackage = z.strictObject({
-  protocol: z.literal(1),
-  name: appSlug,
-  metadata: connectorUploadMetadata,
-  modules: artifact.shape.modules,
-});
-
-export const connectorSecretName = bindingName.refine(
+export const appSecretName = bindingName.refine(
   (name) => !name.startsWith("WIDEFLEET_") && name !== "__proto__",
-  "Reserved connector secret name",
+  "Reserved app secret name",
 );
 
-export const connectorSecretPath = z.strictObject({ name: appSlug, secret: connectorSecretName });
+const appSecretSizeMessage = "Secret value must contain at most 5 KB (5000 UTF-8 bytes)";
 
-const connectorSecretSizeMessage = "Secret value must contain at most 5 KB (5000 UTF-8 bytes)";
-
-export const connectorSecretValue = z
+export const appSecretValue = z
   .string()
   .min(1)
-  .max(connectorValueMaxBytes, connectorSecretSizeMessage)
+  .max(appSecretMaxBytes, appSecretSizeMessage)
   .refine(
-    (value) => new TextEncoder().encode(value).byteLength <= connectorValueMaxBytes,
-    connectorSecretSizeMessage,
+    (value) => new TextEncoder().encode(value).byteLength <= appSecretMaxBytes,
+    appSecretSizeMessage,
   );
 
-export const connectorStatus = z.strictObject({
-  name: appSlug,
-  checksum,
-  appliedChecksum: checksum.nullable(),
-  secretRevision: z.number().int().nonnegative().default(0),
-  appliedSecretRevision: z.number().int().nonnegative().nullable().default(null),
-  secrets: z.array(connectorSecretName).default([]),
-  jobId: identifier,
-  state: z.enum(["queued", "running", "succeeded", "failed"]),
-  message: z.string().nullable(),
-  entrypoints: z.array(bindingName),
-  browserUrl: z.url().nullable().default(null),
+export const appSecretPreparation = z.strictObject({
+  appId: identifier,
+  revision: z.number().int().nonnegative(),
+  values: z.record(appSecretName, appSecretValue),
 });
 
-export const connectorCatalogEntry = z.strictObject({
-  name: appSlug,
-  entrypoints: z.array(bindingName),
-  browserUrl: z.url().nullable().default(null),
+export const appSecretStatus = z.strictObject({
+  names: z.array(appSecretName),
+  revision: z.number().int().nonnegative(),
+  appliedRevision: z.number().int().nonnegative().nullable(),
+  deployment: deployment.nullable(),
 });
 
-export const connectorBrowserRoute = z.strictObject({
-  organizationId: organizationIdentifier,
-  name: appSlug,
-  origin: z.url({ protocol: /^https$/ }).refine((value) => new URL(value).origin === value),
+export const serviceCatalogEntry = z.strictObject({
+  appId: identifier,
+  slug: appSlug,
+  displayName: z.string(),
+  entrypoints: z.array(bindingName),
 });
 
 export const capabilityGrant = z.strictObject({
-  connector: appSlug,
+  app: identifier,
   entrypoint: bindingName.default("default"),
 });
 
@@ -398,37 +358,8 @@ export const capabilityGrants = z.record(bindingName, capabilityGrant);
 
 export const publishedCapability = capabilityGrant.extend({
   organizationId: organizationIdentifier,
+  hostname: z.string().regex(/^[a-z0-9.-]+$/),
 });
-
-export const connectorCaller = z.strictObject({
-  issuer: z.url(),
-  subject: z.string().min(1),
-  name: z.string(),
-});
-
-export const connectorPreparation = z.strictObject({
-  organizationId: organizationIdentifier,
-  version: identifier,
-  release: connectorPackage,
-  nativeBindings: z.record(bindingName, bindingName),
-  browserOrigin: connectorBrowserRoute.shape.origin.nullable().default(null),
-  secrets: z.record(connectorSecretName, connectorSecretValue),
-  telemetry: z
-    .strictObject({ url: z.url(), token: z.string().min(1) })
-    .nullable()
-    .default(null),
-});
-
-export const connectorActivation = z.strictObject({
-  organizationId: organizationIdentifier,
-  name: appSlug,
-  version: identifier,
-});
-
-export const connectorManagement = z.discriminatedUnion("action", [
-  connectorPreparation.extend({ action: z.literal("prepare") }),
-  connectorActivation.extend({ action: z.literal("activate") }),
-]);
 
 export const capabilitySnapshot = z.strictObject({
   revision: z.number().int().nonnegative(),
@@ -451,8 +382,8 @@ export const appResource = z.strictObject({
 export const appConnections = z.strictObject({
   deploymentId: identifier.nullable(),
   resources: z.array(appResource),
-  connectors: capabilityState,
-  activeConnectors: capabilityGrants.nullable(),
+  connections: capabilityState,
+  activeConnections: capabilityGrants.nullable(),
 });
 
 export const capabilityPath = appPath.extend({
@@ -464,11 +395,7 @@ export const capabilityPath = appPath.extend({
 
 export const runtimePackages = z.strictObject({
   runtime: runtimeRelease,
-  connectors: z.array(connectorPackage).default([]),
-  connectorOrigins: z.record(appSlug, connectorBrowserRoute.shape.origin).default({}),
-  connectorSecrets: z
-    .record(appSlug, z.record(connectorSecretName, connectorSecretValue))
-    .default({}),
+  appSecrets: appSecretPreparation.optional(),
 });
 
 export const runtimeVersion = runtimeRelease.shape.version;
@@ -485,6 +412,8 @@ export const runtimeStatus = z.strictObject({
 export const runtimeUpdate = z.strictObject({ version: runtimeVersion });
 
 export const publishedApp = artifact.extend({
+  secretRevision: z.number().int().nonnegative().optional(),
+  organizationId: organizationIdentifier.optional(),
   network: networkSnapshot,
   capabilities: z.record(bindingName, publishedCapability).default({}),
   capabilityRevision: z.number().int().nonnegative().default(0),
@@ -526,15 +455,7 @@ export const migrationArtifact = z.strictObject({
 export const job = z.strictObject({
   id: identifier,
   organizationId: organizationIdentifier,
-  kind: z.enum([
-    "deploy",
-    "runtime",
-    "connector",
-    "delete",
-    "configure",
-    "migrations",
-    "workflows",
-  ]),
+  kind: z.enum(["deploy", "runtime", "delete", "configure", "migrations", "workflows"]),
   workflow: workflowRequest.nullable().default(null),
   migration: migrationArtifact.nullable().default(null),
   access: appAccessSnapshot.nullable(),
@@ -604,11 +525,6 @@ export const logQuery = appPath.extend({
   cursor: z.string().min(1).max(4096).optional(),
 });
 
-export const connectorLogQuery = logQuery.omit({ appId: true, deploymentId: true }).extend({
-  name: appSlug,
-  version: identifier.optional(),
-});
-
 export const stackFrame = z.strictObject({
   generatedFile: z.string(),
   generatedLine: z.number().int(),
@@ -631,7 +547,6 @@ export const runtimeLog = z.strictObject({
   frames: z.array(stackFrame),
   buildId: z.string().nullable(),
   deploymentId: identifier.nullable(),
-  connectorVersion: identifier.nullable().default(null),
   requestId: z.string().nullable(),
   traceId: z.string().nullable(),
   spanId: z.string().nullable(),

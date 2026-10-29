@@ -12,7 +12,6 @@ type Definition = {
   modules: z.infer<typeof storedModule>[];
   nativeBindings: Record<string, string>;
   capabilities?: string[];
-  objects?: { name: string; class_name: string; scope: string }[];
 };
 
 export const workerDefinition = async (
@@ -69,7 +68,7 @@ export const workerDefinition = async (
   const modules = await loadModules(environment, input.scope, input.modules);
   modules.set(
     "__widefleet_bindings.js",
-    `const WIDEFLEET_CONFIGURATION = ${JSON.stringify({ metadata: input.metadata, capabilities: input.capabilities ?? [], objects: input.objects ?? [] })};\n${WIDEFLEET_BINDINGS_SOURCE}`,
+    `const WIDEFLEET_CONFIGURATION = ${JSON.stringify({ metadata: input.metadata, capabilities: input.capabilities ?? [] })};\n${WIDEFLEET_BINDINGS_SOURCE}`,
   );
 
   return {

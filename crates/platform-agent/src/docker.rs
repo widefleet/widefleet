@@ -328,33 +328,6 @@ pub async fn route(configuration: &Configuration, job: &Job) -> Result<()> {
     route_host(configuration, &name, job.hostname()?).await
 }
 
-pub async fn route_connectors(
-    configuration: &Configuration,
-    origins: &std::collections::BTreeMap<String, String>,
-) -> Result<()> {
-    for origin in origins.values() {
-        let url = reqwest::Url::parse(origin).map_err(|error| Error::invalid(error.to_string()))?;
-        if url.scheme() != "https"
-            || !url.username().is_empty()
-            || url.password().is_some()
-            || url.query().is_some()
-            || url.fragment().is_some()
-            || url.path() != "/"
-        {
-            return Err(Error::invalid("Invalid connector browser origin".into()));
-        }
-        let hostname = url
-            .host_str()
-            .ok_or_else(|| Error::invalid("Connector origin has no hostname".into()))?;
-        let name = format!(
-            "platform-connector-{}",
-            platform_core::sha256(hostname.as_bytes())
-        );
-        route_host(configuration, &name, hostname).await?;
-    }
-    Ok(())
-}
-
 async fn route_host(configuration: &Configuration, name: &str, hostname: &str) -> Result<()> {
     tokio::fs::create_dir_all(&configuration.routing_directory).await?;
     let tls = route_tls(configuration, hostname)?;
@@ -410,10 +383,11 @@ pub async fn remove(configuration: &Configuration, job: &Job) -> Result<()> {
     }
 }
 
-pub async fn connector_request(
+pub async fn runtime_request(
     docker: &Docker,
     container: &str,
     token: &str,
+    path: &str,
     request: &Value,
 ) -> Result<Value> {
     let bytes = execute_with_environment(
@@ -432,18 +406,17 @@ pub async fn connector_request(
             "Content-Type: application/json".into(),
             "--data-binary".into(),
             "@-".into(),
-            "http://127.0.0.1:8080/.well-known/widefleet/connectors".into(),
+            format!("http://127.0.0.1:8080/.well-known/widefleet/{path}"),
         ],
         Vec::new(),
         Some(serde_json::to_vec(request)?),
     )
     .await?;
     let response: Value = serde_json::from_slice(&bytes)?;
-    let mut result = response
+    let result = response
         .get("result")
         .cloned()
-        .ok_or_else(|| Error::invalid("Connector runtime returned no result".into()))?;
-    result["action"] = value!("activate");
+        .ok_or_else(|| Error::invalid("App runtime returned no result".into()))?;
     Ok(result)
 }
 
@@ -488,65 +461,6 @@ pub async fn workflow_request(
 mod tests {
     use super::*;
     use clap::Parser;
-
-    #[tokio::test]
-    async fn publishes_connector_routes_without_an_app_and_reuses_the_same_route() -> Result<()> {
-        let directory = tempfile::tempdir()?;
-        let configuration = Configuration::try_parse_from([
-            "platform-agent",
-            "--url",
-            "https://platform.example.test",
-            "--token",
-            "fixture-only",
-            "--routing-directory",
-            directory
-                .path()
-                .to_str()
-                .ok_or_else(|| Error::invalid("Invalid test path".into()))?,
-            "--tls-mode",
-            "provided",
-        ])
-        .map_err(|error| Error::invalid(error.to_string()))?;
-        let hostname = "connector.apps.example.test";
-        let origins = std::collections::BTreeMap::from([(
-            "fixture".into(),
-            format!("https://{hostname}:8443"),
-        )]);
-        route_connectors(&configuration, &origins).await?;
-        let name = format!(
-            "platform-connector-{}",
-            platform_core::sha256(hostname.as_bytes())
-        );
-        let path = directory.path().join(format!("{name}.yaml"));
-        let first = tokio::fs::read(&path).await?;
-        let route: Value = serde_json::from_slice(&first)?;
-        assert_eq!(route["http"]["routers"][&name]["service"], name);
-        assert_eq!(
-            route["http"]["services"][&name]["loadBalancer"]["servers"][0]["url"],
-            "http://app-platform-runtime:8080"
-        );
-        assert!(
-            route["http"]["routers"][&name]["rule"]
-                .as_str()
-                .is_some_and(|rule| rule.contains(hostname)
-                    && rule.contains("!PathPrefix(`/.well-known/widefleet/`)"))
-        );
-        route_connectors(&configuration, &origins).await?;
-        assert_eq!(tokio::fs::read(path).await?, first);
-        assert!(
-            route_connectors(
-                &configuration,
-                &std::collections::BTreeMap::from([(
-                    "fixture".into(),
-                    "https://connector.apps.example.test/path".into()
-                )])
-            )
-            .await
-            .is_err()
-        );
-        Ok(())
-    }
-
     #[test]
     fn requests_one_wildcard_per_parent_and_reuses_the_app_certificate() -> Result<()> {
         let mut configuration = Configuration::try_parse_from([

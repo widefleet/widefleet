@@ -82,9 +82,9 @@ jobs:
       - name: Test dynamic app isolation and native capabilities
         if: matrix.suite == 'integration'
         run: RUN_DYNAMIC_TESTS=1 pnpm exec vitest run apps/control-plane/tests/runtime/dynamic.test.ts apps/control-plane/tests/runtime/workflows.test.ts apps/control-plane/tests/runtime/workflow-adapter.test.ts
-      - name: Test dynamic connector publication and state in both runtimes
+      - name: Test app services and private secrets in both runtimes
         if: matrix.suite == 'integration'
-        run: RUN_CONNECTOR_TESTS=1 pnpm exec vitest run apps/control-plane/tests/dynamic-connectors.test.ts
+        run: RUN_SERVICE_TESTS=1 pnpm exec vitest run apps/control-plane/tests/app-services-runtime.test.ts
       - name: Test services and identity boundaries
         if: matrix.suite == 'integration'
         run: pnpm exec vitest run
@@ -151,7 +151,7 @@ jobs:
           cargo clippy --workspace --all-targets -- -D warnings
           cargo test --workspace
           cargo build --workspace
-          RUN_CLI_TESTS=1 pnpm exec vitest run apps/control-plane/tests/cli.test.ts apps/control-plane/tests/network-cli.test.ts apps/control-plane/tests/access-cli.test.ts apps/control-plane/tests/connector-cli.test.ts apps/control-plane/tests/connector-scope.integration.test.ts apps/control-plane/tests/workflows-cli.test.ts apps/control-plane/tests/auth-cli.test.ts apps/control-plane/tests/configuration-cli.test.ts apps/control-plane/tests/discovery-cli.test.ts apps/control-plane/tests/auth-cli.integration.test.ts apps/control-plane/tests/organization-selection.integration.test.ts apps/control-plane/tests/organization-login.integration.test.ts apps/control-plane/tests/reporting-cli.test.ts
+          RUN_CLI_TESTS=1 pnpm exec vitest run apps/control-plane/tests/cli.test.ts apps/control-plane/tests/network-cli.test.ts apps/control-plane/tests/access-cli.test.ts apps/control-plane/tests/app-services-cli.test.ts apps/control-plane/tests/app-services.integration.test.ts apps/control-plane/tests/workflows-cli.test.ts apps/control-plane/tests/auth-cli.test.ts apps/control-plane/tests/configuration-cli.test.ts apps/control-plane/tests/discovery-cli.test.ts apps/control-plane/tests/auth-cli.integration.test.ts apps/control-plane/tests/organization-selection.integration.test.ts apps/control-plane/tests/organization-login.integration.test.ts apps/control-plane/tests/reporting-cli.test.ts
       - name: Test CLI login through the browser
         if: matrix.suite == 'rust-runtime'
         run: pnpm --filter @platform/control-plane test:e2e cli-login.spec.ts

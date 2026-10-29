@@ -1,9 +1,14 @@
+import { prepareAppSecrets } from "./app-secrets.ts";
+
+export { AppSecrets } from "./app-secrets.ts";
+
+export { AppService } from "./app-service.ts";
+
 import { createAuthHandler, manageAuthConfiguration } from "@platform/auth-proxy";
 import { authControlPath, authRoute, authRouteKey } from "@platform/auth-proxy/publication";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { appEventConfiguration } from "@platform/contracts";
 import { publishedApp } from "@platform/contracts";
-import { connectorCaller } from "@platform/contracts";
 import { z } from "zod";
 import { workflowJson } from "./workflow-json.ts";
 import { workflowCatalog } from "./workflow-catalog.ts";
@@ -15,18 +20,8 @@ import { appKey, readApp } from "./catalog.ts";
 import type { WorkflowRunner } from "./workflow-runner.ts";
 import type { Events } from "./events.ts";
 import type { ParentEnvironment, PublishedApp, Json } from "./types.ts";
-import { manageConnector } from "./connector-catalog.ts";
 import { readOrganizationAvailability } from "./availability.ts";
 import { executionOptions } from "./execution-limits.ts";
-import { signConnectorCaller } from "./connector-caller.ts";
-import { readConnectorBrowserRoute } from "./connector-publication.ts";
-import { connectorBrowserResponse } from "./connector-browser.ts";
-
-export { ConnectorCatalog, ConnectorGateway } from "./connector-catalog.ts";
-
-export { ConnectorSecrets } from "./connector-code.ts";
-
-export { ConnectorState, ConnectorSupervisor } from "./connector-state.ts";
 
 export { Database, KeyValue, Producer } from "./storage.ts";
 
@@ -115,7 +110,6 @@ const dispatchApp = async (
   environment: ParentEnvironment,
   context: ExecutionContext,
   authenticated: { appId: string; organizationId: string } | null,
-  caller?: z.infer<typeof connectorCaller>,
 ) => {
   const url = new URL(request.url);
   const candidate = request.headers.get("x-widefleet-candidate");
@@ -179,6 +173,7 @@ const dispatchApp = async (
       capabilityRevision: app.capabilityRevision,
       version: app.version,
       runtimeVersion: WIDEFLEET_RUNTIME_VERSION,
+      services: 1,
     });
   }
 
@@ -196,21 +191,13 @@ const dispatchApp = async (
       headers: { "cache-control": "no-store" },
     });
 
+  if (app.metadata.web === false) return new Response(null, { status: 404 });
+
   if (request.method === "GET" || request.method === "HEAD") {
     const asset = await serveAsset(request, environment, app);
 
     if (asset.status !== 404) return browserPolicy(asset, app.network.policy.browser);
   }
-
-  const proof =
-    authenticated && caller
-      ? await signConnectorCaller(
-          environment.WIDEFLEET_CONTROL_TOKEN,
-          app.appId,
-          authenticated.organizationId,
-          caller,
-        )
-      : undefined;
 
   return browserPolicy(
     // celld forwards incoming request cancellation only when the signal is
@@ -219,7 +206,6 @@ const dispatchApp = async (
       worker
         .getEntrypoint(undefined, {
           ...executionOptions(environment.WIDEFLEET_EXECUTION_LIMITS, "http"),
-          props: { connectorCaller: proof },
         })
         .fetch(request, { signal: request.signal }),
     ),
@@ -242,8 +228,8 @@ const manageRuntime = async (
     return Response.json({ runtimeVersion: WIDEFLEET_RUNTIME_VERSION });
   }
 
-  if (url.pathname === "/.well-known/widefleet/connectors")
-    return manageConnector(request, environment);
+  if (url.pathname === "/.well-known/widefleet/app-secrets")
+    return prepareAppSecrets(request, environment);
 
   if (url.pathname === "/.well-known/widefleet/workflows") {
     if (request.method !== "POST") return new Response(null, { status: 403 });
@@ -307,41 +293,8 @@ export default {
       return manageRuntime(request, environment, context);
     }
 
-    return createAuthHandler(
-      environment,
-      (authenticated, appId, organizationId, caller) =>
-        dispatchApp(authenticated, environment, context, { appId, organizationId }, caller),
-      async (authenticated, appId, organizationId, caller, binding) => {
-        const app = await readApp(environment, `hosts/${new URL(authenticated.url).hostname}.json`);
-
-        if (!app || app.appId !== appId) return new Response(null, { status: 503 });
-        const grant = app.capabilities[binding];
-
-        if (!grant || grant.organizationId !== organizationId)
-          return new Response(null, { status: 404 });
-
-        return context.exports
-          .ConnectorGateway({ props: { ...grant, appId, caller, browser: true } })
-          .redirect(authenticated, binding);
-      },
-      {
-        resolve: (hostname) => readConnectorBrowserRoute(environment, hostname),
-        fetch: async (authenticated, route, caller) => {
-          return connectorBrowserResponse(
-            await context.exports
-              .ConnectorGateway({
-                props: {
-                  organizationId: route.organizationId,
-                  connector: route.name,
-                  entrypoint: "default",
-                  caller,
-                  browser: true,
-                },
-              })
-              .fetch(authenticated),
-          );
-        },
-      },
+    return createAuthHandler(environment, (authenticated, appId, organizationId) =>
+      dispatchApp(authenticated, environment, context, { appId, organizationId }),
     ).fetch(request);
   },
   async scheduled(

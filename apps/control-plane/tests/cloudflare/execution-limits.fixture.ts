@@ -1,6 +1,6 @@
 export const executionProfiles = {
   http: { cpuMs: 100, subRequests: 50 },
-  connector: { cpuMs: 250, subRequests: 50 },
+  service: { cpuMs: 250, subRequests: 50 },
   cron: { cpuMs: 1000, subRequests: 200 },
   workflow: { cpuMs: 5000, subRequests: 500 },
   readiness: { cpuMs: 100, subRequests: 10 },

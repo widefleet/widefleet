@@ -307,19 +307,6 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         return;
       }
 
-      if (request.url?.startsWith("/api/v1/connectors/erp/logs?")) {
-        response.end(
-          JSON.stringify({
-            entries: [],
-            nextCursor: null,
-            receivedThrough: "1000",
-            since: "2026-10-19T00:00:00Z",
-          }),
-        );
-
-        return;
-      }
-
       if (
         (request.method === "PUT" && request.url === "/api/v1/apps/by-name/fixture") ||
         (request.method === "GET" && request.url === `/api/v1/apps/${app.id}`)
@@ -440,21 +427,6 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         timeout: 15_000,
         env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken },
       });
-
-    it("reads connector logs without resolving an app and sends the selected version", async () => {
-      const version = crypto.randomUUID();
-
-      const result = await execute(
-        join(state, "installation", executableName),
-        ["logs", "--connector", "erp", "--since", "15m", "--version", version, "--json"],
-        { env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken } },
-      );
-
-      expect(result.stdout).toBe("");
-      expect(requests).toEqual([
-        `GET /api/v1/connectors/erp/logs?since=15m&limit=100&version=${version}`,
-      ]);
-    });
 
     it.each([
       [

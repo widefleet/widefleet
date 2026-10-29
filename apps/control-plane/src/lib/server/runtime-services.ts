@@ -1,4 +1,6 @@
 import type { AuthenticationExtension } from "./runtime-extension.ts";
+import { createConnectionService } from "./connections.ts";
+import { createAppSecrets } from "./app-secrets.ts";
 import type { OrganizationAccess } from "./application-context.ts";
 import type { BetterAuthOptions } from "better-auth";
 import type { sveltekitCookies } from "better-auth/svelte-kit";
@@ -9,7 +11,6 @@ import { createIdentityService } from "./identity.ts";
 import { createAppService } from "./apps.ts";
 import { createAgentService } from "./agents.ts";
 import { createRuntimeReleaseService } from "./runtime-releases.ts";
-import { createConnectorService } from "./connectors.ts";
 import { createAppAccessService } from "./app-access.ts";
 import { createNetworkService } from "./network.ts";
 import { createWorkflowService } from "./workflows.ts";
@@ -134,18 +135,13 @@ export const createRuntime = ({
     cliLogin: createCliLogin(database.db, configuration),
     apps: createAppService(database.db, configuration, execution, observation),
     agents: createAgentService(database.db),
-    jobs: createJobService(database.db, storage, encryptionKey, configuration, reporting.operation),
+    jobs: createJobService(database.db, storage, encryptionKey, reporting.operation),
     network: createNetworkService(database.db, execution),
     appAccess: createAppAccessService(database.db, execution),
     workflows: createWorkflowService(database.db, execution),
     migrations: createMigrationService(database.db, storage, execution),
-    connectors: createConnectorService(
-      database.db,
-      storage,
-      encryptionKey,
-      configuration,
-      execution,
-    ),
+    connections: createConnectionService(database.db, execution),
+    appSecrets: createAppSecrets(database.db, encryptionKey, execution),
     releases: createRuntimeReleaseService(database.db, storage, execution),
     uploads: createUploadService(database.db, storage, configuration, execution),
     telemetry: createTelemetry(database.db, storage, configuration, hostedLogs),

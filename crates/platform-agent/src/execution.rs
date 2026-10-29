@@ -143,8 +143,6 @@ pub struct Prepared {
     pub token: String,
     pub app: Option<PublishedApp>,
     pub probes: Vec<PublishedApp>,
-    pub connectors: Vec<Value>,
-    pub activations: Vec<Value>,
     digest: String,
     packages: RuntimePackages,
 }
@@ -156,9 +154,8 @@ pub async fn prepare(
     packages: &RuntimePackages,
     directory: &Path,
     telemetry: Option<platform_core::model::TelemetryDestination>,
-    connector_telemetry: BTreeMap<String, platform_core::model::TelemetryDestination>,
 ) -> Result<Prepared> {
-    if packages.runtime.protocol != 2
+    if packages.runtime.protocol != 3
         || packages.runtime.auth != 1
         || packages.runtime.celld != crate::native::VERSION
     {
@@ -190,33 +187,15 @@ pub async fn prepare(
             current.push(serde_json::from_slice::<PublishedApp>(&bytes)?);
         }
     }
-    let capabilities: BTreeSet<_> = packages
-        .connectors
-        .iter()
-        .flat_map(|connector| {
-            connector
-                .metadata
-                .entrypoints
-                .iter()
-                .map(|entrypoint| (connector.name.clone(), entrypoint.clone()))
-        })
-        .collect();
-    for app in &current {
-        if app.capabilities.values().any(|binding| {
-            !capabilities.contains(&(
-                binding.grant.connector.clone(),
-                binding.grant.entrypoint.clone(),
-            ))
-        }) {
-            return Err(Error::invalid(format!(
-                "Activate binding revocations for {} before removing connector entrypoints",
-                app.hostname
-            )));
-        }
-    }
     // Each activation attempt gets an immutable snapshot and a fresh worker key.
     let mut candidate = match artifact {
         Some(artifact) => Some(PublishedApp {
+            secret_revision: packages
+                .app_secrets
+                .as_ref()
+                .and_then(|value| value["revision"].as_u64())
+                .unwrap_or(0),
+            organization_id: Some(job.organization_id.clone()),
             artifact,
             version: uuid::Uuid::new_v4(),
             deployment_id: job.deployment_id.unwrap_or(job.id),
@@ -235,11 +214,38 @@ pub async fn prepare(
         None => None,
     };
     if let Some(app) = &mut candidate {
+        for consumer in &current {
+            if consumer.capabilities.values().any(|binding| {
+                binding.grant.app == app.artifact.app_id
+                    && !app
+                        .artifact
+                        .metadata
+                        .entrypoints
+                        .contains(&binding.grant.entrypoint)
+            }) {
+                return Err(Error::invalid(
+                    "Disconnect app services before removing their entrypoints".into(),
+                ));
+            }
+        }
         if let Some(snapshot) = &job.capabilities {
             for (name, grant) in &snapshot.grants {
-                let capability = (grant.connector.clone(), grant.entrypoint.clone());
-                if !capabilities.contains(&capability)
-                    || name.starts_with("WIDEFLEET_")
+                let target = current
+                    .iter()
+                    .find(|target| {
+                        target.artifact.app_id == grant.app
+                            && target.organization_id.as_deref()
+                                == Some(job.organization_id.as_str())
+                            && target
+                                .artifact
+                                .metadata
+                                .entrypoints
+                                .contains(&grant.entrypoint)
+                    })
+                    .ok_or_else(|| {
+                        Error::invalid(format!("App binding {name} target is unavailable"))
+                    })?;
+                if name.starts_with("WIDEFLEET_")
                     || name == &app.artifact.metadata.assets.binding
                     || app
                         .artifact
@@ -250,12 +256,13 @@ pub async fn prepare(
                         .any(|binding| binding.name() == name)
                 {
                     return Err(Error::invalid(format!(
-                        "Connector binding {name} is unavailable or collides with another binding"
+                        "App binding {name} is unavailable or collides with another binding"
                     )));
                 }
                 app.capabilities.insert(
                     name.clone(),
                     PublishedCapability {
+                        hostname: target.hostname.clone(),
                         organization_id: job.organization_id.clone(),
                         grant: grant.clone(),
                     },
@@ -426,82 +433,13 @@ pub async fn prepare(
         "AUTH_CONFIG".into(),
         json!({ "binding": "AUTH_CONFIG", "id": "widefleet-auth" }),
     );
-    // Keep connector resources bound across code changes, including calls using
-    // earlier immutable snapshots. Connector removal is a separate operation.
-    let resource_key = format!("{}/connector-resources.json", prefix(job));
-    let mut connector_resources: BTreeMap<String, BTreeMap<String, Value>> =
-        read(&store, &resource_key)
-            .await?
-            .map(|bytes| serde_json::from_slice(&bytes))
-            .transpose()?
-            .unwrap_or_default();
-    let mut connector_preparations = Vec::new();
-    for connector in &packages.connectors {
-        if connector.protocol != 1 {
-            return Err(Error::invalid(
-                "Unsupported connector package protocol".into(),
-            ));
-        }
-        let mut native_bindings = BTreeMap::new();
-        for binding in &connector.metadata.worker.bindings {
-            if let Some((name, field, native, config)) =
-                native_resource(&format!("connector:{}", connector.name), binding)
-            {
-                native_bindings.insert(name, native.clone());
-                connector_resources
-                    .entry(field.into())
-                    .or_default()
-                    .insert(native, config);
-            }
-        }
-        // App operations only use the already active connector versions. Connector
-        // changes prepare snapshots before the recovery journal commits activation.
-        if matches!(job.kind, JobKind::Connector | JobKind::Runtime) {
-            publish_modules(
-                &store,
-                job,
-                &format!("connectors/{}/{}", job.organization_id, connector.name),
-                &connector.modules,
-                &directory.join("connectors").join(&connector.name),
-            )
-            .await?;
-            let mut preparation = json!({
-                "action": "prepare", "organizationId": job.organization_id, "version": job.id,
-                "release": connector, "nativeBindings": native_bindings,
-                "secrets": packages.connector_secrets.get(&connector.name).cloned().unwrap_or_default(),
-                "telemetry": connector_telemetry.get(&connector.name),
-            });
-            if let Some(origin) = packages.connector_origins.get(&connector.name) {
-                preparation["browserOrigin"] = json!(origin);
-            }
-            connector_preparations.push(preparation);
-        }
-    }
-    for (field, resources) in &connector_resources {
-        match field.as_str() {
-            "d1_databases" => databases.extend(resources.clone()),
-            "r2_buckets" => buckets.extend(resources.clone()),
-            "kv_namespaces" => namespaces.extend(resources.clone()),
-            _ => {
-                return Err(Error::invalid(
-                    "Invalid connector resource inventory".into(),
-                ));
-            }
-        }
-    }
-    put(
-        &store,
-        &resource_key,
-        serde_json::to_vec(&connector_resources)?,
-    )
-    .await?;
     let project = directory.join("runtime");
     tokio::fs::create_dir_all(&project).await?;
     write_modules(&project, &packages.runtime.modules).await?;
-    let connector_key =
-        platform_agent::runtime::connector_key(store.as_ref(), &job.organization_id).await?;
+    let secrets_key =
+        platform_agent::runtime::secrets_key(store.as_ref(), &job.organization_id).await?;
     let mut config =
-        platform_agent::runtime::configuration(&packages.runtime, &token, &connector_key)?;
+        platform_agent::runtime::configuration(&packages.runtime, &token, &secrets_key)?;
     config["vars"]["WIDEFLEET_CONFIGURATION"] = json!(serde_json::to_string(
         &json!({ "crons": crons, "queues": queues })
     )?);
@@ -530,8 +468,6 @@ pub async fn prepare(
         )
         .await?;
     }
-    // Connector code and secrets are activated by the loader, independently of
-    // the native runtime deployment. Only resource/configuration changes reload it.
     let digest = sha256(&serde_json::to_vec(&json!([config, packages.runtime]))?);
     let changed = read(&store, &format!("{}/installed", prefix(job)))
         .await?
@@ -551,7 +487,7 @@ pub async fn prepare(
     // Runtime changes affect every published snapshot, including serving hosts
     // whose management acknowledgment has not arrived yet.
     let probes = match job.kind {
-        JobKind::Runtime | JobKind::Connector => current,
+        JobKind::Runtime => current,
         JobKind::Delete | JobKind::Migrations | JobKind::Workflows => Vec::new(),
         JobKind::Deploy | JobKind::Configure => candidate.iter().cloned().collect(),
     };
@@ -562,11 +498,9 @@ pub async fn prepare(
         app: candidate,
         digest,
         packages: RuntimePackages {
-            connector_secrets: BTreeMap::new(),
+            app_secrets: None,
             ..packages.clone()
         },
-        connectors: connector_preparations,
-        activations: Vec::new(),
     })
 }
 
@@ -749,15 +683,11 @@ struct Pending {
     app: Option<PublishedApp>,
     digest: Option<String>,
     packages: Option<RuntimePackages>,
-    #[serde(default)]
-    connectors: Vec<Value>,
 }
 
 pub struct Recovery {
     pub reload: bool,
     pub wake: Vec<String>,
-    pub connectors: Vec<Value>,
-    pub token: String,
 }
 
 // Leave the journal durable until the caller has reloaded the running node.
@@ -854,17 +784,6 @@ pub async fn recover(configuration: &Configuration, job: &Job) -> Result<Option<
             && read(&store, &format!("{}/deploy/current.json", prefix(job)))
                 .await?
                 .is_some(),
-        connectors: if pending.validated {
-            pending.connectors
-        } else {
-            Vec::new()
-        },
-        token: String::from_utf8(
-            read(&store, &format!("{}/control-token", prefix(job)))
-                .await?
-                .ok_or_else(|| Error::invalid("Runtime control token is missing".into()))?,
-        )
-        .map_err(|error| Error::invalid(error.to_string()))?,
         wake: if pending.validated {
             pending.wake
         } else {
@@ -920,7 +839,7 @@ pub async fn migration_database(
         ));
     }
     Ok(resource(
-        &job.app_id()?.to_string(),
+        &app.artifact.app_id.to_string(),
         "d1",
         &request.database_id,
     ))
@@ -935,7 +854,7 @@ pub async fn commit(configuration: &Configuration, job: &Job, prepared: &Prepare
         }
         None => (BTreeMap::new(), Vec::new()),
     };
-    put(&store, &format!("{}/pending.json", prefix(job)), serde_json::to_vec(&json!({ "previous": {}, "next": next, "wake": wake, "validated": true, "app": prepared.app, "digest": prepared.digest, "packages": prepared.packages, "connectors": prepared.activations }))?).await
+    put(&store, &format!("{}/pending.json", prefix(job)), serde_json::to_vec(&json!({ "previous": {}, "next": next, "wake": wake, "validated": true, "app": prepared.app, "digest": prepared.digest, "packages": prepared.packages }))?).await
 }
 
 pub async fn detach(configuration: &Configuration, job: &Job) -> Result<Option<RuntimePackages>> {
@@ -965,6 +884,7 @@ pub async fn remove(configuration: &Configuration, job: &Job) -> Result<()> {
     let mut owned_versions = Vec::new();
     let mut prefixes = BTreeSet::from([
         package_key(job, &format!("apps/{}/", job.app_id()?)),
+        package_key(job, &format!("app-secrets/{}/", job.app_id()?)),
         package_key(job, &format!("workflow-versions/{}/", job.app_id()?)),
     ]);
     for object in versions {
@@ -977,7 +897,8 @@ pub async fn remove(configuration: &Configuration, job: &Job) -> Result<()> {
         }
         for binding in app.artifact.metadata.worker.bindings {
             if let Binding::R2Bucket { bucket_name, .. } = binding {
-                let id = resource(&job.app_id()?.to_string(), "r2", &bucket_name);
+                let owner = app.artifact.app_id.to_string();
+                let id = resource(&owner, "r2", &bucket_name);
                 prefixes.insert(format!("{}/r2/{id}/", prefix(job)));
             }
         }

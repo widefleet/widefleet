@@ -1,6 +1,9 @@
+import { decryptSecret } from "./secret-encryption.ts";
+import { storedAppSecrets } from "./app-secrets.ts";
+import { checkServiceConsumers } from "./app-services.ts";
 import { resolveCloudflareCapabilities } from "./cloudflare-capabilities.ts";
 import { validateAppQueues } from "./cloudflare-app-package.ts";
-import { checkCapabilityNames } from "./connector-changes.ts";
+import { checkCapabilityNames } from "./capability-changes.ts";
 import { CloudflareSubscriptionPending } from "./cloudflare-subscription-updates.ts";
 import { createCloudflareEvents } from "./cloudflare-events.ts";
 import { NonRetryableError } from "cloudflare:workflows";
@@ -136,7 +139,9 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
             });
           const release = await artifact(command.artifactId);
           validateAppQueues(bindings, release.metadata);
+
           const prepared = await provisioner.provision(release);
+
           await withCloudflareDatabase(bindings, ({ db: resources }) =>
             updateCloudflareBindings(resources, provisioner, prepared.resources),
           );
@@ -271,7 +276,41 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               capabilities.grants,
             );
 
+            await checkServiceConsumers(transaction, app, metadata.entrypoints ?? []);
+
+            if (app.secretRevision > 0) {
+              const values = Object.fromEntries(
+                await Promise.all(
+                  Object.entries(storedAppSecrets.parse(app.secrets)).map(
+                    async ([name, ciphertext]) =>
+                      [
+                        name,
+                        await decryptSecret(bindings.PLATFORM_ENCRYPTION_KEY, ciphertext),
+                      ] as const,
+                  ),
+                ),
+              );
+
+              const response = await runtime.fetch(
+                "https://runtime.internal/.well-known/widefleet/app-secrets",
+                {
+                  method: "POST",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({ appId: app.id, revision: app.secretRevision, values }),
+                },
+              );
+
+              if (!response.ok) {
+                await response.body?.cancel();
+                throw new Error("App secrets could not be published");
+              }
+
+              await response.body?.cancel();
+            }
+
             const selected = {
+              secretRevision: app.secretRevision,
+              organizationId: app.organizationId,
               id: record.id,
               appId: app.id,
               metadata: record.metadata,
@@ -319,8 +358,18 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
                 networkRevision: z.literal(network.revision),
                 capabilityRevision: z.literal(capabilities.revision),
                 runtimeVersion: contract.runtimeVersion,
+                services: z.literal(1).optional(),
               })
               .parse(await response.json());
+
+            if (
+              (metadata.web === false ||
+                metadata.entrypoints?.length ||
+                app.secretRevision > 0 ||
+                Object.values(capabilities.grants).some((grant) => grant.app)) &&
+              ready.services !== 1
+            )
+              throw new Error("Upgrade the app runtime before activating app services");
 
             // Runtime upgrades are independent of app deployments. A successful code
             // replacement can precede its SQL confirmation, so check the serving release.
@@ -418,7 +467,9 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               .update(apps)
               .set({
                 activeDeploymentId: published.deploymentId,
+                appliedSecretRevision: published.secretRevision ?? 0,
                 state: "active",
+                webEnabled: metadata.web !== false,
                 appliedNetworkRevision: network.revision,
                 networkError: null,
                 appliedAccessRevision: access.revision,

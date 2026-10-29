@@ -1,9 +1,6 @@
 import * as contract from "@platform/contracts";
-import { and, eq } from "drizzle-orm";
 import type { z } from "zod";
-import { connectorReference } from "./connector-package.ts";
-import { InvalidOperation } from "./errors.ts";
-import { connectors } from "./schema.ts";
+import { resolveAppService } from "./app-services.ts";
 import type { Transaction } from "./transactions.ts";
 
 export const resolveCloudflareCapabilities = async (
@@ -13,27 +10,8 @@ export const resolveCloudflareCapabilities = async (
 ) => {
   const capabilities: Record<string, z.infer<typeof contract.publishedCapability>> = {};
 
-  for (const [name, grant] of Object.entries(grants)) {
-    const [record] = await transaction
-      .select()
-      .from(connectors)
-      .where(
-        and(eq(connectors.organizationId, organizationId), eq(connectors.name, grant.connector)),
-      );
-
-    const active = record?.appliedPackage ? connectorReference.parse(record.appliedPackage) : null;
-
-    if (
-      !record ||
-      !active?.entrypoints.includes(grant.entrypoint) ||
-      !connectorReference.parse(record.package).entrypoints.includes(grant.entrypoint)
-    )
-      throw new InvalidOperation({
-        code: "CONFLICT",
-        message: "Deploy the connector entrypoint successfully before binding it",
-      });
-    capabilities[name] = { ...grant, organizationId };
-  }
+  for (const [name, grant] of Object.entries(grants))
+    capabilities[name] = await resolveAppService(transaction, organizationId, grant);
 
   return capabilities;
 };

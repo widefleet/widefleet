@@ -3,7 +3,7 @@ import { Result } from "better-result";
 import { and, eq, gt, sql } from "drizzle-orm";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
-import { checkCapabilityNames } from "./connectors.ts";
+import { checkCapabilityNames } from "./capability-changes.ts";
 import { appUrl, enqueueDeployment, managedApp } from "./apps.ts";
 import { hashAsset } from "./asset-hash.ts";
 import type { Configuration } from "./config.ts";
@@ -133,6 +133,16 @@ export const createUploadService = (
         if (record.state === "deleting")
           return yield* new InvalidOperation({ code: "CONFLICT", message: "App is being deleted" });
         checkCapabilityNames(metadata, contract.capabilityGrants.parse(record.capabilities));
+
+        if (
+          Object.keys(z.record(z.string(), z.string()).parse(record.secrets)).length +
+            metadata.bindings.filter((binding) => binding.type === "plain_text").length >
+          contract.appEnvironmentMaxBindings
+        )
+          return yield* new InvalidOperation({
+            code: "BAD_REQUEST",
+            message: "App variables and secrets exceed the binding limit",
+          });
 
         const session = yield* Result.await(
           getSession(transaction, principal, appId, metadata.assets.upload_session),

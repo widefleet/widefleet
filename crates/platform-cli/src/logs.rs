@@ -18,12 +18,6 @@ use uuid::Uuid;
 pub struct Options {
     /// App name or ID; otherwise use the current project without creating an app.
     pub app: Option<String>,
-    /// Read shared connector logs (administrator access required).
-    #[arg(long, conflicts_with_all = ["app", "deployment"])]
-    connector: Option<String>,
-    /// Restrict connector logs to one published version.
-    #[arg(long, requires = "connector")]
-    version: Option<Uuid>,
     #[arg(long, default_value = "wrangler.jsonc")]
     config: PathBuf,
     #[arg(long, default_value = "1h")]
@@ -80,7 +74,6 @@ struct Log {
     frames: Vec<Frame>,
     build_id: Option<String>,
     deployment_id: Option<Uuid>,
-    connector_version: Option<Uuid>,
     request_id: Option<String>,
     trace_id: Option<String>,
     span_id: Option<String>,
@@ -169,15 +162,9 @@ fn micros(value: &str) -> Result<u64> {
 }
 
 async fn poll(api: &Api, credentials: &auth::Credentials, options: Options) -> Result<()> {
-    let path = match &options.connector {
-        Some(name) => format!("/connectors/{}/logs", crate::connector::segment(name)?),
-        None => {
-            let app =
-                crate::apps::resolve(api, credentials, options.app.as_deref(), &options.config)
-                    .await?;
-            format!("/apps/{app}/logs")
-        }
-    };
+    let app =
+        crate::apps::resolve(api, credentials, options.app.as_deref(), &options.config).await?;
+    let path = format!("/apps/{app}/logs");
     let json_output = options.json || !std::io::stdout().is_terminal();
     let mut parameters = vec![
         ("since", options.since.clone()),
@@ -197,9 +184,6 @@ async fn poll(api: &Api, credentials: &auth::Credentials, options: Options) -> R
     }
     if let Some(deployment) = options.deployment {
         parameters.push(("deploymentId", deployment.to_string()));
-    }
-    if let Some(version) = options.version {
-        parameters.push(("version", version.to_string()));
     }
     let mut first = true;
     let mut cursor: Option<String> = None;

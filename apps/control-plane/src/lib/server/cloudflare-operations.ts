@@ -1,4 +1,4 @@
-import { applyCapabilityChange } from "./connector-changes.ts";
+import { applyCapabilityChange } from "./capability-changes.ts";
 import { lockOrganizationRuntime } from "./organization-runtime.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";

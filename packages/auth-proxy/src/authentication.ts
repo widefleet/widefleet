@@ -5,13 +5,8 @@ import { z } from "zod";
 import { sessionVersion, type AuthConfiguration } from "./configuration.ts";
 import { issuer, providerIdentity, proxyIdentity } from "./identity.ts";
 
-const companyCookieNamespace = "platform_sso_";
-
 export const cookiePrefix = (configuration: AuthConfiguration) =>
-  `${companyCookieNamespace}${configuration.organizationId}`;
-
-export const companyCookie = (name: string) =>
-  name.replace(/^(?:__Secure-|__Host-)/, "").startsWith(companyCookieNamespace);
+  `platform_sso_${configuration.organizationId}`;
 
 const authenticationOptions = async (configuration: AuthConfiguration) =>
   ({

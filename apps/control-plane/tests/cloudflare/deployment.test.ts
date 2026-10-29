@@ -1,8 +1,7 @@
 import { createGunzip } from "node:zlib";
+import { encryptSecret } from "../../src/lib/server/secret-encryption.ts";
 import { companyIdentity } from "../../src/lib/server/company-identity.ts";
 import { runtimeIdentity } from "../runtime-identity.ts";
-import { connectorReference } from "../../src/lib/server/connector-package.ts";
-import { connectorFixture } from "../cloudflare-connector.fixture.ts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DatabaseSync } from "node:sqlite";
 import { createHash } from "node:crypto";
@@ -35,7 +34,6 @@ import {
   apps,
   appGrants,
   artifacts,
-  connectors,
   cloudflareOperations,
   cloudflareRuntimeBindings,
   deployments,
@@ -82,6 +80,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
     const token = "local-deployment-runtime-token-never-deploy";
     const largeGroups = Array.from({ length: 100 }, (_, index) => `${index}-${"group".repeat(40)}`);
     const databases = new Map<string, string>();
+    const serviceAppId = crypto.randomUUID();
     const createdDatabases = new Set<string>();
     const buckets = new Set<string>();
     const bucketObjects = new Map<string, Set<string>>();
@@ -618,7 +617,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         .toEqual({ done: true, status: "complete" });
     };
 
-    const bindConnector = async (
+    const bindApp = async (
       appId: string,
       name: string,
       grant: z.infer<typeof contract.capabilityGrant> | null,
@@ -713,6 +712,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
 
       for (const entry of [first, preview, delayed, lostResponse])
         databases.set(resourceName(entry.appId, "d1", "data"), crypto.randomUUID());
+      databases.set(resourceName(serviceAppId, "d1", "data"), crypto.randomUUID());
       directory = await mkdtemp(join(tmpdir(), "widefleet-deployment-workerd-"));
       api.listen(0, "127.0.0.1");
       await once(api, "listening");
@@ -730,11 +730,9 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         join(directory, "fixture.ts"),
         `
       import runtime, { RuntimeManagement as BaseManagement } from './runtime.js';
-      import {WorkerEntrypoint} from 'cloudflare:workers';
-      export class ConnectorGateway extends WorkerEntrypoint { invoke(method, args) { if (method !== 'read' || args.length) throw new Error('Unexpected fixture RPC'); return this.ctx.props.entrypoint === 'Reader' ? 'named-connector' : 'default-connector'; } }
-      import {createConnectorService} from ${JSON.stringify(server + "connectors.ts")};
-      import {prepareConnector} from ${JSON.stringify(server + "connector-changes.ts")};
-      import {lockOrganizationRuntime} from ${JSON.stringify(server + "organization-runtime.ts")};
+      import {createConnectionService} from ${JSON.stringify(server + "connections.ts")};
+      import {checkServiceConsumers} from ${JSON.stringify(server + "app-services.ts")};
+                  import {lockOrganizationRuntime} from ${JSON.stringify(server + "organization-runtime.ts")};
       import { createCloudflareDeployment } from ${JSON.stringify(server + "cloudflare-deployment.ts")};
       import { createCloudflareEvents } from ${JSON.stringify(server + "cloudflare-events.ts")};
       import { createCloudflareProvisioner } from ${JSON.stringify(server + "cloudflare-provisioning.ts")};
@@ -805,12 +803,12 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           });
           return Response.json(result.isErr() ? {error:result.error.message} : result.value, {status:result.isErr()?400:200});
         }
-        if (url.hostname === 'fixture' && url.pathname === '/prepare-connector') {
+        if (url.hostname === 'fixture' && url.pathname === '/prepare-service') {
           const input = await request.json();
           try {
             await withCloudflareDatabase(env, ({db}) => db.transaction(async transaction => {
-              const execution = await lockOrganizationRuntime(transaction, input.organizationId);
-              await prepareConnector(transaction, createArtifactStorage(createR2Storage(env.ARTIFACTS)), execution, input.release, env);
+              await lockOrganizationRuntime(transaction, input.organizationId);
+              await checkServiceConsumers(transaction, { id: input.appId, organizationId: input.organizationId }, input.entrypoints);
             }));
             return new Response(null, {status:204});
           } catch(error) {return Response.json({error:error.message}, {status:400});}
@@ -847,7 +845,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           };
           const result = await withCloudflareDatabase(env, async ({ db }) => {
             const executor = createCloudflareExecution({ ...env, DEPLOYMENTS: deploymentBinding, WIDEFLEET_QUEUES: url.searchParams.get('mode') === 'queues-disabled' ? 'false' : 'true' }, db, createArtifactStorage(createR2Storage(env.ARTIFACTS)));
-            if (command.kind === 'capabilities') return executor.connectors.bind(command.actor, command.appId, command.name, command.grant);
+            if (command.kind === 'capabilities') return executor.connections.bind(command.actor, command.appId, command.name, command.grant);
             if (command.kind === 'access') return executor.access(command.actor, command.appId, command.input);
             if (command.kind === 'network') return executor.network(command.actor, command.appId, command.input);
             return executor.deploy({ id: command.id, appId: command.appId, artifactId: command.artifactId, createdAt: command.createdAt,
@@ -933,7 +931,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           return Response.json(result.unwrap());
         }
         if (url.hostname === 'fixture' && url.pathname === '/connections') {
-          const result = await withCloudflareDatabase(env, async ({db}) => createConnectorService(db, createArtifactStorage(createR2Storage(env.ARTIFACTS)), env.PLATFORM_ENCRYPTION_KEY, {APP_DOMAIN: env.APP_DOMAIN, APP_HTTPS_PORT: 443}).connections({id:'fixture-owner', admin:true, application: {...${JSON.stringify(environment.application)}, admin:true}}, url.searchParams.get('appId')));
+          const result = await withCloudflareDatabase(env, async ({db}) => createConnectionService(db).connections({id:'fixture-owner', admin:true, application: {...${JSON.stringify(environment.application)}, admin:true}}, url.searchParams.get('appId')));
           return Response.json(result.unwrap());
         }
         if (url.hostname === 'fixture' && url.pathname === '/host') {
@@ -970,6 +968,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
             CLOUDFLARE_API_TOKEN: "local-provisioning-token",
             APP_RUNTIME_NAME: "fixture-runtime",
             WIDEFLEET_CONTROL_TOKEN: token,
+            WIDEFLEET_SECRETS_KEY: "a".repeat(64),
             WIDEFLEET_CONFIGURATION: JSON.stringify({ source: "r2" }),
           },
           hyperdrive: [
@@ -1285,12 +1284,16 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       expect(await host(hostname)).toBeNull();
     });
 
-    it("rejects grants to undeployed connector entrypoints without publishing them", async () => {
+    it("rejects grants to undeployed app entrypoints without publishing them", async () => {
       const before = await host(first.hostname);
       const entry = await seedDeployment(environment.database.db, { appId: first.appId });
       await environment.database.db
         .update(apps)
-        .set({ capabilities: { CONNECTOR: { connector: "fixture", entrypoint: "default" } } })
+        .set({
+          capabilities: {
+            CONNECTOR: { app: "00000000-0000-4000-8000-000000000099", entrypoint: "default" },
+          },
+        })
         .where(eq(apps.id, first.appId));
 
       try {
@@ -2248,89 +2251,129 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       expect(schedules).toContainEqual({ cron: "50 * * * *" });
       expect(schedules).not.toContainEqual({ cron: "61 * * * *" });
     }, 30_000);
-    it("deploys approved connector RPC bindings and applies replacement and revocation through the same workflow", async () => {
-      const reference = connectorReference.parse({
-        name: "app-connector",
-        checksum: "a".repeat(64),
-        entrypoints: ["default", "Reader"],
-        classes: [],
+
+    it("deploys app services with private secrets and follows their activated versions", async () => {
+      const serviceSource = `import {WorkerEntrypoint} from 'cloudflare:workers'; export class Reader extends WorkerEntrypoint { async read() { return { version: 'one', secret: await this.env.WIDEFLEET_SECRETS.get('TOKEN') }; } }`;
+
+      const target = await seedDeployment(environment.database.db, {
+        appId: serviceAppId,
+        source: serviceSource,
+        bindings: [{ type: "d1", name: "DB", database_name: "data" }],
+        web: false,
+        entrypoints: ["Reader"],
       });
 
-      await environment.database.db.insert(connectors).values({
-        organizationId: first.organizationId,
-        name: reference.name,
-        package: reference,
-        appliedPackage: reference,
-        jobId: crypto.randomUUID(),
+      await environment.database.db
+        .update(apps)
+        .set({
+          secretRevision: 1,
+          secrets: {
+            TOKEN: await encryptSecret(
+              environment.environment.PLATFORM_ENCRYPTION_KEY,
+              "synthetic-first",
+            ),
+          },
+        })
+        .where(eq(apps.id, target.appId));
+      await seed(target);
+      await dispatch(target);
+      await completed(target.command.id);
+      expect((await host(target.hostname))?.body).toMatchObject({
+        nativeBindings: { DB: `B_${resourceName(target.appId, "d1", "data")}` },
       });
+      expect(
+        await manage(
+          target,
+          "migrations",
+          contract.migrationRequest.parse({
+            action: "apply",
+            database: "DB",
+            databaseId: "data",
+            table: "d1_migrations",
+            files: [{ name: "1_records.sql", sql: "CREATE TABLE records(value TEXT);" }],
+          }),
+        ),
+      ).toMatchObject({ entries: [{ name: "1_records.sql", applied: true }] });
+      expect((await authenticatedFetch(`https://${target.hostname}/`)).status).toBe(404);
 
-      const entry = await seedDeployment(environment.database.db, {
+      const source = await seedDeployment(environment.database.db, {
         bindings: [],
-        source: `export default {async fetch(request, env) {return Response.json({value: env.ERP ? await env.ERP.read() : null, secret: env.WIDEFLEET_SECRET_API_KEY ?? null});}}`,
+        source: `export default { async fetch(request, env) { return Response.json(env.API ? await env.API.read() : null); } };`,
       });
 
-      const bind = (grant: z.infer<typeof contract.capabilityGrant> | null) =>
-        bindConnector(entry.appId, "ERP", grant);
+      await bindApp(source.appId, "API", { app: target.appId, entrypoint: "Reader" });
+      await seed(source);
+      await dispatch(source);
+      await completed(source.command.id);
+      expect(await (await authenticatedFetch(`https://${source.hostname}/`)).json()).toEqual({
+        version: "one",
+        secret: "synthetic-first",
+      });
+      await environment.database.db
+        .update(apps)
+        .set({
+          secretRevision: 2,
+          secrets: {
+            TOKEN: await encryptSecret(
+              environment.environment.PLATFORM_ENCRYPTION_KEY,
+              "synthetic-second",
+            ),
+          },
+        })
+        .where(eq(apps.id, target.appId));
 
-      await bind({ connector: reference.name, entrypoint: "default" });
-      await seed(entry);
-      await dispatch(entry);
-      await completed(entry.command.id);
-      expect(await (await authenticatedFetch(`https://${entry.hostname}/`)).json()).toEqual({
-        value: "default-connector",
-        secret: null,
+      const next = await seedDeployment(environment.database.db, {
+        appId: target.appId,
+        source: serviceSource.replace("'one'", "'two'"),
+        bindings: [{ type: "d1", name: "DB", database_name: "data" }],
+        web: false,
+        entrypoints: ["Reader"],
       });
-      await bind({ connector: reference.name, entrypoint: "Reader" });
-      expect(await (await authenticatedFetch(`https://${entry.hostname}/`)).json()).toEqual({
-        value: "named-connector",
-        secret: null,
+
+      await seed(next);
+      await dispatch(next);
+      await completed(next.command.id);
+      expect(await (await authenticatedFetch(`https://${source.hostname}/`)).json()).toEqual({
+        version: "two",
+        secret: "synthetic-second",
       });
-      expect(
-        await (await worker.fetch(`http://fixture/connections?appId=${entry.appId}`)).json(),
-      ).toMatchObject({
-        connectors: { state: "active" },
-        activeConnectors: { ERP: { connector: reference.name, entrypoint: "Reader" } },
-      });
-      await bind(null);
-      expect(await (await authenticatedFetch(`https://${entry.hostname}/`)).json()).toEqual({
-        value: null,
-        secret: null,
-      });
-      expect(
-        await (await worker.fetch(`http://fixture/connections?appId=${entry.appId}`)).json(),
-      ).toMatchObject({ connectors: { state: "active" }, activeConnectors: {} });
-      expect(await environment.database.db.select().from(jobs)).toHaveLength(0);
+
+      const [active] = await environment.database.db
+        .select()
+        .from(apps)
+        .where(eq(apps.id, target.appId));
+
+      expect(active).toMatchObject({ appliedSecretRevision: 2, webEnabled: false });
+      await bindApp(source.appId, "API", null);
+      expect(await (await authenticatedFetch(`https://${source.hostname}/`)).json()).toBeNull();
     }, 60_000);
 
     it.each(["saved", "failed", "unconfirmed", "legacy"])(
       "confirms saved revocations only without a possible publication: %s",
       async (state) => {
-        const reference = connectorReference.parse({
-          name: `saved-${state}`,
-          checksum: "b".repeat(64),
+        const target = await seedDeployment(environment.database.db, {
+          bindings: [],
+          web: false,
           entrypoints: ["default", "Reader"],
-          classes: [],
+          source:
+            "import { WorkerEntrypoint } from 'cloudflare:workers'; export default class API extends WorkerEntrypoint {} export class Reader extends WorkerEntrypoint {}",
         });
 
-        await environment.database.db.insert(connectors).values({
-          organizationId: first.organizationId,
-          name: reference.name,
-          package: reference,
-          appliedPackage: reference,
-          jobId: crypto.randomUUID(),
-        });
+        await seed(target);
+        await dispatch(target);
+        await completed(target.command.id);
 
         const entry = await seedDeployment(environment.database.db, {
           bindings: [],
           source: "export default { fetch: invalid syntax };",
         });
 
-        await bindConnector(entry.appId, "ERP", {
-          connector: reference.name,
+        await bindApp(entry.appId, "ERP", {
+          app: target.appId,
           entrypoint: "Reader",
         });
-        await bindConnector(entry.appId, "OTHER", {
-          connector: reference.name,
+        await bindApp(entry.appId, "OTHER", {
+          app: target.appId,
           entrypoint: "default",
         });
 
@@ -2360,22 +2403,24 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           }
         }
 
-        await bindConnector(entry.appId, "ERP", null);
+        await bindApp(entry.appId, "ERP", null);
         expect(await host(entry.hostname)).toBeNull();
-        const replacement = connectorFixture(reference.name);
-        replacement.metadata.entrypoints = ["default"];
 
         const prepare = () =>
-          worker.fetch("http://fixture/prepare-connector", {
+          worker.fetch("http://fixture/prepare-service", {
             method: "POST",
-            body: JSON.stringify({ organizationId: entry.organizationId, release: replacement }),
+            body: JSON.stringify({
+              organizationId: entry.organizationId,
+              appId: target.appId,
+              entrypoints: ["default"],
+            }),
           });
 
         const safe = state === "saved" || state === "failed";
         const prepared = await prepare();
         expect(prepared.status, await prepared.text()).toBe(safe ? 204 : 400);
 
-        await bindConnector(entry.appId, "OTHER", null);
+        await bindApp(entry.appId, "OTHER", null);
         expect((await prepare()).status).toBe(safe ? 204 : 400);
 
         const [app] = await environment.database.db

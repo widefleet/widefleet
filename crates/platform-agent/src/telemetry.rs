@@ -6,7 +6,6 @@ use platform_core::{
 };
 use reqwest::{Method, Url};
 use serde::Deserialize;
-use std::collections::BTreeMap;
 
 #[derive(Deserialize)]
 struct Credentials {
@@ -59,43 +58,4 @@ fn destination_url(api: &Api, configuration: &Configuration, path: &str) -> Resu
     }
     url.set_path(path);
     Ok(url.to_string())
-}
-
-pub async fn connector_destinations(
-    api: &Api,
-    configuration: &Configuration,
-    job: &Job,
-) -> Result<BTreeMap<String, TelemetryDestination>> {
-    let credentials: BTreeMap<String, Option<Credentials>> = json(
-        api.authenticated(
-            Method::GET,
-            &format!("/agent/jobs/{}/connector-telemetry", job.id),
-            &configuration.token,
-        )
-        .query(&[("leaseToken", job.lease_token)])
-        .send()
-        .await?,
-    )
-    .await?;
-    credentials
-        .into_iter()
-        .filter_map(|(name, credential)| credential.map(|credential| (name, credential)))
-        .map(|(name, credential)| {
-            let url = destination_url(
-                api,
-                configuration,
-                &format!(
-                    "/api/v1/telemetry/connectors/{}/{}",
-                    job.organization_id, name
-                ),
-            )?;
-            Ok((
-                name,
-                TelemetryDestination {
-                    url,
-                    token: credential.token,
-                },
-            ))
-        })
-        .collect()
 }

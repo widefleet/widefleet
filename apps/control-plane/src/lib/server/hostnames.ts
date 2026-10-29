@@ -1,6 +1,6 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
-import { apps, connectors, organizationRuntimes } from "./schema.ts";
+import { apps } from "./schema.ts";
 import { InvalidOperation } from "./errors.ts";
 import type { Transaction } from "./transactions.ts";
 
@@ -8,7 +8,6 @@ export const requireAvailableHostname = async (
   transaction: Transaction,
   hostname: string,
   domain: string,
-  connector?: { organizationId: string; name: string },
 ) => {
   if (!z.hostname().safeParse(hostname).success || !URL.canParse(`https://${hostname}`))
     throw new InvalidOperation({
@@ -33,26 +32,9 @@ export const requireAvailableHostname = async (
     .where(and(eq(apps.hostname, hostname), isNull(apps.removedAt)))
     .limit(1);
 
-  const [existing] = await transaction
-    .select({ name: connectors.name })
-    .from(connectors)
-    .innerJoin(
-      organizationRuntimes,
-      eq(connectors.organizationId, organizationRuntimes.organizationId),
-    )
-    .where(
-      and(
-        sql`${connectors.name} || COALESCE('-' || ${organizationRuntimes.appHostnameSuffix}, '') || '.' || ${domain} = ${hostname}`,
-        connector
-          ? sql`NOT (${connectors.organizationId} = ${connector.organizationId} AND ${connectors.name} = ${connector.name})`
-          : undefined,
-      ),
-    )
-    .limit(1);
-
-  if (app || existing)
+  if (app)
     throw new InvalidOperation({
       code: "CONFLICT",
-      message: "This hostname is already used by an app or connector",
+      message: "This hostname is already used by an app",
     });
 };

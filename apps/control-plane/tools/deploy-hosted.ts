@@ -62,7 +62,7 @@ const secrets = z
     BETTER_AUTH_SECRET: z.string().min(32),
     PLATFORM_ENCRYPTION_KEY: z.string().min(32),
     WIDEFLEET_CONTROL_TOKEN: z.string().min(32),
-    WIDEFLEET_CONNECTOR_KEY: z.string().regex(/^[a-f0-9]{64}$/),
+    WIDEFLEET_SECRETS_KEY: z.string().regex(/^[a-f0-9]{64}$/),
     APP_COOKIE_SECRET: z.string().min(32),
     PLATFORM_BOOTSTRAP: z
       .string()
@@ -245,7 +245,7 @@ try {
     "runtime-secrets.json",
     JSON.stringify({
       WIDEFLEET_CONTROL_TOKEN: secrets.WIDEFLEET_CONTROL_TOKEN,
-      WIDEFLEET_CONNECTOR_KEY: secrets.WIDEFLEET_CONNECTOR_KEY,
+      WIDEFLEET_SECRETS_KEY: secrets.WIDEFLEET_SECRETS_KEY,
     }),
   );
 

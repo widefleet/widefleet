@@ -5,8 +5,8 @@ use uuid::Uuid;
 
 // Persist independently of access credentials. Concurrent bootstrap/agent starts
 // must agree on one key; replacing it would make published snapshots unreadable.
-pub async fn connector_key(store: &dyn ObjectStore, organization_id: &str) -> Result<String> {
-    let path = Path::from(format!("organizations/{organization_id}/connector-key"));
+pub async fn secrets_key(store: &dyn ObjectStore, organization_id: &str) -> Result<String> {
+    let path = Path::from(format!("organizations/{organization_id}/app-secrets-key"));
     let failure =
         |error: object_store::Error| Error::invalid(format!("Runtime key storage failed: {error}"));
     let missing = match store.head(&path).await {
@@ -47,13 +47,13 @@ pub async fn connector_key(store: &dyn ObjectStore, organization_id: &str) -> Re
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
     {
-        return Err(Error::invalid("Invalid connector encryption key".into()));
+        return Err(Error::invalid("Invalid app secret encryption key".into()));
     }
     Ok(value)
 }
 
-pub fn configuration(release: &RuntimeRelease, token: &str, connector_key: &str) -> Result<Value> {
-    if release.protocol != 2 || release.auth != 1 || release.celld != "0.6.2" {
+pub fn configuration(release: &RuntimeRelease, token: &str, secrets_key: &str) -> Result<Value> {
+    if release.protocol != 3 || release.auth != 1 || release.celld != "0.6.2" {
         return Err(Error::invalid(
             "Unsupported runtime installation protocol or celld version".into(),
         ));
@@ -62,13 +62,11 @@ pub fn configuration(release: &RuntimeRelease, token: &str, connector_key: &str)
         "name": "widefleet", "main": release.main, "no_bundle": true,
         "compatibility_date": "2026-10-01", "compatibility_flags": ["nodejs_compat"],
         "worker_loaders": [{ "binding": "WIDEFLEET_LOADER" }],
-        "vars": { "WIDEFLEET_CONTROL_TOKEN": token, "WIDEFLEET_CONNECTOR_KEY": connector_key, "WIDEFLEET_MANAGEMENT_HTTP": "true", "WIDEFLEET_CONFIGURATION": "{\"crons\":{},\"queues\":{}}" },
+        "vars": { "WIDEFLEET_CONTROL_TOKEN": token, "WIDEFLEET_SECRETS_KEY": secrets_key, "WIDEFLEET_MANAGEMENT_HTTP": "true", "WIDEFLEET_CONFIGURATION": "{\"crons\":{},\"queues\":{}}" },
         "r2_buckets": [{ "binding": "WIDEFLEET_PACKAGES", "bucket_name": "widefleet-packages" }],
         "kv_namespaces": [{ "binding": "AUTH_CONFIG", "id": "widefleet-auth" }],
         "services": [],
         "durable_objects": { "bindings": [
-            { "name": "WIDEFLEET_CONNECTORS", "class_name": "ConnectorCatalog" },
-            { "name": "WIDEFLEET_CONNECTOR_STATE", "class_name": "ConnectorSupervisor" },
         ] },
     });
     if release.workflows == Some(1) {
@@ -86,16 +84,16 @@ mod tests {
         let store = object_store::memory::InMemory::new();
         let organization = "test-organization";
         let (first, second) = tokio::join!(
-            super::connector_key(&store, organization),
-            super::connector_key(&store, organization)
+            super::secrets_key(&store, organization),
+            super::secrets_key(&store, organization)
         );
         let first = first?;
         assert_eq!(first, second?);
         assert_eq!(first.len(), 64);
-        assert_eq!(first, super::connector_key(&store, organization).await?);
+        assert_eq!(first, super::secrets_key(&store, organization).await?);
         assert_ne!(
             first,
-            super::connector_key(&store, "other-organization").await?
+            super::secrets_key(&store, "other-organization").await?
         );
         Ok(())
     }

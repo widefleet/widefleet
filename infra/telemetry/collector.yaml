@@ -31,10 +31,6 @@ processors:
         action: upsert
         from_context: metadata.x-widefleet-organization-id
         default_value: ""
-      - key: widefleet.connector
-        action: upsert
-        from_context: metadata.x-widefleet-connector
-        default_value: ""
 
 exporters:
   clickhouse:

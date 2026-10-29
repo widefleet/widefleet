@@ -3,12 +3,7 @@ import * as contract from "@platform/contracts";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Database } from "./database.ts";
-import { artifacts, cloudflareOperations, jobs } from "./schema.ts";
-import {
-  connectorReference,
-  loadConnectorArtifact,
-  connectorModuleScope,
-} from "./connector-package.ts";
+import { artifacts } from "./schema.ts";
 import type { ArtifactStorage } from "./storage.ts";
 
 const generatedLocation = (file: string, browser: boolean) => {
@@ -52,79 +47,24 @@ const appSymbols = async (database: Database, appId: string, buildId: string) =>
   };
 };
 
-const connectorSymbols = async (
-  database: Database,
-  storage: ArtifactStorage,
-  target: { organizationId: string; name: string },
-  version: string,
-) => {
-  const [job] = await database
-    .select()
-    .from(jobs)
-    .where(and(eq(jobs.id, version), eq(jobs.organizationId, target.organizationId)))
-    .limit(1);
-
-  const [operation] = job
-    ? []
-    : await database
-        .select()
-        .from(cloudflareOperations)
-        .where(
-          and(
-            eq(cloudflareOperations.id, version),
-            eq(cloudflareOperations.organizationId, target.organizationId),
-          ),
-        )
-        .limit(1);
-
-  // Runtime upgrades can prepare several connectors under the runtime job's version.
-  const references = job
-    ? [job.connector, ...z.array(z.unknown()).parse(job.connectors)]
-    : [operation?.result];
-
-  const reference = references
-    .map((value) => connectorReference.safeParse(value).data)
-    .find((value) => value?.name === target.name);
-
-  if (!reference) return null;
-
-  try {
-    const { organizationId, release } = await loadConnectorArtifact(storage, reference);
-
-    if (organizationId !== target.organizationId) return null;
-
-    return {
-      debug: release.metadata.debug,
-      modules: release.modules,
-      scope: connectorModuleScope(organizationId, release.name),
-    };
-  } catch {
-    // Unavailable debug artifacts must not hide the original runtime error.
-    return null;
-  }
-};
-
 export const createSymbolicator = (
   database: Database,
   storage: ArtifactStorage,
-  target: { appId: string } | { organizationId: string; name: string },
+  target: { appId: string },
 ) => {
   const releases = new Map<string, Awaited<ReturnType<typeof appSymbols>>>();
   const maps = new Map<string, TraceMap | null>();
   let downloaded = 0;
 
   const resolve = async (log: z.infer<typeof contract.runtimeLog>) => {
-    const version = "appId" in target ? log.buildId : log.connectorVersion;
+    const version = log.buildId;
 
     if (!log.stack || !version) return log;
 
     let release = releases.get(version);
 
     if (release === undefined) {
-      release =
-        "appId" in target
-          ? await appSymbols(database, target.appId, version)
-          : await connectorSymbols(database, storage, target, version);
+      release = await appSymbols(database, target.appId, version);
       releases.set(version, release);
     }
 

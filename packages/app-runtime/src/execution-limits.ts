@@ -7,7 +7,7 @@ const resources = z.strictObject({
 
 export const executionLimits = z.strictObject({
   http: resources,
-  connector: resources,
+  service: resources,
   cron: resources,
   workflow: resources,
   readiness: resources,

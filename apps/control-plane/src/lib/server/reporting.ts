@@ -11,7 +11,7 @@ import type { Configuration } from "./config.ts";
 import type { Database } from "./database.ts";
 import type { Principal } from "./identity.ts";
 import { InvalidOperation } from "./errors.ts";
-import { agents, apps, connectors, organizationRuntimes, installation } from "./schema.ts";
+import { agents, apps, organizationRuntimes, installation } from "./schema.ts";
 
 const projectToken = "phc_AdQ4DSNi7QHqvTVqhTGNFUNa5YxkiwLddL46KFSPvkML";
 
@@ -186,8 +186,6 @@ export const createReporting = (
       .from(agents)
       .where(eq(agents.enabled, true));
 
-    const [connectorCount] = await database.select({ count: count() }).from(connectors);
-
     const runtimeRows = await database
       .selectDistinct({ runtime: organizationRuntimes.appliedRuntime })
       .from(organizationRuntimes)
@@ -217,7 +215,6 @@ export const createReporting = (
       ...applicationCounts,
       organizations: organizationCount?.count ?? 0,
       agents: agentCount?.count ?? 0,
-      connectors: connectorCount?.count ?? 0,
       active_management_users: activeUsers.size,
       active_management_users_capped: activeUsers.size >= 100_000,
       observation_window_ms: Date.now() - windowStart,

@@ -2,14 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   assetManifest,
   assetPath,
-  connectorUploadMetadata,
-  connectorSecretValue,
-  runtimePackages,
+  appSecretValue,
+  appSecretPreparation,
+  capabilityGrant,
   workerMetadata,
-  connectorBrowserOrigin,
 } from "./index.ts";
 
-describe("connector secret contracts", () => {
+describe("app secret contracts", () => {
   it.each([
     { label: "empty", value: "", accepted: false },
     { label: "5000 ASCII bytes", value: "x".repeat(5000), accepted: true },
@@ -18,36 +17,20 @@ describe("connector secret contracts", () => {
     { label: "5002 UTF-8 bytes", value: "é".repeat(2501), accepted: false },
     { label: "previous 64 KiB limit", value: "x".repeat(65536), accepted: false },
   ])("applies the same limit to input and runtime packages: $label", ({ value, accepted }) => {
-    expect(connectorSecretValue.safeParse(value).success).toBe(accepted);
-    expect(
-      runtimePackages.shape.connectorSecrets.safeParse({ erp: { API_KEY: value } }).success,
-    ).toBe(accepted);
+    expect(appSecretValue.safeParse(value).success).toBe(accepted);
+    expect(appSecretPreparation.shape.values.safeParse({ API_KEY: value }).success).toBe(accepted);
   });
 });
 
-describe("connector browser origins", () => {
-  it.each([
-    { suffix: null, port: 443, expected: "https://github.apps.example.test" },
-    { suffix: "team", port: 443, expected: "https://github-team.apps.example.test" },
-    { suffix: "team", port: 8443, expected: "https://github-team.apps.example.test:8443" },
-  ])("uses the app naming convention: $expected", ({ suffix, port, expected }) => {
-    expect(connectorBrowserOrigin("github", suffix, "apps.example.test", port)).toBe(expected);
-  });
-});
-
-describe.each([workerMetadata, connectorUploadMetadata])("shared worker variables", (schema) => {
+describe("worker variables", () => {
   const metadata = { main_module: "worker.js", compatibility_date: "2026-10-01" };
 
   const parse = (bindings: { type: "plain_text"; name: string; text: string }[]) =>
-    schema.safeParse(
-      schema === workerMetadata
-        ? {
-            ...metadata,
-            bindings,
-            assets: { upload_session: "93d8fffd-d0ed-48cf-8fb7-570219c62a70" },
-          }
-        : { ...metadata, bindings, entrypoints: ["default"] },
-    ).success;
+    workerMetadata.safeParse({
+      ...metadata,
+      bindings,
+      assets: { upload_session: "93d8fffd-d0ed-48cf-8fb7-570219c62a70" },
+    }).success;
 
   it.each([
     { value: "", accepted: true },
@@ -130,4 +113,17 @@ describe("deployment contracts", () => {
       }).success,
     ).toBe(false);
   });
+});
+
+it("requires an app target and rejects legacy connector grants", () => {
+  expect(capabilityGrant.safeParse({ connector: "mail", entrypoint: "default" }).success).toBe(
+    false,
+  );
+  expect(capabilityGrant.safeParse({ entrypoint: "default" }).success).toBe(false);
+  expect(
+    capabilityGrant.safeParse({
+      app: "93d8fffd-d0ed-48cf-8fb7-570219c62a70",
+      entrypoint: "default",
+    }).success,
+  ).toBe(true);
 });

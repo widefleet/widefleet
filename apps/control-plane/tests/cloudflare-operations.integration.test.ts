@@ -1,7 +1,5 @@
+import { checkServiceConsumers } from "../src/lib/server/app-services.ts";
 import { Result } from "better-result";
-import { connectorFixture, connectorFiles } from "./cloudflare-connector.fixture.ts";
-import { prepareConnector } from "../src/lib/server/connector-changes.ts";
-import { connectorReference } from "../src/lib/server/connector-package.ts";
 import { transact } from "../src/lib/server/transactions.ts";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
@@ -14,7 +12,6 @@ import { initializeCloudflareRuntime } from "../src/lib/server/organization-runt
 import {
   apps,
   agents,
-  connectors,
   cloudflareOperations,
   deployments,
   organizationRuntimes,
@@ -161,12 +158,10 @@ describe("Cloudflare operation history", () => {
       tokenHash: crypto.randomUUID(),
     });
     expect(
-      await createJobService(
-        environment.database.db,
-        storage,
-        "unused-test-key",
-        environment.configuration,
-      ).claim(agentId, true),
+      await createJobService(environment.database.db, storage, "unused-test-key").claim(
+        agentId,
+        true,
+      ),
     ).toMatchObject({ error: { code: "CONFLICT" } });
     await environment.database.db
       .update(organizationRuntimes)
@@ -183,20 +178,22 @@ describe("Cloudflare operation history", () => {
   it("protects a published grant whose SQL activation receipt was lost", async () => {
     const entry = await seedDeployment(environment.database.db);
 
-    const reference = connectorReference.parse({
-      name: "receipt-connector",
-      checksum: "b".repeat(64),
+    const target = await seedDeployment(environment.database.db, {
+      web: false,
       entrypoints: ["default", "Reader"],
-      classes: [],
     });
 
-    await environment.database.db.insert(connectors).values({
-      organizationId: entry.organizationId,
-      name: reference.name,
-      package: reference,
-      appliedPackage: reference,
-      jobId: crypto.randomUUID(),
+    await environment.database.db.insert(deployments).values({
+      id: target.deploymentId,
+      appId: target.appId,
+      artifactId: target.artifact.id,
+      requestId: crypto.randomUUID(),
+      status: "succeeded",
     });
+    await environment.database.db
+      .update(apps)
+      .set({ state: "active", activeDeploymentId: target.deploymentId })
+      .where(eq(apps.id, target.appId));
 
     const command = deploymentCommand.parse({
       kind: "capabilities",
@@ -208,7 +205,7 @@ describe("Cloudflare operation history", () => {
         application: { ...environment.application, admin: true },
       },
       name: "ERP",
-      grant: { connector: reference.name, entrypoint: "Reader" },
+      grant: { app: target.appId, entrypoint: "Reader" },
       createdAt: new Date().toISOString(),
     });
 
@@ -217,35 +214,23 @@ describe("Cloudflare operation history", () => {
       .update(apps)
       .set({ capabilities: {}, capabilityRevision: 2 })
       .where(eq(apps.id, entry.appId));
-    const replacement = connectorFixture(reference.name);
-    replacement.metadata.entrypoints = ["default"];
 
     const prepare = () =>
       transact(environment.database.db, async (transaction) => {
-        const [execution] = await transaction
-          .select()
-          .from(organizationRuntimes)
-          .where(eq(organizationRuntimes.organizationId, entry.organizationId));
-
-        if (!execution) throw new Error("Missing fixture execution");
-
-        return Result.ok(
-          await prepareConnector(
-            transaction,
-            storage,
-            execution,
-            replacement,
-            environment.configuration,
-            connectorFiles(replacement),
-          ),
+        await checkServiceConsumers(
+          transaction,
+          { id: target.appId, organizationId: target.organizationId },
+          ["default"],
         );
+
+        return Result.ok(true);
       });
 
     const blocked = await prepare();
     expect(blocked.isErr()).toBe(true);
 
     if (blocked.isErr())
-      expect(blocked.error.message).toContain("Confirm pending app binding changes");
+      expect(blocked.error.message).toContain("Disconnect active and pending app connections");
     await environment.database.db
       .update(apps)
       .set({ appliedCapabilityRevision: 2, appliedCapabilities: { revision: 2, grants: {} } })

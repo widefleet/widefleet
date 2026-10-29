@@ -1,4 +1,5 @@
 import { requireAvailableHostname } from "./hostnames.ts";
+import { checkServiceConsumers } from "./app-services.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
 import { and, desc, eq, exists, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
@@ -90,6 +91,8 @@ export const enqueueAppRemoval = async (
 
   if (pending.length === 0) return;
 
+  for (const app of pending) await checkServiceConsumers(transaction, app, []);
+
   await transaction
     .update(apps)
     .set({ state: "deleting" })
@@ -123,6 +126,7 @@ export const presentApp = (record: typeof apps.$inferSelect, configuration: Conf
     slug: record.slug,
     displayName: record.displayName,
     catalogListed: record.catalogListed,
+    web: record.webEnabled,
     parentId: record.parentId,
     organizationId: record.organizationId,
     hostname: record.hostname,
@@ -167,6 +171,19 @@ export const enqueueDeployment = async (
 
     return Result.ok(presentDeployment(existing));
   }
+
+  const [artifact] = await transaction
+    .select({ metadata: artifacts.metadata })
+    .from(artifacts)
+    .where(and(eq(artifacts.id, artifactId), eq(artifacts.appId, record.id)));
+
+  if (!artifact)
+    throw new InvalidOperation({ code: "NOT_FOUND", message: "App artifact not found" });
+  await checkServiceConsumers(
+    transaction,
+    record,
+    contract.workerMetadata.parse(artifact.metadata).entrypoints ?? [],
+  );
 
   const deploymentId = hosted ? operationId(record.id, requestId) : crypto.randomUUID();
 
@@ -372,6 +389,7 @@ export const createAppService = (
             isNull(apps.removedAt),
             eq(apps.organizationId, principal.application.organizationId),
             eq(apps.catalogListed, true),
+            eq(apps.webEnabled, true),
             isNull(apps.parentId),
             eq(apps.state, "active"),
             isNotNull(apps.activeDeploymentId),

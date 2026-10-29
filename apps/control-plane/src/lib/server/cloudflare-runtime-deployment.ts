@@ -63,7 +63,7 @@ export const executeCloudflareRuntime = async (
     try {
       await withCloudflareDatabase(bindings, ({ db }) =>
         db.transaction(async (transaction) => {
-          // Reuse the execution lock used by runtime selection and connector changes.
+          // Reuse the execution lock used by runtime selection and connection changes.
           const execution = await lockOrganizationRuntime(transaction, command.organizationId);
 
           const [operation] = await transaction

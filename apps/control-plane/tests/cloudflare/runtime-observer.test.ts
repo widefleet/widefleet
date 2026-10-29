@@ -38,7 +38,7 @@ const logBatch = z.object({
 });
 
 describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Runtime observer in workerd", () => {
-  it("delivers trusted app and connector identities alongside logs, with parent-only bindings", async () => {
+  it("delivers trusted app and service identities alongside logs, with parent-only bindings", async () => {
     const directory = await mkdtemp(join(tmpdir(), "widefleet-observer-"));
     const observations: z.infer<typeof observation>[] = [];
     const logs: z.infer<ReturnType<typeof z.json>>[] = [];
@@ -147,7 +147,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Runtime observer in
         experimental: { disableExperimentalWarning: true, disableDevRegistry: true, watch: false },
       });
 
-      for (const path of ["/app", "/connector"]) {
+      for (const path of ["/app", "/service"]) {
         const response = await worker.fetch(`http://fixture${path}`);
         expect(response.status, await response.clone().text()).toBe(200);
         expect(await response.json()).toEqual([]);
@@ -183,8 +183,9 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Runtime observer in
           {
             identity: {
               organizationId: "observer-fixture",
-              connector: "fixture",
-              connectorVersion: "a0000000-0000-4000-8000-000000000003",
+              appId: "a0000000-0000-4000-8000-000000000004",
+              buildId: null,
+              deploymentId: "a0000000-0000-4000-8000-000000000003",
             },
             label: "parent-only-fixture",
             outcomes: ["ok"],
@@ -199,13 +200,13 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Runtime observer in
           }),
           expect.objectContaining({
             message: "observer fixture log",
-            connectorVersion: "a0000000-0000-4000-8000-000000000003",
+            deploymentId: "a0000000-0000-4000-8000-000000000003",
           }),
         ]),
       );
 
       // Keep observation delivery pending until all KV calls have returned.
-      for (const path of ["/app/kv", "/connector/kv"]) {
+      for (const path of ["/app/kv", "/service/kv"]) {
         const response = await worker.fetch(`http://fixture${path}`);
         expect(response.status, await response.clone().text()).toBe(200);
         expect(await response.json()).toEqual({
@@ -254,7 +255,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Runtime observer in
         /secret-key|secret-value|secret-metadata|absent-key/,
       );
 
-      for (const path of ["/app/production-kv", "/connector/production-kv"]) {
+      for (const path of ["/app/production-kv", "/service/production-kv"]) {
         const response = await worker.fetch(`http://fixture${path}`);
         expect(response.status, await response.clone().text()).toBe(200);
         expect(await response.json()).toEqual({ value: null, observerBindingVisible: false });
