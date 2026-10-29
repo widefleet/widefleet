@@ -277,7 +277,9 @@ this breaking upgrade.
 
 The database migration deletes connector records and connector jobs, removes
 legacy bindings and clears their pending activation state. There is no importer
-or compatibility mode. The versioned Cloudflare Worker migration deletes the
+or compatibility mode. Before preparing the first app deployment, Widefleet also
+removes legacy grants from stored host and version snapshots so they cannot block
+redeployment. The versioned Cloudflare Worker migration deletes the
 connector Durable Object classes and their state. Retained storage objects are
 not converted into app resources.
 

@@ -141,6 +141,11 @@ selection, or waits for the first deployment if no artifact exists. Confirm
 activation before relying on the new value. Failed changes leave the previous
 serving snapshot intact; repeat the edit to retry.
 
+`widefleet secret list` returns names and activation status immediately. Secret
+changes wait for activation unless `--no-wait` is set and report known activation
+failures with a nonzero exit status. Resumed workflows use the current secrets
+while retaining their pinned code version.
+
 Back up PostgreSQL with its installation encryption key. Also preserve runtime
 object storage and its encryption key. Hosted operators supply
 `WIDEFLEET_SECRETS_KEY`, 32 random bytes encoded as 64 lowercase hexadecimal
