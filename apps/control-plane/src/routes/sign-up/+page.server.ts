@@ -3,6 +3,7 @@ import { getRuntime } from "#server/runtime";
 import { readInstallation } from "#server/installation-store";
 import { localDestination } from "#server/navigation";
 import type { PageServerLoad } from "./$types";
+import { availableSocialProviders } from "#server/social-sign-in";
 
 export const load: PageServerLoad = async ({ url, setHeaders }) => {
   setHeaders({ "cache-control": "private, no-store" });
@@ -14,6 +15,7 @@ export const load: PageServerLoad = async ({ url, setHeaders }) => {
   const destination = localDestination(url.searchParams.get("next"));
 
   return {
+    socialProviders: availableSocialProviders(runtime.configuration),
     next: `/organizations?${new URLSearchParams({ next: destination === "/" ? "/welcome" : destination })}`,
   };
 };

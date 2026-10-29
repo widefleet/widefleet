@@ -363,6 +363,11 @@ describe("Better Auth SSO provider integration", () => {
 
         expect(completed.status).toBe(302);
         expect(completed.headers.get("location")).toBe("/settings");
+        expect(
+          completed.headers
+            .getSetCookie()
+            .some((value) => value.startsWith("platform.last_used_login_method=sso;")),
+        ).toBe(true);
         expect(visited).toEqual(
           new Set([
             metadata.token_endpoint,

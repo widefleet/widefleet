@@ -8,6 +8,8 @@
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
   import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import type { PageData } from "./$types";
+  import { onMount } from "svelte";
+  import SocialSignIn from "#shadcn/components/SocialSignIn.svelte";
 
   let { data }: { data: PageData } = $props();
 
@@ -18,6 +20,12 @@
   let busy = $state(false);
 
   let message = $state("");
+
+  let lastUsed = $state<string | null>(null);
+
+  onMount(() => {
+    lastUsed = authClient.getLastUsedLoginMethod();
+  });
 
   const signIn = async () => {
     if (!data.provider || busy) return;
@@ -59,8 +67,11 @@
       onclick={signIn}
       disabled={busy}
       class="mt-7 h-10 w-full"
-      >{busy ? "Opening sign-in …" : `Sign in with ${data.label}`}<ArrowRight /></Button
+      >{busy ? "Opening sign-in …" : `Sign in with ${data.label}`}{#if lastUsed === "sso"}<span
+          class="ml-auto text-xs font-normal">Last used</span
+        >{/if}<ArrowRight /></Button
     >{/if}
+  <SocialSignIn providers={data.socialProviders} next={data.next} emailSignIn={data.emailSignIn} />
   {#if data.emailSignIn}
     <EmailCodeForm
       next={data.next}
@@ -70,13 +81,16 @@
       publicSignup={data.publicSignup}
     />
   {/if}
+  {#if data.error}<div class="mt-5">
+      <Feedback kind="error">Sign-in could not be completed. Please try again.</Feedback>
+    </div>{/if}
   {#if data.publicSignup}<p class="text-muted-foreground mt-5 text-center text-sm">
       New to Widefleet? <a
         class="text-foreground underline underline-offset-4"
         href={`/sign-up?${new URLSearchParams({ next: data.next })}`}>Create an account</a
       >
     </p>{/if}
-  {#if !data.provider && !data.emailSignIn}<div class="mt-5">
+  {#if !data.provider && !data.emailSignIn && !data.socialProviders.length}<div class="mt-5">
       <Feedback kind="error"
         >Company sign-in is temporarily unavailable. Contact your administrator.</Feedback
       >

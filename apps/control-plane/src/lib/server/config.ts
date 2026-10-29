@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { analyticsEnvironmentSchema } from "../analytics-config.ts";
 import { artifactStorageSchema } from "./storage/config.ts";
+import { socialSignInConfiguration } from "./social-sign-in.ts";
 
 const telemetryUrl = z.url().refine((value) => {
   const url = new URL(value);
@@ -16,6 +17,7 @@ const telemetryUrl = z.url().refine((value) => {
 }, "Expected an HTTP(S) origin without credentials, path, query or fragment");
 
 export const runtimeConfigurationSchema = z.object({
+  ...socialSignInConfiguration.shape,
   ...analyticsEnvironmentSchema.shape,
   DATABASE_URL: z.url(),
   PLATFORM_USAGE_REPORTING: z

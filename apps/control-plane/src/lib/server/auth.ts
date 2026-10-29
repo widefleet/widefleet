@@ -106,6 +106,7 @@ export const createAuthentication = (
   const auth = betterAuth({
     ...settings,
     onAPIError: {
+      errorURL: `${configuration.PLATFORM_URL}/sign-in`,
       onError: (error, context) => {
         if (error instanceof Error && (!(error instanceof APIError) || error.statusCode >= 500)) {
           context.logger.error("Authentication failed", error);

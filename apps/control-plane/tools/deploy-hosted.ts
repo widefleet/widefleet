@@ -9,6 +9,7 @@ import { bootstrapConfiguration, runtimeRelease } from "@platform/contracts";
 import { getPlatformProxy } from "wrangler";
 import { z } from "zod";
 import { cloudflareConfigurationSchema } from "../src/lib/server/cloudflare-config.ts";
+import { socialSignInConfiguration } from "../src/lib/server/social-sign-in.ts";
 import type { CloudflareBindings } from "../src/lib/server/cloudflare-config.ts";
 import { createCloudflareProvisioner } from "../src/lib/server/cloudflare-provisioning.ts";
 import {
@@ -47,6 +48,8 @@ if (positionals.length !== 1)
 const installation = await readHostedInstallation(z.string().parse(positionals[0]));
 
 const names = hostedResourceNames(installation);
+
+const socialCredentials = socialSignInConfiguration.parse(process.env);
 
 const secrets = z
   .object({
@@ -96,7 +99,8 @@ const controlSecretOverrides = z
   );
 
 for (const name of Object.keys(controlSecretOverrides))
-  if (name in secrets) throw new Error(`Additional control-plane secrets cannot replace ${name}`);
+  if (name in secrets || name in socialSignInConfiguration.shape)
+    throw new Error(`Additional control-plane secrets cannot replace ${name}`);
 
 const bootstrap = secrets.PLATFORM_BOOTSTRAP
   ? bootstrapConfiguration.parse(JSON.parse(secrets.PLATFORM_BOOTSTRAP))
@@ -104,6 +108,7 @@ const bootstrap = secrets.PLATFORM_BOOTSTRAP
 
 const configuration = cloudflareConfigurationSchema.parse({
   ...secrets,
+  ...socialCredentials,
   PLATFORM_URL: installation.platformUrl,
   APP_DOMAIN: installation.appDomain,
   LOGIN_CODE_DELIVERY: process.env["LOGIN_CODE_DELIVERY"],
@@ -146,6 +151,7 @@ const password = decodeURIComponent(new URL(secrets.DATABASE_URL).password);
 
 const sensitive = [
   ...Object.values(secrets),
+  ...Object.values(socialCredentials),
   ...Object.values(controlSecretOverrides),
   password,
 ].flatMap((value) => (value ? [value, JSON.stringify(value).slice(1, -1)] : []));
@@ -247,6 +253,7 @@ try {
     "control-secrets.json",
     JSON.stringify({
       ...controlSecretOverrides,
+      ...socialCredentials,
       BETTER_AUTH_SECRET: secrets.BETTER_AUTH_SECRET,
       PLATFORM_ENCRYPTION_KEY: secrets.PLATFORM_ENCRYPTION_KEY,
       APP_COOKIE_SECRET: secrets.APP_COOKIE_SECRET,

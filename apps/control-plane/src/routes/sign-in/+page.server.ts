@@ -8,6 +8,7 @@ import { organization, ssoProvider } from "#server/auth-schema";
 import { organizationSettings } from "#server/schema";
 import { localDestination } from "#server/navigation";
 import { installationOrganizationId } from "#lib/organization";
+import { availableSocialProviders } from "#server/social-sign-in";
 
 export const load: PageServerLoad = async ({ request, url, setHeaders }) => {
   setHeaders({ "cache-control": "private, no-store" });
@@ -34,6 +35,9 @@ export const load: PageServerLoad = async ({ request, url, setHeaders }) => {
 
   return {
     signedOut: !(await runtime.auth.api.getSession({ headers: request.headers })),
+    socialProviders:
+      slug && provider && target?.required ? [] : availableSocialProviders(runtime.configuration),
+    error: url.searchParams.has("error"),
     provider,
     publicSignup: runtime.publicSignup && !slug,
     label:
