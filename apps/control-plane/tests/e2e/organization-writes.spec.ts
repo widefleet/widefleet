@@ -4,7 +4,10 @@ import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { and, eq } from "drizzle-orm";
 import { member, organization, session } from "../../src/lib/server/auth-schema.ts";
-import { apps, organizationRuntimes } from "../../src/lib/server/schema.ts";
+import { apps, deployments, organizationRuntimes } from "../../src/lib/server/schema.ts";
+import { seedDeployment } from "../cloudflare-deployment.fixture.ts";
+import { decryptSecret } from "../../src/lib/server/secret-encryption.ts";
+import { storedAppSecrets } from "../../src/lib/server/app-secrets.ts";
 import {
   S3Client,
   CreateBucketCommand,
@@ -183,6 +186,80 @@ test("opens organization settings without installation reporting privileges", as
 });
 
 for (const javaScriptEnabled of [true, false]) {
+  test(`preserves multiline secrets and offers failed disconnection retries (JavaScript ${javaScriptEnabled})`, async ({
+    browser,
+  }) => {
+    const { person, alpha, context } = await organizationSession(browser, javaScriptEnabled);
+
+    try {
+      const id = crypto.randomUUID();
+      await environment.database.db.insert(apps).values({
+        id,
+        organizationId: alpha,
+        ownerId: person.id,
+        slug: "service-consumer",
+        displayName: "Service consumer",
+        hostname: `service-consumer-${alpha}.apps.localhost`,
+      });
+      await environment.database.db
+        .update(session)
+        .set({ activeOrganizationId: alpha })
+        .where(eq(session.userId, person.id));
+      const page = await context.newPage();
+      await page.goto(`/apps/${id}/secrets`);
+      const value = "-----BEGIN FIXTURE-----\nfirst line\nsecond line\n-----END FIXTURE-----";
+      await page.getByLabel("Name", { exact: true }).fill("TOKEN");
+      await page.getByLabel("Value", { exact: true }).fill(value);
+      await page.getByRole("button", { name: "Save secret", exact: true }).click();
+      await expect(page.getByText("TOKEN", { exact: true })).toBeVisible();
+      const [saved] = await environment.database.db.select().from(apps).where(eq(apps.id, id));
+      const encrypted = storedAppSecrets.parse(saved?.secrets)["TOKEN"];
+
+      if (!encrypted) throw new Error("Missing saved secret");
+      expect(await decryptSecret(environment.environment.PLATFORM_ENCRYPTION_KEY, encrypted)).toBe(
+        value.replaceAll("\n", "\r\n"),
+      );
+      const entry = await seedDeployment(environment.database.db, { appId: id, bindings: [] });
+      await environment.database.db.insert(deployments).values({
+        id: entry.command.id,
+        appId: id,
+        artifactId: entry.artifact.id,
+        status: "succeeded",
+        requestId: crypto.randomUUID(),
+      });
+      await environment.database.db
+        .update(apps)
+        .set({
+          activeDeploymentId: entry.command.id,
+          capabilityRevision: 2,
+          appliedCapabilityRevision: 1,
+          appliedCapabilities: {
+            revision: 1,
+            grants: { API: { app: crypto.randomUUID(), entrypoint: "Reader" } },
+          },
+          capabilityError: "Synthetic disconnection failure",
+        })
+        .where(eq(apps.id, id));
+      await page.goto(`/services?app=${id}`);
+      await page.getByRole("button", { name: "Retry disconnection", exact: true }).click();
+      await expect(page).toHaveURL(
+        `${environment.configuration.PLATFORM_URL}/apps/${id}/connections`,
+      );
+      await page.getByRole("link", { name: "Browse app APIs", exact: true }).click();
+      await expect(
+        page.getByRole("button", { name: "Removal pending", exact: true }),
+      ).toBeDisabled();
+      const [retried] = await environment.database.db.select().from(apps).where(eq(apps.id, id));
+      expect(retried).toMatchObject({
+        capabilities: {},
+        capabilityError: null,
+        capabilityRevision: 2,
+      });
+    } finally {
+      await context.close();
+    }
+  });
+
   test(`creates an app in the only organization without visiting the chooser (JavaScript ${javaScriptEnabled})`, async ({
     browser,
   }) => {

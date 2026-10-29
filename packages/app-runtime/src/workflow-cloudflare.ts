@@ -28,7 +28,7 @@ const workflowWorkerKey = async (
   environment: ParentEnvironment,
 ) => {
   // The pinned version fixes code and resource bindings, but workflowApp applies
-  // current permissions and telemetry. Those must also identify a cached Worker.
+  // current permissions, secrets and telemetry. Those also identify a cached Worker.
   const configuration = JSON.stringify([
     WIDEFLEET_RUNTIME_VERSION,
     app.appId,
@@ -36,6 +36,7 @@ const workflowWorkerKey = async (
     workflow,
     app.network.policy.backend,
     app.capabilities,
+    app.secretRevision ?? 0,
     environment["WIDEFLEET_LOGS"] === "cloudflare" ? "cloudflare" : app.telemetry,
   ]);
 

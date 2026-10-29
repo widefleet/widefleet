@@ -186,6 +186,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
           WIDEFLEET_LOGS: "cloudflare",
           PRIVATE_ROOT_SECRET: "parent-only-fixture",
           WIDEFLEET_CONTROL_TOKEN: controlToken,
+          WIDEFLEET_SECRETS_KEY: "01".repeat(32),
           WIDEFLEET_CONFIGURATION: JSON.stringify({
             crons: { "* * * * *": [hostname, previewHostname] },
             queues: {
@@ -1230,6 +1231,56 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
       await publish(app);
     }
   }, 55_000);
+
+  it.each(["synthetic-new", null])(
+    "refreshes secrets in warm pinned workflows to %s",
+    async (value) => {
+      const prepare = (revision: number, secret: string | null) =>
+        json("/.well-known/widefleet/app-secrets", {
+          method: "POST",
+          body: JSON.stringify({
+            appId: app.appId,
+            revision,
+            values: secret === null ? {} : { TOKEN: secret },
+          }),
+        });
+
+      const revision = value === null ? 20 : 10;
+      await prepare(revision, "synthetic-old");
+      await publish(publishedApp.parse({ ...app, secretRevision: revision }));
+      const id = crypto.randomUUID();
+      const path = `/workflow?id=${id}&mode=secrets`;
+
+      try {
+        await json(path, { method: "POST" });
+        await expect
+          .poll(() => json(`/workflow/attempts?id=${id}`), { timeout: 15_000 })
+          .toEqual([{ label: "started", attempt: 1 }]);
+        const [original] = await workflowWorkers(id);
+        await json(`${path}&action=pause`, { method: "PUT" });
+        await expect
+          .poll(() => json(path), { timeout: 15_000 })
+          .toMatchObject({ status: "paused" });
+        await prepare(revision + 1, value);
+        await publish(
+          publishedApp.parse({
+            ...app,
+            version: crypto.randomUUID(),
+            secretRevision: revision + 1,
+          }),
+        );
+        await json(path, { method: "PUT" });
+        await json(`${path}&action=resume`, { method: "PUT" });
+        await expect
+          .poll(() => json(path), { timeout: 15_000 })
+          .toMatchObject({ status: "complete", output: { secret: value } });
+        expect((await workflowWorkers(id)).at(-1)?.key).not.toBe(original?.key);
+      } finally {
+        await publish(app);
+      }
+    },
+    55_000,
+  );
 
   it("resumes cached pinned code after a deployment while new instances use the new version", async () => {
     const id = crypto.randomUUID();

@@ -4,6 +4,7 @@
   import OrganizationField from "#shadcn/OrganizationField.svelte";
   import FormIssues from "#shadcn/FormIssues.svelte";
   import { Input } from "#shadcn/components/ui/input/index.js";
+  import { Textarea } from "#shadcn/components/ui/textarea/index.js";
   import { Label } from "#shadcn/components/ui/label/index.js";
   import { Button } from "#shadcn/components/ui/button/index.js";
 
@@ -62,10 +63,11 @@
       />
     </div>
     <div class="space-y-2">
-      <Label for="secret-value">Value</Label><Input
+      <Label for="secret-value">Value</Label><Textarea
         id="secret-value"
-        {...putAppSecret.fields._value.as("password")}
+        {...putAppSecret.fields._value.as("text")}
         autocomplete="new-password"
+        spellcheck={false}
         required
       />
     </div>

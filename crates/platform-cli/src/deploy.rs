@@ -374,7 +374,10 @@ async fn publish(
     } = collect_source_maps(worker.len(), map_files)?;
     let build_id = match &assets_root {
         Some(root) => build_version(root)?,
-        None => platform_core::sha256(&worker),
+        None => platform_core::sha256(&serde_json::to_vec(&(
+            platform_core::sha256(&worker),
+            &source_maps,
+        ))?),
     };
     let app = match target {
         Target::Preview(preview) => preview.resolve(api, credentials).await?,

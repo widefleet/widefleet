@@ -65,6 +65,11 @@ export class ExampleWorkflow extends WorkflowEntrypoint {
       await step.waitForEvent('continue', { type: 'continue', timeout: '5 minutes' });
       return step.do('inspect', async () => ({ connected: !!this.env.SERVICE, secret: this.env.PRIVATE_ROOT_SECRET ?? null }));
     }
+    if (mode === 'secrets') {
+      await step.do('started', context => record('started', context));
+      await step.waitForEvent('continue', { type: 'continue', timeout: '5 minutes' });
+      return step.do('inspect', async () => ({ secret: await this.env.WIDEFLEET_SECRETS.get('TOKEN').catch(() => null) }));
+    }
     if (mode === 'restart') {
       await step.do('first', context => record('first', context));
       return step.do('second', context => record('second', context));

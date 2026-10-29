@@ -15,6 +15,11 @@
 
   const connections = $derived(data.app ? await getAppConnections({ appId: data.app.id }) : null);
 
+  const grants = $derived({
+    ...connections?.activeConnections,
+    ...connections?.connections.grants,
+  });
+
   let search = $state("");
 
   const entries = $derived(
@@ -49,8 +54,9 @@
       </p>{/each}
   </div>
   {#if data.app && connections && catalog.admin}
-    {#each Object.entries(connections.connections.grants) as [binding, grant] (binding)}
+    {#each Object.entries(grants) as [binding, grant] (binding)}
       {@const removal = disconnectApp.for(binding)}
+      {@const removing = !connections.connections.grants[binding]}
       <form {...removal} class="flex items-center justify-between gap-4 rounded-lg border p-4">
         <OrganizationField field={removal.fields.organizationId} />
         <input {...removal.fields.appId.as("hidden", data.app.id)} /><input
@@ -63,7 +69,13 @@
         <FormIssues issues={removal.fields.allIssues()} /><Button
           variant="outline"
           type="submit"
-          disabled={removal.pending > 0}>Disconnect</Button
+          disabled={removal.pending > 0 ||
+            (removing && connections.connections.state === "pending")}
+          >{removing
+            ? connections.connections.state === "failed"
+              ? "Retry disconnection"
+              : "Removal pending"
+            : "Disconnect"}</Button
         >
       </form>
     {/each}

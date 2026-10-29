@@ -1,4 +1,5 @@
 import { decryptSecret } from "./secret-encryption.ts";
+import { migrateAppServices } from "./app-services-migration.ts";
 import { storedAppSecrets } from "./app-secrets.ts";
 import { checkServiceConsumers } from "./app-services.ts";
 import { resolveCloudflareCapabilities } from "./cloudflare-capabilities.ts";
@@ -104,8 +105,10 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
   };
 
   return {
-    register: (command: z.infer<typeof deploymentCommand>) =>
-      withCloudflareDatabase(bindings, async ({ db }) => {
+    register: async (command: z.infer<typeof deploymentCommand>) => {
+      await migrateAppServices(bindings.ARTIFACTS);
+
+      return withCloudflareDatabase(bindings, async ({ db }) => {
         const record = value(await registerCloudflareOperation(db, storage, command));
 
         if (command.kind === "deploy" && (!record.finishedAt || record.error))
@@ -115,10 +118,12 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
             .where(and(eq(deployments.id, command.id), ne(deployments.status, "succeeded")));
 
         return {
+          command: deploymentCommand.parse(record.command),
           sequence: record.sequence,
           targets: z.array(operationTarget).parse(record.targets),
         };
-      }),
+      });
+    },
     provision: async (command: z.infer<typeof deploymentCommand>) => {
       if (command.kind !== "deploy") return {};
 
@@ -624,12 +629,14 @@ export const executeCloudflareDeployment = async (
     );
 
     const nativeBindings = await step.do("provision-resources", options, () =>
-      retryable(() => runner.provision(command)),
+      retryable(() => runner.provision(registration.command)),
     );
 
     for (const target of registration.targets)
       await step.do(`activate-${target.appId}`, options, () =>
-        retryable(() => runner.activate(command, target, registration.sequence, nativeBindings)),
+        retryable(() =>
+          runner.activate(registration.command, target, registration.sequence, nativeBindings),
+        ),
       );
 
     await step.do("record-completion", options, () =>

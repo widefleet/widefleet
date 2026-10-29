@@ -26,6 +26,56 @@ fn prefix(job: &Job) -> String {
 fn package_key(job: &Job, key: &str) -> String {
     format!("{}/r2/widefleet-packages/{key}", prefix(job))
 }
+
+// One-time storage cutover: retired grants must not prevent reading another
+// app's publication when preparing the first app-only runtime configuration.
+async fn migrate_app_services(store: &Arc<dyn ObjectStore>, root: &str) -> Result<()> {
+    let marker = format!("{root}/migrations/app-services-v3.json");
+    if read(store, &marker).await?.is_some() {
+        return Ok(());
+    }
+    for prefix in ["hosts/", "versions/"] {
+        let objects = store
+            .list(Some(&ObjectPath::from(format!("{root}/{prefix}"))))
+            .try_collect::<Vec<_>>()
+            .await
+            .map_err(storage_error)?;
+        for object in objects {
+            let entry = store.get(&object.location).await.map_err(storage_error)?;
+            let version = object_store::UpdateVersion {
+                e_tag: entry.meta.e_tag.clone(),
+                version: entry.meta.version.clone(),
+            };
+            let attributes = entry.attributes.clone();
+            let mut snapshot: Value =
+                serde_json::from_slice(&entry.bytes().await.map_err(storage_error)?)?;
+            let legacy = snapshot
+                .get("capabilities")
+                .and_then(Value::as_object)
+                .is_some_and(|grants| {
+                    grants
+                        .values()
+                        .any(|grant| grant.get("connector").is_some())
+                });
+            if legacy {
+                snapshot["capabilities"] = json!({});
+                store
+                    .put_opts(
+                        &object.location,
+                        serde_json::to_vec(&snapshot)?.into(),
+                        PutOptions {
+                            mode: PutMode::Update(version),
+                            attributes,
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .map_err(storage_error)?;
+            }
+        }
+    }
+    put(store, &marker, b"{}".to_vec()).await
+}
 fn resource(owner: &str, kind: &str, name: &str) -> String {
     format!(
         "r{}",
@@ -165,6 +215,7 @@ pub async fn prepare(
     }
     let store = configuration.storage.resolve()?.object_store()?;
     let token_key = format!("{}/control-token", prefix(job));
+    migrate_app_services(&store, package_key(job, "").trim_end_matches('/')).await?;
     let token = match read(&store, &token_key).await? {
         Some(bytes) => {
             String::from_utf8(bytes).map_err(|error| Error::invalid(error.to_string()))?
@@ -939,4 +990,47 @@ pub async fn workflow_control(configuration: &Configuration, job: &Job) -> Resul
     Ok(Some(
         String::from_utf8(token).map_err(|error| Error::invalid(error.to_string()))?,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn cuts_over_legacy_publications_once_without_changing_app_grants() -> Result<()> {
+        let store: Arc<dyn ObjectStore> = Arc::new(object_store::memory::InMemory::new());
+        let root = "organizations/fixture/r2/widefleet-packages";
+        let legacy = json!({"version":"old", "capabilities":{"API":{"connector":"retired"}}});
+        let current = json!({"version":"current", "capabilities":{"API":{"app":"current-app", "entrypoint":"Reader"}}});
+        for suffix in ["hosts/legacy.json", "versions/legacy/old.json"] {
+            put(
+                &store,
+                &format!("{root}/{suffix}"),
+                serde_json::to_vec(&legacy)?,
+            )
+            .await?;
+        }
+        put(
+            &store,
+            &format!("{root}/hosts/current.json"),
+            serde_json::to_vec(&current)?,
+        )
+        .await?;
+        migrate_app_services(&store, root).await?;
+        migrate_app_services(&store, root).await?;
+        for suffix in ["hosts/legacy.json", "versions/legacy/old.json"] {
+            let bytes = read(&store, &format!("{root}/{suffix}"))
+                .await?
+                .ok_or_else(|| Error::invalid("Missing published snapshot".into()))?;
+            assert_eq!(
+                serde_json::from_slice::<Value>(&bytes)?,
+                json!({"version":"old", "capabilities":{}})
+            );
+        }
+        let bytes = read(&store, &format!("{root}/hosts/current.json"))
+            .await?
+            .ok_or_else(|| Error::invalid("Missing app snapshot".into()))?;
+        assert_eq!(serde_json::from_slice::<Value>(&bytes)?, current);
+        Ok(())
+    }
 }

@@ -81,6 +81,39 @@ describe("Cloudflare operation history", () => {
     expect(await environment.database.db.select().from(jobs)).toHaveLength(0);
   });
 
+  it("refreshes secrets using the newest admitted code and persists that choice across retries", async () => {
+    const first = await seedDeployment(environment.database.db);
+    const second = await seedDeployment(environment.database.db, { appId: first.appId });
+    (await registerCloudflareOperation(environment.database.db, storage, first.command)).unwrap();
+    (await registerCloudflareOperation(environment.database.db, storage, second.command)).unwrap();
+
+    const refresh = deploymentCommand.parse({
+      ...first.command,
+      id: crypto.randomUUID(),
+      requestId: crypto.randomUUID(),
+      refreshSecrets: true,
+    });
+
+    const accepted = (
+      await registerCloudflareOperation(environment.database.db, storage, refresh)
+    ).unwrap();
+
+    expect(accepted.command).toMatchObject({ artifactId: second.artifact.id });
+    const third = await seedDeployment(environment.database.db, { appId: first.appId });
+    (await registerCloudflareOperation(environment.database.db, storage, third.command)).unwrap();
+    expect(
+      (await registerCloudflareOperation(environment.database.db, storage, refresh)).unwrap()
+        .command,
+    ).toEqual(accepted.command);
+
+    const [deployment] = await environment.database.db
+      .select()
+      .from(deployments)
+      .where(eq(deployments.id, refresh.id));
+
+    expect(deployment?.artifactId).toBe(second.artifact.id);
+  });
+
   it("applies access inheritance once and keeps settings saved before the first deployment", async () => {
     const first = await seedDeployment(environment.database.db);
     const preview = await seedDeployment(environment.database.db);

@@ -43,6 +43,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App services CLI", () => {
   let outcome = "active";
   let rejected = false;
   let superseded = false;
+  let secretDeployment: z.infer<typeof contract.deployment> | null = null;
 
   const server = createServer((request, response) => {
     let body = "";
@@ -99,7 +100,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App services CLI", () => {
             names: ["TOKEN"],
             revision: 1,
             appliedRevision: null,
-            deployment: null,
+            deployment: secretDeployment,
           }),
         );
       } else if (request.url === `/api/v1/apps/${app.id}/connections`) {
@@ -182,6 +183,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App services CLI", () => {
     outcome = "active";
     rejected = false;
     superseded = false;
+    secretDeployment = null;
   });
   afterAll(async () => {
     await new Promise<void>((resolve, reject) =>
@@ -198,10 +200,8 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App services CLI", () => {
     });
 
   it("deploys an app API without assets or a build script and manages app connections and secrets", async () => {
-    await writeFile(
-      join(directory, "service.ts"),
-      `import {WorkerEntrypoint} from 'cloudflare:workers'; export class Reader extends WorkerEntrypoint { read() { return 'value'; } }`,
-    );
+    const source = `import {WorkerEntrypoint} from 'cloudflare:workers'; export class Reader extends WorkerEntrypoint { read() { return 'value'; } }`;
+    await writeFile(join(directory, "service.ts"), source);
     await writeFile(
       join(directory, "service.jsonc"),
       JSON.stringify({
@@ -225,6 +225,27 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App services CLI", () => {
       entrypoints: ["Reader"],
       assets: { binding: "ASSETS" },
     });
+    await writeFile(join(directory, "service.ts"), `type SourceMapOnly = string;\n${source}`);
+    await command("deploy", "--config", "service.jsonc", "--no-wait", "--json");
+    const rebuilt = requests.findLast((entry) => entry.path.endsWith("/worker"));
+
+    const next = await new Response(rebuilt?.body, {
+      headers: { "content-type": rebuilt?.contentType ?? "" },
+    }).formData();
+
+    const before = contract.workerMetadata.parse(
+      JSON.parse(z.string().parse(form.get("metadata"))),
+    );
+
+    const after = contract.workerMetadata.parse(JSON.parse(z.string().parse(next.get("metadata"))));
+    const code = form.get("worker.js");
+    const nextCode = next.get("worker.js");
+
+    if (!(code instanceof File) || !(nextCode instanceof File))
+      throw new Error("Missing worker module");
+    expect(await nextCode.text()).toBe(await code.text());
+    expect(after.debug?.source_maps).not.toEqual(before.debug?.source_maps);
+    expect(after.debug?.build_id).not.toBe(before.debug?.build_id);
     expect(requests.some((entry) => entry.path.includes("/connectors"))).toBe(false);
     expect(JSON.parse((await command("services")).stdout)).toMatchObject([
       { slug: "erp-app", entrypoints: ["Reader"] },
@@ -262,4 +283,50 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App services CLI", () => {
     await expect(command("connector", "--help")).rejects.toThrow("unrecognized subcommand");
     expect(requests).toHaveLength(0);
   });
+
+  it.each(["queued", "running", "failed"])(
+    "lists secrets without waiting for a %s deployment",
+    async (status) => {
+      secretDeployment = contract.deployment.parse({
+        id: app.activeDeploymentId,
+        appId: app.id,
+        artifactId: crypto.randomUUID(),
+        status,
+        createdAt: app.createdAt,
+        finishedAt: null,
+        message: "Synthetic failure",
+      });
+      expect(JSON.parse((await command("secret", "list", "--json")).stdout)).toMatchObject({
+        deployment: { status },
+      });
+      expect(requests.map((entry) => entry.path)).toEqual([
+        "/api/v1/apps/by-name/inventory",
+        `/api/v1/apps/${app.id}/secrets`,
+      ]);
+    },
+  );
+
+  it.each([false, true])(
+    "fails secret changes when activation already failed (no-wait %s)",
+    async (noWait) => {
+      const options = noWait ? ["--no-wait"] : [];
+      secretDeployment = contract.deployment.parse({
+        id: app.activeDeploymentId,
+        appId: app.id,
+        artifactId: crypto.randomUUID(),
+        status: "failed",
+        createdAt: app.createdAt,
+        finishedAt: app.createdAt,
+        message: "Synthetic activation failure",
+      });
+      await expect(command("secret", "delete", "TOKEN", ...options)).rejects.toThrow(
+        "Synthetic activation failure",
+      );
+      const secretFile = join(directory, "failed-secret");
+      await writeFile(secretFile, "synthetic-value");
+      await expect(
+        command("secret", "put", "TOKEN", "--file", secretFile, ...options),
+      ).rejects.toThrow("Synthetic activation failure");
+    },
+  );
 });

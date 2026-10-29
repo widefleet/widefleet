@@ -121,7 +121,7 @@ export const createCloudflareExecution = (
         catch: (cause) =>
           new StorageUnavailable({ message: "Cloudflare deployment status is unavailable", cause }),
       }),
-    deploy: async (deployment, requestId, rollback = false, actor) => {
+    deploy: async (deployment, requestId, rollback = false, actor, options) => {
       const valid = await transact(database, async (transaction) => {
         const [artifact] = await transaction
           .select()
@@ -168,6 +168,8 @@ export const createCloudflareExecution = (
         requestId,
         rollback,
       };
+
+      if (options?.refreshSecrets) input.refreshSecrets = true;
 
       if (actor)
         input.attribution = { userId: actor.id, organizationId: actor.application.organizationId };

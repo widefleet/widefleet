@@ -117,7 +117,16 @@ export const createAppSecrets = (
     });
 
     if (prepared.isErr() || !execution || !prepared.value.deployment) return prepared;
-    const deployed = await execution.deploy(prepared.value.deployment, requestId);
+
+    const deployed = await execution.deploy(
+      prepared.value.deployment,
+      requestId,
+      false,
+      undefined,
+      {
+        refreshSecrets: true,
+      },
+    );
 
     if (deployed.isErr()) return Result.err(deployed.error);
 

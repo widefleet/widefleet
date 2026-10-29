@@ -550,7 +550,8 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
     };
 
     const dispatch = async (entry: typeof first, mode = "") => {
-      expect((await submit(entry, mode)).status).toBe(200);
+      const response = await submit(entry, mode);
+      expect(response.status, await response.text()).toBe(200);
     };
 
     const configure = async (
@@ -850,7 +851,8 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
             if (command.kind === 'network') return executor.network(command.actor, command.appId, command.input);
             return executor.deploy({ id: command.id, appId: command.appId, artifactId: command.artifactId, createdAt: command.createdAt,
               status: 'queued', finishedAt: null, message: null }, command.requestId, command.rollback,
-              command.attribution ? {id: command.attribution.userId, application: {organizationId: command.attribution.organizationId}} : undefined);
+              command.attribution ? {id: command.attribution.userId, application: {organizationId: command.attribution.organizationId}} : undefined,
+              command.refreshSecrets ? {refreshSecrets:true} : undefined);
           });
           return Response.json(result.isErr() ? { error: result.error.message } : result.value, { status: result.isErr() ? 400 : 200 });
         }
@@ -867,12 +869,16 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         }
         if (url.hostname === 'fixture' && url.pathname === '/storage') {
           if (request.method === 'PUT') {
-            await env.ARTIFACTS.put(url.searchParams.get('key'), await request.text());
+            await env.ARTIFACTS.put(url.searchParams.get('key'), await request.text(), {customMetadata:{widefleet_deployment_sequence:'0'}});
             return new Response(null,{status:204});
           }
           if (request.method === 'DELETE') {
             await env.ARTIFACTS.delete(url.searchParams.get('key'));
             return new Response(null,{status:204});
+          }
+          if (url.searchParams.has('key')) {
+            const object = await env.ARTIFACTS.get(url.searchParams.get('key'));
+            return Response.json(object ? {body:await object.json(),metadata:object.customMetadata} : null);
           }
           return Response.json((await env.ARTIFACTS.list({prefix:url.searchParams.get('prefix') ?? ''})).objects.map(object=>object.key));
         }
@@ -2252,6 +2258,87 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       expect(schedules).not.toContainEqual({ cron: "61 * * * *" });
     }, 30_000);
 
+    it("cuts over legacy host and version grants before redeploying an app", async () => {
+      const entry = await seedDeployment(environment.database.db, { bindings: [] });
+      await seed(entry);
+      const original = contract.publishedApp.parse((await host(first.hostname))?.body);
+
+      const legacy = {
+        ...original,
+        ...entry.artifact,
+        hostname: entry.hostname,
+        version: crypto.randomUUID(),
+        capabilities: {
+          OLD: { connector: "retired-service", entrypoint: "Reader", organizationId: "widefleet" },
+        },
+      };
+
+      const versionKey = `versions/${entry.appId}/${legacy.version}.json`;
+
+      for (const key of [`hosts/${entry.hostname}.json`, versionKey])
+        await worker.fetch(`http://fixture/storage?key=${key}`, {
+          method: "PUT",
+          body: JSON.stringify(legacy),
+        });
+      await worker.fetch("http://fixture/storage?key=migrations/app-services-v3.json", {
+        method: "DELETE",
+      });
+      await dispatch(entry);
+      await completed(entry.command.id);
+      expect(contract.publishedApp.parse((await host(entry.hostname))?.body).capabilities).toEqual(
+        {},
+      );
+      expect(
+        await (await worker.fetch(`http://fixture/storage?key=${versionKey}`)).json(),
+      ).toMatchObject({
+        body: z.json().parse(JSON.parse(JSON.stringify({ ...legacy, capabilities: {} }))),
+        metadata: { widefleet_deployment_sequence: "0" },
+      });
+      expect((await authenticatedFetch(`https://${entry.hostname}/`)).status).toBe(200);
+    }, 30_000);
+
+    it("activates newer admitted code when a delayed secret edit requests the previous artifact", async () => {
+      const original = await seedDeployment(environment.database.db, {
+        bindings: [],
+        source: "export default {fetch(){return new Response('original')}}",
+      });
+
+      await seed(original);
+      await dispatch(original);
+      await completed(original.command.id);
+
+      const next = await seedDeployment(environment.database.db, {
+        appId: original.appId,
+        bindings: [],
+        source: "export default {fetch(){return new Response('newer')}}",
+      });
+
+      await seed(next);
+      await dispatch(next);
+      await completed(next.command.id);
+
+      const refresh = {
+        ...original,
+        command: {
+          ...original.command,
+          id: crypto.randomUUID(),
+          requestId: crypto.randomUUID(),
+          refreshSecrets: true,
+        },
+      };
+
+      await dispatch(refresh);
+      await completed(refresh.command.id);
+      expect((await host(original.hostname))?.body).toMatchObject({
+        id: next.artifact.id,
+        deploymentId: refresh.command.id,
+      });
+      expect(await (await authenticatedFetch(`https://${original.hostname}/`)).text()).toBe(
+        "newer",
+      );
+      await dispatch(refresh);
+    }, 30_000);
+
     it("deploys app services with private secrets and follows their activated versions", async () => {
       const serviceSource = `import {WorkerEntrypoint} from 'cloudflare:workers'; export class Reader extends WorkerEntrypoint { async read() { return { version: 'one', secret: await this.env.WIDEFLEET_SECRETS.get('TOKEN') }; } }`;
 
@@ -2570,14 +2657,37 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         .set({ parentId: child.appId })
         .where(eq(apps.id, grandchild.appId));
 
-      for (const entry of [root, child, grandchild]) await seed(entry);
+      for (const entry of [root, child, grandchild]) {
+        await seed(entry);
+        await environment.database.db
+          .update(apps)
+          .set({
+            secrets: { TOKEN: "synthetic-encrypted-value" },
+            secretRevision: 1,
+            appliedSecretRevision: 1,
+          })
+          .where(eq(apps.id, entry.appId));
+        await worker.fetch(`http://fixture/storage?key=app-secrets/${entry.appId}/1.json`, {
+          method: "PUT",
+          body: JSON.stringify({ ciphertext: "synthetic-encrypted-value" }),
+        });
+      }
+
       expect((await remove(root.appId)).status).toBe(200);
       await removed(root.appId);
 
       for (const entry of [root, child, grandchild]) {
         expect(
           await environment.database.db.select().from(apps).where(eq(apps.id, entry.appId)),
-        ).toEqual([expect.objectContaining({ id: entry.appId })]);
+        ).toEqual([
+          expect.objectContaining({
+            id: entry.appId,
+            secrets: {},
+            secretRevision: 0,
+            appliedSecretRevision: null,
+            secretDeploymentId: null,
+          }),
+        ]);
         expect(
           (await environment.database.db.select().from(apps).where(eq(apps.id, entry.appId)))[0]
             ?.removedAt,
@@ -2585,6 +2695,11 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         expect((await host(entry.hostname))?.body).toEqual({ deleted: true, appId: entry.appId });
         const stored = await worker.fetch(`http://fixture/storage?prefix=apps/${entry.appId}/`);
         expect(await stored.json()).toEqual([]);
+        expect(
+          await (
+            await worker.fetch(`http://fixture/storage?prefix=app-secrets/${entry.appId}/`)
+          ).json(),
+        ).toEqual([]);
         expect((await authenticatedFetch(`https://${entry.hostname}/`)).status).toBe(404);
       }
     }, 60000);

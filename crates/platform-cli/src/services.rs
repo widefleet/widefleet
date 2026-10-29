@@ -140,6 +140,7 @@ pub async fn secrets(api: &Api, credentials: &auth::Credentials, options: Secret
     let app = apps::resolve(api, credentials, options.app.as_deref(), &options.config).await?;
     let token = auth::access_token(api, credentials).await?;
     let path = format!("/apps/{app}/secrets");
+    let changing = !matches!(&options.command, SecretCommand::List);
     let request = match options.command {
         SecretCommand::List => api.authenticated(Method::GET, &path, &token),
         SecretCommand::Put { name, file } => {
@@ -154,13 +155,25 @@ pub async fn secrets(api: &Api, credentials: &auth::Credentials, options: Secret
         ),
     };
     let mut status: SecretStatus = json(request.send().await?).await?;
-    if !options.no_wait
+    if changing
+        && !options.no_wait
         && let Some(deployment) = &status.deployment
         && (deployment.status == "queued" || deployment.status == "running")
     {
         deploy::wait(api, credentials, app, deployment.id).await?;
         let token = auth::access_token(api, credentials).await?;
         status = json(api.authenticated(Method::GET, &path, &token).send().await?).await?;
+    }
+    if changing
+        && let Some(deployment) = &status.deployment
+        && deployment.status == "failed"
+    {
+        return Err(Error::invalid(
+            deployment
+                .message
+                .clone()
+                .unwrap_or_else(|| "Secret activation failed".into()),
+        ));
     }
     if options.json || !std::io::stdout().is_terminal() {
         return crate::print_json(&status);
