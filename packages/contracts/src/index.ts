@@ -309,6 +309,12 @@ export const runtimeRelease = z.strictObject({
     .min(1),
 });
 
+export const appCaller = z.strictObject({
+  issuer: z.url(),
+  subject: z.string().min(1),
+  name: z.string(),
+});
+
 const appSecretMaxBytes = 5_000;
 
 export const appEnvironmentMaxBindings = 128;

@@ -1,6 +1,36 @@
 import { workerDefinition, workerTails } from "./worker-definition.ts";
 import type { ParentEnvironment, PublishedApp } from "./types.ts";
 
+// celld 0.6.2 cannot keep a call alive while it awaits another request's async
+// loader factory. Prepare code in each invoking request, then pass a synchronous
+// factory. Cache completed definitions only; weak references and a bounded index
+// avoid retaining inactive app code. No caller data belongs in this cache.
+const definitions = new Map<string, WeakRef<Awaited<ReturnType<typeof workerCode>>>>();
+
+export const appWorker = async (
+  app: PublishedApp,
+  environment: ParentEnvironment,
+  context: ExecutionContext,
+) => {
+  let definition = definitions.get(app.version)?.deref();
+
+  if (!definition) {
+    definition = await workerCode(app, environment, context);
+
+    if (definitions.size >= 64) {
+      const oldest = definitions.keys().next();
+
+      if (!oldest.done) definitions.delete(oldest.value);
+    }
+
+    definitions.set(app.version, new WeakRef(definition));
+  }
+
+  const code = definition;
+
+  return environment.WIDEFLEET_LOADER.get(app.version, () => code);
+};
+
 export const workerCode = async (
   app: PublishedApp,
   environment: ParentEnvironment,
@@ -30,6 +60,7 @@ export const workerCode = async (
 
   const bindings = new Map(Object.entries(worker.env));
   bindings.set("WIDEFLEET_DEPLOYMENT_ID", app.deploymentId);
+  bindings.set("WIDEFLEET_ORIGIN", `https://${app.hostname}`);
   bindings.set(
     "WIDEFLEET_SECRETS",
     context.exports.AppSecrets({ props: { appId: app.appId, revision: app.secretRevision ?? 0 } }),
@@ -49,7 +80,10 @@ export const workerCode = async (
       );
 
   for (const [name, grant] of Object.entries(app.capabilities))
-    bindings.set(`WIDEFLEET_SERVICE_${name}`, context.exports.AppService({ props: grant }));
+    bindings.set(
+      `WIDEFLEET_SERVICE_${name}`,
+      context.exports.AppService({ props: { ...grant, sourceAppId: app.appId } }),
+    );
 
   const modules = new Map(Object.entries(worker.modules));
 
@@ -57,10 +91,13 @@ export const workerCode = async (
   // Import the full namespace before linking app and platform sibling modules.
   modules.set(
     "__widefleet_bootstrap.js",
-    `import * as workers from 'cloudflare:workers'; import './__widefleet_bindings.js'; export {default} from './__widefleet_app.js'; export {Events} from './__widefleet_events.js';
+    `import * as workers from 'cloudflare:workers'; import {callerEntrypoint} from './__widefleet_bindings.js'; import app from './__widefleet_app.js'; export default callerEntrypoint(app); export {Events} from './__widefleet_events.js';
 ${(app.metadata.entrypoints ?? [])
   .filter((name) => name !== "default")
-  .map((name) => `export {${name}} from ${JSON.stringify(`./${app.metadata.main_module}`)};`)
+  .map(
+    (name) =>
+      `import {${name} as App_${name}} from ${JSON.stringify(`./${app.metadata.main_module}`)}; export const ${name} = callerEntrypoint(App_${name});`,
+  )
   .join("\n")}`,
   );
   modules.set(

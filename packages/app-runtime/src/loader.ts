@@ -1,4 +1,6 @@
 import { prepareAppSecrets } from "./app-secrets.ts";
+import { signAppCaller } from "./app-caller.ts";
+import type { appCaller } from "@platform/contracts";
 
 export { AppSecrets } from "./app-secrets.ts";
 
@@ -13,10 +15,10 @@ import { z } from "zod";
 import { workflowJson } from "./workflow-json.ts";
 import { workflowCatalog } from "./workflow-catalog.ts";
 import { workflowRequest } from "@platform/contracts";
-import { workerCode } from "./worker.ts";
+import { appWorker, workerCode } from "./worker.ts";
 import { browserPolicy } from "./csp.ts";
 import { serveAsset } from "./assets.ts";
-import { appKey, readApp } from "./catalog.ts";
+import { readApp } from "./catalog.ts";
 import type { WorkflowRunner } from "./workflow-runner.ts";
 import type { Events } from "./events.ts";
 import type { ParentEnvironment, PublishedApp, Json } from "./types.ts";
@@ -62,16 +64,13 @@ const eventConfiguration = async (environment: ParentEnvironment) => {
   };
 };
 
-const load = (app: PublishedApp, environment: ParentEnvironment, context: ExecutionContext) =>
-  environment.WIDEFLEET_LOADER.get(appKey(app), () => workerCode(app, environment, context));
-
 const run = async <T>(
   app: PublishedApp,
   environment: ParentEnvironment,
   context: ExecutionContext,
   operation: (worker: WorkerStub) => Promise<T>,
 ) => {
-  const worker = load(app, environment, context);
+  const worker = await appWorker(app, environment, context);
 
   try {
     return await operation(worker);
@@ -109,7 +108,11 @@ const dispatchApp = async (
   request: Request,
   environment: ParentEnvironment,
   context: ExecutionContext,
-  authenticated: { appId: string; organizationId: string } | null,
+  authenticated: {
+    appId: string;
+    organizationId: string;
+    caller: z.infer<typeof appCaller>;
+  } | null,
 ) => {
   const url = new URL(request.url);
   const candidate = request.headers.get("x-widefleet-candidate");
@@ -135,7 +138,11 @@ const dispatchApp = async (
 
   if (!app) return new Response("App is not published", { status: 404 });
 
-  if (authenticated !== null && authenticated.appId !== app.appId)
+  if (
+    authenticated !== null &&
+    (authenticated.appId !== app.appId ||
+      (app.organizationId !== undefined && authenticated.organizationId !== app.organizationId))
+  )
     return new Response("App authorization is being updated", { status: 503 });
 
   if (url.pathname === "/.well-known/widefleet/ready") {
@@ -199,6 +206,15 @@ const dispatchApp = async (
     if (asset.status !== 404) return browserPolicy(asset, app.network.policy.browser);
   }
 
+  const proof = authenticated
+    ? await signAppCaller(
+        environment.WIDEFLEET_CONTROL_TOKEN,
+        app.appId,
+        authenticated.organizationId,
+        authenticated.caller,
+      )
+    : undefined;
+
   return browserPolicy(
     // celld forwards incoming request cancellation only when the signal is
     // explicitly supplied to the subrequest.
@@ -206,6 +222,7 @@ const dispatchApp = async (
       worker
         .getEntrypoint(undefined, {
           ...executionOptions(environment.WIDEFLEET_EXECUTION_LIMITS, "http"),
+          props: { caller: authenticated?.caller ?? null, appCaller: proof },
         })
         .fetch(request, { signal: request.signal }),
     ),
@@ -293,8 +310,8 @@ export default {
       return manageRuntime(request, environment, context);
     }
 
-    return createAuthHandler(environment, (authenticated, appId, organizationId) =>
-      dispatchApp(authenticated, environment, context, { appId, organizationId }),
+    return createAuthHandler(environment, (authenticated, appId, organizationId, caller) =>
+      dispatchApp(authenticated, environment, context, { appId, organizationId, caller }),
     ).fetch(request);
   },
   async scheduled(

@@ -159,7 +159,9 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")(
         expect(echoed.headers).not.toHaveProperty("x-forwarded-proto");
         expect(echoed.headers).not.toHaveProperty("cookie");
         expect(echoed.headers).not.toHaveProperty("authorization");
-        expect(authenticated.headers["set-cookie"]).toBeUndefined();
+        expect(authenticated.headers["set-cookie"]).toEqual([
+          "app-cookie=oauth; Path=/; Secure; HttpOnly",
+        ]);
         await fixture.route(["administrators"], 2);
         expect(
           (

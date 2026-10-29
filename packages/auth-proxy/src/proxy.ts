@@ -1,12 +1,12 @@
-import { appAccessSnapshot } from "@platform/contracts";
+import { appAccessSnapshot, appCaller } from "@platform/contracts";
 import { z } from "zod";
-import { createAuthentication, cookiePrefix } from "./authentication.ts";
+import { companyCookie, createAuthentication, cookiePrefix } from "./authentication.ts";
 import { authConfiguration, type AuthConfiguration } from "./configuration.ts";
-import { proxyIdentity } from "./identity.ts";
+import { issuer, proxyIdentity } from "./identity.ts";
 
 interface Apps {
   resolve: (hostname: string) => Promise<z.infer<typeof appAccessSnapshot> | null>;
-  fetch: (request: Request) => Promise<Response>;
+  fetch: (request: Request, caller: z.infer<typeof appCaller>) => Promise<Response>;
 }
 
 const response = (status: number, message: string) =>
@@ -179,10 +179,41 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
       headers.set("x-auth-request-preferred-username", user.data.name);
       headers.set("x-auth-request-email", user.data.email);
       headers.set("x-auth-request-groups", user.data.groups.join(","));
-      const result = await apps.fetch(new Request(request, { headers }));
+
+      const caller = appCaller.parse({
+        issuer: issuer(configuration.provider),
+        subject: user.data.id,
+        name: user.data.name,
+      });
+
+      const cookies = (request.headers.get("cookie") ?? "")
+        .split(";")
+        .filter((value) => !companyCookie(value.trim().split("=")[0] ?? ""));
+
+      if (cookies.some((value) => value.trim())) headers.set("cookie", cookies.join(";"));
+
+      const result = await apps.fetch(
+        new Request(request, { headers, redirect: "manual" }),
+        caller,
+      );
+
       const outgoing = new Response(result.body, result);
 
       outgoing.headers.delete("set-cookie");
+
+      // App OAuth cookies stay on the app host. No app can read or overwrite
+      // the proxy's company sign-in cookies, including another organization's.
+      for (const cookie of result.headers.getSetCookie())
+        if (!companyCookie(cookie.split("=")[0]?.trim() ?? "")) {
+          const attributes = cookie.split(";");
+          const value = attributes.shift();
+
+          if (value)
+            outgoing.headers.append(
+              "set-cookie",
+              [value, ...attributes.filter((part) => !/^\s*domain\s*=/i.test(part))].join(";"),
+            );
+        }
 
       return outgoing;
     },

@@ -84,6 +84,59 @@ describe("Auth proxy session lifecycle", () => {
     await idp?.stop();
   });
 
+  it("passes the verified caller and isolates app OAuth cookies from all company cookies", async () => {
+    const forwarded = vi.fn(async () => {
+      const headers = new Headers();
+      headers.append(
+        "set-cookie",
+        "app_session=oauth; Domain=apps.example.test; Path=/; Secure; HttpOnly; SameSite=Lax",
+      );
+      headers.append("set-cookie", "__Host-app_state=state; Path=/; Secure; HttpOnly");
+
+      for (const name of [
+        "platform_sso_other.session_data",
+        "__Secure-platform_sso_other.session_token",
+        "__Host-platform_sso_other.oauth_state",
+      ])
+        headers.append("set-cookie", `${name}=forged; Domain=apps.example.test; Path=/`);
+
+      return new Response("Connected", { headers });
+    });
+
+    const calls: { request: Request; caller: unknown }[] = [];
+
+    const proxy = createAuthProxy(configuration, {
+      ...apps,
+      fetch: (request, caller) => {
+        calls.push({ request, caller });
+
+        return forwarded();
+      },
+    });
+
+    const response = await proxy.fetch(
+      new Request(app, {
+        headers: {
+          cookie: `${cookie}; app_session=oauth; __Secure-platform_sso_other.session_token=private; platform_sso_other.session_data=private`,
+          "x-auth-request-user": "forged",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls[0]?.caller).toEqual({
+      issuer: idp.origin,
+      subject: "pairwise-subject",
+      name: "Example User",
+    });
+    expect(calls[0]?.request.headers.get("cookie")?.trim()).toBe("app_session=oauth");
+    expect(calls[0]?.request.headers.get("x-auth-request-user")).toBe("pairwise-subject");
+    expect(response.headers.getSetCookie()).toEqual([
+      "app_session=oauth; Path=/; Secure; HttpOnly; SameSite=Lax",
+      "__Host-app_state=state; Path=/; Secure; HttpOnly",
+    ]);
+  });
+
   it("expires after one hour and does not extend the session when it is used", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(Date.now() + 59 * 60 * 1000);

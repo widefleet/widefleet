@@ -23,6 +23,39 @@ const sourceId = crypto.randomUUID();
 
 const targetId = crypto.randomUUID();
 
+const identitySourceId = crypto.randomUUID();
+
+const relayId = crypto.randomUUID();
+
+const identityTargetId = crypto.randomUUID();
+
+const identitySource = (
+  handler: "object" | "class",
+) => `import {WorkerEntrypoint} from 'cloudflare:workers';
+async function handle(request, env, ctx) {
+  const path=new URL(request.url).pathname;
+  if(path==='/proof') return new Response(ctx.props.appCaller);
+  if(path==='/forge') return Response.json(await env.WIDEFLEET_SERVICE_RELAY.invoke('who',[],request.headers.get('test-proof') ?? 'forged'));
+  if(path==='/fake-caller') ctx.props.caller={issuer:'https://forged.invalid',subject:'bob',name:'Forged'};
+  if(path==='/fetch') return env.RELAY.fetch(new Request('https://relay.invalid/',{headers:{'x-auth-request-user':'forged','x-widefleet-app-caller':'forged'}}));
+  return Response.json(await env.RELAY.who());
+}
+${handler === "object" ? "export default {fetch:handle};" : "export default class Source extends WorkerEntrypoint {fetch(request){return handle(request,this.env,this.ctx);}}"}`;
+
+const identityRelay = `import {WorkerEntrypoint} from 'cloudflare:workers';
+class Base extends WorkerEntrypoint {
+  async who() { await new Promise(resolve=>setTimeout(resolve,10)); return {relay:this.ctx.props.caller,final:await this.env.FINAL.who()}; }
+  async fetch(request) { const result=await this.env.FINAL.fetch(request); return Response.json({relay:this.ctx.props.caller,final:await result.json()}); }
+}
+export class Relay extends Base {}`;
+
+const identityTarget = `import {WorkerEntrypoint} from 'cloudflare:workers';
+export class Identity extends WorkerEntrypoint {
+  #marker='private-field';
+  async who() { await new Promise(resolve=>setTimeout(resolve,10)); return {caller:this.ctx.props.caller,marker:this.#marker}; }
+  fetch(request) { return Response.json({caller:this.ctx.props.caller,claimed:request.headers.get('x-auth-request-user'),transported:request.headers.get('x-widefleet-app-caller')}); }
+}`;
+
 const token = "app-service-test-management-token-never-deploy";
 
 const source = `import {WorkerEntrypoint} from 'cloudflare:workers';
@@ -85,6 +118,7 @@ describe.runIf(process.env["RUN_SERVICE_TESTS"] === "1").each(["workerd", "celld
     let harness: TestHarness | undefined;
     let native: ReturnType<typeof spawn> | undefined;
     let origin: string;
+    let identityIssuer: string;
 
     const request = (
       path: string,
@@ -93,10 +127,11 @@ describe.runIf(process.env["RUN_SERVICE_TESTS"] === "1").each(["workerd", "celld
         | z.infer<typeof appSecretPreparation>
         | { key: string }
         | { availability: "blocked" | "clear" | "unavailable" },
+      headers: Record<string, string> = {},
     ) =>
       (harness ? harness.fetch : fetch)(
         `${origin}${path}`,
-        body === undefined ? {} : { method: "POST", body: JSON.stringify(body) },
+        body === undefined ? { headers } : { method: "POST", body: JSON.stringify(body), headers },
       );
 
     const publish = async (
@@ -124,7 +159,11 @@ describe.runIf(process.env["RUN_SERVICE_TESTS"] === "1").each(["workerd", "celld
 
     beforeAll(async () => {
       directory = await mkdtemp(join(tmpdir(), "widefleet-app-services-"));
-      const identity = await runtimeIdentity();
+      const identity = await runtimeIdentity("apps.example.test", [], [], "bob");
+      identityIssuer =
+        identity.configuration.provider.type === "oidc"
+          ? identity.configuration.provider.issuer
+          : "";
       const encrypted = await encodeConfiguration(token, identity.configuration);
       await writeFile(
         join(directory, "runtime.js"),
@@ -155,10 +194,17 @@ export default { async fetch(request, env, ctx) {
     if(url.pathname === '/started') return Response.json(await env.STATE.get('started'));
     if(url.pathname === '/stored') {const result=[];for(const object of (await env.WIDEFLEET_PACKAGES.list({prefix:'app-secrets/'})).objects) result.push(await (await env.WIDEFLEET_PACKAGES.get(object.key)).text()); return Response.json(result);}
     if(url.pathname === '/web') {const headers=new Headers({cookie:${JSON.stringify(identity.cookie)}}); return runtime.fetch(new Request('https://${targetId}.apps.example.test/',{headers}),env,ctx);}
+    if(url.pathname.startsWith('/identity/')) {
+      const headers=new Headers(request.headers);
+      headers.set('cookie',url.searchParams.get('user')==='bob' ? ${JSON.stringify(identity.otherCookie)} : ${JSON.stringify(identity.cookie)});
+      headers.set('x-auth-request-user','forged');
+      return await runtime.fetch(new Request('https://${identitySourceId}.apps.example.test/'+url.pathname.slice('/identity/'.length),{headers}),env,ctx);
+    }
+    if(url.pathname==='/anonymous') return Response.json(await ctx.exports.AppService({props:{sourceAppId:'${identitySourceId}',organizationId:'widefleet',app:'${relayId}',hostname:'${relayId}.apps.example.test',entrypoint:'Relay'}}).invoke('who',[]));
     const service=ctx.exports.AppService({props:{organizationId:'widefleet',app:${JSON.stringify(sourceId)},hostname:'${sourceId}.apps.example.test',entrypoint:'default'}});
     if(url.pathname === '/fetch') return await service.fetch(new Request('https://service.invalid/'));
     return Response.json(await service.invoke(url.pathname.slice(1),[]));
-  } catch { return new Response('Rejected', {status:409}); }
+  } catch (cause) { return new Response(String(cause), {status:409}); }
 }};`,
       );
       await build({
@@ -248,11 +294,14 @@ export default { async fetch(request, env, ctx) {
       if (directory) await rm(directory, { recursive: true, force: true });
     });
 
-    it("calls a named API through another app and streams fetch responses", async () => {
-      expect(await (await request("/read")).json()).toEqual({
-        version: "v1",
-        secret: "synthetic-one",
-      });
+    it("admits concurrent cold service calls and streams fetch responses", async () => {
+      const responses = await Promise.all(Array.from({ length: 8 }, () => request("/read")));
+
+      for (const response of responses) {
+        expect(response.status, await response.clone().text()).toBe(200);
+        expect(await response.json()).toEqual({ version: "v1", secret: "synthetic-one" });
+      }
+
       expect(await (await request("/fetch")).text()).toBe("v1");
       expect((await request("/web")).status).toBe(404);
     });
@@ -313,6 +362,119 @@ export default { async fetch(request, env, ctx) {
       await publish(targetId, target("v2"), "v2");
       await publish(sourceId, source, "v1", { capabilities: {} });
       expect((await request("/read")).status).toBe(409);
+    });
+
+    it.each(["object", "class"] as const)(
+      "preserves SSO identity across HTTP and named RPC hops with %s handlers",
+      async (handler) => {
+        const grant = (app: string, entrypoint: string) => ({
+          app,
+          entrypoint,
+          organizationId: "widefleet",
+          hostname: `${app}.apps.example.test`,
+        });
+
+        const metadata = (entrypoints: string[], web = false) => ({
+          ...snapshot(identityTargetId, identityTarget).metadata,
+          entrypoints,
+          web,
+        });
+
+        await publish(identityTargetId, identityTarget, "v1", { metadata: metadata(["Identity"]) });
+        await publish(relayId, identityRelay, "v1", {
+          metadata: metadata(["Relay"]),
+          capabilities: { FINAL: grant(identityTargetId, "Identity") },
+        });
+        await publish(identitySourceId, identitySource(handler), "v1", {
+          metadata: metadata(["default"], true),
+          capabilities: { RELAY: grant(relayId, "Relay") },
+        });
+        const alice = { issuer: identityIssuer, subject: "pairwise-subject", name: "Example User" };
+        const bob = { ...alice, subject: "bob" };
+
+        const calls = await Promise.all(
+          Array.from({ length: 8 }, async (_, index) => {
+            const user = index % 2 ? bob : alice;
+            const response = await request(`/identity/who?user=${index % 2 ? "bob" : "alice"}`);
+
+            return { user, status: response.status, body: await response.text() };
+          }),
+        );
+
+        expect(
+          calls.map((call) => call.status),
+          JSON.stringify(calls),
+        ).toEqual(Array(8).fill(200));
+
+        for (const call of calls)
+          expect(JSON.parse(call.body)).toEqual({
+            relay: call.user,
+            final: { caller: call.user, marker: "private-field" },
+          });
+        expect(await (await request("/identity/fetch")).json()).toEqual({
+          relay: alice,
+          final: { caller: alice, claimed: null, transported: null },
+        });
+        expect(await (await request("/identity/fake-caller")).json()).toEqual({
+          relay: alice,
+          final: { caller: alice, marker: "private-field" },
+        });
+        expect((await request("/identity/forge")).status).toBe(409);
+        expect(await (await request("/anonymous")).json()).toEqual({
+          relay: null,
+          final: { caller: null, marker: "private-field" },
+        });
+
+        // A service cannot replay the source app's proof through its own binding.
+        const sourceProof = await (await request("/identity/proof")).text();
+        const replay = `import {WorkerEntrypoint} from 'cloudflare:workers'; export class Relay extends WorkerEntrypoint {who(){return this.env.WIDEFLEET_SERVICE_FINAL.invoke('who',[],${JSON.stringify(sourceProof)});}}`;
+        await publish(relayId, replay, "v1", {
+          metadata: metadata(["Relay"]),
+          capabilities: { FINAL: grant(identityTargetId, "Identity") },
+        });
+        expect((await request("/identity/who")).status).toBe(409);
+      },
+      15_000,
+    );
+
+    it("carries the caller through object-style service RPC", async () => {
+      const metadata = snapshot(relayId, identityRelay).metadata;
+      await publish(identityTargetId, identityTarget, "v1", {
+        metadata: { ...metadata, entrypoints: ["Identity"] },
+      });
+      await publish(relayId, `export default {who(_arg,env,ctx){return env.FINAL.who();}};`, "v1", {
+        metadata: { ...metadata, entrypoints: ["default"] },
+        capabilities: {
+          FINAL: {
+            organizationId: "widefleet",
+            app: identityTargetId,
+            hostname: `${identityTargetId}.apps.example.test`,
+            entrypoint: "Identity",
+          },
+        },
+      });
+      await publish(
+        identitySourceId,
+        identitySource("object").replace("env.RELAY.who()", "env.RELAY.who(null)"),
+        "v1",
+        {
+          metadata: { ...metadata, web: true, entrypoints: ["default"] },
+          capabilities: {
+            RELAY: {
+              organizationId: "widefleet",
+              app: relayId,
+              hostname: `${relayId}.apps.example.test`,
+              entrypoint: "default",
+            },
+          },
+        },
+      );
+      const response = await request("/identity/who?user=bob");
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(await response.json()).toEqual({
+        caller: { issuer: identityIssuer, subject: "bob", name: "Example User" },
+        marker: "private-field",
+      });
     });
   },
 );

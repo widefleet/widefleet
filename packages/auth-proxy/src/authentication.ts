@@ -8,6 +8,9 @@ import { issuer, providerIdentity, proxyIdentity } from "./identity.ts";
 export const cookiePrefix = (configuration: AuthConfiguration) =>
   `platform_sso_${configuration.organizationId}`;
 
+export const companyCookie = (name: string) =>
+  name.replace(/^(?:__Secure-|__Host-)/, "").startsWith("platform_sso_");
+
 const authenticationOptions = async (configuration: AuthConfiguration) =>
   ({
     appName: "Widefleet Auth Proxy",

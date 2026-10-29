@@ -39,7 +39,12 @@ export default {
           headers: Object.fromEntries(appRequest.headers),
           body: await appRequest.text(),
         },
-        { headers: { "set-cookie": "app_cookie=blocked; Path=/" } },
+        {
+          headers: {
+            "set-cookie":
+              "app_cookie=oauth; Domain=apps.example.test; Path=/; Secure; HttpOnly; SameSite=Lax",
+          },
+        },
       ),
     );
 

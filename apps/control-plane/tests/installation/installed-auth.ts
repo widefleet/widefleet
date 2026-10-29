@@ -226,7 +226,7 @@ export const installedAuth = async () => {
 
     const source = `export default { async fetch(request, env) {
       const url = new URL(request.url);
-      return Response.json({url:url.pathname+url.search,headers:Object.fromEntries(request.headers),body:await request.text(),bindings:Object.keys(env)}, {headers:{"set-cookie":"app-cookie=blocked"}});
+      return Response.json({url:url.pathname+url.search,headers:Object.fromEntries(request.headers),body:await request.text(),bindings:Object.keys(env)}, {headers:new Headers([["set-cookie","app-cookie=oauth; Domain=apps.example.test; Path=/; Secure; HttpOnly"],["set-cookie","__Secure-platform_sso_other.session_token=forged; Domain=apps.example.test; Path=/; Secure; HttpOnly"]])});
     }};`;
 
     const hash = createHash("sha256").update(source).digest("hex");
