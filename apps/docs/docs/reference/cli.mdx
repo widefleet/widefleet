@@ -1,7 +1,7 @@
 ---
 title: CLI
 description: Common Widefleet commands, app selection, authentication and deployment output.
-lastModified: 2026-10-27
+lastModified: 2026-10-29
 ---
 
 For installation and your first deployment, start with [CLI setup](/getting-started/installation).
@@ -39,25 +39,21 @@ API commands. See [organization selection](/reference/cli-configuration#select-a
 
 ## Create an organization
 
-When the installation allows organization creation, sign in using a verified
-email code and run:
+With platform and CLI **0.4.13 or newer**, sign in with a verified personal
+account and run these commands on an installation that offers organization creation:
 
 ```sh
 widefleet organizations create --name "Example Team" --slug example-team
 widefleet organizations list
 ```
 
-`widefleet organizations` remains an alias for the list command. Creation prints
-`{ "id": "...", "name": "Example Team", "slug": "example-team" }`. Use the returned
-ID with `--organization ID` for app commands. Creating an organization does not
-change the target selected for later CLI requests.
+Creation prints `{ "id": "...", "name": "Example Team", "slug": "example-team" }`.
+Use the returned ID with `--organization ID` for subsequent app commands.
+`widefleet organizations` also lists your organizations.
 
-Organization creation requires `platform:write` and an account authenticated with
-an email code. Company SSO credentials remain scoped to their own organization.
-If the command reports that setup is being prepared, retry it to finish publication.
-If creation is disabled, ask the installation administrator for an invitation.
-Use `widefleet organizations create --help` to check that your CLI supports creation;
-the management server must support the same endpoint.
+If setup asks you to retry, run the creation command again. If creation is
+unavailable, ask an administrator for an invitation. See the
+[API reference](/reference/api#organization-creation) for permissions and errors.
 
 ## App commands
 

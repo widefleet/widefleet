@@ -1,7 +1,7 @@
 ---
 title: Installation
 description: Set up the Widefleet CLI and create an app for an existing installation.
-lastModified: 2026-10-27
+lastModified: 2026-10-29
 ---
 
 Use the Widefleet CLI to create and deploy apps from your own machine. You need
@@ -10,24 +10,19 @@ access to a Widefleet installation; if you do not have one yet, start with the
 
 ## Create or join an organization
 
-Open your installation's sign-in page. If it offers **Create an account**, enter
-your name and email, then verify the six-digit code sent to your inbox. A verified
-account does not automatically join an existing organization.
+Open your installation's sign-in page and follow your invitation or company
+sign-in. If **Create an account** is available, enter your name and email and
+confirm the six-digit code sent to your inbox.
 
-Choose an available organization or create your own when that option is offered.
-Enter its name and a URL name using lowercase letters, numbers and hyphens. The
-URL name is used in app addresses. Organization creation depends on the installation's
-policy; an invitation or company SSO may be required instead.
+Choose an organization or select **Create organization** when offered. Enter a
+name and a URL name using lowercase letters, numbers and hyphens; the URL name
+appears in app addresses. **Publish your first app** then shows the connection
+and deployment commands for your workspace. If setup asks you to retry, repeat
+the action to finish preparing that organization.
 
-After creation, **Publish your first app** shows commands for that installation and
-organization. If setup reports that the organization is still being prepared, retry
-to finish it. The server can resume the prepared organization without creating a
-second one.
-
-For a self-hosted installation, the installing administrator first completes
-[workspace setup](/self-hosting/installation#infrastructure-and-first-start).
-Self-hosting does not require a Widefleet Cloud account. Other users join through
-invitations or configured company SSO.
+Installing Widefleet yourself? Start with
+[first setup](/self-hosting/installation#infrastructure-and-first-start), then
+invite colleagues or configure company sign-in.
 
 ## Install the CLI
 

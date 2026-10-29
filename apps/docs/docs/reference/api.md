@@ -1,7 +1,7 @@
 ---
 title: API and uploads
 description: Authentication, app publication and the Worker upload contract.
-lastModified: 2026-10-27
+lastModified: 2026-10-29
 ---
 
 Authenticated clients can fetch `/api/v1/openapi.json`. The document covers management operations, agent jobs, binary assets and multipart Workers.
@@ -85,31 +85,29 @@ an administrator to grant access.
 
 ## Organization creation
 
-On installations with self-service organization creation, `GET /api/v1/onboarding`
-returns `{ "canCreateOrganization": true }` when creation is available to the current
-account. It requires a session or a token with `platform:read`, including accounts
-that do not yet have a membership.
+Requires platform **0.4.13 or newer** and an installation that enables
+self-service organization creation.
 
-`POST /api/v1/organizations` accepts:
+`GET /api/v1/onboarding` returns `{ "canCreateOrganization": true }` when the
+current account can create an organization. It accepts a session or a token with
+`platform:read`, including accounts that have yet to join an organization.
+
+`POST /api/v1/organizations` requires a verified personal account and accepts:
 
 ```json
 { "name": "Example Team", "slug": "example-team" }
 ```
 
-It requires a verified email-code account and `platform:write` for tokens. Browser
-writes require a same-origin session. Company-scoped credentials cannot create
-organizations. Names contain 1–200 characters; slugs contain at most 61 lowercase
-letters, numbers and separating hyphens.
+Tokens need `platform:write`; browser sessions require a same-origin request.
+Company-scoped credentials are limited to their organization. Names contain
+1–200 characters; slugs contain up to 61 lowercase letters, numbers and separating
+hyphens.
 
-The response contains `{ "id": "...", "name": "Example Team", "slug": "example-team" }`.
-Creation and activation follow the installation's provisioning policy. A publication
-failure returns `409`; retry to complete setup. A taken slug also returns `409`, with
-a message to choose another. Disabled creation or an ineligible account returns `403`.
+The response is `{ "id": "...", "name": "Example Team", "slug": "example-team" }`.
+Pass the returned ID in `X-Widefleet-Organization` for subsequent requests.
 
-The endpoint does not select the new organization for later API requests. Use its
-returned ID in `X-Widefleet-Organization`. Account registration alone never grants
-membership in existing organizations. Existing installations keep creation disabled
-unless their operator enables it.
+A `409` response explains whether to retry incomplete setup or choose an available
+slug. A `403` response means creation is disabled or the account is ineligible.
 
 ## Members, invitations and company sign-in
 
