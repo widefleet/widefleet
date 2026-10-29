@@ -20,6 +20,7 @@
     codeDelivery = "email",
     register = false,
     publicSignup = false,
+    verifyEmail = false,
   }: {
     next: string;
     initialEmail?: string;
@@ -27,6 +28,7 @@
     codeDelivery?: "email" | "console";
     register?: boolean;
     publicSignup?: boolean;
+    verifyEmail?: boolean;
   } = $props();
 
   let email = $state("");
@@ -43,11 +45,14 @@
 
   let message = $state("");
 
+  let lastUsed = $state(false);
+
   let extensionContainer = $state<HTMLDivElement>();
 
   onMount(() => {
     email = initialEmail;
     ready = true;
+    lastUsed = authClient.isLastUsedLoginMethod("email-otp");
 
     return extensionContainer
       ? authClientExtension.mountEmailCodeForm?.(extensionContainer)
@@ -68,7 +73,7 @@
         const recipient = email.trim().toLowerCase();
 
         const destination =
-          register || organizationSlug
+          register || organizationSlug || verifyEmail
             ? null
             : await findSignInDestination({ email: recipient, next });
 
@@ -140,7 +145,11 @@
     </div>
   {/if}
   <div class="space-y-2">
-    <Label for="code-email">Email</Label>
+    <div class="flex items-center justify-between">
+      <Label for="code-email">Email</Label>{#if lastUsed}<span class="text-muted-foreground text-xs"
+          >Last used</span
+        >{/if}
+    </div>
     <Input
       id="code-email"
       type="email"
