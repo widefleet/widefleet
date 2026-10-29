@@ -8,6 +8,15 @@ import { NonRetryableError } from 'cloudflare:workflows';
 export class ExampleWorkflow extends WorkflowEntrypoint {
   async run(event, step) {
     const mode = event.payload.mode;
+    if (mode === 'quota-event-timeout') {
+      try {
+        await step.waitForEvent('timeout', { type: 'continue', timeout: '2 seconds' });
+        return 'unexpected event';
+      } catch (error) {
+        if (error.message !== 'Execution timed out after 2000ms') throw error;
+        return { fallback: true, name: error.name, message: error.message };
+      }
+    }
     const record = async (label, context) => {
       await this.env.DB.exec('CREATE TABLE IF NOT EXISTS workflow_attempts (id TEXT, label TEXT, attempt INTEGER)');
       await this.env.DB.prepare('INSERT INTO workflow_attempts VALUES (?, ?, ?)').bind(event.instanceId, label, context.attempt).run();
@@ -231,7 +240,19 @@ export class CloudflareAppWorkflow extends RuntimeAppWorkflow {
         },
         load(code) { record.loads++; return loader.load(code); },
       },
-    }).run(event, step);
+    }).run(event, {
+      do: (...args) => step.do(...args),
+      sleep: (...args) => step.sleep(...args),
+      sleepUntil: (...args) => step.sleepUntil(...args),
+      waitForEvent(...args) {
+        const result = step.waitForEvent(...args).catch(error => {
+          record.waitError = { name: error.name, message: error.message };
+          throw error;
+        });
+        record.waiting = true;
+        return result;
+      },
+    });
   }
 }
 

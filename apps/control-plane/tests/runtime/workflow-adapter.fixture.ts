@@ -7,6 +7,15 @@ import { NonRetryableError } from 'cloudflare:workflows';
 export class AppWorkflow extends WorkflowEntrypoint {
   async run(event, step) {
     const { mode, id } = event.payload;
+    if (mode === 'suspension-event-timeout') {
+      try {
+        await step.waitForEvent('timeout', { type: 'continue', timeout: '2 seconds' });
+        return 'unexpected event';
+      } catch (error) {
+        if (error instanceof NonRetryableError) throw error;
+        return { fallback: true, name: error.name };
+      }
+    }
     const record = async (label, value) => {
       await this.env.OBSERVE.record(id, label);
       return value;

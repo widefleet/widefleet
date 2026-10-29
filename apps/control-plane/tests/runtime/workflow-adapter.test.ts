@@ -427,6 +427,29 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
       15000,
     );
 
+    it.each([false, true])(
+      "checks event timeouts before returning to app code (suspended: %s)",
+      async (blocked) => {
+        const id = await create("suspension-event-timeout");
+
+        try {
+          await status(id, "waiting");
+
+          if (blocked) await availability(true);
+
+          if (blocked) await suspended(id);
+          else
+            expect(await status(id, "complete")).toMatchObject({
+              output: { fallback: true, name: "Error" },
+            });
+        } finally {
+          await availability(false);
+          await manage({ action: "delete", workflow: "fixture", id });
+        }
+      },
+      15000,
+    );
+
     it("retains committed steps and receives events after an abrupt process restart", async () => {
       const id = await create("sequential");
       await status(id, "waiting");

@@ -109,7 +109,19 @@ export class CloudflareWorkflowSteps extends RpcTarget {
   waitForEvent(...args: Parameters<WorkflowStep["waitForEvent"]>) {
     return captureWorkflow(async () => {
       await this.#check();
-      const result = await this.#step.waitForEvent(...args);
+
+      const result = await this.#step.waitForEvent(...args).catch(async (cause: unknown) => {
+        // Native RPC can erase WorkflowTimeoutError's name. Match its message
+        // too, without replacing engine pause/restart/termination signals.
+        if (
+          cause instanceof Error &&
+          (cause.name === "WorkflowTimeoutError" ||
+            /^Execution timed out after \d+ms$/.test(cause.message))
+        )
+          await this.#check();
+        throw cause;
+      });
+
       await this.#check();
 
       return result;

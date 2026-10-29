@@ -1599,6 +1599,59 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
     30_000,
   );
 
+  it.each([false, true])(
+    "checks event timeouts before returning to app code (suspended: %s)",
+    async (blocked) => {
+      const id = crypto.randomUUID();
+      expect(
+        (await manageWorkflow({ action: "create", id, params: { mode: "quota-event-timeout" } }))
+          .status,
+      ).toBe(200);
+
+      try {
+        await expect
+          .poll(() => json("/fixture/workflow-workers"), { timeout: 15_000 })
+          .toContainEqual(expect.objectContaining({ instanceId: id, waiting: true }));
+
+        // Suspend only after the native wait starts; omit pause reconciliation.
+        if (blocked) await availability(JSON.stringify({ blocked: true }));
+
+        await expect
+          .poll(async () => (await manageWorkflow({ action: "status", id })).json(), {
+            timeout: 15_000,
+          })
+          .toMatchObject({
+            result: blocked
+              ? {
+                  status: "errored",
+                  error: {
+                    name: "NonRetryableError",
+                    message: "Organization execution is suspended",
+                  },
+                }
+              : {
+                  status: "complete",
+                  output: {
+                    fallback: true,
+                    name: "Error",
+                    message: "Execution timed out after 2000ms",
+                  },
+                },
+          });
+        expect(await json("/fixture/workflow-workers")).toContainEqual(
+          expect.objectContaining({
+            instanceId: id,
+            waitError: { name: "Error", message: "Execution timed out after 2000ms" },
+          }),
+        );
+      } finally {
+        await availability(null);
+        await manageWorkflow({ action: "delete", id });
+      }
+    },
+    30_000,
+  );
+
   it("checks suspension after a native event wakes an existing wait", async () => {
     const id = crypto.randomUUID();
     expect((await manageWorkflow({ action: "create", id, params: { value: 20 } })).status).toBe(
