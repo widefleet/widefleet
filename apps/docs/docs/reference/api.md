@@ -88,10 +88,6 @@ an administrator to grant access.
 Requires platform **0.4.13 or newer** and an installation that enables
 self-service organization creation.
 
-`GET /api/v1/onboarding` returns `{ "canCreateOrganization": true }` when the
-current account can create an organization. It accepts a session or a token with
-`platform:read`, including accounts that have yet to join an organization.
-
 `POST /api/v1/organizations` requires a verified personal account and accepts:
 
 ```json
@@ -100,7 +96,7 @@ current account can create an organization. It accepts a session or a token with
 
 Tokens need `platform:write`; browser sessions require a same-origin request.
 Company-scoped credentials are limited to their organization. Names contain
-1–200 characters; slugs contain up to 61 lowercase letters, numbers and separating
+1–200 characters; slugs contain up to 50 lowercase letters, numbers and separating
 hyphens.
 
 The response is `{ "id": "...", "name": "Example Team", "slug": "example-team" }`.
