@@ -196,8 +196,7 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
 
     if (!availability.blocked) {
       await this.ctx.blockConcurrencyWhile(async () => {
-        if (await this.currentReconciliation(reconciliation))
-          await this.invalidateReconciliation();
+        if (await this.currentReconciliation(reconciliation)) await this.invalidateReconciliation();
       });
 
       return;

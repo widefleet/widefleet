@@ -36,7 +36,6 @@ export type ParentEnvironment = {
     | undefined
     | NativeBindings[keyof NativeBindings]
     | string
-    | undefined
     | Fetcher
     | WorkerLoader
     | Workflow<import("./workflow-protocol.ts").Start>

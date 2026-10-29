@@ -154,7 +154,6 @@ export class CloudflareAppWorkflow extends WorkflowEntrypoint<ParentEnvironment,
         ),
       );
 
-
     if (result.error)
       throw result.native ? restore(result.error) : nativeWorkflowError(result.error);
 

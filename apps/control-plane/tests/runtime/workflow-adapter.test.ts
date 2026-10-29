@@ -274,7 +274,7 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
             await env.WIDEFLEET_PACKAGES.put('hosts/fixture.apps.example.test.json', JSON.stringify(next));
             return Response.json({ version: next.version });
           }
-          return runtime.fetch(request, request.headers.has('x-fixture-disabled') ? { ...env, WIDEFLEET_HTTP_AVAILABILITY: undefined } : env, ctx);
+          return runtime.fetch(request, env, ctx);
         } };
       `,
       );
