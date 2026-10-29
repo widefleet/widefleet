@@ -988,7 +988,10 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
       }
     });
 
-    it("delivers native cron and queue events, preserves waitUntil and retry decisions", async () => {
+    it("delivers native cron and queue events, preserves waitUntil and retry decisions", async ({
+      onTestFailed,
+    }) => {
+      onTestFailed(() => console.error("Native queue runtime logs:\n", runtimeLogs));
       await call("enqueue");
       await expect
         .poll(() => call("queue-result"), { timeout: 20000 })
