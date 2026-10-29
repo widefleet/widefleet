@@ -234,6 +234,9 @@ the connector implements its routes, provider authorization, token storage,
 refresh and account management. An app uses the connector's documented API and
 links. Widefleet does not automatically display an account-connection dialog.
 
+For a complete project to copy, use the [Gmail connector example](/guides/gmail-connector).
+It combines Better Auth Generic OAuth, D1 account storage and personal Gmail access.
+
 Use matching control-plane, CLI, deployment-agent and app-runtime versions when
 enabling browser pages. Configure [published app sign-in](/guides/members#opening-published-apps)
 for the organization first.

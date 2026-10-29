@@ -12,5 +12,6 @@ export default defineMeta({
     "workflows",
     "network",
     "connectors",
+    "gmail-connector",
   ],
 });
