@@ -1,7 +1,7 @@
 ---
 title: Members and company sign-in
 description: Accept invitations, manage organization membership and activate verified company sign-in.
-lastModified: 2026-10-23
+lastModified: 2026-10-29
 ---
 
 Use this flow on an installation with email delivery and organization invitations enabled.
@@ -10,6 +10,10 @@ Without company SSO, an owner or administrator must invite you first. With verif
 admitted by that provider can join as members on their first sign-in without an invitation.
 
 ## Accept an invitation
+
+If enabled by the installation, [Google and Microsoft sign-in](/reference/social-sign-in)
+can also verify your personal Widefleet account. Use the invited email address;
+organizations with required company SSO continue to require their company provider.
 
 1. Open the invitation link and sign in with the email address that received it.
 2. Without active company SSO, enter the six-digit code from the sign-in email. It expires
