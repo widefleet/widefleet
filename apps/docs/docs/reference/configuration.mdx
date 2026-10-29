@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: App configuration fields, storage bindings and settings managed by the platform.
-lastModified: 2026-10-27
+lastModified: 2026-10-29
 ---
 
 App projects use `wrangler.jsonc`. Start with the generated starter and use the
@@ -69,6 +69,51 @@ If deployment reports `Queues are disabled for this installation`, remove the Qu
 declarations and code that requires them, or ask your installation operator to enable
 Queues. Rollbacks to artifacts that use Queues are also rejected. Existing apps keep
 running, and the setting does not delete Queue data or pause existing consumers.
+
+### Dynamic Worker execution limits
+
+With Widefleet **0.4.15 or newer**, Cloudflare installation operators can set CPU
+and subrequest budgets in the versioned installation profile, then deploy it
+through their normal deployment process. For example:
+
+```json
+{
+  "executionLimits": {
+    "http": { "cpuMs": 100, "subRequests": 50 },
+    "connector": { "cpuMs": 250, "subRequests": 50 },
+    "cron": { "cpuMs": 1000, "subRequests": 200 },
+    "workflow": { "cpuMs": 5000, "subRequests": 500 },
+    "readiness": { "cpuMs": 100, "subRequests": 10 }
+  }
+}
+```
+
+Choose budgets for your workloads; these values are examples. When configuring
+`executionLimits`, supply all five profiles with a positive integer `cpuMs` and
+a nonnegative integer `subRequests`. Omitting `executionLimits` keeps the
+platform's existing limits.
+
+| Profile     | Applies to                                                                                            |
+| ----------- | ----------------------------------------------------------------------------------------------------- |
+| `http`      | Each app HTTP invocation that executes Worker code.                                                   |
+| `connector` | Connector HTTP and RPC calls, including Durable Object facets.                                        |
+| `cron`      | Each app's scheduled invocation.                                                                      |
+| `workflow`  | A Workflow runner invocation, shared across its steps rather than a lifetime budget for the workflow. |
+| `readiness` | App, connector and Workflow readiness checks.                                                         |
+
+CPU time measures active computation, excluding time spent waiting for network
+or storage. Cloudflare ends an invocation that exceeds its CPU or subrequest
+budget. Static asset serving and Queue consumers keep their existing limits;
+these profiles control Dynamic Worker execution rather than total service costs.
+
+Changes apply to new invocations, including cached Workers. Running invocations
+keep their selected budget. These are installation settings; app `wrangler.jsonc`
+files use the operator's limits.
+
+If an invocation exceeds its budget, check its runtime logs, reduce the work per
+call or ask the operator to adjust that profile. See
+[Cloudflare's Dynamic Worker limits](https://developers.cloudflare.com/dynamic-workers/usage/limits/)
+for runtime constraints.
 
 ## Database migrations
 
