@@ -1,7 +1,7 @@
 ---
 title: API and uploads
 description: Authentication, app publication and the Worker upload contract.
-lastModified: 2026-10-23
+lastModified: 2026-10-29
 ---
 
 Authenticated clients can fetch `/api/v1/openapi.json`. The document covers management operations, agent jobs, binary assets and multipart Workers.
@@ -82,6 +82,28 @@ Use [CLI organization selection](/reference/cli-configuration#select-an-organiza
 for equivalent CLI commands. If a browser selection becomes unavailable, the
 workspace returns to organization selection. With no available memberships, ask
 an administrator to grant access.
+
+## Organization creation
+
+Requires platform **0.4.13 or newer** and an installation that enables
+self-service organization creation.
+
+`POST /api/v1/organizations` requires a verified personal account and accepts:
+
+```json
+{ "name": "Example Team", "slug": "example-team" }
+```
+
+Tokens need `platform:write`; browser sessions require a same-origin request.
+Company-scoped credentials are limited to their organization. Names contain
+1–200 characters; slugs contain up to 50 lowercase letters, numbers and separating
+hyphens.
+
+The response is `{ "id": "...", "name": "Example Team", "slug": "example-team" }`.
+Pass the returned ID in `X-Widefleet-Organization` for subsequent requests.
+
+A `409` response explains whether to retry incomplete setup or choose an available
+slug. A `403` response means creation is disabled or the account is ineligible.
 
 ## Members, invitations and company sign-in
 

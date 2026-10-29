@@ -1,7 +1,7 @@
 ---
 title: CLI
 description: Common Widefleet commands, app selection, authentication and deployment output.
-lastModified: 2026-10-23
+lastModified: 2026-10-29
 ---
 
 For installation and your first deployment, start with [CLI setup](/getting-started/installation).
@@ -36,6 +36,24 @@ signing in while working with an agent.
 
 Use `--organization` or `PLATFORM_ORGANIZATION` to select the organization for
 API commands. See [organization selection](/reference/cli-configuration#select-an-organization).
+
+## Create an organization
+
+With platform and CLI **0.4.13 or newer**, sign in with a verified personal
+account and run these commands on an installation that offers organization creation:
+
+```sh
+widefleet organizations create --name "Example Team" --slug example-team
+widefleet organizations list
+```
+
+Creation prints `{ "id": "...", "name": "Example Team", "slug": "example-team" }`.
+Use the returned ID with `--organization ID` for subsequent app commands.
+`widefleet organizations` also lists your organizations.
+
+If setup asks you to retry, run the creation command again. If creation is
+unavailable, ask an administrator for an invitation. See the
+[API reference](/reference/api#organization-creation) for permissions and errors.
 
 ## App commands
 
