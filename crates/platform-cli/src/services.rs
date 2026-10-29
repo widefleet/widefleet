@@ -155,15 +155,7 @@ pub async fn secrets(api: &Api, credentials: &auth::Credentials, options: Secret
         ),
     };
     let mut status: SecretStatus = json(request.send().await?).await?;
-    if changing
-        && !options.no_wait
-        && let Some(deployment) = &status.deployment
-        && (deployment.status == "queued" || deployment.status == "running")
-    {
-        deploy::wait(api, credentials, app, deployment.id).await?;
-        let token = auth::access_token(api, credentials).await?;
-        status = json(api.authenticated(Method::GET, &path, &token).send().await?).await?;
-    }
+    // Only this response identifies our mutation; a later read can describe another edit.
     if changing
         && let Some(deployment) = &status.deployment
         && deployment.status == "failed"
@@ -174,6 +166,15 @@ pub async fn secrets(api: &Api, credentials: &auth::Credentials, options: Secret
                 .clone()
                 .unwrap_or_else(|| "Secret activation failed".into()),
         ));
+    }
+    if changing
+        && !options.no_wait
+        && let Some(deployment) = &status.deployment
+        && (deployment.status == "queued" || deployment.status == "running")
+    {
+        deploy::wait(api, credentials, app, deployment.id).await?;
+        let token = auth::access_token(api, credentials).await?;
+        status = json(api.authenticated(Method::GET, &path, &token).send().await?).await?;
     }
     if options.json || !std::io::stdout().is_terminal() {
         return crate::print_json(&status);

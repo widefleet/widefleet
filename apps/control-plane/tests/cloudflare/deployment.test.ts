@@ -825,6 +825,14 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
             await createCloudflareDeployment(env).register(command);
             return new Response(null, {status:200});
           }
+          if (url.searchParams.get('mode') === 'legacy-registration') {
+            const {sequence, targets} = await createCloudflareDeployment(env).register(command);
+            const modifier = await env.DEPLOYMENTS.unsafeGetInstanceModifier(command.id);
+            try {
+              await modifier.mockStepResult({name:'register-command'}, {sequence, targets});
+              await modifier.disableRetryDelays();
+            } finally { modifier[Symbol.dispose]?.(); }
+          }
           // Miniflare's testing API skips backoff time, while every real step attempt still runs.
           if (url.searchParams.get('mode') === 'fast-retries') {
             const modifier = await env.DEPLOYMENTS.unsafeGetInstanceModifier(command.id);
@@ -2295,6 +2303,40 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         metadata: { widefleet_deployment_sequence: "0" },
       });
       expect((await authenticatedFetch(`https://${entry.hostname}/`)).status).toBe(200);
+    }, 30_000);
+
+    it("resumes a deployment with a registration checkpoint from before the upgrade", async () => {
+      const entry = await seedDeployment(environment.database.db, {
+        bindings: [],
+        source: "export default {fetch(){return new Response('resumed')}}",
+      });
+
+      await seed(entry);
+
+      const legacy = {
+        ...contract.publishedApp.parse((await host(first.hostname))?.body),
+        ...entry.artifact,
+        hostname: entry.hostname,
+        capabilities: {
+          OLD: { connector: "retired-service", entrypoint: "Reader", organizationId: "widefleet" },
+        },
+      };
+
+      await worker.fetch(`http://fixture/storage?key=hosts/${entry.hostname}.json`, {
+        method: "PUT",
+        body: JSON.stringify(legacy),
+      });
+      await worker.fetch("http://fixture/storage?key=migrations/app-services-v3.json", {
+        method: "DELETE",
+      });
+      await dispatch(entry, "legacy-registration");
+      await completed(entry.command.id);
+      expect((await host(entry.hostname))?.body).toMatchObject({
+        id: entry.artifact.id,
+        deploymentId: entry.command.id,
+        capabilities: {},
+      });
+      expect(await (await authenticatedFetch(`https://${entry.hostname}/`)).text()).toBe("resumed");
     }, 30_000);
 
     it("activates newer admitted code when a delayed secret edit requests the previous artifact", async () => {

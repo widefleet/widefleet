@@ -105,10 +105,8 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
   };
 
   return {
-    register: async (command: z.infer<typeof deploymentCommand>) => {
-      await migrateAppServices(bindings.ARTIFACTS);
-
-      return withCloudflareDatabase(bindings, async ({ db }) => {
+    register: (command: z.infer<typeof deploymentCommand>) =>
+      withCloudflareDatabase(bindings, async ({ db }) => {
         const record = value(await registerCloudflareOperation(db, storage, command));
 
         if (command.kind === "deploy" && (!record.finishedAt || record.error))
@@ -122,8 +120,7 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
           sequence: record.sequence,
           targets: z.array(operationTarget).parse(record.targets),
         };
-      });
-    },
+      }),
     provision: async (command: z.infer<typeof deploymentCommand>) => {
       if (command.kind !== "deploy") return {};
 
@@ -160,8 +157,11 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
       target: z.infer<typeof operationTarget>,
       sequence: number,
       nativeBindings: Record<string, string>,
-    ) =>
-      withCloudflareDatabase(bindings, async ({ db }) =>
+    ) => {
+      // Registration may replay a pre-upgrade checkpoint, so migrate at the read boundary.
+      await migrateAppServices(bindings.ARTIFACTS);
+
+      return withCloudflareDatabase(bindings, async ({ db }) =>
         value(
           await transact(db, async (transaction) => {
             const [app] = await transaction
@@ -504,7 +504,8 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
             return Result.ok(undefined);
           }),
         ),
-      ),
+      );
+    },
     finish: (command: z.infer<typeof deploymentCommand>, error: string | null) =>
       withCloudflareDatabase(bindings, async ({ db }) => {
         return value(
@@ -624,19 +625,26 @@ export const executeCloudflareDeployment = async (
   } as const;
 
   try {
-    const registration = await step.do("register-command", options, () =>
-      retryable(() => runner.register(command)),
-    );
+    // Durable step results can predate admitted code selection for secret edits.
+    const registration = z
+      .object({
+        command: deploymentCommand.optional(),
+        sequence: z.number().int().nonnegative(),
+        targets: z.array(operationTarget),
+      })
+      .parse(
+        await step.do("register-command", options, () => retryable(() => runner.register(command))),
+      );
+
+    const admitted = registration.command ?? command;
 
     const nativeBindings = await step.do("provision-resources", options, () =>
-      retryable(() => runner.provision(registration.command)),
+      retryable(() => runner.provision(admitted)),
     );
 
     for (const target of registration.targets)
       await step.do(`activate-${target.appId}`, options, () =>
-        retryable(() =>
-          runner.activate(registration.command, target, registration.sequence, nativeBindings),
-        ),
+        retryable(() => runner.activate(admitted, target, registration.sequence, nativeBindings)),
       );
 
     await step.do("record-completion", options, () =>

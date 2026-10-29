@@ -44,6 +44,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App services CLI", () => {
   let rejected = false;
   let superseded = false;
   let secretDeployment: z.infer<typeof contract.deployment> | null = null;
+  let secretHistory: z.infer<typeof contract.deployment>[] = [];
 
   const server = createServer((request, response) => {
     let body = "";
@@ -95,14 +96,21 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App services CLI", () => {
           }),
         );
       } else if (request.url?.startsWith(`/api/v1/apps/${app.id}/secrets`)) {
+        const newer = request.method === "GET" ? secretHistory[0] : undefined;
         response.end(
           JSON.stringify({
             names: ["TOKEN"],
-            revision: 1,
+            revision: newer ? 2 : 1,
             appliedRevision: null,
-            deployment: secretDeployment,
+            deployment: newer ?? secretDeployment,
           }),
         );
+      } else if (request.url === `/api/v1/apps/${app.id}/deployments`) {
+        response.end(JSON.stringify(secretHistory));
+      } else if (
+        request.url === `/api/v1/apps/${app.id}/deployments/${secretDeployment?.id}/events`
+      ) {
+        response.end("[]");
       } else if (request.url === `/api/v1/apps/${app.id}/connections`) {
         response.end(
           JSON.stringify({
@@ -184,6 +192,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App services CLI", () => {
     rejected = false;
     superseded = false;
     secretDeployment = null;
+    secretHistory = [];
   });
   afterAll(async () => {
     await new Promise<void>((resolve, reject) =>
@@ -303,6 +312,61 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App services CLI", () => {
         "/api/v1/apps/by-name/inventory",
         `/api/v1/apps/${app.id}/secrets`,
       ]);
+    },
+  );
+
+  it.each([
+    { action: "put", status: "succeeded" },
+    { action: "delete", status: "succeeded" },
+    { action: "put", status: "failed" },
+    { action: "delete", status: "failed" },
+  ])(
+    "reports its own $action deployment outcome ($status) after a newer secret edit fails",
+    async ({ action, status }) => {
+      secretDeployment = contract.deployment.parse({
+        id: app.activeDeploymentId,
+        appId: app.id,
+        artifactId: crypto.randomUUID(),
+        status: "queued",
+        createdAt: app.createdAt,
+        finishedAt: null,
+        message: null,
+      });
+
+      const newer = {
+        ...secretDeployment,
+        id: crypto.randomUUID(),
+        status: "failed" as const,
+        finishedAt: app.createdAt,
+        message: "Another edit failed",
+      };
+
+      secretHistory = [
+        newer,
+        contract.deployment.parse({
+          ...secretDeployment,
+          status,
+          finishedAt: app.createdAt,
+          message: status === "failed" ? "Own activation failed" : null,
+        }),
+      ];
+      const secretFile = join(directory, "concurrent-secret");
+      await writeFile(secretFile, "synthetic-value");
+      const args = action === "put" ? ["--file", secretFile] : [];
+      const result = command("secret", action, "TOKEN", ...args, "--json");
+
+      if (status === "failed") await expect(result).rejects.toThrow("Own activation failed");
+      else
+        expect(JSON.parse((await result).stdout)).toMatchObject({
+          revision: 2,
+          deployment: { id: newer.id, status: "failed" },
+        });
+      expect(requests.filter((entry) => entry.path.endsWith("/events"))).toMatchObject([
+        { path: `/api/v1/apps/${app.id}/deployments/${secretDeployment.id}/events` },
+      ]);
+      expect(
+        requests.filter((entry) => entry.path === `/api/v1/apps/${app.id}/secrets`),
+      ).toHaveLength(status === "succeeded" ? 1 : 0);
     },
   );
 
