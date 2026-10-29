@@ -85,6 +85,13 @@
       publicSignup={data.publicSignup}
       verifyEmail
     />
+  {:else if needsProof}
+    <div class="mt-5">
+      <Feedback kind="error"
+        >Email confirmation is unavailable. Contact your administrator or use another sign-in
+        method.</Feedback
+      >
+    </div>
   {/if}
   {#if message}<div class="mt-5"><Feedback kind="error">{message}</Feedback></div>{/if}
   <p class="mt-6 text-center text-sm">

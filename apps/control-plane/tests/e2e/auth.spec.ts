@@ -821,6 +821,67 @@ test("shows email confirmation only for missing provider proof and handles cance
   await expect(page).toHaveURL(/\/sign-in\?next=%2Fapps$/);
 });
 
+test("offers configured social providers when email delivery is unavailable", async ({ page }) => {
+  const origin = "http://localhost:25435";
+  let output = "";
+
+  const socialOnly = spawn(process.execPath, ["build"], {
+    cwd: fileURLToPath(new URL("../../", import.meta.url)),
+    env: {
+      ...process.env,
+      ...environment.environment,
+      PLATFORM_URL: origin,
+      LOGIN_CODE_DELIVERY: "email",
+      GOOGLE_CLIENT_ID: "synthetic-google-client",
+      GOOGLE_CLIENT_SECRET: "synthetic-google-secret",
+      MICROSOFT_CLIENT_ID: "synthetic-microsoft-client",
+      MICROSOFT_CLIENT_SECRET: "synthetic-microsoft-secret",
+      NODE_ENV: "production",
+      HOST: "127.0.0.1",
+      PORT: "25435",
+      PROTOCOL_HEADER: "x-forwarded-proto",
+      SHUTDOWN_TIMEOUT: "1",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  socialOnly.stdout?.setEncoding("utf8").on("data", (chunk: string) => {
+    output += chunk;
+  });
+  socialOnly.stderr?.setEncoding("utf8").on("data", (chunk: string) => {
+    output += chunk;
+  });
+
+  try {
+    await expect
+      .poll(
+        async () => {
+          if (socialOnly.exitCode !== null) throw new Error(output);
+
+          try {
+            return (await fetch(`${origin}/healthz`)).ok;
+          } catch {
+            return false;
+          }
+        },
+        { timeout: 15_000 },
+      )
+      .toBe(true);
+    await page.goto(`${origin}/sign-in`);
+    await expect(page.getByRole("button", { name: /^Continue with Google/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Continue with Microsoft/ })).toBeVisible();
+    await expect(page.getByLabel("Email", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("or continue with email", { exact: true })).toHaveCount(0);
+    await page.goto(`${origin}/sign-in/connect?provider=microsoft&error=account_not_linked`);
+    await expect(page.getByRole("alert")).toContainText("Email confirmation is unavailable");
+  } finally {
+    if (socialOnly.exitCode === null) {
+      socialOnly.kill("SIGTERM");
+      await once(socialOnly, "exit");
+    }
+  }
+});
+
 test("requires code confirmation in the browser, grants the CLI, then signs out", async ({
   page,
   context,

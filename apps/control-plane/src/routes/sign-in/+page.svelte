@@ -71,8 +71,8 @@
           class="ml-auto text-xs font-normal">Last used</span
         >{/if}<ArrowRight /></Button
     >{/if}
+  <SocialSignIn providers={data.socialProviders} next={data.next} emailSignIn={data.emailSignIn} />
   {#if data.emailSignIn}
-    <SocialSignIn providers={data.socialProviders} next={data.next} />
     <EmailCodeForm
       next={data.next}
       initialEmail={data.email}
@@ -90,7 +90,7 @@
         href={`/sign-up?${new URLSearchParams({ next: data.next })}`}>Create an account</a
       >
     </p>{/if}
-  {#if !data.provider && !data.emailSignIn}<div class="mt-5">
+  {#if !data.provider && !data.emailSignIn && !data.socialProviders.length}<div class="mt-5">
       <Feedback kind="error"
         >Company sign-in is temporarily unavailable. Contact your administrator.</Feedback
       >

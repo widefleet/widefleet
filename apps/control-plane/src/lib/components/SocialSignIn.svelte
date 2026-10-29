@@ -8,10 +8,12 @@
     providers,
     next,
     register = false,
+    emailSignIn = true,
   }: {
     providers: ("google" | "microsoft")[];
     next: string;
     register?: boolean;
+    emailSignIn?: boolean;
   } = $props();
 
   let busy = $state<string | null>(null);
@@ -94,9 +96,9 @@
     {/each}
   </div>
   {#if message}<div class="mt-4"><Feedback kind="error">{message}</Feedback></div>{/if}
-  <div class="text-muted-foreground mt-6 flex items-center gap-3 text-xs">
-    <div class="bg-border h-px flex-1"></div>
-    or continue with email
-    <div class="bg-border h-px flex-1"></div>
-  </div>
+  {#if emailSignIn}<div class="text-muted-foreground mt-6 flex items-center gap-3 text-xs">
+      <div class="bg-border h-px flex-1"></div>
+      or continue with email
+      <div class="bg-border h-px flex-1"></div>
+    </div>{/if}
 {/if}
