@@ -22,6 +22,13 @@ impl Failure {
                 ("api_rejected", "API rejected the request", true)
             }
             ErrorKind::Api { .. } => ("api_failure", "API request failed", false),
+            ErrorKind::Http(error)
+                if error
+                    .status()
+                    .is_some_and(|status| status.is_client_error()) =>
+            {
+                ("http_rejected", "HTTP request rejected", true)
+            }
             ErrorKind::Http(error) if error.is_timeout() => {
                 ("http_timeout", "HTTP request timed out", false)
             }
