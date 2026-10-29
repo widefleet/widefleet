@@ -69,7 +69,15 @@ export const socialProviders = (configuration: Configuration) => {
       scope: ["openid", "profile", "email"],
       prompt: "select_account",
       mapProfileToUser: (profile) => {
-        if (z.email().safeParse(profile.email).success) return {};
+        if (z.email().safeParse(profile.email).success) {
+          // Microsoft also emits email-domain proof as the string "1". Preserve
+          // an explicit email_verified decision and the provider's other checks.
+          return profile.email_verified === undefined &&
+            z.literal("1").safeParse(profile.xms_edov).success
+            ? { emailVerified: true }
+            : {};
+        }
+
         // Some managed accounts omit email. A mail-shaped login name is only a
         // hint for the OTP flow, never evidence for automatic account linking.
         const username = z.email().safeParse(profile.preferred_username);

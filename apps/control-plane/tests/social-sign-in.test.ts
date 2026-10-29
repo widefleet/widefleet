@@ -236,6 +236,36 @@ describe("personal social sign-in", () => {
     );
   });
 
+  it.each([true, "1"])("accepts Microsoft consumer email-domain proof %s", async (proof) => {
+    const f = await fixture({ localEmail: "member@outlook.de" });
+
+    const response = await f.signIn("microsoft", {
+      email: "member@outlook.de",
+      tid: "9188040d-6c67-4c5b-b112-36a304b66dad",
+      xms_edov: proof,
+    });
+
+    expect(response.headers.get("location")).toBe("/device?user_code=SYNTHETIC");
+    expect(await f.internalAdapter.findAccounts(z.string().parse(f.user?.id))).toMatchObject([
+      { providerId: "widefleet-microsoft" },
+    ]);
+  });
+
+  it.each([
+    { xms_edov: "0" },
+    { xms_edov: "false" },
+    { xms_edov: "true" },
+    { xms_edov: 1 },
+    { xms_edov: "1", email_verified: false },
+    { xms_edov: "1", email: undefined, preferred_username: email },
+  ])("rejects unsupported or contradicted Microsoft proof %j", async (claims) => {
+    const f = await fixture();
+    expect((await f.signIn("microsoft", claims)).headers.get("location")).toContain(
+      "error=account_not_linked",
+    );
+    expect(await f.internalAdapter.findAccounts(z.string().parse(f.user?.id))).toEqual([]);
+  });
+
   it.each(["google", "microsoft"] as const)(
     "requires email proof for %s, links after OTP, and recognizes the returning identity",
     async (provider) => {
