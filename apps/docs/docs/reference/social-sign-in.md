@@ -13,27 +13,17 @@ the same options when public registration is enabled.
 
 Choose **Continue with Google** or **Continue with Microsoft** and select your
 provider account. Use the same email address as your existing Widefleet account
-or invitation. If the provider supplies sufficient email proof, Widefleet connects
-the account and continues to your original destination.
+or invitation. When the provider verifies your email, Widefleet connects the account and
+continues to your original destination.
 
-Otherwise, Widefleet asks you to confirm your email with a six-digit code. After
+If email confirmation is needed, Widefleet asks for a six-digit code. After
 confirmation, choose **Connect Google** or **Connect Microsoft** and select the
 provider account with that same email address. Once connected, subsequent visits
 use the saved provider identity without another email code.
 
-Google proves Gmail addresses and verified Google Workspace addresses. A Google
-account using an external email address needs the email-code step. Microsoft can
-prove an address through its verified-email claims or a positive email-domain
-ownership claim. A login name alone is not proof: when Microsoft supplies an
-email-shaped login name without an email claim, Widefleet requires the code step.
-
-The **Last used** indicator remembers the last successful method in this browser
-for 30 days. It does not grant access or change which methods are allowed.
-
-An organization that requires company SSO still requires that provider for its
-workspace, apps and CLI authorization. Personal Google or Microsoft sign-in does
-not grant organization membership or bypass its SSO policy. See
-[members and company sign-in](/guides/members).
+The **Last used** indicator helps you find the method you last used in this
+browser. For organizations with required company SSO, use the company provider
+shown on their sign-in page. See [members and company sign-in](/guides/members).
 
 ## Configure an installation
 
@@ -60,13 +50,10 @@ Supply the corresponding credentials to the control-plane process or Worker:
 | Google    | `GOOGLE_CLIENT_ID`    | `GOOGLE_CLIENT_SECRET`    |
 | Microsoft | `MICROSOFT_CLIENT_ID` | `MICROSOFT_CLIENT_SECRET` |
 
-Each provider requires both values. Keep secrets in the installation's secret
-store, outside source control and browser configuration. The hosted deployment
-command accepts these environment variables and includes them in its Wrangler
-secrets file for the deployed Worker version.
+Supply both values for each enabled provider through the installation's secret
+store. The Cloudflare deployment command accepts these environment variables.
 
-For Compose, pass these values through a private override file for the
-`control-plane` service. The provider credentials belong only to that service:
+For Compose, pass the credentials to `control-plane` through a private override:
 
 ```yaml
 services:
@@ -85,15 +72,13 @@ the configured providers should appear next to the email option.
 ## Troubleshooting
 
 - **A button is missing:** verify that both credentials reach the running
-  control plane. Required company-SSO pages intentionally show only company SSO.
+  control plane. Company-SSO pages show the organization's provider.
 - **Redirect URI mismatch:** match the scheme, hostname and complete callback
   path exactly, including `widefleet-google` or `widefleet-microsoft`.
 - **Microsoft rejects a personal or work account:** check the app registration's
   supported account types and any consent or access restrictions in that user's
   organization.
-- **An email code is requested:** complete the confirmation step. A provider's
-  email address alone is not sufficient to connect an existing account.
 - **No email address is shared:** choose an account with an email address or use
-  email sign-in. Widefleet does not invent an email address from a provider ID.
+  email sign-in.
 - **The connection expired:** choose **Confirm email again**, request a new code
-  and repeat the connection. Linking requires a recent personal Widefleet session.
+  and repeat the connection.
