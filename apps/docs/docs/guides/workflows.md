@@ -1,7 +1,7 @@
 ---
 title: Workflows
 description: Declare durable background work and manage Workflow instances.
-lastModified: 2026-10-28
+lastModified: 2026-10-29
 ---
 
 ## Declare and export a Workflow
@@ -108,9 +108,11 @@ If your installation suspends an organization's execution, new Workflow starts, 
 resumes and events are rejected. Status, pause, terminate and delete remain available
 through the CLI, management API and app's Workflows page.
 
-Installations that publish execution gates pause existing instances through the runtime
-catalog. Execution suspension requires `WIDEFLEET_HTTP_AVAILABILITY=kv` on the trusted
-app runtime; the management endpoint rejects gate publication when enforcement is disabled.
+Installations can reconcile suspension of existing instances through the runtime catalog.
+The catalog reads the same organization availability as execution checks and saves the
+progress of pending pauses. Execution suspension requires `WIDEFLEET_HTTP_AVAILABILITY=kv`
+on the trusted app runtime. Changes take effect as the organization's KV state becomes visible;
+there is no separate per-app execution gate.
 Pausing is asynchronous: an instance can report `waitingForPause` while current
 work finishes. The runtime also checks availability before app execution, on every step
 attempt, around durable waits and before resource calls. A suspended operation fails
