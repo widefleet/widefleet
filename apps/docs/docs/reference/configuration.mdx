@@ -93,13 +93,13 @@ Choose budgets for your workloads; these values are examples. When configuring
 a nonnegative integer `subRequests`. Omitting `executionLimits` keeps the
 platform's existing limits.
 
-| Profile     | Applies to                                                                                                   |
-| ----------- | ------------------------------------------------------------------------------------------------------------ |
-| `http`      | Each app HTTP invocation that executes Worker code.                                                          |
-| `connector` | Connector HTTP and RPC calls, including Durable Object facets.                                               |
-| `cron`      | Each app's scheduled invocation.                                                                             |
-| `workflow`  | A Workflow runner invocation, shared across its steps. Retries and resumed invocations receive a new budget. |
-| `readiness` | App, connector and Workflow readiness checks.                                                                |
+| Profile     | Applies to                                                                                            |
+| ----------- | ----------------------------------------------------------------------------------------------------- |
+| `http`      | Each app HTTP invocation that executes Worker code.                                                   |
+| `connector` | Connector HTTP and RPC calls, including Durable Object facets.                                        |
+| `cron`      | Each app's scheduled invocation.                                                                      |
+| `workflow`  | A Workflow runner invocation, shared across its steps rather than a lifetime budget for the workflow. |
+| `readiness` | App, connector and Workflow readiness checks.                                                         |
 
 CPU time measures active computation, excluding time spent waiting for network
 or storage. Cloudflare ends an invocation that exceeds its CPU or subrequest
