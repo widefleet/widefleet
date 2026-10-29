@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.platform/
+.wrangler/
+.env
+.env.*
+.dev.vars
+.dev.vars.*
