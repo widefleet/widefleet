@@ -4,7 +4,7 @@ description: Expose app APIs, connect callers and keep provider secrets private.
 lastModified: 2026-10-29
 ---
 
-An app can expose selected Worker entrypoints to other apps in its organization.
+An app can expose exported Worker entrypoints to other apps in its organization.
 It uses the same deployment, resources, networking and logs as any other app.
 Use a headless app when the service does not need browser access.
 
@@ -38,12 +38,12 @@ Configure `wrangler.jsonc`:
   "name": "inventory-api",
   "main": "src/worker.ts",
   "compatibility_date": "2026-10-01",
-  "widefleet": { "web": false, "entrypoints": ["Reader"] },
 }
 ```
 
 Publish through the usual CLI. `--skip-build` uses the source entry directly;
-the CLI still bundles it and verifies that declared entrypoints are exported.
+the CLI still bundles it and discovers service entrypoints from the module exports.
+Classes declared in the standard `workflows` configuration remain Workflow entrypoints.
 
 ```sh
 widefleet deploy --skip-build
@@ -56,10 +56,11 @@ command also accepts redirected standard input. `widefleet services` now lists
 `inventory-api` and its `Reader` entrypoint; secret status should show matching
 desired and applied revisions.
 
-`widefleet.web: false` hides browser launch links and returns `404` for authenticated
-browser requests, including assets. Named service entrypoints still support RPC and
-`fetch()`. Headless apps can omit the default export and static assets. Ordinary
-web apps can expose service entrypoints alongside their browser UI.
+An app with only named service exports and no static assets has no browser launch
+link and returns `404` for browser requests. Named service entrypoints still support
+RPC and `fetch()`. A default export or configured static assets enables the app URL;
+web apps can expose named service entrypoints alongside their browser UI.
+No Widefleet-specific properties belong in `wrangler.jsonc`.
 
 ## Connect a caller
 
@@ -72,7 +73,7 @@ widefleet connections
 
 Use `--app CALLER` to select a caller by slug or UUID outside its project. The
 target accepts a service catalog slug or UUID. Bindings default to the `default`
-entrypoint; that export must be explicitly listed in `widefleet.entrypoints`.
+entrypoint; the provider must export a default Worker handler or `WorkerEntrypoint` class.
 
 In the UI, browse **Services**, then open the caller app's **Connections** to
 select a service, entrypoint and binding name. The UI, CLI and API show the same

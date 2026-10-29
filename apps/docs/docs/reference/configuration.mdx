@@ -37,9 +37,12 @@ for app code that does not use storage.
 | `compatibility_date`                  | Worker compatibility date; see [runtime compatibility](/reference/runtime-compatibility) for supported APIs.                                                                  |
 | `compatibility_flags`                 | Supported flags are `nodejs_compat` and `nodejs_als`; see [Node.js compatibility](/reference/runtime-compatibility#nodejs-compatibility).                                     |
 | `assets.directory` / `assets.binding` | Built static asset directory and the binding exposed to app code.                                                                                                             |
-| `widefleet.web`                       | Set `false` for a headless app; defaults to `true`.                                                                                                                           |
-| `widefleet.entrypoints`               | Explicit service exports, such as `["Reader"]` or `["default"]`; defaults to no exposed API.                                                                                  |
 | `vars`                                | Plain-text string values. Never put credentials here.                                                                                                                         |
+
+Service entrypoints come from the Worker module exports; there is no additional
+service declaration in `wrangler.jsonc`. Workflow classes declared in `workflows`
+are excluded from the service catalog. A Worker with only named service exports
+and no `assets` has no browser URL. See [app services](/guides/app-services).
 
 Changing `name` selects another app on the next deployment. It does not rename an
 existing app or move its data. The CLI uses your saved or company-provided
