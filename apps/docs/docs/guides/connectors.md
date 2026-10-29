@@ -43,12 +43,8 @@ A pending or failed removal remains visible with its currently active connector.
 
 After choosing a connector, ask an administrator to [give the app its binding](#give-an-app-its-binding). The connector author supplies the corresponding TypeScript interface or package.
 
-Each connector has one browser address, exposed as `browserUrl` in status and
-catalog responses. Expand an activated connector in the catalog to open its
-**Browser address**, or inspect it with `widefleet connector catalog --json`.
-Administrative status from `widefleet connector show NAME --json` includes the
-address while activation is pending; the catalog returns `null` until a version
-has activated.
+Open an activated connector's **Browser address** in the catalog, or read
+`browserUrl` from `widefleet connector show NAME --json`.
 
 ## Manage connectors in an organization
 
@@ -228,51 +224,32 @@ A binding can be saved before the app's first deployment. Otherwise changes wait
 
 ## User identity and connector pages
 
-Connectors can implement account linking, setup pages and other interactive
-flows. Widefleet supplies the verified caller and a separate browser origin;
-the connector implements its routes, provider authorization, token storage,
-refresh and account management. An app uses the connector's documented API and
-links. Widefleet does not automatically display an account-connection dialog.
+Connectors can offer account-linking and setup pages at their own browser address.
+Widefleet supplies the signed-in user's identity; the connector manages provider
+authorization and saved connections. Start with the
+[Gmail example](/guides/gmail-connector) for a complete project.
 
-For a complete project to copy, use the [Gmail connector example](/guides/gmail-connector).
-It combines Better Auth Generic OAuth, D1 account storage and personal Gmail access.
-
-Use matching control-plane, CLI, deployment-agent and app-runtime versions when
-enabling browser pages. Configure [published app sign-in](/guides/members#opening-published-apps)
-for the organization first.
+Use matching control-plane, CLI, deployment-agent and app-runtime versions with
+connector browser support, and configure
+[app sign-in](/guides/members#opening-published-apps) for the organization.
 
 ### Identify the caller
 
-For calls made while handling an authenticated app request, a connector
-`WorkerEntrypoint` receives `this.ctx.props.caller` with:
+During an authenticated app request, a connector receives
+`this.ctx.props.caller` with `issuer`, `subject` and `name`. Use `(issuer, subject)`
+as the user's stable identity. App code calls its binding normally, for example
+`env.ERP.listCustomers()`; Widefleet supplies the caller context.
 
-| Field     | Use                                            |
-| --------- | ---------------------------------------------- |
-| `issuer`  | Identity provider that authenticated the user. |
-| `subject` | User ID within that identity provider.         |
-| `name`    | Display name; not a stable account identifier. |
-
-Use the pair `(issuer, subject)` to associate a user's stored connections with
-their identity. Resources are already scoped to the connector's organization.
-App code calls the ordinary binding, such as `env.ERP.listCustomers()`; it does
-not supply the caller or need an identity SDK. The runtime verifies caller
-context before passing it to the connector. Calls without an authenticated
-request context, including scheduled work, receive `caller: null`. The connector
-must decide whether such a call is allowed and which shared credentials it may
-use. The forwarded request headers are not a substitute for `ctx.props.caller`.
-
-Storing one connection per identity allows multiple apps using this connector to
-reuse it. Multiple accounts and account selection are connector behavior, not
-platform-managed settings. Keep tokens in the connector's own persistent
-resources and out of RPC results, browser responses and logs.
+Calls outside an authenticated request, such as scheduled work, receive
+`caller: null`. Choose which operations permit those calls. Store personal tokens
+in the connector's persistent resources, keyed by caller identity, and return
+only the data apps need. Apps using the same connector can share that user's
+saved connection.
 
 ### Implement connector pages
 
-Every deployed connector has a browser address. Browser requests call the
-`fetch()` handler of its default export; no additional configuration is needed.
-Implement paths such as `/connect` and `/callback` in that handler.
-
-This complete `worker.ts` exposes the caller identity for verification:
+Browser requests reach the default export's `fetch()` handler with their path
+and query string. This handler displays the current identity:
 
 ```ts
 import { WorkerEntrypoint } from "cloudflare:workers";
@@ -293,80 +270,50 @@ export default class ERP extends WorkerEntrypoint<Env, Props> {
 }
 ```
 
-Deploy it with `widefleet connector deploy`, then inspect
-`widefleet connector show erp`. After activation succeeds, open the
-browser address and sign in. The response shows your verified identity and the
-connector's origin. Replace the verification handler with your connector's
-pages and provider flow before using it for account connections.
+Add the handler to your connector project, deploy with `widefleet connector deploy`,
+then open its browser address and sign in. The response shows your identity and
+connector origin. Use `env.WIDEFLEET_ORIGIN` with your callback path when
+registering a provider callback.
 
-Connector addresses follow the same naming convention as apps. For example,
-`github` uses `https://github-team.apps.example.com` when the organization's
-existing hostname suffix is `team`, or `https://github.apps.example.com` without
-a suffix. App and connector addresses share one namespace: deployment rejects
-an address already used by another app or connector. The usual DNS hostname
-length limits apply.
-
-Connector updates and new app bindings keep that origin unchanged. Renaming the connector or changing the installation domain
-changes the address. `env.WIDEFLEET_ORIGIN` supplies the origin to connector code;
-register provider callbacks using that origin and your callback path. Adding an
-app binding does not require another provider callback registration.
-
-All paths at this address reach the default export's `fetch()` handler unchanged.
-Named RPC entrypoints remain available through app bindings; they do not create
-separate browser routes. A connector without a default `fetch()` implementation
-cannot serve pages at its address.
+Addresses follow app naming rules: `github` uses
+`https://github-team.apps.example.com` with the organization suffix `team`, or
+`https://github.apps.example.com` without a suffix. Choose a name available in
+the shared app and connector namespace. Code updates and additional app bindings
+keep the address stable; changing the connector name or installation domain
+requires updating provider callbacks.
 
 ### Link from an app
 
-Find the app's binding name with `widefleet connections` or the app's
-**Connections** tab. If the connector documents a `/connect` page and the binding
-is `ERP`, the app can render:
+For a binding named `ERP` whose connector implements a `/connect` page:
 
 ```html
 <a href="/_widefleet/connectors/ERP/connect">Connect your account</a>
 ```
 
-Widefleet checks the app's access rules and active binding, then redirects the
-browser to the connector's fixed address. The suffix and query string are
-preserved. This always reaches the default `fetch()` handler, including when
-the app binding selects a named RPC entrypoint. This entry link accepts `GET`
-and `HEAD`; forms and provider callbacks must target the canonical connector address. `/connect` is a route chosen by
-the connector author, not a platform-defined endpoint.
+Widefleet checks app access and the active binding, then redirects to the
+connector address, preserving the path suffix and query string. Use this link
+for `GET` or `HEAD` navigation. Forms and provider callbacks target the connector
+address directly. Browser routes always use the default `fetch()` handler,
+including for bindings to named RPC entrypoints.
 
-Users can also open the canonical address directly, before any app has a binding.
-Access requires sign-in accepted by that organization's configuration; app group
-rules do not apply there. With company SSO, the IdP registration controls who
-can authenticate. This does not add a separate control-plane membership check.
-Other organizations' sessions do not grant access. Connector pages must enforce
+The connector address is also directly accessible with organization sign-in,
+independently of an app binding or that app's group rules. Connector pages enforce
 their own account ownership and action permissions.
 
 ### Browser boundaries and recovery
 
-Connector pages have a different origin from apps. Widefleet removes browser
-CORS grants from connector responses, applies its Content Security Policy and
-retains any stricter connector policy. Serve scripts and assets from the
-connector's own origin: external scripts, cross-origin browser API requests,
-frames and service workers are blocked. Start provider authorization with a
-top-level navigation; server-side provider requests are independent of this CSP.
+Serve scripts and assets from the connector's own origin. Its browser policy
+allows same-origin requests and top-level navigation to providers; external
+scripts, cross-origin fetches, frames and service workers are blocked. Make
+provider API requests from connector code. Cookies are scoped to the connector
+host. Implement CSRF protection and validate OAuth state and return URLs.
 
-The connector receives its own browser cookies, but never the platform's company
-sign-in cookies. Widefleet strips `Domain` from response cookies so they remain
-host-only and prevents replacement of company sign-in cookies. The connector
-still needs CSRF protection, secure OAuth state validation and validation of any
-return URL it accepts. Separate origins and CORS restrictions do not prevent all
-cross-origin requests.
-
-| Symptom                                                    | Check                                                                                           |
-| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Browser redirects to sign-in; an API request returns `401` | Establish the organization's sign-in session in the browser.                                    |
-| The app entry link returns `403`                           | Check the user's access to that app. Direct connector access uses organization sign-in instead. |
-| Page or entry link returns `404`                           | Confirm activation, the route path and, for an app link, the active binding.                    |
-| The app entry link returns `405`                           | Navigate with `GET`; submit forms to the canonical connector address.                           |
-
-Once the verification page works, implement the account flow in the connector
-and [give apps their bindings](#give-an-app-its-binding). Use the published
-canonical address for provider callbacks and the relative binding link for app
-navigation.
+| Symptom                          | Next step                                                     |
+| -------------------------------- | ------------------------------------------------------------- |
+| Sign-in redirect or `401`        | Sign in through the organization's provider.                  |
+| App entry link returns `403`     | Check the user's access to the app.                           |
+| Page or entry link returns `404` | Check activation, the route and the app binding.              |
+| App entry link returns `405`     | Use a navigation link; submit forms to the connector address. |
 
 ## Resources and activation
 
