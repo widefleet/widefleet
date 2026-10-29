@@ -12,6 +12,7 @@ peerDependencyRules:
     "runed@0.37.1>@sveltejs/kit": "3.0.0"
 
 patchedDependencies:
+  "@better-auth/core@1.7.12": patches/@better-auth__core@1.7.12.patch
   "@better-auth/oauth-provider@1.7.12": patches/@better-auth__oauth-provider@1.7.12.patch
   better-auth@1.7.12: patches/better-auth@1.7.12.patch
   blume@2.1.1: patches/blume@2.1.1.patch
