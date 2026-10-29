@@ -23,6 +23,7 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createAgentService } from "../src/lib/server/agents.ts";
+import { deploymentCommand } from "../src/lib/server/deployment-execution.ts";
 import { createApi } from "../src/lib/server/api.ts";
 import { apiResource } from "../src/lib/server/auth-options.ts";
 import { createAppAccessService } from "../src/lib/server/app-access.ts";
@@ -49,6 +50,8 @@ import { createTelemetry } from "../src/lib/server/telemetry.ts";
 describe("Platform API with PostgreSQL and RustFS", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
   let api: ReturnType<typeof createApi>;
+  let network: ReturnType<typeof createNetworkService>;
+  let appAccess: ReturnType<typeof createAppAccessService>;
   let storage: ReturnType<typeof createStorage>;
   let s3: S3Client;
   let adminHeaders: Headers;
@@ -76,6 +79,8 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     });
     await s3.send(new CreateBucketCommand({ Bucket: configuration.S3_BUCKET }));
     storage = createStorage(configuration);
+    network = createNetworkService(environment.database.db);
+    appAccess = createAppAccessService(environment.database.db);
     api = createApi({
       directory: createDirectory(
         async () => ({ ...configuration.IDENTITY, directory: configuration.IDENTITY.management }),
@@ -104,8 +109,8 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       storage,
       identity: createIdentityService(environment.auth, environment.database.db, configuration),
       apps: createAppService(environment.database.db, configuration),
-      network: createNetworkService(environment.database.db),
-      appAccess: createAppAccessService(environment.database.db),
+      network,
+      appAccess,
       workflows: createWorkflowService(environment.database.db),
       migrations: createMigrationService(environment.database.db, storage),
       connections: createConnectionService(environment.database.db),
@@ -1838,6 +1843,66 @@ describe("Platform API with PostgreSQL and RustFS", () => {
         error: revision === 1 ? null : "Synthetic code failure",
         appliedRevision: 1,
       });
+    }
+  });
+
+  it("passes network and access API changes through the strict hosted workflow contract", async () => {
+    const app = await createApp("hosted-change-payload");
+    const changeNetwork = network.change;
+    const changeAccess = appAccess.change;
+
+    const networkSpy = vi.spyOn(network, "change").mockImplementation((principal, appId, input) => {
+      deploymentCommand.parse({
+        kind: "network",
+        id: crypto.randomUUID(),
+        appId,
+        actor: principal,
+        input,
+        createdAt: new Date().toISOString(),
+      });
+
+      return changeNetwork(principal, appId, input);
+    });
+
+    const accessSpy = vi
+      .spyOn(appAccess, "change")
+      .mockImplementation((principal, appId, input) => {
+        deploymentCommand.parse({
+          kind: "access",
+          id: crypto.randomUUID(),
+          appId,
+          actor: principal,
+          input,
+          createdAt: new Date().toISOString(),
+        });
+
+        return changeAccess(principal, appId, input);
+      });
+
+    try {
+      const networkResponse = await json(`/apps/${app.id}/network`, "PATCH", {
+        action: "allow",
+        target: "backend",
+        origins: ["https://api.example.test"],
+      });
+
+      expect(networkResponse.status).toBe(200);
+      expect(networkSpy).toHaveBeenCalledOnce();
+      expect(await networkResponse.json()).toMatchObject({
+        policy: { backend: ["https://api.example.test"] },
+      });
+
+      const accessResponse = await json(`/apps/${app.id}/access`, "PATCH", {
+        revision: 0,
+        groups: ["engineering"],
+      });
+
+      expect(accessResponse.status).toBe(200);
+      expect(accessSpy).toHaveBeenCalledOnce();
+      expect(await accessResponse.json()).toMatchObject({ groups: ["engineering"] });
+    } finally {
+      networkSpy.mockRestore();
+      accessSpy.mockRestore();
     }
   });
 
