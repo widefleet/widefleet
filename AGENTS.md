@@ -7,6 +7,7 @@ Prefer correctness and predictable behavior over short-term convenience.
 Every platform capability must be available through the CLI, API, and UI, with consistent behavior and authorization.
 Preserve runtime behavior during lint, typing, and test-structure changes.
 Use public package exports; never cross package boundaries with relative imports.
+Wrangler configuration must use Cloudflare-supported keys. Do not introduce Widefleet-specific configuration blocks.
 Extract shared logic only for genuinely shared behavior. Avoid generic abstractions for one-off duplication.
 Share app and connector infrastructure where behavior matches. Justify lasting differences before implementing them.
 Public PRs, commits, generated files, and documentation contain no private names, internal context, customer-derived data, or AI attribution.

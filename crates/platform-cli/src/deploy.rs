@@ -30,8 +30,6 @@ struct Configuration {
     worker: crate::worker::Configuration,
     assets: Option<Assets>,
     #[serde(default)]
-    widefleet: AppConfiguration,
-    #[serde(default)]
     triggers: Triggers,
     #[serde(default)]
     queues: Queues,
@@ -39,14 +37,6 @@ struct Configuration {
     workflows: Vec<Workflow>,
     #[serde(rename = "no_bundle")]
     _no_bundle: Option<bool>,
-}
-
-#[derive(Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct AppConfiguration {
-    web: Option<bool>,
-    #[serde(default)]
-    entrypoints: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -331,16 +321,20 @@ async fn publish(
         .iter()
         .any(|flag| flag == "nodejs_compat");
     let bundled = bundle(&bundler, project, &entry, temporary.path(), node_compat).await?;
-    if configuration
-        .widefleet
-        .entrypoints
-        .iter()
-        .any(|name| !bundled.exports.contains(name))
-    {
-        return Err(Error::invalid(
-            "A declared service entrypoint is not exported by the Worker".into(),
-        ));
-    }
+    // Service entrypoints are module exports, as in Cloudflare Workers. Workflow
+    // classes use their standard declarations and are not RPC service entrypoints.
+    let web =
+        configuration.assets.is_some() || bundled.exports.iter().any(|name| name == "default");
+    let entrypoints = bundled
+        .exports
+        .into_iter()
+        .filter(|name| {
+            !configuration
+                .workflows
+                .iter()
+                .any(|workflow| workflow.class_name == *name)
+        })
+        .collect();
     let worker = bundled.source;
     if worker.len() > 20 * 1024 * 1024 {
         return Err(Error::invalid("Worker exceeds 20 MiB".into()));
@@ -476,8 +470,8 @@ async fn publish(
             }),
     );
     let metadata = WorkerMetadata {
-        web: configuration.widefleet.web,
-        entrypoints: configuration.widefleet.entrypoints,
+        web: Some(web),
+        entrypoints,
         crons: configuration.triggers.crons,
         queue_consumers: configuration.queues.consumers,
         worker: worker_metadata,

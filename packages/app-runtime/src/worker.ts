@@ -102,9 +102,7 @@ ${(app.metadata.entrypoints ?? [])
   );
   modules.set(
     "__widefleet_app.js",
-    app.metadata.web === false
-      ? `import * as app from ${JSON.stringify(`./${app.metadata.main_module}`)}; export default app.default ?? {};`
-      : `export {default} from ${JSON.stringify(`./${app.metadata.main_module}`)};`,
+    `import * as app from ${JSON.stringify(`./${app.metadata.main_module}`)}; export default app.default ?? {};`,
   );
   modules.set("__widefleet_events.js", WIDEFLEET_EVENTS_SOURCE);
 

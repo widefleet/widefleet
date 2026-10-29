@@ -208,6 +208,91 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App services CLI", () => {
       env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: "normal-credential" },
     });
 
+  it.each([
+    {
+      name: "default RPC export",
+      source:
+        "import {WorkerEntrypoint} from 'cloudflare:workers'; export default class extends WorkerEntrypoint {read(){return 'value';}}",
+      entrypoints: ["default"],
+      web: true,
+      assets: false,
+      workflows: [],
+    },
+    {
+      name: "re-exported service and web handler",
+      source:
+        "import {WorkerEntrypoint} from 'cloudflare:workers'; class Service extends WorkerEntrypoint {read(){return 'value';}} export {Service as Reader}; export default {fetch(){return new Response('web');}};",
+      entrypoints: ["Reader", "default"],
+      web: true,
+      assets: false,
+      workflows: [],
+    },
+    {
+      name: "service alongside a workflow",
+      source:
+        "import {WorkerEntrypoint, WorkflowEntrypoint} from 'cloudflare:workers'; export class Reader extends WorkerEntrypoint {read(){return 'value';}} export class Job extends WorkflowEntrypoint {async run(){return 'done';}}",
+      entrypoints: ["Reader"],
+      web: false,
+      assets: false,
+      workflows: [{ binding: "JOBS", name: "jobs", class_name: "Job" }],
+    },
+    {
+      name: "static assets without a default handler",
+      source: "export {};",
+      entrypoints: [],
+      web: true,
+      assets: true,
+      workflows: [],
+    },
+  ])("derives app metadata from standard Worker exports: $name", async (fixture) => {
+    await writeFile(join(directory, "inferred.ts"), fixture.source);
+
+    if (fixture.assets) {
+      await mkdir(join(directory, "public"), { recursive: true });
+      await writeFile(join(directory, "public/index.html"), "Static app");
+    }
+
+    await writeFile(
+      join(directory, "inferred.jsonc"),
+      JSON.stringify({
+        name: app.slug,
+        main: "inferred.ts",
+        compatibility_date: "2026-10-01",
+        workflows: fixture.workflows,
+        assets: fixture.assets ? { directory: "public", binding: "ASSETS" } : undefined,
+      }),
+    );
+    const result = await command("deploy", "--config", "inferred.jsonc", "--no-wait", "--json");
+    expect(JSON.parse(result.stdout)).toMatchObject({ url: fixture.web ? app.url : null });
+    const upload = requests.find((entry) => entry.path.endsWith("/worker"));
+
+    const form = await new Response(upload?.body, {
+      headers: { "content-type": upload?.contentType ?? "" },
+    }).formData();
+
+    const metadata = contract.workerMetadata.parse(
+      JSON.parse(z.string().parse(form.get("metadata"))),
+    );
+
+    expect(metadata.entrypoints ?? []).toEqual(fixture.entrypoints);
+    expect(metadata.web).toBe(fixture.web);
+  });
+
+  it("rejects the nonstandard widefleet Wrangler property", async () => {
+    await writeFile(
+      join(directory, "invalid.jsonc"),
+      JSON.stringify({
+        main: "service.ts",
+        compatibility_date: "2026-10-01",
+        widefleet: { web: false, entrypoints: ["Reader"] },
+      }),
+    );
+    await expect(
+      command("deploy", "--config", "invalid.jsonc", "--no-wait"),
+    ).rejects.toHaveProperty("stderr", expect.stringContaining("unknown field `widefleet`"));
+    expect(requests.some((entry) => entry.path.endsWith("/worker"))).toBe(false);
+  });
+
   it("deploys an app API without assets or a build script and manages app connections and secrets", async () => {
     const source = `import {WorkerEntrypoint} from 'cloudflare:workers'; export class Reader extends WorkerEntrypoint { read() { return 'value'; } }`;
     await writeFile(join(directory, "service.ts"), source);
@@ -217,7 +302,6 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App services CLI", () => {
         name: app.slug,
         main: "service.ts",
         compatibility_date: "2026-10-01",
-        widefleet: { web: false, entrypoints: ["Reader"] },
       }),
     );
     const result = await command("deploy", "--config", "service.jsonc", "--no-wait", "--json");
