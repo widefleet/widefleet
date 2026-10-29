@@ -42,9 +42,15 @@ describe("Gmail connector with Better Auth and D1", () => {
 
   const start = async (client: ReturnType<typeof browser>) => {
     const response = await client.request("/connect", "POST");
-    expect(response.status, await response.clone().text()).toBe(303);
+    const page = await response.text();
+    expect(response.status, page).toBe(200);
+    expect(response.headers.get("location")).toBeNull();
+    expect(response.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(response.headers.getSetCookie().length).toBeGreaterThan(0);
+    const destination = z.string().parse(/<a href="([^"]+)">/.exec(page)?.[1]);
+    expect(page).toContain(`<meta http-equiv="refresh" content="0;url=${destination}">`);
 
-    return z.string().parse(response.headers.get("location"));
+    return destination.replace(/&#(\d+);/g, (_, code: string) => String.fromCharCode(Number(code)));
   };
 
   const connect = async (client: ReturnType<typeof browser>, user: string) => {

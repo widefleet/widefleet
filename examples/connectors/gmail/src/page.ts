@@ -1,6 +1,30 @@
 const escapeHtml = (value: string) =>
   value.replace(/[&<>"']/g, (character) => `&#${character.charCodeAt(0)};`);
 
+// The platform's form-action 'self' policy also constrains form redirects in
+// Chromium. Finish the POST here, then navigate from this document to Google.
+export const authorizationPage = (url: string, cookies: string[]) => {
+  const headers = new Headers({
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": "no-store",
+    "referrer-policy": "no-referrer",
+  });
+
+  for (const cookie of cookies) headers.append("set-cookie", cookie);
+
+  const destination = escapeHtml(url);
+
+  return new Response(
+    `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<meta http-equiv="refresh" content="0;url=${destination}">
+<title>Continue to Google</title></head><body>
+<p>Opening Google to connect your account. <a href="${destination}">Continue to Google</a></p>
+</body></html>`,
+    { headers },
+  );
+};
+
 export const connectionPage = (name: string, accountId: string | null, failed: boolean) =>
   new Response(
     `<!doctype html>

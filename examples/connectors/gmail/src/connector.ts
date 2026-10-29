@@ -4,7 +4,7 @@ import { authentication, callbackPath } from "./auth.ts";
 import { caller, callerId, type Environment, type Properties } from "./context.ts";
 import { initialize } from "./database.ts";
 import { gmailScope, providerId } from "./google.ts";
-import { connectionPage } from "./page.ts";
+import { authorizationPage, connectionPage } from "./page.ts";
 
 const linkedAccount = z.object({
   id: z.string(),
@@ -195,7 +195,7 @@ export default class GmailConnector extends WorkerEntrypoint<Environment, Proper
       if (!linked.ok) return redirect("/?error=connection", cookies);
       const location = z.object({ url: z.url() }).parse(await linked.json()).url;
 
-      return redirect(location, [...cookies, ...linked.headers.getSetCookie()]);
+      return authorizationPage(location, [...cookies, ...linked.headers.getSetCookie()]);
     }
 
     if (url.pathname === callbackPath && request.method === "GET") {
