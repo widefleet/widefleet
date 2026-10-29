@@ -78,7 +78,7 @@ change.
 
 The shared runtime checks the groups before forwarding requests to app code or
 static assets. User-supplied identity headers are removed, and SSO cookies
-and tokens do not reach the app. Internal Cron, Queue and connector invocations
+and tokens do not reach the app. Internal Cron, Queue and app service invocations
 continue to use their existing capability boundaries; they are not browser SSO
 requests. Resource-level permissions inside an app remain the app's responsibility.
 

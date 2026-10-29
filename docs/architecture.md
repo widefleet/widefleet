@@ -38,13 +38,13 @@ Traefik removes client-supplied identity headers and forwards only the identity 
 
 Apps share celld configuration, so jobs are serialized per organization, not per app or agent. Leases fence stale acknowledgments and retries retain their ordering. Changing [job scheduling](../apps/control-plane/src/lib/server/jobs.ts) requires preserving this constraint even when two jobs target different apps.
 
-An accepted job records intent, not successful activation. The agent prepares and checks candidate snapshots before switching serving state. Runtime and connector changes can affect every published app, including one whose activation has not yet been acknowledged to management. Keep the previous usable state available until those checks pass.
+An accepted job records intent, not successful activation. The agent prepares and checks candidate snapshots before switching serving state. Runtime changes can affect every published app, including one whose activation has not yet been acknowledged to management. Keep the previous usable state available until those checks pass.
 
 Activation spans object storage, the running node and routing files; it is not a database transaction. The [activation journal](../crates/platform-agent/src/execution.rs) must remain recoverable through agent or runtime interruption. [App access activation](../crates/platform-agent/src/access.rs) additionally probes the proxy before confirming that a rule revision is active. The [deployment suite](../apps/control-plane/tests/runtime/deployment.test.ts) exercises failure and restart recovery.
 
 ## Code versions do not own current policy or data
 
-App snapshots are immutable so in-flight requests can finish against the version they started with. A code rollback does not restore database or file contents, or undo current network and connector permissions. Keep those policies separate from the uploaded code when changing deployment selection.
+App snapshots are immutable so in-flight requests can finish against the version they started with. A code rollback does not restore database or file contents, or undo current network and app connection permissions. Keep those policies separate from the uploaded code when changing deployment selection.
 
 Previews have independent app resources within the same organization. Long-running Workflows can retain older code and its resource bindings after a newer app version is published; retaining those bindings must not revive old event subscriptions. See [snapshot preparation](../crates/platform-agent/src/execution.rs) and the [Workflow adapter tests](../apps/control-plane/tests/runtime/workflow-adapter.test.ts).
 

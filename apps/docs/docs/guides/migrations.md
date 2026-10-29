@@ -79,4 +79,4 @@ Applied migrations are identified by name, not by content checksum. Do not edit 
 
 `POST /api/v1/apps/{appId}/migrations` accepts `action` (`list` or `apply`), `database` (binding name), `databaseId` (the configured ID, or database name when no ID is configured), `table` and `files`. Each file has a `name`; `sql` is required for `apply` and omitted for `list`. Supply a UUID `Idempotency-Key` header. Repeating the same request returns the original job; changing its content with the same key returns a conflict.
 
-Poll `GET /api/v1/apps/{appId}/migrations/{jobId}` for `state`, `message` and `entries`. Jobs do not activate code or update network/connector permissions. The agent checks the current runtime binding again before executing, so a queued migration cannot silently follow a binding that has changed identity.
+Poll `GET /api/v1/apps/{appId}/migrations/{jobId}` for `state`, `message` and `entries`. Jobs do not activate code or update network/app connection permissions. The agent checks the current runtime binding again before executing, so a queued migration cannot silently follow a binding that has changed identity.

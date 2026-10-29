@@ -65,30 +65,32 @@ the browser URL for company sign-in. Accounts with matching verified company ema
 `APP_UUID`, `DEPLOYMENT_UUID` and `ARTIFACT_UUID` below are placeholders. Find app
 IDs with `widefleet apps` and deployment IDs and artifact IDs with `widefleet history APP_UUID`.
 
-| Command                                          | Purpose                                                              |
-| ------------------------------------------------ | -------------------------------------------------------------------- |
-| `widefleet init DIRECTORY [--template TEMPLATE]` | Create an independent app; defaults to SvelteKit. No login required. |
-| `widefleet apps`                                 | List apps you can manage.                                            |
-| `widefleet deploy [APP_UUID]`                    | Build and deploy; normally selects the configured app name.          |
-| `widefleet preview --name review`                | Build and deploy an isolated preview of an existing app.             |
-| `widefleet history APP_UUID`                     | Read deployment history as JSON.                                     |
-| `widefleet events APP_UUID DEPLOYMENT_UUID`      | Read deployment events.                                              |
-| `widefleet rollback APP_UUID ARTIFACT_UUID`      | Activate a retained code artifact.                                   |
-| `widefleet logs --level error --since 1h`        | Query app runtime errors; `--follow` keeps polling.                  |
-| `widefleet migrations list DB` / `apply DB`      | Inspect or explicitly apply SQL migrations to a deployed D1 binding. |
-| `widefleet access`                               | Inspect app usage rules; `set` changes the group list.               |
-| `widefleet network`                              | Inspect external destinations; `allow` and `deny` change grants.     |
-| `widefleet connector bindings`                   | Inspect IT-managed connector bindings.                               |
-| `widefleet connector catalog`                    | Browse connector names and available entrypoints.                    |
-| `widefleet connections`                          | Inspect desired and active connectors and deployed app resources.    |
-| `widefleet catalog list`                         | List published app launch URLs.                                      |
-| `widefleet delete APP_UUID --yes`                | Request removal of an app and all its previews.                      |
+| Command                                              | Purpose                                                                |
+| ---------------------------------------------------- | ---------------------------------------------------------------------- |
+| `widefleet init DIRECTORY [--template TEMPLATE]`     | Create an independent app; defaults to SvelteKit. No login required.   |
+| `widefleet apps`                                     | List apps you can manage.                                              |
+| `widefleet deploy [APP_UUID]`                        | Build and deploy; normally selects the configured app name.            |
+| `widefleet preview --name review`                    | Build and deploy an isolated preview of an existing app.               |
+| `widefleet history APP_UUID`                         | Read deployment history as JSON.                                       |
+| `widefleet events APP_UUID DEPLOYMENT_UUID`          | Read deployment events.                                                |
+| `widefleet rollback APP_UUID ARTIFACT_UUID`          | Activate a retained code artifact.                                     |
+| `widefleet logs --level error --since 1h`            | Query app runtime errors; `--follow` keeps polling.                    |
+| `widefleet migrations list DB` / `apply DB`          | Inspect or explicitly apply SQL migrations to a deployed D1 binding.   |
+| `widefleet access`                                   | Inspect app usage rules; `set` changes the group list.                 |
+| `widefleet network`                                  | Inspect external destinations; `allow` and `deny` change grants.       |
+| `widefleet services`                                 | Browse apps and their service entrypoints.                             |
+| `widefleet connect TARGET --as BINDING`              | Grant the current app access to another app's API.                     |
+| `widefleet disconnect BINDING`                       | Revoke an app connection.                                              |
+| `widefleet secret list` / `put NAME` / `delete NAME` | Manage the selected app's private secrets.                             |
+| `widefleet connections`                              | Inspect desired and active app connections and deployed app resources. |
+| `widefleet catalog list`                             | List published app launch URLs.                                        |
+| `widefleet delete APP_UUID --yes`                    | Request removal of an app and all its previews.                        |
 
 The target is the selected platform URL, organization context and `name` in `wrangler.jsonc`. The first deploy creates that app; subsequent deploys update it after checking the user's app permissions. A changed name selects a different app. The server assigns the host, and existing apps keep their host and data.
 Logs, access, network, connections and migrations also use project context; history, events and
 rollback require IDs. Each command's help lists its selection options.
 
-See [connector discovery and app connections](/guides/connectors#find-connectors-and-inspect-your-app)
+See [app services and connections](/guides/app-services)
 for permissions, activation states and app selection.
 
 ## Create a project
@@ -126,7 +128,7 @@ These flags apply to both `deploy` and `preview`:
 | `--no-wait`     | Return the queued deployment; activation follows asynchronously.              |
 | `--json`        | Print one result on stdout; build output and progress go to stderr.           |
 
-After activation, the command prints `Deployment succeeded` and the app URL. For automation, use `widefleet deploy --json`: stdout contains one JSON object with the final deployment fields and `url`, while build output and progress go to stderr. The `id` field identifies the deployment and `appId` identifies the app. Existing scripts that parsed the default JSON output must add `--json`. With `--no-wait --json`, the result describes the queued deployment. Uploading with `--no-wait` requires only `platform:write`; waiting for deployment events and history also requires `platform:read`. Failures exit nonzero and leave stdout empty. Update the management server together with the CLI so it can provide the complete URL, including its configured HTTPS port.
+After activation, the command prints `Deployment succeeded` and the app URL. Headless apps have no launch URL; their JSON deployment result uses `url: null`. For automation, use `widefleet deploy --json`: stdout contains one JSON object with the final deployment fields and `url`, while build output and progress go to stderr. The `id` field identifies the deployment and `appId` identifies the app. Existing scripts that parsed the default JSON output must add `--json`. With `--no-wait --json`, the result describes the queued deployment. Uploading with `--no-wait` requires only `platform:write`; waiting for deployment events and history also requires `platform:read`. Failures exit nonzero and leave stdout empty. Update the management server together with the CLI so it can provide the complete URL, including its configured HTTPS port.
 
 Each command's help documents its output options.
 

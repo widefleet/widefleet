@@ -33,4 +33,4 @@ Run `widefleet preview` from the app project to build and deploy an isolated pre
 
 The existing `widefleet create notes-preview --name 'Notes Preview' --parent APP_UUID` workflow keeps its flat hostname; deploy to the returned ID explicitly. Use `widefleet rollback APP_UUID ARTIFACT_UUID` to restore retained code and `widefleet delete APP_UUID --yes` to remove an app and its published versions. See [app removal](/reference/runtime#app-removal) for the cleanup process and remaining native storage cells.
 
-External requests need [network permissions](/guides/network). For IT-managed system access, use [connectors](/guides/connectors). Apps can also declare [Workflows](/guides/workflows) with a compatible deployment agent and runtime.
+External requests need [network permissions](/guides/network). For IT-managed system access, use [app services](/guides/app-services). Apps can also declare [Workflows](/guides/workflows) with a compatible deployment agent and runtime.

@@ -63,20 +63,18 @@ Reload the affected page to load the selected organization before submitting the
 Use separate browser sessions if you need to work in two organizations concurrently.
 
 `GET /api/v1/me` returns the selected context under `application`:
-`organizationId` and `admin`. The nested `admin` field applies to app and connector
-administration within that scope. The top-level `admin` field remains installation
-administration. Connector catalogs and deployment-agent discovery are scoped to
-the selected organization. Connector deployment, updates, secrets, app binding changes,
-status and logs require an administrator of the selected organization and stay
-within that organization. Same-named connectors in other organizations are independent.
+`organizationId` and `admin`. The nested `admin` field authorizes app connection
+changes within that organization. The top-level `admin` field remains installation
+administration. The app service catalog and deployment-agent discovery are scoped
+to the selected organization. App collaborators can inspect their app's connections
+and manage its secrets; organization administrators manage grants between apps.
 Deployment-agent administration, runtime upgrades and installation reporting still
 require installation administration. Identity settings and directory search use the
 selected organization's configuration. Organization owners and administrators can
 manage that configuration. Directory secrets are encrypted per organization and omitted
 from settings responses; omitting `directory.clientSecret` from an update preserves the saved value.
 
-See [connector management](/guides/connectors#manage-connectors-in-an-organization)
-for the browser flow and connector API endpoints.
+See [app services](/guides/app-services#api) for discovery, connections and secret endpoints.
 
 Use [CLI organization selection](/reference/cli-configuration#select-an-organization)
 for equivalent CLI commands. If a browser selection becomes unavailable, the

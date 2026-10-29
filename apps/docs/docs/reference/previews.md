@@ -26,7 +26,7 @@ Each preview has a stable app ID and an internal slug based on the parent slug a
 
 Manage access groups on the original app with `widefleet access set --group GROUP_ID`. Its previews inherit the rule and all later changes automatically. See [app access](/reference/app-access).
 
-Previews start with their own empty D1, R2, KV and Queue resources. Plain-text variables and resource declarations come from the project configuration being deployed. Configure network permissions and connector bindings separately for the preview's own app ID when needed.
+Previews start with their own empty D1, R2, KV and Queue resources. Plain-text variables and resource declarations come from the project configuration being deployed. Configure network permissions and app connections separately for the preview's own app ID when needed.
 
 ## Organization addresses
 
