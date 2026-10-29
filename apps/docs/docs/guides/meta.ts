@@ -11,7 +11,7 @@ export default defineMeta({
     "migrations",
     "workflows",
     "network",
-    "connectors",
-    "gmail-connector",
+    "app-services",
+    "gmail-app",
   ],
 });

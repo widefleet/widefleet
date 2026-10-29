@@ -39,6 +39,11 @@ for app code that does not use storage.
 | `assets.directory` / `assets.binding` | Built static asset directory and the binding exposed to app code.                                                                                                             |
 | `vars`                                | Plain-text string values. Never put credentials here.                                                                                                                         |
 
+Service entrypoints come from the Worker module exports; there is no additional
+service declaration in `wrangler.jsonc`. Workflow classes declared in `workflows`
+are excluded from the service catalog. A Worker with only named service exports
+and no `assets` has no browser URL. See [app services](/guides/app-services).
+
 Changing `name` selects another app on the next deployment. It does not rename an
 existing app or move its data. The CLI uses your saved or company-provided
 platform URL to select the installation; see [CLI configuration](/reference/cli-configuration).
@@ -72,7 +77,7 @@ running, and the setting does not delete Queue data or pause existing consumers.
 
 ### Dynamic Worker execution limits
 
-With Widefleet **0.4.15 or newer**, Cloudflare installation operators can set CPU
+With Widefleet **0.5.0 or newer**, Cloudflare installation operators can set CPU
 and subrequest budgets in the versioned installation profile, then deploy it
 through their normal deployment process. For example:
 
@@ -80,7 +85,7 @@ through their normal deployment process. For example:
 {
   "executionLimits": {
     "http": { "cpuMs": 100, "subRequests": 50 },
-    "connector": { "cpuMs": 250, "subRequests": 50 },
+    "service": { "cpuMs": 250, "subRequests": 50 },
     "cron": { "cpuMs": 1000, "subRequests": 200 },
     "workflow": { "cpuMs": 5000, "subRequests": 500 },
     "readiness": { "cpuMs": 100, "subRequests": 10 }
@@ -96,10 +101,10 @@ platform's existing limits.
 | Profile     | Applies to                                                                                            |
 | ----------- | ----------------------------------------------------------------------------------------------------- |
 | `http`      | Each app HTTP invocation that executes Worker code.                                                   |
-| `connector` | Connector HTTP and RPC calls, including Durable Object facets.                                        |
+| `service`   | Each HTTP or RPC invocation through a granted app connection.                                         |
 | `cron`      | Each app's scheduled invocation.                                                                      |
 | `workflow`  | A Workflow runner invocation, shared across its steps rather than a lifetime budget for the workflow. |
-| `readiness` | App, connector and Workflow readiness checks.                                                         |
+| `readiness` | App and Workflow readiness checks.                                                                    |
 
 CPU time measures active computation, excluding time spent waiting for network
 or storage. Cloudflare ends an invocation that exceeds its CPU or subrequest
@@ -123,7 +128,7 @@ for file configuration, Drizzle, first-schema deployment and failure recovery.
 
 ## Settings outside this file
 
-Manage company SSO, app access groups, network grants and connector bindings through
+Manage company SSO, app access groups, network grants and app connections through
 the management UI or the relevant [CLI commands](/reference/cli). These settings
 remain in effect across code deployments and rollbacks.
 

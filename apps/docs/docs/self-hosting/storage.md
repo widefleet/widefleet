@@ -52,7 +52,7 @@ Without a credential file, managed/VM identity endpoints must be reachable from 
 
 ## Initialization and existing data
 
-Artifact uploads are create-only: writing an existing key preserves its original bytes and succeeds. Runtime and connector packages use content-addressed keys, so retries and concurrent uploads can safely reuse them. Object Storage is outside the PostgreSQL transaction; a failed transaction can leave an unreferenced package, which a later retry reuses without deleting it. Other storage errors fail the operation before a database reference is committed.
+Artifact uploads are create-only: writing an existing key preserves its original bytes and succeeds. Runtime packages use content-addressed keys, so retries and concurrent uploads can safely reuse them. Object Storage is outside the PostgreSQL transaction; a failed transaction can leave an unreferenced package, which a later retry reuses without deleting it. Other storage errors fail the operation before a database reference is committed.
 
 The Compose `initialize` service creates missing S3 buckets. In Azure/GCS mode it only checks existing artifact and fleet containers/buckets; missing resources are an error. It does not create storage accounts, cloud buckets, identities or IAM bindings. This tool expects matching artifact/fleet providers and access to both locations using the control plane's credentials. The fleet name comes from `FLEET_AZURE_CONTAINER` or `FLEET_GCS_BUCKET`.
 

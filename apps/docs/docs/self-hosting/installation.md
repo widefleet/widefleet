@@ -267,3 +267,31 @@ To restore on the existing host, stop the same services, restore the complete ma
 On a replacement host, restore the same absolute data path, Compose project name, named volumes and ownership before starting services. Restore the saved agent credential in the private environment. Start management and its dependencies, then telemetry and the agent. Restrict proxy access to the restore operator while checking sign-in, `widefleet runtime status`, an existing app, a database record and the corresponding private file. The restored runtime state and routes retain the installed deployments. Enable general access after these checks pass. Never run the old and restored runtime against the same storage simultaneously.
 
 Before relying on the backup, complete a restore drill using the installation's actual storage and backup target.
+
+## Upgrade from connectors to app services
+
+Widefleet **0.5.0** replaces connectors with [app services](/guides/app-services)
+and requires runtime protocol 3. Upgrade the control plane, CLI, agent and runtime
+together. Back up PostgreSQL, its encryption key and runtime state before applying
+this breaking upgrade.
+
+The database migration deletes connector records and connector jobs, removes
+legacy bindings and clears their pending activation state. There is no importer
+or compatibility mode. Before preparing the first app deployment, Widefleet also
+removes legacy grants from stored host and version snapshots so they cannot block
+redeployment. The versioned Cloudflare Worker migration deletes the
+connector Durable Object classes and their state. Retained storage objects are
+not converted into app resources.
+
+Recreate integrations as apps, re-enter their secrets and grant connections to
+callers. Redeploy callers before verifying them. Former connector browser URLs and
+Durable Object APIs are no longer available. Apps use their own browser URLs and
+receive the verified user through `ctx.props.caller`; see
+[app caller identity](/guides/app-services#user-identity). Users reconnect their
+personal accounts in the recreated provider apps.
+Hosted configuration uses `WIDEFLEET_SECRETS_KEY` and the `service` execution-limit
+profile. Follow the normal versioned deployment process for these changes.
+
+An application-only code rollback cannot reverse this database or Worker
+migration. Recovery requires restoring compatible platform versions and backups;
+a PostgreSQL backup alone does not restore deleted Durable Object state.

@@ -23,7 +23,7 @@ _The management workspace with synthetic example apps._
 - **Build with your own tools.** Start with SvelteKit by default or choose TanStack Start for React, edit the independent project with your coding agent and deploy through the [CLI](https://widefleet.com/docs/getting-started/installation).
 - **Give colleagues access.** Use company SSO, manage [app access groups](https://widefleet.com/docs/reference/app-access) and make apps discoverable in the shared catalog.
 - **Keep app data together.** Declare databases, file storage and key-value bindings. [Runtime and storage](https://widefleet.com/docs/reference/runtime).
-- **Control system access.** Grant specific external destinations through [network permissions](https://widefleet.com/docs/guides/network) and expose IT-managed services through [connectors](https://widefleet.com/docs/guides/connectors).
+- **Control system access.** Grant specific external destinations through [network permissions](https://widefleet.com/docs/guides/network) and expose IT-managed services through [app services](https://widefleet.com/docs/guides/app-services).
 - **Run background work.** Use Cron, Queues and durable [Workflows](https://widefleet.com/docs/guides/workflows), including retries and waits for events.
 - **Operate your apps.** Publish [previews](https://widefleet.com/docs/reference/previews), inspect deployment history, roll back code and query [app logs](https://widefleet.com/docs/self-hosting/runtime-logs) from the CLI.
 
@@ -75,7 +75,7 @@ flowchart LR
     Agent -->|"Install app versions"| Runtime["App runtime"]
     Team["Your team"] -->|"Company SSO"| Runtime
     Runtime --> Data["App databases and files"]
-    Runtime --> Systems["Approved systems and connectors"]
+    Runtime --> Systems["Approved systems and app services"]
 ```
 
 Management stores configuration and deployment jobs. The agent installs built code into a shared celld fleet, where apps and previews run as separate Dynamic Workers with their own resources. Published apps keep serving when management or the agent is stopped; the runtime, proxy, identity service and storage must remain available. See the [architecture](docs/architecture.md) for the full deployment and authentication model.
@@ -93,7 +93,7 @@ The [documentation website](https://widefleet.com/docs) is the home for app crea
 | Task                            | Guide                                                                                                                                                                                                                                                               |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Build and deploy apps           | [CLI and app development](https://widefleet.com/docs/getting-started/installation), [previews](https://widefleet.com/docs/reference/previews), [migrations](https://widefleet.com/docs/guides/migrations), [Workflows](https://widefleet.com/docs/guides/workflows) |
-| Control access and integrations | [App access](https://widefleet.com/docs/reference/app-access), [network permissions](https://widefleet.com/docs/guides/network), [connectors](https://widefleet.com/docs/guides/connectors)                                                                         |
+| Control access and integrations | [App access](https://widefleet.com/docs/reference/app-access), [network permissions](https://widefleet.com/docs/guides/network), [app services](https://widefleet.com/docs/guides/app-services)                                                                     |
 | Install and operate Widefleet   | [Operations](https://widefleet.com/docs/self-hosting/installation), [storage](https://widefleet.com/docs/self-hosting/storage), [upgrades and recovery](https://widefleet.com/docs/self-hosting/installation#upgrade-deliberately)                                  |
 | Inspect logs and reporting      | [App logs](https://widefleet.com/docs/self-hosting/runtime-logs), [installation reporting and opt-out](https://widefleet.com/docs/self-hosting/installation-reporting)                                                                                              |
 | Understand the platform         | [Runtime](https://widefleet.com/docs/reference/runtime), [compatibility](https://widefleet.com/docs/reference/runtime-compatibility), [API and uploads](https://widefleet.com/docs/reference/api)                                                                   |
