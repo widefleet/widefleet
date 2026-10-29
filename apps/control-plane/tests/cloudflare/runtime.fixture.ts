@@ -94,7 +94,9 @@ export class ExampleWorkflow extends WorkflowEntrypoint {
     }
     if (mode === 'sleep') {
       await step.sleep('nap', 1);
-      const deadline = await step.do('deadline', async () => new Date(Date.now() + 20));
+      // Allow checkpoint persistence, RPC and availability reads to finish before
+      // the native engine rejects a sleepUntil deadline that is already past.
+      const deadline = await step.do('deadline', async () => new Date(Date.now() + 2000));
       await step.sleepUntil('until', deadline);
       return step.do('awake', context => record('awake', context));
     }

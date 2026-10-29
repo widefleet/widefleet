@@ -2059,7 +2059,9 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
         expect(response.status, await response.text()).toBe(200);
         // Runtime checks read KV directly and do not revisit catalog admission.
         await expect
-          .poll(async () => (await manageWorkflow({ action: "status", id })).json())
+          .poll(async () => (await manageWorkflow({ action: "status", id })).json(), {
+            timeout: 15_000,
+          })
           .toMatchObject({ result: { status: "complete" } });
         const reads = await (await workflowBinding({ method: "admissionReads" })).json();
         expect(reads).toBe(1);
@@ -2071,6 +2073,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
         await manageWorkflow({ action: "delete", id });
       }
     },
+    30_000,
   );
 
   it.each(["create", "resume", "restart"])(
