@@ -11,6 +11,7 @@ import { build } from "esbuild";
 import { publishedApp, appSecretPreparation } from "@platform/contracts";
 import { encodeConfiguration } from "@platform/auth-proxy/publication";
 import { runtimeIdentity } from "./runtime-identity.ts";
+import { hashAsset } from "../src/lib/server/asset-hash.ts";
 import { z } from "zod";
 import type { TestHarness } from "wrangler";
 import { executionProfiles, executionRecorder } from "./cloudflare/execution-limits.fixture.ts";
@@ -123,7 +124,7 @@ describe.runIf(process.env["RUN_SERVICE_TESTS"] === "1").each(["workerd", "celld
     const request = (
       path: string,
       body?:
-        | { app: z.infer<typeof publishedApp>; source: string }
+        | { app: z.infer<typeof publishedApp>; source: string; assets: Record<string, string> }
         | z.infer<typeof appSecretPreparation>
         | { key: string }
         | { availability: "blocked" | "clear" | "unavailable" },
@@ -139,9 +140,10 @@ describe.runIf(process.env["RUN_SERVICE_TESTS"] === "1").each(["workerd", "celld
       code: string,
       version = "v1",
       changes: Partial<z.infer<typeof publishedApp>> = {},
+      assets: Record<string, string> = {},
     ) => {
       const app = { ...snapshot(appId, code, version), ...changes };
-      const response = await request("/seed", { app, source: code });
+      const response = await request("/seed", { app, source: code, assets });
       expect(response.status).toBe(200);
 
       return app;
@@ -181,8 +183,9 @@ export default { async fetch(request, env, ctx) {
   try {
     if(url.pathname === '/executions') return Response.json(executions);
     if(url.pathname === '/seed') {
-      const {app,source} = await request.json();
+      const {app,source,assets} = await request.json();
       await env.WIDEFLEET_PACKAGES.put('apps/'+app.appId+'/modules/'+app.modules[0].sha256,source);
+      for(const [path,content] of Object.entries(assets)) await env.WIDEFLEET_PACKAGES.put('apps/'+app.appId+'/assets/'+app.manifest[path].hash,content);
       await env.WIDEFLEET_PACKAGES.put('hosts/'+app.hostname+'.json',JSON.stringify(app));
       await env.AUTH_CONFIG.put('organizations/widefleet/configuration',${JSON.stringify(encrypted)});
       await env.AUTH_CONFIG.put('apps/'+app.hostname, JSON.stringify({organizationId:'widefleet',appId:app.appId,access:{revision:1,groups:[]}}));
@@ -190,6 +193,7 @@ export default { async fetch(request, env, ctx) {
     }
     if(url.pathname === '/availability') { const {availability}=await request.json(); await env.AUTH_CONFIG.put('organizations/widefleet/http-availability',availability==='unavailable' ? 'invalid' : JSON.stringify({blocked:availability==='blocked'})); return Response.json(true); }
     if(url.pathname === '/secrets') return ctx.exports.RuntimeManagement({props:{}}).fetch(new Request('https://runtime.internal/.well-known/widefleet/app-secrets',request));
+    if(url.pathname === '/ready') return ctx.exports.RuntimeManagement({props:{}}).fetch(new Request('https://${identitySourceId}.apps.example.test/.well-known/widefleet/ready'));
     if(url.pathname === '/signal') { const input=await request.json(); await env.STATE.put(input.key,'yes'); return Response.json(true); }
     if(url.pathname === '/started') return Response.json(await env.STATE.get('started'));
     if(url.pathname === '/stored') {const result=[];for(const object of (await env.WIDEFLEET_PACKAGES.list({prefix:'app-secrets/'})).objects) result.push(await (await env.WIDEFLEET_PACKAGES.get(object.key)).text()); return Response.json(result);}
@@ -198,7 +202,7 @@ export default { async fetch(request, env, ctx) {
       const headers=new Headers(request.headers);
       headers.set('cookie',url.searchParams.get('user')==='bob' ? ${JSON.stringify(identity.otherCookie)} : ${JSON.stringify(identity.cookie)});
       headers.set('x-auth-request-user','forged');
-      return await runtime.fetch(new Request('https://${identitySourceId}.apps.example.test/'+url.pathname.slice('/identity/'.length),{headers}),env,ctx);
+      return await runtime.fetch(new Request('https://${identitySourceId}.apps.example.test/'+url.pathname.slice('/identity/'.length),{headers,method:request.method}),env,ctx);
     }
     if(url.pathname==='/anonymous') return Response.json(await ctx.exports.AppService({props:{sourceAppId:'${identitySourceId}',organizationId:'widefleet',app:'${relayId}',hostname:'${relayId}.apps.example.test',entrypoint:'Relay'}}).invoke('who',[]));
     const service=ctx.exports.AppService({props:{organizationId:'widefleet',app:${JSON.stringify(sourceId)},hostname:'${sourceId}.apps.example.test',entrypoint:'default'}});
@@ -506,6 +510,83 @@ export default { async fetch(request, env, ctx) {
       const response = await request("/read");
       expect(response.status, await response.clone().text()).toBe(200);
       expect(await response.json()).toEqual(names.map(() => target.origin));
+    });
+
+    it("loads helper function exports alongside HTTP and inherited service entrypoints", async () => {
+      const code = `import {WorkerEntrypoint} from 'cloudflare:workers';
+        export async function asyncHelper(){return 'async';}
+        export const arrowHelper=()=> 'arrow';
+        export function syncHelper(){return 'sync';}
+        class Base extends WorkerEntrypoint {
+          async read(){return [await asyncHelper(),arrowHelper(),syncHelper()];}
+        }
+        export class Reader extends Base {}
+        export default {async fetch(request,env,ctx){return Response.json({values:[await asyncHelper(),arrowHelper(),syncHelper()],caller:ctx.props.caller});}};`;
+
+      const app = await publish(identitySourceId, code, "v1", {
+        metadata: {
+          ...snapshot(identitySourceId, code).metadata,
+          web: true,
+          entrypoints: ["Reader", "arrowHelper", "asyncHelper", "default", "syncHelper"],
+        },
+      });
+
+      const ready = await request("/ready");
+      expect(ready.status, await ready.clone().text()).toBe(200);
+      expect(await ready.json()).toMatchObject({ deploymentId: app.deploymentId });
+
+      const response = await request("/identity/helpers");
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(await response.json()).toEqual({
+        values: ["async", "arrow", "sync"],
+        caller: { issuer: identityIssuer, subject: "pairwise-subject", name: "Example User" },
+      });
+
+      await publish(sourceId, source, "v1", {
+        capabilities: {
+          TARGET: {
+            app: app.appId,
+            hostname: app.hostname,
+            organizationId: "widefleet",
+            entrypoint: "Reader",
+          },
+        },
+      });
+      const rpc = await request("/read");
+      expect(rpc.status, await rpc.clone().text()).toBe(200);
+      expect(await rpc.json()).toEqual(["async", "arrow", "sync"]);
+    });
+
+    it("serves static assets and returns 404 for missing assets without a default handler", async () => {
+      const code = "export {};";
+      const content = "Static app";
+      await publish(
+        identitySourceId,
+        code,
+        "v1",
+        {
+          metadata: { ...snapshot(identitySourceId, code).metadata, web: true, entrypoints: [] },
+          manifest: {
+            "/present.txt": {
+              hash: hashAsset("present.txt", Buffer.from(content)),
+              size: Buffer.byteLength(content),
+            },
+          },
+        },
+        { "/present.txt": content },
+      );
+      expect((await request("/ready")).status).toBe(200);
+      const present = await request("/identity/present.txt");
+      expect(present.status).toBe(200);
+      expect(await present.text()).toBe(content);
+
+      for (const method of ["GET", "HEAD", "POST"]) {
+        const missing = await (harness ? harness.fetch : fetch)(`${origin}/identity/missing.txt`, {
+          method,
+        });
+
+        expect(missing.status, `${method}: ${await missing.text()}`).toBe(404);
+      }
     });
   },
 );

@@ -50,6 +50,10 @@ export const callerEntrypoint = (application: Entrypoint | Handler) => {
     return scoped;
   }
 
+  // Functions other than WorkerEntrypoint classes are legal module exports.
+  // Preserve their native classification instead of trying to subclass them.
+  if (!(constructor.data.prototype instanceof WorkerEntrypoint)) return application;
+
   const contexts = new WeakMap<object, ExecutionContext<Properties>>();
 
   class ScopedEntrypoint extends constructor.data {
