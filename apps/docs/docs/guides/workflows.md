@@ -1,7 +1,7 @@
 ---
 title: Workflows
 description: Declare durable background work and manage Workflow instances.
-lastModified: 2026-10-12
+lastModified: 2026-10-29
 ---
 
 ## Declare and export a Workflow
@@ -102,6 +102,33 @@ HTTP management endpoints are:
 
 POST bodies contain a `request` object, for example `{"request":{"action":"create","workflow":"process","id":"example-1","params":{"message":"Example"}}}`. Supply a UUID `Idempotency-Key` header. All endpoints require management access to the app. Management payloads are JSON and bounded to 64 KiB; app-side bindings retain native structured-clone values. Management renders non-JSON outputs with `$type` tags (for example `BigInt`, `Map`, and binary values); repeated object references use `$ref` indices. Listings return instance summaries; use `status` for the output.
 
+## Organization execution suspension
+
+If your installation suspends an organization's execution, new Workflow starts, restarts,
+resumes and events are rejected. Status, pause, terminate and delete remain available
+through the CLI, management API and app's Workflows page.
+
+Installations can reconcile suspension of existing instances through the runtime catalog.
+The catalog reads the same organization availability as execution checks and saves the
+progress of pending pauses. Execution suspension requires `WIDEFLEET_HTTP_AVAILABILITY=kv`
+on the trusted app runtime. Changes take effect as the organization's KV state becomes visible;
+there is no separate per-app execution gate.
+Pausing is asynchronous: an instance can report `waitingForPause` while current
+work finishes. The runtime also checks availability before app execution, on every step
+attempt, around durable waits and before resource calls. A suspended operation fails
+closed even if native pausing has not finished. An interrupted step can therefore leave
+the instance in `errored` instead of `paused`.
+
+After the organization is unblocked, inspect the instance with `widefleet workflows status`.
+Resume a paused instance explicitly. For an errored instance, use [selective restart](#restart-from-a-step)
+from an appropriate checkpoint after checking for partial side effects. A quota reset or
+limit increase never resumes an instance automatically. Manually paused instances remain
+paused. Status and list results include a `suspension` field with the catalog's pause-request
+reason and timestamp, or `null` when none is recorded.
+
+Already admitted operations and retained Workflow state can still incur costs. Suspension
+does not reserve budget atomically or roll back completed side effects.
+
 ## Restart from a step
 
 Selective restart requires CLI and control plane 0.3.2 or newer and app runtime 0.2.2 or newer. Existing fleets retain their selected runtime when the control plane is upgraded; an administrator must [update the app runtime](/reference/runtime) with `widefleet runtime update 0.2.2`. Confirm the active version with `widefleet runtime status` before using selective restart.
@@ -181,6 +208,25 @@ Management request IDs have durable receipts. A retry returns the recorded resul
 ## Supported step API and limits
 
 Supported operations are `step.do`, `step.sleep`, `step.sleepUntil` and `step.waitForEvent`, including parallel branches, repeated step names, native static-delay retry policies, callback attempt context and `NonRetryableError`. `sleepUntil` requires a future deadline when scheduled, as in celld. Do not nest step calls inside a `step.do` callback.
+
+Installation operators can set `WIDEFLEET_WORKFLOW_POLICY` on the trusted app runtime to
+bound step retries, initial retry delay and per-attempt timeout. For example, this Wrangler
+variable allows at most 10 retries, a minimum initial delay of one second and a maximum
+attempt timeout of ten minutes:
+
+```jsonc
+{
+  "vars": {
+    "WIDEFLEET_WORKFLOW_POLICY": "{\"maxRetries\":10,\"minRetryDelayMs\":1000,\"maxTimeoutMs\":600000}",
+  },
+}
+```
+
+The runtime clamps app settings to the installation policy while preserving stricter app
+settings. Pinned app versions use the current policy when scheduling steps. Native steps
+whose configuration was already persisted retain that configuration; availability checks
+still guard each subsequent attempt. Without this variable, native step configuration is
+unchanged. Apply runtime configuration through the installation's normal deployment process.
 
 Short global `setTimeout` waits and `fetch` calls (including response body methods such as `json()` and `text()`) can run between steps while another branch waits for an event. They repeat on replay. Command delivery has a 60-second timeout; use durable steps for longer work. Put other asynchronous I/O, such as direct connector calls, Node APIs and manual stream reads, inside `step.do`, and use `step.sleep` for durable delays.
 
