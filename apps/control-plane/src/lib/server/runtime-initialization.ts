@@ -90,6 +90,7 @@ export const initializeRuntime = async (
 ) => {
   const { keys, configuration, database } = await prepareInstallation(input, migrationsFolder);
   const observation = createProductAnalytics(configuration);
+  database.db.$client.on("error", (error) => observation.exception(error));
 
   try {
     const extension = await createExtension({
