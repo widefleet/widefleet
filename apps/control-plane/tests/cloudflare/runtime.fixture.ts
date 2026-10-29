@@ -251,6 +251,13 @@ export class CloudflareWorkflowCatalog extends RuntimeWorkflowCatalog {
           if (await ctx.storage.get('creationFault') === 'lookup')
             throw new Error('Synthetic Workflow lookup failure');
           const instance = await env.WIDEFLEET_WORKFLOWS.get(id);
+          if (await ctx.storage.get('creationFault') === 'slow-pause') return {
+            status: () => instance.status(),
+            pause: async () => {
+              await ctx.storage.put('pauseStarted', true);
+              await new Promise(resolve => setTimeout(resolve, 30_000));
+            },
+          };
           if (await ctx.storage.get('creationFault') === 'pause') return {
             status: () => instance.status(),
             pause: async () => { throw new Error('Synthetic pause failure'); },
@@ -280,7 +287,11 @@ export class CloudflareWorkflowCatalog extends RuntimeWorkflowCatalog {
   }
   async admissionReads() { return await this.ctx.storage.get('admissionReads') ?? 0; }
   async creationFault(mode) { await this.ctx.storage.put('creationFault', mode); }
-  async reconcile() { await super.alarm(); }
+  async runReconciliation() { await super.alarm(); }
+  async reconciliationProgress() {
+    return { progress: await this.ctx.storage.get('pauseReconciliation') ?? null,
+      alarm: await this.ctx.storage.getAlarm(), pauseStarted: await this.ctx.storage.get('pauseStarted') ?? false };
+  }
   async nativeEvent(scope, id) {
     const record = await this.ctx.storage.get('instance/' + scope.workflow + '/' + id);
     await (await this.env.WIDEFLEET_WORKFLOWS.get(record.nativeId)).sendEvent({ type: 'continue', payload: { add: 21 } });
@@ -396,7 +407,7 @@ export default {
     if (url.pathname === '/fixture/workflow-binding') {
       const { scope, method, id, options, action } = await request.json();
       try {
-        if (['seedPending', 'forgetStart', 'admissionFault', 'admissionReads', 'creationFault', 'nativeExists', 'nativeEvent', 'reconcile'].includes(method)) {
+        if (['seedPending', 'forgetStart', 'admissionFault', 'admissionReads', 'creationFault', 'nativeExists', 'nativeEvent', 'reconcile', 'reconciliationProgress'].includes(method)) {
           const catalog = env.WIDEFLEET_WORKFLOW_CATALOG.get(env.WIDEFLEET_WORKFLOW_CATALOG.idFromName(scope.appId));
           if (method === 'seedPending') await catalog.seedPending(scope, id);
           if (method === 'forgetStart') await catalog.forgetStart(scope, id);
@@ -405,7 +416,8 @@ export default {
           if (method === 'creationFault') await catalog.creationFault(options);
           if (method === 'nativeExists') return Response.json(await catalog.nativeExists(scope, id));
           if (method === 'nativeEvent') await catalog.nativeEvent(scope, id);
-          if (method === 'reconcile') await catalog.reconcile();
+          if (method === 'reconcile') await catalog.runReconciliation();
+          if (method === 'reconciliationProgress') return Response.json(await catalog.reconciliationProgress());
           return Response.json({ ok: true });
         }
         const binding = ctx.exports.WorkflowBinding({ props: scope });
@@ -415,6 +427,11 @@ export default {
           : await binding.instance(id, action, options);
         return Response.json(result);
       } catch (error) { return Response.json({ error: error.message }, { status: 400 }); }
+    }
+    if (url.pathname === '/fixture/reconcile-workflows') {
+      const { organizationId, appIds } = await request.json();
+      await env.RUNTIME_MANAGEMENT.reconcileWorkflows(organizationId, appIds);
+      return new Response(null, { status: 204 });
     }
     if (url.pathname === '/fixture/availability') {
       const { organizationId = 'widefleet', value } = await request.json();

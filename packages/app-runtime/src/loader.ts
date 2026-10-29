@@ -1,7 +1,7 @@
 import { createAuthHandler, manageAuthConfiguration } from "@platform/auth-proxy";
 import { authControlPath, authRoute, authRouteKey } from "@platform/auth-proxy/publication";
 import { WorkerEntrypoint } from "cloudflare:workers";
-import { appEventConfiguration } from "@platform/contracts";
+import { appEventConfiguration, organizationIdentifier } from "@platform/contracts";
 import { publishedApp } from "@platform/contracts";
 import { connectorCaller } from "@platform/contracts";
 import { z } from "zod";
@@ -245,24 +245,6 @@ const manageRuntime = async (
   if (url.pathname === "/.well-known/widefleet/connectors")
     return manageConnector(request, environment);
 
-  if (url.pathname === "/.well-known/widefleet/execution") {
-    if (request.method !== "POST") return new Response(null, { status: 405 });
-
-    if (environment["WIDEFLEET_HTTP_AVAILABILITY"] !== "kv")
-      return Response.json(
-        { error: "Execution suspension requires WIDEFLEET_HTTP_AVAILABILITY=kv" },
-        { status: 409 },
-      );
-
-    const input = z
-      .strictObject({ appId: z.uuid(), blocked: z.boolean() })
-      .parse(await request.json());
-
-    await workflowCatalog(environment, input.appId).suspend(input.blocked);
-
-    return new Response(null, { status: 204 });
-  }
-
   if (url.pathname === "/.well-known/widefleet/workflows") {
     if (request.method !== "POST") return new Response(null, { status: 403 });
 
@@ -307,6 +289,23 @@ const manageRuntime = async (
 };
 
 export class RuntimeManagement extends WorkerEntrypoint<ParentEnvironment> {
+  async reconcileWorkflows(organizationId: string, appIds: string[]) {
+    if (this.env["WIDEFLEET_HTTP_AVAILABILITY"] !== "kv")
+      throw new Error("Workflow suspension requires WIDEFLEET_HTTP_AVAILABILITY=kv");
+    organizationIdentifier.parse(organizationId);
+    const ids = z.array(z.uuid()).max(10).parse(appIds);
+
+    const results = await Promise.allSettled(
+      ids.map((appId) => workflowCatalog(this.env, appId).reconcile(organizationId)),
+    );
+
+    const failures: unknown[] = [];
+
+    for (const result of results) if (result.status === "rejected") failures.push(result.reason);
+
+    if (failures.length)
+      throw new AggregateError(failures, "Workflow suspension reconciliation failed");
+  }
   override fetch(request: Request) {
     return manageRuntime(request, this.env, this.ctx);
   }

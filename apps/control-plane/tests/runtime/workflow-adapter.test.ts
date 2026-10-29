@@ -378,25 +378,6 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
         });
     };
 
-    it("rejects suspension publication when execution enforcement is disabled", async () => {
-      const response = await fetch(`${origin}/.well-known/widefleet/execution`, {
-        method: "POST",
-        headers: {
-          authorization: "Bearer native-runtime-fixture-control-token-never-deploy",
-          "content-type": "application/json",
-          "x-fixture-disabled": "true",
-        },
-        body: JSON.stringify({ appId, blocked: true }),
-      });
-
-      expect(response.status).toBe(409);
-      expect(await response.json()).toEqual({
-        error: "Execution suspension requires WIDEFLEET_HTTP_AVAILABILITY=kv",
-      });
-      // No gate was persisted and no pause was scheduled by the rejected request.
-      expect(await status(await create("loop"), "complete")).toMatchObject({ output: 3 });
-    });
-
     it("stops retries with a native non-retryable error when execution is suspended", async () => {
       const id = await create("suspension-retry");
 

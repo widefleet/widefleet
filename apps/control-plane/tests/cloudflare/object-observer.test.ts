@@ -194,6 +194,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("R2 observer in work
           for (const identity of [
             {
               appId: "a0000000-0000-4000-8000-000000000001",
+              hostname: "objects.example.test",
               deploymentId: "a0000000-0000-4000-8000-000000000002",
               buildId: null,
             },

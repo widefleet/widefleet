@@ -1,6 +1,6 @@
 import type { workerMetadata, publishedApp } from "@platform/contracts";
 import type { z } from "zod";
-import type { ExecutionScope } from "./execution.ts";
+import type { WorkerIdentity } from "./runtime-extension.ts";
 
 export type Json = z.infer<ReturnType<typeof z.json>>;
 
@@ -45,7 +45,10 @@ export type ParentEnvironment = {
     | DurableObjectNamespace<import("./connector-state.ts").ConnectorSupervisor>;
 };
 
-export type BindingProperties = { name: string; execution: ExecutionScope };
+export type BindingProperties = {
+  name: string;
+  identity: WorkerIdentity & ({ hostname: string } | { organizationId: string });
+};
 
 export type ScheduledInput = { cron: string; scheduledTime: number };
 

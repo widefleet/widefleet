@@ -10,6 +10,7 @@ export const workerCode = async (
 ) => {
   const identity = {
     appId: app.appId,
+    hostname: app.hostname,
     deploymentId: app.deploymentId,
     buildId: app.metadata.debug?.build_id ?? null,
   };
@@ -18,7 +19,6 @@ export const workerCode = async (
     {
       scope: `apps/${app.appId}`,
       identity,
-      execution: { appId: app.appId, hostname: app.hostname },
       metadata: app.metadata,
       modules: app.modules,
       nativeBindings: app.nativeBindings,
@@ -105,7 +105,7 @@ export default entrypoint;`,
     globalOutbound: context.exports.Gateway({
       props: {
         origins: app.network.policy.backend,
-        execution: { appId: app.appId, hostname: app.hostname },
+        identity,
       },
     }),
     tails: workerTails(environment, context, identity, app.telemetry),

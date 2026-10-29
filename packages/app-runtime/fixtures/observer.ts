@@ -22,6 +22,7 @@ export { ConnectorSecrets } from "../src/connector-code.ts";
 
 const app = {
   appId: "a0000000-0000-4000-8000-000000000001",
+  hostname: "observer.example.test",
   deploymentId: "a0000000-0000-4000-8000-000000000002",
   buildId: null,
 };
@@ -159,7 +160,6 @@ export default {
                 name: "OBSERVER_KV",
                 binding: "APP_KV",
                 identity: scope === "app" ? app : connector,
-                execution: { organizationId: "fixture" },
               },
             }),
           }

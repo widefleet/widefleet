@@ -1,15 +1,13 @@
 import type { storedModule, workerConfiguration } from "@platform/contracts";
 import type { z } from "zod";
-import type { ParentEnvironment } from "./types.ts";
+import type { BindingProperties, ParentEnvironment } from "./types.ts";
 import { loadModules } from "./worker-modules.ts";
 import { runtimeExtension } from "#runtime-extension";
 import type { WorkerIdentity } from "./runtime-extension.ts";
-import type { ExecutionScope } from "./execution.ts";
 
 type Definition = {
   scope: string;
-  identity: WorkerIdentity;
-  execution: ExecutionScope;
+  identity: BindingProperties["identity"];
   metadata: z.infer<typeof workerConfiguration>;
   modules: z.infer<typeof storedModule>[];
   nativeBindings: Record<string, string>;
@@ -35,14 +33,14 @@ export const workerDefinition = async (
     const name = input.nativeBindings[binding.name];
 
     if (!name || !environment[name]) throw new Error("Worker resource is not installed");
-    const options = { props: { name, execution: input.execution } };
+    const options = { props: { name, identity: input.identity } };
 
     switch (binding.type) {
       case "d1":
         bindings.set(
           `WIDEFLEET_D1_${binding.name}`,
           context.exports.Database({
-            props: { ...options.props, binding: binding.name, identity: input.identity },
+            props: { ...options.props, binding: binding.name },
           }),
         );
         break;
@@ -50,7 +48,7 @@ export const workerDefinition = async (
         bindings.set(
           `WIDEFLEET_R2_${binding.name}`,
           context.exports.Objects({
-            props: { ...options.props, binding: binding.name, identity: input.identity },
+            props: { ...options.props, binding: binding.name },
           }),
         );
         break;
@@ -58,7 +56,7 @@ export const workerDefinition = async (
         bindings.set(
           `WIDEFLEET_KV_${binding.name}`,
           context.exports.KeyValue({
-            props: { ...options.props, binding: binding.name, identity: input.identity },
+            props: { ...options.props, binding: binding.name },
           }),
         );
         break;

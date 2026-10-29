@@ -1,7 +1,7 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { objectOperation } from "./object-protocol.ts";
 import { runtimeExtension } from "#runtime-extension";
-import type { ObjectObservation, WorkerIdentity } from "./runtime-extension.ts";
+import type { ObjectObservation } from "./runtime-extension.ts";
 import { nativeBinding } from "./native-binding.ts";
 import type { BindingProperties, ParentEnvironment } from "./types.ts";
 import { requireExecution } from "./execution.ts";
@@ -22,14 +22,14 @@ const metadata = (object: R2Object) => ({
 
 export class Objects extends WorkerEntrypoint<
   ParentEnvironment,
-  BindingProperties & { binding: string; identity: WorkerIdentity }
+  BindingProperties & { binding: string }
 > {
   async #observe<Value>(
     operation: ObjectObservation["operation"],
     execute: () => Promise<Value>,
     resultOutcome: (result: Value) => ObjectObservation["outcome"] = () => "ok",
   ) {
-    await requireExecution(this.env, this.ctx.props.execution);
+    await requireExecution(this.env, this.ctx.props.identity);
     const observe = runtimeExtension.object;
 
     if (!observe) return execute();
