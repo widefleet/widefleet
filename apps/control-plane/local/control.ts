@@ -84,10 +84,13 @@ if (command === "agent") {
             .values({
               id: identity.userId,
               name: identity.name,
-              email: identity.email,
+              email: identity.email.toLowerCase(),
               emailVerified: true,
             })
-            .onConflictDoNothing();
+            .onConflictDoUpdate({
+              target: user.id,
+              set: { email: identity.email.toLowerCase() },
+            });
           await transaction
             .insert(account)
             .values({

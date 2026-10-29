@@ -193,7 +193,11 @@ export const authenticationOptions = (
           if (!(await allowEmail(input.email.toLowerCase()))) {
             if (context.path === "/email-otp/send-verification-otp")
               return context.json({ success: true });
-            throw new APIError("UNAUTHORIZED", { message: "Invalid or expired sign-in code" });
+
+            const plugin = context.context.getPlugin("email-otp");
+
+            if (!plugin) throw new Error("Email OTP plugin is not configured");
+            throw APIError.from("BAD_REQUEST", plugin.$ERROR_CODES.INVALID_OTP);
           }
         }
 
