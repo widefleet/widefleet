@@ -229,8 +229,8 @@ Widefleet supplies the signed-in user's identity; the connector manages provider
 authorization and saved connections. Start with the
 [Gmail example](/guides/gmail-connector) for a complete project.
 
-Use matching control-plane, CLI, deployment-agent and app-runtime versions with
-connector browser support, and configure
+Use matching control-plane, CLI, deployment-agent and app-runtime releases at
+**0.4.15 or newer**, and configure
 [app sign-in](/guides/members#opening-published-apps) for the organization.
 
 ### Identify the caller

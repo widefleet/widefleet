@@ -4,7 +4,7 @@ description: Copy a connector that links personal Google accounts with Better Au
 lastModified: 2026-10-29
 ---
 
-Deploy the [Gmail example](https://github.com/widefleet/widefleet/tree/main/examples/connectors/gmail)
+Deploy the [Gmail example](https://github.com/widefleet/widefleet/tree/v0.4.15/examples/connectors/gmail)
 to let users connect their own Google accounts and read Gmail from your apps.
 It includes a connection page and persistent account storage; apps access Gmail
 through the connector binding.
@@ -12,7 +12,8 @@ through the connector binding.
 ## Prerequisites
 
 - An organization administrator account and a signed-in Widefleet CLI.
-- Matching control-plane, CLI, deployment-agent and app-runtime versions with
+- Matching control-plane, CLI, deployment-agent and app-runtime releases at
+  **0.4.15 or newer** for
   [verified connector callers and browser pages](/guides/connectors#user-identity-and-connector-pages).
   Configure organization sign-in and a public HTTPS connector address first.
 - Node.js 24 or newer and pnpm 12.4.2 for the connector project.
@@ -24,7 +25,7 @@ Copy the complete example directory, including its lockfile and package-manager
 configuration, into your own repository:
 
 ```sh
-git clone --depth 1 https://github.com/widefleet/widefleet.git
+git clone --depth 1 --branch v0.4.15 https://github.com/widefleet/widefleet.git
 cp -R widefleet/examples/connectors/gmail gmail-connector
 cd gmail-connector
 pnpm install --frozen-lockfile
