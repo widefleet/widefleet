@@ -7,10 +7,32 @@ import { NonRetryableError } from 'cloudflare:workflows';
 export class AppWorkflow extends WorkflowEntrypoint {
   async run(event, step) {
     const { mode, id } = event.payload;
+    if (mode === 'suspension-event-timeout') {
+      try {
+        await step.waitForEvent('timeout', { type: 'continue', timeout: '2 seconds' });
+        return 'unexpected event';
+      } catch (error) {
+        if (error instanceof NonRetryableError) throw error;
+        return { fallback: true, name: error.name };
+      }
+    }
     const record = async (label, value) => {
       await this.env.OBSERVE.record(id, label);
       return value;
     };
+    if (mode === 'suspension-retry') {
+      return step.do('retry', { retries: { limit: 10000, delay: 1 } }, async () => {
+        await record('suspension-start', null);
+        throw new Error('synthetic retry');
+      });
+    }
+    if (['suspension-sleep', 'suspension-until', 'suspension-event'].includes(mode)) {
+      await step.do('first', () => record('first', null));
+      if (mode === 'suspension-sleep') await step.sleep('wait', 2000);
+      else if (mode === 'suspension-until') await step.sleepUntil('wait', Date.now() + 2000);
+      else await step.waitForEvent('wait', { type: 'continue', timeout: '5 minutes' });
+      return record('after-wait', true);
+    }
     if (mode === 'restart-error') {
       await step.do('first', () => record('first', null));
       return step.do('recover', async () => {

@@ -1,6 +1,6 @@
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
-import { authRoute, authRouteKey } from "@platform/auth-proxy/publication";
 import {
+  organizationIdentifier,
   workflowEventType,
   workflowInstanceId,
   workflowName,
@@ -10,7 +10,7 @@ import {
 } from "@platform/contracts";
 import { z } from "zod";
 import { readApp } from "./catalog.ts";
-import { requireOrganizationAvailability } from "./availability.ts";
+import { readExecutionAvailability, readOrganizationAvailability } from "./availability.ts";
 import type { ParentEnvironment } from "./types.ts";
 import {
   workflowOptions,
@@ -41,6 +41,16 @@ type RecordEntry = {
   createdAt: string;
   start: Start;
   started: boolean;
+  suspension?: { reason: "organization"; requestedAt: string };
+};
+
+type PauseReconciliation = {
+  id: string;
+  organizationId: string;
+  since: string;
+  cursor?: string;
+  pending: boolean;
+  complete: boolean;
 };
 
 const key = (workflow: string, id: string) => `instance/${workflow}/${id}`;
@@ -61,24 +71,167 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
   ) {
     return this.env.WIDEFLEET_WORKFLOWS.create(options);
   }
-  private async requireExecution(scope: WorkflowScope) {
-    if (this.env["WIDEFLEET_HTTP_AVAILABILITY"] !== "kv") return;
-
+  private async requireExecution(scope: Pick<WorkflowScope, "appId" | "hostname">) {
     try {
-      const value = await this.env.AUTH_CONFIG.get(authRouteKey(scope.hostname));
-
-      if (value === null) throw new Error("Workflow app organization is not published");
-      const route = authRoute.parse(JSON.parse(value));
-
-      if (route.appId !== scope.appId)
-        throw new Error("Workflow app authorization is being updated");
-      await requireOrganizationAvailability(this.env, route.organizationId);
+      if ((await readExecutionAvailability(this.env, scope)).blocked)
+        throw new Error("Organization execution is suspended");
     } catch (cause) {
       throw new WorkflowAdmissionError(
         cause instanceof Error ? cause.message : "Workflow admission failed",
         { cause },
       );
     }
+  }
+  async reconcile(organizationId: string) {
+    organizationIdentifier.parse(organizationId);
+    const availability = await readOrganizationAvailability(this.env, organizationId);
+
+    if (availability === null) throw new Error("Organization availability could not be read");
+
+    return this.ctx.blockConcurrencyWhile(async () => {
+      if (!availability.blocked) {
+        await this.invalidateReconciliation();
+
+        return;
+      }
+
+      if (await this.ctx.storage.get<boolean>("deleted")) return;
+      const previous = await this.ctx.storage.get<PauseReconciliation>("pauseReconciliation");
+
+      const reconciliation =
+        previous?.organizationId === organizationId
+          ? previous
+          : {
+              id: crypto.randomUUID(),
+              organizationId,
+              since: new Date().toISOString(),
+              pending: false,
+              complete: false,
+            };
+
+      // This is progress for pausing instances, never a second admission gate.
+      // Repeated quota evaluations do not rescan a completed catalog.
+      if (reconciliation.complete) return;
+      await this.ctx.storage.put("pauseReconciliation", reconciliation);
+
+      if ((await this.ctx.storage.getAlarm()) === null)
+        await this.ctx.storage.setAlarm(Date.now() + 1);
+      await this.ctx.storage.sync();
+    });
+  }
+  private async invalidateReconciliation() {
+    await this.ctx.storage.delete("pauseReconciliation");
+    await this.ctx.storage.deleteAlarm();
+  }
+  private async currentReconciliation(expected: PauseReconciliation) {
+    const current = await this.ctx.storage.get<PauseReconciliation>("pauseReconciliation");
+
+    return current?.id === expected.id && current.cursor === expected.cursor && !current.complete;
+  }
+  private async pauseRecord(
+    name: string,
+    record: RecordEntry,
+    reconciliation: PauseReconciliation,
+  ) {
+    let expired = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    try {
+      return await Promise.race([
+        (async () => {
+          const instance = await this.env.WIDEFLEET_WORKFLOWS.get(record.nativeId);
+          const { status } = await this.status(instance);
+
+          if (["paused", "complete", "errored", "terminated"].includes(status)) return false;
+
+          if (expired || status === "unknown" || status === "waitingForPause") return true;
+
+          const ready = await this.ctx.blockConcurrencyWhile(async () => {
+            if (expired || !(await this.currentReconciliation(reconciliation))) return false;
+            const current = await this.ctx.storage.get<RecordEntry>(name);
+
+            if (!current || current.nativeId !== record.nativeId) return false;
+            current.suspension = { reason: "organization", requestedAt: reconciliation.since };
+            await this.ctx.storage.put(name, current);
+
+            return true;
+          });
+
+          if (ready && !expired) await instance.pause();
+
+          return true;
+        })(),
+        new Promise<boolean>((resolve) => {
+          timer = setTimeout(() => {
+            expired = true;
+            resolve(true);
+          }, 5_000);
+        }),
+      ]);
+    } catch (cause) {
+      if (missing(cause)) return false;
+      console.error("Workflow suspension could not be applied", { instanceId: record.nativeId });
+
+      return true;
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  }
+  override async alarm() {
+    const reconciliation = await this.ctx.storage.get<PauseReconciliation>("pauseReconciliation");
+
+    if (!reconciliation || reconciliation.complete) return;
+
+    const availability = await readOrganizationAvailability(
+      this.env,
+      reconciliation.organizationId,
+    );
+
+    if (availability === null) {
+      // Keep the saved work and retry even after the platform's alarm retries expire.
+      await this.ctx.storage.setAlarm(Date.now() + 10_000);
+
+      return;
+    }
+
+    if (!availability.blocked) {
+      await this.ctx.blockConcurrencyWhile(async () => {
+        if (await this.currentReconciliation(reconciliation)) await this.invalidateReconciliation();
+      });
+
+      return;
+    }
+
+    const options: DurableObjectListOptions = { prefix: "instance/", limit: 10 };
+
+    if (reconciliation.cursor) options.startAfter = reconciliation.cursor;
+    const records = await this.ctx.storage.list<RecordEntry>(options);
+
+    // Provider calls run outside the storage lock. One slow instance cannot
+    // block admission or prevent other instances/pages from being processed.
+    const pending = await Promise.all(
+      [...records].map(([name, record]) => this.pauseRecord(name, record, reconciliation)),
+    );
+
+    await this.ctx.blockConcurrencyWhile(async () => {
+      if (!(await this.currentReconciliation(reconciliation))) return;
+      reconciliation.pending ||= pending.some(Boolean);
+      const cursor = [...records.keys()].at(-1);
+
+      if (records.size === 10 && cursor) {
+        reconciliation.cursor = cursor;
+        await this.ctx.storage.setAlarm(Date.now() + 1);
+      } else {
+        delete reconciliation.cursor;
+        reconciliation.complete = !reconciliation.pending;
+
+        if (reconciliation.pending) await this.ctx.storage.setAlarm(Date.now() + 10_000);
+        else await this.ctx.storage.deleteAlarm();
+        reconciliation.pending = false;
+      }
+
+      await this.ctx.storage.put("pauseReconciliation", reconciliation);
+    });
   }
   protected async restartTarget(from: z.infer<typeof workflowRestartFrom>) {
     // celld's adapter prepares each operation in a separate native checkpoint.
@@ -115,12 +268,16 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
   }
   private async readStatus(record: RecordEntry) {
     try {
-      return await this.status(await this.native(record));
+      return {
+        ...(await this.status(await this.native(record))),
+        suspension: record.suspension ?? null,
+      };
     } catch (error) {
       if (record.started || !missing(error)) throw error;
 
       return {
         status: "unknown" as const,
+        suspension: record.suspension ?? null,
         error: {
           name: "WorkflowInstanceUnavailable",
           message: "Workflow creation was not confirmed and its native instance is missing",
@@ -130,6 +287,7 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
   }
   private async start(record: RecordEntry) {
     await this.requireExecution(record.start);
+    await this.invalidateReconciliation();
     await this.ctx.storage.put(key(record.start.workflow, record.id), record);
     let instance;
 
@@ -288,7 +446,10 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
 
     if (action === "status") return this.readStatus(record);
 
-    if (action === "resume" || action === "restart") await this.requireExecution(scope);
+    if (action === "resume" || action === "restart" || action === "sendEvent")
+      await this.requireExecution(scope);
+
+    if (action === "resume" || action === "restart") await this.invalidateReconciliation();
     const instance = await this.native(record);
 
     switch (action) {
@@ -331,6 +492,11 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
         throw new Error("Unsupported Workflow operation");
     }
 
+    if (action === "resume" || action === "restart") {
+      delete record.suspension;
+      await this.ctx.storage.put(name, record);
+    }
+
     return null;
   }
   instance(scope: WorkflowScope, id: string, action: string, input?: InstanceInput) {
@@ -361,6 +527,7 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
               id: record.id,
               version: record.start.version,
               createdAt: record.createdAt,
+              suspension: record.suspension ?? null,
             };
 
             try {
@@ -454,6 +621,7 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
   purge() {
     return this.ctx.blockConcurrencyWhile(async () => {
       await this.ctx.storage.put("deleted", true);
+      await this.invalidateReconciliation();
       const records = await this.ctx.storage.list<RecordEntry>({ prefix: "instance/", limit: 100 });
 
       for (const [name, record] of records) {

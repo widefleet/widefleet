@@ -15,6 +15,8 @@ import type { WorkflowRunner } from "./workflow-cloudflare-runner.ts";
 import { workflowObserver } from "./workflow-observation.ts";
 import type { WorkflowObservation } from "./runtime-extension.ts";
 import { executionOptions } from "./execution-limits.ts";
+import { requireExecution } from "./execution.ts";
+import { workflowStepPolicy } from "./workflow-policy.ts";
 import {
   captureWorkflow,
   nativeWorkflowError,
@@ -50,10 +52,19 @@ const workflowWorkerKey = async (
 export class CloudflareWorkflowSteps extends RpcTarget {
   #step;
   #observe;
-  constructor(step: WorkflowStep, observe?: (event: WorkflowObservation) => void) {
+  #check;
+  #policy;
+  constructor(
+    step: WorkflowStep,
+    check: () => Promise<void>,
+    policy: string | undefined,
+    observe?: (event: WorkflowObservation) => void,
+  ) {
     super();
     this.#step = step;
     this.#observe = observe;
+    this.#check = check;
+    this.#policy = policy;
   }
   do(
     name: string,
@@ -61,7 +72,9 @@ export class CloudflareWorkflowSteps extends RpcTarget {
     callback: (context: StepContext) => Promise<WorkflowResult>,
   ) {
     return captureWorkflow(() =>
-      this.#step.do(name, config, async (context) => {
+      this.#step.do(name, workflowStepPolicy(config, this.#policy), async (context) => {
+        await this.#check();
+
         // The engine invokes this callback only on execution, not cache replay.
         // Use its persisted attempt number; wrapper calls include cached steps.
         if (context.attempt === 1)
@@ -77,26 +90,49 @@ export class CloudflareWorkflowSteps extends RpcTarget {
   }
   sleep(...args: Parameters<WorkflowStep["sleep"]>) {
     return captureWorkflow(async () => {
+      await this.#check();
       await this.#step.sleep(...args);
+      await this.#check();
 
       return undefined;
     });
   }
   sleepUntil(...args: Parameters<WorkflowStep["sleepUntil"]>) {
     return captureWorkflow(async () => {
+      await this.#check();
       await this.#step.sleepUntil(...args);
+      await this.#check();
 
       return undefined;
     });
   }
   waitForEvent(...args: Parameters<WorkflowStep["waitForEvent"]>) {
-    return captureWorkflow(() => this.#step.waitForEvent(...args));
+    return captureWorkflow(async () => {
+      await this.#check();
+
+      const result = await this.#step.waitForEvent(...args).catch(async (cause: unknown) => {
+        // Native RPC can erase WorkflowTimeoutError's name. Match its message
+        // too, without replacing engine pause/restart/termination signals.
+        if (
+          cause instanceof Error &&
+          (cause.name === "WorkflowTimeoutError" ||
+            /^Execution timed out after \d+ms$/.test(cause.message))
+        )
+          await this.#check();
+        throw cause;
+      });
+
+      await this.#check();
+
+      return result;
+    });
   }
 }
 
 export class CloudflareAppWorkflow extends WorkflowEntrypoint<ParentEnvironment, Start> {
   override async run(event: WorkflowEvent<Start>, step: WorkflowStep) {
     const start = event.payload;
+    await requireExecution(this.env, start);
     const app = await workflowApp(start, this.env);
 
     const worker = this.env.WIDEFLEET_LOADER.get(
@@ -119,6 +155,8 @@ export class CloudflareAppWorkflow extends WorkflowEntrypoint<ParentEnvironment,
         },
         new CloudflareWorkflowSteps(
           step,
+          () => requireExecution(this.env, start),
+          this.env.WIDEFLEET_WORKFLOW_POLICY,
           workflowObserver(this.ctx, this.env, {
             appId: start.appId,
             version: start.version,

@@ -10,6 +10,7 @@ export const workerCode = async (
 ) => {
   const identity = {
     appId: app.appId,
+    hostname: app.hostname,
     deploymentId: app.deploymentId,
     buildId: app.metadata.debug?.build_id ?? null,
   };
@@ -101,7 +102,12 @@ export default entrypoint;`,
     mainModule: "__widefleet_bootstrap.js",
     modules: Object.fromEntries(modules),
     env: Object.fromEntries(bindings),
-    globalOutbound: context.exports.Gateway({ props: { origins: app.network.policy.backend } }),
+    globalOutbound: context.exports.Gateway({
+      props: {
+        origins: app.network.policy.backend,
+        identity,
+      },
+    }),
     tails: workerTails(environment, context, identity, app.telemetry),
   };
 };

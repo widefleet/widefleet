@@ -7,6 +7,8 @@ import {
 } from "cloudflare:workers";
 import { workflowApp } from "./workflow-app.ts";
 import { workerCode } from "./worker.ts";
+import { requireExecution } from "./execution.ts";
+import { workflowStepPolicy } from "./workflow-policy.ts";
 import type { ParentEnvironment } from "./types.ts";
 import type { WorkflowRunner } from "./workflow-runner.ts";
 import { executionOptions } from "./execution-limits.ts";
@@ -56,6 +58,7 @@ class Session extends RpcTarget {
 
 export class WorkflowSessions extends WorkerEntrypoint<ParentEnvironment> {
   async open(start: Start) {
+    await requireExecution(this.env, start);
     const options = executionOptions(this.env.WIDEFLEET_EXECUTION_LIMITS, "workflow");
     const app = await workflowApp(start, this.env);
 
@@ -74,6 +77,7 @@ type CelldWorkflowEnvironment = ParentEnvironment & {
 export class AppWorkflow extends WorkflowEntrypoint<CelldWorkflowEnvironment, Start> {
   override async run(event: WorkflowEvent<Start>, step: WorkflowStep) {
     const start = event.payload;
+    await requireExecution(this.env, start);
     let runner: Rpc.Stub<Session> | undefined;
     let synchronized = 0;
     const history: { results: Reply[]; commands: ReplayCommand[] }[] = [];
@@ -127,6 +131,7 @@ export class AppWorkflow extends WorkflowEntrypoint<CelldWorkflowEnvironment, St
         `bridge/${ordinal++}`,
         { timeout: 60000, retries: { limit: 0, delay: 0 } },
         async () => {
+          await requireExecution(this.env, start);
           const target = await ensure();
 
           const selected = listen
@@ -200,6 +205,7 @@ export class AppWorkflow extends WorkflowEntrypoint<CelldWorkflowEnvironment, St
             recorded.nativeName,
             { timeout: 60000, retries: { limit: 0, delay: 0 } },
             async () => {
+              await requireExecution(this.env, start);
               await ensure();
 
               const command = commands.get(recorded.id);
@@ -216,28 +222,41 @@ export class AppWorkflow extends WorkflowEntrypoint<CelldWorkflowEnvironment, St
           const execute = async () => {
             switch (command.kind) {
               case "do":
-                return step.do(name, command.config, async (context) => {
-                  const result = await (
-                    await ensure()
-                  ).execute(command.id, {
-                    ...context,
-                    step: { name: command.name, count: command.count },
-                  });
+                return step.do(
+                  name,
+                  workflowStepPolicy(command.config, this.env.WIDEFLEET_WORKFLOW_POLICY),
+                  async (context) => {
+                    await requireExecution(this.env, start);
 
-                  if (result.error) throw restore(result.error);
+                    const result = await (
+                      await ensure()
+                    ).execute(command.id, {
+                      ...context,
+                      step: { name: command.name, count: command.count },
+                    });
 
-                  return result.value;
-                });
+                    if (result.error) throw restore(result.error);
+
+                    return result.value;
+                  },
+                );
               case "sleep":
                 await step.sleep(name, command.duration);
+                await requireExecution(this.env, start);
 
                 return undefined;
               case "sleepUntil":
                 await step.sleepUntil(name, command.deadline);
+                await requireExecution(this.env, start);
 
                 return undefined;
-              case "waitForEvent":
-                return step.waitForEvent(name, command.options);
+              case "waitForEvent": {
+                const result = await step.waitForEvent(name, command.options);
+                await requireExecution(this.env, start);
+
+                return result;
+              }
+
               default:
                 throw new Error("Invalid Workflow command");
             }

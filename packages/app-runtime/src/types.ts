@@ -1,5 +1,6 @@
 import type { workerMetadata, publishedApp } from "@platform/contracts";
 import type { z } from "zod";
+import type { WorkerIdentity } from "./runtime-extension.ts";
 
 export type Json = z.infer<ReturnType<typeof z.json>>;
 
@@ -15,6 +16,7 @@ export type NativeBindings = {
 };
 
 export type ParentEnvironment = {
+  WIDEFLEET_WORKFLOW_POLICY?: string;
   AUTH_CONFIG: KVNamespace;
   WIDEFLEET_WORKFLOW_CATALOG: DurableObjectNamespace<
     import("./workflow-catalog.ts").WorkflowCatalog
@@ -42,7 +44,10 @@ export type ParentEnvironment = {
     | DurableObjectNamespace<import("./connector-state.ts").ConnectorSupervisor>;
 };
 
-export type BindingProperties = { name: string };
+export type BindingProperties = {
+  name: string;
+  identity: WorkerIdentity & ({ hostname: string } | { organizationId: string });
+};
 
 export type ScheduledInput = { cron: string; scheduledTime: number };
 

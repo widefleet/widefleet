@@ -3,8 +3,9 @@ import * as z from "zod";
 import type { BindingProperties, Json, ParentEnvironment } from "./types.ts";
 import { nativeBinding } from "./native-binding.ts";
 import { runtimeExtension } from "#runtime-extension";
-import type { KeyValueObservation, WorkerIdentity } from "./runtime-extension.ts";
+import type { KeyValueObservation } from "./runtime-extension.ts";
 import { observeDatabase } from "./d1-observation.ts";
+import { requireExecution } from "./execution.ts";
 
 const statement = z.object({
   sql: z.string(),
@@ -27,10 +28,11 @@ export type DatabaseRequest = z.infer<typeof databaseRequest>;
 
 export class Database extends WorkerEntrypoint<
   ParentEnvironment,
-  BindingProperties & { binding: string; identity: WorkerIdentity }
+  BindingProperties & { binding: string }
 > {
   async query(input: DatabaseRequest, bookmark?: string) {
     const request = databaseRequest.parse(input);
+    await requireExecution(this.env, this.ctx.props.identity);
     const nativeDatabase = nativeBinding(this.env, this.ctx.props.name, "d1");
     const observe = runtimeExtension.database;
 
@@ -91,13 +93,14 @@ export type KeyValueOperation = z.infer<typeof keyValueOperation>;
 
 export class KeyValue extends WorkerEntrypoint<
   ParentEnvironment,
-  BindingProperties & { binding: string; identity: WorkerIdentity }
+  BindingProperties & { binding: string }
 > {
   async #observe<Value>(
     operation: KeyValueObservation["operation"],
     count: number,
     execute: () => Promise<Value>,
   ) {
+    await requireExecution(this.env, this.ctx.props.identity);
     const observe = runtimeExtension.keyValue;
 
     if (!observe) return execute();
@@ -198,13 +201,17 @@ export class KeyValue extends WorkerEntrypoint<
 }
 
 export class Producer extends WorkerEntrypoint<ParentEnvironment, BindingProperties> {
-  send(body: Json | ArrayBuffer, options?: QueueSendOptions) {
+  async send(body: Json | ArrayBuffer, options?: QueueSendOptions) {
+    await requireExecution(this.env, this.ctx.props.identity);
+
     return nativeBinding(this.env, this.ctx.props.name, "queue").send(body, options);
   }
-  sendBatch(
+  async sendBatch(
     messages: Iterable<MessageSendRequest<Json | ArrayBuffer>>,
     options?: QueueSendBatchOptions,
   ) {
+    await requireExecution(this.env, this.ctx.props.identity);
+
     return nativeBinding(this.env, this.ctx.props.name, "queue").sendBatch(messages, options);
   }
 }
