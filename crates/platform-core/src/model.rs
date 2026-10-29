@@ -199,6 +199,7 @@ pub struct Job {
     pub capabilities: Option<CapabilitySnapshot>,
     pub app_id: Option<Uuid>,
     pub hostname: Option<String>,
+    pub origin: Option<String>,
     pub deployment_id: Option<Uuid>,
     pub artifact_id: Option<Uuid>,
     pub attempt: u32,
@@ -252,6 +253,8 @@ pub struct CapabilitySnapshot {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublishedApp {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
     #[serde(default)]
     pub secret_revision: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]

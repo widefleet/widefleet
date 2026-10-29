@@ -60,7 +60,7 @@ export const workerCode = async (
 
   const bindings = new Map(Object.entries(worker.env));
   bindings.set("WIDEFLEET_DEPLOYMENT_ID", app.deploymentId);
-  bindings.set("WIDEFLEET_ORIGIN", `https://${app.hostname}`);
+  bindings.set("WIDEFLEET_ORIGIN", app.origin ?? `https://${app.hostname}`);
   bindings.set(
     "WIDEFLEET_SECRETS",
     context.exports.AppSecrets({ props: { appId: app.appId, revision: app.secretRevision ?? 0 } }),
@@ -91,12 +91,12 @@ export const workerCode = async (
   // Import the full namespace before linking app and platform sibling modules.
   modules.set(
     "__widefleet_bootstrap.js",
-    `import * as workers from 'cloudflare:workers'; import {callerEntrypoint} from './__widefleet_bindings.js'; import app from './__widefleet_app.js'; export default callerEntrypoint(app); export {Events} from './__widefleet_events.js';
+    `import * as WIDEFLEET_WORKERS from 'cloudflare:workers'; import {callerEntrypoint as WIDEFLEET_CALLER} from './__widefleet_bindings.js'; import WIDEFLEET_APP from './__widefleet_app.js'; import * as WIDEFLEET_EXPORTS from ${JSON.stringify(`./${app.metadata.main_module}`)}; export default WIDEFLEET_CALLER(WIDEFLEET_APP); export {Events} from './__widefleet_events.js';
 ${(app.metadata.entrypoints ?? [])
   .filter((name) => name !== "default")
   .map(
-    (name) =>
-      `import {${name} as App_${name}} from ${JSON.stringify(`./${app.metadata.main_module}`)}; export const ${name} = callerEntrypoint(App_${name});`,
+    (name, index) =>
+      `const WIDEFLEET_SERVICE_${index} = WIDEFLEET_CALLER(WIDEFLEET_EXPORTS[${JSON.stringify(name)}]); export {WIDEFLEET_SERVICE_${index} as ${name}};`,
   )
   .join("\n")}`,
   );

@@ -476,5 +476,36 @@ export default { async fetch(request, env, ctx) {
         marker: "private-field",
       });
     });
+    it("keeps generated helper names and JavaScript keywords available as service exports", async () => {
+      const names = ["app", "workers", "callerEntrypoint", "App_Reader", "class"];
+
+      const code = `import {WorkerEntrypoint} from 'cloudflare:workers';
+        class Reader extends WorkerEntrypoint {read(){return this.env.WIDEFLEET_ORIGIN;}}
+        export {${names.map((name) => `Reader as ${name}`).join(",")}};`;
+
+      const target = await publish(identityTargetId, code, "v1", {
+        origin: `https://${identityTargetId}.apps.example.test:25453`,
+        metadata: { ...snapshot(identityTargetId, code).metadata, entrypoints: names },
+      });
+
+      const bindings = names.map(
+        (entrypoint, index) =>
+          [
+            `SERVICE_${index}`,
+            {
+              app: target.appId,
+              hostname: target.hostname,
+              organizationId: "widefleet",
+              entrypoint,
+            },
+          ] as const,
+      );
+
+      const reader = `import {WorkerEntrypoint} from 'cloudflare:workers'; export default class extends WorkerEntrypoint {async read(){return Promise.all(${JSON.stringify(bindings.map(([name]) => name))}.map(name=>this.env[name].read()));}}`;
+      await publish(sourceId, reader, "v1", { capabilities: Object.fromEntries(bindings) });
+      const response = await request("/read");
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(await response.json()).toEqual(names.map(() => target.origin));
+    });
   },
 );

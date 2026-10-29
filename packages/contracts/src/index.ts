@@ -418,6 +418,7 @@ export const runtimeStatus = z.strictObject({
 export const runtimeUpdate = z.strictObject({ version: runtimeVersion });
 
 export const publishedApp = artifact.extend({
+  origin: z.url().optional(),
   secretRevision: z.number().int().nonnegative().optional(),
   organizationId: organizationIdentifier.optional(),
   network: networkSnapshot,
@@ -469,6 +470,7 @@ export const job = z.strictObject({
   capabilities: capabilitySnapshot.nullable().default(null),
   appId: identifier.nullable(),
   hostname: z.string().nullable(),
+  origin: z.url().nullable().default(null),
   deploymentId: identifier.nullable(),
   artifactId: identifier.nullable(),
   attempt: z.number().int().positive(),

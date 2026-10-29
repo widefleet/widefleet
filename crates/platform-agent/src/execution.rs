@@ -241,6 +241,7 @@ pub async fn prepare(
     // Each activation attempt gets an immutable snapshot and a fresh worker key.
     let mut candidate = match artifact {
         Some(artifact) => Some(PublishedApp {
+            origin: job.origin.clone(),
             secret_revision: packages
                 .app_secrets
                 .as_ref()

@@ -2281,9 +2281,12 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         },
       };
 
-      const versionKey = `versions/${entry.appId}/${legacy.version}.json`;
+      const versionKeys = Array.from(
+        { length: 65 },
+        () => `versions/${entry.appId}/${crypto.randomUUID()}.json`,
+      );
 
-      for (const key of [`hosts/${entry.hostname}.json`, versionKey])
+      for (const key of [`hosts/${entry.hostname}.json`, ...versionKeys])
         await worker.fetch(`http://fixture/storage?key=${key}`, {
           method: "PUT",
           body: JSON.stringify(legacy),
@@ -2296,12 +2299,14 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       expect(contract.publishedApp.parse((await host(entry.hostname))?.body).capabilities).toEqual(
         {},
       );
-      expect(
-        await (await worker.fetch(`http://fixture/storage?key=${versionKey}`)).json(),
-      ).toMatchObject({
-        body: z.json().parse(JSON.parse(JSON.stringify({ ...legacy, capabilities: {} }))),
-        metadata: { widefleet_deployment_sequence: "0" },
-      });
+
+      for (const versionKey of versionKeys)
+        expect(
+          await (await worker.fetch(`http://fixture/storage?key=${versionKey}`)).json(),
+        ).toMatchObject({
+          body: z.json().parse(JSON.parse(JSON.stringify({ ...legacy, capabilities: {} }))),
+          metadata: { widefleet_deployment_sequence: "0" },
+        });
       expect((await authenticatedFetch(`https://${entry.hostname}/`)).status).toBe(200);
     }, 30_000);
 
@@ -3133,8 +3138,9 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         { runtime: { version: "99.3.0" } },
       ]);
       await selectRuntime({ version: release.version });
+      // Publishing the runtime and confirming its workflow are separate steps.
       await expect
-        .poll(runtimeStatus)
+        .poll(runtimeStatus, { timeout: 15000 })
         .toMatchObject({ activeVersion: release.version, state: "succeeded" });
       await dispatch(entry);
       await completed(entry.command.id);

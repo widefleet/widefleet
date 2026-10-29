@@ -1,3 +1,4 @@
+import { appUrl } from "./apps.ts";
 import { finishAppRemoval } from "./app-removal.ts";
 import { storedAppSecrets } from "./app-secrets.ts";
 import * as contract from "@platform/contracts";
@@ -58,6 +59,7 @@ export const createJobService = (
   storage: ArtifactStorage,
   encryptionKey: string,
   report: (event: z.infer<typeof contract.reportingOperation>) => void = () => {},
+  appHttpsPort = 443,
 ) => ({
   authenticate: (token: string) =>
     transact(database, async (transaction) => {
@@ -242,6 +244,9 @@ export const createJobService = (
           workflow: claimed.workflow,
           appId: claimed.appId,
           hostname: candidate.hostname,
+          origin: candidate.hostname
+            ? new URL(appUrl(candidate.hostname, appHttpsPort)).origin
+            : null,
           deploymentId: claimed.deploymentId,
           artifactId,
           access,

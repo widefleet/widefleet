@@ -1,3 +1,4 @@
+import { appUrl } from "./apps.ts";
 import { decryptSecret } from "./secret-encryption.ts";
 import { migrateAppServices } from "./app-services-migration.ts";
 import { storedAppSecrets } from "./app-secrets.ts";
@@ -41,6 +42,7 @@ const deploymentConfiguration = z.object({
   CLOUDFLARE_ACCOUNT_ID: z.string().regex(/^[a-f0-9]{32}$/),
   CLOUDFLARE_API_TOKEN: z.string().min(1),
   APP_RUNTIME_NAME: z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/),
+  APP_HTTPS_PORT: z.coerce.number().int().min(1).max(65535).default(443),
 });
 
 const value = <T, E>(result: Result<T, E>) => {
@@ -158,9 +160,6 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
       sequence: number,
       nativeBindings: Record<string, string>,
     ) => {
-      // Registration may replay a pre-upgrade checkpoint, so migrate at the read boundary.
-      await migrateAppServices(bindings.ARTIFACTS);
-
       return withCloudflareDatabase(bindings, async ({ db }) =>
         value(
           await transact(db, async (transaction) => {
@@ -322,6 +321,7 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               manifest: record.manifest,
               modules: record.modules,
               hostname: app.hostname,
+              origin: new URL(appUrl(app.hostname, configuration.APP_HTTPS_PORT)).origin,
               deploymentId: command.kind === "deploy" ? command.id : serving?.deploymentId,
               network,
               capabilities: resolved,
@@ -637,6 +637,9 @@ export const executeCloudflareDeployment = async (
       );
 
     const admitted = registration.command ?? command;
+
+    // Run outside registration: that step may replay a pre-upgrade checkpoint.
+    await migrateAppServices(bindings.ARTIFACTS, step);
 
     const nativeBindings = await step.do("provision-resources", options, () =>
       retryable(() => runner.provision(admitted)),
