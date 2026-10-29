@@ -25,10 +25,13 @@ export const authorizationPage = (url: string, cookies: string[]) => {
   );
 };
 
+// The runtime's no-referrer default makes form POSTs send Origin: null. Keep the
+// same-origin check working without sending referrer information to other origins.
 export const connectionPage = (name: string, accountId: string | null, failed: boolean) =>
   new Response(
     `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<meta name="referrer" content="same-origin">
 <title>Connect Gmail</title><style>
 *{box-sizing:border-box}body{margin:0;background:#fafafa;color:#202124;font:16px/1.6 system-ui,sans-serif}
 main{max-width:540px;margin:10vh auto;padding:32px}h1{font-size:30px;line-height:1.2;letter-spacing:-.7px}

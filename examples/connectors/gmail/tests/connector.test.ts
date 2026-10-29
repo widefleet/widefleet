@@ -120,6 +120,19 @@ describe("Gmail connector with Better Auth and D1", () => {
     await runtime?.dispose();
   });
 
+  it("serves a same-origin document policy for connection and disconnection forms", async () => {
+    const alice = browser("alice");
+    const policy = '<meta name="referrer" content="same-origin">';
+    const disconnected = await alice.request("/");
+    expect(disconnected.status).toBe(200);
+    expect(await disconnected.text()).toContain(policy);
+
+    await connect(alice, "google-alice");
+    const connected = await alice.request("/");
+    expect(connected.status).toBe(200);
+    expect(await connected.text()).toContain(policy);
+  });
+
   it("links the caller, reuses the connection across requests, and isolates subjects and issuers", async () => {
     const alice = browser("alice");
     const bob = browser("bob");
@@ -201,6 +214,8 @@ describe("Gmail connector with Better Auth and D1", () => {
   it("rejects cross-origin actions, changed callback users, missing state cookies and replay", async () => {
     const alice = browser("alice");
     expect((await alice.request("/connect", "POST", "https://app.example.test")).status).toBe(403);
+    expect((await alice.request("/connect", "POST", "null")).status).toBe(403);
+    expect((await alice.request("/disconnect", "POST", "null")).status).toBe(403);
     expect((await alice.request("/disconnect", "POST", "https://app.example.test")).status).toBe(
       403,
     );
