@@ -1,8 +1,7 @@
 import { z } from "zod";
 import { publishedApp } from "@platform/contracts";
 import { workerCode } from "../src/worker.ts";
-import { connectorCode } from "../src/connector-code.ts";
-import { connectorSnapshot, digest } from "../src/connector-publication.ts";
+import { digest } from "./digest.ts";
 import { nativeBinding } from "../src/native-binding.ts";
 import { observeDatabase } from "../src/d1-observation.ts";
 import { exerciseDatabase } from "./d1-scenarios.ts";
@@ -10,21 +9,22 @@ import type { ParentEnvironment } from "../src/types.ts";
 
 export { Database } from "../src/storage.ts";
 
+export { AppSecrets } from "../src/app-secrets.ts";
+
 export { Assets } from "../src/assets.ts";
 
 export { Gateway } from "../src/egress.ts";
-
-export { ConnectorSecrets } from "../src/connector-code.ts";
 
 const app = {
   appId: "a0000000-0000-4000-8000-000000000001",
   deploymentId: "a0000000-0000-4000-8000-000000000002",
 };
 
-const connector = {
+const service = {
   organizationId: "observer-fixture",
-  connector: "fixture",
-  connectorVersion: "a0000000-0000-4000-8000-000000000003",
+  appId: "a0000000-0000-4000-8000-000000000004",
+  buildId: null,
+  deploymentId: "a0000000-0000-4000-8000-000000000003",
 };
 
 export default {
@@ -89,10 +89,11 @@ export default {
       return Response.json(await exerciseDatabase(database, "raw-write"));
     }
 
-    const scope = path.startsWith("/connector") ? "connector" : "app";
+    const scope = path.startsWith("/service") ? "service" : "app";
+    const identity = scope === "app" ? app : service;
     const source = z.string().parse(env["D1_CHILD_SOURCE"]);
     const sha256 = await digest(source);
-    const prefix = scope === "app" ? `apps/${app.appId}` : "connectors/observer-fixture/fixture";
+    const prefix = `apps/${identity.appId}`;
 
     await env.WIDEFLEET_PACKAGES.put(`${prefix}/modules/${sha256}`, source);
     const modules = [{ name: "child.js", type: "esm", sha256, size: source.length }];
@@ -106,44 +107,28 @@ export default {
     const nativeBindings = { DB: "NATIVE_DB" };
 
     const worker = env.WIDEFLEET_LOADER.get(scope, () =>
-      scope === "app"
-        ? workerCode(
-            publishedApp.parse({
-              id: app.appId,
-              appId: app.appId,
-              deploymentId: app.deploymentId,
-              version: app.deploymentId,
-              hostname: "observer.example.test",
-              metadata: {
-                ...metadata,
-                assets: { binding: "ASSETS", upload_session: app.deploymentId },
-              },
-              manifest: {},
-              modules,
-              nativeBindings,
-              network: { revision: 1, policy: { backend: [], browser: [] } },
-            }),
-            env,
-            ctx,
-          )
-        : connectorCode(
-            connectorSnapshot.parse({
-              organizationId: connector.organizationId,
-              version: connector.connectorVersion,
-              release: {
-                protocol: 1,
-                name: connector.connector,
-                metadata: { ...metadata, entrypoints: ["default"] },
-                modules,
-              },
-              nativeBindings,
-              ciphertext: "",
-              fingerprint: sha256,
-              previous: null,
-            }),
-            env,
-            ctx,
-          ),
+      workerCode(
+        publishedApp.parse({
+          id: identity.appId,
+          appId: identity.appId,
+          deploymentId: identity.deploymentId,
+          version: identity.deploymentId,
+          hostname: "observer.example.test",
+          organizationId: scope === "app" ? undefined : "observer-fixture",
+          metadata: {
+            ...metadata,
+            web: scope === "app",
+            entrypoints: scope === "app" ? [] : ["default"],
+            assets: { binding: "ASSETS", upload_session: identity.deploymentId },
+          },
+          manifest: {},
+          modules,
+          nativeBindings,
+          network: { revision: 1, policy: { backend: [], browser: [] } },
+        }),
+        env,
+        ctx,
+      ),
     );
 
     return worker.getEntrypoint().fetch(request);

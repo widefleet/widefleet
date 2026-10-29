@@ -45,7 +45,7 @@ describe("Hosted resource provisioning", () => {
   it("validates and applies execution profiles only to the parent runtime", async () => {
     const executionLimits = {
       http: { cpuMs: 100, subRequests: 50 },
-      connector: { cpuMs: 250, subRequests: 50 },
+      service: { cpuMs: 250, subRequests: 50 },
       cron: { cpuMs: 1000, subRequests: 200 },
       workflow: { cpuMs: 5000, subRequests: 500 },
       readiness: { cpuMs: 100, subRequests: 10 },
@@ -409,7 +409,7 @@ describe("Hosted infrastructure deployment coordination", () => {
   const source = "export default { fetch() { return new Response('fixture'); } }";
 
   const release = runtimeRelease.parse({
-    protocol: 2,
+    protocol: 3,
     auth: 1,
     workflows: 1,
     cloudflare: 1,

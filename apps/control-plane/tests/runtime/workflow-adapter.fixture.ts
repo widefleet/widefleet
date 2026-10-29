@@ -88,7 +88,7 @@ export class AppWorkflow extends WorkflowEntrypoint {
     }
     if (mode === 'permissions') {
       await step.waitForEvent('continue', { type: 'continue', timeout: '5 minutes' });
-      return step.do('inspect', async () => ({ connector: !!this.env.OBSERVE, secret: this.env.PLATFORM_SECRET ?? null }));
+      return step.do('inspect', async () => ({ connected: !!this.env.OBSERVE, secret: this.env.PLATFORM_SECRET ?? null }));
     }
     if (mode === 'sequential') {
       const a = await step.do('first', () => record('first', 20));

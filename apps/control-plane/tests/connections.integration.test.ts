@@ -1,19 +1,15 @@
-import { memoryStorage } from "./memory-storage.fixture.ts";
-import { connectorFixture, connectorFiles } from "./cloudflare-connector.fixture.ts";
 import * as contract from "@platform/contracts";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { z } from "zod";
 import { createAppService } from "../src/lib/server/apps.ts";
-import { createConnectorService } from "../src/lib/server/connectors.ts";
-import { connectorReference } from "../src/lib/server/connector-package.ts";
-import { apps, artifacts, connectors, deployments, jobs } from "../src/lib/server/schema.ts";
-import { createStorage } from "../src/lib/server/storage.ts";
+import { createConnectionService } from "../src/lib/server/connections.ts";
+import { apps, artifacts, deployments, jobs } from "../src/lib/server/schema.ts";
 import { createTestEnvironment } from "./environment.ts";
 
-describe("Connector discovery and app connections", () => {
+describe("App connections", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
-  let service: ReturnType<typeof createConnectorService>;
+  let service: ReturnType<typeof createConnectionService>;
   let appService: ReturnType<typeof createAppService>;
   let creator: Awaited<ReturnType<typeof person>>;
   let colleague: Awaited<ReturnType<typeof person>>;
@@ -35,19 +31,13 @@ describe("Connector discovery and app connections", () => {
 
   beforeAll(async () => {
     environment = await createTestEnvironment();
-    service = createConnectorService(
-      environment.database.db,
-      createStorage(environment.configuration, memoryStorage()),
-      "local-test-only",
-      environment.configuration,
-    );
+    service = createConnectionService(environment.database.db);
     appService = createAppService(environment.database.db, environment.configuration);
     creator = await person("connection-creator");
     colleague = await person("connection-reader");
   });
 
   beforeEach(async () => {
-    await environment.database.db.delete(connectors);
     await environment.database.db.delete(apps);
     await environment.database.db.delete(jobs);
     app = (
@@ -98,117 +88,24 @@ describe("Connector discovery and app connections", () => {
     return deploymentId;
   };
 
-  const publish = (name: string) => {
-    const release = connectorFixture(name);
-
-    return service.deploy(
-      { ...creator, application: { ...creator.application, admin: true } },
-      release,
-      connectorFiles(release),
-      crypto.randomUUID(),
-    );
-  };
-
-  it("rejects a connector whose hostname belongs to an app", async () => {
-    expect(await publish("inventory")).toMatchObject({ error: { code: "CONFLICT" } });
-    expect((await service.catalog(creator)).unwrap()).toEqual([]);
-  });
-
-  it("reserves connector addresses before activation and permits connector updates", async () => {
-    const deployed = (await publish("github")).unwrap();
-    expect(deployed.browserUrl).toBe(
-      `https://github.${environment.configuration.APP_DOMAIN}${environment.configuration.APP_HTTPS_PORT === 443 ? "" : `:${environment.configuration.APP_HTTPS_PORT}`}/`,
-    );
-    expect(
-      await appService.create(creator, {
-        slug: "github",
-        displayName: "Conflicting app",
-        parentId: null,
-      }),
-    ).toMatchObject({ error: { code: "CONFLICT" } });
-    expect((await publish("github")).isOk()).toBe(true);
-  });
-
-  it("allows exactly one owner when an app and connector claim an address concurrently", async () => {
-    const outcomes = await Promise.all([
-      publish("simultaneous"),
-      appService.create(creator, {
-        slug: "simultaneous",
-        displayName: "Concurrent app",
-        parentId: null,
-      }),
-    ]);
-
-    expect(outcomes.filter((outcome) => outcome.isOk())).toHaveLength(1);
-    expect(outcomes.find((outcome) => outcome.isErr())).toMatchObject({
-      error: { code: "CONFLICT" },
-    });
-  });
-
-  it("keeps the organization sign-in hostname reserved", async () => {
-    expect(await publish("auth")).toMatchObject({ error: { code: "CONFLICT" } });
-  });
-
-  it("offers only grantable entrypoints without exposing administrative metadata", async () => {
-    const reference = connectorReference.parse({
-      name: "erp",
-      checksum: "a".repeat(64),
-      entrypoints: ["default", "NewReader"],
-      classes: [],
-      secrets: { API_KEY: "synthetic-ciphertext" },
-      secretRevision: 9,
-    });
-
-    await environment.database.db.insert(connectors).values([
-      {
-        name: "erp",
-        organizationId: app.organizationId,
-        jobId: crypto.randomUUID(),
-        package: reference,
-        appliedPackage: {
-          ...reference,
-          entrypoints: ["default", "OldReader"],
-        },
-      },
-      {
-        name: "pending",
-        organizationId: app.organizationId,
-        jobId: crypto.randomUUID(),
-        package: { ...reference, name: "pending" },
-      },
-    ]);
-
-    expect((await service.catalog(creator)).unwrap()).toEqual([
-      {
-        name: "erp",
-        entrypoints: ["default"],
-        browserUrl: `${contract.connectorBrowserOrigin("erp", null, environment.configuration.APP_DOMAIN, environment.configuration.APP_HTTPS_PORT)}/`,
-      },
-      { name: "pending", entrypoints: [], browserUrl: null },
-    ]);
-    expect(await service.list(creator)).toMatchObject({ error: { code: "FORBIDDEN" } });
-    expect(await service.read(creator, "erp")).toMatchObject({ error: { code: "FORBIDDEN" } });
-    expect(
-      await service.bind(creator, app.id, "ERP", { connector: "erp", entrypoint: "default" }),
-    ).toMatchObject({ error: { code: "FORBIDDEN" } });
-  });
-
   it("authorizes app collaborators and distinguishes saved grants from active connections", async () => {
     await environment.database.db
       .update(apps)
       .set({
-        capabilities: { ERP: { connector: "erp", entrypoint: "default" } },
+        capabilities: {
+          ERP: { app: "f7233b0b-8e7a-470a-b4a9-a543990abc71", entrypoint: "default" },
+        },
         capabilityRevision: 1,
       })
       .where(eq(apps.id, app.id));
     expect((await service.connections(creator, app.id)).unwrap()).toEqual({
       deploymentId: null,
       resources: [],
-      activeConnectors: {},
-      connectors: {
+      activeConnections: {},
+      connections: {
         revision: 1,
         appliedRevision: null,
-        grants: { ERP: { connector: "erp", entrypoint: "default" } },
+        grants: { ERP: { app: "f7233b0b-8e7a-470a-b4a9-a543990abc71", entrypoint: "default" } },
         state: "saved",
         error: null,
       },
@@ -217,7 +114,7 @@ describe("Connector discovery and app connections", () => {
       error: { code: "NOT_FOUND" },
     });
     (await appService.grant(creator, app.id, colleague.id)).unwrap();
-    expect((await service.connections(colleague, app.id)).unwrap().connectors.state).toBe("saved");
+    expect((await service.connections(colleague, app.id)).unwrap().connections.state).toBe("saved");
   });
 
   it("reads resource names only from the serving deployment and omits variable values", async () => {
@@ -242,7 +139,7 @@ describe("Connector discovery and app connections", () => {
       { binding: "ASSETS", type: "assets", target: "inventory" },
     ]);
     expect(JSON.stringify(result)).not.toContain("synthetic-sensitive-value");
-    expect(result.activeConnectors).toEqual({});
+    expect(result.activeConnections).toEqual({});
   });
 
   it("distinguishes D1 databases with the same name using the selected identifier", async () => {
@@ -263,7 +160,11 @@ describe("Connector discovery and app connections", () => {
     "preserves serving bindings across pending or failed removal: %s",
     async (error) => {
       const deploymentId = await deploy([]);
-      const active = { ERP: { connector: "erp", entrypoint: "default" } };
+
+      const active = {
+        ERP: { app: "f7233b0b-8e7a-470a-b4a9-a543990abc71", entrypoint: "default" },
+      };
+
       await environment.database.db.insert(jobs).values([
         {
           id: crypto.randomUUID(),
@@ -302,8 +203,8 @@ describe("Connector discovery and app connections", () => {
         })
         .where(eq(apps.id, app.id));
       const result = (await service.connections(creator, app.id)).unwrap();
-      expect(result.activeConnectors).toEqual(active);
-      expect(result.connectors).toMatchObject({
+      expect(result.activeConnections).toEqual(active);
+      expect(result.connections).toMatchObject({
         grants: {},
         state: error ? "failed" : "pending",
         error,
@@ -314,8 +215,8 @@ describe("Connector discovery and app connections", () => {
         .set({ appliedCapabilityRevision: 2, capabilityError: null })
         .where(eq(apps.id, app.id));
       expect((await service.connections(creator, app.id)).unwrap()).toMatchObject({
-        activeConnectors: {},
-        connectors: { state: "active" },
+        activeConnections: {},
+        connections: { state: "active" },
       });
     },
   );
@@ -325,17 +226,19 @@ describe("Connector discovery and app connections", () => {
     await environment.database.db
       .update(apps)
       .set({
-        capabilities: { ERP: { connector: "erp", entrypoint: "default" } },
+        capabilities: {
+          ERP: { app: "f7233b0b-8e7a-470a-b4a9-a543990abc71", entrypoint: "default" },
+        },
         capabilityRevision: 2,
         appliedCapabilityRevision: 1,
       })
       .where(eq(apps.id, app.id));
-    expect((await service.connections(creator, app.id)).unwrap().activeConnectors).toBeNull();
+    expect((await service.connections(creator, app.id)).unwrap().activeConnections).toBeNull();
   });
 
   it("finds the serving snapshot without scanning newer jobs from other apps", async () => {
     const deploymentId = await deploy([]);
-    const active = { ERP: { connector: "erp", entrypoint: "default" } };
+    const active = { ERP: { app: "f7233b0b-8e7a-470a-b4a9-a543990abc71", entrypoint: "default" } };
 
     const other = (
       await appService.create(creator, { slug: "other", displayName: "Other", parentId: null })
@@ -372,7 +275,7 @@ describe("Connector discovery and app connections", () => {
       })
       .where(eq(apps.id, app.id));
     await environment.database.db.execute(sql`ANALYZE job`);
-    expect((await service.connections(creator, app.id)).unwrap().activeConnectors).toEqual(active);
+    expect((await service.connections(creator, app.id)).unwrap().activeConnections).toEqual(active);
 
     const explained = await environment.database.db.execute(sql`
       EXPLAIN (ANALYZE, FORMAT JSON)

@@ -1,6 +1,36 @@
 import { workerDefinition, workerTails } from "./worker-definition.ts";
 import type { ParentEnvironment, PublishedApp } from "./types.ts";
 
+// celld 0.6.2 cannot keep a call alive while it awaits another request's async
+// loader factory. Prepare code in each invoking request, then pass a synchronous
+// factory. Cache completed definitions only; weak references and a bounded index
+// avoid retaining inactive app code. No caller data belongs in this cache.
+const definitions = new Map<string, WeakRef<Awaited<ReturnType<typeof workerCode>>>>();
+
+export const appWorker = async (
+  app: PublishedApp,
+  environment: ParentEnvironment,
+  context: ExecutionContext,
+) => {
+  let definition = definitions.get(app.version)?.deref();
+
+  if (!definition) {
+    definition = await workerCode(app, environment, context);
+
+    if (definitions.size >= 64) {
+      const oldest = definitions.keys().next();
+
+      if (!oldest.done) definitions.delete(oldest.value);
+    }
+
+    definitions.set(app.version, new WeakRef(definition));
+  }
+
+  const code = definition;
+
+  return environment.WIDEFLEET_LOADER.get(app.version, () => code);
+};
+
 export const workerCode = async (
   app: PublishedApp,
   environment: ParentEnvironment,
@@ -9,6 +39,7 @@ export const workerCode = async (
   workflowSource = WIDEFLEET_WORKFLOW_SOURCE,
 ) => {
   const identity = {
+    organizationId: app.organizationId,
     appId: app.appId,
     deploymentId: app.deploymentId,
     buildId: app.metadata.debug?.build_id ?? null,
@@ -29,6 +60,11 @@ export const workerCode = async (
 
   const bindings = new Map(Object.entries(worker.env));
   bindings.set("WIDEFLEET_DEPLOYMENT_ID", app.deploymentId);
+  bindings.set("WIDEFLEET_ORIGIN", app.origin ?? `https://${app.hostname}`);
+  bindings.set(
+    "WIDEFLEET_SECRETS",
+    context.exports.AppSecrets({ props: { appId: app.appId, revision: app.secretRevision ?? 0 } }),
+  );
   bindings.set(
     app.metadata.assets.binding,
     context.exports.Assets({ props: { version: `versions/${app.appId}/${app.version}.json` } }),
@@ -45,8 +81,8 @@ export const workerCode = async (
 
   for (const [name, grant] of Object.entries(app.capabilities))
     bindings.set(
-      `WIDEFLEET_CONNECTOR_${name}`,
-      context.exports.ConnectorGateway({ props: { ...grant, appId: app.appId } }),
+      `WIDEFLEET_SERVICE_${name}`,
+      context.exports.AppService({ props: { ...grant, sourceAppId: app.appId } }),
     );
 
   const modules = new Map(Object.entries(worker.modules));
@@ -55,22 +91,18 @@ export const workerCode = async (
   // Import the full namespace before linking app and platform sibling modules.
   modules.set(
     "__widefleet_bootstrap.js",
-    `import * as workers from 'cloudflare:workers';
-import { withConnectorCaller } from './__widefleet_bindings.js';
-import app from './__widefleet_app.js';
-export {Events} from './__widefleet_events.js';
-const entrypoint = app.prototype instanceof workers.WorkerEntrypoint
-  ? class extends app {
-      fetch(request) { return withConnectorCaller(this.ctx.props?.connectorCaller, () => super.fetch(request)); }
-    }
-  : { ...app, fetch(request, env, ctx) {
-      return withConnectorCaller(ctx.props?.connectorCaller, () => app.fetch(request, env, ctx));
-    } };
-export default entrypoint;`,
+    `import * as WIDEFLEET_WORKERS from 'cloudflare:workers'; import {callerEntrypoint as WIDEFLEET_CALLER} from './__widefleet_bindings.js'; import WIDEFLEET_APP from './__widefleet_app.js'; import * as WIDEFLEET_EXPORTS from ${JSON.stringify(`./${app.metadata.main_module}`)}; export default WIDEFLEET_CALLER(WIDEFLEET_APP); export {Events} from './__widefleet_events.js';
+${(app.metadata.entrypoints ?? [])
+  .filter((name) => name !== "default")
+  .map(
+    (name, index) =>
+      `const WIDEFLEET_SERVICE_${index} = WIDEFLEET_CALLER(WIDEFLEET_EXPORTS[${JSON.stringify(name)}]); export {WIDEFLEET_SERVICE_${index} as ${name}};`,
+  )
+  .join("\n")}`,
   );
   modules.set(
     "__widefleet_app.js",
-    `export {default} from ${JSON.stringify(`./${app.metadata.main_module}`)};`,
+    `import * as app from ${JSON.stringify(`./${app.metadata.main_module}`)}; export default app.default ?? {fetch(){return new Response(null,{status:404});}};`,
   );
   modules.set("__widefleet_events.js", WIDEFLEET_EVENTS_SOURCE);
 
@@ -102,6 +134,16 @@ export default entrypoint;`,
     modules: Object.fromEntries(modules),
     env: Object.fromEntries(bindings),
     globalOutbound: context.exports.Gateway({ props: { origins: app.network.policy.backend } }),
-    tails: workerTails(environment, context, identity, app.telemetry),
+    tails: workerTails(
+      environment,
+      context,
+      {
+        organizationId: app.organizationId,
+        appId: app.appId,
+        deploymentId: app.deploymentId,
+        buildId: app.metadata.debug?.build_id ?? null,
+      },
+      app.telemetry,
+    ),
   };
 };

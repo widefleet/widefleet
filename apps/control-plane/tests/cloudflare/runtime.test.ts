@@ -66,9 +66,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
     manifest: { "/asset.txt": { hash: assetHash, size: Buffer.byteLength(asset) } },
     nativeBindings: { DB: "DB", KV: "KV", FILES: "FILES", JOBS: "JOBS" },
     capabilities: {
-      CONNECTOR: {
+      SERVICE: {
         organizationId: crypto.randomUUID(),
-        connector: "fixture",
+        app: "00000000-0000-4000-8000-000000000099",
+        hostname: "service.apps.example.test",
         entrypoint: "default",
       },
     },
@@ -185,6 +186,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
           WIDEFLEET_LOGS: "cloudflare",
           PRIVATE_ROOT_SECRET: "parent-only-fixture",
           WIDEFLEET_CONTROL_TOKEN: controlToken,
+          WIDEFLEET_SECRETS_KEY: "01".repeat(32),
           WIDEFLEET_CONFIGURATION: JSON.stringify({
             crons: { "* * * * *": [hostname, previewHostname] },
             queues: {
@@ -565,11 +567,11 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
     expect(z.object({ message: z.string() }).parse(await response.json()).message).toBe(
       "fixture application failure",
     );
-    expect(await json("/connector")).toBe(42);
+    expect(await json("/service")).toBe(42);
   });
 
-  it("exposes granted connector RPC without leaking parent bindings", async () => {
-    expect(await json("/connector")).toBe(42);
+  it("exposes granted app RPC without leaking parent bindings", async () => {
+    expect(await json("/service")).toBe(42);
 
     const result = z
       .object({ keys: z.array(z.string()), imported: z.array(z.string()) })
@@ -577,7 +579,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
 
     expect(result.keys).toEqual(result.imported);
     expect(result.keys).toContain("DB");
-    expect(result.keys).toContain("CONNECTOR");
+    expect(result.keys).toContain("SERVICE");
 
     for (const key of [
       "PRIVATE_ROOT_SECRET",
@@ -787,7 +789,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
     }
   });
 
-  it("resumes an app workflow with its own resources and connector", async () => {
+  it("resumes an app workflow with its own resources and app connection", async () => {
     const id = crypto.randomUUID();
     const path = `/workflow?id=${id}`;
     expect(await json(path, { method: "POST" })).toEqual({ id });
@@ -917,7 +919,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
       await json(`${path}&action=resume`, { method: "PUT" });
       await expect
         .poll(() => json(path), { timeout: 15_000 })
-        .toMatchObject({ status: "complete", output: { network: 403, connector: true } });
+        .toMatchObject({ status: "complete", output: { network: 403, connected: true } });
       const resumed = (await workflowWorkers(id)).at(-1);
       expect(resumed?.key).not.toBe(original?.key);
       expect(await json(`/workflow/attempts?id=${id}`)).toEqual([{ label: "started", attempt: 1 }]);
@@ -1203,7 +1205,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
     expect(await json(`/workflow/attempts?id=${id}`)).toEqual([{ label: "failure", attempt: 1 }]);
   }, 55_000);
 
-  it("rechecks connector grants when a pinned workflow resumes with a warm Worker cache", async () => {
+  it("rechecks app grants when a pinned workflow resumes with a warm Worker cache", async () => {
     const id = crypto.randomUUID();
     const path = `/workflow?id=${id}&mode=permissions`;
     await json(path, { method: "POST" });
@@ -1222,13 +1224,63 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
         .poll(() => json(path), { timeout: 15_000 })
         .toMatchObject({
           status: "complete",
-          output: { connector: false, secret: null },
+          output: { connected: false, secret: null },
         });
       expect((await workflowWorkers(id)).at(-1)?.key).not.toBe(original?.key);
     } finally {
       await publish(app);
     }
   }, 55_000);
+
+  it.each(["synthetic-new", null])(
+    "refreshes secrets in warm pinned workflows to %s",
+    async (value) => {
+      const prepare = (revision: number, secret: string | null) =>
+        json("/.well-known/widefleet/app-secrets", {
+          method: "POST",
+          body: JSON.stringify({
+            appId: app.appId,
+            revision,
+            values: secret === null ? {} : { TOKEN: secret },
+          }),
+        });
+
+      const revision = value === null ? 20 : 10;
+      await prepare(revision, "synthetic-old");
+      await publish(publishedApp.parse({ ...app, secretRevision: revision }));
+      const id = crypto.randomUUID();
+      const path = `/workflow?id=${id}&mode=secrets`;
+
+      try {
+        await json(path, { method: "POST" });
+        await expect
+          .poll(() => json(`/workflow/attempts?id=${id}`), { timeout: 15_000 })
+          .toEqual([{ label: "started", attempt: 1 }]);
+        const [original] = await workflowWorkers(id);
+        await json(`${path}&action=pause`, { method: "PUT" });
+        await expect
+          .poll(() => json(path), { timeout: 15_000 })
+          .toMatchObject({ status: "paused" });
+        await prepare(revision + 1, value);
+        await publish(
+          publishedApp.parse({
+            ...app,
+            version: crypto.randomUUID(),
+            secretRevision: revision + 1,
+          }),
+        );
+        await json(path, { method: "PUT" });
+        await json(`${path}&action=resume`, { method: "PUT" });
+        await expect
+          .poll(() => json(path), { timeout: 15_000 })
+          .toMatchObject({ status: "complete", output: { secret: value } });
+        expect((await workflowWorkers(id)).at(-1)?.key).not.toBe(original?.key);
+      } finally {
+        await publish(app);
+      }
+    },
+    55_000,
+  );
 
   it("resumes cached pinned code after a deployment while new instances use the new version", async () => {
     const id = crypto.randomUUID();
@@ -1332,7 +1384,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
         ).toEqual(snapshots);
 
         for (const host of [hostname, previewHostname]) {
-          expect(await json("/connector", undefined, host)).toBe(42);
+          expect(await json("/service", undefined, host)).toBe(42);
           expect(await json("/.well-known/widefleet/ready", undefined, host)).toMatchObject({
             runtimeVersion: version,
           });

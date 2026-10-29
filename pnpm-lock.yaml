@@ -371,7 +371,7 @@ importers:
         specifier: 4.147.0
         version: 4.147.0(@cloudflare/workers-types@5.20261003.1)(@types/node@22.20.5)
 
-  examples/connectors/gmail:
+  examples/apps/gmail:
     dependencies:
       better-auth:
         specifier: 1.7.12

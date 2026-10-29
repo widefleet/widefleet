@@ -55,20 +55,6 @@ export const cloudflareRuntimeBindings = pgTable("cloudflare_runtime_bindings", 
   pending: jsonb(),
 });
 
-export const connectors = pgTable(
-  "connector",
-  {
-    organizationId: text("organization_id")
-      .notNull()
-      .references(() => organization.id),
-    name: text().notNull(),
-    package: jsonb().notNull(),
-    appliedPackage: jsonb("applied_package"),
-    jobId: uuid("job_id").notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.organizationId, table.name] })],
-);
-
 export const agents = pgTable("agent", {
   id: uuid().primaryKey(),
   organizationId: text("organization_id")
@@ -98,6 +84,11 @@ export const apps = pgTable(
       .notNull()
       .default("created"),
     activeDeploymentId: uuid("active_deployment_id"),
+    webEnabled: boolean("web_enabled").notNull().default(true),
+    secrets: jsonb().notNull().default({}),
+    secretRevision: integer("secret_revision").notNull().default(0),
+    appliedSecretRevision: integer("applied_secret_revision"),
+    secretDeploymentId: uuid("secret_deployment_id"),
     accessGroups: jsonb("access_groups").notNull().default([]),
     accessRevision: integer("access_revision").notNull().default(0),
     appliedAccessRevision: integer("applied_access_revision"),
@@ -197,7 +188,7 @@ export const jobs = pgTable(
     agentId: uuid("agent_id").references(() => agents.id),
     deploymentId: uuid("deployment_id").references(() => deployments.id),
     kind: text({
-      enum: ["deploy", "runtime", "connector", "delete", "configure", "migrations", "workflows"],
+      enum: ["deploy", "runtime", "delete", "configure", "migrations", "workflows"],
     }).notNull(),
     migration: jsonb(),
     workflow: jsonb(),
@@ -205,8 +196,7 @@ export const jobs = pgTable(
     access: jsonb(),
     network: jsonb(),
     capabilities: jsonb(),
-    connector: jsonb(),
-    connectors: jsonb().notNull().default([]),
+    appSecrets: jsonb("app_secrets"),
     runtime: jsonb(),
     state: text({ enum: ["queued", "running", "succeeded", "failed"] })
       .notNull()

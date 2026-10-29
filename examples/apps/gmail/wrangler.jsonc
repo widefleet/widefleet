@@ -1,0 +1,10 @@
+{
+  "name": "gmail",
+  "main": "src/app.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [{ "binding": "DB", "database_name": "accounts" }],
+  "vars": {
+    "GOOGLE_CLIENT_ID": "replace-with-your-google-client-id.apps.googleusercontent.com",
+  },
+}

@@ -3,7 +3,7 @@ import { executionLimits, executionOptions } from "./execution-limits.ts";
 
 const profiles = {
   http: { cpuMs: 100, subRequests: 50 },
-  connector: { cpuMs: 250, subRequests: 50 },
+  service: { cpuMs: 250, subRequests: 50 },
   cron: { cpuMs: 1000, subRequests: 200 },
   workflow: { cpuMs: 5000, subRequests: 500 },
   readiness: { cpuMs: 100, subRequests: 10 },
@@ -20,7 +20,7 @@ describe("Dynamic Worker execution policy", () => {
     expect(executionOptions(configuration, "http")).toEqual({ limits: profiles.http });
     expect(executionOptions(configuration, "cron")).toEqual({ limits: profiles.cron });
     expect(executionOptions(configuration, "workflow")).toEqual({ limits: profiles.workflow });
-    expect(executionOptions(configuration, "connector")).toEqual({ limits: profiles.connector });
+    expect(executionOptions(configuration, "service")).toEqual({ limits: profiles.service });
 
     const http = { cpuMs: 25, subRequests: 0 };
     expect(executionOptions(JSON.stringify({ ...profiles, http }), "http")).toEqual({

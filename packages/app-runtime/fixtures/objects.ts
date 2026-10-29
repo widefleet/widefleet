@@ -1,18 +1,17 @@
 import { publishedApp } from "@platform/contracts";
 import { workerCode } from "../src/worker.ts";
-import { connectorCode } from "../src/connector-code.ts";
-import { connectorSnapshot, digest } from "../src/connector-publication.ts";
+import { digest } from "./digest.ts";
 import type { ParentEnvironment } from "../src/types.ts";
 
 export { Objects } from "../src/objects.ts";
 
 export { RuntimeObserver } from "../src/runtime-observer.ts";
 
+export { AppSecrets } from "../src/app-secrets.ts";
+
 export { Assets } from "../src/assets.ts";
 
 export { Gateway } from "../src/egress.ts";
-
-export { ConnectorSecrets } from "../src/connector-code.ts";
 
 const source = `export default {
   async fetch(request, env) {
@@ -91,7 +90,7 @@ const source = `export default {
       pages: [firstPage.objects.length, secondPage.objects.length], truncated: firstPage.truncated,
       empty: empty.objects.length, completedSize: completed.size, multipartValue, nativeErrors, invalidInputRejected,
       unexpectedBindings: Object.keys(env).filter(name => ![
-        'FILES', 'ASSETS', 'WIDEFLEET_R2_FILES', 'WIDEFLEET_DEPLOYMENT_ID', 'WIDEFLEET_SECRETS'
+        'FILES', 'ASSETS', 'WIDEFLEET_R2_FILES', 'WIDEFLEET_DEPLOYMENT_ID', 'WIDEFLEET_SECRETS', 'WIDEFLEET_ORIGIN'
       ].includes(name))
     });
   }
@@ -99,12 +98,18 @@ const source = `export default {
 
 export default {
   async fetch(request, env, ctx) {
-    const connector = new URL(request.url).pathname.startsWith("/connector");
-    const appId = "a0000000-0000-4000-8000-000000000001";
-    const deploymentId = "a0000000-0000-4000-8000-000000000002";
-    const connectorVersion = "a0000000-0000-4000-8000-000000000003";
+    const service = new URL(request.url).pathname.startsWith("/service");
+
+    const appId = service
+      ? "a0000000-0000-4000-8000-000000000004"
+      : "a0000000-0000-4000-8000-000000000001";
+
+    const deploymentId = service
+      ? "a0000000-0000-4000-8000-000000000003"
+      : "a0000000-0000-4000-8000-000000000002";
+
     const sha256 = await digest(source);
-    const prefix = connector ? "connectors/objects-fixture/fixture" : `apps/${appId}`;
+    const prefix = `apps/${appId}`;
     await env.WIDEFLEET_PACKAGES.put(`${prefix}/modules/${sha256}`, source);
     const modules = [{ name: "child.js", type: "esm", sha256, size: source.length }];
 
@@ -114,47 +119,31 @@ export default {
       bindings: [{ type: "r2_bucket", name: "FILES", bucket_name: "fixture" }],
     };
 
-    const nativeBindings = { FILES: connector ? "CONNECTOR_OBJECTS" : "APP_OBJECTS" };
+    const nativeBindings = { FILES: service ? "SERVICE_OBJECTS" : "APP_OBJECTS" };
 
-    const worker = env.WIDEFLEET_LOADER.get(connector ? "connector" : "app", () =>
-      connector
-        ? connectorCode(
-            connectorSnapshot.parse({
-              organizationId: "objects-fixture",
-              version: connectorVersion,
-              release: {
-                protocol: 1,
-                name: "fixture",
-                metadata: { ...metadata, entrypoints: ["default"] },
-                modules,
-              },
-              nativeBindings,
-              ciphertext: "",
-              fingerprint: sha256,
-              previous: null,
-            }),
-            env,
-            ctx,
-          )
-        : workerCode(
-            publishedApp.parse({
-              id: appId,
-              appId,
-              deploymentId,
-              version: deploymentId,
-              hostname: "objects.example.test",
-              metadata: {
-                ...metadata,
-                assets: { binding: "ASSETS", upload_session: deploymentId },
-              },
-              manifest: {},
-              modules,
-              nativeBindings,
-              network: { revision: 1, policy: { backend: [], browser: [] } },
-            }),
-            env,
-            ctx,
-          ),
+    const worker = env.WIDEFLEET_LOADER.get(service ? "service" : "app", () =>
+      workerCode(
+        publishedApp.parse({
+          id: appId,
+          appId,
+          deploymentId,
+          version: deploymentId,
+          hostname: "objects.example.test",
+          organizationId: service ? "objects-fixture" : undefined,
+          metadata: {
+            ...metadata,
+            web: !service,
+            entrypoints: service ? ["default"] : [],
+            assets: { binding: "ASSETS", upload_session: deploymentId },
+          },
+          manifest: {},
+          modules,
+          nativeBindings,
+          network: { revision: 1, policy: { backend: [], browser: [] } },
+        }),
+        env,
+        ctx,
+      ),
     );
 
     return worker.getEntrypoint().fetch(request);

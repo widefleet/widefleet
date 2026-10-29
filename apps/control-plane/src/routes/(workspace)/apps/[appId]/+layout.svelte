@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { getAppDetails } from "#lib/apps.remote";
-  import { getAppConnections } from "#lib/connectors.remote";
+  import { getAppConnections } from "#lib/connections.remote";
   import type { manageWorkflow } from "#lib/workflows.remote";
   import { Button } from "#shadcn/components/ui/button/index.js";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
@@ -50,6 +50,7 @@
     { id: "deployments", label: "Deployments" },
     { id: "connections", label: "Connections" },
     { id: "workflows", label: "Workflows" },
+    { id: "secrets", label: "Secrets" },
     { id: "access", label: "Access" },
     { id: "settings", label: "App settings" },
   ];
@@ -131,8 +132,10 @@
       disabled={refreshing}
       onclick={refresh}
       ><RefreshCw class={refreshing ? "animate-spin motion-reduce:animate-none" : ""} /></Button
-    >{#if data.app.state === "active"}<Button href={data.app.url} target="_blank" rel="noreferrer"
-        >Open app<ArrowUpRight /></Button
+    >{#if data.app.state === "active" && data.app.web}<Button
+        href={data.app.url}
+        target="_blank"
+        rel="noreferrer">Open app<ArrowUpRight /></Button
       >{/if}
   </div>
 </div>

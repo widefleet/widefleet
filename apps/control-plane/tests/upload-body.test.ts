@@ -2,30 +2,34 @@ import * as contract from "@platform/contracts";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { parseWorkerUpload } from "../src/lib/server/upload-body.ts";
-import {
-  connectorFixture,
-  connectorUploadForm,
-  connectorSource,
-} from "./cloudflare-connector.fixture.ts";
 
-describe.each(["app", "connector"])("Shared %s multipart upload", (kind) => {
-  const read = (request: Request) =>
-    kind === "app"
-      ? parseWorkerUpload(request, contract.workerMetadata)
-      : parseWorkerUpload(request, contract.connectorUploadMetadata);
+const source = "export default { fetch() { return new Response('fixture'); } };";
+
+const metadata = () => ({
+  main_module: "worker.js",
+  compatibility_date: "2026-10-01",
+  assets: { upload_session: crypto.randomUUID() },
+});
+
+describe("App multipart upload", () => {
+  const read = (request: Request) => parseWorkerUpload(request, contract.workerMetadata);
 
   const form = () => {
-    const value = connectorUploadForm(connectorFixture());
+    const value = new FormData();
+    value.set(
+      "worker.js",
+      new Blob([source], { type: "application/javascript+module" }),
+      "worker.js",
+    );
 
-    if (kind === "app")
-      value.set(
-        "metadata",
-        JSON.stringify({
-          main_module: "connector.js",
-          compatibility_date: "2026-10-01",
-          assets: { upload_session: crypto.randomUUID() },
-        }),
-      );
+    value.set(
+      "metadata",
+      JSON.stringify({
+        main_module: "worker.js",
+        compatibility_date: "2026-10-01",
+        assets: { upload_session: crypto.randomUUID() },
+      }),
+    );
 
     return value;
   };
@@ -43,8 +47,8 @@ describe.each(["app", "connector"])("Shared %s multipart upload", (kind) => {
     );
     const file = (await read(request(body))).unwrap();
     expect(file).toEqual(text);
-    expect(file.modules).toEqual([expect.objectContaining({ name: "connector.js", type: "esm" })]);
-    expect(new TextDecoder().decode(file.modules[0]?.bytes)).toBe(connectorSource);
+    expect(file.modules).toEqual([expect.objectContaining({ name: "worker.js", type: "esm" })]);
+    expect(new TextDecoder().decode(file.modules[0]?.bytes)).toBe(source);
   });
 
   it("rejects JSON bodies, repeated or oversized metadata and non-file modules", async () => {
@@ -54,7 +58,7 @@ describe.each(["app", "connector"])("Shared %s multipart upload", (kind) => {
           new Request("https://fixture.test/upload", {
             method: "PUT",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify(connectorFixture()),
+            body: JSON.stringify(metadata()),
           }),
         )
       ).isErr(),
@@ -67,13 +71,13 @@ describe.each(["app", "connector"])("Shared %s multipart upload", (kind) => {
     oversized.set("metadata", " ".repeat(64 * 1024) + z.string().parse(oversized.get("metadata")));
     expect((await read(request(oversized))).isErr()).toBe(true);
     const string = form();
-    string.set("connector.js", "export default {}");
+    string.set("worker.js", "export default {}");
     expect((await read(request(string))).isErr()).toBe(true);
     const largeFile = form();
     largeFile.set(
-      "connector.js",
+      "worker.js",
       new Blob([new Uint8Array(20 * 1024 * 1024 + 1)], { type: "application/javascript+module" }),
-      "connector.js",
+      "worker.js",
     );
     expect((await read(request(largeFile))).isErr()).toBe(true);
   });

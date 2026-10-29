@@ -1,6 +1,11 @@
+import { appUrl } from "./apps.ts";
+import { decryptSecret } from "./secret-encryption.ts";
+import { migrateAppServices } from "./app-services-migration.ts";
+import { storedAppSecrets } from "./app-secrets.ts";
+import { checkServiceConsumers } from "./app-services.ts";
 import { resolveCloudflareCapabilities } from "./cloudflare-capabilities.ts";
 import { validateAppQueues } from "./cloudflare-app-package.ts";
-import { checkCapabilityNames } from "./connector-changes.ts";
+import { checkCapabilityNames } from "./capability-changes.ts";
 import { CloudflareSubscriptionPending } from "./cloudflare-subscription-updates.ts";
 import { createCloudflareEvents } from "./cloudflare-events.ts";
 import { NonRetryableError } from "cloudflare:workflows";
@@ -37,6 +42,7 @@ const deploymentConfiguration = z.object({
   CLOUDFLARE_ACCOUNT_ID: z.string().regex(/^[a-f0-9]{32}$/),
   CLOUDFLARE_API_TOKEN: z.string().min(1),
   APP_RUNTIME_NAME: z.string().regex(/^[a-z0-9][a-z0-9-]{0,62}$/),
+  APP_HTTPS_PORT: z.coerce.number().int().min(1).max(65535).default(443),
 });
 
 const value = <T, E>(result: Result<T, E>) => {
@@ -112,6 +118,7 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
             .where(and(eq(deployments.id, command.id), ne(deployments.status, "succeeded")));
 
         return {
+          command: deploymentCommand.parse(record.command),
           sequence: record.sequence,
           targets: z.array(operationTarget).parse(record.targets),
         };
@@ -136,7 +143,9 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
             });
           const release = await artifact(command.artifactId);
           validateAppQueues(bindings, release.metadata);
+
           const prepared = await provisioner.provision(release);
+
           await withCloudflareDatabase(bindings, ({ db: resources }) =>
             updateCloudflareBindings(resources, provisioner, prepared.resources),
           );
@@ -150,8 +159,8 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
       target: z.infer<typeof operationTarget>,
       sequence: number,
       nativeBindings: Record<string, string>,
-    ) =>
-      withCloudflareDatabase(bindings, async ({ db }) =>
+    ) => {
+      return withCloudflareDatabase(bindings, async ({ db }) =>
         value(
           await transact(db, async (transaction) => {
             const [app] = await transaction
@@ -271,13 +280,48 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               capabilities.grants,
             );
 
+            await checkServiceConsumers(transaction, app, metadata.entrypoints ?? []);
+
+            if (app.secretRevision > 0) {
+              const values = Object.fromEntries(
+                await Promise.all(
+                  Object.entries(storedAppSecrets.parse(app.secrets)).map(
+                    async ([name, ciphertext]) =>
+                      [
+                        name,
+                        await decryptSecret(bindings.PLATFORM_ENCRYPTION_KEY, ciphertext),
+                      ] as const,
+                  ),
+                ),
+              );
+
+              const response = await runtime.fetch(
+                "https://runtime.internal/.well-known/widefleet/app-secrets",
+                {
+                  method: "POST",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({ appId: app.id, revision: app.secretRevision, values }),
+                },
+              );
+
+              if (!response.ok) {
+                await response.body?.cancel();
+                throw new Error("App secrets could not be published");
+              }
+
+              await response.body?.cancel();
+            }
+
             const selected = {
+              secretRevision: app.secretRevision,
+              organizationId: app.organizationId,
               id: record.id,
               appId: app.id,
               metadata: record.metadata,
               manifest: record.manifest,
               modules: record.modules,
               hostname: app.hostname,
+              origin: new URL(appUrl(app.hostname, configuration.APP_HTTPS_PORT)).origin,
               deploymentId: command.kind === "deploy" ? command.id : serving?.deploymentId,
               network,
               capabilities: resolved,
@@ -319,8 +363,18 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
                 networkRevision: z.literal(network.revision),
                 capabilityRevision: z.literal(capabilities.revision),
                 runtimeVersion: contract.runtimeVersion,
+                services: z.literal(1).optional(),
               })
               .parse(await response.json());
+
+            if (
+              (metadata.web === false ||
+                metadata.entrypoints?.length ||
+                app.secretRevision > 0 ||
+                Object.values(capabilities.grants).some((grant) => grant.app)) &&
+              ready.services !== 1
+            )
+              throw new Error("Upgrade the app runtime before activating app services");
 
             // Runtime upgrades are independent of app deployments. A successful code
             // replacement can precede its SQL confirmation, so check the serving release.
@@ -418,7 +472,9 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               .update(apps)
               .set({
                 activeDeploymentId: published.deploymentId,
+                appliedSecretRevision: published.secretRevision ?? 0,
                 state: "active",
+                webEnabled: metadata.web !== false,
                 appliedNetworkRevision: network.revision,
                 networkError: null,
                 appliedAccessRevision: access.revision,
@@ -448,7 +504,8 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
             return Result.ok(undefined);
           }),
         ),
-      ),
+      );
+    },
     finish: (command: z.infer<typeof deploymentCommand>, error: string | null) =>
       withCloudflareDatabase(bindings, async ({ db }) => {
         return value(
@@ -568,17 +625,29 @@ export const executeCloudflareDeployment = async (
   } as const;
 
   try {
-    const registration = await step.do("register-command", options, () =>
-      retryable(() => runner.register(command)),
-    );
+    // Durable step results can predate admitted code selection for secret edits.
+    const registration = z
+      .object({
+        command: deploymentCommand.optional(),
+        sequence: z.number().int().nonnegative(),
+        targets: z.array(operationTarget),
+      })
+      .parse(
+        await step.do("register-command", options, () => retryable(() => runner.register(command))),
+      );
+
+    const admitted = registration.command ?? command;
+
+    // Run outside registration: that step may replay a pre-upgrade checkpoint.
+    await migrateAppServices(bindings.ARTIFACTS, step);
 
     const nativeBindings = await step.do("provision-resources", options, () =>
-      retryable(() => runner.provision(command)),
+      retryable(() => runner.provision(admitted)),
     );
 
     for (const target of registration.targets)
       await step.do(`activate-${target.appId}`, options, () =>
-        retryable(() => runner.activate(command, target, registration.sequence, nativeBindings)),
+        retryable(() => runner.activate(admitted, target, registration.sequence, nativeBindings)),
       );
 
     await step.do("record-completion", options, () =>

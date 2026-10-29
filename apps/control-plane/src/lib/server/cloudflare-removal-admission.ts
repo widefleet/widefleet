@@ -1,3 +1,4 @@
+import { checkServiceConsumers } from "./app-services.ts";
 import { Result } from "better-result";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
@@ -63,6 +64,9 @@ export const registerCloudflareRemoval = (
     }
 
     const descendants = await lockAppDescendants(transaction, access.value);
+
+    for (const app of [access.value, ...descendants])
+      await checkServiceConsumers(transaction, app, []);
 
     const targets = [access.value, ...descendants]
       .toReversed()

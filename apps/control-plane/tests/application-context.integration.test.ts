@@ -1,6 +1,4 @@
 import { memoryStorage } from "./memory-storage.fixture.ts";
-import { connectorFixture, connectorFiles } from "./cloudflare-connector.fixture.ts";
-import { connectorBrowserOrigin } from "@platform/contracts";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { createTestEnvironment } from "./environment.ts";
@@ -10,7 +8,8 @@ import {
   appGrants,
   organizationRuntimes,
   jobs,
-  connectors,
+  artifacts,
+  deployments,
   agents,
 } from "../src/lib/server/schema.ts";
 import { createIdentityService } from "../src/lib/server/identity.ts";
@@ -23,7 +22,7 @@ import { cloudflareRemovalCommand } from "../src/lib/server/cloudflare-removal-c
 import { createRuntime } from "../src/lib/server/runtime-services.ts";
 import { createApi } from "../src/lib/server/api.ts";
 import { createStorage } from "../src/lib/server/storage.ts";
-import { connectorReference } from "../src/lib/server/connector-package.ts";
+import { workerMetadata } from "@platform/contracts";
 
 describe("Mandatory application context", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
@@ -104,53 +103,41 @@ describe("Mandatory application context", () => {
       },
     })();
 
-  it("serializes app and connector hostname collisions across organizations", async () => {
-    const target = await scope("collision-first");
-    const other = await scope("other-collision-first");
-    const current = await runtime();
-    const release = connectorFixture("github-other");
-
-    // Different names and organization suffixes still produce the same full hostname.
-    const outcomes = await Promise.all([
-      current.connectors.deploy(
-        target.principal,
-        release,
-        connectorFiles(release),
-        crypto.randomUUID(),
-      ),
-      service.create(other.principal, { slug: "github", displayName: "GitHub", parentId: null }),
-    ]);
-
-    expect(outcomes.filter((outcome) => outcome.isOk())).toHaveLength(1);
-    expect(outcomes.find((outcome) => outcome.isErr())).toMatchObject({
-      error: { code: "CONFLICT" },
-    });
-    await environment.database.db
-      .delete(jobs)
-      .where(eq(jobs.organizationId, target.organizationId));
-    await environment.database.db
-      .delete(connectors)
-      .where(eq(connectors.organizationId, target.organizationId));
-  });
-
-  it("scopes connector and agent discovery and denies installation administration", async () => {
+  it("scopes app API and agent discovery and denies installation administration", async () => {
     const current = await runtime();
 
     for (const target of [first, second]) {
-      const reference = connectorReference.parse({
-        name: "erp",
-        checksum: "a".repeat(64),
-        entrypoints: ["default", target === first ? "FirstReader" : "SecondReader"],
-        classes: [],
-      });
+      const app = (
+        await service.create(target.principal, { slug: "erp", displayName: "ERP", parentId: null })
+      ).unwrap();
 
-      await environment.database.db.insert(connectors).values({
-        organizationId: target.organizationId,
-        name: "erp",
-        package: reference,
-        appliedPackage: reference,
-        jobId: crypto.randomUUID(),
+      const artifactId = crypto.randomUUID(),
+        deploymentId = crypto.randomUUID();
+
+      await environment.database.db.insert(artifacts).values({
+        id: artifactId,
+        appId: app.id,
+        modules: [],
+        manifest: {},
+        metadata: workerMetadata.parse({
+          main_module: "worker.js",
+          compatibility_date: "2026-10-01",
+          web: false,
+          entrypoints: ["default", target === first ? "FirstReader" : "SecondReader"],
+          assets: { upload_session: artifactId },
+        }),
       });
+      await environment.database.db.insert(deployments).values({
+        id: deploymentId,
+        appId: app.id,
+        artifactId,
+        requestId: crypto.randomUUID(),
+        status: "succeeded",
+      });
+      await environment.database.db
+        .update(apps)
+        .set({ state: "active", activeDeploymentId: deploymentId })
+        .where(eq(apps.id, app.id));
       await environment.database.db.insert(agents).values({
         id: crypto.randomUUID(),
         organizationId: target.organizationId,
@@ -159,15 +146,13 @@ describe("Mandatory application context", () => {
       });
     }
 
-    const catalog = [
-      {
-        name: "erp",
-        entrypoints: ["default", "FirstReader"],
-        browserUrl: `${connectorBrowserOrigin("erp", "first", environment.configuration.APP_DOMAIN, environment.configuration.APP_HTTPS_PORT)}/`,
-      },
-    ];
-
-    expect((await current.connectors.catalog(first.principal)).unwrap()).toEqual(catalog);
+    const catalog = (await current.connections.services(first.principal)).unwrap();
+    expect(catalog).toHaveLength(1);
+    expect(catalog[0]).toMatchObject({
+      slug: "erp",
+      displayName: "ERP",
+      entrypoints: ["default", "FirstReader"],
+    });
     const listing = (await current.agents.list(first.principal)).unwrap();
     expect(listing.map((agent) => agent.name)).toEqual(["First agent"]);
     expect(await current.agents.create(first.principal, { name: "Forbidden" })).toMatchObject({
@@ -184,7 +169,7 @@ describe("Mandatory application context", () => {
         headers: first.headers,
       });
 
-    expect(await (await api(request("/connector-catalog"))).json()).toEqual(catalog);
+    expect(await (await api(request("/app-services"))).json()).toEqual(catalog);
     expect(await (await api(request("/agents"))).json()).toEqual(listing);
 
     for (const path of ["/runtime", "/reporting"])

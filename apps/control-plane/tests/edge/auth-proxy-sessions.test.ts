@@ -84,6 +84,59 @@ describe("Auth proxy session lifecycle", () => {
     await idp?.stop();
   });
 
+  it("passes the verified caller and isolates app OAuth cookies from all company cookies", async () => {
+    const forwarded = vi.fn(async () => {
+      const headers = new Headers();
+      headers.append(
+        "set-cookie",
+        "app_session=oauth; Domain=apps.example.test; Path=/; Secure; HttpOnly; SameSite=Lax",
+      );
+      headers.append("set-cookie", "__Host-app_state=state; Path=/; Secure; HttpOnly");
+
+      for (const name of [
+        "platform_sso_other.session_data",
+        "__Secure-platform_sso_other.session_token",
+        "__Host-platform_sso_other.oauth_state",
+      ])
+        headers.append("set-cookie", `${name}=forged; Domain=apps.example.test; Path=/`);
+
+      return new Response("Connected", { headers });
+    });
+
+    const calls: { request: Request; caller: unknown }[] = [];
+
+    const proxy = createAuthProxy(configuration, {
+      ...apps,
+      fetch: (request, caller) => {
+        calls.push({ request, caller });
+
+        return forwarded();
+      },
+    });
+
+    const response = await proxy.fetch(
+      new Request(app, {
+        headers: {
+          cookie: `${cookie}; app_session=oauth; __Secure-platform_sso_other.session_token=private; platform_sso_other.session_data=private`,
+          "x-auth-request-user": "forged",
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(calls[0]?.caller).toEqual({
+      issuer: idp.origin,
+      subject: "pairwise-subject",
+      name: "Example User",
+    });
+    expect(calls[0]?.request.headers.get("cookie")?.trim()).toBe("app_session=oauth");
+    expect(calls[0]?.request.headers.get("x-auth-request-user")).toBe("pairwise-subject");
+    expect(response.headers.getSetCookie()).toEqual([
+      "app_session=oauth; Path=/; Secure; HttpOnly; SameSite=Lax",
+      "__Host-app_state=state; Path=/; Secure; HttpOnly",
+    ]);
+  });
+
   it("expires after one hour and does not extend the session when it is used", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(Date.now() + 59 * 60 * 1000);
@@ -103,95 +156,6 @@ describe("Auth proxy session lifecycle", () => {
     access.groups = [];
     access.revision++;
     expect((await visit()).status).toBe(200);
-  });
-
-  it("returns from company sign-in to a connector callback without an app grant", async () => {
-    const target =
-      "https://connector.apps.example.test/callback?code=synthetic-code&state=synthetic-state";
-
-    const destinations = {
-      resolve: async (hostname: string) =>
-        hostname === "connector.apps.example.test" ? { revision: 0, groups: [] } : null,
-      fetch: async () => new Response("Connector response"),
-    };
-
-    const session = await login(configuration, target, destinations);
-    const proxy = createAuthProxy(configuration, { ...destinations, browser: true });
-    expect((await proxy.fetch(new Request(target, { headers: { cookie: session } }))).status).toBe(
-      200,
-    );
-
-    const otherSession = await login({
-      ...configuration,
-      organizationId: "other-org",
-      redirectUrl: "https://auth.apps.example.test/oauth2/other-org/callback",
-    });
-
-    expect(
-      (await proxy.fetch(new Request(target, { headers: { cookie: otherSession } }))).status,
-    ).toBe(401);
-  });
-
-  it("protects every organization's sign-in cookies on connector browser routes", async () => {
-    const received: Request[] = [];
-    const identities: { issuer: string; subject: string; name: string }[] = [];
-
-    const otherCookie = await login({
-      ...configuration,
-      organizationId: "other-org",
-      redirectUrl: "https://auth.apps.example.test/oauth2/other-org/callback",
-      cookieSecret: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url"),
-    });
-
-    const protectedCookies = [
-      "__Secure-platform_sso_widefleet.session_data",
-      "__Secure-platform_sso_other-org.session_token",
-      "__Secure-platform_sso_other-org.session_data.0",
-      "__Host-platform_sso_other-org.oauth_state",
-      "platform_sso_other-org.session_token",
-    ];
-
-    const proxy = createAuthProxy(configuration, {
-      ...apps,
-      browser: true,
-      resolve: async (hostname) =>
-        hostname === "connector.apps.example.test" ? { revision: 0, groups: [] } : null,
-      fetch: async (request, caller) => {
-        received.push(request);
-        identities.push(caller);
-        const headers = new Headers();
-        headers.append("set-cookie", "connector_test.state=test; Domain=apps.example.test; Path=/");
-
-        for (const name of protectedCookies)
-          headers.append("set-cookie", `${name}=forged; Domain=apps.example.test; Path=/`);
-
-        return new Response("Connector", { headers });
-      },
-    });
-
-    const path = new URL("https://connector.apps.example.test/connect");
-    expect((await proxy.fetch(new Request(path))).status).toBe(401);
-
-    const response = await proxy.fetch(
-      new Request(path, {
-        headers: {
-          cookie: `${cookie}; ${otherCookie}; __Secure-platform_sso_other-org.session_data.0=chunk; __Host-platform_sso_other-org.oauth_state=state; platform_sso_other-org.session_token=legacy; connector_test.state=own`,
-          "x-auth-request-user": "forged",
-          authorization: "Bearer private",
-        },
-      }),
-    );
-
-    expect(response.status).toBe(200);
-    expect(received[0]?.headers.get("cookie")).toBe("connector_test.state=own");
-    expect(received[0]?.headers.get("authorization")).toBeNull();
-    expect(identities).toEqual([
-      { issuer: idp.origin, subject: "pairwise-subject", name: "Example User" },
-    ]);
-    expect(response.headers.getSetCookie()).toEqual(["connector_test.state=test; Path=/"]);
-    access.groups = ["denied"];
-    expect((await proxy.fetch(new Request(path, { headers: { cookie } }))).status).toBe(200);
-    expect(received).toHaveLength(2);
   });
 
   it("invalidates sessions when the identity source changes but preserves client-secret rotation", async () => {

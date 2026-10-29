@@ -242,7 +242,7 @@
       <dt class="text-foreground font-medium">Member</dt>
       <dd>Create apps and manage apps they own or have access to.</dd>
       <dt class="text-foreground font-medium">Admin</dt>
-      <dd>Also manage all apps, connectors, members and organization settings.</dd>
+      <dd>Also manage all apps, members and organization settings.</dd>
       <dt class="text-foreground font-medium">Owner</dt>
       <dd>Have all admin permissions and can appoint additional owners.</dd>
     </dl>

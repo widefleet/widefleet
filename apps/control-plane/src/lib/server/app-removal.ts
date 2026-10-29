@@ -21,6 +21,14 @@ export const finishAppRemoval = async (transaction: Transaction, appId: string) 
   await transaction.delete(artifacts).where(eq(artifacts.appId, appId));
   await transaction
     .update(apps)
-    .set({ removedAt: new Date(), activeDeploymentId: null, catalogListed: false })
+    .set({
+      removedAt: new Date(),
+      activeDeploymentId: null,
+      catalogListed: false,
+      secrets: {},
+      secretRevision: 0,
+      appliedSecretRevision: null,
+      secretDeploymentId: null,
+    })
     .where(eq(apps.id, appId));
 };

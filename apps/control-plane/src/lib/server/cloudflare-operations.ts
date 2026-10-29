@@ -1,8 +1,8 @@
-import { applyCapabilityChange } from "./connector-changes.ts";
+import { applyCapabilityChange } from "./capability-changes.ts";
 import { lockOrganizationRuntime } from "./organization-runtime.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { applyAccessChange } from "./app-access.ts";
 import { presentDeployment } from "./apps.ts";
@@ -36,10 +36,12 @@ export const operationTarget = z.object({
 export const registerCloudflareOperation = (
   database: Database,
   storage: ArtifactStorage,
-  command: z.infer<typeof deploymentCommand>,
+  requested: z.infer<typeof deploymentCommand>,
 ) =>
   transact(database, (transaction) =>
     Result.gen(async function* () {
+      let command = requested;
+
       const [scope] = await transaction
         .select({ organizationId: apps.organizationId })
         .from(apps)
@@ -86,6 +88,20 @@ export const registerCloudflareOperation = (
         | z.infer<typeof contract.capabilityState>;
 
       if (command.kind === "deploy") {
+        if (command.refreshSecrets) {
+          // Admission, not the earlier secret edit, orders accepted code selections.
+          // Resolve under the same app lock so a delayed edit cannot restore old code.
+          const [latest] = await transaction
+            .select({ artifactId: deployments.artifactId })
+            .from(cloudflareOperations)
+            .innerJoin(deployments, eq(deployments.id, cloudflareOperations.id))
+            .where(eq(cloudflareOperations.appId, app.id))
+            .orderBy(desc(cloudflareOperations.sequence))
+            .limit(1);
+
+          if (latest) command = { ...command, artifactId: latest.artifactId };
+        }
+
         const [artifact] = await transaction
           .select()
           .from(artifacts)

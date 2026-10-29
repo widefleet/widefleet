@@ -1,5 +1,6 @@
-import { requireAvailableHostname } from "./hostnames.ts";
+import { appUrl } from "./apps.ts";
 import { finishAppRemoval } from "./app-removal.ts";
+import { storedAppSecrets } from "./app-secrets.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
 import { and, eq, gt, inArray, lt, notExists, or, sql } from "drizzle-orm";
@@ -11,7 +12,6 @@ import { enqueueAppRemoval } from "./apps.ts";
 import { InvalidOperation } from "./errors.ts";
 import {
   agents,
-  connectors,
   apps,
   artifacts,
   deploymentEvents,
@@ -22,11 +22,9 @@ import {
 } from "./schema.ts";
 import { ensureOrganizationRuntime, loadRuntime, runtimeReference } from "./runtime-releases.ts";
 import { decryptSecret } from "./secret-encryption.ts";
-import { connectorReference, loadConnector, loadConnectorArtifact } from "./connector-package.ts";
 import { lockOrganizationRuntime } from "./organization-runtime.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import { transact, type Transaction } from "./transactions.ts";
-import type { Configuration } from "./config.ts";
 
 const leasedJob = async (
   transaction: Transaction,
@@ -60,8 +58,8 @@ export const createJobService = (
   database: Database,
   storage: ArtifactStorage,
   encryptionKey: string,
-  configuration: Pick<Configuration, "APP_DOMAIN" | "APP_HTTPS_PORT">,
   report: (event: z.infer<typeof contract.reportingOperation>) => void = () => {},
+  appHttpsPort = 443,
 ) => ({
   authenticate: (token: string) =>
     transact(database, async (transaction) => {
@@ -192,25 +190,6 @@ export const createJobService = (
           })
         : null;
 
-      const installed = await transaction
-        .select()
-        .from(connectors)
-        .where(eq(connectors.organizationId, execution.organizationId));
-
-      let selectedConnectors = installed.flatMap((entry) =>
-        entry.appliedPackage ? [connectorReference.parse(entry.appliedPackage)] : [],
-      );
-
-      if (candidate.job.kind === "connector") {
-        const next = connectorReference.parse(candidate.job.connector);
-        selectedConnectors = [
-          ...selectedConnectors.filter((entry) => entry.name !== next.name),
-          next,
-        ];
-      }
-
-      selectedConnectors.sort((left, right) => left.name.localeCompare(right.name));
-
       const selectedRuntime =
         candidate.job.kind === "runtime"
           ? runtimeReference.parse(candidate.job.runtime)
@@ -228,7 +207,13 @@ export const createJobService = (
           access,
           network,
           capabilities,
-          connectors: selectedConnectors,
+          appSecrets: app
+            ? {
+                appId: app.id,
+                revision: app.secretRevision,
+                values: storedAppSecrets.parse(app.secrets),
+              }
+            : null,
           attempt: sql`${jobs.attempt} + 1`,
           leaseToken: crypto.randomUUID(),
           leaseUntil: sql`now() + interval '90 seconds'`,
@@ -259,6 +244,9 @@ export const createJobService = (
           workflow: claimed.workflow,
           appId: claimed.appId,
           hostname: candidate.hostname,
+          origin: candidate.hostname
+            ? new URL(appUrl(candidate.hostname, appHttpsPort)).origin
+            : null,
           deploymentId: claimed.deploymentId,
           artifactId,
           access,
@@ -308,75 +296,31 @@ export const createJobService = (
       if (lease.isErr()) return lease;
 
       const runtime = await loadRuntime(storage, runtimeReference.parse(lease.value.runtime));
-      const references = z.array(connectorReference).parse(lease.value.connectors);
 
-      const [execution] = await transaction
-        .select()
-        .from(organizationRuntimes)
-        .where(eq(organizationRuntimes.organizationId, lease.value.organizationId));
+      const secretSnapshot = lease.value.appSecrets
+        ? z
+            .object({ appId: z.uuid(), revision: z.number(), values: storedAppSecrets })
+            .parse(lease.value.appSecrets)
+        : null;
 
-      if (!execution) throw new Error("Organization runtime is missing");
-
-      const connectorOrigins = Object.fromEntries(
-        references.map((reference) => [
-          reference.name,
-          contract.connectorBrowserOrigin(
-            reference.name,
-            execution.appHostnameSuffix,
-            configuration.APP_DOMAIN,
-            configuration.APP_HTTPS_PORT,
-          ),
-        ]),
-      );
-
-      // Check publication too: older connector records may predate shared hostname admission.
-      for (const [name, origin] of Object.entries(connectorOrigins).sort(([, left], [, right]) =>
-        left.localeCompare(right),
-      ))
-        await requireAvailableHostname(
-          transaction,
-          new URL(origin).hostname,
-          configuration.APP_DOMAIN,
-          { organizationId: lease.value.organizationId, name },
-        );
-
-      const resolved = await Promise.all(
-        references.map(async (reference) => {
-          const values = await Promise.all(
-            Object.entries(reference.secrets).map(
-              async ([name, ciphertext]) =>
-                [name, await decryptSecret(encryptionKey, ciphertext)] as const,
+      const appSecrets = secretSnapshot
+        ? {
+            ...secretSnapshot,
+            values: Object.fromEntries(
+              await Promise.all(
+                Object.entries(secretSnapshot.values).map(
+                  async ([name, ciphertext]) =>
+                    [name, await decryptSecret(encryptionKey, ciphertext)] as const,
+                ),
+              ),
             ),
-          );
-
-          return [reference.name, Object.fromEntries(values)] as const;
-        }),
-      );
+          }
+        : undefined;
 
       return Result.ok({
         ...runtime,
-        connectorOrigins,
-        connectorSecrets: Object.fromEntries(resolved),
-        connectors: await Promise.all(
-          references.map((reference) => loadConnector(storage, reference)),
-        ),
+        appSecrets,
       });
-    }),
-  connectorTelemetry: (agentId: string, jobId: string, leaseToken: string) =>
-    transact(database, async (transaction) => {
-      const lease = await leasedJob(transaction, agentId, jobId, leaseToken);
-
-      if (lease.isErr()) return lease;
-
-      return Result.ok(
-        z
-          .array(connectorReference)
-          .parse(lease.value.connectors)
-          .map((reference) => ({
-            organizationId: lease.value.organizationId,
-            name: reference.name,
-          })),
-      );
     }),
   artifact: (agentId: string, jobId: string, leaseToken: string) =>
     transact(database, async (transaction) => {
@@ -410,63 +354,29 @@ export const createJobService = (
         }),
       );
     }),
-  module: (
-    agentId: string,
-    jobId: string,
-    leaseToken: string,
-    hash: string,
-    connector: string | null,
-  ) =>
+  module: (agentId: string, jobId: string, leaseToken: string, hash: string) =>
     transact(database, async (transaction) => {
       const lease = await leasedJob(transaction, agentId, jobId, leaseToken);
 
       if (lease.isErr()) return lease;
-      let scope: string;
-      let modules: z.infer<typeof contract.storedModule>[];
 
-      if (connector !== null) {
-        const reference = z
-          .array(connectorReference)
-          .parse(lease.value.connectors)
-          .find((entry) => entry.name === connector);
+      if (!lease.value.deploymentId)
+        return Result.err(
+          new InvalidOperation({ code: "NOT_FOUND", message: "This job has no artifact" }),
+        );
 
-        if (!reference)
-          return Result.err(
-            new InvalidOperation({
-              code: "NOT_FOUND",
-              message: "Connector is not part of this job",
-            }),
-          );
-        const artifact = await loadConnectorArtifact(storage, reference);
+      const [record] = await transaction
+        .select({ artifact: artifacts })
+        .from(deployments)
+        .innerJoin(artifacts, eq(deployments.artifactId, artifacts.id))
+        .where(eq(deployments.id, lease.value.deploymentId));
 
-        if (artifact.organizationId !== lease.value.organizationId)
-          return Result.err(
-            new InvalidOperation({
-              code: "NOT_FOUND",
-              message: "Connector artifact belongs to another organization",
-            }),
-          );
-        scope = `connectors/${artifact.organizationId}/${artifact.release.name}`;
-        modules = artifact.release.modules;
-      } else {
-        if (!lease.value.deploymentId)
-          return Result.err(
-            new InvalidOperation({ code: "NOT_FOUND", message: "This job has no artifact" }),
-          );
-
-        const [record] = await transaction
-          .select({ artifact: artifacts })
-          .from(deployments)
-          .innerJoin(artifacts, eq(deployments.artifactId, artifacts.id))
-          .where(eq(deployments.id, lease.value.deploymentId));
-
-        if (!record)
-          return Result.err(
-            new InvalidOperation({ code: "NOT_FOUND", message: "Artifact not found" }),
-          );
-        scope = `apps/${record.artifact.appId}`;
-        modules = contract.artifact.shape.modules.parse(record.artifact.modules);
-      }
+      if (!record)
+        return Result.err(
+          new InvalidOperation({ code: "NOT_FOUND", message: "Artifact not found" }),
+        );
+      const scope = `apps/${record.artifact.appId}`;
+      const modules = contract.artifact.shape.modules.parse(record.artifact.modules);
 
       if (!modules.some((module) => module.sha256 === hash))
         return Result.err(
@@ -541,12 +451,7 @@ export const createJobService = (
           attempt: lease.attempt,
         };
 
-        if (
-          lease.kind === "runtime" ||
-          lease.kind === "connector" ||
-          lease.kind === "migrations" ||
-          lease.kind === "workflows"
-        ) {
+        if (lease.kind === "runtime" || lease.kind === "migrations" || lease.kind === "workflows") {
           if (
             lease.kind === "workflows" &&
             result.outcome === "succeeded" &&
@@ -572,19 +477,6 @@ export const createJobService = (
               .update(organizationRuntimes)
               .set({ appliedRuntime: lease.runtime })
               .where(eq(organizationRuntimes.organizationId, lease.organizationId));
-          }
-
-          if (lease.kind === "connector" && result.outcome === "succeeded") {
-            const reference = connectorReference.parse(lease.connector);
-            await transaction
-              .update(connectors)
-              .set({ appliedPackage: reference })
-              .where(
-                and(
-                  eq(connectors.organizationId, lease.organizationId),
-                  eq(connectors.name, reference.name),
-                ),
-              );
           }
 
           await transaction
@@ -648,6 +540,13 @@ export const createJobService = (
           });
 
           if (result.outcome === "succeeded") {
+            const [published] = await transaction
+              .select({ metadata: artifacts.metadata })
+              .from(deployments)
+              .innerJoin(artifacts, eq(artifacts.id, deployments.artifactId))
+              .where(eq(deployments.id, lease.deploymentId));
+
+            if (!published) throw new Error("Published app artifact is missing");
             await transaction
               .update(organizationRuntimes)
               .set({ appliedRuntime: lease.runtime })
@@ -656,6 +555,7 @@ export const createJobService = (
               .update(apps)
               .set({
                 activeDeploymentId: lease.deploymentId,
+                webEnabled: contract.workerMetadata.parse(published.metadata).web !== false,
                 state: app.state === "deleting" ? "deleting" : "active",
               })
               .where(eq(apps.id, app.id));
@@ -710,13 +610,26 @@ export const createJobService = (
               .where(eq(apps.id, app.id));
         }
 
+        if (
+          lease.kind !== "delete" &&
+          lease.appSecrets &&
+          result.outcome === "succeeded" &&
+          lease.deploymentId
+        ) {
+          const secrets = z.object({ revision: z.number() }).parse(lease.appSecrets);
+          await transaction
+            .update(apps)
+            .set({ appliedSecretRevision: secrets.revision })
+            .where(eq(apps.id, app.id));
+        }
+
         if (lease.kind !== "delete" && lease.capabilities) {
           const snapshot = contract.capabilitySnapshot.parse(lease.capabilities);
 
           if (result.outcome === "succeeded" && lease.deploymentId)
             await transaction
               .update(apps)
-              .set({ appliedCapabilityRevision: snapshot.revision })
+              .set({ appliedCapabilityRevision: snapshot.revision, appliedCapabilities: snapshot })
               .where(eq(apps.id, app.id));
 
           if (snapshot.revision === app.capabilityRevision)

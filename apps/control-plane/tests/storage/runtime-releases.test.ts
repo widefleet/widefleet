@@ -21,7 +21,7 @@ describe("Runtime installation with PostgreSQL and Azure Blob Storage", () => {
   const source = "export default {};";
 
   const release = contract.runtimeRelease.parse({
-    protocol: 2,
+    protocol: 3,
     auth: 1,
     version: "99.0.0",
     celld: "0.6.2",

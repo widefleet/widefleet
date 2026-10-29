@@ -12,6 +12,7 @@ export const workflowApp = async (start: Start, environment: ParentEnvironment) 
   return {
     ...pinned,
     network: current.network,
+    secretRevision: current.secretRevision ?? 0,
     telemetry: current.telemetry,
     capabilities: Object.fromEntries(
       Object.entries(pinned.capabilities).filter(([name, grant]) => {
@@ -19,7 +20,7 @@ export const workflowApp = async (start: Start, environment: ParentEnvironment) 
 
         return (
           active?.organizationId === grant.organizationId &&
-          active.connector === grant.connector &&
+          active.app === grant.app &&
           active.entrypoint === grant.entrypoint
         );
       }),

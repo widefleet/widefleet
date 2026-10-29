@@ -81,13 +81,7 @@ export const createCloudflareLogs =
     const filters = [
       leaf("$workers.scriptName", "eq", bindings.APP_RUNTIME_NAME),
       numeric("widefleetLog", "eq", 1),
-      ...("appId" in input
-        ? [leaf("appId", "eq", input.appId)]
-        : [
-            leaf("organizationId", "eq", input.organizationId),
-            leaf("connector", "eq", input.name),
-            ...(input.version ? [leaf("record.connectorVersion", "eq", input.version)] : []),
-          ]),
+      leaf("appId", "eq", input.appId),
       numeric(
         "eventTime",
         "gte",
@@ -115,30 +109,29 @@ export const createCloudflareLogs =
         leaf("record.body", "regex", `(?i)${input.query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
       );
 
-    const deploymentFilter =
-      "appId" in input && input.deploymentId
-        ? [
-            {
-              kind: "group" as const,
-              filterCombination: "or" as const,
-              filters: [
-                leaf("record.deploymentId", "eq", input.deploymentId),
-                ...(window.buildId
-                  ? [
-                      {
-                        kind: "group" as const,
-                        filterCombination: "and" as const,
-                        filters: [
-                          leaf("record.source", "eq", "browser"),
-                          leaf("record.buildId", "eq", window.buildId),
-                        ],
-                      },
-                    ]
-                  : []),
-              ],
-            },
-          ]
-        : [];
+    const deploymentFilter = input.deploymentId
+      ? [
+          {
+            kind: "group" as const,
+            filterCombination: "or" as const,
+            filters: [
+              leaf("record.deploymentId", "eq", input.deploymentId),
+              ...(window.buildId
+                ? [
+                    {
+                      kind: "group" as const,
+                      filterCombination: "and" as const,
+                      filters: [
+                        leaf("record.source", "eq", "browser"),
+                        leaf("record.buildId", "eq", window.buildId),
+                      ],
+                    },
+                  ]
+                : []),
+            ],
+          },
+        ]
+      : [];
 
     const accountId = bindings.CLOUDFLARE_ACCOUNT_ID;
     const client = createCloudflareClient(bindings.CLOUDFLARE_API_TOKEN, transport);
@@ -170,11 +163,7 @@ export const createCloudflareLogs =
 
     for (const event of events)
       if (
-        ("appId" in input
-          ? event.source.appId !== input.appId
-          : event.source.appId !== null ||
-            event.source.organizationId !== input.organizationId ||
-            event.source.connector !== input.name) ||
+        event.source.appId !== input.appId ||
         event.$workers.scriptName !== bindings.APP_RUNTIME_NAME
       )
         throw new Error("Cloudflare returned logs outside the authorized source");

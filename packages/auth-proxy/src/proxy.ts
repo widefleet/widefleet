@@ -1,21 +1,12 @@
-import { appAccessSnapshot, connectorCaller } from "@platform/contracts";
+import { appAccessSnapshot, appCaller } from "@platform/contracts";
 import { z } from "zod";
 import { companyCookie, createAuthentication, cookiePrefix } from "./authentication.ts";
 import { authConfiguration, type AuthConfiguration } from "./configuration.ts";
 import { issuer, proxyIdentity } from "./identity.ts";
 
-export const connectorBrowserBinding = (url: URL) =>
-  /^\/_widefleet\/connectors\/([A-Za-z_$][A-Za-z0-9_$]*)\//.exec(url.pathname)?.[1] ?? null;
-
 interface Apps {
-  browser?: boolean;
   resolve: (hostname: string) => Promise<z.infer<typeof appAccessSnapshot> | null>;
-  fetch: (request: Request, caller: z.infer<typeof connectorCaller>) => Promise<Response>;
-  connector?: (
-    request: Request,
-    caller: z.infer<typeof connectorCaller>,
-    binding: string,
-  ) => Promise<Response>;
+  fetch: (request: Request, caller: z.infer<typeof appCaller>) => Promise<Response>;
 }
 
 const response = (status: number, message: string) =>
@@ -189,60 +180,40 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
       headers.set("x-auth-request-email", user.data.email);
       headers.set("x-auth-request-groups", user.data.groups.join(","));
 
-      const caller = connectorCaller.parse({
+      const caller = appCaller.parse({
         issuer: issuer(configuration.provider),
         subject: user.data.id,
         name: user.data.name,
       });
 
-      const binding = connectorBrowserBinding(url);
+      const cookies = (request.headers.get("cookie") ?? "")
+        .split(";")
+        .filter((value) => !companyCookie(value.trim().split("=")[0] ?? ""));
 
-      if (binding && !apps.browser) {
-        if (!apps.connector) return response(404, "Not found");
+      if (cookies.some((value) => value.trim())) headers.set("cookie", cookies.join(";"));
 
-        return apps.connector(
-          new Request(request, { headers, redirect: "manual" }),
-          caller,
-          binding,
-        );
-      }
+      const result = await apps.fetch(
+        new Request(request, { headers, redirect: "manual" }),
+        caller,
+      );
 
-      if (apps.browser) {
-        const cookies = (request.headers.get("cookie") ?? "")
-          .split(";")
-          .filter((value) => !companyCookie(value.trim().split("=")[0] ?? ""));
-
-        if (cookies.some((value) => value.trim())) headers.set("cookie", cookies.join(";"));
-
-        const result = await apps.fetch(
-          new Request(request, { headers, redirect: "manual" }),
-          caller,
-        );
-
-        const outgoing = new Response(result.body, result);
-        outgoing.headers.delete("set-cookie");
-
-        // Connectors may set cookies only on their own host. Company sign-in
-        // cookies remain owned by the authentication proxy, across all organizations.
-        for (const cookie of result.headers.getSetCookie())
-          if (!companyCookie(cookie.split("=")[0]?.trim() ?? "")) {
-            const attributes = cookie.split(";");
-            const value = attributes.shift();
-
-            if (value)
-              outgoing.headers.append(
-                "set-cookie",
-                [value, ...attributes.filter((part) => !/^\s*domain\s*=/i.test(part))].join(";"),
-              );
-          }
-
-        return outgoing;
-      }
-
-      const result = await apps.fetch(new Request(request, { headers }), caller);
       const outgoing = new Response(result.body, result);
 
       outgoing.headers.delete("set-cookie");
+
+      // App OAuth cookies stay on the app host. No app can read or overwrite
+      // the proxy's company sign-in cookies, including another organization's.
+      for (const cookie of result.headers.getSetCookie())
+        if (!companyCookie(cookie.split("=")[0]?.trim() ?? "")) {
+          const attributes = cookie.split(";");
+          const value = attributes.shift();
+
+          if (value)
+            outgoing.headers.append(
+              "set-cookie",
+              [value, ...attributes.filter((part) => !/^\s*domain\s*=/i.test(part))].join(";"),
+            );
+        }
 
       return outgoing;
     },

@@ -3,7 +3,9 @@ import { workflowInstanceId } from "@platform/contracts";
 import type { WorkflowBinding, InstanceInput } from "./workflow-catalog.ts";
 import { installFetch } from "./fetch.ts";
 import { env } from "cloudflare:workers";
-import "./connector-bindings.ts";
+import "./app-bindings.ts";
+
+export { callerEntrypoint } from "./app-entrypoint.ts";
 
 import { config } from "./config.ts";
 import * as z from "zod";
@@ -16,10 +18,6 @@ import type {
   StatementInput,
 } from "./storage.ts";
 import { objectListing, objectMetadata, type ObjectOperation } from "./object-protocol.ts";
-
-export { connectorResponse } from "./connector-response.ts";
-
-export { withConnectorCaller } from "./connector-context.ts";
 
 const binding = <T extends Database | KeyValue | Producer | WorkflowBinding>(name: string) => {
   // SAFETY: These service bindings are created by the trusted loader, from the same manifest.

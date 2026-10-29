@@ -118,7 +118,9 @@
                   class="hidden text-[10px] sm:inline-flex">Preview</Badge
                 >{/if}
             </div>
-            <p class="text-muted-foreground mt-1 truncate text-xs">{app.hostname}</p>
+            <p class="text-muted-foreground mt-1 truncate text-xs">
+              {app.web ? app.hostname : "Service only"}
+            </p>
             <div class="mt-2 sm:hidden"><AppStatus state={app.state} /></div>
           </div>
         </div>

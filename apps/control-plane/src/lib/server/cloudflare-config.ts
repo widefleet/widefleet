@@ -10,7 +10,7 @@ import type {
 import { z } from "zod";
 import { runtimeConfigurationSchema } from "./config.ts";
 import type { cloudflareAppOperation } from "./cloudflare-app-operation-command.ts";
-import type { deploymentWorkflowCommand } from "./cloudflare-connector-command.ts";
+import type { deploymentWorkflowCommand } from "./deployment-workflow-command.ts";
 import type { CloudflareAuthRateLimitBindings } from "./auth-rate-limit-cloudflare.ts";
 
 export interface CloudflareBindings extends CloudflareAuthRateLimitBindings {

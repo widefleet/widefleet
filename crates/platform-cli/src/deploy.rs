@@ -28,7 +28,7 @@ struct Configuration {
     name: Option<String>,
     #[serde(flatten)]
     worker: crate::worker::Configuration,
-    assets: Assets,
+    assets: Option<Assets>,
     #[serde(default)]
     triggers: Triggers,
     #[serde(default)]
@@ -130,8 +130,10 @@ pub async fn run(
         crate::print_json(&result)?;
     } else {
         println!("Deployment {}", result.deployment.status);
-        if result.deployment.status == "succeeded" {
-            println!("{}", result.url);
+        if result.deployment.status == "succeeded"
+            && let Some(url) = &result.url
+        {
+            println!("{url}");
         }
     }
     Ok(())
@@ -233,7 +235,7 @@ async fn local_command(project: &Path, arguments: &[&str]) -> Result<()> {
 pub struct DeploymentResult {
     #[serde(flatten)]
     pub deployment: Deployment,
-    pub url: String,
+    pub url: Option<String>,
 }
 
 async fn publish(
@@ -303,7 +305,7 @@ async fn publish(
         eprintln!("Target: {} on {}", name, api.origin_text());
     }
     let bundler = installation::bundler().await?;
-    if !skip_build {
+    if !skip_build && project.join("package.json").exists() {
         local_command(project, &["run", "build"]).await?;
     }
     let temporary = tempfile::tempdir_in(project)?;
@@ -318,28 +320,59 @@ async fn publish(
         .compatibility_flags
         .iter()
         .any(|flag| flag == "nodejs_compat");
-    let worker = bundle(&bundler, project, &entry, temporary.path(), node_compat)
-        .await?
-        .source;
+    let bundled = bundle(&bundler, project, &entry, temporary.path(), node_compat).await?;
+    // Service entrypoints are module exports, as in Cloudflare Workers. Workflow
+    // classes use their standard declarations and are not RPC service entrypoints.
+    let web =
+        configuration.assets.is_some() || bundled.exports.iter().any(|name| name == "default");
+    let entrypoints = bundled
+        .exports
+        .into_iter()
+        .filter(|name| {
+            !configuration
+                .workflows
+                .iter()
+                .any(|workflow| workflow.class_name == *name)
+        })
+        .collect();
+    let worker = bundled.source;
     if worker.len() > 20 * 1024 * 1024 {
         return Err(Error::invalid("Worker exceeds 20 MiB".into()));
     }
-    let assets_root = project
-        .join(&configuration.assets.directory)
-        .canonicalize()?;
-    if !assets_root.starts_with(project) {
+    let assets_root = configuration
+        .assets
+        .as_ref()
+        .map(|assets| project.join(&assets.directory).canonicalize())
+        .transpose()?;
+    if assets_root
+        .as_ref()
+        .is_some_and(|root| !root.starts_with(project))
+    {
         return Err(Error::invalid(
             "Assets must be inside the app project".into(),
         ));
     }
-    let assets = collect_assets(&assets_root)?;
+    let assets = match &assets_root {
+        Some(root) => collect_assets(root)?,
+        None => AssetFiles {
+            source_maps: BTreeMap::new(),
+            manifest: BTreeMap::new(),
+            files: BTreeMap::new(),
+        },
+    };
     let mut map_files = assets.source_maps.clone();
     map_files.insert("worker.js".into(), temporary.path().join("worker.js.map"));
     let SourceMaps {
         source_maps,
         uploads: map_uploads,
     } = collect_source_maps(worker.len(), map_files)?;
-    let build_id = build_version(&assets_root)?;
+    let build_id = match &assets_root {
+        Some(root) => build_version(root)?,
+        None => platform_core::sha256(&serde_json::to_vec(&(
+            platform_core::sha256(&worker),
+            &source_maps,
+        ))?),
+    };
     let app = match target {
         Target::Preview(preview) => preview.resolve(api, credentials).await?,
         Target::App(Some(app)) => app,
@@ -437,12 +470,16 @@ async fn publish(
             }),
     );
     let metadata = WorkerMetadata {
+        web: Some(web),
+        entrypoints,
         crons: configuration.triggers.crons,
         queue_consumers: configuration.queues.consumers,
         worker: worker_metadata,
         assets: WorkerAssets {
             upload_session: session.id,
-            binding: configuration.assets.binding,
+            binding: configuration
+                .assets
+                .map_or_else(|| "ASSETS".into(), |assets| assets.binding),
         },
     };
     let mut modules = vec![("worker.js".into(), ModuleType::Esm, worker)];
@@ -461,7 +498,7 @@ async fn publish(
     .await?;
     Ok(DeploymentResult {
         deployment,
-        url: app_url,
+        url: (metadata.web != Some(false)).then_some(app_url),
     })
 }
 

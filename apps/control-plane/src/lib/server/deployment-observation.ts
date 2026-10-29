@@ -1,7 +1,7 @@
 import { createProductAnalytics } from "./analytics.ts";
 import type { AnalyticsEnvironment } from "../analytics-config.ts";
 import type { z } from "zod";
-import type { deploymentWorkflowCommand } from "./cloudflare-connector-command.ts";
+import type { deploymentWorkflowCommand } from "./deployment-workflow-command.ts";
 import type { cloudflareAppOperation } from "./cloudflare-app-operation-command.ts";
 import { observe } from "./observation.ts";
 

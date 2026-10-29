@@ -6,8 +6,7 @@ import { WorkflowEntrypoint } from "cloudflare:workers";
 import type { z } from "zod";
 import type { CloudflareBindings } from "./lib/server/cloudflare-config.ts";
 import { executeCloudflareDeployment } from "./lib/server/cloudflare-deployment.ts";
-import { deploymentWorkflowCommand } from "./lib/server/cloudflare-connector-command.ts";
-import { executeCloudflareConnector } from "./lib/server/cloudflare-connector-deployment.ts";
+import { deploymentWorkflowCommand } from "./lib/server/deployment-workflow-command.ts";
 import { executeCloudflareRuntime } from "./lib/server/cloudflare-runtime-deployment.ts";
 
 export class DeploymentWorkflow extends WorkflowEntrypoint<
@@ -31,8 +30,6 @@ export class DeploymentWorkflow extends WorkflowEntrypoint<
       command = parsed;
 
       if (command.kind === "runtime") await executeCloudflareRuntime(this.env, command, step);
-      else if (command.kind === "connector")
-        await executeCloudflareConnector(this.env, command, step);
       else await executeCloudflareDeployment(this.env, command, step);
       outcome = "succeeded";
     } catch (error) {

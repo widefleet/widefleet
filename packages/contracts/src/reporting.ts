@@ -62,7 +62,6 @@ export const reportingOperation = z.strictObject({
     "rollback",
     "runtime_update",
     "runtime_rollback",
-    "connector",
     "delete",
     "configure",
     "migrations",

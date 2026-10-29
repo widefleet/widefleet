@@ -1,5 +1,4 @@
 import { applicationContext } from "./application-context.ts";
-import type { WorkerModule } from "./worker-modules.ts";
 import * as contract from "@platform/contracts";
 import { createHash } from "node:crypto";
 import type { Result } from "better-result";
@@ -28,6 +27,7 @@ export const deploymentCommand = z.discriminatedUnion("kind", [
     artifactId: z.uuid(),
     requestId: z.string().min(1).max(128),
     rollback: z.boolean(),
+    refreshSecrets: z.boolean().optional(),
   }),
   command.extend({
     kind: z.literal("network"),
@@ -37,7 +37,7 @@ export const deploymentCommand = z.discriminatedUnion("kind", [
   command.extend({
     kind: z.literal("capabilities"),
     actor: deploymentActor,
-    name: contract.connectorSecretName,
+    name: contract.appSecretName,
     grant: contract.capabilityGrant.nullable(),
   }),
   command.extend({
@@ -56,41 +56,26 @@ export const operationId = (appId: string, requestId: string) => {
   return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-8${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
 };
 
-type ConnectorResult<T> = Promise<
+type ExecutionResult<T> = Promise<
   Result<T, DatabaseUnavailable | InvalidOperation | StorageUnavailable>
 >;
 
 export type HostedExecution = {
   runtime: {
-    read: (principal: Principal) => ConnectorResult<z.infer<typeof contract.runtimeStatus>>;
+    read: (principal: Principal) => ExecutionResult<z.infer<typeof contract.runtimeStatus>>;
     select: (
       principal: Principal,
       input: z.infer<typeof contract.runtimeRelease> | z.infer<typeof contract.runtimeUpdate>,
-    ) => ConnectorResult<z.infer<typeof contract.runtimeStatus>>;
+    ) => ExecutionResult<z.infer<typeof contract.runtimeStatus>>;
   };
-  remove: (principal: Principal, appId: string) => ConnectorResult<{ accepted: boolean }>;
-  connectors: {
-    status: (
-      current: z.infer<typeof contract.connectorStatus>,
-    ) => Promise<z.infer<typeof contract.connectorStatus>>;
-    deploy: (
-      principal: Principal,
-      release: z.infer<typeof contract.connectorPackage>,
-      modules: WorkerModule[],
-      requestId: string,
-    ) => ConnectorResult<z.infer<typeof contract.connectorStatus>>;
-    setSecret: (
-      principal: Principal,
-      name: string,
-      secret: string,
-      value: string | null,
-    ) => ConnectorResult<z.infer<typeof contract.connectorStatus>>;
+  remove: (principal: Principal, appId: string) => ExecutionResult<{ accepted: boolean }>;
+  connections: {
     bind: (
       principal: Principal,
       appId: string,
       name: string,
       grant: z.infer<typeof contract.capabilityGrant> | null,
-    ) => ConnectorResult<z.infer<typeof contract.capabilityState>>;
+    ) => ExecutionResult<z.infer<typeof contract.capabilityState>>;
   };
   operations: {
     migrate: (
@@ -144,6 +129,7 @@ export type HostedExecution = {
     requestId: string,
     rollback?: boolean,
     actor?: z.infer<typeof deploymentActor>,
+    options?: { refreshSecrets: true },
   ) => Promise<
     Result<
       z.infer<typeof contract.deployment>,

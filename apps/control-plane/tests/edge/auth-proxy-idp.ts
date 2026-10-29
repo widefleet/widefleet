@@ -33,6 +33,7 @@ export const createIdentityProvider = async (
     entra: false,
     groups: ["accounting"],
     name: "Example User",
+    subject: "pairwise-subject",
     email: "user@example.test",
     graphFailure: "",
     issuerSuffix: "",
@@ -172,7 +173,7 @@ export const createIdentityProvider = async (
                 : issuer,
           )
           .setAudience(settings.failure === "audience" ? "other-app" : "app-login")
-          .setSubject(parameters.person?.toLowerCase() ?? "pairwise-subject");
+          .setSubject(parameters.person?.toLowerCase() ?? settings.subject);
 
         if (settings.failure !== "missing-issued-at") claims.setIssuedAt();
 

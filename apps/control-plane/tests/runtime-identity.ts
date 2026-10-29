@@ -14,6 +14,7 @@ export const runtimeIdentity = async (
   domain = "apps.example.test",
   groups: string[] = [],
   otherGroups?: string[],
+  otherSubject?: string,
 ) => {
   const redirectUrl = `https://auth.${domain}/oauth2/widefleet/callback`;
   const provider = await createIdentityProvider(redirectUrl);
@@ -66,6 +67,7 @@ export const runtimeIdentity = async (
 
     const cookie = await login();
     provider.settings.groups = otherGroups ?? [];
+    provider.settings.subject = otherSubject ?? provider.settings.subject;
     const otherCookie = otherGroups ? await login() : undefined;
 
     return { configuration, cookie, otherCookie };

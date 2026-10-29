@@ -254,6 +254,7 @@ export const executeCloudflareRemoval = async (
 
       for (const prefix of [
         `apps/${target.id}/`,
+        `app-secrets/${target.id}/`,
         `versions/${target.id}/`,
         `workflow-versions/${target.id}/`,
       ])

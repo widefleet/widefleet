@@ -1,9 +1,12 @@
 import type { TraceItem } from "@cloudflare/workers-types";
 import type { z } from "zod";
 
-export type WorkerIdentity =
-  | { appId: string; deploymentId: string; buildId: string | null }
-  | { organizationId: string; connector: string; connectorVersion: string };
+export type WorkerIdentity = {
+  organizationId?: string | undefined;
+  appId: string;
+  deploymentId: string;
+  buildId: string | null;
+};
 
 export type WorkflowIdentity = {
   appId: string;

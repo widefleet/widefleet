@@ -53,7 +53,7 @@ const scenarios = [
 
 describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("D1 observation in workerd", () => {
   it.each([false, true])(
-    "preserves native behavior through app/connector builders (hook=%s)",
+    "preserves native behavior through app/service builders (hook=%s)",
     async (enabled) => {
       const directory = await mkdtemp(join(tmpdir(), "widefleet-d1-observer-"));
       const observations: z.infer<typeof observation>[] = [];
@@ -204,7 +204,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("D1 observation in w
 
         let expectedEvents = 0;
 
-        for (const scope of ["app", "connector"]) {
+        for (const scope of ["app", "service"]) {
           for (const scenario of scenarios) {
             await reset();
             const native = await read(`/native/${scenario}`);
@@ -253,7 +253,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("D1 observation in w
         }
 
         await reset();
-        const results = await Promise.all([read("/app/drizzle"), read("/connector/drizzle")]);
+        const results = await Promise.all([read("/app/drizzle"), read("/service/drizzle")]);
 
         for (const result of results)
           expect(result).toEqual([
@@ -273,8 +273,9 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("D1 observation in w
                 },
                 {
                   organizationId: "observer-fixture",
-                  connector: "fixture",
-                  connectorVersion: "a0000000-0000-4000-8000-000000000003",
+                  appId: "a0000000-0000-4000-8000-000000000004",
+                  buildId: null,
+                  deploymentId: "a0000000-0000-4000-8000-000000000003",
                 },
               ])
             : [],

@@ -1,10 +1,10 @@
 mod access;
+mod app_bindings;
 mod apps;
 mod auth;
 mod catalog;
 mod configuration;
 mod connections;
-mod connector;
 mod deploy;
 mod discovery;
 mod groups;
@@ -17,6 +17,7 @@ mod organizations;
 mod preview;
 mod reporting;
 mod runtime;
+mod services;
 mod settings;
 mod upload;
 mod worker;
@@ -98,10 +99,16 @@ enum Command {
     Network(network::Options),
     /// Manage app access groups inherited automatically by every preview.
     Access(access::Options),
-    /// Deploy IT connectors and manage their app bindings.
-    Connector(connector::Options),
-    /// Show app connectors and resources from the active deployment.
+    /// Show app connections and resources from the active deployment.
     Connections(connections::Options),
+    /// Discover app APIs in the organization.
+    Services,
+    /// Connect an app to another app API.
+    Connect(services::Connect),
+    /// Remove an app connection.
+    Disconnect(services::Disconnect),
+    /// Manage app secrets.
+    Secret(services::Secrets),
     /// Create an application; use --parent for an isolated preview.
     Create {
         slug: String,
@@ -246,7 +253,10 @@ async fn run(args: Arguments) -> Result<()> {
         Command::Workflows(options) => workflows::run(&api, &credentials, options).await,
         Command::Network(options) => network::run(&api, &credentials, options).await,
         Command::Access(options) => access::run(&api, &credentials, options).await,
-        Command::Connector(options) => connector::run(&api, &credentials, options).await,
+        Command::Services => services::catalog(&api, &credentials).await,
+        Command::Connect(options) => services::connect(&api, &credentials, options).await,
+        Command::Disconnect(options) => services::disconnect(&api, &credentials, options).await,
+        Command::Secret(options) => services::secrets(&api, &credentials, options).await,
         Command::Connections(options) => connections::run(&api, &credentials, options).await,
         Command::Runtime(options) => runtime::run(&api, &credentials, &token, options).await,
         Command::Settings(options) => settings::run(&api, &token, options).await,
@@ -408,7 +418,10 @@ async fn main() {
         Command::Workflows(_) => "workflows",
         Command::Network(_) => "network",
         Command::Access(_) => "access",
-        Command::Connector(_) => "connector",
+        Command::Services => "services",
+        Command::Connect(_) => "connect",
+        Command::Disconnect(_) => "disconnect",
+        Command::Secret(_) => "secret",
         Command::Connections(_) => "connections",
         Command::Create { .. } => "create",
         Command::Deploy { .. } => "deploy",

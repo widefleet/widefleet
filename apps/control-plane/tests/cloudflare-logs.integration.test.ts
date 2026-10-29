@@ -6,7 +6,7 @@ import { cloudflareLogRecords } from "@platform/app-runtime/logs";
 import { createCloudflareLogs } from "../src/lib/server/cloudflare-logs.ts";
 import { createTelemetry } from "../src/lib/server/telemetry.ts";
 import { createStorage } from "../src/lib/server/storage.ts";
-import { apps, artifacts, connectors, deployments } from "../src/lib/server/schema.ts";
+import { apps, artifacts, deployments } from "../src/lib/server/schema.ts";
 import { InvalidOperation, TelemetryUnavailable } from "../src/lib/server/errors.ts";
 import { seedDeployment } from "./cloudflare-deployment.fixture.ts";
 import { createTestEnvironment } from "./environment.ts";
@@ -78,12 +78,6 @@ describe("Cloudflare logs through the shared authorized service", () => {
     environment = await createTestEnvironment();
     principal.application.organizationId = environment.application.organizationId;
     fixture = await seedDeployment(environment.database.db);
-    await environment.database.db.insert(connectors).values({
-      organizationId: fixture.organizationId,
-      name: "fixture-connector",
-      package: {},
-      jobId: crypto.randomUUID(),
-    });
     await environment.database.db.insert(deployments).values({
       id: fixture.deploymentId,
       appId: fixture.appId,
@@ -159,134 +153,6 @@ describe("Cloudflare logs through the shared authorized service", () => {
 
     expect(requests).toHaveLength(0);
   });
-
-  it("authorizes connector logs separately and scopes the backend to execution, connector and version", async () => {
-    const version = crypto.randomUUID();
-    const input = contract.connectorLogQuery.parse({ name: "fixture-connector", version });
-    const denied = await telemetry.queryConnector(principal, input);
-    expect(denied.isErr() && denied.error).toMatchObject({ code: "FORBIDDEN" });
-    expect(requests).toHaveLength(0);
-
-    const source = cloudflareLogRecords(
-      {
-        logs: [{ timestamp: now, level: "info", message: ["connector message"] }],
-        exceptions: [],
-        eventTimestamp: now,
-        outcome: "ok",
-        truncated: false,
-      },
-      { organizationId: fixture.organizationId, connector: input.name, connectorVersion: version },
-      now + 1000,
-    )[0];
-
-    events = [{ ...logEvent(fixture.appId, fixture.deploymentId), source }];
-
-    const page = (
-      await telemetry.queryConnector(
-        { ...principal, application: { ...principal.application, admin: true } },
-        input,
-      )
-    ).unwrap();
-
-    expect(page.entries[0]).toMatchObject({
-      message: "connector message",
-      connectorVersion: version,
-      deploymentId: null,
-      stack: null,
-      buildId: null,
-      traceId: null,
-      spanId: null,
-      route: null,
-      status: null,
-    });
-    expect(requests[0]?.parameters.filters).toEqual(
-      expect.arrayContaining([
-        { key: "organizationId", type: "string", operation: "eq", value: fixture.organizationId },
-        { key: "connector", type: "string", operation: "eq", value: input.name },
-        { key: "record.connectorVersion", type: "string", operation: "eq", value: version },
-      ]),
-    );
-    const appQuery = await query();
-    expect(appQuery.isErr() && appQuery.error).toBeInstanceOf(TelemetryUnavailable);
-    events = [logEvent(fixture.appId, fixture.deploymentId)];
-
-    const foreign = await telemetry.queryConnector(
-      { ...principal, application: { ...principal.application, admin: true } },
-      input,
-    );
-
-    expect(foreign.isErr() && foreign.error).toBeInstanceOf(TelemetryUnavailable);
-  });
-
-  it("restores nullable log fields omitted by Workers Logs", async () => {
-    const event = events[0];
-
-    if (!event?.source) throw new Error("Expected a log fixture");
-
-    for (const key of [
-      "stack",
-      "buildId",
-      "deploymentId",
-      "connectorVersion",
-      "requestId",
-      "traceId",
-      "spanId",
-      "route",
-      "status",
-    ] as const)
-      event.source.record[key] = null;
-
-    const page = (await query()).unwrap();
-    expect(page.entries).toEqual([{ ...event.source.record, id: event.$metadata.id, frames: [] }]);
-  });
-
-  it("preserves present empty text and zero-valued metadata", async () => {
-    const event = events[0];
-
-    if (!event?.source) throw new Error("Expected a log fixture");
-
-    for (const key of ["stack", "buildId", "requestId", "traceId", "spanId", "route"] as const)
-      event.source.record[key] = "";
-    event.source.record.status = 0;
-
-    const page = (await query()).unwrap();
-    expect(page.entries).toEqual([{ ...event.source.record, id: event.$metadata.id, frames: [] }]);
-  });
-
-  it.each(["organizationId", "connector", "appId"] as const)(
-    "rejects connector logs with foreign %s after restoring omitted fields",
-    async (field) => {
-      const source = cloudflareLogRecords(
-        {
-          logs: [{ timestamp: now, level: "info", message: ["connector message"] }],
-          exceptions: [],
-          eventTimestamp: now,
-          outcome: "ok",
-          truncated: false,
-        },
-        {
-          organizationId: fixture.organizationId,
-          connector: "fixture-connector",
-          connectorVersion: crypto.randomUUID(),
-        },
-        now + 1000,
-      )[0];
-
-      if (!source) throw new Error("Expected a connector log fixture");
-      source[field] = field === "connector" ? "another-connector" : crypto.randomUUID();
-      events = [{ ...logEvent(fixture.appId, fixture.deploymentId), source }];
-
-      const result = await telemetry.queryConnector(
-        { ...principal, application: { ...principal.application, admin: true } },
-        contract.connectorLogQuery.parse({ name: "fixture-connector" }),
-      );
-
-      expect(result.isErr() && result.error).toBeInstanceOf(TelemetryUnavailable);
-      expect(result.isErr() && result.error.cause).toMatchObject({
-        message: "Cloudflare returned logs outside the authorized source",
-      });
-    },
-  );
 
   it("scopes every query to this installation's runtime and authorized app", async () => {
     const page = (await query()).unwrap();
