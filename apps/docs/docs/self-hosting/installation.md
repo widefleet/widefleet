@@ -284,8 +284,11 @@ connector Durable Object classes and their state. Retained storage objects are
 not converted into app resources.
 
 Recreate integrations as apps, re-enter their secrets and grant connections to
-callers. Redeploy callers before verifying them. Former connector browser URLs,
-verified-caller hooks and Durable Object APIs are no longer available.
+callers. Redeploy callers before verifying them. Former connector browser URLs and
+Durable Object APIs are no longer available. Apps use their own browser URLs and
+receive the verified user through `ctx.props.caller`; see
+[app caller identity](/guides/app-services#user-identity). Users reconnect their
+personal accounts in the recreated provider apps.
 Hosted configuration uses `WIDEFLEET_SECRETS_KEY` and the `service` execution-limit
 profile. Follow the normal versioned deployment process for these changes.
 

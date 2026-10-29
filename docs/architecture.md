@@ -32,7 +32,7 @@ The UI's remote functions and the CLI's HTTP API call shared server operations d
 
 Management membership and app usage are separate. Signing into a published app must not enroll a management member; management access must not implicitly grant app usage. App access rules also apply to previews through their parent. Keep these boundaries when changing [membership](../apps/control-plane/src/lib/server/organization.ts) or [app access](../apps/control-plane/src/lib/server/app-access.ts); the public [app access reference](https://widefleet.com/docs/reference/app-access) owns the user-facing rules.
 
-Traefik removes client-supplied identity headers and forwards only the identity established by app SSO. App code must not receive login tokens or SSO cookies. The [edge tests](../apps/control-plane/tests/edge/sso.test.ts) verify this boundary across proxy and runtime changes.
+Traefik removes client-supplied identity headers and forwards only the identity established by app SSO. App code must not receive login tokens or SSO cookies. Per-app OAuth cookies remain host-scoped. The runtime signs the verified SSO caller for the invoking app, verifies its app and organization at each service boundary, then rebinds it to the target without extending its expiry. AsyncLocalStorage carries this proof per invocation; never store a caller in a worker-global variable or accept a caller object from RPC arguments. The [edge tests](../apps/control-plane/tests/edge/sso.test.ts) verify this boundary across proxy and runtime changes.
 
 ## Activation is serialized per organization
 

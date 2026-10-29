@@ -97,9 +97,46 @@ Deploy the caller and request its authenticated app URL. The response is
 Use the provider's own [network permissions](/guides/network) for outbound
 requests to an external system. Each app keeps its own D1, R2 and KV resources.
 
-Connections authorize an app, not an individual signed-in user. RPC arguments
-are caller-controlled; services must validate them and enforce their business
-permissions. No verified end-user identity is propagated by a service connection.
+## User identity
+
+A request authenticated through company sign-in supplies `ctx.props.caller` to
+the app's HTTP handler. App bindings carry that identity automatically across
+RPC and `fetch()` calls, including calls through another service app:
+
+```ts
+import { WorkerEntrypoint } from "cloudflare:workers";
+
+type Caller = { issuer: string; subject: string; name: string };
+
+export class Profile extends WorkerEntrypoint<{}, { caller: Caller | null }> {
+  whoAmI() {
+    const caller = this.ctx.props.caller;
+    if (!caller) throw new Error("A signed-in user is required");
+    return { issuer: caller.issuer, subject: caller.subject };
+  }
+}
+```
+
+Use the pair `(issuer, subject)` as the stable user key. Names and email addresses
+are display data. The trusted runtime verifies the caller at each app boundary;
+request headers, method arguments and changes to the caller object cannot select
+another user. Company login cookies and tokens stay outside app code.
+
+Connections authorize the calling app to use the API. Services must additionally
+validate arguments and enforce their own per-user permissions. Calls without an
+authenticated HTTP invocation, such as cron, queues and workflows, have no verified
+user; a service receives `caller: null`. Delegation expires after five minutes and
+further service hops do not extend it. Start a new authenticated request for later
+user actions; do not persist delegation proofs in jobs.
+
+Apps with a browser UI can manage provider OAuth on their own HTTPS URL.
+`env.WIDEFLEET_ORIGIN` contains that canonical origin. App cookies are forwarded,
+but company sign-in cookies are filtered. App responses can set only host-scoped
+cookies and cannot overwrite company sign-in cookies. Keep OAuth state, callback
+user checks and CSRF protection in the app.
+
+The [Gmail app example](/guides/gmail-app) connects each user's personal Google
+account and shares that account across authorized calling apps.
 
 ## Activation and updates
 
