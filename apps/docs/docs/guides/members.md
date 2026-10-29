@@ -1,7 +1,7 @@
 ---
 title: Members and company sign-in
 description: Accept invitations, manage organization membership and activate verified company sign-in.
-lastModified: 2026-10-23
+lastModified: 2026-10-29
 ---
 
 Use this flow on an installation with email delivery and organization invitations enabled.
@@ -12,8 +12,9 @@ admitted by that provider can join as members on their first sign-in without an 
 ## Accept an invitation
 
 1. Open the invitation link and sign in with the email address that received it.
-2. Without active company SSO, enter the six-digit code from the sign-in email. It expires
-   after five minutes and allows three attempts. With active company SSO, use that
+2. Use [Google or Microsoft](/reference/social-sign-in) when offered, or enter the
+   six-digit email code. Codes expire after five minutes and allow three attempts.
+   With active company SSO, use that
    organization's provider instead; an email-code login cannot accept its invitations.
 3. Review the organization and role, then accept.
 
