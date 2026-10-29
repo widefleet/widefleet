@@ -201,6 +201,8 @@ describe("Gmail connector with Better Auth and D1", () => {
   it("rejects cross-origin actions, changed callback users, missing state cookies and replay", async () => {
     const alice = browser("alice");
     expect((await alice.request("/connect", "POST", "https://app.example.test")).status).toBe(403);
+    expect((await alice.request("/connect", "POST", "null")).status).toBe(403);
+    expect((await alice.request("/disconnect", "POST", "null")).status).toBe(403);
     expect((await alice.request("/disconnect", "POST", "https://app.example.test")).status).toBe(
       403,
     );
