@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: App configuration fields, storage bindings and settings managed by the platform.
-lastModified: 2026-10-28
+lastModified: 2026-10-29
 ---
 
 App projects use `wrangler.jsonc`. Start with the generated starter and use the
@@ -72,9 +72,9 @@ running, and the setting does not delete Queue data or pause existing consumers.
 
 ### Dynamic Worker execution limits
 
-Cloudflare installation operators can set `executionLimits` in the hosted
-installation profile. The following example assigns separate CPU and subrequest
-budgets to each supported execution type:
+Cloudflare installation operators can set CPU and subrequest budgets in the
+versioned installation profile, then deploy it through their normal deployment
+process. For example:
 
 ```json
 {
@@ -88,44 +88,32 @@ budgets to each supported execution type:
 }
 ```
 
-These are example budgets, not defaults. Choose values against representative
-app workloads. If `executionLimits` is omitted, the platform's existing limits
-apply. When configured, all five profiles and both fields in each profile are
-required. `cpuMs` must be a positive integer; `subRequests` must be a nonnegative
-integer. Zero subrequests is allowed. Invalid configuration rejects execution
-instead of falling back to an unrestricted call.
+Choose budgets for your workloads; these values are examples. When configuring
+`executionLimits`, supply all five profiles with a positive integer `cpuMs` and
+a nonnegative integer `subRequests`. Omitting `executionLimits` keeps the
+platform's existing limits.
 
-- `http` applies to each dynamic app HTTP invocation. Static assets served by
-  the parent runtime do not execute app code and do not use this profile.
-- `connector` applies to default and named connector entrypoints, including
-  HTTP and RPC calls, and to connector Durable Object facets.
-- `cron` applies separately to each app's scheduled invocation.
-- `workflow` applies to the entire Dynamic Worker runner invocation on
-  Cloudflare, including calls across its steps. It does not reset at each step
-  and does not set a lifetime budget across retries or resumed invocations.
-- `readiness` applies to app, connector and workflow readiness invocations.
+| Profile     | Applies to                                                                                                   |
+| ----------- | ------------------------------------------------------------------------------------------------------------ |
+| `http`      | Each app HTTP invocation that executes Worker code.                                                          |
+| `connector` | Connector HTTP and RPC calls, including Durable Object facets.                                               |
+| `cron`      | Each app's scheduled invocation.                                                                             |
+| `workflow`  | A Workflow runner invocation, shared across its steps. Retries and resumed invocations receive a new budget. |
+| `readiness` | App, connector and Workflow readiness checks.                                                                |
 
-CPU time counts active computation; waiting for network or storage does not
-consume that CPU budget. Cloudflare throws an exception when an invocation
-reaches its CPU or subrequest limit. These profiles do not impose wall-clock,
-memory, request-rate or total-cost limits. Parent runtime work and external
-service charges are outside the child CPU budget. Queue consumers retain the
-platform's existing limits; the `cron` profile does not apply to Queue batches.
+CPU time measures active computation, excluding time spent waiting for network
+or storage. Cloudflare ends an invocation that exceeds its CPU or subrequest
+budget. Static asset serving and Queue consumers keep their existing limits;
+these profiles control Dynamic Worker execution rather than total service costs.
 
-The hosted deployment tool validates the profile and writes it to the parent
-runtime's `WIDEFLEET_EXECUTION_LIMITS` variable. If the same variable is present
-in a runtime override file, the installation profile takes precedence. Change
-the versioned installation profile and deploy the parent runtime through your
-normal deployment process. New invocations select the configured profile even
-when the child Worker is already cached. Already-running invocations retain
-their selected limits.
+Changes apply to new invocations, including cached Workers. Running invocations
+keep their selected budget. These are installation settings; app `wrangler.jsonc`
+files use the operator's limits.
 
-App `wrangler.jsonc` files cannot set these operator limits. If a normal request
-starts failing after a policy change, inspect the runtime error and its CPU or
-subrequest usage, then optimize the operation or adjust its profile. Local
-workerd tests verify profile selection and forwarding; use Cloudflare's runtime
-to validate production resource enforcement. See
-[Dynamic Worker limits](https://developers.cloudflare.com/dynamic-workers/usage/limits/).
+If an invocation exceeds its budget, check its runtime logs, reduce the work per
+call or ask the operator to adjust that profile. See
+[Cloudflare's Dynamic Worker limits](https://developers.cloudflare.com/dynamic-workers/usage/limits/)
+for runtime constraints.
 
 ## Database migrations
 
