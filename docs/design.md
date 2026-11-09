@@ -40,7 +40,8 @@ Use [local fixtures and verification](development.md#local-verification). Before
 2. Inspect the affected flow at desktop and narrow mobile widths, in light and dark themes. Compare before and after for changes to layout or hierarchy.
 3. Check for redundant labels, competing emphasis, unnecessary containers, awkward gaps, clipping and layout shifts. Verify long names and realistic list density where relevant.
 4. Exercise the changed interactions with pointer and keyboard. Check relevant empty, loading, failure and permission states, including image fallbacks when applicable.
-5. Record the views and states checked in the PR, with before/after images when useful. State any unverified cases explicitly; passing functional tests alone does not establish visual quality.
+5. Include labeled before/after screenshots in the PR description for every visible UI change. Capture the original and updated application with the same synthetic data, viewport, theme and interaction state so reviewers can compare them directly. Cover the affected desktop and mobile views and light and dark themes; refresh the after images when subsequent changes alter the result. Documentation-only and backend-only changes do not need screenshots.
+6. Record the views and states checked and any verification gaps in the PR. If a screenshot cannot be captured, explain the blocker explicitly instead of presenting a mockup as verification. Passing functional tests alone does not establish visual quality.
 
 ## References
 
