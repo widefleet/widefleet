@@ -12,6 +12,7 @@ import { binaryPaths, binarySchemas } from "./openapi-binary.ts";
 import { DirectoryUnavailable } from "./directory.ts";
 import { InvalidOperation, TelemetryNotConfigured, TelemetryUnavailable } from "./errors.ts";
 import { readInstallation } from "./installation-store.ts";
+import { readAppIcon } from "./app-icons.ts";
 
 import { changeMemberRole, listMembers, removeMember } from "./members.ts";
 import { readCompanyAccount } from "./settings-account.ts";
@@ -813,6 +814,26 @@ export const createApi = (runtime: Runtime) => {
         components: {
           ...document.components,
           schemas: { ...document.components?.schemas, ...binarySchemas },
+        },
+      });
+    }
+
+    const icon = /^\/api\/v1\/apps\/([^/]+)\/icon$/.exec(url.pathname);
+
+    if (icon && request.method === "GET") {
+      const principal = unwrap(await runtime.identity.authenticate(request, "platform:read"));
+      const appId = contract.identifier.parse(icon[1]);
+
+      const result = unwrap(
+        await readAppIcon(runtime.database.db, runtime.storage, principal, appId),
+      );
+
+      return new Response(Buffer.from(result.bytes), {
+        headers: {
+          "content-type": result.contentType,
+          "x-content-type-options": "nosniff",
+          "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+          "cross-origin-resource-policy": "same-origin",
         },
       });
     }

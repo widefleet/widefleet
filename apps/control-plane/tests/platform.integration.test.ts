@@ -28,6 +28,7 @@ import { apiResource } from "../src/lib/server/auth-options.ts";
 import { createAppAccessService } from "../src/lib/server/app-access.ts";
 import { createNetworkService } from "../src/lib/server/network.ts";
 import { createAppService } from "../src/lib/server/apps.ts";
+import { organization } from "../src/lib/server/auth-schema.ts";
 import { hashAsset } from "../src/lib/server/asset-hash.ts";
 import { createIdentityService } from "../src/lib/server/identity.ts";
 import { createJobService } from "../src/lib/server/jobs.ts";
@@ -2308,5 +2309,75 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     expect((await json(path, "PUT", { listed: false }, outsiderHeaders)).status).toBe(403);
     expect(await (await json(path, "PUT", { listed: false })).json()).toEqual({ listed: false });
     expect(await (await json("/catalog", "GET", undefined, outsiderHeaders)).json()).toEqual([]);
+  });
+
+  it("serves only accessible active app icons and isolates SVG responses", async () => {
+    const app = await createApp("app-icon");
+    const path = `/apps/${app.id}/icon`;
+
+    const bytes = new TextEncoder().encode(
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M0 0h24v24H0z"/></svg>',
+    );
+
+    const hash = hashAsset("/favicon.svg", bytes);
+    const session = await start(app.id, { "/favicon.svg": { hash, size: bytes.length } });
+    expect(
+      (
+        await storage.put(`apps/${app.id}/assets/${hash}`, bytes, "application/octet-stream")
+      ).isOk(),
+    ).toBe(true);
+    const deployment = contract.deployment.parse(await (await publish(app.id, session.id)).json());
+
+    expect((await json(path, "GET")).status).toBe(404);
+    await environment.database.db
+      .update(apps)
+      .set({ state: "active", activeDeploymentId: deployment.id })
+      .where(eq(apps.id, app.id));
+    expect((await json(path, "GET", undefined, new Headers())).status).toBe(401);
+    expect((await json(path, "GET", undefined, outsiderHeaders)).status).toBe(404);
+    const response = await json(path, "GET");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("image/svg+xml");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("content-security-policy")).toContain("sandbox");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("cross-origin-resource-policy")).toBe("same-origin");
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
+
+    const foreignOrganizationId = crypto.randomUUID();
+    await environment.database.db.insert(organization).values({
+      id: foreignOrganizationId,
+      name: "Other tenant",
+      slug: foreignOrganizationId,
+      createdAt: new Date(),
+    });
+    await environment.database.db
+      .update(apps)
+      .set({ organizationId: foreignOrganizationId })
+      .where(eq(apps.id, app.id));
+    expect((await json(path, "GET")).status).toBe(404);
+    await environment.database.db
+      .update(apps)
+      .set({ organizationId: app.organizationId })
+      .where(eq(apps.id, app.id));
+
+    const replacement = await start(app.id);
+    const next = contract.deployment.parse(await (await publish(app.id, replacement.id)).json());
+    expect((await json(path, "GET")).status).toBe(200);
+    await environment.database.db
+      .update(apps)
+      .set({ activeDeploymentId: next.id })
+      .where(eq(apps.id, app.id));
+    expect((await json(path, "GET")).status).toBe(404);
+    await environment.database.db
+      .update(apps)
+      .set({ activeDeploymentId: deployment.id, webEnabled: false })
+      .where(eq(apps.id, app.id));
+    expect((await json(path, "GET")).status).toBe(404);
+    await environment.database.db
+      .update(apps)
+      .set({ webEnabled: true, state: "deleting" })
+      .where(eq(apps.id, app.id));
+    expect((await json(path, "GET")).status).toBe(404);
   });
 });

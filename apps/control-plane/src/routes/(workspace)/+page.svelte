@@ -6,11 +6,11 @@
   import Plus from "@lucide/svelte/icons/plus";
   import Search from "@lucide/svelte/icons/search";
   import Layers2 from "@lucide/svelte/icons/layers-2";
-  import GitBranch from "@lucide/svelte/icons/git-branch";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import ArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
   import PageHeading from "#shadcn/components/PageHeading.svelte";
   import EmptyState from "#shadcn/components/EmptyState.svelte";
+  import AppIcon from "#shadcn/components/AppIcon.svelte";
   import AppStatus from "#shadcn/components/AppStatus.svelte";
   import type { PageData } from "./$types";
 
@@ -43,7 +43,7 @@
 </script>
 
 <svelte:head><title>Apps · Widefleet</title></svelte:head>
-<PageHeading title="Your apps" description="Everything that moves your team forward. In one place.">
+<PageHeading title="Apps">
   {#if data.principal.creator}<Button href="/apps/new"><Plus />Create app</Button>{/if}
 </PageHeading>
 <div class="mt-8 flex flex-wrap items-center justify-between gap-4 border-b pb-4">
@@ -98,25 +98,20 @@
   <ul class="divide-y" aria-label="Apps">
     {#each apps as app (app.id)}
       <li
-        class="group relative grid grid-cols-[minmax(0,1fr)_24px] items-center gap-4 rounded-md px-3 py-4 hover:bg-muted/40 sm:grid-cols-[minmax(0,1fr)_190px_24px]"
+        class="group relative grid grid-cols-[minmax(0,1fr)_24px] items-center gap-4 rounded-md px-3 py-3 hover:bg-muted/40 sm:grid-cols-[minmax(0,1fr)_190px_24px]"
       >
-        <div class="flex min-w-0 items-center gap-3.5">
-          <span
-            class={`grid size-10 shrink-0 place-items-center rounded-xl border ${app.parentId ? "bg-amber-500/5 text-amber-600 dark:text-amber-400" : "bg-primary/5 text-primary"}`}
-            >{#if app.parentId}<GitBranch class="size-4" />{:else}<Layers2
-                class="size-4"
-              />{/if}</span
-          >
+        <div class="flex min-w-0 items-center gap-3">
+          <AppIcon
+            appId={app.id}
+            deploymentId={app.web && app.state === "active" ? app.activeDeploymentId : null}
+          />
           <div class="min-w-0">
             <div class="flex items-center gap-2">
               <a
                 href={`/apps/${app.id}`}
                 class="truncate text-sm font-medium after:absolute after:inset-0 after:rounded-md"
                 >{app.displayName}</a
-              >{#if app.parentId}<Badge
-                  variant="secondary"
-                  class="hidden text-[10px] sm:inline-flex">Preview</Badge
-                >{/if}
+              >{#if app.parentId}<Badge variant="secondary" class="text-[10px]">Preview</Badge>{/if}
             </div>
             <p class="text-muted-foreground mt-1 truncate text-xs">
               {app.web ? app.hostname : "Service only"}

@@ -54,7 +54,7 @@ test("signs in through generic OIDC and enrolls the verified account as a manage
     await page.goto(`${environment.configuration.PLATFORM_URL}/sign-in`);
     await page.getByRole("button", { name: "Sign in with Company SSO" }).click();
     await page.getByRole("button", { name: /sso@example.test/ }).click();
-    await expect(page.getByRole("heading", { name: "Your apps", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
     await expect(page.getByText("SSO Test User", { exact: true })).toBeVisible();
 
     const accounts = await environment.database.db
