@@ -10,34 +10,20 @@ import { apps, artifacts, deployments } from "./schema.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import { transact } from "./transactions.ts";
 
-const iconTypes = new Map([
-  ["svg", "image/svg+xml"],
-  ["ico", "image/x-icon"],
-  ["png", "image/png"],
+const iconPaths = new Map([
+  ["/favicon.svg", "image/svg+xml"],
+  ["/favicon.ico", "image/x-icon"],
+  ["/favicon.png", "image/png"],
+  ["/apple-touch-icon.png", "image/png"],
 ]);
-
-const preferredPaths = ["/favicon.svg", "/favicon.ico", "/favicon.png", "/apple-touch-icon.png"];
 
 const maxIconBytes = 256 * 1024;
 
 export const findAppIcon = (manifest: z.infer<typeof assetManifest>) => {
-  const entries = Object.entries(manifest);
+  for (const [path, contentType] of iconPaths) {
+    const entry = manifest[path];
 
-  const priority = (path: string) => {
-    const index = preferredPaths.indexOf(path);
-
-    return index < 0 ? preferredPaths.length : index;
-  };
-
-  entries.sort(([left], [right]) => priority(left) - priority(right) || left.localeCompare(right));
-
-  for (const [path, entry] of entries) {
-    if (!preferredPaths.includes(path) && !/\/favicon(?:[.-][\w-]+)?\.(svg|ico|png)$/.test(path))
-      continue;
-    const contentType = iconTypes.get(path.split(".").at(-1) ?? "");
-
-    if (contentType && entry.size > 0 && entry.size <= maxIconBytes)
-      return { ...entry, contentType };
+    if (entry && entry.size > 0 && entry.size <= maxIconBytes) return { ...entry, contentType };
   }
 
   return null;
