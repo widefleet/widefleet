@@ -24,6 +24,14 @@ Inspect how [page headings](../apps/control-plane/src/lib/components/PageHeading
 
 Keep essential context available at narrow widths. Preserve image proportions and reserve their layout space while loading or falling back. Interactive controls need clear hover, focus, pending and disabled states. Motion should explain a transition or acknowledge an action, stay unobtrusive during repeated use, and respect reduced-motion preferences.
 
+## Choose an editing surface
+
+Prefer inline editing for small, independent, reversible changes when the surrounding context helps users, such as changing an app's display name or a short description. Make editability apparent on touch devices and with keyboard focus as well as on hover.
+
+Group dependent fields into a form with a shared save action. Use dialogs for short, self-contained tasks or consequential confirmations. Use a dedicated page for complex workflows or decisions that require consulting other information.
+
+Make save and cancel behavior explicit with visible controls and appropriate keyboard support. Keep validation errors beside the field and preserve the draft when saving fails. Avoid implicitly saving or discarding unfinished text when focus leaves the editor. Changes to permissions or running services need a clear commit action that communicates their consequences.
+
 ## Review the rendered result
 
 Use [local fixtures and verification](development.md#local-verification). Before opening or updating a UI PR:
@@ -39,5 +47,6 @@ Use [local fixtures and verification](development.md#local-verification). Before
 - [Linear's interface refresh](https://linear.app/now/behind-the-latest-design-refresh): restrained navigation, meaningful emphasis and quieter structure.
 - [Linear's product reasoning skill](https://gist.github.com/ksaa/5644e3225be8af5eef4fa1bed0e7e88a): understand the underlying need and consider tradeoffs before committing to a solution.
 - [Emil Kowalski's Agents with Taste](https://emilkowal.ski/ui/agents-with-taste): make design judgments explicit through concrete rules, reasons and examples.
+- [Atlassian's inline-edit guidelines](https://atlassian.design/components/inline-edit/usage) and [Carbon's dialog guidelines](https://www.carbondesignsystem.com/building-blocks/core/patterns/dialogs): preserve context for frequent edits and use focused dialogs deliberately.
 
 These references inform the guidelines above; apply them to Widefleet's workflows and existing visual system.
