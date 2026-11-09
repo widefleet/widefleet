@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
+import { standardAppsCron } from "../src/lib/server/standard-apps-schedule.ts";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseConfigFileTextToJson } from "typescript";
@@ -212,6 +213,17 @@ export const hostedConfigurations = async (
       kv_namespaces: [{ binding: "AUTH_CONFIG", id: ids.auth }],
       r2_buckets: [{ binding: "ARTIFACTS", bucket_name: names.artifacts }],
       ...controlOverrides,
+      triggers: {
+        crons: [
+          ...new Set([
+            standardAppsCron,
+            ...(z
+              .object({ crons: z.array(z.string()) })
+              .optional()
+              .parse(controlOverrides["triggers"])?.crons ?? []),
+          ]),
+        ],
+      },
       vars: {
         ...control.vars,
         APP_RUNTIME_NAME: names.runtime,

@@ -55,9 +55,11 @@ jobs:
       - name: Check source
         if: matrix.suite == 'source'
         run: pnpm check
-      - name: Build the app runtime for packaged tests
+      - name: Build the app runtime and standard apps for packaged tests
         if: matrix.suite == 'packaged-runtime'
-        run: pnpm --filter @platform/app-runtime build
+        run: |
+          pnpm --filter @platform/app-runtime build
+          pnpm --filter @platform/standard-apps build
       - name: Generate the control-plane test configuration
         if: matrix.suite == 'packaged-runtime'
         run: pnpm --filter @platform/control-plane exec svelte-kit sync

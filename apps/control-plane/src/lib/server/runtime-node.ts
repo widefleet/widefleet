@@ -4,6 +4,7 @@ import { initializeRuntime } from "./runtime-initialization.ts";
 import { createReporting } from "./reporting.ts";
 import { createRuntime } from "./runtime-services.ts";
 import { createStorage } from "./storage.ts";
+import { createStandardAppService } from "./standard-apps.ts";
 
 export type { Runtime } from "./runtime-services.ts";
 
@@ -12,6 +13,14 @@ const startRuntime = async () => {
     await initializeRuntime();
 
   const storage = createStorage(configuration);
+  await createStandardAppService(
+    database.db,
+    configuration,
+    storage,
+    encryptionKey,
+    undefined,
+    observation,
+  ).backfill(extension.organizationAccess, Number.POSITIVE_INFINITY);
 
   const reporting = createReporting(configuration, database.db);
 

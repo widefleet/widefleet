@@ -8,6 +8,7 @@
   "preview_urls": false,
   "assets": { "directory": "dist/cloudflare/public", "binding": "ASSETS" },
   "observability": { "enabled": true },
+  "triggers": { "crons": ["29 * * * *"] },
   // Match Better Auth's default and plugin policies: requests per seconds.
   "ratelimits": [
     {

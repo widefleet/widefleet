@@ -26,7 +26,14 @@
     catalog.entries.filter(
       (entry) =>
         entry.appId !== data.app?.id &&
-        `${entry.displayName} ${entry.slug}`.toLowerCase().includes(search.toLowerCase()),
+        `${entry.displayName} ${entry.slug} ${Object.values(entry.services)
+          .map(
+            (service) =>
+              `${service.description} ${service.methods.map((method) => `${method.name} ${method.description}`).join(" ")}`,
+          )
+          .join(" ")}`
+          .toLowerCase()
+          .includes(search.toLowerCase()),
     ),
   );
 </script>
@@ -48,6 +55,47 @@
         <h2 class="font-medium">{entry.displayName}</h2>
         <p class="text-muted-foreground text-sm">{entry.slug}</p>
         <p class="text-sm">Available entrypoints: <code>{entry.entrypoints.join(", ")}</code></p>
+        {#each Object.entries(entry.services) as [name, service] (name)}
+          <details class="rounded-md border text-sm">
+            <summary class="cursor-pointer px-3 py-2 font-medium"
+              >{name} · {service.methods.length} methods</summary
+            >
+            <div class="space-y-4 border-t p-3">
+              {#if service.description}<p class="whitespace-pre-wrap">{service.description}</p>{/if}
+              {#each service.examples as example}<pre
+                  class="bg-muted overflow-x-auto rounded-md p-3"><code>{example}</code
+                  ></pre>{/each}
+              {#each service.methods as method, index (`${method.name}-${index}`)}
+                <details class="rounded-md border">
+                  <summary class="cursor-pointer px-3 py-2"><code>{method.name}</code></summary>
+                  <div class="space-y-3 border-t p-3">
+                    <p class="whitespace-pre-wrap">{method.description}</p>
+                    <pre class="bg-muted overflow-x-auto rounded-md p-3"><code
+                        >{method.signature}</code
+                      ></pre>
+                    {#each method.parameters as parameter (parameter.name)}
+                      {#if parameter.description}<p>
+                          <code>{parameter.name}</code>: {parameter.description}
+                        </p>{/if}
+                    {/each}
+                    {#each method.examples as example}<pre
+                        class="bg-muted overflow-x-auto rounded-md p-3"><code>{example}</code
+                        ></pre>{/each}
+                  </div>
+                </details>
+              {/each}
+              {#if Object.keys(service.types).length}
+                <details>
+                  <summary class="cursor-pointer">Types</summary>
+                  {#each Object.entries(service.types) as [type, definition] (type)}<pre
+                      class="bg-muted mt-2 overflow-x-auto rounded-md p-3"><code
+                        >type {type} = {definition}</code
+                      ></pre>{/each}
+                </details>
+              {/if}
+            </div>
+          </details>
+        {/each}
       </div>
     {:else}<p class="text-muted-foreground p-4 text-sm">
         No apps with published APIs match your search.

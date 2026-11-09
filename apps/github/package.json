@@ -1,0 +1,28 @@
+{
+  "name": "@widefleet/github",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/app.ts",
+    "./wrangler.jsonc": "./wrangler.jsonc"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "esbuild src/app.ts --bundle --format=esm --platform=browser --target=es2022 --external:cloudflare:* --external:node:* --outfile=dist/app.js && widefleet-service-docs src/app.ts"
+  },
+  "dependencies": {
+    "@platform/account-connection": "workspace:*",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261003.1",
+    "@tsconfig/strictest": "2.0.8",
+    "@types/node": "26.6.4",
+    "@widefleet/service-docs": "workspace:*",
+    "esbuild": "0.28.2",
+    "typescript": "6.0.3",
+    "vitest": "5.0.3"
+  }
+}

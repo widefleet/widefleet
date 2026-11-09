@@ -131,6 +131,8 @@ pub struct WorkerMetadata {
     pub web: Option<bool>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub entrypoints: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub services: BTreeMap<String, ServiceDescription>,
     #[serde(flatten)]
     pub worker: WorkerConfiguration,
     #[serde(default)]
@@ -138,6 +140,34 @@ pub struct WorkerMetadata {
     #[serde(default)]
     pub queue_consumers: Vec<QueueConsumer>,
     pub assets: WorkerAssets,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ServiceDescription {
+    pub description: String,
+    pub examples: Vec<String>,
+    pub methods: Vec<ServiceMethod>,
+    pub types: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ServiceMethod {
+    pub name: String,
+    pub description: String,
+    pub examples: Vec<String>,
+    pub signature: String,
+    pub returns: String,
+    pub parameters: Vec<ServiceParameter>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ServiceParameter {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub optional: bool,
+    pub rest: bool,
+    pub description: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

@@ -228,9 +228,46 @@ export const workerConfiguration = z.strictObject({
   debug: debugMetadata.optional(),
 });
 
+export const serviceDocumentation = z
+  .record(
+    bindingName,
+    z.strictObject({
+      description: z.string().max(16384),
+      examples: z.array(z.string().max(16384)).max(32),
+      methods: z
+        .array(
+          z.strictObject({
+            name: bindingName,
+            description: z.string().max(16384),
+            examples: z.array(z.string().max(16384)).max(32),
+            signature: z.string().max(65536),
+            returns: z.string().max(65536),
+            parameters: z
+              .array(
+                z.strictObject({
+                  name: z.string().min(1).max(256),
+                  type: z.string().max(65536),
+                  optional: z.boolean(),
+                  rest: z.boolean(),
+                  description: z.string().max(16384),
+                }),
+              )
+              .max(64),
+          }),
+        )
+        .max(128),
+      types: z.record(z.string().max(256), z.string().max(65536)),
+    }),
+  )
+  .refine(
+    (value) => JSON.stringify(value).length <= 1024 * 1024,
+    "Service documentation exceeds 1 MiB",
+  );
+
 export const workerMetadata = workerConfiguration
   .extend({
     web: z.boolean().optional(),
+    services: serviceDocumentation.optional(),
     entrypoints: z
       .array(bindingName)
       .max(32)
@@ -249,6 +286,12 @@ export const workerMetadata = workerConfiguration
     assets: z.strictObject({ upload_session: identifier, binding: bindingName.default("ASSETS") }),
   })
   .superRefine((metadata, context) => {
+    if (Object.keys(metadata.services ?? {}).some((name) => !metadata.entrypoints?.includes(name)))
+      context.addIssue({
+        code: "custom",
+        message: "Service documentation must describe deployed entrypoints",
+      });
+
     const workflows = metadata.bindings
       .filter((binding) => binding.type === "workflow")
       .map((binding) => binding.workflow_name);
@@ -353,6 +396,7 @@ export const serviceCatalogEntry = z.strictObject({
   slug: appSlug,
   displayName: z.string(),
   entrypoints: z.array(bindingName),
+  services: serviceDocumentation.default({}),
 });
 
 export const capabilityGrant = z.strictObject({

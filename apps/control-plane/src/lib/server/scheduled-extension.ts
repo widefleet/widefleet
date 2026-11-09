@@ -4,6 +4,11 @@ import type { CloudflareBindings } from "./cloudflare-config.ts";
 import { readCloudflareConfiguration } from "./cloudflare-config.ts";
 import { withCloudflareDatabase } from "./cloudflare-database.ts";
 import type { createRuntimeExtension, RuntimeExtension } from "./runtime-extension.ts";
+import { createStandardAppService } from "./standard-apps.ts";
+import { standardAppsCron } from "./standard-apps-schedule.ts";
+import { createArtifactStorage } from "./artifact-storage.ts";
+import { createR2Storage } from "./storage/r2.ts";
+import { createCloudflareExecution } from "./cloudflare-execution.ts";
 
 export const runScheduledExtension = async (
   bindings: CloudflareBindings,
@@ -17,6 +22,19 @@ export const runScheduledExtension = async (
         binding: (name, schema) => schema.parse(bindings[name]),
         configuration: readCloudflareConfiguration(bindings),
       });
+
+      if (event.cron === standardAppsCron) {
+        const storage = createArtifactStorage(createR2Storage(bindings.ARTIFACTS));
+        await createStandardAppService(
+          db,
+          readCloudflareConfiguration(bindings),
+          storage,
+          bindings.PLATFORM_ENCRYPTION_KEY,
+          createCloudflareExecution(bindings, db, storage),
+        ).backfill(extension.organizationAccess);
+
+        return;
+      }
 
       await extension.scheduled?.(event, (name, schema) => schema.parse(bindings[name]));
     });

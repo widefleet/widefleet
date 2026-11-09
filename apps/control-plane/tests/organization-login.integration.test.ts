@@ -10,6 +10,7 @@ import { authConfiguration, createAuthProxy } from "@platform/auth-proxy";
 import { configurationRevision } from "@platform/auth-proxy/publication";
 import { organization, member, invitation, user } from "../src/lib/server/auth-schema.ts";
 import {
+  apps,
   installation,
   organizationSettings,
   organizationRuntimes,
@@ -18,7 +19,7 @@ import { createSettingsService } from "../src/lib/server/settings.ts";
 import { createInstalledAppSignIn } from "../src/lib/server/app-sign-in-installed.ts";
 import { createRuntime } from "../src/lib/server/runtime-services.ts";
 import type { Runtime } from "../src/lib/server/runtime-services.ts";
-import { createStorage } from "../src/lib/server/storage.ts";
+import { memoryArtifacts } from "./memory-artifacts.ts";
 import { createApi } from "../src/lib/server/api.ts";
 import {
   prepareOrganizationInvitation,
@@ -158,7 +159,7 @@ describe("Invited organization members with Widefleet OIDC", () => {
       configuration: environment.configuration,
       database: environment.database,
       settings,
-      storage: createStorage(environment.configuration),
+      storage: memoryArtifacts(),
       reporting: environment.reporting,
       encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
       sendEmail: async (message) => {
@@ -857,6 +858,16 @@ describe("Invited organization members with Widefleet OIDC", () => {
 
     const created = await setup();
     expect(created.status).toBe(200);
+    expect(
+      (
+        await environment.database.db
+          .select()
+          .from(apps)
+          .where(eq(apps.organizationId, "widefleet"))
+      )
+        .map((app) => app.slug)
+        .sort(),
+    ).toEqual(["github", "gmail", "onedrive"]);
     expect(published.get("widefleet")?.provider).toMatchObject({
       type: "oidc",
       issuer: `${origin}/api/auth`,

@@ -266,7 +266,7 @@ describe("Hosted resource provisioning", () => {
     );
 
     expect(configs.controlPlane).toMatchObject({
-      triggers: { crons: ["* * * * *"] },
+      triggers: { crons: ["29 * * * *", "* * * * *"] },
       vpc_networks: [{ binding: "EXAMPLE" }],
       hyperdrive: [{ binding: "HYPERDRIVE", id: installation.hyperdriveId }],
       r2_buckets: [{ binding: "ARTIFACTS" }],

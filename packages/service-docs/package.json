@@ -1,0 +1,21 @@
+{
+  "name": "@widefleet/service-docs",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "bin": {
+    "widefleet-service-docs": "./src/cli.ts"
+  },
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@platform/contracts": "workspace:*",
+    "typedoc": "0.28.20",
+    "typescript": "6.0.3"
+  }
+}

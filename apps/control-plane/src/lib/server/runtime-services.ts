@@ -1,5 +1,7 @@
 import type { AuthenticationExtension } from "./runtime-extension.ts";
 import { createConnectionService } from "./connections.ts";
+import { createStandardAppService } from "./standard-apps.ts";
+import { installationOrganizationId } from "../organization.ts";
 import { createAppSecrets } from "./app-secrets.ts";
 import type { OrganizationAccess } from "./application-context.ts";
 import type { BetterAuthOptions } from "better-auth";
@@ -106,10 +108,27 @@ export const createRuntime = ({
   if (organizationAccess) authOptions.organizationAccess = organizationAccess;
   const auth = createAuthentication(configuration, database.db, authOptions);
 
+  const standardApps = createStandardAppService(
+    database.db,
+    configuration,
+    storage,
+    encryptionKey,
+    execution,
+    observation,
+  );
+
   const runtime = {
     auth,
     publicSignup,
-    onboarding: createOnboardingService(database.db, settings, createOrganization, observation),
+    onboarding: createOnboardingService(
+      database.db,
+      settings,
+      createOrganization,
+      observation,
+      async (ownerId, organizationId) => {
+        await standardApps.organization(ownerId, organizationId);
+      },
+    ),
     identity: createIdentityService(
       auth,
       database.db,
@@ -122,7 +141,15 @@ export const createRuntime = ({
     ),
     configuration,
     database,
-    settings,
+    settings: {
+      ...settings,
+      createOwner: async (...input: Parameters<typeof settings.createOwner>) => {
+        const owner = await settings.createOwner(...input);
+        await standardApps.organization(owner.id, installationOrganizationId);
+
+        return owner;
+      },
+    },
     reporting: {
       ...reporting,
       exception: reportException,

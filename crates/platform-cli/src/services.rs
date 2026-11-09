@@ -3,11 +3,11 @@ use clap::{Args, Subcommand};
 use platform_core::{
     Error, Result,
     http::{Api, json},
-    model::{CapabilityGrant, Deployment},
+    model::{CapabilityGrant, Deployment, ServiceDescription},
 };
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
-use std::{io::IsTerminal, path::PathBuf};
+use std::{collections::BTreeMap, io::IsTerminal, path::PathBuf};
 use uuid::Uuid;
 
 #[derive(Args)]
@@ -43,6 +43,8 @@ struct Service {
     slug: String,
     display_name: String,
     entrypoints: Vec<String>,
+    #[serde(default)]
+    services: BTreeMap<String, ServiceDescription>,
 }
 
 pub async fn catalog(api: &Api, credentials: &auth::Credentials) -> Result<()> {

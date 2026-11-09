@@ -5,7 +5,7 @@ import { createAuthentication } from "../src/lib/server/auth.ts";
 import { createIdentityService } from "../src/lib/server/identity.ts";
 import { createRuntime } from "../src/lib/server/runtime-services.ts";
 import { createApi } from "../src/lib/server/api.ts";
-import { createStorage } from "../src/lib/server/storage.ts";
+import { memoryArtifacts } from "./memory-artifacts.ts";
 import { member, organization, session, user } from "../src/lib/server/auth-schema.ts";
 import { organizationRuntimes } from "../src/lib/server/schema.ts";
 import type { EmailMessage } from "../src/lib/server/email.ts";
@@ -109,7 +109,7 @@ describe("Public account registration and organization onboarding", () => {
       database: environment.database,
       settings: environment.settings,
       reporting: environment.reporting,
-      storage: createStorage(environment.configuration),
+      storage: memoryArtifacts(),
       encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
     })();
 
@@ -174,7 +174,7 @@ describe("Public account registration and organization onboarding", () => {
     await expect(
       onboarding.create(person, { name: record.name, slug: record.slug }),
     ).rejects.toThrow("Publication failed");
-    expect(events).toEqual([
+    expect(events.filter((event) => event.event === "organization_created")).toEqual([
       {
         event: "organization_created",
         id: record.id,
@@ -202,7 +202,7 @@ describe("Public account registration and organization onboarding", () => {
         }),
       },
       reporting: environment.reporting,
-      storage: createStorage(environment.configuration),
+      storage: memoryArtifacts(),
       encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
       sendEmail: async (message) => {
         messages.push(message);
@@ -261,7 +261,8 @@ describe("Public account registration and organization onboarding", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(record);
     expect(calls).toEqual([result.user.id]);
-    expect(events).toEqual([
+    expect(events.filter((event) => event.event === "app_created")).toHaveLength(3);
+    expect(events.filter((event) => event.event === "organization_created")).toEqual([
       {
         event: "organization_created",
         id: record.id,

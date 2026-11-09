@@ -86,6 +86,7 @@ describe("App service connections", () => {
       slug: target.slug,
       displayName: target.displayName,
       entrypoints: ["Reader"],
+      services: {},
     });
     const grant = { app: target.id, entrypoint: "Reader" };
     expect((await services().bind(principal, source.id, "ERP", grant)).unwrap().grants).toEqual({

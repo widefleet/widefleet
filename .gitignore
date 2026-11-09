@@ -1,5 +1,6 @@
 node_modules/
 .platform/
+.widefleet/
 .tools/
 .local/
 .svelte-kit/

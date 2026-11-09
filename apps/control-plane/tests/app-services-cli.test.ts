@@ -1,6 +1,7 @@
 import { esbuildBinary } from "../../../tools/cli-tools.ts";
 import * as contract from "@platform/contracts";
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -46,6 +47,24 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App services CLI", () => {
   let secretDeployment: z.infer<typeof contract.deployment> | null = null;
   let secretHistory: z.infer<typeof contract.deployment>[] = [];
 
+  const services = {
+    Reader: {
+      description: "Read inventory records.",
+      examples: ["await env.ERP.read()"],
+      methods: [
+        {
+          name: "read",
+          description: "Read a record.",
+          examples: [],
+          parameters: [],
+          returns: "string",
+          signature: "read(): string",
+        },
+      ],
+      types: {},
+    },
+  };
+
   const server = createServer((request, response) => {
     let body = "";
     request.setEncoding("utf8").on("data", (chunk: string) => {
@@ -71,6 +90,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App services CLI", () => {
               slug: "erp-app",
               displayName: "ERP",
               entrypoints: ["Reader"],
+              services,
             },
           ]),
         );
@@ -208,6 +228,47 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App services CLI", () => {
       env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: "normal-credential" },
     });
 
+  it("publishes current service documentation and rejects it after source changes", async () => {
+    const source =
+      "import {WorkerEntrypoint} from 'cloudflare:workers'; export class Reader extends WorkerEntrypoint {read(){return 'value';}}";
+
+    await writeFile(join(directory, "documented.ts"), source);
+    await writeFile(
+      join(directory, "documented.jsonc"),
+      JSON.stringify({ name: app.slug, main: "documented.ts", compatibility_date: "2026-10-01" }),
+    );
+    await mkdir(join(directory, ".widefleet"), { recursive: true });
+
+    try {
+      await writeFile(
+        join(directory, ".widefleet/services.json"),
+        JSON.stringify({
+          entry: "documented.ts",
+          inputs: { "documented.ts": createHash("sha256").update(source).digest("hex") },
+          documentation: services,
+        }),
+      );
+      await command("deploy", "--config", "documented.jsonc", "--no-wait");
+      const upload = requests.find((entry) => entry.path.endsWith("/worker"));
+
+      const form = await new Response(upload?.body, {
+        headers: { "content-type": upload?.contentType ?? "" },
+      }).formData();
+
+      expect(
+        contract.workerMetadata.parse(JSON.parse(z.string().parse(form.get("metadata")))).services,
+      ).toEqual(services);
+      requests.length = 0;
+      await writeFile(join(directory, "documented.ts"), `${source}\n// Changed`);
+      await expect(command("deploy", "--config", "documented.jsonc", "--no-wait")).rejects.toThrow(
+        "Service documentation is stale",
+      );
+      expect(requests.some((entry) => entry.path.endsWith("/worker"))).toBe(false);
+    } finally {
+      await rm(join(directory, ".widefleet/services.json"));
+    }
+  });
+
   it.each([
     {
       name: "default RPC export",
@@ -341,7 +402,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App services CLI", () => {
     expect(after.debug?.build_id).not.toBe(before.debug?.build_id);
     expect(requests.some((entry) => entry.path.includes("/connectors"))).toBe(false);
     expect(JSON.parse((await command("services")).stdout)).toMatchObject([
-      { slug: "erp-app", entrypoints: ["Reader"] },
+      { slug: "erp-app", entrypoints: ["Reader"], services },
     ]);
     await command("connect", "erp-app", "--as", "ERP", "--entrypoint", "Reader", "--no-wait");
     expect(requests.at(-1)).toMatchObject({

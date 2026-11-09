@@ -17,6 +17,7 @@ mod organizations;
 mod preview;
 mod reporting;
 mod runtime;
+mod service_docs;
 mod services;
 mod settings;
 mod upload;

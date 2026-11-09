@@ -1,0 +1,25 @@
+{
+  "name": "@platform/standard-apps",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./bundle": "./dist/apps.json"
+  },
+  "scripts": {
+    "build": "node build.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@platform/contracts": "workspace:*",
+    "@types/node": "26.6.4",
+    "@widefleet/github": "workspace:*",
+    "@widefleet/gmail": "workspace:*",
+    "@widefleet/onedrive": "workspace:*",
+    "@widefleet/service-docs": "workspace:*",
+    "esbuild": "0.28.2",
+    "typescript": "6.0.3",
+    "zod": "4.6.5"
+  }
+}

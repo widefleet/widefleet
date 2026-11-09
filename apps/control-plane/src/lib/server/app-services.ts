@@ -75,11 +75,9 @@ export const checkServiceConsumers = async (
       );
 };
 
-export const serviceEntrypoints = async (
-  transaction: Transaction,
-  app: typeof apps.$inferSelect,
-) => {
-  if (!app.activeDeploymentId || app.state === "deleting") return [];
+export const describeService = async (transaction: Transaction, app: typeof apps.$inferSelect) => {
+  if (!app.activeDeploymentId || app.state === "deleting")
+    return { entrypoints: [], services: contract.serviceDocumentation.parse({}) };
 
   const [active] = await transaction
     .select({ metadata: artifacts.metadata })
@@ -87,7 +85,7 @@ export const serviceEntrypoints = async (
     .innerJoin(artifacts, eq(artifacts.id, deployments.artifactId))
     .where(and(eq(deployments.appId, app.id), eq(deployments.id, app.activeDeploymentId)));
 
-  if (!active) return [];
+  if (!active) return { entrypoints: [], services: contract.serviceDocumentation.parse({}) };
 
   const pending = await transaction
     .select({ metadata: artifacts.metadata })
@@ -95,12 +93,24 @@ export const serviceEntrypoints = async (
     .innerJoin(artifacts, eq(artifacts.id, deployments.artifactId))
     .where(and(eq(deployments.appId, app.id), inArray(deployments.status, ["queued", "running"])));
 
-  return (contract.workerMetadata.parse(active.metadata).entrypoints ?? []).filter((name) =>
+  const metadata = contract.workerMetadata.parse(active.metadata);
+
+  const entrypoints = (metadata.entrypoints ?? []).filter((name) =>
     pending.every((record) =>
       contract.workerMetadata.parse(record.metadata).entrypoints?.includes(name),
     ),
   );
+
+  return {
+    entrypoints,
+    services: Object.fromEntries(
+      Object.entries(metadata.services ?? {}).filter(([name]) => entrypoints.includes(name)),
+    ),
+  };
 };
+
+export const serviceEntrypoints = async (transaction: Transaction, app: typeof apps.$inferSelect) =>
+  (await describeService(transaction, app)).entrypoints;
 
 export const resolveAppService = async (
   transaction: Transaction,
