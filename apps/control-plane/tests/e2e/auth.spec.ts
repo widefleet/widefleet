@@ -490,7 +490,7 @@ test("completes Microsoft login against emulate through the built SvelteKit serv
   await page.getByLabel("Email", { exact: true }).fill("sso@EXAMPLE.TEST");
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await page.getByRole("button", { name: /sso@example.test/ }).click();
-  await expect(page.getByRole("heading", { name: "Your apps", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
   await expect(page.getByText("SSO Test User", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: /^Account:/ }).click();
   await page.getByRole("menuitem", { name: "Sign out" }).click();
@@ -684,7 +684,7 @@ test("requires code confirmation in the browser, grants the CLI, then signs out"
 
   expect(token.status()).toBe(200);
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Your apps", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
   await expect(page.getByText("Example User", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: /^Account:/ }).click();
   await page.getByRole("menuitem", { name: "Sign out" }).click();
@@ -749,7 +749,7 @@ test("registers an agent, creates an app and an isolated preview, then requests 
   await page.getByText("Permanently delete app", { exact: true }).click();
   await page.getByRole("checkbox").check();
   await page.getByRole("button", { name: "Delete app", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Your apps" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Apps" })).toBeVisible();
   await expect(page.getByRole("listitem").filter({ hasText: "Notes Preview" })).toContainText(
     "Deleting",
   );
@@ -1878,6 +1878,68 @@ test.describe("workspace experience", () => {
         secure: false,
       })),
     );
+  });
+
+  test("shows app favicons with stable fallbacks on desktop and mobile", async ({
+    page,
+    context,
+  }) => {
+    const cases = ["valid", "missing", "broken", "service", "unpublished"];
+    const iconRequests: string[] = [];
+
+    for (const kind of cases) {
+      const response = await context.request.post("/api/v1/apps", {
+        headers: { origin: environment.configuration.PLATFORM_URL },
+        data: { slug: `icon-${kind}`, displayName: `Icon ${kind}` },
+      });
+
+      expect(response.ok()).toBe(true);
+      const record = app.parse(await response.json());
+
+      if (kind !== "unpublished")
+        await environment.database.db
+          .update(apps)
+          .set({
+            state: "active",
+            activeDeploymentId: crypto.randomUUID(),
+            webEnabled: kind !== "service",
+          })
+          .where(eq(apps.id, record.id));
+      await page.route(`**/api/v1/apps/${record.id}/icon?*`, (route) => {
+        iconRequests.push(kind);
+
+        return route.fulfill({
+          status: kind === "missing" ? 404 : 200,
+          contentType: "image/svg+xml",
+          body:
+            kind === "valid"
+              ? '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="24"><rect width="48" height="24" fill="red"/></svg>'
+              : "not an image",
+        });
+      });
+    }
+
+    await page.goto("/?q=Icon");
+    await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
+    await expect(page.locator("header").getByText("Widefleet", { exact: true })).toHaveCount(1);
+    const rows = page.getByRole("list", { name: "Apps" }).getByRole("listitem");
+    const valid = rows.filter({ hasText: "Icon valid" }).locator("img");
+    await expect(valid).toBeVisible();
+    await expect(valid).toHaveCSS("width", "24px");
+    await expect(valid).toHaveCSS("height", "24px");
+    await expect(valid).toHaveCSS("object-fit", "contain");
+
+    for (const kind of cases.filter((value) => value !== "valid")) {
+      const row = rows.filter({ hasText: `Icon ${kind}` });
+      await expect(row.locator("svg.lucide-layers-2")).toBeVisible();
+      await expect(row.locator("img")).toBeHidden();
+    }
+
+    expect(iconRequests.sort()).toEqual(["broken", "missing", "valid"]);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(valid).toBeVisible();
+    await rows.filter({ hasText: "Icon valid" }).getByRole("link").click();
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Icon valid");
   });
 
   test("searches apps, preserves filters in URLs, and returns to an app's access section", async ({
