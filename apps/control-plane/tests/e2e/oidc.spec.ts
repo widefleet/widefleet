@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { eq } from "drizzle-orm";
 import { account, member, ssoProvider } from "../../src/lib/server/auth-schema.ts";
 import { companyAccountProvider } from "../../src/lib/server/company-identity.ts";
-import { createTestEnvironment } from "../environment.ts";
+import { createTestEnvironment } from "./environment.ts";
 
 test("signs in through generic OIDC and enrolls the verified account as a management member", async ({
   page,

@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { createTestEnvironment } from "../environment.ts";
+import { createTestEnvironment } from "./environment.ts";
 import { createCertificates } from "../installation/certificates.ts";
 import { organizationSettings } from "../../src/lib/server/schema.ts";
 

@@ -8,14 +8,7 @@ import { apps, deployments, organizationRuntimes } from "../../src/lib/server/sc
 import { seedDeployment } from "../cloudflare-deployment.fixture.ts";
 import { decryptSecret } from "../../src/lib/server/secret-encryption.ts";
 import { storedAppSecrets } from "../../src/lib/server/app-secrets.ts";
-import {
-  S3Client,
-  CreateBucketCommand,
-  DeleteBucketCommand,
-  ListObjectsV2Command,
-  DeleteObjectsCommand,
-} from "@aws-sdk/client-s3";
-import { createTestEnvironment } from "../environment.ts";
+import { createTestEnvironment } from "./environment.ts";
 
 let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
 
@@ -23,23 +16,10 @@ let server: ReturnType<typeof spawn>;
 
 let logs = "";
 
-let storage: S3Client;
-
 test.setTimeout(60_000);
 
 test.beforeAll(async () => {
   environment = await createTestEnvironment();
-  environment.environment.S3_BUCKET = `test-${crypto.randomUUID()}`;
-  storage = new S3Client({
-    endpoint: "http://localhost:25400",
-    region: "us-east-1",
-    forcePathStyle: true,
-    credentials: {
-      accessKeyId: environment.environment.S3_ACCESS_KEY_ID,
-      secretAccessKey: environment.environment.S3_SECRET_ACCESS_KEY,
-    },
-  });
-  await storage.send(new CreateBucketCommand({ Bucket: environment.environment.S3_BUCKET }));
   server = spawn(
     process.execPath,
     [
@@ -87,21 +67,6 @@ test.afterAll(async () => {
     server.kill("SIGTERM");
     await exited;
     clearTimeout(timeout);
-  }
-
-  if (storage) {
-    const Bucket = environment.environment.S3_BUCKET;
-    const contents = await storage.send(new ListObjectsV2Command({ Bucket }));
-
-    if (contents.Contents?.length)
-      await storage.send(
-        new DeleteObjectsCommand({
-          Bucket,
-          Delete: { Objects: contents.Contents.map(({ Key }) => ({ Key: Key ?? "" })) },
-        }),
-      );
-    await storage.send(new DeleteBucketCommand({ Bucket }));
-    storage.destroy();
   }
 
   await environment?.close();

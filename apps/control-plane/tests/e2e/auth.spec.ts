@@ -22,7 +22,7 @@ import {
   jobs,
 } from "../../src/lib/server/schema.ts";
 import { apiResource, cliClientId } from "../../src/lib/server/auth-options.ts";
-import { createTestEnvironment } from "../environment.ts";
+import { createTestEnvironment } from "./environment.ts";
 import { authConfiguration, createAuthProxy } from "@platform/auth-proxy";
 import { registerAppLogin, readAppLogin } from "../../src/lib/server/app-login-client.ts";
 

@@ -5,7 +5,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createTestEnvironment } from "../environment.ts";
+import { createTestEnvironment } from "./environment.ts";
 
 const cloud = "https://app.widefleet.com";
 

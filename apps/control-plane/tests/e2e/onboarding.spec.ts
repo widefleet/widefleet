@@ -13,7 +13,7 @@ import {
   organizationSettings,
 } from "../../src/lib/server/schema.ts";
 import { prepareOrganizationInvitation } from "../../src/lib/server/members.ts";
-import { createTestEnvironment } from "../environment.ts";
+import { createTestEnvironment } from "./environment.ts";
 import { createIdentityProvider } from "../edge/auth-proxy-idp.ts";
 
 const emailMessage = z.object({ to: z.email(), subject: z.string(), text: z.string() });
