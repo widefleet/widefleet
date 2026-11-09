@@ -1,7 +1,7 @@
 ---
 title: Gmail app example
 description: Copy an app that links personal Google accounts with Better Auth and D1.
-lastModified: 2026-10-29
+lastModified: 2026-11-09
 ---
 
 Deploy the [Gmail example](https://github.com/widefleet/widefleet/tree/v0.5.0/examples/apps/gmail)
@@ -11,6 +11,9 @@ through an app service binding. The runtime carries the verified company identit
 from the calling app; Gmail never accepts a user ID supplied as an RPC argument.
 
 ## Prerequisites
+
+For the preinstalled Gmail app, use the [standard app setup](/guides/standard-apps).
+This guide deploys an independent copy of the standalone example.
 
 - An organization administrator account and a signed-in Widefleet CLI.
 - Matching control-plane, CLI, deployment-agent and app-runtime releases at
@@ -33,6 +36,9 @@ pnpm install --frozen-lockfile
 pnpm typecheck
 pnpm test
 ```
+
+Set `name` in `wrangler.jsonc` to `gmail-example` to keep this app separate from
+the preinstalled `gmail` app.
 
 In Google Cloud, enable **Gmail API**, configure the OAuth consent screen and create
 a **Web application** OAuth client. For an external application in Testing mode,
@@ -60,11 +66,11 @@ with `network:manage` in addition to the deployment scopes:
 
 ```sh
 widefleet login --scope platform:read platform:write network:manage
-widefleet network allow https://oauth2.googleapis.com https://www.googleapis.com https://gmail.googleapis.com --app gmail
+widefleet network allow https://oauth2.googleapis.com https://www.googleapis.com https://gmail.googleapis.com --app gmail-example
 ```
 
 The OAuth page navigates to Google; it needs no browser network grant. Set these
-secrets in **Apps → gmail → Secrets**:
+secrets in **Apps → gmail-example → Secrets**:
 
 | Secret                 | Value                                                                                                                      |
 | ---------------------- | -------------------------------------------------------------------------------------------------------------------------- |
@@ -74,8 +80,8 @@ secrets in **Apps → gmail → Secrets**:
 Alternatively, put each value in a protected file outside the project and use:
 
 ```sh
-widefleet secret put GOOGLE_CLIENT_SECRET --app gmail --file /absolute/path/to/google-client-secret.txt
-widefleet secret put AUTH_SECRET --app gmail --file /absolute/path/to/auth-secret.txt
+widefleet secret put GOOGLE_CLIENT_SECRET --app gmail-example --file /absolute/path/to/google-client-secret.txt
+widefleet secret put AUTH_SECRET --app gmail-example --file /absolute/path/to/auth-secret.txt
 ```
 
 Back up `AUTH_SECRET` with the app's D1 data: it encrypts saved tokens,
@@ -97,7 +103,7 @@ email address. Return to your app and retry its Gmail action.
 Give an existing app the binding:
 
 ```sh
-widefleet connect gmail --as GMAIL --app inbox
+widefleet connect gmail-example --as GMAIL --app inbox
 ```
 
 The app's server code can call:

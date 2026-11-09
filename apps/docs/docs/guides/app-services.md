@@ -1,7 +1,7 @@
 ---
 title: Connect apps
 description: Expose app APIs, connect callers and keep provider secrets private.
-lastModified: 2026-10-29
+lastModified: 2026-11-09
 ---
 
 An app can expose exported Worker entrypoints to other apps in its organization.
@@ -136,8 +136,27 @@ but company sign-in cookies are filtered. App responses can set only host-scoped
 cookies and cannot overwrite company sign-in cookies. Keep OAuth state, callback
 user checks and CSRF protection in the app.
 
-The [Gmail app example](/guides/gmail-app) connects each user's personal Google
-account and shares that account across authorized calling apps.
+The [standard Gmail, OneDrive and GitHub apps](/guides/standard-apps) connect personal
+accounts and share them across authorized calling apps. The standalone
+[Gmail app example](/guides/gmail-app) shows the same identity model in a separate app.
+
+## Service descriptions
+
+`widefleet services`, `GET /api/v1/app-services` and the Services UI include the
+active deployment's method descriptions, signatures, parameter and return types,
+and examples when the app supplies them. Apps without descriptions still list
+their entrypoints. Use the CLI release matching your control plane.
+
+The standard apps generate this information from TypeScript and TSDoc with the
+repository's `@widefleet/service-docs` build helper. The helper runs only during
+the build. It writes `.widefleet/services.json` beside the app configuration;
+`widefleet deploy` uploads its description with the worker. Source hashes remain
+local and prevent deploying a description after its source or imported types change.
+Rebuild the app when deployment reports stale documentation.
+
+Keep summaries, `@param` comments and `@example` blocks next to the public methods.
+Private methods, Worker event handlers and implementation paths are omitted.
+Descriptions follow the active app deployment and do not have a separate version.
 
 ## Activation and updates
 
