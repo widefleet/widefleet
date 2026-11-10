@@ -1,5 +1,5 @@
 import { and, eq } from "drizzle-orm";
-import { companyLoginRevision } from "./auth.ts";
+import { companyLoginRevision, type Authentication } from "./auth.ts";
 import { account } from "./auth-schema.ts";
 import type { Principal } from "./identity.ts";
 import type { Runtime } from "./runtime.ts";
@@ -7,7 +7,7 @@ import type { Runtime } from "./runtime.ts";
 export const readCompanyAccount = async (
   runtime: Runtime,
   principal: Principal,
-  headers: Headers,
+  session: Authentication["$Infer"]["Session"]["session"] | null,
 ) => {
   const organizationId = principal.application.organizationId;
   const resolved = await runtime.settings.resolve(organizationId);
@@ -21,8 +21,6 @@ export const readCompanyAccount = async (
         .limit(1)
     : [];
 
-  const current = await runtime.auth.api.getSession({ headers });
-
   return {
     organizationId,
     provider,
@@ -31,8 +29,8 @@ export const readCompanyAccount = async (
     linked: linked.length > 0,
     tested: Boolean(
       resolved.sso?.domainVerified &&
-      current?.session.identityOrganizationId === organizationId &&
-      current?.session.companyConfiguration === companyLoginRevision(resolved.sso),
+      session?.identityOrganizationId === organizationId &&
+      session?.companyConfiguration === companyLoginRevision(resolved.sso),
     ),
   };
 };
@@ -40,10 +38,10 @@ export const readCompanyAccount = async (
 export const readSettingsAccount = async (
   runtime: Runtime,
   principal: Principal,
-  headers: Headers,
+  session: Authentication["$Infer"]["Session"]["session"] | null,
 ) => ({
   view: await runtime.settings.read(principal),
-  ...(await readCompanyAccount(runtime, principal, headers)),
+  ...(await readCompanyAccount(runtime, principal, session)),
   emailSignIn: runtime.emailSignIn,
   reporting: principal.admin ? await runtime.reporting.read(principal) : null,
   platformUrl: runtime.configuration.PLATFORM_URL,

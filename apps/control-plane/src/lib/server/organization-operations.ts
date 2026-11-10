@@ -11,7 +11,7 @@ export const organizationOperation = async <T>(
   try {
     return await run(credential.auth.api, credential.headers);
   } catch (cause) {
-    if (cause instanceof APIError)
+    if (cause instanceof APIError && cause.statusCode !== 401 && cause.statusCode < 500)
       throw new InvalidOperation({
         code: [
           "INVITATION_NOT_FOUND",
@@ -19,7 +19,7 @@ export const organizationOperation = async <T>(
           "YOU_CANNOT_LEAVE_THE_ORGANIZATION_WITHOUT_AN_OWNER",
         ].includes(cause.body?.code ?? "")
           ? "CONFLICT"
-          : cause.statusCode === 401 || cause.statusCode === 403
+          : cause.statusCode === 403
             ? "FORBIDDEN"
             : cause.statusCode === 404
               ? "NOT_FOUND"

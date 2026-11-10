@@ -39,6 +39,13 @@ const unwrap = <T, E extends { message: string }>(result: Result<T, E>) => {
   if (result.isOk()) return result.value;
   const error = result.error;
 
+  if (error instanceof APIError)
+    throw new ORPCError("AUTH_OPERATION_FAILED", {
+      status: error.statusCode,
+      message: error.message,
+      cause: error,
+    });
+
   if (error instanceof DirectoryUnavailable)
     throw new ORPCError("SERVICE_UNAVAILABLE", { message: error.message, cause: error });
 
@@ -145,8 +152,13 @@ export const createApi = (runtime: Runtime) => {
     account: read
       .route({ method: "GET", path: "/account" })
       .output(contract.companyAccount)
-      .handler(({ context }) =>
-        readCompanyAccount(runtime, context.principal, context.request.headers),
+      .handler(async ({ context }) =>
+        readCompanyAccount(
+          runtime,
+          context.principal,
+          (await runtime.auth.api.getSession({ headers: context.request.headers }))?.session ??
+            null,
+        ),
       ),
     organizations: base
       .route({ method: "GET", path: "/organizations" })
