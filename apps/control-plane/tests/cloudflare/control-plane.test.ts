@@ -76,7 +76,22 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
       export class AcceptedDeployment extends WorkflowEntrypoint {
         async run(event, step) { await step.sleep('pending', '1 day'); }
       }
-      export default application;
+      const events = [];
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async (input, options) => {
+        const request = new Request(input, options);
+        if (new URL(request.url).origin === 'https://eu.i.posthog.com') {
+          const body = request.headers.get('content-encoding') === 'gzip'
+            ? request.body.pipeThrough(new DecompressionStream('gzip')) : request.body;
+          events.push(...(await new Response(body).json()).batch);
+          return new Response('{}', {status:503});
+        }
+        return originalFetch(request);
+      };
+      export default {...application, fetch(request, env, ctx) {
+        if (new URL(request.url).pathname === '/fixture-exceptions') return Response.json(events);
+        return application.fetch(request, env, ctx);
+      }};
     `,
     );
     const path = join(directory, "wrangler.json");
@@ -163,6 +178,41 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
 
     if (directory) await rm(directory, { recursive: true, force: true });
   });
+
+  it("reports initialization errors without an available request runtime", async () => {
+    const { unstable_dev } = await import("wrangler");
+
+    const broken = await unstable_dev(join(directory, "fixture.ts"), {
+      config: join(directory, "wrangler.json"),
+      local: true,
+      persist: false,
+      ip: "127.0.0.1",
+      port: 0,
+      inspectorPort: 0,
+      logLevel: "error",
+      vars: {
+        BETTER_AUTH_SECRET: "too-short",
+        POSTHOG_PROJECT_TOKEN: "phc_synthetic",
+        POSTHOG_ORIGIN: origin,
+      },
+      experimental: { disableExperimentalWarning: true, disableDevRegistry: true, watch: false },
+    });
+
+    try {
+      expect((await broken.fetch(`${origin}/healthz`)).status).toBe(500);
+      await expect
+        .poll(async () => {
+          const response = await broken.fetch(`${origin}/fixture-exceptions`);
+
+          return z
+            .array(z.object({ event: z.string(), distinct_id: z.string() }))
+            .parse(await response.json());
+        })
+        .toEqual([{ event: "$exception", distinct_id: "installation:control-plane" }]);
+    } finally {
+      await broken.stop();
+    }
+  }, 30000);
 
   it("serves management requests from workerd through the local Hyperdrive binding", async () => {
     const response = await fetch(`${origin}/healthz`);

@@ -21,6 +21,7 @@ export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
   // A pool belongs to this request only; Hyperdrive owns pooling between requests.
   const database = createDatabase(configuration, 5);
   const observation = createProductAnalytics(configuration);
+  database.db.$client.on("error", (error) => observation.exception(error));
   const reporting = createReporting(configuration, database.db);
 
   const extension = createRuntimeExtension({
