@@ -101,7 +101,9 @@ use case.
 
 Templates are read from the [Widefleet repository](https://github.com/widefleet/widefleet/tree/main/templates).
 Each directory with a `template.md` is a template; its YAML frontmatter supplies
-`name` and `description`, and its directory name supplies `id`.
+`name` and `description`, and its directory name supplies `id`. IDs contain
+1–64 characters, start with a lowercase ASCII letter, and use only lowercase
+ASCII letters, digits and hyphens. Directories with other names are skipped.
 
 An unknown template ID returns `404`; an invalid ID returns `400`. A repository
 or template parsing failure returns `503`. These read operations leave app
