@@ -136,8 +136,8 @@ but company sign-in cookies are filtered. App responses can set only host-scoped
 cookies and cannot overwrite company sign-in cookies. Keep OAuth state, callback
 user checks and CSRF protection in the app.
 
-Use [connectors](/guides/connectors) to access an external account through an app
-connection.
+Find ready-made integrations in [App templates](/guides/app-templates), then
+connect the deployed app using the same flow.
 
 ## Activation and updates
 
