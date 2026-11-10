@@ -157,7 +157,7 @@ it("reads a new template from its directory and frontmatter without provider-spe
   expect(template.source).toBe("https://github.com/widefleet/widefleet/tree/main/templates/kanban");
   expect(template.prompt).toContain("catalog templates show kanban");
   expect(template.prompt).not.toMatch(/OAuth|personal account/i);
-  expect(requests).not.toContain(expect.stringContaining("outside"));
+  expect(requests).not.toContainEqual(expect.stringContaining("outside"));
 });
 
 it.each([
