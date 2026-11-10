@@ -58,6 +58,9 @@ export default class Host extends WorkerEntrypoint<TestEnvironment> {
 
     if (path === "/rpc/list") return Response.json(await app.listRepositories());
 
+    if (path === "/rpc/issues")
+      return Response.json(await app.listIssues({ owner: "example", repository: "project" }));
+
     if (path === "/rpc/content")
       return Response.json(
         await app.readFile({ owner: "example", repository: "project", path: "README.md" }),

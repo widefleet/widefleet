@@ -16,6 +16,7 @@ export const provider = () => {
 
   const access = new Map<string, string>();
   const refresh = new Map<string, string>();
+  const requests: Request[] = [];
 
   const state = {
     refreshes: 0,
@@ -23,6 +24,7 @@ export const provider = () => {
     apiStatus: 200,
     apiHeaders: new Headers(),
     expiringTokens: false,
+    redirects: new Map<string, { status: number; location: string }>(),
   };
 
   const tokens = (user: string) => {
@@ -49,6 +51,7 @@ export const provider = () => {
 
   return {
     state,
+    requests,
     authorize: (location: string, user: string) => {
       const url = new URL(location);
       const redirect = z.url().parse(url.searchParams.get("redirect_uri"));
@@ -65,6 +68,7 @@ export const provider = () => {
       return callback.href;
     },
     fetch: async (request: Request) => {
+      requests.push(request);
       const url = new URL(request.url);
 
       if (url.href === "https://github.com/login/oauth/access_token") {
@@ -125,6 +129,14 @@ export const provider = () => {
       if (url.href === "https://api.github.com/user/emails")
         return Response.json([{ email: `${user}@example.test`, verified: true, primary: true }]);
 
+      const redirect = state.redirects.get(url.href);
+
+      if (redirect)
+        return new Response(null, {
+          status: redirect.status,
+          headers: { location: redirect.location },
+        });
+
       if (state.apiStatus !== 200)
         return new Response(null, { status: state.apiStatus, headers: state.apiHeaders });
 
@@ -141,8 +153,34 @@ export const provider = () => {
           },
         ]);
 
-      if (url.href === "https://api.github.com/repos/example/project/contents/README.md")
+      if (
+        url.href === "https://api.github.com/repos/example/project/contents/README.md" ||
+        url.href === "https://api.github.com/repositories/42/contents/README.md"
+      )
         return new Response("file content", { headers: { "content-type": "text/plain" } });
+
+      if (
+        url.href === "https://api.github.com/repositories/42/issues?page=1&per_page=30&state=open"
+      )
+        return Response.json(
+          [
+            {
+              id: 7,
+              number: 7,
+              title: "Open issue",
+              state: "open",
+              html_url: "https://github.com/example/renamed/issues/7",
+              user: null,
+              created_at: "2026-01-01",
+              updated_at: "2026-01-01",
+            },
+          ],
+          {
+            headers: {
+              link: '<https://api.github.com/repositories/42/issues?page=2>; rel="next"',
+            },
+          },
+        );
       throw new Error(`Unexpected outbound request: ${url.origin}${url.pathname}`);
     },
   };

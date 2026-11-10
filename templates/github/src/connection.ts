@@ -133,7 +133,27 @@ export const accountConnection = (environment: Environment, properties: Properti
 
       if (result.status !== "connected") return result;
       headers.set("authorization", `Bearer ${result.accessToken}`);
-      const response = await fetch(url, { headers, redirect: "manual" });
+      let destination = new URL(url);
+      let response = await fetch(destination, { headers, redirect: "manual" });
+
+      for (let redirects = 0; [301, 302, 303, 307, 308].includes(response.status); redirects++) {
+        await response.body?.cancel();
+
+        if (redirects >= 5) throw new Error("GitHub redirect limit exceeded");
+        const location = response.headers.get("location");
+
+        if (!location) throw new Error("GitHub redirect has no location");
+        destination = new URL(location, destination);
+
+        // Keep the user's token and requests inside the approved GitHub API origin.
+        if (
+          destination.origin !== "https://api.github.com" ||
+          destination.username ||
+          destination.password
+        )
+          throw new Error("GitHub redirect target is not allowed");
+        response = await fetch(destination, { headers, redirect: "manual" });
+      }
 
       if (response.status === 401)
         return { status: "reconnect_required", connectUrl: environment.WIDEFLEET_ORIGIN } as const;
@@ -162,8 +182,7 @@ export const accountConnection = (environment: Environment, properties: Properti
 
       if (response.status === 404) return { status: "not_found" } as const;
 
-      if (!response.ok && response.status !== 302)
-        throw new Error(`GitHub request failed (HTTP ${response.status})`);
+      if (!response.ok) throw new Error(`GitHub request failed (HTTP ${response.status})`);
 
       const connected = { status: "connected", response } as const;
 

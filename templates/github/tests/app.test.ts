@@ -226,6 +226,71 @@ describe("GitHub personal account app", () => {
       status: "connected",
     });
   });
+  it.each([301, 302, 303, 307, 308])(
+    "reads files and issues after a %s repository redirect",
+    async (status) => {
+      const alice = browser("alice");
+      await connect(alice, "101");
+      upstream.requests.length = 0;
+      upstream.state.redirects.set(
+        "https://api.github.com/repos/example/project/contents/README.md",
+        { status, location: "https://api.github.com/repositories/42/contents/README.md" },
+      );
+      upstream.state.redirects.set(
+        "https://api.github.com/repos/example/project/issues?page=1&per_page=30&state=open",
+        { status, location: "/repositories/42/issues?page=1&per_page=30&state=open" },
+      );
+
+      expect(await (await alice.request("/rpc/content")).json()).toEqual({
+        status: "connected",
+        data: Object.fromEntries(new TextEncoder().encode("file content").entries()),
+        contentType: "text/plain",
+      });
+      expect(await (await alice.request("/rpc/issues")).json()).toMatchObject({
+        status: "connected",
+        issues: [{ number: 7, title: "Open issue" }],
+        nextPage: 2,
+      });
+      expect(upstream.requests).toHaveLength(4);
+
+      for (const request of upstream.requests)
+        expect(request.headers.get("authorization")).toBe(
+          upstream.requests[0]?.headers.get("authorization"),
+        );
+      expect(upstream.requests[1]?.headers.get("accept")).toBe("application/vnd.github.raw+json");
+      expect(upstream.requests[3]?.headers.get("accept")).toBe("application/vnd.github+json");
+    },
+  );
+  it.each([
+    "https://other.example.test/file",
+    "https://api.github.com.other.example.test/file",
+    "http://api.github.com/file",
+    "https://name:password@api.github.com/file",
+  ])("rejects a redirect to %s before forwarding the token", async (location) => {
+    const alice = browser("alice");
+    await connect(alice, "101");
+    upstream.requests.length = 0;
+    upstream.state.apiStatus = 302;
+    upstream.state.apiHeaders.set("location", location);
+    expect((await alice.request("/rpc/content")).status).toBe(500);
+    expect(upstream.requests).toHaveLength(1);
+  });
+  it("bounds redirect loops and rejects a redirect without a location", async () => {
+    const alice = browser("alice");
+    await connect(alice, "101");
+    upstream.requests.length = 0;
+    upstream.state.apiStatus = 301;
+    upstream.state.apiHeaders.set(
+      "location",
+      "https://api.github.com/repos/example/project/contents/README.md",
+    );
+    expect((await alice.request("/rpc/content")).status).toBe(500);
+    expect(upstream.requests).toHaveLength(6);
+    upstream.requests.length = 0;
+    upstream.state.apiHeaders.delete("location");
+    expect((await alice.request("/rpc/content")).status).toBe(500);
+    expect(upstream.requests).toHaveLength(1);
+  });
   it("distinguishes rate limits from authorization failures and preserves the retry delay", async () => {
     const alice = browser("alice");
     await connect(alice, "101");
