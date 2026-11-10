@@ -1,4 +1,5 @@
 import type { Handle } from "@sveltejs/kit/hooks";
+import { handleSession } from "../../src/lib/server/session.ts";
 import { createIdentityService } from "../../src/lib/server/identity.ts";
 import { getRuntime } from "../../src/lib/server/runtime-node.ts";
 import { createRequestRuntime } from "../../src/lib/server/runtime-services.ts";
@@ -17,5 +18,5 @@ export const handle: Handle = ({ event, resolve }) => {
     };
   });
 
-  return resolve(event);
+  return handleSession({ event, resolve });
 };
