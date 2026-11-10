@@ -9,6 +9,7 @@ import { createStorage } from "../src/lib/server/storage.ts";
 import { createTestEnvironment } from "./environment.ts";
 import { memoryStorage } from "./memory-storage.fixture.ts";
 import { AuthenticationFailed } from "../src/lib/server/identity.ts";
+import { runtimeConfigurationSchema } from "../src/lib/server/config.ts";
 
 let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
 
@@ -121,6 +122,49 @@ it("lets members discover templates without creating apps or granting management
     "platform:read",
   );
 });
+
+it.each([undefined, "", "fixture-catalog-token"])(
+  "keeps the optional catalog token on the server (%s)",
+  async (token) => {
+    const { GITHUB_TOKEN } = runtimeConfigurationSchema.parse({
+      ...environment.environment,
+      GITHUB_TOKEN: token,
+    });
+
+    const api = createApi({
+      ...runtime,
+      configuration: { ...runtime.configuration, GITHUB_TOKEN },
+    });
+
+    const listing = await api(new Request("http://localhost/api/v1/catalog/templates"));
+    expect(listing.status).toBe(200);
+    const catalog = contract.appTemplateCatalog.parse(await listing.json());
+    expect(catalog.templates).toHaveLength(3);
+    const detail = await api(new Request("http://localhost/api/v1/catalog/templates/gmail"));
+    expect(detail.status).toBe(200);
+    const template = contract.appTemplate.parse(await detail.json());
+    expect(JSON.stringify({ catalog, template })).not.toContain("fixture-catalog-token");
+
+    const requests = vi
+      .mocked(globalThis.fetch)
+      .mock.calls.map(([input, init]) => new Request(input, init));
+
+    const directory = requests.filter(
+      (request) => new URL(request.url).hostname === "api.github.com",
+    );
+
+    expect(directory).toHaveLength(1);
+    expect(directory[0]?.headers.get("authorization")).toBe(token ? `Bearer ${token}` : null);
+
+    const documents = requests.filter(
+      (request) => new URL(request.url).hostname === "raw.githubusercontent.com",
+    );
+
+    expect(documents).toHaveLength(4);
+
+    for (const document of documents) expect(document.headers.has("authorization")).toBe(false);
+  },
+);
 
 it("reads a new template from its directory and frontmatter without provider-specific fields", async () => {
   const markdown = "## Start\n\nCreate a board.\n\n```text\n---\n```\n";

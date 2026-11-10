@@ -41,13 +41,21 @@ const loadTemplate = async (id: string) => {
 
 export const templateCatalog = (
   principal: Principal,
-  configuration: Pick<Configuration, "PLATFORM_URL">,
+  configuration: Pick<Configuration, "PLATFORM_URL" | "GITHUB_TOKEN">,
   search = "",
 ) =>
   Result.tryPromise({
     try: async () => {
+      const headers = new Headers({
+        accept: "application/vnd.github+json",
+        "user-agent": "Widefleet",
+      });
+
+      if (configuration.GITHUB_TOKEN)
+        headers.set("authorization", `Bearer ${configuration.GITHUB_TOKEN}`);
+
       const response = await fetch(directory, {
-        headers: { accept: "application/vnd.github+json", "user-agent": "Widefleet" },
+        headers,
         signal: AbortSignal.timeout(10_000),
       });
 
