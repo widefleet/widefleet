@@ -4,7 +4,7 @@ import { createServer, request as httpRequest } from "node:http";
 import { EventEmitter, once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { app, artifact } from "@platform/contracts";
 import {
   account,
@@ -418,6 +418,39 @@ test("renews the browser session cookie while rendering a protected page", async
   expect(await response?.headerValue("set-cookie")).toMatch(/Max-Age=604800/i);
   const cookie = (await context.cookies()).find((entry) => entry.name.endsWith("session_token"));
   expect(cookie?.expires).toBeGreaterThan(Date.now() / 1000 + 6 * 24 * 60 * 60);
+});
+
+test("returns 503 from the session hook when the session store is unavailable", async ({
+  context,
+}) => {
+  const login = await environment.users.login({ userId: environment.owner.id });
+  await context.addCookies(
+    login.cookies.map((cookie) => ({
+      ...cookie,
+      domain: "localhost",
+      sameSite: "Lax",
+      secure: false,
+    })),
+  );
+
+  // Fail the actual Better Auth adapter in this test's disposable database,
+  // including its APIError wrapping, before either page loader can run.
+  await environment.database.db.execute(sql`ALTER TABLE "session" RENAME TO "unavailable_session"`);
+
+  try {
+    for (const path of ["/organizations", "/organizations/__data.json"]) {
+      const response = await context.request.get(path, { maxRedirects: 0 });
+      expect(response.status()).toBe(503);
+      expect(await response.text()).toContain("Sign-in is temporarily unavailable.");
+      expect(response.headers()["location"]).toBeUndefined();
+    }
+  } finally {
+    await environment.database.db.execute(
+      sql`ALTER TABLE "unavailable_session" RENAME TO "session"`,
+    );
+  }
+
+  expect((await context.request.get("/organizations")).status()).toBe(200);
 });
 
 test("redirects anonymous device requests to login and preserves the code", async ({ page }) => {

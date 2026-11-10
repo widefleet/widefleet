@@ -1,6 +1,9 @@
 import { building } from "$app/env";
 import { APIError } from "better-auth/api";
+import { DrizzleQueryError } from "drizzle-orm";
+import { error } from "@sveltejs/kit";
 import type { Handle } from "@sveltejs/kit/hooks";
+import { DatabaseUnavailable } from "./errors.ts";
 
 export const handleSession: Handle = async ({ event, resolve }) => {
   event.locals.user = null;
@@ -16,8 +19,21 @@ export const handleSession: Handle = async ({ event, resolve }) => {
       event.locals.user = current?.user ?? null;
       event.locals.session = current?.session ?? null;
     } catch (cause) {
-      if (!(cause instanceof APIError) || (cause.statusCode !== 401 && cause.statusCode !== 403))
-        throw cause;
+      // Better Auth wraps adapter failures in an APIError. Keep an unavailable
+      // session store distinct from an expired session or an unexpected bug.
+      const failure = cause instanceof APIError ? cause.cause : cause;
+
+      if (failure instanceof DrizzleQueryError || failure instanceof DatabaseUnavailable) {
+        runtime.reporting.exception(failure);
+        error(503, "Sign-in is temporarily unavailable.");
+      }
+
+      if (!(cause instanceof APIError)) throw cause;
+
+      if (cause.statusCode !== 401 && cause.statusCode !== 403) {
+        if (cause.statusCode >= 500) runtime.reporting.exception(cause);
+        error(cause.statusCode, cause.message);
+      }
     }
   }
 
