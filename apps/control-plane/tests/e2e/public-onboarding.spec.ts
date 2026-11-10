@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { user, member, organization } from "../../src/lib/server/auth-schema.ts";
-import { createTestEnvironment } from "../environment.ts";
+import { createTestEnvironment } from "../artifact-environment.ts";
 
 test("registers a verified account, creates its organization and guides the first deployment", async ({
   page,
@@ -144,7 +144,10 @@ test("registers a verified account, creates its organization and guides the firs
       `--organization ${created.id}`,
     );
     await page.getByRole("link", { name: "Open apps", exact: true }).click();
-    await expect(page.getByText("Room for your first idea", { exact: true })).toBeVisible();
+
+    for (const name of ["Gmail", "OneDrive", "GitHub"]) {
+      await expect(page.getByRole("link", { name, exact: true })).toBeVisible();
+    }
 
     const other = await page.request.get("/api/v1/apps", {
       headers: { "x-widefleet-organization": "widefleet" },

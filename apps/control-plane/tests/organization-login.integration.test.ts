@@ -18,7 +18,7 @@ import { createSettingsService } from "../src/lib/server/settings.ts";
 import { createInstalledAppSignIn } from "../src/lib/server/app-sign-in-installed.ts";
 import { createRuntime } from "../src/lib/server/runtime-services.ts";
 import type { Runtime } from "../src/lib/server/runtime-services.ts";
-import { createStorage } from "../src/lib/server/storage.ts";
+import { memoryArtifacts } from "./memory-artifacts.ts";
 import { createApi } from "../src/lib/server/api.ts";
 import {
   prepareOrganizationInvitation,
@@ -158,7 +158,7 @@ describe("Invited organization members with Widefleet OIDC", () => {
       configuration: environment.configuration,
       database: environment.database,
       settings,
-      storage: createStorage(environment.configuration),
+      storage: memoryArtifacts(),
       reporting: environment.reporting,
       encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
       sendEmail: async (message) => {

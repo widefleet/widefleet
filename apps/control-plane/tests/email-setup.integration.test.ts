@@ -14,7 +14,7 @@ import * as extension from "../src/lib/server/runtime-extension.ts";
 import { initializeRuntime } from "../src/lib/server/runtime-initialization.ts";
 import { installation, organizationSettings } from "../src/lib/server/schema.ts";
 import { readAppLogin, appLoginClientId } from "../src/lib/server/app-login-client.ts";
-import { createTestEnvironment } from "./environment.ts";
+import { createTestEnvironment } from "./artifact-environment.ts";
 
 it.each(["runtime", "source command"])(
   "publishes default app sign-in during %s bootstrap",
@@ -107,9 +107,11 @@ it.each(["runtime", "source command"])(
         const { ownerId } = await readInstallation(runtime.database.db);
         const expected = [{ event: "user_created", id: ownerId, userId: ownerId }];
 
-        if (mode === "runtime") expect(events).toEqual(expected);
-        else {
-          expect(await readFile(eventsPath, "utf8")).toBe(
+        if (mode === "runtime") {
+          expect(events.filter((event) => event.event === "user_created")).toEqual(expected);
+          expect(events.filter((event) => event.event === "app_created")).toHaveLength(3);
+        } else {
+          expect(await readFile(eventsPath, "utf8")).toContain(
             `${JSON.stringify({ event: "user_created", distinct_id: `user:${ownerId}` })}\n`,
           );
           expect(events).toEqual([]);

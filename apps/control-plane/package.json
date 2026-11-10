@@ -49,10 +49,10 @@
     "initialize": "node tools/initialize.ts",
     "initialize:cloudflare": "node tools/initialize-cloudflare.ts",
     "dev": "vite --host 127.0.0.1",
-    "build": "pnpm --filter @platform/app-runtime build && vite build && node tools/reporting-maps.ts",
+    "build": "pnpm --filter @platform/connectors build && pnpm --filter @platform/app-runtime build && vite build && node tools/reporting-maps.ts",
     "start": "node build",
     "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-    "build:cloudflare": "pnpm --filter @platform/app-runtime build && vite build --config vite.cloudflare.config.ts && node tools/cloudflare-entry.ts && node tools/reporting-maps.ts cloudflare",
+    "build:cloudflare": "pnpm --filter @platform/connectors build && pnpm --filter @platform/app-runtime build && vite build --config vite.cloudflare.config.ts && node tools/cloudflare-entry.ts && node tools/reporting-maps.ts cloudflare",
     "dev:cloudflare": "vite --config vite.cloudflare.config.ts --host 127.0.0.1"
   },
   "dependencies": {
@@ -70,6 +70,7 @@
     "@orpc/zod": "1.15.4",
     "@platform/app-runtime": "workspace:*",
     "@platform/auth-proxy": "workspace:*",
+    "@platform/connectors": "workspace:*",
     "@platform/contracts": "workspace:*",
     "better-auth": "1.7.12",
     "better-result": "3.0.1",
