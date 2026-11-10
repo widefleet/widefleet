@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { provider } from "./provider.ts";
+import { message } from "../src/messages.ts";
+import { maximumDownloadBytes } from "../src/bytes.ts";
 
 const module = new URL("../src/app.ts", import.meta.url);
 
@@ -242,5 +244,68 @@ describe(`${kind} personal account app`, () => {
     expect(await (await bob.request("/rpc/status")).json()).toMatchObject({
       status: "connected",
     });
+  });
+  it.each([false, true])(
+    "bounds all message parts together when sizes are understated: %s",
+    async (understated) => {
+      const alice = browser("alice");
+      await connect(alice, "101");
+      const size = maximumDownloadBytes / 2;
+      upstream.state.message = message.parse({
+        ...upstream.state.message,
+        payload: {
+          partId: "",
+          mimeType: "multipart/mixed",
+          body: { size: 0 },
+          parts: ["first", "second", "third"].map((id) => ({
+            partId: id,
+            mimeType: "text/plain",
+            body: { size: understated ? 1 : size, attachmentId: id },
+          })),
+        },
+      });
+
+      for (const id of ["first", "second", "third"])
+        upstream.state.attachments.set(id, {
+          size: understated ? 1 : size,
+          data: btoa("A".repeat(size)),
+        });
+      expect(await (await alice.request("/rpc/content")).json()).toEqual({
+        status: "too_large",
+        maximumBytes: maximumDownloadBytes,
+      });
+      expect(upstream.state.attachmentReads).toEqual(understated ? ["first", "second"] : ["first"]);
+    },
+  );
+
+  it("reads inline content and multiple separately stored text parts within the message budget", async () => {
+    const alice = browser("alice");
+    await connect(alice, "101");
+    upstream.state.message = message.parse({
+      ...upstream.state.message,
+      payload: {
+        partId: "",
+        mimeType: "multipart/alternative",
+        body: { size: 0 },
+        parts: [
+          {
+            partId: "0",
+            mimeType: "text/plain",
+            body: { size: 6, data: btoa("Inline") },
+          },
+          { partId: "1", mimeType: "text/plain", body: { size: 5, attachmentId: "body" } },
+          { partId: "2", mimeType: "text/html", body: { size: 9, attachmentId: "html" } },
+        ],
+      },
+    });
+    upstream.state.attachments.set("html", {
+      size: 9,
+      data: btoa("<p>Hi</p>"),
+    });
+    expect(await (await alice.request("/rpc/content")).json()).toMatchObject({
+      status: "connected",
+      message: { text: "Inline\nHello", html: "<p>Hi</p>" },
+    });
+    expect(upstream.state.attachmentReads).toEqual(["body", "html"]);
   });
 });

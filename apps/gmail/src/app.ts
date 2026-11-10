@@ -59,12 +59,19 @@ export default class Gmail extends WorkerEntrypoint<Environment, Properties> {
     if (bytes.status !== "connected") return bytes;
     const value = message.parse(JSON.parse(new TextDecoder().decode(bytes.data)));
 
-    // Gmail can store large text bodies via the attachments endpoint too.
+    // Share the download budget between the message JSON and text bodies
+    // stored separately by Gmail, rather than allowing 8 MiB for every part.
+    let remaining = maximumDownloadBytes - bytes.data.byteLength;
+
     for (const part of textBodies(value)) {
       if (!part.body.attachmentId || part.body.data !== undefined) continue;
-      const body = await this.getAttachment(parsedId, part.body.attachmentId);
+
+      if (part.body.size > remaining)
+        return { status: "too_large", maximumBytes: maximumDownloadBytes } as const;
+      const body = await this.#attachment(parsedId, part.body.attachmentId, remaining);
 
       if (body.status !== "connected") return body;
+      remaining -= body.size;
       part.body.data = body.base64url;
     }
 
@@ -73,27 +80,28 @@ export default class Gmail extends WorkerEntrypoint<Environment, Properties> {
 
   /** Download an attachment by message ID and attachmentId, up to 8 MiB. Returns base64url and bytes. */
   async getAttachment(id: string, part: string) {
+    return this.#attachment(id, part, maximumDownloadBytes);
+  }
+
+  async #attachment(id: string, part: string, maximum: number) {
     const result = await this.#connection().request(
       `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId.parse(id)}/attachments/${attachmentId.parse(part)}`,
     );
 
     if (result.status !== "connected") return result;
 
-    const bytes = await readBytes(
-      result.response,
-      Math.ceil((maximumDownloadBytes * 4) / 3) + 4096,
-    );
+    const bytes = await readBytes(result.response, Math.ceil((maximum * 4) / 3) + 4096);
 
     if (bytes.status !== "connected")
       return { status: "too_large", maximumBytes: maximumDownloadBytes } as const;
     const value = attachment.parse(JSON.parse(new TextDecoder().decode(bytes.data)));
 
-    if (value.size > maximumDownloadBytes)
+    if (value.size > maximum)
       return { status: "too_large", maximumBytes: maximumDownloadBytes } as const;
     const base64url = value.data ?? "";
     const data = decodeBody(base64url);
 
-    if (data.byteLength > maximumDownloadBytes)
+    if (data.byteLength > maximum)
       return { status: "too_large", maximumBytes: maximumDownloadBytes } as const;
 
     return { status: "connected", size: data.byteLength, data, base64url } as const;

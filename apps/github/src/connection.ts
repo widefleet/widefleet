@@ -144,12 +144,29 @@ export const accountConnection = (
       if (response.status === 401)
         return { status: "reconnect_required", connectUrl: environment.WIDEFLEET_ORIGIN } as const;
 
+      // GitHub uses 403 for both permission failures and exhausted rate limits.
+      const retryAfter = response.headers.get("retry-after");
+      const exhausted = response.headers.get("x-ratelimit-remaining") === "0";
+
+      if (
+        response.status === 429 ||
+        (response.status === 403 && (exhausted || retryAfter !== null))
+      ) {
+        const reset = response.headers.get("x-ratelimit-reset");
+
+        return {
+          status: "rate_limited",
+          retryAfter:
+            retryAfter ??
+            (exhausted && reset && Number.isFinite(Number(reset))
+              ? String(Math.max(0, Math.ceil(Number(reset) - Date.now() / 1000)))
+              : null),
+        } as const;
+      }
+
       if (response.status === 403) return { status: "access_denied" } as const;
 
       if (response.status === 404) return { status: "not_found" } as const;
-
-      if (response.status === 429)
-        return { status: "rate_limited", retryAfter: response.headers.get("retry-after") } as const;
 
       if (!response.ok && response.status !== 302)
         throw new Error(`${provider.name} request failed (HTTP ${response.status})`);

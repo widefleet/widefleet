@@ -65,6 +65,18 @@ export const decodeBody = (data: string) =>
     byte.charCodeAt(0),
   );
 
+const textDecoder = (charset: string) => {
+  try {
+    return new TextDecoder(charset);
+  } catch (error) {
+    if (!(error instanceof RangeError)) throw error;
+
+    // Unknown labels must not hide the rest of the message. Use UTF-8's
+    // replacement decoding for content the runtime cannot decode by its label.
+    return new TextDecoder();
+  }
+};
+
 const isTextBody = (value: z.infer<typeof part>) =>
   !value.filename &&
   ["text/plain", "text/html"].includes(value.mimeType) &&
@@ -127,7 +139,7 @@ export const readMessage = (value: z.infer<typeof message>) => {
       )?.value;
 
       const charset = /;\s*charset\s*=\s*(?:"([^"]+)"|([^;\s]+))/i.exec(contentType ?? "");
-      const decoded = new TextDecoder(charset?.[1] ?? charset?.[2] ?? "utf-8").decode(bytes);
+      const decoded = textDecoder(charset?.[1] ?? charset?.[2] ?? "utf-8").decode(bytes);
 
       if (current.mimeType === "text/plain") text.push(decoded);
 

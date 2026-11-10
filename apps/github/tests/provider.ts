@@ -1,16 +1,8 @@
-import { createHash, generateKeyPairSync, sign } from "node:crypto";
-import { Request, Response } from "miniflare";
+import { createHash } from "node:crypto";
+import { Headers, Request, Response } from "miniflare";
 import { z } from "zod";
 
 const kind = "github";
-
-const base64url = (value: Uint8Array) =>
-  btoa(Array.from(value, (byte) => String.fromCharCode(byte)).join(""))
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replaceAll("=", "");
-
-const encode = (value: string) => base64url(new TextEncoder().encode(value));
 
 export const provider = () => {
   const codes = new Map<
@@ -19,58 +11,39 @@ export const provider = () => {
       user: string;
       challenge: string;
       redirect: string;
-      nonce: string | null;
     }
   >();
 
   const access = new Map<string, string>();
   const refresh = new Map<string, string>();
-  const state = { refreshes: 0, unavailable: false, apiStatus: 200, downloads: 0 };
-  const keys = generateKeyPairSync("rsa", { modulusLength: 2048 });
 
-  const jwk = {
-    ...keys.publicKey.export({ format: "jwk" }),
-    kid: "test-key",
-    alg: "RS256",
-    use: "sig",
+  const state = {
+    refreshes: 0,
+    unavailable: false,
+    apiStatus: 200,
+    apiHeaders: new Headers(),
+    expiringTokens: false,
   };
 
-  const tenant = "9188040d-6c67-4c5b-b112-36a304b66dad";
-
-  const tokens = (user: string, nonce: string | null = null) => {
+  const tokens = (user: string) => {
     const accessToken = `synthetic-access-${crypto.randomUUID()}`;
-    const refreshToken = `synthetic-refresh-${crypto.randomUUID()}`;
     access.set(accessToken, user);
-    refresh.set(refreshToken, user);
-    const header = encode(JSON.stringify({ alg: "RS256", kid: jwk.kid }));
-    const now = Math.floor(Date.now() / 1000);
 
-    const payload = encode(
-      JSON.stringify({
-        iss: `https://login.microsoftonline.com/${tenant}/v2.0`,
-        aud: `test-${kind}-client`,
-        sub: user,
-        oid: user,
-        tid: tenant,
-        iat: now,
-        exp: now + 3600,
-        name: user,
-        email: `${user}@example.test`,
-        email_verified: true,
-        nonce,
-      }),
-    );
-
-    const unsigned = `${header}.${payload}`;
-    const signature = base64url(sign("RSA-SHA256", unsigned, keys.privateKey));
-
-    return Response.json({
+    const result = {
       access_token: accessToken,
-      refresh_token: refreshToken,
-      id_token: `${unsigned}.${signature}`,
-      expires_in: 3600,
       token_type: "Bearer",
       scope: "repo read:user user:email",
+    };
+
+    if (!state.expiringTokens) return Response.json(result);
+    const refreshToken = `synthetic-refresh-${crypto.randomUUID()}`;
+    refresh.set(refreshToken, user);
+
+    return Response.json({
+      ...result,
+      refresh_token: refreshToken,
+      expires_in: 28800,
+      refresh_token_expires_in: 15811200,
     });
   };
 
@@ -84,7 +57,7 @@ export const provider = () => {
 
       if (url.searchParams.get("code_challenge_method") !== "S256") throw new Error("Missing PKCE");
       const code = crypto.randomUUID();
-      codes.set(code, { user, challenge, redirect, nonce: url.searchParams.get("nonce") });
+      codes.set(code, { user, challenge, redirect });
       const callback = new URL(redirect);
       callback.searchParams.set("code", code);
       callback.searchParams.set("state", oauthState);
@@ -94,19 +67,7 @@ export const provider = () => {
     fetch: async (request: Request) => {
       const url = new URL(request.url);
 
-      if (
-        url.href === "https://www.googleapis.com/oauth2/v3/certs" ||
-        url.href === "https://login.microsoftonline.com/common/discovery/v2.0/keys"
-      )
-        return Response.json({ keys: [jwk] });
-
-      if (
-        [
-          "https://oauth2.googleapis.com/token",
-          "https://login.microsoftonline.com/common/oauth2/v2.0/token",
-          "https://github.com/login/oauth/access_token",
-        ].includes(url.href)
-      ) {
+      if (url.href === "https://github.com/login/oauth/access_token") {
         const form = request.headers.get("content-type")?.includes("application/json")
           ? new URLSearchParams(z.record(z.string(), z.string()).parse(await request.json()))
           : new URLSearchParams(await request.text());
@@ -133,7 +94,7 @@ export const provider = () => {
           )
             return Response.json({ error: "invalid_grant" }, { status: 400 });
 
-          return tokens(saved.user, saved.nonce);
+          return tokens(saved.user);
         }
 
         if (form.get("grant_type") === "refresh_token") {
@@ -147,14 +108,6 @@ export const provider = () => {
 
           return tokens(user);
         }
-      }
-
-      if (url.origin === "https://download.example.test") {
-        if (request.headers.has("authorization"))
-          throw new Error("Graph token leaked to download host");
-        state.downloads++;
-
-        return new Response("file content", { headers: { "content-type": "text/plain" } });
       }
 
       const user = access.get((request.headers.get("authorization") ?? "").replace(/^Bearer /, ""));
@@ -172,42 +125,8 @@ export const provider = () => {
       if (url.href === "https://api.github.com/user/emails")
         return Response.json([{ email: `${user}@example.test`, verified: true, primary: true }]);
 
-      if (state.apiStatus !== 200) return new Response(null, { status: state.apiStatus });
-
-      if (url.href.startsWith("https://gmail.googleapis.com/gmail/v1/users/me/messages?"))
-        return Response.json({
-          messages: [{ id: `message-${user}`, threadId: "thread" }],
-          nextPageToken: "next",
-        });
-
-      if (url.href.startsWith("https://gmail.googleapis.com/gmail/v1/users/me/messages/message?"))
-        return Response.json({
-          id: "message",
-          threadId: "thread",
-          snippet: "Hello",
-          internalDate: "1700000000000",
-          payload: {
-            partId: "",
-            mimeType: "text/plain",
-            headers: [],
-            body: { size: 5, attachmentId: "body" },
-          },
-        });
-
-      if (
-        url.href ===
-        "https://gmail.googleapis.com/gmail/v1/users/me/messages/message/attachments/body"
-      )
-        return Response.json({ size: 5, data: "SGVsbG8" });
-
-      if (url.href.startsWith("https://graph.microsoft.com/v1.0/me/drive/root/children?"))
-        return Response.json({ value: [{ id: `file-${user}`, name: "report.txt", size: 12 }] });
-
-      if (url.href === "https://graph.microsoft.com/v1.0/me/drive/items/file/content")
-        return new Response(null, {
-          status: 302,
-          headers: { location: "https://download.example.test/file?token=synthetic" },
-        });
+      if (state.apiStatus !== 200)
+        return new Response(null, { status: state.apiStatus, headers: state.apiHeaders });
 
       if (url.href.startsWith("https://api.github.com/user/repos?"))
         return Response.json([

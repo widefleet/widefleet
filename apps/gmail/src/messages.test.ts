@@ -74,4 +74,51 @@ describe("Gmail messages", () => {
     expect(result.attachments[0]?.attachmentId).toBe("attachment");
     expect(new TextDecoder().decode(result.attachments[1]?.data)).toBe("Note");
   });
+  it.each(["utf-7", "unknown-charset"])(
+    "preserves message content when a part uses %s",
+    (charset) => {
+      const result = readMessage(
+        message.parse({
+          id: "m1",
+          threadId: "t1",
+          snippet: "Hello",
+          internalDate: "1700000000000",
+          payload: {
+            partId: "",
+            mimeType: "multipart/mixed",
+            body: { size: 0 },
+            headers: [{ name: "Subject", value: "Hello" }],
+            parts: [
+              {
+                partId: "1",
+                mimeType: "text/plain",
+                headers: [{ name: "Content-Type", value: `text/plain; charset="${charset}"` }],
+                body: { size: 6, data: btoa("H\xc3\xa9llo") },
+              },
+              {
+                partId: "2",
+                mimeType: "text/html",
+                headers: [{ name: "Content-Type", value: "text/html; charset=windows-1252" }],
+                body: {
+                  size: 8,
+                  data: btoa("<p>é</p>"),
+                },
+              },
+              {
+                partId: "3",
+                mimeType: "application/pdf",
+                filename: "report.pdf",
+                body: { size: 123, attachmentId: "report" },
+              },
+            ],
+          },
+        }),
+      );
+
+      expect(result.text).toBe("Héllo");
+      expect(result.html).toBe("<p>é</p>");
+      expect(result.headers).toEqual([{ name: "Subject", value: "Hello" }]);
+      expect(result.attachments[0]?.attachmentId).toBe("report");
+    },
+  );
 });

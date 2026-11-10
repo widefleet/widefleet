@@ -1,6 +1,7 @@
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { Request, Response } from "miniflare";
 import { z } from "zod";
+import { message } from "../src/messages.ts";
 
 const kind = "google";
 
@@ -25,7 +26,29 @@ export const provider = () => {
 
   const access = new Map<string, string>();
   const refresh = new Map<string, string>();
-  const state = { refreshes: 0, unavailable: false, apiStatus: 200, downloads: 0 };
+  const attachmentReads: string[] = [];
+
+  const state = {
+    refreshes: 0,
+    unavailable: false,
+    apiStatus: 200,
+    downloads: 0,
+    attachmentReads,
+    attachments: new Map([["body", { size: 5, data: "SGVsbG8" }]]),
+    message: message.parse({
+      id: "message",
+      threadId: "thread",
+      snippet: "Hello",
+      internalDate: "1700000000000",
+      payload: {
+        partId: "",
+        mimeType: "text/plain",
+        headers: [],
+        body: { size: 5, attachmentId: "body" },
+      },
+    }),
+  };
+
   const keys = generateKeyPairSync("rsa", { modulusLength: 2048 });
 
   const jwk = {
@@ -181,24 +204,15 @@ export const provider = () => {
         });
 
       if (url.href.startsWith("https://gmail.googleapis.com/gmail/v1/users/me/messages/message?"))
-        return Response.json({
-          id: "message",
-          threadId: "thread",
-          snippet: "Hello",
-          internalDate: "1700000000000",
-          payload: {
-            partId: "",
-            mimeType: "text/plain",
-            headers: [],
-            body: { size: 5, attachmentId: "body" },
-          },
-        });
+        return Response.json(state.message);
 
-      if (
-        url.href ===
-        "https://gmail.googleapis.com/gmail/v1/users/me/messages/message/attachments/body"
-      )
-        return Response.json({ size: 5, data: "SGVsbG8" });
+      if (url.pathname.startsWith("/gmail/v1/users/me/messages/message/attachments/")) {
+        const id = url.pathname.split("/").at(-1) ?? "";
+        state.attachmentReads.push(id);
+        const body = state.attachments.get(id);
+
+        return body ? Response.json(body) : new Response(null, { status: 404 });
+      }
 
       if (url.href.startsWith("https://graph.microsoft.com/v1.0/me/drive/root/children?"))
         return Response.json({ value: [{ id: `file-${user}`, name: "report.txt", size: 12 }] });

@@ -150,7 +150,7 @@ describe(`${kind} personal account app`, () => {
     expect(page).toContain(`/auth/callback/${kind}`);
     expect((await alice.request("/connect", "POST")).headers.get("location")).toBe("/");
   });
-  it("links, reads, encrypts tokens and isolates users and identity issuers", async () => {
+  it("uses non-expiring OAuth tokens for repeated reads and isolates users and identity issuers", async () => {
     const alice = browser("alice");
     const bob = browser("bob");
     expect(await (await alice.request("/rpc/list")).json()).toMatchObject({
@@ -175,11 +175,23 @@ describe(`${kind} personal account app`, () => {
     const db = await runtime.getD1Database("DB");
 
     const saved = z
-      .object({ accessToken: z.string(), refreshToken: z.string() })
-      .parse(await db.prepare("SELECT accessToken, refreshToken FROM account").first());
+      .object({
+        accessToken: z.string(),
+        refreshToken: z.null(),
+        accessTokenExpiresAt: z.null(),
+        idToken: z.null(),
+      })
+      .parse(
+        await db
+          .prepare("SELECT accessToken, refreshToken, accessTokenExpiresAt, idToken FROM account")
+          .first(),
+      );
 
     expect(saved.accessToken).not.toContain("synthetic-access-");
-    expect(saved.refreshToken).not.toContain("synthetic-refresh-");
+    expect(upstream.state.refreshes).toBe(0);
+    alice.identity.issuer = "https://identity.example.test";
+    expect(await (await alice.request("/rpc/list")).json()).toMatchObject({ status: "connected" });
+    expect(upstream.state.refreshes).toBe(0);
   });
   it("rejects changed callback identities, replay, cross-origin forms and public token endpoints", async () => {
     const alice = browser("alice");
@@ -204,7 +216,8 @@ describe(`${kind} personal account app`, () => {
       (await runtime.dispatchFetch(origin, { headers: { "x-auth-request-user": "alice" } })).status,
     ).toBe(401);
   });
-  it("refreshes tokens, preserves accounts on outages and disconnects only the current user", async () => {
+  it("refreshes expiring tokens, preserves accounts on outages and disconnects only the current user", async () => {
+    upstream.state.expiringTokens = true;
     const alice = browser("alice");
     const bob = browser("bob");
     await connect(alice, "101");
@@ -240,6 +253,43 @@ describe(`${kind} personal account app`, () => {
     });
     expect(await (await bob.request("/rpc/status")).json()).toMatchObject({
       status: "connected",
+    });
+  });
+  it("distinguishes rate limits from authorization failures and preserves the retry delay", async () => {
+    const alice = browser("alice");
+    await connect(alice, "101");
+    upstream.state.apiStatus = 403;
+    expect(await (await alice.request("/rpc/list")).json()).toEqual({ status: "access_denied" });
+    upstream.state.apiHeaders.set("retry-after", "60");
+    expect(await (await alice.request("/rpc/list")).json()).toEqual({
+      status: "rate_limited",
+      retryAfter: "60",
+    });
+    upstream.state.apiStatus = 429;
+    expect(await (await alice.request("/rpc/list")).json()).toEqual({
+      status: "rate_limited",
+      retryAfter: "60",
+    });
+    upstream.state.apiStatus = 403;
+    upstream.state.apiHeaders.delete("retry-after");
+    upstream.state.apiHeaders.set("x-ratelimit-remaining", "0");
+    expect(await (await alice.request("/rpc/list")).json()).toEqual({
+      status: "rate_limited",
+      retryAfter: null,
+    });
+    upstream.state.apiHeaders.set("x-ratelimit-reset", String(Math.ceil(Date.now() / 1000) + 3600));
+
+    const limited = z
+      .object({ status: z.literal("rate_limited"), retryAfter: z.string() })
+      .parse(await (await alice.request("/rpc/list")).json());
+
+    expect(Number(limited.retryAfter)).toBeGreaterThan(3590);
+    expect(Number(limited.retryAfter)).toBeLessThanOrEqual(3601);
+    upstream.state.apiHeaders.set("x-ratelimit-remaining", "10");
+    expect(await (await alice.request("/rpc/list")).json()).toEqual({ status: "access_denied" });
+    upstream.state.apiStatus = 401;
+    expect(await (await alice.request("/rpc/list")).json()).toMatchObject({
+      status: "reconnect_required",
     });
   });
 });
