@@ -9,11 +9,13 @@
     next,
     register = false,
     emailSignIn = true,
+    compact = false,
   }: {
     providers: ("google" | "microsoft")[];
     next: string;
     register?: boolean;
     emailSignIn?: boolean;
+    compact?: boolean;
   } = $props();
 
   let busy = $state<string | null>(null);
@@ -53,22 +55,34 @@
 </script>
 
 {#if providers.length}
-  <div class="mt-6 space-y-3">
+  <div class={compact ? "mt-6 grid grid-cols-2 items-start gap-2.5" : "mt-6 space-y-3"}>
     {#each providers as provider (provider)}
-      <Button
-        variant="outline"
-        class="h-10 w-full"
-        disabled={busy !== null}
-        onclick={() => signIn(provider)}
-      >
-        <img src={`/brand/${provider}.svg`} class="size-4" width="16" height="16" alt="" />
-        {busy === provider
-          ? "Opening sign-in …"
-          : `Continue with ${provider === "google" ? "Google" : "Microsoft"}`}
-        {#if lastUsed === provider}<span class="text-muted-foreground ml-auto text-xs font-normal"
-            >Last used</span
-          >{/if}
-      </Button>
+      <div class={compact && providers.length === 1 ? "col-span-2" : undefined}>
+        <Button
+          variant="outline"
+          class={compact ? "h-11 w-full gap-2 px-2 text-sm" : "h-10 w-full"}
+          aria-label={`Continue with ${provider === "google" ? "Google" : "Microsoft"}`}
+          aria-describedby={compact && lastUsed === provider ? `last-used-${provider}` : undefined}
+          disabled={busy !== null}
+          onclick={() => signIn(provider)}
+        >
+          <img src={`/brand/${provider}.svg`} class="size-4" width="16" height="16" alt="" />
+          {busy === provider
+            ? compact
+              ? "Opening …"
+              : "Opening sign-in …"
+            : `${compact ? "" : "Continue with "}${provider === "google" ? "Google" : "Microsoft"}`}
+          {#if lastUsed === provider && !compact}<span
+              class="text-muted-foreground ml-auto text-xs font-normal">Last used</span
+            >{/if}
+        </Button>
+        {#if compact && lastUsed === provider}<p
+            id={`last-used-${provider}`}
+            class="text-muted-foreground mt-1.5 text-center text-xs"
+          >
+            Last used
+          </p>{/if}
+      </div>
     {/each}
   </div>
   {#if message}<div class="mt-4"><Feedback kind="error">{message}</Feedback></div>{/if}

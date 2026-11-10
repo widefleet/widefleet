@@ -108,6 +108,9 @@ test("accepts emailed owner invitations and manages members in isolated organiza
         WIDEFLEET_RUNTIME_EXTENSION: fileURLToPath(
           new URL("./onboarding-extension.ts", import.meta.url),
         ),
+        WIDEFLEET_AUTH_CLIENT_EXTENSION: fileURLToPath(
+          new URL("./auth-client.fixture.ts", import.meta.url),
+        ),
         PLATFORM_TEST_MAILBOX: `http://127.0.0.1:${mailboxPort}`,
         WRANGLER_SEND_METRICS: "false",
       },
@@ -147,7 +150,10 @@ test("accepts emailed owner invitations and manages members in isolated organiza
   });
 
   const signIn = async (page: Page, email: string, checkEmailState = false) => {
-    const form = page.locator("form").filter({ has: page.locator("#code-email") });
+    const form = page.locator("form");
+    const challenge = page.getByLabel("Security check", { exact: true });
+    await expect(challenge).toBeVisible();
+    const challengeId = await challenge.getAttribute("id");
     await form.getByLabel("Email", { exact: true }).fill(email);
 
     if (checkEmailState) {
@@ -163,7 +169,8 @@ test("accepts emailed owner invitations and manages members in isolated organiza
         },
         { times: 1 },
       );
-      await form.getByRole("button", { name: "Continue", exact: true }).click();
+      await challenge.check();
+      await form.getByRole("button", { name: "Continue with email", exact: true }).click();
       await requested;
 
       try {
@@ -181,13 +188,22 @@ test("accepts emailed owner invitations and manages members in isolated organiza
       await expect(page.getByLabel("Sign-in code", { exact: true })).toHaveCount(0);
     }
 
-    await form.getByRole("button", { name: "Continue", exact: true }).click();
+    await challenge.check();
+    await form.getByRole("button", { name: "Continue with email", exact: true }).click();
     await expect(page.getByLabel("Sign-in code", { exact: true })).toBeVisible();
 
     if (checkEmailState) {
       await expect(page.locator("input[type=password]")).toHaveCount(0);
-      await expect(page.locator("#code-email")).toHaveValue(email);
-      await expect(page.locator("#code-email")).toHaveAttribute("readonly", "");
+      await expect(page.locator("#code-email")).toHaveCount(0);
+      await expect(page.getByText(email, { exact: true })).toBeVisible();
+      await expect(challenge).toHaveAttribute("id", z.string().parse(challengeId));
+      await page.clock.runFor(31_000);
+      await page.getByRole("button", { name: "Resend code", exact: true }).click();
+      await expect(page.getByRole("alert")).toContainText("Complete the security check");
+      await challenge.check();
+      await page.getByRole("button", { name: "Resend code", exact: true }).click();
+      await expect(page.getByRole("status")).toContainText("A new code has been requested.");
+      await expect(challenge).toHaveAttribute("id", z.string().parse(challengeId));
     }
 
     const code = z
@@ -199,7 +215,7 @@ test("accepts emailed owner invitations and manages members in isolated organiza
       );
 
     await page.getByLabel("Sign-in code", { exact: true }).fill(code);
-    await form.getByRole("button", { name: "Sign in", exact: true }).click();
+    await form.getByRole("button", { name: "Verify and sign in", exact: true }).click();
   };
 
   try {
@@ -295,6 +311,7 @@ test("accepts emailed owner invitations and manages members in isolated organiza
 
     // A recipient may already have an email session when their company enables SSO.
     const emailPage = await emailContext.newPage();
+    await emailPage.clock.install();
     await emailPage.goto(`/invitations/${company.invitationId}`);
     await signIn(emailPage, company.email, true);
     await expect(emailPage.getByRole("heading", { name: "Join browser-company" })).toBeVisible();
@@ -352,7 +369,9 @@ test("accepts emailed owner invitations and manages members in isolated organiza
       expect(new URL(page.url()).searchParams.get("next")).toBe(
         `/invitations/${company.invitationId}`,
       );
-      await expect(page.getByRole("button", { name: "Continue", exact: true })).toHaveCount(0);
+      await expect(
+        page.getByRole("button", { name: "Continue with email", exact: true }),
+      ).toHaveCount(0);
       await page.getByRole("button", { name: "Sign in with browser-company" }).click();
       await expect(page.getByRole("heading", { name: "Join browser-company" })).toBeVisible();
       await expect(page.getByLabel("Your name")).toHaveCount(0);
@@ -453,7 +472,9 @@ test("accepts emailed owner invitations and manages members in isolated organiza
     expect((await operatorContext.request.get("/api/v1/me")).status()).toBe(200);
     const loginPage = await firstContext.newPage();
     await loginPage.goto("/sign-in?organization=widefleet&next=%2Fsettings");
-    await expect(loginPage.getByRole("button", { name: "Continue", exact: true })).toBeVisible();
+    await expect(
+      loginPage.getByRole("button", { name: "Continue with email", exact: true }),
+    ).toBeVisible();
     await signIn(loginPage, "email-setup@example.test");
     await expect(loginPage).toHaveURL(/\/settings$/);
     // Both operator sessions were verified by OTP. Activating SSO must deny
@@ -471,7 +492,9 @@ test("accepts emailed owner invitations and manages members in isolated organiza
 
     expect(policy?.ssoRequired).toBe(true);
     await loginPage.goto("/sign-in?organization=widefleet");
-    await expect(loginPage.getByRole("button", { name: "Continue", exact: true })).toHaveCount(0);
+    await expect(
+      loginPage.getByRole("button", { name: "Continue with email", exact: true }),
+    ).toHaveCount(0);
   } catch (cause) {
     await test.info().attach("onboarding-server-log", { body: logs, contentType: "text/plain" });
 

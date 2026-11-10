@@ -88,11 +88,11 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
     await page.getByRole("button", { name: "Create account and continue" }).click();
     await expect(page).toHaveURL(/\/sign-in\?/);
     await expect(page.getByLabel("Email", { exact: true })).toHaveValue("sso@example.test");
-    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.getByRole("button", { name: "Continue with email", exact: true }).click();
     await expect.poll(() => logs.match(/code is (\d{6})/)?.[1]).toBeTruthy();
     const otp = z.string().parse(logs.match(/code is (\d{6})/)?.[1]);
     await page.getByLabel("Sign-in code", { exact: true }).fill(otp);
-    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    await page.getByRole("button", { name: "Verify and sign in", exact: true }).click();
     await expect(page).toHaveURL(/\/settings$/);
     await expect(page.getByRole("button", { name: "Activate Widefleet sign-in" })).toBeVisible();
     environment.authControl.available(true);
