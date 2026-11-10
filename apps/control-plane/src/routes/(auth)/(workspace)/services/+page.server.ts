@@ -3,12 +3,11 @@ import { identifier } from "@platform/contracts";
 import { getAppServices } from "#lib/services.remote";
 import { getAppDetails } from "#lib/apps.remote";
 import { getAppConnections } from "#lib/connections.remote";
-import { pagePrincipal } from "#server/page-auth";
 import type { PageServerLoad } from "./$types";
 
-export const load: PageServerLoad = async ({ url, setHeaders }) => {
+export const load: PageServerLoad = async ({ parent, url, setHeaders }) => {
   setHeaders({ "cache-control": "private, no-store" });
-  await pagePrincipal();
+  await parent();
   await getAppServices();
   const selected = url.searchParams.get("app");
 

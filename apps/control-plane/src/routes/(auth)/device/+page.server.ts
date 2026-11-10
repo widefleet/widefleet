@@ -1,21 +1,13 @@
 import { eq } from "drizzle-orm";
 import { organization } from "#server/auth-schema";
-import { redirect } from "@sveltejs/kit";
+import { getUserSession } from "#server/session";
 import { getRuntime } from "#server/runtime";
 import type { PageServerLoad } from "./$types";
 
-export const load: PageServerLoad = async ({ locals, url, setHeaders }) => {
+export const load: PageServerLoad = async ({ url, setHeaders }) => {
   setHeaders({ "cache-control": "private, no-store", "referrer-policy": "no-referrer" });
   const runtime = await getRuntime();
-  const { session, user } = locals;
-
-  if (!session || !user) {
-    const next = new URLSearchParams({ next: url.pathname + url.search });
-    const email = url.searchParams.get("email");
-
-    if (email) next.set("email", email);
-    redirect(303, `/sign-in?${next}`);
-  }
+  const { session, user } = getUserSession();
 
   const organizationId = session.identityOrganizationId;
 

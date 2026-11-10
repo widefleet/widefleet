@@ -1,7 +1,8 @@
 import { building } from "$app/env";
+import { getRequestEvent } from "$app/server";
 import { APIError } from "better-auth/api";
 import { DrizzleQueryError } from "drizzle-orm";
-import { error } from "@sveltejs/kit";
+import { error, redirect } from "@sveltejs/kit";
 import type { Handle } from "@sveltejs/kit/hooks";
 import { DatabaseUnavailable } from "./errors.ts";
 
@@ -37,5 +38,44 @@ export const handleSession: Handle = async ({ event, resolve }) => {
     }
   }
 
+  if (
+    !building &&
+    !event.isRemoteRequest &&
+    event.route.id?.split("/").includes("(auth)") &&
+    (!event.locals.user || !event.locals.session)
+  ) {
+    // POST URLs can contain a remote form's transport parameters. Return to its
+    // page after sign-in, while retaining normal GET filters and device codes.
+    const next = new URLSearchParams({
+      next:
+        event.request.method === "GET" ? event.url.pathname + event.url.search : event.url.pathname,
+    });
+
+    if (event.route.id === "/(auth)/device") {
+      const email = event.url.searchParams.get("email");
+
+      if (email) next.set("email", email);
+    }
+
+    if (event.route.id === "/(auth)/invitations/[invitationId]" && event.params["invitationId"]) {
+      const runtime = await event.locals.runtime();
+      const company = await runtime.invitations.companySignIn(event.params["invitationId"]);
+
+      if (company) next.set("organization", company.slug);
+    }
+
+    redirect(303, `/sign-in?${next}`);
+  }
+
   return resolve(event);
+};
+
+// Remote functions are independently callable and do not inherit page groups.
+// Data access reads the hook's session and rejects calls without an identity.
+export const getUserSession = () => {
+  const { user, session } = getRequestEvent().locals;
+
+  if (!user || !session) error(401, "Sign in to continue");
+
+  return { user, session };
 };

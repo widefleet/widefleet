@@ -453,15 +453,65 @@ test("returns 503 from the session hook when the session store is unavailable", 
   expect((await context.request.get("/organizations")).status()).toBe(200);
 });
 
-test("redirects anonymous device requests to login and preserves the code", async ({ page }) => {
+test("protects auth-group documents and data requests even when every layout is reused", async ({
+  request,
+}) => {
+  for (const path of [
+    "/",
+    "/account",
+    "/agents",
+    "/apps/new",
+    "/apps/fixture/connections",
+    "/catalog",
+    "/members?q=reader&page=2",
+    "/services",
+    "/settings",
+    "/welcome",
+    "/organizations",
+    "/device?user_code=ABCD1234",
+  ]) {
+    const location = `/sign-in?${new URLSearchParams({ next: path })}`;
+    const document = await request.get(path, { maxRedirects: 0 });
+    expect(document.status(), path).toBe(303);
+    expect(document.headers()["location"], path).toBe(location);
+
+    const data = new URL(path, environment.configuration.PLATFORM_URL);
+    data.pathname = `${data.pathname.replace(/\/$/, "")}/__data.json`;
+    data.searchParams.set("x-sveltekit-invalidated", "00000");
+    const response = await request.get(data.href, { maxRedirects: 0 });
+    expect(response.status(), path).toBe(200);
+    expect(await response.json(), path).toEqual({ type: "redirect", status: 303, location });
+  }
+});
+
+test("keeps public pages, service health and API authentication outside page login redirects", async ({
+  request,
+}) => {
+  for (const path of ["/sign-in", "/recover", "/healthz"]) {
+    const response = await request.get(path, { maxRedirects: 0 });
+    expect(response.status(), path).toBe(200);
+  }
+
+  const api = await request.get("/api/v1/apps", { maxRedirects: 0 });
+  expect(api.status()).toBe(401);
+  expect(api.headers()["location"]).toBeUndefined();
+  expect((await request.get("/nonexistent", { maxRedirects: 0 })).status()).toBe(404);
+});
+
+test("redirects anonymous device requests to login and preserves the code and email", async ({
+  page,
+}) => {
   await environment.database.db.update(ssoProvider).set({ domainVerified: true });
-  await page.goto("/device?user_code=ABCD1234");
+  await page.goto("/device?user_code=ABCD1234&email=device%40example.test");
   await expect(page).toHaveURL(/\/sign-in\?next=/);
   await expect(page.getByLabel("Email", { exact: true })).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Continue with email", exact: true }),
   ).toBeVisible();
-  expect(new URL(page.url()).searchParams.get("next")).toBe("/device?user_code=ABCD1234");
+  expect(new URL(page.url()).searchParams.get("next")).toBe(
+    "/device?user_code=ABCD1234&email=device%40example.test",
+  );
+  await expect(page.getByLabel("Email", { exact: true })).toHaveValue("device@example.test");
 });
 
 test("starts Entra login with a host-only HttpOnly state cookie", async ({ request }) => {
@@ -1663,6 +1713,19 @@ test("remote endpoints recheck sessions, roles, input and request origin", async
   const anonymous = await request.get(queryUrl);
   expect(anonymous.headers()["cache-control"]).toBe("private, no-store");
   expect(await anonymous.json()).toMatchObject({ type: "error", error: { status: 401 } });
+
+  // Remote callers control their page-context headers. Neither an auth-group
+  // page nor a public page may replace the remote function's own authorization.
+  for (const pathname of ["/agents", "/sign-in"]) {
+    const response = await request.get(queryUrl, {
+      headers: { "x-sveltekit-pathname": pathname },
+      maxRedirects: 0,
+    });
+
+    expect(response.headers()["location"]).toBeUndefined();
+    expect(await response.json()).toMatchObject({ type: "error", error: { status: 401 } });
+  }
+
   const authenticated = await context.request.get(queryUrl);
   expect(await authenticated.json()).toMatchObject({ type: "result" });
   expect(await authenticated.text()).toContain("remote-private-app");

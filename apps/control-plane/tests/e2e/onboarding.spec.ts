@@ -365,7 +365,10 @@ test("accepts emailed owner invitations and manages members in isolated organiza
     await companyPage.waitForLoadState("networkidle");
 
     for (const page of [emailPage, companyPage]) {
-      await expect(page).toHaveURL(/\/sign-in\?organization=browser-company&next=/);
+      await expect(page).toHaveURL(
+        (url) =>
+          url.pathname === "/sign-in" && url.searchParams.get("organization") === "browser-company",
+      );
       expect(new URL(page.url()).searchParams.get("next")).toBe(
         `/invitations/${company.invitationId}`,
       );

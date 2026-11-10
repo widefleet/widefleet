@@ -5,17 +5,17 @@ import type { Result } from "better-result";
 import { DatabaseUnavailable, InvalidOperation, StorageUnavailable } from "./errors.ts";
 import { pageFailure } from "./page-auth.ts";
 import { getRuntime } from "./runtime.ts";
+import { getUserSession } from "./session.ts";
 
 export const remoteContext = async (write?: { organizationId: string }) => {
-  const { request, locals } = getRequestEvent();
-
-  if (!locals.user || !locals.session) error(401, "Sign in to continue");
+  const { request } = getRequestEvent();
+  const { user, session } = getUserSession();
   const runtime = await getRuntime();
 
   const principal = await runtime.identity.principal(
-    locals.user.id,
-    locals.session.activeOrganizationId ?? null,
-    locals.session.identityOrganizationId ?? null,
+    user.id,
+    session.activeOrganizationId ?? null,
+    session.identityOrganizationId ?? null,
   );
 
   if (principal.isErr()) {

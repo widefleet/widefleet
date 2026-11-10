@@ -1,11 +1,10 @@
 import { z } from "zod";
 import { getMembers } from "#lib/members.remote";
-import { pagePrincipal } from "#server/page-auth";
 import type { PageServerLoad } from "./$types";
 
-export const load: PageServerLoad = async ({ request, url, setHeaders }) => {
+export const load: PageServerLoad = async ({ parent, request, url, setHeaders }) => {
   setHeaders({ "cache-control": "private, no-store" });
-  await pagePrincipal();
+  await parent();
   const search = (url.searchParams.get("q") ?? "").trim().slice(0, 200);
 
   const page = z.coerce

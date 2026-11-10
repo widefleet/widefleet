@@ -5,21 +5,20 @@ import type { DatabaseUnavailable, InvalidOperation, StorageUnavailable } from "
 import { getRuntime } from "./runtime.ts";
 import type { AuthenticationFailed } from "./identity.ts";
 import { runExtensionEffect } from "../extension-effects.ts";
+import { getUserSession } from "./session.ts";
 
-export const requireLogin = (destination?: string) => {
-  const { locals, url } = getRequestEvent();
+// Remote forms can run without a page route, including after a session expires.
+export const requireLogin = (destination: string) => {
+  const { locals } = getRequestEvent();
 
   if (!locals.user || !locals.session)
-    redirect(
-      303,
-      `/sign-in?${new URLSearchParams({ next: destination ?? url.pathname + url.search })}`,
-    );
+    redirect(303, `/sign-in?${new URLSearchParams({ next: destination })}`);
 
   return { user: locals.user, session: locals.session };
 };
 
 export const pageOrganizations = async () => {
-  const { user, session } = requireLogin();
+  const { user, session } = getUserSession();
   const runtime = await getRuntime();
 
   const result = await runtime.identity.listOrganizations(
@@ -49,7 +48,7 @@ export const invitationIdentity = async (invitationId: string) => {
 };
 
 export const pagePrincipal = async () => {
-  const { user, session } = requireLogin();
+  const { user, session } = getUserSession();
   const { url } = getRequestEvent();
   const runtime = await getRuntime();
 

@@ -1,13 +1,12 @@
-import { pagePrincipal } from "#server/page-auth";
 import { getRuntime } from "#server/runtime";
 import type { PageServerLoad } from "./$types";
 import { eq } from "drizzle-orm";
 import { organizationRuntimes } from "#server/schema";
 import { redirect } from "@sveltejs/kit";
 
-export const load: PageServerLoad = async ({ setHeaders }) => {
+export const load: PageServerLoad = async ({ parent, setHeaders }) => {
   setHeaders({ "cache-control": "private, no-store" });
-  const principal = await pagePrincipal();
+  const { principal } = await parent();
   const runtime = await getRuntime();
 
   if (principal.application.admin) {

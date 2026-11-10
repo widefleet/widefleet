@@ -1,9 +1,8 @@
 import { getCatalog } from "#lib/catalog.remote";
-import { pagePrincipal } from "#server/page-auth";
 import type { PageServerLoad } from "./$types";
 
-export const load: PageServerLoad = async ({ setHeaders }) => {
+export const load: PageServerLoad = async ({ parent, setHeaders }) => {
   setHeaders({ "cache-control": "private, no-store" });
-  await pagePrincipal();
+  await parent();
   await getCatalog();
 };

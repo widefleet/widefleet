@@ -1,11 +1,10 @@
 import { getApps } from "#lib/apps.remote";
-import { pagePrincipal } from "#server/page-auth";
 import { z } from "zod";
 import type { PageServerLoad } from "./$types";
 
-export const load: PageServerLoad = async ({ setHeaders, url }) => {
+export const load: PageServerLoad = async ({ parent, setHeaders, url }) => {
   setHeaders({ "cache-control": "private, no-store" });
-  await pagePrincipal();
+  await parent();
   await getApps();
 
   return {
