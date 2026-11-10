@@ -12,6 +12,6 @@ export default defineMeta({
     "workflows",
     "network",
     "app-services",
-    "connectors",
+    "app-templates",
   ],
 });

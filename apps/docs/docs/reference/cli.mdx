@@ -1,7 +1,7 @@
 ---
 title: CLI
 description: Common Widefleet commands, app selection, authentication and deployment output.
-lastModified: 2026-10-29
+lastModified: 2026-11-10
 ---
 
 For installation and your first deployment, start with [CLI setup](/getting-started/installation).
@@ -84,13 +84,16 @@ IDs with `widefleet apps` and deployment IDs and artifact IDs with `widefleet hi
 | `widefleet secret list` / `put NAME` / `delete NAME` | Manage the selected app's private secrets.                             |
 | `widefleet connections`                              | Inspect desired and active app connections and deployed app resources. |
 | `widefleet catalog list`                             | List published app launch URLs.                                        |
+| `widefleet catalog templates list [--search TEXT]`   | Find available app templates and a prompt for creating your own app.   |
+| `widefleet catalog templates show ID`                | Read a template's source, setup instructions and usage examples.       |
 | `widefleet delete APP_UUID --yes`                    | Request removal of an app and all its previews.                        |
 
 The target is the selected platform URL, organization context and `name` in `wrangler.jsonc`. The first deploy creates that app; subsequent deploys update it after checking the user's app permissions. A changed name selects a different app. The server assigns the host, and existing apps keep their host and data.
 Logs, access, network, connections and migrations also use project context; history, events and
 rollback require IDs. Each command's help lists its selection options.
 
-See [app services and connections](/guides/app-services)
+See [app templates](/guides/app-templates) for using a ready-made app and
+[app services and connections](/guides/app-services)
 for permissions, activation states and app selection.
 
 ## Create a project
