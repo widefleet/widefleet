@@ -93,6 +93,21 @@ describe.runIf(process.env["RUN_INSTALLATION_TESTS"] === "1")(
       expect(services).not.toHaveProperty("configure-edge");
     });
 
+    it("keeps the catalog token in the control-plane environment", async () => {
+      const { services } = await render(["compose.base", "compose.azure"], {
+        ...installationSettings,
+        GITHUB_TOKEN: "fixture-catalog-token",
+      });
+
+      const control = serviceSchema.parse(services["control-plane"]);
+      expect(configurationSchema.parse(control.environment).GITHUB_TOKEN).toBe(
+        "fixture-catalog-token",
+      );
+
+      for (const name of ["runtime", "agent", "proxy"])
+        expect(services[name]?.environment).not.toHaveProperty("GITHUB_TOKEN");
+    });
+
     it.each(matrix)(
       "renders $database PostgreSQL, $storage storage and $tls TLS",
       async ({ database, storage, tls }) => {

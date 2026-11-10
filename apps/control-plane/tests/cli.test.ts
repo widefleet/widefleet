@@ -92,6 +92,21 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
 
       response.setHeader("content-type", "application/json");
 
+      if (request.method === "GET" && request.url?.startsWith("/api/v1/catalog/templates")) {
+        response.end(
+          JSON.stringify(
+            request.url.includes("/gmail")
+              ? { id: "gmail", markdown: "Deploy this synthetic template" }
+              : {
+                  templates: [{ id: "gmail", name: "Gmail", description: "Read mail" }],
+                  createPrompt: "Create an app",
+                },
+          ),
+        );
+
+        return;
+      }
+
       if (request.method === "GET" && request.url === "/api/v1/catalog") {
         response.end(
           JSON.stringify([
@@ -492,6 +507,42 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         `PUT /api/v1/apps/${app.id}/catalog`,
         `PUT /api/v1/apps/${app.id}/catalog`,
       ]);
+    });
+
+    it("discovers templates and reads setup instructions in the selected organization", async () => {
+      requiredOrganization = app.organizationId;
+
+      const options = {
+        env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken },
+      };
+
+      const binary = join(state, "installation", executableName);
+      const prefix = ["--organization", app.organizationId, "catalog", "templates"];
+
+      const listing = await execute(
+        binary,
+        [...prefix, "list", "--search", "mail & files"],
+        options,
+      );
+
+      expect(contract.appTemplateCatalog.parse(JSON.parse(listing.stdout)).templates[0]?.id).toBe(
+        "gmail",
+      );
+      const detail = await execute(binary, [...prefix, "show", "gmail"], options);
+      expect(JSON.parse(detail.stdout)).toEqual({
+        id: "gmail",
+        markdown: "Deploy this synthetic template",
+      });
+      expect(requests).toEqual([
+        "GET /api/v1/catalog/templates?search=mail+%26+files",
+        "GET /api/v1/catalog/templates/gmail",
+      ]);
+      await expect(execute(binary, [...prefix, "show", "../apps"], options)).rejects.toMatchObject({
+        code: 1,
+        stdout: "",
+        stderr: "Use a template ID from catalog templates list\n",
+      });
+      expect(requests).toHaveLength(2);
     });
 
     it("preserves catalog listing in app list JSON", async () => {

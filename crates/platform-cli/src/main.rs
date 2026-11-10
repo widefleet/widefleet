@@ -81,7 +81,7 @@ enum Command {
     Invitations(members::InvitationOptions),
     /// List visible applications.
     Apps,
-    /// Discover listed apps or publish and withdraw your app's catalog listing.
+    /// Discover published apps and templates, or manage an app's catalog listing.
     Catalog(catalog::Options),
     /// Search the connected company directory.
     Groups(groups::Options),

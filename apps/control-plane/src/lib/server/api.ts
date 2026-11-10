@@ -12,6 +12,7 @@ import { binaryPaths, binarySchemas } from "./openapi-binary.ts";
 import { DirectoryUnavailable } from "./directory.ts";
 import { InvalidOperation, TelemetryNotConfigured, TelemetryUnavailable } from "./errors.ts";
 import { readInstallation } from "./installation-store.ts";
+import { templateCatalog, readTemplate } from "./app-templates.ts";
 import { readAppIcon } from "./app-icons.ts";
 
 import { changeMemberRole, listMembers, removeMember } from "./members.ts";
@@ -561,6 +562,20 @@ export const createApi = (runtime: Runtime) => {
       .route({ method: "GET", path: "/catalog" })
       .output(z.array(contract.catalogEntry))
       .handler(async ({ context }) => unwrap(await runtime.apps.catalog(context.principal))),
+    listTemplates: read
+      .route({ method: "GET", path: "/catalog/templates" })
+      .input(contract.templateSearch)
+      .output(contract.appTemplateCatalog)
+      .handler(async ({ context, input }) =>
+        unwrap(await templateCatalog(context.principal, runtime.configuration, input.search)),
+      ),
+    getTemplate: read
+      .route({ method: "GET", path: "/catalog/templates/{templateId}" })
+      .input(contract.templatePath)
+      .output(contract.appTemplate)
+      .handler(async ({ context, input }) =>
+        unwrap(await readTemplate(context.principal, runtime.configuration, input.templateId)),
+      ),
     setCatalogListing: write
       .route({ method: "PUT", path: "/apps/{appId}/catalog" })
       .input(contract.catalogListingInput)
