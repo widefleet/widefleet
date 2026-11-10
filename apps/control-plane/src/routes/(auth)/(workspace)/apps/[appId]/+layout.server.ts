@@ -3,11 +3,10 @@ import { error } from "@sveltejs/kit";
 import { getAppDetails } from "#lib/apps.remote";
 import type { LayoutServerLoad } from "./$types";
 
-export const load: LayoutServerLoad = async ({ parent, params, url, setHeaders, depends }) => {
+export const load: LayoutServerLoad = async ({ params, url, setHeaders, depends }) => {
   setHeaders({ "cache-control": "private, no-store" });
   // Recheck resource access on each section navigation, including reused layouts.
   depends("app:details", url.href);
-  await parent();
   const appId = identifier.safeParse(params.appId);
 
   if (!appId.success) error(404, "App not found.");

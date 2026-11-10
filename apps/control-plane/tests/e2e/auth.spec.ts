@@ -338,6 +338,18 @@ test("selects an organization, repairs stale selection and explains removed acce
     .update(authSession)
     .set({ activeOrganizationId: "unavailable" })
     .where(eq(authSession.userId, person.id));
+
+  // Page queries may run alongside the layout. Its organization-selection
+  // redirect must still reach the client when those queries reject access.
+  for (const path of ["/", "/catalog"]) {
+    const response = await context.request.get(`${path.replace(/\/$/, "")}/__data.json`);
+    expect(await response.json()).toEqual({
+      type: "redirect",
+      status: 303,
+      location: `/organizations?${new URLSearchParams({ next: path })}`,
+    });
+  }
+
   await page.goto("/");
   await expect(page).toHaveURL("http://localhost:25430/organizations?next=%2F");
   await page.getByRole("button", { name: "Widefleet Member" }).click();
