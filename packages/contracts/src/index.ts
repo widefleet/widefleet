@@ -25,6 +25,8 @@ export * from "./members.ts";
 
 export * from "./reporting.ts";
 
+export * from "./templates.ts";
+
 export const protocolVersion = 1;
 
 export const identifier = z.uuid();

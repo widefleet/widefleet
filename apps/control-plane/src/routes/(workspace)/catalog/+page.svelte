@@ -3,7 +3,6 @@
   import { page } from "$app/state";
   import { Button } from "#shadcn/components/ui/button/index.js";
   import { Input } from "#shadcn/components/ui/input/index.js";
-  import PageHeading from "#shadcn/components/PageHeading.svelte";
   import EmptyState from "#shadcn/components/EmptyState.svelte";
   import LayoutGrid from "@lucide/svelte/icons/layout-grid";
   import ArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
@@ -23,8 +22,7 @@
 </script>
 
 <svelte:head><title>App catalog · Widefleet</title></svelte:head>
-<PageHeading title="App catalog" description="Discover your team's tools and open them directly." />
-<div class="mt-8 flex flex-wrap items-center justify-between gap-4 border-b pb-5">
+<div class="flex flex-wrap items-center justify-between gap-4 border-b pb-5">
   <p class="text-muted-foreground text-xs">
     {apps.length}
     {apps.length === 1 ? "published app" : "published apps"}

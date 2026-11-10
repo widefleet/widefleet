@@ -7,6 +7,7 @@ import { createRuntime, type Runtime } from "../src/lib/server/runtime-services.
 import { createStorage } from "../src/lib/server/storage.ts";
 import { createTestEnvironment } from "./environment.ts";
 import { memoryStorage } from "./memory-storage.fixture.ts";
+import { AuthenticationFailed } from "../src/lib/server/identity.ts";
 
 let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
 
@@ -48,6 +49,78 @@ const request = (path: string, body: string) =>
       body,
     }),
   );
+
+it("lets members discover templates without creating apps or granting management access", async () => {
+  const principal = (
+    await runtime.identity.authenticate(new Request("http://localhost"), "platform:read")
+  ).unwrap();
+
+  vi.mocked(runtime.identity.authenticate).mockResolvedValue(
+    Result.ok({
+      ...principal,
+      role: "member",
+      admin: false,
+      creator: false,
+      application: { ...principal.application, admin: false },
+    }),
+  );
+  const create = vi.spyOn(runtime.apps, "create");
+  const api = createApi(runtime);
+  const listing = await api(new Request("http://localhost/api/v1/catalog/templates"));
+  expect(listing.status).toBe(200);
+  const catalog = contract.appTemplateCatalog.parse(await listing.json());
+  expect(catalog.templates.map(({ id }) => id)).toEqual(["gmail", "github", "onedrive"]);
+  expect(catalog.createPrompt).toContain(
+    `--organization '${principal.application.organizationId}'`,
+  );
+
+  for (const { id } of catalog.templates) {
+    const response = await api(new Request(`http://localhost/api/v1/catalog/templates/${id}`));
+    expect(response.status).toBe(200);
+    const template = contract.appTemplate.parse(await response.json());
+    expect(template.id).toBe(id);
+    expect(template.source).toBe(`https://github.com/widefleet/widefleet/tree/main/apps/${id}`);
+    expect(template.prompt).toContain(
+      `--url '${environment.configuration.PLATFORM_URL}' --organization '${principal.application.organizationId}' catalog templates show ${id}`,
+    );
+    expect(template.secrets).toContain("AUTH_SECRET");
+    expect(template.examples.length).toBeGreaterThan(0);
+    expect(template.instructions).toContain("widefleet deploy");
+  }
+
+  const filtered = await api(
+    new Request("http://localhost/api/v1/catalog/templates?search=PRIVATE"),
+  );
+
+  expect(
+    contract.appTemplateCatalog.parse(await filtered.json()).templates.map(({ id }) => id),
+  ).toEqual(["github"]);
+  const empty = await api(new Request("http://localhost/api/v1/catalog/templates?search=missing"));
+  expect(contract.appTemplateCatalog.parse(await empty.json()).templates).toEqual([]);
+  expect((await api(new Request("http://localhost/api/v1/catalog/templates/missing"))).status).toBe(
+    404,
+  );
+  expect((await api(new Request("http://localhost/api/v1/catalog/templates/INVALID"))).status).toBe(
+    400,
+  );
+  expect(create).not.toHaveBeenCalled();
+  expect(runtime.identity.authenticate).toHaveBeenLastCalledWith(
+    expect.any(Request),
+    "platform:read",
+  );
+});
+
+it.each(["/catalog/templates", "/catalog/templates/gmail"])(
+  "requires authentication for %s",
+  async (path) => {
+    vi.mocked(runtime.identity.authenticate).mockResolvedValue(
+      Result.err(new AuthenticationFailed({ code: "UNAUTHORIZED", message: "Sign in" })),
+    );
+    expect((await createApi(runtime)(new Request(`http://localhost/api/v1${path}`))).status).toBe(
+      401,
+    );
+  },
+);
 
 it.each(["backend", "browser"])(
   "passes %s network changes through hosted command validation",

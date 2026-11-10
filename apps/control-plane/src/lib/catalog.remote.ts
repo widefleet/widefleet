@@ -1,6 +1,7 @@
+import { templateCatalog, readTemplate } from "#server/app-templates";
 import { form, getRequestEvent, query } from "$app/server";
 import { redirect } from "@sveltejs/kit";
-import { appPath, organizationSelection } from "@platform/contracts";
+import { appPath, organizationSelection, templatePath, templateSearch } from "@platform/contracts";
 import { z } from "zod";
 import { getAppDetails } from "#lib/apps.remote";
 import { formValue, queryValue, remoteContext } from "#server/remote-support";
@@ -29,3 +30,15 @@ export const setCatalogListing = form(
     return { saved: true };
   },
 );
+
+export const getTemplates = query(templateSearch, async ({ search }) => {
+  const { runtime, principal } = await remoteContext();
+
+  return templateCatalog(principal, runtime.configuration, search);
+});
+
+export const getTemplate = query(templatePath, async ({ templateId }) => {
+  const { runtime, principal } = await remoteContext();
+
+  return queryValue(readTemplate(principal, runtime.configuration, templateId));
+});

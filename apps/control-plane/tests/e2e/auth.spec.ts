@@ -2352,3 +2352,125 @@ test("keeps the email step usable after a failed send and clears feedback on bac
   await expect(page.getByLabel("Email", { exact: true })).toBeFocused();
   expect(sent).toBe(2);
 });
+
+for (const javaScriptEnabled of [true, false]) {
+  test.describe(`app templates with JavaScript ${javaScriptEnabled ? "enabled" : "disabled"}`, () => {
+    test.use({ javaScriptEnabled });
+
+    test("lets a member find a template and copy its setup prompt", async ({
+      page,
+      context,
+      request,
+    }, testInfo) => {
+      await page.goto("/catalog/templates/gmail");
+      await expect(page).toHaveURL(/\/sign-in\?next=/);
+      expect(new URL(page.url()).searchParams.get("next")).toBe("/catalog/templates/gmail");
+      expect((await request.get("/api/v1/catalog/templates")).status()).toBe(401);
+
+      const person = environment.users.createUser({
+        name: "Template Reader",
+        email: `template-reader-${javaScriptEnabled}@example.test`,
+      });
+
+      await environment.users.saveUser(person);
+      await environment.linkMicrosoftUser(person.id);
+      const session = await environment.users.login({ userId: person.id });
+      await context.addCookies(
+        session.cookies.map((cookie) => ({
+          ...cookie,
+          domain: "localhost",
+          sameSite: "Lax",
+          secure: false,
+        })),
+      );
+      const before = await environment.database.db.select({ id: apps.id }).from(apps);
+      const catalog = await context.request.get("/api/v1/catalog/templates");
+      expect(catalog.status()).toBe(200);
+
+      await page.goto("/catalog");
+      await page.getByRole("link", { name: "Templates", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Start from a template" })).toBeVisible();
+
+      if (javaScriptEnabled) {
+        for (const width of [1280, 390]) {
+          await page.setViewportSize({ width, height: 900 });
+
+          for (const colorScheme of ["light", "dark"] as const) {
+            await page.emulateMedia({ colorScheme });
+            await expect(page.locator("html")).toHaveClass(colorScheme === "dark" ? /dark/ : "");
+            expect(
+              await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+            ).toBe(true);
+            await page.screenshot({
+              path: testInfo.outputPath(`templates-${width}-${colorScheme}.png`),
+              fullPage: true,
+            });
+          }
+        }
+      }
+
+      await page.getByRole("searchbox", { name: "Search templates", exact: true }).fill("PRIVATE");
+      await page.getByRole("searchbox", { name: "Search templates", exact: true }).press("Enter");
+      await expect(page.getByRole("heading", { name: "GitHub", exact: true })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Gmail", exact: true })).toHaveCount(0);
+      await page.getByRole("searchbox", { name: "Search templates", exact: true }).fill("unknown");
+      await page.getByRole("button", { name: "Search", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "No matching templates" })).toBeVisible();
+      await page.getByText("App not here? Create one with your agent", { exact: true }).click();
+      await expect(
+        page.getByText("Help me create an app on Widefleet.", { exact: false }),
+      ).toBeVisible();
+      await page.getByRole("link", { name: "Reset search" }).click();
+      await page.getByRole("link", { name: /^Gmail/ }).focus();
+      await page.keyboard.press("Enter");
+      await expect(page.getByRole("heading", { name: "Gmail", exact: true })).toBeVisible();
+      const response = await context.request.get("/api/v1/catalog/templates/gmail");
+      const detail = z.object({ prompt: z.string() }).parse(await response.json());
+      await expect(page.locator("code").first()).toHaveText(detail.prompt);
+      expect(detail.prompt).toContain("--organization 'widefleet'");
+      expect(detail.prompt).toContain(`--url '${environment.configuration.PLATFORM_URL}'`);
+
+      if (javaScriptEnabled) {
+        await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+        await page.getByRole("button", { name: "Copy setup prompt" }).click();
+        await expect(page.getByRole("button", { name: "Copied", exact: true })).toBeVisible();
+        expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(detail.prompt);
+
+        for (const width of [1280, 390]) {
+          await page.setViewportSize({ width, height: 900 });
+
+          for (const colorScheme of ["light", "dark"] as const) {
+            await page.emulateMedia({ colorScheme });
+            await expect(page.locator("html")).toHaveClass(colorScheme === "dark" ? /dark/ : "");
+            expect(
+              await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+            ).toBe(true);
+            await page.screenshot({
+              path: testInfo.outputPath(`template-${width}-${colorScheme}.png`),
+              fullPage: true,
+            });
+          }
+        }
+
+        await page.evaluate(() =>
+          Object.defineProperty(navigator, "clipboard", {
+            value: { writeText: () => Promise.reject(new Error("Synthetic clipboard failure")) },
+            configurable: true,
+          }),
+        );
+        await page.getByRole("button", { name: /Copy setup prompt|Copied/ }).click();
+        await expect(page.getByRole("alert")).toHaveText(
+          "Copying is not available here. Select the text and copy it manually.",
+        );
+      }
+
+      await page.getByText("Setup instructions and examples", { exact: true }).click();
+      await expect(
+        page.getByText("GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, AUTH_SECRET", { exact: true }),
+      ).toBeVisible();
+      const missing = await page.goto("/catalog/templates/missing");
+      expect(missing?.status()).toBe(404);
+      expect(await environment.database.db.select({ id: apps.id }).from(apps)).toEqual(before);
+    });
+  });
+}
