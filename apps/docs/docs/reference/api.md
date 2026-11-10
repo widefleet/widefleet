@@ -108,6 +108,18 @@ ASCII letters, digits and hyphens. Directories with other names are skipped.
 An unknown template ID returns `404`; an invalid ID returns `400`. A repository
 or template parsing failure returns `503`. These read operations leave app
 creation and configuration to the normal app APIs.
+
+Installation operators can set the optional `GITHUB_TOKEN` on the control plane
+to authenticate GitHub directory requests. Public-repository read access is
+sufficient. For Compose, add it to the private deployment environment file and
+recreate the control-plane service. For Cloudflare, include it in the deployment's
+`--control-secrets` file. The token stays on the server.
+
+An unset or empty token uses GitHub's unauthenticated
+[request limit](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api).
+An exhausted limit or an invalid token makes catalog listing return `503`.
+Replace an expired token or wait for the limit to reset before retrying.
+
 See [Use an app template](/guides/app-templates) for the UI and CLI workflow.
 
 ## Organization creation
