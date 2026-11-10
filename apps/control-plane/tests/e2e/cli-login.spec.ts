@@ -309,7 +309,7 @@ for (const mode of [
 
       if (automatic) await expect(page.getByLabel("Email", { exact: true })).toHaveValue(email);
       await page.getByLabel("Email", { exact: true }).fill(email);
-      await page.getByRole("button", { name: "Continue", exact: true }).click();
+      await page.getByRole("button", { name: "Continue with email", exact: true }).click();
       await expect
         .poll(
           () =>
@@ -330,7 +330,7 @@ for (const mode of [
       );
 
       await page.getByLabel("Sign-in code", { exact: true }).fill(otp);
-      await page.getByRole("button", { name: "Sign in", exact: true }).click();
+      await page.getByRole("button", { name: "Verify and sign in", exact: true }).click();
       await expect(page).toHaveURL(
         new RegExp(`^${target.origin.replaceAll(".", "\\.")}/device\\?`),
       );

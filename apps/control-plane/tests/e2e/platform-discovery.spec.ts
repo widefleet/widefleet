@@ -122,7 +122,7 @@ test.beforeEach(async ({ page }) => {
 test("routes an email to its company before requesting a Cloud sign-in code", async ({ page }) => {
   await page.goto(`${cloud}/sign-in?next=/settings`);
   await page.getByLabel("Email", { exact: true }).fill("employee@company.test");
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("button", { name: "Continue with email", exact: true }).click();
   await expect(page).toHaveURL(
     "https://platform.example.test/sign-in?email=employee%40company.test",
   );
@@ -132,7 +132,7 @@ test("routes an email to its company before requesting a Cloud sign-in code", as
 test("keeps users without a published company mapping in Cloud", async ({ page }) => {
   await page.goto(`${cloud}/sign-in`);
   await page.getByLabel("Email", { exact: true }).fill("employee@unpublished.test");
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("button", { name: "Continue with email", exact: true }).click();
   await expect(page.getByLabel("Sign-in code", { exact: true })).toBeVisible();
   await expect(page).toHaveURL(`${cloud}/sign-in`);
   expect(authRequests).toContain("/api/auth/email-otp/send-verification-otp");
@@ -141,7 +141,7 @@ test("keeps users without a published company mapping in Cloud", async ({ page }
 test("stops on invalid discovery without creating a Cloud login", async ({ page }) => {
   await page.goto(`${cloud}/sign-in`);
   await page.getByLabel("Email", { exact: true }).fill("employee@broken.test");
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("button", { name: "Continue with email", exact: true }).click();
   await expect(
     page.getByText("Could not determine your company's platform.", { exact: false }),
   ).toBeVisible();
@@ -151,7 +151,7 @@ test("stops on invalid discovery without creating a Cloud login", async ({ page 
 test("preserves explicit organization sign-in for guests", async ({ page }) => {
   await page.goto(`${cloud}/sign-in?organization=widefleet`);
   await page.getByLabel("Email", { exact: true }).fill("guest@company.test");
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("button", { name: "Continue with email", exact: true }).click();
   await expect(page.getByLabel("Sign-in code", { exact: true })).toBeVisible();
   await expect(page).toHaveURL(`${cloud}/sign-in?organization=widefleet`);
 });
@@ -159,7 +159,7 @@ test("preserves explicit organization sign-in for guests", async ({ page }) => {
 test("does not carry an existing Cloud device grant to another installation", async ({ page }) => {
   await page.goto(`${cloud}/sign-in?next=${encodeURIComponent("/device?user_code=SECRET")}`);
   await page.getByLabel("Email", { exact: true }).fill("employee@company.test");
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("button", { name: "Continue with email", exact: true }).click();
   await expect(page.getByLabel("Sign-in code", { exact: true })).toBeVisible();
   expect(new URL(page.url()).origin).toBe(cloud);
   expect(authRequests).toContain("/api/auth/email-otp/send-verification-otp");
