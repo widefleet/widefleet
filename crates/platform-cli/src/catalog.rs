@@ -35,7 +35,7 @@ enum TemplateCommand {
         #[arg(long)]
         search: Option<String>,
     },
-    /// Show a template's source, setup instructions and examples as JSON.
+    /// Show a template's source, Markdown instructions and setup prompt as JSON.
     Show { template: String },
 }
 

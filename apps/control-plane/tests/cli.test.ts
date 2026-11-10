@@ -96,7 +96,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         response.end(
           JSON.stringify(
             request.url.includes("/gmail")
-              ? { id: "gmail", instructions: "Deploy this synthetic template", examples: [] }
+              ? { id: "gmail", markdown: "Deploy this synthetic template" }
               : {
                   templates: [{ id: "gmail", name: "Gmail", description: "Read mail" }],
                   createPrompt: "Create an app",
@@ -531,8 +531,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       const detail = await execute(binary, [...prefix, "show", "gmail"], options);
       expect(JSON.parse(detail.stdout)).toEqual({
         id: "gmail",
-        instructions: "Deploy this synthetic template",
-        examples: [],
+        markdown: "Deploy this synthetic template",
       });
       expect(requests).toEqual([
         "GET /api/v1/catalog/templates?search=mail+%26+files",

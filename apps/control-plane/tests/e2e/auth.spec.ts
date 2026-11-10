@@ -56,25 +56,29 @@ test.beforeAll(async () => {
   environment = await createTestEnvironment();
   edge.listen(25430);
   await once(edge, "listening");
-  server = spawn(process.execPath, ["build"], {
-    cwd: fileURLToPath(new URL("../../", import.meta.url)),
-    env: {
-      ...process.env,
-      ...environment.environment,
-      LOGIN_CODE_DELIVERY: "console",
-      GOOGLE_CLIENT_ID: "synthetic-google-client",
-      GOOGLE_CLIENT_SECRET: "synthetic-google-secret",
-      MICROSOFT_CLIENT_ID: "synthetic-microsoft-client",
-      MICROSOFT_CLIENT_SECRET: "synthetic-microsoft-secret",
-      NODE_ENV: "production",
-      HOST: "127.0.0.1",
-      PORT: "25431",
-      PROTOCOL_HEADER: "x-forwarded-proto",
-      SHUTDOWN_TIMEOUT: "1",
-      BODY_SIZE_LIMIT: "32M",
+  server = spawn(
+    process.execPath,
+    ["--import", fileURLToPath(new URL("./templates.fixture.ts", import.meta.url)), "build"],
+    {
+      cwd: fileURLToPath(new URL("../../", import.meta.url)),
+      env: {
+        ...process.env,
+        ...environment.environment,
+        LOGIN_CODE_DELIVERY: "console",
+        GOOGLE_CLIENT_ID: "synthetic-google-client",
+        GOOGLE_CLIENT_SECRET: "synthetic-google-secret",
+        MICROSOFT_CLIENT_ID: "synthetic-microsoft-client",
+        MICROSOFT_CLIENT_SECRET: "synthetic-microsoft-secret",
+        NODE_ENV: "production",
+        HOST: "127.0.0.1",
+        PORT: "25431",
+        PROTOCOL_HEADER: "x-forwarded-proto",
+        SHUTDOWN_TIMEOUT: "1",
+        BODY_SIZE_LIMIT: "32M",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
     },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  );
   server.stdout?.setEncoding("utf8").on("data", (chunk: string) => {
     logs += chunk;
   });
@@ -2464,12 +2468,15 @@ for (const javaScriptEnabled of [true, false]) {
         );
       }
 
-      await page.getByText("Setup instructions and examples", { exact: true }).click();
       await expect(
-        page.getByText("GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, AUTH_SECRET", { exact: true }),
+        page.getByRole("heading", { name: "Configure Google", exact: true }),
       ).toBeVisible();
+      await expect(page.locator(".markdown")).toContainText("GOOGLE_CLIENT_ID");
       const missing = await page.goto("/catalog/templates/missing");
       expect(missing?.status()).toBe(404);
+      const unavailable = await page.goto("/catalog/templates/unavailable");
+      expect(unavailable?.status()).toBe(503);
+      await expect(page.getByRole("heading", { name: "Something went wrong." })).toBeVisible();
       expect(await environment.database.db.select({ id: apps.id }).from(apps)).toEqual(before);
     });
   });

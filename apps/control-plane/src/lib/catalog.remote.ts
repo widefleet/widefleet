@@ -1,3 +1,4 @@
+import MarkdownIt from "markdown-it";
 import { templateCatalog, readTemplate } from "#server/app-templates";
 import { form, getRequestEvent, query } from "$app/server";
 import { redirect } from "@sveltejs/kit";
@@ -34,11 +35,13 @@ export const setCatalogListing = form(
 export const getTemplates = query(templateSearch, async ({ search }) => {
   const { runtime, principal } = await remoteContext();
 
-  return templateCatalog(principal, runtime.configuration, search);
+  return queryValue(await templateCatalog(principal, runtime.configuration, search));
 });
 
 export const getTemplate = query(templatePath, async ({ templateId }) => {
   const { runtime, principal } = await remoteContext();
 
-  return queryValue(readTemplate(principal, runtime.configuration, templateId));
+  const template = queryValue(await readTemplate(principal, runtime.configuration, templateId));
+
+  return { ...template, html: new MarkdownIt({ html: false }).render(template.markdown) };
 });

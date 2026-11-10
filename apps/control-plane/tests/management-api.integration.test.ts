@@ -1,3 +1,4 @@
+import { templateRepository } from "./template-repository.fixture.ts";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
@@ -13,6 +14,8 @@ let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
 
 let runtime: Runtime;
 
+const originalFetch = globalThis.fetch;
+
 beforeAll(async () => {
   environment = await createTestEnvironment();
   runtime = await createRuntime({
@@ -26,6 +29,12 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+
+    return (await templateRepository(url)) ?? originalFetch(input, init);
+  });
+
   vi.spyOn(runtime.identity, "authenticate").mockResolvedValue(
     Result.ok({
       ...environment.owner,
@@ -69,7 +78,7 @@ it("lets members discover templates without creating apps or granting management
   const listing = await api(new Request("http://localhost/api/v1/catalog/templates"));
   expect(listing.status).toBe(200);
   const catalog = contract.appTemplateCatalog.parse(await listing.json());
-  expect(catalog.templates.map(({ id }) => id)).toEqual(["gmail", "github", "onedrive"]);
+  expect(catalog.templates.map(({ id }) => id)).toEqual(["github", "gmail", "onedrive"]);
   expect(catalog.createPrompt).toContain(
     `--organization '${principal.application.organizationId}'`,
   );
@@ -79,13 +88,16 @@ it("lets members discover templates without creating apps or granting management
     expect(response.status).toBe(200);
     const template = contract.appTemplate.parse(await response.json());
     expect(template.id).toBe(id);
-    expect(template.source).toBe(`https://github.com/widefleet/widefleet/tree/main/apps/${id}`);
+    expect(template.source).toBe(
+      `https://github.com/widefleet/widefleet/tree/main/templates/${id}`,
+    );
     expect(template.prompt).toContain(
       `--url '${environment.configuration.PLATFORM_URL}' --organization '${principal.application.organizationId}' catalog templates show ${id}`,
     );
-    expect(template.secrets).toContain("AUTH_SECRET");
-    expect(template.examples.length).toBeGreaterThan(0);
-    expect(template.instructions).toContain("widefleet deploy");
+    expect(template.markdown).toContain("AUTH_SECRET");
+    expect(template.markdown).toContain("widefleet deploy");
+    expect(template.markdown).toContain("## Use from another app");
+    expect(template).not.toHaveProperty("instructions");
   }
 
   const filtered = await api(
@@ -108,6 +120,69 @@ it("lets members discover templates without creating apps or granting management
     expect.any(Request),
     "platform:read",
   );
+});
+
+it("reads a new template from its directory and frontmatter without provider-specific fields", async () => {
+  const markdown = "## Start\n\nCreate a board.\n\n```text\n---\n```\n";
+  const requests: string[] = [];
+  vi.mocked(globalThis.fetch).mockImplementation(async (input) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    requests.push(url.href);
+
+    if (url.hostname === "api.github.com")
+      return Response.json([
+        { type: "file", name: "README.md" },
+        { type: "dir", name: "kanban" },
+        { type: "dir", name: "no-template" },
+        { type: "dir", name: "../outside" },
+      ]);
+
+    if (url.pathname.endsWith("/no-template/template.md"))
+      return new Response(null, { status: 404 });
+
+    return new Response(
+      `\uFEFF---\r\nname: Team board\r\ndescription: >-\r\n  Organize tasks\r\n  together.\r\n---\r\n${markdown}`,
+    );
+  });
+  const api = createApi(runtime);
+  const listing = await api(new Request("http://localhost/api/v1/catalog/templates"));
+  expect(listing.status).toBe(200);
+  expect(contract.appTemplateCatalog.parse(await listing.json()).templates).toEqual([
+    { id: "kanban", name: "Team board", description: "Organize tasks together." },
+  ]);
+  const response = await api(new Request("http://localhost/api/v1/catalog/templates/kanban"));
+  expect(response.status).toBe(200);
+  const template = contract.appTemplate.parse(await response.json());
+  expect(template.markdown).toBe(markdown);
+  expect(template.source).toBe("https://github.com/widefleet/widefleet/tree/main/templates/kanban");
+  expect(template.prompt).toContain("catalog templates show kanban");
+  expect(template.prompt).not.toMatch(/OAuth|personal account/i);
+  expect(requests).not.toContain(expect.stringContaining("outside"));
+});
+
+it.each([
+  { status: 503, content: "" },
+  { status: 200, content: "No frontmatter" },
+  { status: 200, content: "---\nname: [broken\n---\nInstructions" },
+  { status: 200, content: "---\nname: Gmail\n---\nInstructions" },
+])("reports unavailable template content ($status, $content)", async ({ status, content }) => {
+  vi.mocked(globalThis.fetch).mockResolvedValue(new Response(content, { status }));
+
+  const response = await createApi(runtime)(
+    new Request("http://localhost/api/v1/catalog/templates/gmail"),
+  );
+
+  expect(response.status).toBe(503);
+});
+
+it("reports a GitHub listing failure instead of an empty catalog", async () => {
+  vi.mocked(globalThis.fetch).mockResolvedValue(new Response(null, { status: 403 }));
+
+  const response = await createApi(runtime)(
+    new Request("http://localhost/api/v1/catalog/templates"),
+  );
+
+  expect(response.status).toBe(503);
 });
 
 it.each(["/catalog/templates", "/catalog/templates/gmail"])(
