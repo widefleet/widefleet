@@ -20,7 +20,7 @@ export interface Properties {
 }
 
 export interface Provider {
-  id: "google" | "microsoft" | "github";
+  id: "microsoft";
   name: string;
   description: string;
   setup: string;

@@ -1,4 +1,4 @@
-import type { Provider } from "@platform/account-connection";
+import type { Provider } from "./context.ts";
 import { z } from "zod";
 
 const scope = "https://www.googleapis.com/auth/gmail.readonly";

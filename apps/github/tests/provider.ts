@@ -2,9 +2,7 @@ import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { Request, Response } from "miniflare";
 import { z } from "zod";
 
-export const providerKind = z.enum(["google", "microsoft", "github"]);
-
-export type ProviderKind = z.infer<typeof providerKind>;
+const kind = "github";
 
 const base64url = (value: Uint8Array) =>
   btoa(Array.from(value, (byte) => String.fromCharCode(byte)).join(""))
@@ -14,10 +12,15 @@ const base64url = (value: Uint8Array) =>
 
 const encode = (value: string) => base64url(new TextEncoder().encode(value));
 
-export const provider = (kind: ProviderKind) => {
+export const provider = () => {
   const codes = new Map<
     string,
-    { user: string; challenge: string; redirect: string; nonce: string | null }
+    {
+      user: string;
+      challenge: string;
+      redirect: string;
+      nonce: string | null;
+    }
   >();
 
   const access = new Map<string, string>();
@@ -44,10 +47,7 @@ export const provider = (kind: ProviderKind) => {
 
     const payload = encode(
       JSON.stringify({
-        iss:
-          kind === "google"
-            ? "https://accounts.google.com"
-            : `https://login.microsoftonline.com/${tenant}/v2.0`,
+        iss: `https://login.microsoftonline.com/${tenant}/v2.0`,
         aud: `test-${kind}-client`,
         sub: user,
         oid: user,
@@ -70,12 +70,7 @@ export const provider = (kind: ProviderKind) => {
       id_token: `${unsigned}.${signature}`,
       expires_in: 3600,
       token_type: "Bearer",
-      scope:
-        kind === "google"
-          ? "openid profile email https://www.googleapis.com/auth/gmail.readonly"
-          : kind === "microsoft"
-            ? "openid profile email offline_access User.Read Files.Read"
-            : "repo read:user user:email",
+      scope: "repo read:user user:email",
     });
   };
 
@@ -229,7 +224,6 @@ export const provider = (kind: ProviderKind) => {
 
       if (url.href === "https://api.github.com/repos/example/project/contents/README.md")
         return new Response("file content", { headers: { "content-type": "text/plain" } });
-
       throw new Error(`Unexpected outbound request: ${url.origin}${url.pathname}`);
     },
   };

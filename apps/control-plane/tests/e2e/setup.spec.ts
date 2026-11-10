@@ -13,7 +13,7 @@ import { installationId } from "../../src/lib/server/installation-store.ts";
 import { migrateSsoSettings } from "../../src/lib/server/sso-migration.ts";
 import { encryptSecret } from "../../src/lib/server/secret-encryption.ts";
 import { createRecoveryLink } from "../../src/lib/server/recovery.ts";
-import { createTestEnvironment } from "../artifact-environment.ts";
+import { createTestEnvironment } from "../environment.ts";
 
 test("verifies company DNS, preserves matching accounts and enforces company SSO", async ({
   page,

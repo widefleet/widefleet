@@ -14,7 +14,6 @@ export const initializeBootstrap = async (
   auth: Authentication,
   database: Database,
   input: z.infer<typeof bootstrapConfiguration>,
-  initializeApps?: (ownerId: string) => Promise<void>,
 ) => {
   const state = await readInstallation(database);
 
@@ -42,11 +41,6 @@ export const initializeBootstrap = async (
 
     if (result.error) throw new Error(result.error);
   }
-
-  const initialized = await readInstallation(database);
-
-  if (!initialized.ownerId) throw new Error("The installation owner is missing");
-  await initializeApps?.(initialized.ownerId);
 
   await database
     .update(installation)

@@ -18,8 +18,7 @@ import {
 } from "../src/lib/server/installation-store.ts";
 import { createRecoveryLink } from "../src/lib/server/recovery.ts";
 import { createIdentityService } from "../src/lib/server/identity.ts";
-import { organizationCredential } from "./environment.ts";
-import { createTestEnvironment } from "./artifact-environment.ts";
+import { createTestEnvironment, organizationCredential } from "./environment.ts";
 import { createSettingsService } from "../src/lib/server/settings.ts";
 import type { AppSignIn } from "../src/lib/server/app-sign-in.ts";
 import { createInstalledAppSignIn } from "../src/lib/server/app-sign-in-installed.ts";

@@ -1,5 +1,6 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
-import { accountConnection, type Environment, type Properties } from "@platform/account-connection";
+import { accountConnection } from "./connection.ts";
+import type { Environment, Properties } from "./context.ts";
 import { z } from "zod";
 import {
   filePage,

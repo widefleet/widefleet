@@ -222,14 +222,13 @@ export const enqueueDeployment = async (
   return Result.ok(presentDeployment(deployment));
 };
 
-export const provisionApp = async (
+const provisionApp = async (
   database: Database,
   configuration: Configuration,
   principal: Principal,
   input: z.infer<typeof contract.createAppInput>,
   mode: "create" | "resolve",
   observation?: Observation,
-  initial?: Pick<typeof apps.$inferInsert, "id" | "networkPolicy" | "secrets" | "catalogListed">,
 ) => {
   let created = false;
 
@@ -237,30 +236,6 @@ export const provisionApp = async (
     await transaction.execute(
       sql`select pg_advisory_xact_lock(hashtextextended(${JSON.stringify([principal.application.organizationId, input.slug])}, 0))`,
     );
-
-    if (initial) {
-      if (!principal.application.admin)
-        return Result.err(
-          new InvalidOperation({
-            code: "FORBIDDEN",
-            message: "Organization administrator permission is required",
-          }),
-        );
-
-      const [existing] = await transaction
-        .select()
-        .from(apps)
-        .where(
-          and(
-            eq(apps.id, initial.id),
-            eq(apps.organizationId, principal.application.organizationId),
-          ),
-        );
-
-      // The stable identity also survives rename and deletion. Provisioning never
-      // restores a deliberately deleted app or changes an existing installation.
-      if (existing) return Result.ok(presentApp(existing, configuration));
-    }
 
     const [duplicate] = await transaction
       .select({ id: apps.id })
@@ -360,7 +335,7 @@ export const provisionApp = async (
     const [record] = await transaction
       .insert(apps)
       .values({
-        id: initial?.id ?? crypto.randomUUID(),
+        id: crypto.randomUUID(),
         slug: input.slug,
         displayName: input.displayName,
         parentId: input.parentId,
@@ -369,9 +344,6 @@ export const provisionApp = async (
         organizationId: execution.organizationId,
         ownerId: principal.id,
         hostname,
-        ...initial,
-        networkRevision: initial ? 1 : 0,
-        secretRevision: initial ? 1 : 0,
       })
       .onConflictDoNothing()
       .returning();

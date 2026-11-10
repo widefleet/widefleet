@@ -1,11 +1,7 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
-import {
-  accountConnection,
-  maximumDownloadBytes,
-  readBytes,
-  type Environment,
-  type Properties,
-} from "@platform/account-connection";
+import { accountConnection } from "./connection.ts";
+import type { Environment, Properties } from "./context.ts";
+import { maximumDownloadBytes, readBytes } from "./bytes.ts";
 import { z } from "zod";
 import {
   attachment,

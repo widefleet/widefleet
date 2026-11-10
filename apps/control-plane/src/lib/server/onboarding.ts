@@ -18,7 +18,6 @@ export const createOnboardingService = (
   settings: Pick<ReturnType<typeof createSettingsService>, "publish">,
   createOrganization?: CreateOrganization,
   observation?: Observation,
-  initializeApps?: (ownerId: string, organizationId: string) => Promise<void>,
 ) => {
   const verifiedUser = async (person: AuthenticatedUser) => {
     if (person.identityOrganizationId !== null) return false;
@@ -73,8 +72,6 @@ export const createOnboardingService = (
           message:
             "Your organization was created, but app sign-in is not ready. Retry or open organization settings.",
         });
-
-      await initializeApps?.(person.userId, organization.id);
 
       return organization;
     },

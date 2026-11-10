@@ -1,10 +1,7 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
-import {
-  accountConnection,
-  readBytes,
-  type Environment,
-  type Properties,
-} from "@platform/account-connection";
+import { accountConnection } from "./connection.ts";
+import type { Environment, Properties } from "./context.ts";
+import { readBytes } from "./bytes.ts";
 import { z } from "zod";
 import {
   fileInput,

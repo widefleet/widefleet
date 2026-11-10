@@ -23,9 +23,6 @@ import { initializeOrganization } from "./organization.ts";
 import { createSettingsService } from "./settings.ts";
 import { installationRuntime } from "./organization-runtime.ts";
 import { z } from "zod";
-import { createConnectorApps } from "./connector-apps.ts";
-import { createStorage } from "./storage.ts";
-import { installationOrganizationId } from "../organization.ts";
 
 const readBootstrap = async (configuration: Configuration) => {
   if (!configuration.PLATFORM_BOOTSTRAP_FILE) return null;
@@ -127,16 +124,6 @@ export const initializeRuntime = async (
           }),
           database.db,
           bootstrap,
-          async (ownerId) => {
-            await createConnectorApps(
-              database.db,
-              configuration,
-              createStorage(configuration),
-              keys.encryption,
-              undefined,
-              observation,
-            ).organization(ownerId, installationOrganizationId);
-          },
         );
       }
     }

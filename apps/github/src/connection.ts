@@ -4,10 +4,6 @@ import { caller, callerId, type Environment, type Properties, type Provider } fr
 import { initialize } from "./database.ts";
 import { authorizationPage, connectionPage } from "./page.ts";
 
-export type { Environment, Properties, Provider } from "./context.ts";
-
-export { readBytes, maximumDownloadBytes } from "./bytes.ts";
-
 const linkedAccount = z.object({
   id: z.string(),
   accountId: z.string(),
