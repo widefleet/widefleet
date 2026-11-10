@@ -56,7 +56,9 @@ export class ExampleWorkflow extends WorkflowEntrypoint {
     }
     if (mode === 'sleep') {
       await step.sleep('nap', 1);
-      const deadline = await step.do('deadline', async () => new Date(Date.now() + 20));
+      // Persisting the deadline and crossing Worker RPC boundaries must leave
+      // time for native sleepUntil to receive a future timestamp on busy runners.
+      const deadline = await step.do('deadline', async () => new Date(Date.now() + 1000));
       await step.sleepUntil('until', deadline);
       return step.do('awake', context => record('awake', context));
     }
