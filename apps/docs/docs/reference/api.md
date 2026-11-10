@@ -88,7 +88,7 @@ Template discovery requires an authenticated session or a token with
 
 `GET /api/v1/catalog/templates` returns `{ templates, createPrompt }`.
 Each entry in `templates` contains `id`, `name` and `description`. The optional
-`search` query parameter filters names, descriptions and capabilities
+`search` query parameter filters names and descriptions
 case-insensitively; it accepts up to 200 characters. An unmatched search returns
 an empty list. `createPrompt` guides an agent through creating an app for another
 use case.
@@ -96,14 +96,16 @@ use case.
 `GET /api/v1/catalog/templates/{templateId}` returns one template with:
 
 - `id`, `name`, `description` and a source URL in `source`.
-- `capabilities`, a list of supported functions in plain language.
-- `setup` and `instructions`, text explaining prerequisites and setup.
-- `secrets`, the required secret names, and `network`, the backend origins to allow.
-- `examples`, objects containing a `description` and `code`.
+- `markdown`, the body of the template's `template.md` file.
 - `prompt`, a setup prompt containing the installation URL and selected organization.
 
-An unknown template ID returns `404`; an invalid ID returns `400`. These
-read operations leave app creation and configuration to the normal app APIs.
+Templates are read from the [Widefleet repository](https://github.com/widefleet/widefleet/tree/main/templates).
+Each directory with a `template.md` is a template; its YAML frontmatter supplies
+`name` and `description`, and its directory name supplies `id`.
+
+An unknown template ID returns `404`; an invalid ID returns `400`. A repository
+or template parsing failure returns `503`. These read operations leave app
+creation and configuration to the normal app APIs.
 See [Use an app template](/guides/app-templates) for the UI and CLI workflow.
 
 ## Organization creation
