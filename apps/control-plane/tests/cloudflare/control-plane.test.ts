@@ -511,7 +511,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
       const page = await browser.newPage();
       await page.goto(`${origin}/sign-in`);
       await page.getByLabel("Email", { exact: true }).fill("sso@example.test");
-      await page.getByRole("button", { name: "Continue", exact: true }).click();
+      await page.getByRole("button", { name: "Continue with email", exact: true }).click();
       await page.getByRole("button", { name: /sso@example.test/ }).click();
       await browserExpect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
       await browserExpect(page.getByText("SSO Test User", { exact: true })).toBeVisible();

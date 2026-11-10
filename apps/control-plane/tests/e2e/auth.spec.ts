@@ -152,12 +152,12 @@ test("completes app OAuth through the built server after signing in", async ({ p
   await page.goto(z.url().parse(started.headers.get("location")));
   await expect(page).toHaveURL(/\/sign-in\?/);
   await page.getByLabel("Email", { exact: true }).fill("owner@example.test");
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("button", { name: "Continue with email", exact: true }).click();
   await expect.poll(() => logs.match(/code is (\d{6})/)?.[1]).toBeTruthy();
   await page
     .getByLabel("Sign-in code", { exact: true })
     .fill(z.string().parse(logs.match(/code is (\d{6})/)?.[1]));
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByRole("button", { name: "Verify and sign in", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`${configuration.redirectUrl}\\?`));
 
   const cookies = (response: Response) =>
@@ -395,7 +395,9 @@ test("redirects anonymous device requests to login and preserves the code", asyn
   await page.goto("/device?user_code=ABCD1234");
   await expect(page).toHaveURL(/\/sign-in\?next=/);
   await expect(page.getByLabel("Email", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Continue", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Continue with email", exact: true }),
+  ).toBeVisible();
   expect(new URL(page.url()).searchParams.get("next")).toBe("/device?user_code=ABCD1234");
 });
 
@@ -488,7 +490,7 @@ test("completes Microsoft login against emulate through the built SvelteKit serv
   await expect(page.getByLabel("Organization slug")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Sign in with Microsoft" })).toHaveCount(0);
   await page.getByLabel("Email", { exact: true }).fill("sso@EXAMPLE.TEST");
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("button", { name: "Continue with email", exact: true }).click();
   await page.getByRole("button", { name: /sso@example.test/ }).click();
   await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
   await expect(page.getByText("SSO Test User", { exact: true })).toBeVisible();
@@ -508,7 +510,7 @@ test("keeps an SSO error on the email step without requesting an email code", as
   );
   await page.goto("/sign-in");
   await page.getByLabel("Email", { exact: true }).fill("sso@example.test");
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("button", { name: "Continue with email", exact: true }).click();
   await expect(page.getByText("Could not start sign-in. Please try again.")).toBeVisible();
   await expect(page.getByLabel("Email", { exact: true })).toBeEnabled();
   await expect(page.getByLabel("Sign-in code", { exact: true })).toHaveCount(0);
@@ -527,9 +529,9 @@ test("offers Google and Microsoft alongside email and highlights the last succes
     },
   ]);
   await page.goto("/sign-in?next=%2Fdevice%3Fuser_code%3DSYNTHETIC");
-  await expect(page.getByRole("button", { name: /^Continue with Google/ })).toContainText(
-    "Last used",
-  );
+  await expect(
+    page.getByRole("button", { name: /^Continue with Google/ }),
+  ).toHaveAccessibleDescription("Last used");
   await expect(page.getByRole("button", { name: /^Continue with Microsoft/ })).toBeVisible();
   await expect(page.getByLabel("Email", { exact: true })).toBeVisible();
   await page.route("**/api/auth/sign-in/social", async (route) => {
@@ -2245,4 +2247,108 @@ test.describe("workspace experience", () => {
       await context.close();
     }
   });
+});
+
+test("focuses code entry and returns to the same email without another send", async ({ page }) => {
+  let sent = 0;
+  await page.route("**/api/auth/email-otp/send-verification-otp", async (route) => {
+    sent += 1;
+    expect(route.request().postDataJSON()).toMatchObject({ email: "reader@example.test" });
+    await route.fulfill({ json: { success: true } });
+  });
+  await page.route("**/api/auth/sign-in/email-otp", async (route) => {
+    expect(route.request().postDataJSON()).toMatchObject({
+      email: "reader@example.test",
+      otp: "123456",
+    });
+    await route.fulfill({ status: 401, json: { message: "Invalid code" } });
+  });
+  await page.goto("/sign-in?next=%2Fdevice%3Fuser_code%3DSYNTHETIC");
+  await expect(
+    page.getByText("Sign in to review the request from your terminal", { exact: false }),
+  ).toBeVisible();
+  await page.getByLabel("Email", { exact: true }).fill("Reader@EXAMPLE.TEST");
+  await page.getByLabel("Email", { exact: true }).press("Enter");
+  await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible();
+  await expect(page.getByLabel("Email", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Continue with Google/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Continue with Microsoft/ })).toHaveCount(0);
+  await expect(page.getByText("reader@example.test", { exact: true })).toBeVisible();
+  const code = page.getByLabel("Sign-in code", { exact: true });
+  await expect(code).toBeFocused();
+  await expect(page.getByRole("button", { name: "Verify and sign in" })).toBeDisabled();
+  await code.fill("123456");
+  await code.press("Enter");
+  await expect(page.getByRole("alert")).toContainText("Invalid or expired code");
+  await expect(code).toHaveValue("123456");
+  await expect(code).toBeFocused();
+  await page.getByRole("button", { name: "Change", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByLabel("Email", { exact: true })).toBeFocused();
+  await expect(page.getByLabel("Email", { exact: true })).toHaveValue("reader@example.test");
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Continue with Google/ })).toBeVisible();
+  expect(sent).toBe(1);
+  expect(new URL(page.url()).searchParams.get("next")).toBe("/device?user_code=SYNTHETIC");
+});
+
+test("resends a code in place and retains the current code when resend fails", async ({ page }) => {
+  await page.clock.install();
+  let sent = 0;
+  await page.route("**/api/auth/email-otp/send-verification-otp", async (route) => {
+    sent += 1;
+    expect(route.request().postDataJSON()).toMatchObject({ email: "reader@example.test" });
+    await route.fulfill(
+      sent === 2
+        ? { status: 503, json: { message: "Temporarily unavailable" } }
+        : { json: { success: true } },
+    );
+  });
+  await page.goto("/sign-in");
+  await page.getByLabel("Email", { exact: true }).fill("reader@example.test");
+  await page.getByRole("button", { name: "Continue with email", exact: true }).click();
+  const code = page.getByLabel("Sign-in code", { exact: true });
+  await expect(code).toBeVisible();
+  await code.fill("123456");
+  await expect(page.getByRole("button", { name: /^Resend in/ })).toBeDisabled();
+  await page.clock.runFor(31_000);
+  await page.getByRole("button", { name: "Resend code", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Could not send a sign-in code");
+  await expect(code).toHaveValue("123456");
+  await expect(code).toBeFocused();
+  await page.getByRole("button", { name: "Resend code", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("A new code has been requested.");
+  await expect(code).toHaveValue("");
+  await expect(code).toBeFocused();
+  await expect(page.getByRole("button", { name: /^Resend in/ })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Verify and sign in" })).toBeDisabled();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  expect(sent).toBe(3);
+});
+
+test("keeps the email step usable after a failed send and clears feedback on back", async ({
+  page,
+}) => {
+  let sent = 0;
+  await page.route("**/api/auth/email-otp/send-verification-otp", async (route) => {
+    sent += 1;
+    await route.fulfill(
+      sent === 1
+        ? { status: 503, json: { message: "Temporarily unavailable" } }
+        : { json: { success: true } },
+    );
+  });
+  await page.goto("/sign-in");
+  await page.getByLabel("Email", { exact: true }).fill("reader@example.test");
+  await page.getByRole("button", { name: "Continue with email", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Could not send a sign-in code");
+  await expect(page.getByLabel("Email", { exact: true })).toBeEnabled();
+  await expect(page.getByLabel("Email", { exact: true })).toHaveValue("reader@example.test");
+  await expect(page.getByRole("heading", { name: "Check your email" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Continue with email", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await page.getByRole("button", { name: "Back to sign in", exact: true }).click();
+  await expect(page.getByLabel("Email", { exact: true })).toBeFocused();
+  expect(sent).toBe(2);
 });
