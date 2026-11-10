@@ -109,11 +109,19 @@
   });
 
   const apply = async (input: z.infer<typeof settingsInput>, acknowledgeRestart: boolean) => {
-    await updateSettings({
+    const result = await updateSettings({
       ...input,
       acknowledgeRestart,
       organizationId: workspace.organizationId,
     });
+
+    if (result.signedOut) {
+      savedDraft = JSON.stringify(draft);
+      window.location.assign("/sign-in?next=/settings");
+
+      return;
+    }
+
     const updated = await getSettings();
     draft = initialDraft(updated.view);
     configureCompany = Boolean(updated.view.sso) || !data.emailSignIn;

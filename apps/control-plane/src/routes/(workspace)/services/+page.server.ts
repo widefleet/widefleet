@@ -6,9 +6,9 @@ import { getAppConnections } from "#lib/connections.remote";
 import { pagePrincipal } from "#server/page-auth";
 import type { PageServerLoad } from "./$types";
 
-export const load: PageServerLoad = async ({ request, url, setHeaders }) => {
+export const load: PageServerLoad = async ({ url, setHeaders }) => {
   setHeaders({ "cache-control": "private, no-store" });
-  await pagePrincipal(request);
+  await pagePrincipal();
   await getAppServices();
   const selected = url.searchParams.get("app");
 

@@ -1,18 +1,19 @@
-import { pageOrganizations, identityFailure } from "#server/page-auth";
+import { pageOrganizations, requireLogin } from "#server/page-auth";
 import { localDestination } from "#server/navigation";
 import { getRuntime } from "#server/runtime";
 import type { PageServerLoad } from "./$types";
 
-export const load: PageServerLoad = async ({ request, url, setHeaders }) => {
+export const load: PageServerLoad = async ({ url, setHeaders }) => {
   setHeaders({ "cache-control": "private, no-store" });
   const runtime = await getRuntime();
-  const person = await runtime.identity.authenticateUser(request, "platform:read");
-
-  if (person.isErr()) return identityFailure(person.error, request);
+  const { user, session } = requireLogin();
 
   return {
-    organizations: await pageOrganizations(request),
-    canCreateOrganization: await runtime.onboarding.available(person.value),
+    organizations: await pageOrganizations(),
+    canCreateOrganization: await runtime.onboarding.available({
+      userId: user.id,
+      identityOrganizationId: session.identityOrganizationId ?? null,
+    }),
     next: localDestination(url.searchParams.get("next")),
   };
 };

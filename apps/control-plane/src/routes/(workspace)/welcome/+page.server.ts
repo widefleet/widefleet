@@ -5,9 +5,9 @@ import { eq } from "drizzle-orm";
 import { organizationRuntimes } from "#server/schema";
 import { redirect } from "@sveltejs/kit";
 
-export const load: PageServerLoad = async ({ request, setHeaders }) => {
+export const load: PageServerLoad = async ({ setHeaders }) => {
   setHeaders({ "cache-control": "private, no-store" });
-  const principal = await pagePrincipal(request);
+  const principal = await pagePrincipal();
   const runtime = await getRuntime();
 
   if (principal.application.admin) {

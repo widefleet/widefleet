@@ -390,6 +390,36 @@ test("preserves SvelteKit form protection and accepts the CLI with an explicit O
   expect(foreignOrigin.status()).toBe(403);
 });
 
+test("renews the browser session cookie while rendering a protected page", async ({
+  page,
+  context,
+}) => {
+  const login = await environment.users.login({ userId: environment.owner.id });
+  const current = await environment.auth.api.getSession({ headers: login.headers });
+
+  if (!current) throw new Error("Expected owner session");
+  await context.addCookies(
+    login.cookies.map((cookie) => ({
+      ...cookie,
+      domain: "localhost",
+      sameSite: "Lax",
+      secure: false,
+    })),
+  );
+  await environment.database.db
+    .update(authSession)
+    .set({
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    })
+    .where(eq(authSession.id, current.session.id));
+
+  const response = await page.goto("/");
+  expect(response?.status()).toBe(200);
+  expect(await response?.headerValue("set-cookie")).toMatch(/Max-Age=604800/i);
+  const cookie = (await context.cookies()).find((entry) => entry.name.endsWith("session_token"));
+  expect(cookie?.expires).toBeGreaterThan(Date.now() / 1000 + 6 * 24 * 60 * 60);
+});
+
 test("redirects anonymous device requests to login and preserves the code", async ({ page }) => {
   await environment.database.db.update(ssoProvider).set({ domainVerified: true });
   await page.goto("/device?user_code=ABCD1234");

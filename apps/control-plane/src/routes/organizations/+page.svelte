@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { isHttpError } from "@sveltejs/kit";
+  import FormIssues from "#shadcn/FormIssues.svelte";
   import AuthLayout from "#shadcn/components/AuthLayout.svelte";
   import Feedback from "#shadcn/components/Feedback.svelte";
   import { Button } from "#shadcn/components/ui/button/index.js";
@@ -18,30 +18,7 @@
 
   let creating = $state(false);
 
-  let name = $state("");
-
-  let slug = $state("");
-
-  const create = async (event: SubmitEvent) => {
-    event.preventDefault();
-
-    if (pending) return;
-    pending = true;
-    message = "";
-
-    try {
-      await createOrganization({ name, slug });
-      window.location.assign(data.next === "/" ? "/welcome" : data.next);
-    } catch (cause) {
-      message = isHttpError(cause)
-        ? cause.body.message
-        : cause instanceof Error
-          ? cause.message
-          : "Could not create your organization. Try again.";
-    } finally {
-      pending = false;
-    }
-  };
+  const creationIssues = $derived(createOrganization.fields.allIssues());
 
   const signOut = async () => {
     pending = true;
@@ -113,7 +90,7 @@
             type="submit"
             variant="outline"
             class="h-auto w-full justify-between px-4 py-3"
-            disabled={pending}
+            disabled={pending || createOrganization.pending > 0}
           >
             <span class="truncate">{organization.name}</span>
             <span class="text-muted-foreground text-xs capitalize">{organization.role}</span>
@@ -122,43 +99,52 @@
       {/if}
     {/each}
   </div>
-  {#if data.canCreateOrganization}
-    {#if data.organizations.length && !creating}
+  {#if data.canCreateOrganization || creationIssues?.length}
+    {#if data.organizations.length && !creating && !creationIssues?.length}
       <Button variant="outline" class="mt-4 w-full" onclick={() => (creating = true)}
         >Set up your own organization</Button
       >
     {:else}
-      <form onsubmit={create} class="mt-6 space-y-4">
+      <form {...createOrganization} class="mt-6 space-y-4">
+        <FormIssues issues={creationIssues} />
+        <input {...createOrganization.fields.next.as("hidden", data.next)} />
         <div class="space-y-2">
           <Label for="organization-name">Organization name</Label><Input
             id="organization-name"
-            bind:value={name}
+            {...createOrganization.fields.name.as("text")}
             required
             maxlength={200}
             autocomplete="organization"
-            disabled={pending}
+            disabled={pending || createOrganization.pending > 0}
           />
         </div>
         <div class="space-y-2">
           <Label for="organization-slug">Organization URL name</Label><Input
             id="organization-slug"
-            bind:value={slug}
+            {...createOrganization.fields.slug.as("text")}
             required
             maxlength={50}
             pattern="[a-z0-9]+(-[a-z0-9]+)*"
             placeholder="my-team"
-            disabled={pending}
+            disabled={pending || createOrganization.pending > 0}
           />
           <p class="text-muted-foreground text-xs">
             Up to 50 lowercase letters, numbers and hyphens. Used in your apps’ addresses.
           </p>
         </div>
-        <Button type="submit" class="w-full" disabled={pending}
-          >{pending ? "Preparing your organization …" : "Create organization"}</Button
+        <Button type="submit" class="w-full" disabled={pending || createOrganization.pending > 0}
+          >{createOrganization.pending
+            ? "Preparing your organization …"
+            : "Create organization"}</Button
         >
       </form>
     {/if}
   {/if}
   {#if message}<div class="mt-4"><Feedback kind="error">{message}</Feedback></div>{/if}
-  <Button variant="ghost" class="mt-6 w-full" onclick={signOut} disabled={pending}>Sign out</Button>
+  <Button
+    variant="ghost"
+    class="mt-6 w-full"
+    onclick={signOut}
+    disabled={pending || createOrganization.pending > 0}>Sign out</Button
+  >
 </AuthLayout>

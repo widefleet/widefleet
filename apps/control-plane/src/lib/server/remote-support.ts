@@ -7,13 +7,15 @@ import { pageFailure } from "./page-auth.ts";
 import { getRuntime } from "./runtime.ts";
 
 export const remoteContext = async (write?: { organizationId: string }) => {
-  const { request } = getRequestEvent();
+  const { request, locals } = getRequestEvent();
+
+  if (!locals.user || !locals.session) error(401, "Sign in to continue");
   const runtime = await getRuntime();
 
-  const principal = await runtime.identity.authenticate(
-    request,
-    write ? "platform:write" : "platform:read",
-    write?.organizationId,
+  const principal = await runtime.identity.principal(
+    locals.user.id,
+    locals.session.activeOrganizationId ?? null,
+    locals.session.identityOrganizationId ?? null,
   );
 
   if (principal.isErr()) {
@@ -23,13 +25,16 @@ export const remoteContext = async (write?: { organizationId: string }) => {
     error(principal.error.code === "UNAUTHORIZED" ? 401 : 403, principal.error.message);
   }
 
+  if (write && write.organizationId !== principal.value.application.organizationId)
+    error(409, "Your organization selection changed. Reload this page before making changes.");
+
   runtime.reporting.active(principal.value.id);
 
   return { runtime, principal: principal.value, request };
 };
 
 export const queryValue = <T>(
-  result: Result<T, InvalidOperation | DatabaseUnavailable | StorageUnavailable>,
+  result: Result<T, InvalidOperation | DatabaseUnavailable | StorageUnavailable | APIError>,
 ) => {
   if (result.isErr()) return pageFailure(result.error);
 
@@ -37,7 +42,7 @@ export const queryValue = <T>(
 };
 
 export const formValue = <T>(
-  result: Result<T, InvalidOperation | DatabaseUnavailable | StorageUnavailable>,
+  result: Result<T, InvalidOperation | DatabaseUnavailable | StorageUnavailable | APIError>,
 ) => {
   if (result.isErr()) {
     if (result.error instanceof InvalidOperation) invalid(result.error.message);

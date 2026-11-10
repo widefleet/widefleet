@@ -1,25 +1,39 @@
-import { command, form, getRequestEvent } from "$app/server";
+import { form, getRequestEvent } from "$app/server";
 import { organizationSelection, createOrganizationInput } from "@platform/contracts";
-import { error, redirect } from "@sveltejs/kit";
+import { error, invalid, redirect } from "@sveltejs/kit";
 import { getRuntime } from "#server/runtime";
-import { identityFailure } from "#server/page-auth";
+import { requireLogin, pageFailure } from "#server/page-auth";
 import { localDestination } from "#server/navigation";
 import { z } from "zod";
-import { remoteOperation } from "#server/remote-support";
+import { InvalidOperation } from "#server/errors";
 
-export const createOrganization = command(createOrganizationInput, async (input) => {
-  const { request } = getRequestEvent();
-  const runtime = await getRuntime();
-  const person = await runtime.identity.authenticateUser(request, "platform:write");
+export const createOrganization = form(
+  createOrganizationInput.extend({ next: z.string().optional() }),
+  async ({ next, ...input }) => {
+    const { request } = getRequestEvent();
+    const { user, session } = requireLogin("/organizations");
+    const runtime = await getRuntime();
 
-  if (person.isErr()) return identityFailure(person.error, request);
-  const organization = await remoteOperation(() => runtime.onboarding.create(person.value, input));
-  const selection = await runtime.identity.selectOrganization(request, organization.id);
+    const organization = await runtime.onboarding
+      .create(
+        {
+          userId: user.id,
+          identityOrganizationId: session.identityOrganizationId ?? null,
+        },
+        input,
+      )
+      .catch((cause: unknown) => {
+        if (cause instanceof InvalidOperation) invalid(cause.message);
+        throw cause;
+      });
 
-  if (selection.isErr()) return identityFailure(selection.error, request);
+    const selection = await runtime.identity.selectOrganization(request, organization.id);
 
-  return organization;
-});
+    if (selection.isErr()) pageFailure(selection.error);
+    const destination = localDestination(next);
+    redirect(303, destination === "/" ? "/welcome" : destination);
+  },
+);
 
 export const selectOrganization = form(
   organizationSelection.extend({ next: z.string().optional() }),
@@ -29,10 +43,11 @@ export const selectOrganization = form(
     // Organization choice is a browser-session preference. API tokens select per request.
     if (request.headers.has("authorization"))
       error(400, "Use a browser session to select an organization");
+    requireLogin("/organizations");
     const runtime = await getRuntime();
     const result = await runtime.identity.selectOrganization(request, organizationId);
 
-    if (result.isErr()) return identityFailure(result.error, request);
+    if (result.isErr()) return pageFailure(result.error);
 
     const destination = localDestination(next);
 

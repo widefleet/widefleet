@@ -5,7 +5,7 @@ import type { PageServerLoad } from "./$types";
 
 export const load: PageServerLoad = async ({ request, url, setHeaders }) => {
   setHeaders({ "cache-control": "private, no-store" });
-  await pagePrincipal(request);
+  await pagePrincipal();
   const search = (url.searchParams.get("q") ?? "").trim().slice(0, 200);
 
   const page = z.coerce

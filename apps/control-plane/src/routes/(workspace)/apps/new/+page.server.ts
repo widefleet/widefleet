@@ -3,9 +3,9 @@ import { getApps } from "#lib/apps.remote";
 import { pagePrincipal } from "#server/page-auth";
 import type { PageServerLoad } from "./$types";
 
-export const load: PageServerLoad = async ({ request, url, setHeaders }) => {
+export const load: PageServerLoad = async ({ url, setHeaders }) => {
   setHeaders({ "cache-control": "private, no-store" });
-  const principal = await pagePrincipal(request);
+  const principal = await pagePrincipal();
 
   if (!principal.creator) error(403, "You do not have permission to create apps.");
   const { apps } = await getApps();

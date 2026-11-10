@@ -4,12 +4,12 @@ import { redirect } from "@sveltejs/kit";
 import { getRuntime } from "#server/runtime";
 import type { PageServerLoad } from "./$types";
 
-export const load: PageServerLoad = async ({ request, url, setHeaders }) => {
+export const load: PageServerLoad = async ({ locals, url, setHeaders }) => {
   setHeaders({ "cache-control": "private, no-store", "referrer-policy": "no-referrer" });
   const runtime = await getRuntime();
-  const session = await runtime.auth.api.getSession({ headers: request.headers });
+  const { session, user } = locals;
 
-  if (!session) {
+  if (!session || !user) {
     const next = new URLSearchParams({ next: url.pathname + url.search });
     const email = url.searchParams.get("email");
 
@@ -17,7 +17,7 @@ export const load: PageServerLoad = async ({ request, url, setHeaders }) => {
     redirect(303, `/sign-in?${next}`);
   }
 
-  const organizationId = session.session.identityOrganizationId;
+  const organizationId = session.identityOrganizationId;
 
   const [company] = organizationId
     ? await runtime.database.db
@@ -28,8 +28,8 @@ export const load: PageServerLoad = async ({ request, url, setHeaders }) => {
 
   return {
     code: url.searchParams.get("user_code") ?? "",
-    name: session.user.name,
-    sessionId: session.session.id,
+    name: user.name,
+    sessionId: session.id,
     organization: organizationId ? (company?.name ?? "your company") : null,
   };
 };

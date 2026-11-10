@@ -10,7 +10,7 @@ import { localDestination } from "#server/navigation";
 import { installationOrganizationId } from "#lib/organization";
 import { availableSocialProviders } from "#server/social-sign-in";
 
-export const load: PageServerLoad = async ({ request, url, setHeaders }) => {
+export const load: PageServerLoad = async ({ locals, url, setHeaders }) => {
   setHeaders({ "cache-control": "private, no-store" });
   const runtime = await getRuntime();
 
@@ -34,7 +34,7 @@ export const load: PageServerLoad = async ({ request, url, setHeaders }) => {
   const provider = target?.verified ? target.providerId : null;
 
   return {
-    signedOut: !(await runtime.auth.api.getSession({ headers: request.headers })),
+    signedOut: !locals.session,
     socialProviders:
       slug && provider && target?.required ? [] : availableSocialProviders(runtime.configuration),
     error: url.searchParams.has("error"),
