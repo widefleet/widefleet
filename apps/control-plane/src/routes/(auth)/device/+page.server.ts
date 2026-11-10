@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { organization } from "#server/auth-schema";
-import { getUserSession } from "#server/session";
+import { getUserSession } from "#server/page-auth";
 import { getRuntime } from "#server/runtime";
 import type { PageServerLoad } from "./$types";
 

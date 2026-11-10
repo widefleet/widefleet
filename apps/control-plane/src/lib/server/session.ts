@@ -1,5 +1,4 @@
 import { building } from "$app/env";
-import { getRequestEvent } from "$app/server";
 import { APIError } from "better-auth/api";
 import { DrizzleQueryError } from "drizzle-orm";
 import { error, redirect } from "@sveltejs/kit";
@@ -68,14 +67,4 @@ export const handleSession: Handle = async ({ event, resolve }) => {
   }
 
   return resolve(event);
-};
-
-// Remote functions are independently callable and do not inherit page groups.
-// Data access reads the hook's session and rejects calls without an identity.
-export const getUserSession = () => {
-  const { user, session } = getRequestEvent().locals;
-
-  if (!user || !session) error(401, "Sign in to continue");
-
-  return { user, session };
 };

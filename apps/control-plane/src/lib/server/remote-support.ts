@@ -3,9 +3,8 @@ import { getRequestEvent } from "$app/server";
 import { error, invalid } from "@sveltejs/kit";
 import type { Result } from "better-result";
 import { DatabaseUnavailable, InvalidOperation, StorageUnavailable } from "./errors.ts";
-import { pageFailure } from "./page-auth.ts";
+import { getUserSession, pageFailure } from "./page-auth.ts";
 import { getRuntime } from "./runtime.ts";
-import { getUserSession } from "./session.ts";
 
 export const remoteContext = async (write?: { organizationId: string }) => {
   const { request } = getRequestEvent();

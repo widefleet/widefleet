@@ -5,7 +5,16 @@ import type { DatabaseUnavailable, InvalidOperation, StorageUnavailable } from "
 import { getRuntime } from "./runtime.ts";
 import type { AuthenticationFailed } from "./identity.ts";
 import { runExtensionEffect } from "../extension-effects.ts";
-import { getUserSession } from "./session.ts";
+
+// Remote functions are independently callable and do not inherit page groups.
+// Data access reads the hook's session and rejects calls without an identity.
+export const getUserSession = () => {
+  const { user, session } = getRequestEvent().locals;
+
+  if (!user || !session) error(401, "Sign in to continue");
+
+  return { user, session };
+};
 
 // Remote forms can run without a page route, including after a session expires.
 export const requireLogin = (destination: string) => {
