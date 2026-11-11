@@ -336,7 +336,7 @@ async fn publish(
         })
         .collect();
     let service_documentation =
-        crate::service_docs::extract(project, temporary.path(), &entrypoints).await?;
+        crate::service_docs::extract(project, temporary.path(), &entrypoints)?;
     let worker = bundled.source;
     if worker.len() > 20 * 1024 * 1024 {
         return Err(Error::invalid("Worker exceeds 20 MiB".into()));
