@@ -42,7 +42,10 @@ for (const [template, kind, prefix] of [
       ]);
     });
 
-    const configuration = (custom: "none" | "complete" | "partial" = "none") =>
+    const configuration = (
+      custom: "none" | "complete" | "partial" = "none",
+      clientId = `test-${kind}-client`,
+    ) =>
       ({
         telemetry: { enabled: false },
         workers: [
@@ -61,7 +64,7 @@ for (const [template, kind, prefix] of [
                 WIDEFLEET_ORIGIN: { type: "json", value: origin },
                 [`${prefix}_CLIENT_ID`]: {
                   type: "json",
-                  value: custom === "none" ? "" : `test-${kind}-client`,
+                  value: custom === "none" ? "" : clientId,
                 },
                 [`${prefix}_CLIENT_SECRET`]: {
                   type: "json",
@@ -293,6 +296,32 @@ for (const [template, kind, prefix] of [
         missing: [`${prefix}_CLIENT_SECRET`],
       });
     });
+    it("requires one reconnect for legacy accounts before trusting a registration", async () => {
+      await runtime.setOptions(configuration("complete"));
+
+      if (kind === "github") upstream.state.expiring = false;
+      const alice = browser("alice");
+      await connect(alice, "101");
+      const db = await runtime.getD1Database("DB", "template");
+      await db.prepare("DELETE FROM oauth_registration").run();
+
+      for (const path of ["/rpc/status", "/rpc/list"])
+        expect(await (await alice.request(path)).json()).toMatchObject({
+          status: "reconnect_required",
+        });
+      expect(await db.prepare("SELECT COUNT(*) AS count FROM account").first("count")).toBe(1);
+      await connect(alice, "101");
+      expect(await (await alice.request("/rpc/list")).json()).toMatchObject({
+        status: "connected",
+      });
+      await runtime.setOptions(configuration("complete", "other-client"));
+
+      for (const path of ["/rpc/status", "/rpc/list"])
+        expect(await (await alice.request(path)).json()).toMatchObject({
+          status: "reconnect_required",
+        });
+    });
+
     it("rejects missing or forged caller proofs and callbacks to deleted apps", async () => {
       const relay = await runtime.getWorker("relay");
 

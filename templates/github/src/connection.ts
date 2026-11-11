@@ -59,10 +59,11 @@ export const accountConnection = (environment: Environment, properties: Properti
       .bind(id)
       .first<{ clientId: string; managed: number }>();
 
+    // Legacy accounts cannot prove which OAuth registration issued their tokens.
     return registration
       ? registration.clientId !== credentials.clientId ||
           Boolean(registration.managed) !== credentials.managed
-      : credentials.managed;
+      : true;
   };
 
   const token = async () => {
