@@ -369,6 +369,71 @@ it("keeps name-conflict diagnostics when completed types are reused", async () =
   ).toBe("Promise<Item>");
 });
 
+it.each([false, true])(
+  "preserves both mutually recursive generic inputs regardless of method order (reversed: %s)",
+  async (reversed) => {
+    const methods = [
+      "readA(input: A<string>) { return input; }",
+      "readB(input: B<string>) { return input; }",
+    ];
+
+    const root = await project(`import {WorkerEntrypoint} from "cloudflare:workers";
+      interface A<T> { a: T; next: B<T> }
+      interface B<T> { b: T; next: A<T> }
+      export class Reader extends WorkerEntrypoint {
+        ${(reversed ? methods.toReversed() : methods).join("\n")}
+      }`);
+
+    const result = extractServiceDocumentation(root, await bundle(root), ["Reader"]);
+    expect(result.warnings).toEqual([]);
+
+    for (const [method, type] of [
+      ["readA", '{ "a": string; "next": { "b": string; "next": unknown; }; }'],
+      ["readB", '{ "b": string; "next": { "a": string; "next": unknown; }; }'],
+    ])
+      expect(
+        result.documentation.entrypoints[0]?.methods.find((item) => item.name === method),
+      ).toMatchObject({
+        signatures: [{ parameters: [{ type }], returns: { type: `Promise<${type}>` } }],
+      });
+  },
+);
+
+it.each([false, true])(
+  "recovers a named type first encountered near the depth limit (reversed: %s)",
+  async (reversed) => {
+    const graph = Array.from(
+      { length: 20 },
+      (_, index) => `interface Model${index} { next: Model${index + 1} }`,
+    ).join("\n");
+
+    const methods = [
+      "deep(input: Model0) { return input; }",
+      "direct(input: Model20) { return input; }",
+    ];
+
+    const root = await project(`import {WorkerEntrypoint} from "cloudflare:workers";
+      ${graph}
+      interface Model20 { value: string }
+      export class Reader extends WorkerEntrypoint {
+        ${(reversed ? methods.toReversed() : methods).join("\n")}
+      }`);
+
+    const result = extractServiceDocumentation(root, await bundle(root), ["Reader"]);
+    expect(result.documentation.types.find((type) => type.name === "Model20")?.definition).toBe(
+      'type Model20 = { "value": string; };',
+    );
+    expect(result.warnings.some((warning) => warning.includes("Conflicting API type name"))).toBe(
+      false,
+    );
+    expect(
+      result.documentation.entrypoints[0]?.methods.find((method) => method.name === "direct"),
+    ).toMatchObject({
+      signatures: [{ parameters: [{ type: "Model20" }], returns: { type: "Promise<Model20>" } }],
+    });
+  },
+);
+
 it("renders replacement advice and examples on referenced types", () => {
   const docs = serviceDocumentation.parse({
     format: 1,

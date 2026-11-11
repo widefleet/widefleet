@@ -226,6 +226,8 @@ export function extractServiceDocumentation(
 
   const visiting = new Set<ts.Type>();
   const completed = new Map<ts.Type, string>();
+  const namedTypes = new Map<string, ts.Type>();
+  let truncations = 0;
 
   function typeText(type: ts.Type, depth = 0): string {
     const cached = completed.get(type);
@@ -233,6 +235,7 @@ export function extractServiceDocumentation(
     if (cached !== undefined) return cached;
 
     if (depth > 20) {
+      truncations++;
       warnings.push(
         "An API type exceeds 20 levels of nesting; its nested value is shown as unknown.",
       );
@@ -329,7 +332,14 @@ export function extractServiceDocumentation(
           ? symbol.name
           : undefined;
 
-      if (visiting.has(type)) return name ?? "unknown";
+      if (visiting.has(type)) {
+        if (!name) truncations++;
+
+        return name ?? "unknown";
+      }
+
+      const before = truncations;
+
       visiting.add(type);
 
       const fields = properties.map((property) => {
@@ -354,7 +364,7 @@ export function extractServiceDocumentation(
         const definition = `type ${name} = ${body};`;
         const previous = types.get(name);
 
-        if (previous && previous.definition !== definition) {
+        if (previous && previous.definition !== definition && namedTypes.get(name) !== type) {
           warnings.push(
             `Conflicting API type name ${name} is shown as unknown. Give public types distinct names.`,
           );
@@ -363,13 +373,17 @@ export function extractServiceDocumentation(
           return "unknown";
         }
 
+        // The same type can gain fields when revisited with more depth available.
         types.set(name, { name, definition, ...documentation(declared, warnings).comment });
-        completed.set(type, name);
+        namedTypes.set(name, type);
+
+        if (truncations === before) completed.set(type, name);
 
         return name;
       }
 
-      completed.set(type, body);
+      // A shortened body depends on this traversal's ancestors and depth budget.
+      if (truncations === before) completed.set(type, body);
 
       return body;
     }
