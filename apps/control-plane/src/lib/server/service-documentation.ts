@@ -44,13 +44,18 @@ export function renderServiceDocumentation(documentation: z.infer<typeof service
     }
   }
 
-  for (const type of documentation.types)
+  for (const type of documentation.types) {
     sections.push(
       `## ${type.name}`,
       type.summary,
       type.remarks,
       `\`\`\`ts\n${type.definition}\n\`\`\``,
     );
+
+    if (type.deprecated) sections.push(`Deprecated: ${type.deprecated}`);
+
+    for (const example of type.examples) sections.push("**Example**", example);
+  }
 
   return new MarkdownIt({ html: false }).render(sections.join("\n\n"));
 }

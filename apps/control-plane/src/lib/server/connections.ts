@@ -1,7 +1,7 @@
 import { transact } from "./transactions.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
-import { and, desc, eq, isNull, sql, ne } from "drizzle-orm";
+import { and, desc, eq, isNull, sql, ne, or } from "drizzle-orm";
 import type { z } from "zod";
 import { managedApp } from "./apps.ts";
 import { bindingState, applyCapabilityChange } from "./capability-changes.ts";
@@ -15,6 +15,10 @@ import { InvalidOperation } from "./errors.ts";
 export const createConnectionService = (database: Database, execution?: HostedExecution) => ({
   describe: (principal: Principal, service: string) =>
     transact(database, async (transaction) => {
+      const byId = contract.identifier.safeParse(service).success
+        ? eq(apps.id, service)
+        : undefined;
+
       const [record] = await transaction
         .select({ app: apps, metadata: artifacts.metadata, deploymentId: deployments.id })
         .from(apps)
@@ -28,11 +32,11 @@ export const createConnectionService = (database: Database, execution?: HostedEx
             eq(apps.organizationId, principal.application.organizationId),
             isNull(apps.removedAt),
             ne(apps.state, "deleting"),
-            contract.identifier.safeParse(service).success
-              ? eq(apps.id, service)
-              : eq(apps.slug, service),
+            or(byId, eq(apps.slug, service)),
           ),
-        );
+        )
+        .orderBy(desc(byId ?? apps.slug))
+        .limit(1);
 
       if (!record)
         return Result.err(

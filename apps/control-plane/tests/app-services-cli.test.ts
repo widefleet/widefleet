@@ -300,6 +300,47 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App services CLI", () => {
       ).toBe("read");
   });
 
+  it.each([
+    {
+      name: "excess overloads",
+      source: `${Array.from({ length: 17 }, (_, index) => `read(input: ${index}): ${index};`).join("\n")} read(input: number) { return input; }`,
+      warning: "Only the first 16 overloads",
+      signatures: 16,
+    },
+    {
+      name: "oversized comment",
+      source: `/** ${"x".repeat(32769)} */ read() { return 1; }`,
+      warning: "API documentation was omitted",
+      signatures: 0,
+    },
+  ])("deploys valid code when documentation exceeds limits: $name", async (fixture) => {
+    await writeFile(
+      join(directory, "bounded.ts"),
+      `import {WorkerEntrypoint} from "cloudflare:workers"; export class Reader extends WorkerEntrypoint {\n${fixture.source}\n}`,
+    );
+    await writeFile(
+      join(directory, "bounded.jsonc"),
+      JSON.stringify({ name: app.slug, main: "bounded.ts", compatibility_date: "2026-10-01" }),
+    );
+    const result = await command("deploy", "--config", "bounded.jsonc", "--no-wait", "--json");
+    expect(JSON.parse(result.stdout)).toMatchObject({ status: "queued" });
+    const upload = requests.find((entry) => entry.path.endsWith("/worker"));
+
+    const form = await new Response(upload?.body, {
+      headers: { "content-type": upload?.contentType ?? "" },
+    }).formData();
+
+    const metadata = contract.workerMetadata.parse(
+      JSON.parse(z.string().parse(form.get("metadata"))),
+    );
+
+    expect(metadata.entrypoints).toEqual(["Reader"]);
+    expect(result.stderr).toContain(fixture.warning);
+    expect(metadata.service_documentation?.entrypoints[0]?.methods[0]?.signatures.length ?? 0).toBe(
+      fixture.signatures,
+    );
+  });
+
   it("reads API documentation through the authenticated service endpoint", async () => {
     const result = await command("services", "describe", "erp-app");
     expect(JSON.parse(result.stdout)).toMatchObject({

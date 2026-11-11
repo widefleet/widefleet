@@ -21,7 +21,9 @@
   {#if service.html}
     <article><Markdown html={service.html} /></article>
   {:else if service.documentation}
-    <p class="text-muted-foreground text-sm">No service methods were found in this deployment.</p>
+    <p class="text-muted-foreground text-sm">
+      No API documentation was generated. Check the provider app’s deployment diagnostics.
+    </p>
   {:else}
     <p class="text-muted-foreground text-sm">
       This deployment has no API documentation. Redeploy the provider app with a CLI that supports

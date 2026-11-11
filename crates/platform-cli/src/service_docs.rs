@@ -17,17 +17,19 @@ pub async fn extract(
                 .into(),
         ));
     }
-    let result = Command::new(std::env::var_os("WIDEFLEET_NODE").unwrap_or_else(|| "node".into()))
+    let child = Command::new(std::env::var_os("WIDEFLEET_NODE").unwrap_or_else(|| "node".into()))
         .arg(helper)
         .arg(project)
         .arg(output.join("worker.js"))
         .args(entrypoints)
         .current_dir(project)
+        .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .kill_on_drop(true)
-        .output()
-        .await
+        .spawn()
         .map_err(|error| Error::invalid(format!("Cannot run API documentation extraction ({error}); app deployment requires Node.js 22.18 or newer")))?;
+    // Command::output() overrides stderr with a pipe, hiding author diagnostics.
+    let result = child.wait_with_output().await?;
     if !result.status.success() {
         return Err(Error::invalid(
             "API documentation extraction failed; see diagnostics above".into(),

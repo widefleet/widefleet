@@ -231,7 +231,11 @@ export const workerConfiguration = z.strictObject({
   debug: debugMetadata.optional(),
 });
 
-export { appRpcMethod, serviceDocumentation } from "./service-documentation.ts";
+export {
+  appRpcMethod,
+  serviceDocumentation,
+  serviceDocumentationMaxSignatures,
+} from "./service-documentation.ts";
 
 export const workerMetadata = workerConfiguration
   .extend({

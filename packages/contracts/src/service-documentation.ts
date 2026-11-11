@@ -46,6 +46,8 @@ const comment = {
   deprecated: text.optional(),
 };
 
+export const serviceDocumentationMaxSignatures = 16;
+
 export const serviceDocumentation = z
   .strictObject({
     format: z.literal(1),
@@ -79,7 +81,7 @@ export const serviceDocumentation = z
                     }),
                   )
                   .min(1)
-                  .max(16),
+                  .max(serviceDocumentationMaxSignatures),
               }),
             )
             .max(128),

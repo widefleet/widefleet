@@ -3,7 +3,11 @@ import { readFileSync } from "node:fs";
 import { dirname, relative, resolve, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { TraceMap, originalPositionFor } from "@jridgewell/trace-mapping";
-import { appRpcMethod, serviceDocumentation } from "@platform/contracts";
+import {
+  appRpcMethod,
+  serviceDocumentation,
+  serviceDocumentationMaxSignatures,
+} from "@platform/contracts";
 import { documentation } from "./service-docs-comments.ts";
 
 const flags = ts.TypeFormatFlags.NoTruncation | ts.TypeFormatFlags.InTypeAlias;
@@ -221,8 +225,13 @@ export function extractServiceDocumentation(
   >();
 
   const visiting = new Set<ts.Type>();
+  const completed = new Map<ts.Type, string>();
 
   function typeText(type: ts.Type, depth = 0): string {
+    const cached = completed.get(type);
+
+    if (cached !== undefined) return cached;
+
     if (depth > 20) {
       warnings.push(
         "An API type exceeds 20 levels of nesting; its nested value is shown as unknown.",
@@ -349,14 +358,18 @@ export function extractServiceDocumentation(
           warnings.push(
             `Conflicting API type name ${name} is shown as unknown. Give public types distinct names.`,
           );
+          completed.set(type, "unknown");
 
           return "unknown";
         }
 
         types.set(name, { name, definition, ...documentation(declared, warnings).comment });
+        completed.set(type, name);
 
         return name;
       }
+
+      completed.set(type, body);
 
       return body;
     }
@@ -438,7 +451,12 @@ export function extractServiceDocumentation(
       if (!callable.length) continue;
       const doc = documentation(member, warnings);
 
-      const signatures = callable.map((signature) => {
+      if (callable.length > serviceDocumentationMaxSignatures)
+        warnings.push(
+          `Only the first ${serviceDocumentationMaxSignatures} overloads of ${symbol.name}.${property.name} are documented; the remaining overloads are still callable.`,
+        );
+
+      const signatures = callable.slice(0, serviceDocumentationMaxSignatures).map((signature) => {
         const params = signature.getParameters();
         const signatureDoc = documentation(signature.declaration ?? member, warnings);
 
@@ -473,12 +491,26 @@ export function extractServiceDocumentation(
       entries.push({ name: symbol.name, ...documentation(node, warnings).comment, http, methods });
   }
 
+  const result = serviceDocumentation.safeParse({
+    format: 1,
+    entrypoints: entries,
+    types: [...types.values()],
+  });
+
+  // Documentation is supplemental. Keep upload validation strict, but never
+  // prevent deployment of valid code because its description exceeds a limit.
+  if (!result.success)
+    warnings.push(
+      `API documentation was omitted because it exceeds supported limits: ${result.error.issues
+        .slice(0, 5)
+        .map((issue) => `${issue.path.join(".") || "documentation"}: ${issue.message}`)
+        .join("; ")}. Deployment continues.`,
+    );
+
   return {
-    documentation: serviceDocumentation.parse({
-      format: 1,
-      entrypoints: entries,
-      types: [...types.values()],
-    }),
+    documentation: result.success
+      ? result.data
+      : serviceDocumentation.parse({ format: 1, entrypoints: [], types: [] }),
     warnings: [...new Set(warnings)],
   };
 }

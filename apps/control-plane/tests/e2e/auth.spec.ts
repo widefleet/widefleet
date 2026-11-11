@@ -135,7 +135,18 @@ test("shows versioned service documentation through authenticated API and access
     assets: { upload_session: artifactId },
     service_documentation: {
       format: 1,
-      types: [],
+      types: [
+        {
+          name: "InventoryItem",
+          definition: "type InventoryItem = { id: string; displayName: string };",
+          summary: "An inventory item.",
+          remarks: "",
+          deprecated: "Use CatalogItem when migrating callers.",
+          examples: [
+            '```ts\nconst item: InventoryItem = { id: "one", displayName: "Spare part" };\n```',
+          ],
+        },
+      ],
       entrypoints: [
         {
           name: "Reader",
@@ -164,7 +175,7 @@ test("shows versioned service documentation through authenticated API and access
                     },
                   ],
                   returns: {
-                    type: "Promise<Array<{ id: string; displayName: string }>>",
+                    type: "Promise<Array<InventoryItem>>",
                     description: "Matching inventory items.",
                   },
                 },
@@ -203,6 +214,10 @@ test("shows versioned service documentation through authenticated API and access
   ).toBeVisible();
   await expect(page.getByRole("heading", { name: "findItems", exact: true })).toBeVisible();
   await expect(page.getByText("Words to search for.", { exact: false })).toBeVisible();
+  await expect(page.getByText("Deprecated: Use CatalogItem when migrating callers.")).toBeVisible();
+  await expect(
+    page.getByText('const item: InventoryItem = { id: "one", displayName: "Spare part" };'),
+  ).toBeVisible();
 
   for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 900 });
@@ -244,7 +259,9 @@ test("shows versioned service documentation through authenticated API and access
     .set({ metadata })
     .where(eq(artifacts.id, artifactId));
   await page.goto(`/services/${record.id}`);
-  await expect(page.getByText("No service methods were found in this deployment.")).toBeVisible();
+  await expect(
+    page.getByText("No API documentation was generated.", { exact: false }),
+  ).toBeVisible();
   delete metadata.service_documentation;
   await environment.database.db
     .update(artifacts)

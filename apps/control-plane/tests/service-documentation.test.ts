@@ -269,6 +269,128 @@ it("ships a self-contained helper and declaration libraries in the CLI installat
   ).toContain("MIT License");
 });
 
+it("limits documented overloads without rejecting the app", async () => {
+  const signatures = Array.from(
+    { length: 17 },
+    (_, index) => `read(input: ${index}): ${index};`,
+  ).join("\n");
+
+  const root = await project(`import {WorkerEntrypoint} from "cloudflare:workers";
+    export class Reader extends WorkerEntrypoint {
+      ${signatures}
+      read(input: number) { return input; }
+    }`);
+
+  const result = extractServiceDocumentation(root, await bundle(root), ["Reader"]);
+  expect(result.documentation.entrypoints[0]?.methods[0]?.signatures).toHaveLength(16);
+  expect(result.warnings).toContain(
+    "Only the first 16 overloads of Reader.read are documented; the remaining overloads are still callable.",
+  );
+});
+
+it.each([
+  { summary: "x".repeat(32769), count: 1 },
+  { summary: "é".repeat(10000), count: 14 },
+  { summary: "Read a value.", count: 129 },
+])(
+  "omits oversized documentation with a warning while keeping extraction successful ($count methods)",
+  async ({ summary, count }) => {
+    const methods = Array.from(
+      { length: count },
+      (_, index) => `/** ${summary} */ read${index}() { return 1; }`,
+    ).join("\n");
+
+    const root = await project(`import {WorkerEntrypoint} from "cloudflare:workers";
+      export class Reader extends WorkerEntrypoint {\n${methods}\n}`);
+
+    const result = extractServiceDocumentation(root, await bundle(root), ["Reader"]);
+    expect(result.documentation).toEqual({ format: 1, entrypoints: [], types: [] });
+    expect(result.warnings).toContainEqual(
+      expect.stringContaining("API documentation was omitted because it exceeds supported limits:"),
+    );
+  },
+);
+
+it("handles heavily shared types in the packaged helper without repeatedly expanding each branch", async () => {
+  const graph = Array.from(
+    { length: 16 },
+    (_, index) =>
+      `interface Model${index} { left: Model${index + 1}; middle: Model${index + 1}; right: Model${index + 1}; }`,
+  ).join("\n");
+
+  const root = await project(`import {WorkerEntrypoint} from "cloudflare:workers";
+    ${graph}
+    interface Model16 { value: string }
+    export class Reader extends WorkerEntrypoint { read(input: Model0) { return input; } }`);
+
+  const file = await bundle(root);
+  const installation = join(root, "installation");
+  await packageServiceDocumentation(installation);
+
+  // A subprocess deadline also stops a synchronous regression in the compiler walk.
+  const result = await execute(
+    process.execPath,
+    [join(installation, "service-docs/extract.cjs"), root, file, "Reader"],
+    { timeout: 10000 },
+  );
+
+  const docs = serviceDocumentation.parse(JSON.parse(result.stdout));
+  expect(result.stderr).toBe("");
+  expect(docs.types).toHaveLength(17);
+  expect(docs.types.find((type) => type.name === "Model0")?.definition).toBe(
+    'type Model0 = { "left": Model1; "middle": Model1; "right": Model1; };',
+  );
+  expect(docs.entrypoints[0]?.methods[0]?.signatures[0]?.returns.type).toBe("Promise<Model0>");
+});
+
+it("keeps name-conflict diagnostics when completed types are reused", async () => {
+  const root = await project(`import {WorkerEntrypoint} from "cloudflare:workers";
+    namespace One { export interface Item { id: string } }
+    namespace Two { export interface Item { count: number } }
+    export class Reader extends WorkerEntrypoint {
+      first(input: One.Item) { return input; }
+      second(input: Two.Item) { return input; }
+      repeated(input: One.Item) { return input; }
+    }`);
+
+  const result = extractServiceDocumentation(root, await bundle(root), ["Reader"]);
+  expect(result.documentation.types).toHaveLength(1);
+  expect(result.documentation.types[0]?.definition).toContain('"id": string');
+  expect(result.warnings).toContain(
+    "Conflicting API type name Item is shown as unknown. Give public types distinct names.",
+  );
+  expect(
+    result.documentation.entrypoints[0]?.methods.find((method) => method.name === "second")
+      ?.signatures[0]?.returns.type,
+  ).toBe("Promise<unknown>");
+  expect(
+    result.documentation.entrypoints[0]?.methods.find((method) => method.name === "repeated")
+      ?.signatures[0]?.returns.type,
+  ).toBe("Promise<Item>");
+});
+
+it("renders replacement advice and examples on referenced types", () => {
+  const docs = serviceDocumentation.parse({
+    format: 1,
+    entrypoints: [],
+    types: [
+      {
+        name: "Query",
+        definition: "type Query = { id: string };",
+        summary: "Select one item.",
+        remarks: "Identifiers are case-sensitive.",
+        deprecated: "Use ItemQuery for new integrations.",
+        examples: ['```ts\nconst query: Query = { id: "one" };\n```'],
+      },
+    ],
+  });
+
+  const html = renderServiceDocumentation(docs);
+  expect(html).toContain("Deprecated: Use ItemQuery for new integrations.");
+  expect(html).toContain("<strong>Example</strong>");
+  expect(html).toContain("const query: Query = { id: &quot;one&quot; };");
+});
+
 it("rejects oversized and mismatched artifact documentation and renders authored HTML as text", () => {
   const docs = {
     format: 1,
