@@ -22,26 +22,38 @@ and its declared database. Keep your local source for subsequent changes.
 
 ## Configure GitHub
 
-An administrator needs to:
+If your installation provides [managed template OAuth](https://widefleet.com/docs/reference/template-oauth),
+leave `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` unset. The template uses
+that registration automatically. You can supply your own registration instead,
+using the instructions below.
+
+Set the app's `AUTH_SECRET` to a random value of at least 32 characters and keep it
+stable; it encrypts saved account tokens. Use the app's Secrets page or
+`widefleet secret put AUTH_SECRET --file /path/to/secret`.
+
+Allow these backend origins from the app directory:
+
+```sh
+widefleet network allow https://github.com
+widefleet network allow https://api.github.com
+```
+
+Network changes require the CLI's `network:manage` scope. Wait for the configuration
+to activate, then open the app URL and connect your GitHub account.
+
+Private repositories require the `repo` scope, which also grants write access;
+the supplied app exposes read methods. GitHub organizations may require approval
+for the OAuth app before their repositories become available.
+
+### Use your own OAuth registration
 
 1. Register a GitHub OAuth app. Set its authorization callback URL to
    `https://YOUR-APP-URL/auth/callback/github`.
-2. Set the app secrets `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` and `AUTH_SECRET`.
-   Generate `AUTH_SECRET` randomly with at least 32 characters and keep it stable;
-   it encrypts the saved account tokens. Use the app's Secrets page or
-   `widefleet secret put NAME --file /path/to/secret` to provide values.
-3. Allow these backend origins from the app directory:
+2. Set both `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` as app secrets.
 
-   ```sh
-   widefleet network allow https://github.com
-   widefleet network allow https://api.github.com
-   ```
-
-Network changes require the CLI's `network:manage` scope. Wait for the configuration
-to activate, then open the app URL and connect your GitHub account. Private
-repositories require the `repo` scope, which also grants write access; the supplied
-app exposes read methods. GitHub organizations may require approval for the OAuth
-app before their repositories become available.
+Your own credentials take precedence over managed OAuth. Provide both values;
+setting only one produces a setup error. Removing both switches back to managed
+OAuth when available. Users must reconnect after changing registrations.
 
 ## Use from another app
 

@@ -23,28 +23,39 @@ and its declared database. Keep your local source for subsequent changes.
 
 ## Configure Microsoft
 
-An administrator needs to:
+If your installation provides [managed template OAuth](https://widefleet.com/docs/reference/template-oauth),
+leave `MICROSOFT_CLIENT_ID` and `MICROSOFT_CLIENT_SECRET` unset. The template uses
+that registration automatically. You can supply your own registration instead,
+using the instructions below.
+
+Set the app's `AUTH_SECRET` to a random value of at least 32 characters and keep it
+stable; it encrypts saved account tokens. Use the app's Secrets page or
+`widefleet secret put AUTH_SECRET --file /path/to/secret`.
+
+Allow these backend origins from the app directory:
+
+```sh
+widefleet network allow https://login.microsoftonline.com
+widefleet network allow https://graph.microsoft.com
+```
+
+Network changes require the CLI's `network:manage` scope. Wait for the configuration
+to activate, then open the app URL and connect your Microsoft account.
+
+### Use your own OAuth registration
 
 1. Register a Microsoft Entra application. Choose **Accounts in any organizational
    directory and personal Microsoft accounts** to support work, school and personal
    accounts.
 2. Add `https://YOUR-APP-URL/auth/callback/microsoft` as a **Web** redirect URI and
    add the delegated Microsoft Graph permission `Files.Read`.
-3. Create a client secret. Set the app secrets `MICROSOFT_CLIENT_ID`,
-   `MICROSOFT_CLIENT_SECRET` and `AUTH_SECRET`. Use the application client ID and
-   the client secret's **value**, not its ID. Generate `AUTH_SECRET` randomly with
-   at least 32 characters and keep it stable; it encrypts the saved account tokens.
-   Use the app's Secrets page or `widefleet secret put NAME --file /path/to/secret`
-   to provide values.
-4. Allow these backend origins from the app directory:
+3. Create a client secret. Set both `MICROSOFT_CLIENT_ID` and
+   `MICROSOFT_CLIENT_SECRET` as app secrets. Use the application client ID and the
+   client secret's **value**, not its ID.
 
-   ```sh
-   widefleet network allow https://login.microsoftonline.com
-   widefleet network allow https://graph.microsoft.com
-   ```
-
-Network changes require the CLI's `network:manage` scope. Wait for the configuration
-to activate, then open the app URL and connect your Microsoft account.
+Your own credentials take precedence over managed OAuth. Provide both values;
+setting only one produces a setup error. Removing both switches back to managed
+OAuth when available. Users must reconnect after changing registrations.
 
 ## Use from another app
 
