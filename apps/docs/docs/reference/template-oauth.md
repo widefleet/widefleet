@@ -25,6 +25,9 @@ Every template still needs its own persistent `AUTH_SECRET` of at least 32
 characters. It encrypts saved account tokens in that app's D1 database. Provider API
 requests continue to run in the template, using its existing network policy.
 
+Older saved connections require a one-time reconnection after upgrading these
+templates. This records which registration issued their tokens.
+
 After switching registrations, users must reconnect. A `reconnect_required` result
 includes the connection page URL. Keep the old registration available until its
 users have migrated.

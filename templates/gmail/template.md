@@ -56,7 +56,8 @@ The requested `gmail.readonly` scope permits reading mail.
 
 Your own credentials take precedence over managed OAuth. Provide both values;
 setting only one produces a setup error. Removing both switches back to managed
-OAuth when available. Users must reconnect after changing registrations.
+OAuth when available. Users must reconnect after changing registrations. Older
+saved connections require a one-time reconnection after upgrading this template.
 
 ## Use from another app
 
