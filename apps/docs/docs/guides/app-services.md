@@ -1,7 +1,7 @@
 ---
 title: Connect apps
 description: Expose app APIs, connect callers and keep provider secrets private.
-lastModified: 2026-10-29
+lastModified: 2026-11-11
 ---
 
 An app can expose exported Worker entrypoints to other apps in its organization.
@@ -16,7 +16,7 @@ administrator access. The provider and caller must belong to the same organizati
 
 In a Worker project, create `src/worker.ts`:
 
-```ts
+````ts
 import { WorkerEntrypoint } from "cloudflare:workers";
 
 type Environment = {
@@ -24,12 +24,20 @@ type Environment = {
 };
 
 export class Reader extends WorkerEntrypoint<Environment> {
+  /**
+   * Check whether this provider has an API token.
+   * @returns Whether the provider is configured, without exposing the token.
+   * @example
+   * ```ts
+   * const status = await env.INVENTORY.status();
+   * ```
+   */
   async status() {
     const token = await this.env.WIDEFLEET_SECRETS.get("API_TOKEN");
     return { configured: token.length > 0 };
   }
 }
-```
+````
 
 Configure `wrangler.jsonc`:
 
@@ -61,6 +69,63 @@ link and returns `404` for browser requests. Named service entrypoints still sup
 RPC and `fetch()`. A default export or configured static assets enables the app URL;
 web apps can expose named service entrypoints alongside their browser UI.
 No Widefleet-specific properties belong in `wrangler.jsonc`.
+
+## Document service methods
+
+Write TSDoc comments on exported `WorkerEntrypoint` classes and their callable
+methods, as in the `status()` example above. Then run the usual `widefleet deploy`.
+The CLI extracts the comments and TypeScript signatures and attaches the resulting
+API documentation to the deployment. You do not install a documentation package,
+add configuration or run a separate documentation build.
+
+Use an updated CLI and control plane. Documentation extraction runs inside the
+native CLI and needs no Node.js process or separately installed compiler. Your
+project still needs its normal dependencies installed so imported types can be
+resolved. Your app's build command keeps its usual toolchain requirements; use
+`--skip-build` when deploying an already built app.
+
+Start each comment with what the method does. Use `@param name - Description`
+for arguments, `@returns` for the result, `@remarks` for usage requirements,
+`@throws` for errors, `@example` with a fenced code block for an invocation, and
+`@deprecated` for a replacement recommendation. Keep types in TypeScript
+signatures. Comments on referenced interfaces and their properties provide
+additional context. `@privateRemarks` is omitted from the published description.
+
+After the deployment becomes active, inspect it:
+
+```sh
+widefleet services describe inventory-api
+```
+
+The command accepts an app slug or UUID and returns JSON with the active
+`deploymentId`, entrypoints and `documentation`. The format includes method
+signatures, parameter and return descriptions, examples and referenced data
+types. Agents can use this information to choose and call a binding. In the UI,
+open **App APIs**, then **View API documentation** on the provider app.
+
+Documentation follows the active deployment. A pending deployment leaves the
+previous description visible; a successful rollback restores its description
+alongside the code. Apps deployed with older CLIs return `documentation: null`;
+redeploy them with an updated CLI to publish documentation.
+
+The supported starters preserve source maps automatically. If you use a custom
+build, keep source maps with embedded source content next to the generated
+Worker, referenced by its `sourceMappingURL`, so the CLI can recover comments and
+types after bundling or minification. The CLI warns when a service's source
+cannot be recovered. If a signature lacks expected type information, check the
+app's TypeScript configuration and installed dependencies.
+
+At most 16 overloads per method are documented; additional overloads remain
+callable. If the generated description exceeds another documentation limit, the
+CLI warns and omits the description while continuing the deployment. The app's
+code and available methods are unchanged. Check the deployment diagnostics if
+the App APIs page reports that no documentation was generated.
+
+Only published Worker entrypoints are described. Internal helpers, instance
+fields, getters and reserved event handlers are excluded from the RPC method
+list. HTTP support is reported separately. Documentation describes how to call
+an API; a connection grant and the provider's own authorization checks still
+control access.
 
 ## Connect a caller
 
@@ -211,6 +276,7 @@ All routes use normal OAuth authentication and the selected organization.
 | Action                                           | Route                                                                                                 |
 | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
 | Discover available apps and entrypoints          | `GET /api/v1/app-services`                                                                            |
+| Read an active API description                   | `GET /api/v1/app-services/{slugOrAppId}`                                                              |
 | Inspect resources and active/desired connections | `GET /api/v1/apps/{appId}/connections`                                                                |
 | Inspect grants                                   | `GET /api/v1/apps/{appId}/bindings`                                                                   |
 | Grant one binding                                | `PUT /api/v1/apps/{appId}/bindings/{binding}` with `{ "app": "TARGET_UUID", "entrypoint": "Reader" }` |
