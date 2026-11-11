@@ -11,10 +11,14 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
+import { executeCli } from "./cli-process.ts";
 
 const execute = promisify(execFile);
 
-describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App services CLI", () => {
+const describeCli = describe.runIf(process.env["RUN_CLI_TESTS"] === "1");
+
+// Allow multiple native commands, each with its own 10-second process deadline.
+describeCli("App services CLI", { timeout: 30_000 }, () => {
   const app = contract.app.parse({
     id: "00000000-0000-4000-8000-000000000001",
     slug: "inventory",
@@ -217,7 +221,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App services CLI", () => {
   });
 
   const command = (...args: string[]) =>
-    execute(executable, args, {
+    executeCli(executable, args, {
       cwd: directory,
       timeout: 10000,
       env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: "normal-credential" },
@@ -407,6 +411,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App services CLI", () => {
     );
 
     const after = contract.workerMetadata.parse(JSON.parse(z.string().parse(next.get("metadata"))));
+
     const code = form.get("worker.js");
     const nextCode = next.get("worker.js");
 
