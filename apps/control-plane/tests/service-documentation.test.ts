@@ -1,5 +1,5 @@
 import { build } from "esbuild";
-import { mkdtemp, mkdir, writeFile, rm, symlink } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm, symlink, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,7 +19,10 @@ afterEach(async () => {
 });
 
 async function project(source: string) {
-  const root = await mkdtemp(join(tmpdir(), "service documentation "));
+  // Match the CLI's canonical build directory. On macOS, tmpdir() uses /var
+  // through a symlink; esbuild's relative source maps otherwise change meaning
+  // when the CLI rebundles the same files through /private/var.
+  const root = await realpath(await mkdtemp(join(tmpdir(), "service documentation ")));
   directories.push(root);
   await writeFile(join(root, "app.ts"), source);
   await writeFile(
