@@ -115,6 +115,75 @@ describe("App service connections", () => {
     });
   });
 
+  it("describes only the active provider version in the selected organization, including rollback and legacy artifacts", async () => {
+    const target = await app(["Reader"]);
+    const legacy = (await services().describe(principal, target.id)).unwrap();
+    expect(legacy.documentation).toBeNull();
+
+    const first = contract.workerMetadata.parse(
+      (
+        await environment.database.db
+          .select()
+          .from(artifacts)
+          .where(eq(artifacts.id, target.artifactId))
+      )[0]?.metadata,
+    );
+
+    const documentation = (summary: string) =>
+      contract.serviceDocumentation.parse({
+        format: 1,
+        entrypoints: [
+          { name: "Reader", summary, remarks: "", examples: [], methods: [], http: false },
+        ],
+        types: [],
+      });
+
+    await environment.database.db
+      .update(artifacts)
+      .set({ metadata: { ...first, service_documentation: documentation("First version") } })
+      .where(eq(artifacts.id, target.artifactId));
+    const nextArtifact = crypto.randomUUID();
+    const nextDeployment = crypto.randomUUID();
+    await environment.database.db.insert(artifacts).values({
+      id: nextArtifact,
+      appId: target.id,
+      metadata: { ...first, service_documentation: documentation("Next version") },
+      manifest: {},
+      modules: [],
+    });
+    await environment.database.db.insert(deployments).values({
+      id: nextDeployment,
+      appId: target.id,
+      artifactId: nextArtifact,
+      status: "queued",
+      requestId: crypto.randomUUID(),
+    });
+    expect((await services().describe(principal, target.slug)).unwrap().documentation).toEqual(
+      documentation("First version"),
+    );
+    expect(
+      await services().describe(
+        { ...principal, application: { organizationId: "foreign", admin: true } },
+        target.id,
+      ),
+    ).toMatchObject({ error: { code: "NOT_FOUND" } });
+    await environment.database.db
+      .update(apps)
+      .set({ activeDeploymentId: nextDeployment })
+      .where(eq(apps.id, target.id));
+    expect((await services().describe(principal, target.id)).unwrap()).toMatchObject({
+      deploymentId: nextDeployment,
+      documentation: documentation("Next version"),
+    });
+    await environment.database.db
+      .update(apps)
+      .set({ activeDeploymentId: legacy.deploymentId })
+      .where(eq(apps.id, target.id));
+    expect((await services().describe(principal, target.id)).unwrap().documentation).toEqual(
+      documentation("First version"),
+    );
+  });
+
   it("rejects cycles through desired or still-active connections", async () => {
     const a = await app(["Reader"]);
     const b = await app(["Reader"]);

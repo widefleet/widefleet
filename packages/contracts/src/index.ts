@@ -3,6 +3,7 @@ export { appEventConfiguration } from "./app-events.ts";
 export { workerHostname } from "./hostnames.ts";
 
 import { z } from "zod";
+import { serviceDocumentation } from "./service-documentation.ts";
 import { organizationIdentifier } from "./organizations.ts";
 import { appAccessSnapshot } from "./app-access.ts";
 import { networkSnapshot } from "./network.ts";
@@ -230,9 +231,12 @@ export const workerConfiguration = z.strictObject({
   debug: debugMetadata.optional(),
 });
 
+export { appRpcMethod, serviceDocumentation } from "./service-documentation.ts";
+
 export const workerMetadata = workerConfiguration
   .extend({
     web: z.boolean().optional(),
+    service_documentation: serviceDocumentation.optional(),
     entrypoints: z
       .array(bindingName)
       .max(32)
@@ -251,6 +255,17 @@ export const workerMetadata = workerConfiguration
     assets: z.strictObject({ upload_session: identifier, binding: bindingName.default("ASSETS") }),
   })
   .superRefine((metadata, context) => {
+    const documented = metadata.service_documentation?.entrypoints.map((entry) => entry.name) ?? [];
+
+    if (
+      new Set(documented).size !== documented.length ||
+      documented.some((name) => !metadata.entrypoints?.includes(name))
+    )
+      context.addIssue({
+        code: "custom",
+        message: "Documentation must reference unique published entrypoints",
+      });
+
     const workflows = metadata.bindings
       .filter((binding) => binding.type === "workflow")
       .map((binding) => binding.workflow_name);
@@ -270,6 +285,15 @@ export const workerMetadata = workerConfiguration
       });
     }
   });
+
+// Documentation belongs to the control plane. Existing runtime releases validate
+// metadata strictly, so keep these build-time additions out of execution snapshots.
+export function executionWorkerMetadata(value: z.infer<typeof workerMetadata>) {
+  const metadata = { ...value };
+  delete metadata.service_documentation;
+
+  return metadata;
+}
 
 export const storedModule = z.strictObject({
   name: moduleName,
@@ -356,6 +380,13 @@ export const serviceCatalogEntry = z.strictObject({
   displayName: z.string(),
   entrypoints: z.array(bindingName),
 });
+
+export const serviceDescription = serviceCatalogEntry.extend({
+  deploymentId: identifier,
+  documentation: serviceDocumentation.nullable(),
+});
+
+export const servicePath = z.strictObject({ service: z.string().min(1).max(128) });
 
 export const capabilityGrant = z.strictObject({
   app: identifier,

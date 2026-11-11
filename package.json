@@ -17,7 +17,10 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20261003.1",
+    "@jridgewell/trace-mapping": "0.3.31",
+    "@microsoft/tsdoc": "0.17.1",
     "@oxlint/plugins": "1.86.0",
+    "@platform/contracts": "workspace:*",
     "@playwright/test": "1.63.0",
     "@tsconfig/strictest": "2.0.8",
     "@types/node": "26.6.4",

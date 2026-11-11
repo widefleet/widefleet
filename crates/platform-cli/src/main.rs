@@ -17,6 +17,7 @@ mod organizations;
 mod preview;
 mod reporting;
 mod runtime;
+mod service_docs;
 mod services;
 mod settings;
 mod upload;
@@ -102,7 +103,7 @@ enum Command {
     /// Show app connections and resources from the active deployment.
     Connections(connections::Options),
     /// Discover app APIs in the organization.
-    Services,
+    Services(services::Catalog),
     /// Connect an app to another app API.
     Connect(services::Connect),
     /// Remove an app connection.
@@ -253,7 +254,7 @@ async fn run(args: Arguments) -> Result<()> {
         Command::Workflows(options) => workflows::run(&api, &credentials, options).await,
         Command::Network(options) => network::run(&api, &credentials, options).await,
         Command::Access(options) => access::run(&api, &credentials, options).await,
-        Command::Services => services::catalog(&api, &credentials).await,
+        Command::Services(options) => services::catalog(&api, &credentials, options).await,
         Command::Connect(options) => services::connect(&api, &credentials, options).await,
         Command::Disconnect(options) => services::disconnect(&api, &credentials, options).await,
         Command::Secret(options) => services::secrets(&api, &credentials, options).await,
@@ -418,7 +419,7 @@ async fn main() {
         Command::Workflows(_) => "workflows",
         Command::Network(_) => "network",
         Command::Access(_) => "access",
-        Command::Services => "services",
+        Command::Services(_) => "services",
         Command::Connect(_) => "connect",
         Command::Disconnect(_) => "disconnect",
         Command::Secret(_) => "secret",

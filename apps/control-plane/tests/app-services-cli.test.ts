@@ -1,4 +1,5 @@
 import { esbuildBinary } from "../../../tools/cli-tools.ts";
+import { packageServiceDocumentation } from "../../../tools/service-docs-package.ts";
 import * as contract from "@platform/contracts";
 import { execFile } from "node:child_process";
 import { once } from "node:events";
@@ -73,6 +74,19 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App services CLI", () => {
               entrypoints: ["Reader"],
             },
           ]),
+        );
+      } else if (request.url === "/api/v1/app-services/erp-app") {
+        response.end(
+          JSON.stringify({
+            appId: app.id,
+            slug: "erp-app",
+            deploymentId: app.activeDeploymentId,
+            documentation: {
+              format: 1,
+              entrypoints: [{ name: "Reader", summary: "Read inventory" }],
+              types: [],
+            },
+          }),
         );
       } else if (request.url === `/api/v1/apps/${app.id}/assets-upload-session`) {
         response.end(
@@ -156,6 +170,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App services CLI", () => {
     directory = await mkdtemp(join(tmpdir(), "widefleet-app-cli-"));
     const installation = join(directory, "installation");
     await mkdir(installation);
+    await packageServiceDocumentation(installation);
     executable = join(installation, process.platform === "win32" ? "widefleet.exe" : "widefleet");
     await copyFile(
       process.env["CLI_BINARY"] ??
@@ -276,6 +291,26 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App services CLI", () => {
 
     expect(metadata.entrypoints ?? []).toEqual(fixture.entrypoints);
     expect(metadata.web).toBe(fixture.web);
+    expect(metadata.service_documentation?.format).toBe(1);
+
+    if (fixture.entrypoints.includes("Reader"))
+      expect(
+        metadata.service_documentation?.entrypoints.find((entry) => entry.name === "Reader")
+          ?.methods[0]?.name,
+      ).toBe("read");
+  });
+
+  it("reads API documentation through the authenticated service endpoint", async () => {
+    const result = await command("services", "describe", "erp-app");
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      slug: "erp-app",
+      documentation: { format: 1 },
+    });
+    expect(requests[0]).toMatchObject({
+      path: "/api/v1/app-services/erp-app",
+      method: "GET",
+      authorization: "Bearer normal-credential",
+    });
   });
 
   it("rejects the nonstandard widefleet Wrangler property", async () => {

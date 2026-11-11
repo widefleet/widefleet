@@ -131,6 +131,8 @@ pub struct WorkerMetadata {
     pub web: Option<bool>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub entrypoints: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_documentation: Option<serde_json::Value>,
     #[serde(flatten)]
     pub worker: WorkerConfiguration,
     #[serde(default)]

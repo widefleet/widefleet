@@ -26,7 +26,9 @@ export default class OneDrive extends WorkerEntrypoint<Environment, Properties> 
   /**
    * List the root folder or a folder by ID. Pass nextPageUrl as pageUrl with the same folderId to continue.
    * @example
+   * ```ts
    * await env.ONEDRIVE.listFiles({ folderId: "root" });
+   * ```
    */
   async listFiles(input: z.input<typeof folderInput> = {}) {
     const result = await this.#connection().request(

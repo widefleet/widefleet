@@ -7,6 +7,7 @@ import { parseArgs, promisify } from "node:util";
 import { build } from "esbuild";
 import { cliPlatform, cliPlatforms } from "./cli-platforms.ts";
 import { esbuildBinary, runPnpm } from "./cli-tools.ts";
+import { packageServiceDocumentation } from "./service-docs-package.ts";
 
 const execute = promisify(execFile);
 
@@ -67,6 +68,8 @@ await copyFile(esbuild, join(release, bundlerName));
 await chmod(join(release, executableName), 0o755);
 
 await chmod(join(release, bundlerName), 0o755);
+
+await packageServiceDocumentation(release);
 
 await writeFile(
   join(release, "release.json"),
@@ -156,6 +159,7 @@ const metadata = {
     executableName,
     bundlerName,
     "release.json",
+    "service-docs",
     "starter",
     "starters",
     "licenses",

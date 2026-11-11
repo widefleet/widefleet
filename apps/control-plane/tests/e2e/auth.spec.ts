@@ -5,7 +5,7 @@ import { EventEmitter, once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { and, eq, sql } from "drizzle-orm";
-import { app, artifact } from "@platform/contracts";
+import { app, artifact, workerMetadata } from "@platform/contracts";
 import {
   account,
   member,
@@ -100,6 +100,166 @@ test.beforeAll(async () => {
       { timeout: 15_000 },
     )
     .toBe(true);
+});
+
+test("shows versioned service documentation through authenticated API and accessible pages", async ({
+  page,
+  context,
+  browser,
+}, testInfo) => {
+  const session = await environment.users.login({ userId: environment.owner.id });
+
+  const cookies = session.cookies.map((cookie) => ({
+    ...cookie,
+    domain: "localhost",
+    sameSite: "Lax" as const,
+    secure: false,
+  }));
+
+  await context.addCookies(cookies);
+
+  const created = await context.request.post("/api/v1/apps", {
+    headers: { origin: environment.configuration.PLATFORM_URL },
+    data: { slug: "documented-service", displayName: "Inventory service" },
+  });
+
+  expect(created.ok()).toBe(true);
+  const record = app.parse(await created.json());
+  const artifactId = crypto.randomUUID();
+  const deploymentId = crypto.randomUUID();
+
+  const metadata = workerMetadata.parse({
+    main_module: "worker.js",
+    compatibility_date: "2026-10-01",
+    entrypoints: ["Reader"],
+    assets: { upload_session: artifactId },
+    service_documentation: {
+      format: 1,
+      types: [],
+      entrypoints: [
+        {
+          name: "Reader",
+          summary: "Read inventory available to the signed-in user.",
+          remarks: "",
+          examples: [],
+          http: false,
+          methods: [
+            {
+              name: "findItems",
+              summary: "Find matching items.",
+              remarks: "Results are paginated. Continue with the returned cursor.",
+              examples: [
+                '```ts\nconst result = await env.INVENTORY.findItems("spare parts");\n```',
+              ],
+              throws: [],
+              signatures: [
+                {
+                  parameters: [
+                    {
+                      name: "query",
+                      type: "string",
+                      description: "Words to search for.",
+                      optional: false,
+                      rest: false,
+                    },
+                  ],
+                  returns: {
+                    type: "Promise<Array<{ id: string; displayName: string }>>",
+                    description: "Matching inventory items.",
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  });
+
+  await environment.database.db
+    .insert(artifacts)
+    .values({ id: artifactId, appId: record.id, metadata, manifest: {}, modules: [] });
+  await environment.database.db.insert(deployments).values({
+    id: deploymentId,
+    appId: record.id,
+    artifactId,
+    status: "succeeded",
+    requestId: crypto.randomUUID(),
+  });
+  await environment.database.db
+    .update(apps)
+    .set({ activeDeploymentId: deploymentId })
+    .where(eq(apps.id, record.id));
+  const description = await context.request.get(`/api/v1/app-services/${record.slug}`);
+  expect(description.ok()).toBe(true);
+  expect(await description.json()).toMatchObject({
+    deploymentId,
+    documentation: metadata.service_documentation,
+  });
+  await page.goto("/services");
+  await page.getByRole("link", { name: "View API documentation", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Inventory service API", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "findItems", exact: true })).toBeVisible();
+  await expect(page.getByText("Words to search for.", { exact: false })).toBeVisible();
+
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+
+    for (const colorScheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme });
+      await page.screenshot({
+        path: testInfo.outputPath(`api-${width}-${colorScheme}.png`),
+        fullPage: true,
+      });
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+    }
+  }
+
+  await page.getByRole("link", { name: "Back to app APIs" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/services$/);
+
+  const noScript = await browser.newContext({
+    javaScriptEnabled: false,
+    baseURL: environment.configuration.PLATFORM_URL,
+    extraHTTPHeaders: { "x-forwarded-proto": "http" },
+  });
+
+  try {
+    await noScript.addCookies(cookies);
+    const staticPage = await noScript.newPage();
+    await staticPage.goto(`/services/${record.id}`);
+    await expect(staticPage.getByRole("heading", { name: "findItems", exact: true })).toBeVisible();
+  } finally {
+    await noScript.close();
+  }
+
+  metadata.service_documentation = { format: 1, entrypoints: [], types: [] };
+  await environment.database.db
+    .update(artifacts)
+    .set({ metadata })
+    .where(eq(artifacts.id, artifactId));
+  await page.goto(`/services/${record.id}`);
+  await expect(page.getByText("No service methods were found in this deployment.")).toBeVisible();
+  delete metadata.service_documentation;
+  await environment.database.db
+    .update(artifacts)
+    .set({ metadata })
+    .where(eq(artifacts.id, artifactId));
+  await page.reload();
+  await expect(
+    page.getByText("This deployment has no API documentation.", { exact: false }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath("api-legacy-mobile-dark.png"),
+    fullPage: true,
+  });
+  const missing = await page.goto(`/services/${crypto.randomUUID()}`);
+  expect(missing?.status()).toBe(404);
 });
 
 test("completes app OAuth through the built server after signing in", async ({ page }) => {

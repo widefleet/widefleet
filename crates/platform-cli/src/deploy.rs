@@ -325,7 +325,7 @@ async fn publish(
     // classes use their standard declarations and are not RPC service entrypoints.
     let web =
         configuration.assets.is_some() || bundled.exports.iter().any(|name| name == "default");
-    let entrypoints = bundled
+    let entrypoints: Vec<String> = bundled
         .exports
         .into_iter()
         .filter(|name| {
@@ -335,6 +335,8 @@ async fn publish(
                 .any(|workflow| workflow.class_name == *name)
         })
         .collect();
+    let service_documentation =
+        crate::service_docs::extract(project, temporary.path(), &entrypoints).await?;
     let worker = bundled.source;
     if worker.len() > 20 * 1024 * 1024 {
         return Err(Error::invalid("Worker exceeds 20 MiB".into()));
@@ -472,6 +474,7 @@ async fn publish(
     let metadata = WorkerMetadata {
         web: Some(web),
         entrypoints,
+        service_documentation: Some(service_documentation),
         crons: configuration.triggers.crons,
         queue_consumers: configuration.queues.consumers,
         worker: worker_metadata,

@@ -1,4 +1,5 @@
 import { esbuildBinary } from "../../../tools/cli-tools.ts";
+import { packageServiceDocumentation } from "../../../tools/service-docs-package.ts";
 import * as contract from "@platform/contracts";
 import { execFile } from "node:child_process";
 import { once } from "node:events";
@@ -361,6 +362,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       const installation = join(state, "installation");
       const project = join(state, "project with spaces");
       await mkdir(installation);
+      await packageServiceDocumentation(installation);
       await mkdir(join(project, "public"), { recursive: true });
       await copyFile(
         process.env["CLI_BINARY"] ?? join(root, "target/debug", executableName),
