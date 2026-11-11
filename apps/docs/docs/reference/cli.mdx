@@ -1,7 +1,7 @@
 ---
 title: CLI
 description: Common Widefleet commands, app selection, authentication and deployment output.
-lastModified: 2026-10-29
+lastModified: 2026-11-11
 ---
 
 For installation and your first deployment, start with [CLI setup](/getting-started/installation).
@@ -79,6 +79,7 @@ IDs with `widefleet apps` and deployment IDs and artifact IDs with `widefleet hi
 | `widefleet access`                                   | Inspect app usage rules; `set` changes the group list.                 |
 | `widefleet network`                                  | Inspect external destinations; `allow` and `deny` change grants.       |
 | `widefleet services`                                 | Browse apps and their service entrypoints.                             |
+| `widefleet services describe APP`                    | Read the active service API documentation as JSON.                     |
 | `widefleet connect TARGET --as BINDING`              | Grant the current app access to another app's API.                     |
 | `widefleet disconnect BINDING`                       | Revoke an app connection.                                              |
 | `widefleet secret list` / `put NAME` / `delete NAME` | Manage the selected app's private secrets.                             |
