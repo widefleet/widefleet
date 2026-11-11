@@ -226,7 +226,7 @@ export function extractServiceDocumentation(
 
   const visiting = new Set<ts.Type>();
   const completed = new Map<ts.Type, string>();
-  const namedTypes = new Map<string, ts.Type>();
+  const namedTypes = new Map<string, { type: ts.Type; depth: number }>();
   let truncations = 0;
 
   function typeText(type: ts.Type, depth = 0): string {
@@ -363,8 +363,9 @@ export function extractServiceDocumentation(
       if (name) {
         const definition = `type ${name} = ${body};`;
         const previous = types.get(name);
+        const previousType = namedTypes.get(name);
 
-        if (previous && previous.definition !== definition && namedTypes.get(name) !== type) {
+        if (previous && previous.definition !== definition && previousType?.type !== type) {
           warnings.push(
             `Conflicting API type name ${name} is shown as unknown. Give public types distinct names.`,
           );
@@ -373,9 +374,12 @@ export function extractServiceDocumentation(
           return "unknown";
         }
 
-        // The same type can gain fields when revisited with more depth available.
-        types.set(name, { name, definition, ...documentation(declared, warnings).comment });
-        namedTypes.set(name, type);
+        // Recursive types stay uncached. A later, deeper walk must not replace
+        // their richer description unless it resolves the whole type.
+        if (!previousType || depth < previousType.depth || truncations === before) {
+          types.set(name, { name, definition, ...documentation(declared, warnings).comment });
+          namedTypes.set(name, { type, depth });
+        }
 
         if (truncations === before) completed.set(type, name);
 

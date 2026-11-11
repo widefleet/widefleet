@@ -399,9 +399,14 @@ it.each([false, true])(
   },
 );
 
-it.each([false, true])(
-  "recovers a named type first encountered near the depth limit (reversed: %s)",
-  async (reversed) => {
+it.each([
+  { reversed: false, recursive: false },
+  { reversed: true, recursive: false },
+  { reversed: false, recursive: true },
+  { reversed: true, recursive: true },
+])(
+  "keeps the most detailed named type near the depth limit (reversed: $reversed, recursive: $recursive)",
+  async ({ reversed, recursive }) => {
     const graph = Array.from(
       { length: 20 },
       (_, index) => `interface Model${index} { next: Model${index + 1} }`,
@@ -414,14 +419,17 @@ it.each([false, true])(
 
     const root = await project(`import {WorkerEntrypoint} from "cloudflare:workers";
       ${graph}
-      interface Model20 { value: string }
+      interface Loop<T> { value: T; next: Loop<T> }
+      interface Model20 { value: string; ${recursive ? "loop: Loop<string>" : ""} }
       export class Reader extends WorkerEntrypoint {
         ${(reversed ? methods.toReversed() : methods).join("\n")}
       }`);
 
     const result = extractServiceDocumentation(root, await bundle(root), ["Reader"]);
     expect(result.documentation.types.find((type) => type.name === "Model20")?.definition).toBe(
-      'type Model20 = { "value": string; };',
+      recursive
+        ? 'type Model20 = { "value": string; "loop": { "value": string; "next": unknown; }; };'
+        : 'type Model20 = { "value": string; };',
     );
     expect(result.warnings.some((warning) => warning.includes("Conflicting API type name"))).toBe(
       false,
