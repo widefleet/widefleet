@@ -29,6 +29,31 @@ impl Types {
         self.render(checker, value, None)
     }
 
+    pub fn type_parameter(&mut self, checker: &mut Checker, parameter: P<Type>) -> String {
+        let mut declaration = self.text(checker, parameter);
+        if parameter.symbol().is_some_and(|symbol| {
+            symbol.declarations().iter().any(|node| {
+                node.modifiers().is_some_and(|modifiers| {
+                    modifiers
+                        .nodes()
+                        .iter()
+                        .any(|modifier| modifier.kind() == ast::Kind::ConstKeyword)
+                })
+            })
+        }) {
+            declaration.insert_str(0, "const ");
+        }
+        if let Some(constraint) = checker.get_constraint_of_type_parameter_exported(parameter) {
+            declaration.push_str(" extends ");
+            declaration.push_str(&self.text(checker, constraint));
+        }
+        if let Some(default) = checker.get_default_from_type_parameter_exported(parameter) {
+            declaration.push_str(" = ");
+            declaration.push_str(&self.text(checker, default));
+        }
+        declaration
+    }
+
     fn render(
         &self,
         checker: &mut Checker,

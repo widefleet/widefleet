@@ -24,8 +24,12 @@ export function renderServiceDocumentation(documentation: z.infer<typeof service
             `${param.rest ? "..." : ""}${param.name}${param.optional ? "?" : ""}: ${param.type}`,
         );
 
+        const typeParameters = signature.typeParameters?.length
+          ? `<${signature.typeParameters.join(", ")}>`
+          : "";
+
         sections.push(
-          `\`\`\`ts\n${method.name}(${parameters.join(", ")}): ${signature.returns.type}\n\`\`\``,
+          `\`\`\`ts\n${method.name}${typeParameters}(${parameters.join(", ")}): ${signature.returns.type}\n\`\`\``,
         );
 
         for (const parameter of signature.parameters)

@@ -66,6 +66,7 @@ export const serviceDocumentation = z
                 signatures: z
                   .array(
                     z.strictObject({
+                      typeParameters: z.array(text).max(32).optional(),
                       parameters: z
                         .array(
                           z.strictObject({

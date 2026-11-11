@@ -478,6 +478,73 @@ native(
   },
 );
 
+native(
+  "preserves generic declarations, constraints and defaults on each method signature",
+  async () => {
+    const root = await project(`import {WorkerEntrypoint} from "cloudflare:workers";
+    interface Item { id: string }
+    export class Reader extends WorkerEntrypoint {
+      read<T extends { id: string }>(input: T): T { return input; }
+      list<T extends Item = Item>(input: T[]): T[] { return input; }
+      pick<T extends Item, K extends keyof T>(input: T, key: K): T[K] { return input[key]; }
+      echo<T>(input: T): T { return input; }
+      literal<const T extends string>(input: T): T { return input; }
+      overloaded<T extends Item>(input: T): T;
+      overloaded<T extends { count: number }>(input: T[]): T[];
+      overloaded(input: unknown) { return input; }
+    }`);
+
+    const result = await extractServiceDocumentation(root, await bundle(root), ["Reader"]);
+    expect(result.warnings).toEqual([]);
+    const methods = result.documentation.entrypoints[0]?.methods;
+    expect(methods?.find((method) => method.name === "read")).toMatchObject({
+      signatures: [
+        {
+          typeParameters: ["T extends { id: string; }"],
+          parameters: [{ type: "T" }],
+          returns: { type: "Promise<T>" },
+        },
+      ],
+    });
+    expect(methods?.find((method) => method.name === "list")).toMatchObject({
+      signatures: [
+        {
+          typeParameters: ["T extends Item = Item"],
+          parameters: [{ type: "T[]" }],
+          returns: { type: "Promise<T[]>" },
+        },
+      ],
+    });
+    expect(methods?.find((method) => method.name === "pick")).toMatchObject({
+      signatures: [
+        {
+          typeParameters: ["T extends Item", "K extends keyof T"],
+          parameters: [{ type: "T" }, { type: "K" }],
+          returns: { type: "Promise<Awaited<T[K]>>" },
+        },
+      ],
+    });
+    expect(methods?.find((method) => method.name === "echo")).toMatchObject({
+      signatures: [{ typeParameters: ["T"] }],
+    });
+    expect(methods?.find((method) => method.name === "literal")).toMatchObject({
+      signatures: [{ typeParameters: ["const T extends string"] }],
+    });
+    expect(methods?.find((method) => method.name === "overloaded")).toMatchObject({
+      signatures: [
+        { typeParameters: ["T extends Item"] },
+        { typeParameters: ["T extends { count: number; }"] },
+      ],
+    });
+    expect(result.documentation.types.find((type) => type.name === "Item")?.definition).toContain(
+      "id: string",
+    );
+    expect(renderServiceDocumentation(result.documentation)).toContain(
+      "read&lt;T extends { id: string; }&gt;(input: T): Promise&lt;T&gt;",
+    );
+  },
+);
+
 native("collects alias, dictionary and callback types from declaration files", async () => {
   const root = await project(`import { WorkerEntrypoint } from "cloudflare:workers";
     import type { Item, Choice } from "./model";

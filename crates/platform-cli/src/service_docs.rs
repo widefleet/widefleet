@@ -141,7 +141,17 @@ pub fn extract(project: &Path, output: &Path, entrypoints: &[String]) -> Result<
                 }
                 let result = checker.get_return_type_of_signature_exported(signature);
                 let awaited = checker.get_awaited_type_exported(result).unwrap_or(result);
-                signatures.push(json!({"parameters": parameters, "returns": {"type": format!("Promise<{}>", types.text(&mut checker, awaited)), "description": signature_doc.returns}}));
+                let mut documented = json!({"parameters": parameters, "returns": {"type": format!("Promise<{}>", types.text(&mut checker, awaited)), "description": signature_doc.returns}});
+                if !signature.type_parameters().is_empty() {
+                    documented["typeParameters"] = json!(
+                        signature
+                            .type_parameters()
+                            .iter()
+                            .map(|&parameter| types.type_parameter(&mut checker, parameter))
+                            .collect::<Vec<_>>()
+                    );
+                }
+                signatures.push(documented);
             }
             let mut method = serde_json::to_value(doc.comment)?;
             method["name"] = json!(property.name());
@@ -305,7 +315,7 @@ fn within_limits(key: &str, value: &Value) -> bool {
         Value::Array(values) => {
             values.len()
                 <= match key {
-                    "entrypoints" | "parameters" => 32,
+                    "entrypoints" | "parameters" | "typeParameters" => 32,
                     "methods" | "types" => 128,
                     _ => 16,
                 }
