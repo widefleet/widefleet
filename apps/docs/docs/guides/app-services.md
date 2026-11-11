@@ -78,10 +78,11 @@ The CLI extracts the comments and TypeScript signatures and attaches the resulti
 API documentation to the deployment. You do not install a documentation package,
 add configuration or run a separate documentation build.
 
-Use an updated CLI and control plane. App deployment needs Node.js **22.18 or
-newer**; the CLI package includes the documentation tools and TypeScript compiler.
-Your project still needs its normal dependencies installed so imported types can
-be resolved.
+Use an updated CLI and control plane. Documentation extraction runs inside the
+native CLI and needs no Node.js process or separately installed compiler. Your
+project still needs its normal dependencies installed so imported types can be
+resolved. Your app's build command keeps its usual toolchain requirements; use
+`--skip-build` when deploying an already built app.
 
 Start each comment with what the method does. Use `@param name - Description`
 for arguments, `@returns` for the result, `@remarks` for usage requirements,
@@ -109,10 +110,10 @@ redeploy them with an updated CLI to publish documentation.
 
 The supported starters preserve source maps automatically. If you use a custom
 build, keep source maps with embedded source content next to the generated
-Worker so the CLI can recover comments and types after bundling or minification.
-Extraction warnings identify missing source maps, malformed comments and
-unresolved types. Unresolvable types are shown as `unknown`; check the app's
-TypeScript configuration and installed dependencies when that happens.
+Worker, referenced by its `sourceMappingURL`, so the CLI can recover comments and
+types after bundling or minification. The CLI warns when a service's source
+cannot be recovered. If a signature lacks expected type information, check the
+app's TypeScript configuration and installed dependencies.
 
 At most 16 overloads per method are documented; additional overloads remain
 callable. If the generated description exceeds another documentation limit, the
