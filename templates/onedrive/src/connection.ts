@@ -231,6 +231,7 @@ export const accountConnection = (environment: Environment, properties: Properti
           id,
           config.credentials,
           url.searchParams.get("managed_state") ?? undefined,
+          await registrationChanged(id, config.credentials),
         );
 
         const session = await auth.api.getSession({ headers: request.headers });

@@ -12,6 +12,7 @@ export const authentication = (
   id: string,
   credentials: OAuthCredentials,
   ticket?: string,
+  registrationChanged = false,
 ) =>
   betterAuth({
     database: environment.DB,
@@ -54,6 +55,27 @@ export const authentication = (
         allowUnlinkingAll: true,
         updateUserInfoOnLink: true,
         trustedProviders: ["microsoft"],
+      },
+    },
+    databaseHooks: {
+      account: {
+        update: {
+          before: async (account) => {
+            if (!registrationChanged) return;
+
+            // Better Auth preserves omitted tokens on relinking. A new registration
+            // must not inherit refresh grants or expiry dates from the previous one.
+            return {
+              data: {
+                ...account,
+                refreshToken: account.refreshToken ?? null,
+                idToken: account.idToken ?? null,
+                accessTokenExpiresAt: account.accessTokenExpiresAt ?? null,
+                refreshTokenExpiresAt: account.refreshTokenExpiresAt ?? null,
+              },
+            };
+          },
+        },
       },
     },
     advanced: { cookiePrefix: "account_microsoft" },

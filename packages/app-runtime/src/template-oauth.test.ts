@@ -319,8 +319,12 @@ for (const [template, kind, prefix] of [
 
     if (kind === "github")
       it("supports GitHub OAuth registrations without expiring tokens", async () => {
-        upstream.state.expiring = false;
+        await runtime.setOptions(configuration("complete"));
         const alice = browser("alice");
+        await connect(alice, "101");
+        await expire();
+        await runtime.setOptions(configuration());
+        upstream.state.expiring = false;
         await connect(alice, "101");
         expect(await (await alice.request("/rpc/list")).json()).toMatchObject({
           status: "connected",
