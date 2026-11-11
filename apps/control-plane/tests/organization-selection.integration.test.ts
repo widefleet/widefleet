@@ -11,7 +11,6 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { app } from "@platform/contracts";
 import { and, eq, or } from "drizzle-orm";
 import { esbuildBinary } from "../../../tools/cli-tools.ts";
-import { packageServiceDocumentation } from "../../../tools/service-docs-package.ts";
 import { CreateBucketCommand, DeleteBucketCommand } from "@aws-sdk/client-s3";
 import { createS3Client, createS3Storage } from "../src/lib/server/storage/s3.ts";
 import { createTestEnvironment } from "./environment.ts";
@@ -489,7 +488,6 @@ describe("Organization discovery and selection", () => {
           esbuild,
           join(directory, process.platform === "win32" ? "esbuild.exe" : "esbuild"),
         );
-        await packageServiceDocumentation(directory);
 
         const version = (await execute(binary, ["--version"])).stdout
           .trim()

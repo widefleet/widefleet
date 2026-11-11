@@ -1,5 +1,4 @@
 import { esbuildBinary } from "../../../tools/cli-tools.ts";
-import { packageServiceDocumentation } from "../../../tools/service-docs-package.ts";
 import * as contract from "@platform/contracts";
 import { execFile } from "node:child_process";
 import { once } from "node:events";
@@ -174,7 +173,6 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
     directory = await mkdtemp(join(tmpdir(), "widefleet-app-cli-"));
     const installation = join(directory, "installation");
     await mkdir(installation);
-    await packageServiceDocumentation(installation);
     executable = join(installation, process.platform === "win32" ? "widefleet.exe" : "widefleet");
     await copyFile(
       process.env["CLI_BINARY"] ??

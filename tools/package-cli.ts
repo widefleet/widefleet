@@ -7,7 +7,6 @@ import { parseArgs, promisify } from "node:util";
 import { build } from "esbuild";
 import { cliPlatform, cliPlatforms } from "./cli-platforms.ts";
 import { esbuildBinary, runPnpm } from "./cli-tools.ts";
-import { packageServiceDocumentation } from "./service-docs-package.ts";
 
 const execute = promisify(execFile);
 
@@ -69,8 +68,6 @@ await chmod(join(release, executableName), 0o755);
 
 await chmod(join(release, bundlerName), 0o755);
 
-await packageServiceDocumentation(release);
-
 await writeFile(
   join(release, "release.json"),
   JSON.stringify({ format: 1, version, esbuild_version: esbuildVersion }, null, 2) + "\n",
@@ -115,7 +112,9 @@ for (const [name, target] of [
   await runPnpm(["install", "--lockfile-only", "--frozen-lockfile", "--ignore-scripts"], template);
 }
 
-await mkdir(join(release, "licenses"));
+await cp(join(root, "crates/platform-cli/licenses"), join(release, "licenses"), {
+  recursive: true,
+});
 
 await copyFile(
   join(dirname(fileURLToPath(import.meta.resolve("esbuild/package.json"))), "LICENSE.md"),
@@ -159,7 +158,6 @@ const metadata = {
     executableName,
     bundlerName,
     "release.json",
-    "service-docs",
     "starter",
     "starters",
     "licenses",
