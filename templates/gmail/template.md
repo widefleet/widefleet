@@ -22,29 +22,41 @@ and its declared database. Keep your local source for subsequent changes.
 
 ## Configure Google
 
-An administrator needs to:
+If your installation provides [managed template OAuth](https://widefleet.com/docs/reference/template-oauth),
+leave `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` unset. The template uses
+that registration automatically. You can supply your own registration instead,
+using the instructions below.
+
+Set the app's `AUTH_SECRET` to a random value of at least 32 characters and keep it
+stable; it encrypts saved account tokens. Use the app's Secrets page or
+`widefleet secret put AUTH_SECRET --file /path/to/secret`.
+
+Allow these backend origins from the app directory:
+
+```sh
+widefleet network allow https://accounts.google.com
+widefleet network allow https://oauth2.googleapis.com
+widefleet network allow https://www.googleapis.com
+widefleet network allow https://gmail.googleapis.com
+```
+
+Network changes require the CLI's `network:manage` scope. Wait for the configuration
+to activate, then open the app URL and connect your Google account.
+
+The requested `gmail.readonly` scope permits reading mail.
+
+### Use your own OAuth registration
 
 1. Create a Google Cloud project, enable the Gmail API and configure the OAuth
    consent screen. For an external app in testing mode, add the Google accounts
    that will connect as test users.
 2. Create an OAuth client with the **Web application** type. Register
    `https://YOUR-APP-URL/auth/callback/google` as an authorized redirect URI.
-3. Set the app secrets `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `AUTH_SECRET`.
-   Generate `AUTH_SECRET` randomly with at least 32 characters and keep it stable;
-   it encrypts the saved account tokens. Use the app's Secrets page or
-   `widefleet secret put NAME --file /path/to/secret` to provide values.
-4. Allow these backend origins from the app directory:
+3. Set both `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` as app secrets.
 
-   ```sh
-   widefleet network allow https://accounts.google.com
-   widefleet network allow https://oauth2.googleapis.com
-   widefleet network allow https://www.googleapis.com
-   widefleet network allow https://gmail.googleapis.com
-   ```
-
-Network changes require the CLI's `network:manage` scope. Wait for the configuration
-to activate, then open the app URL and connect your Google account. The requested
-`gmail.readonly` scope permits reading mail.
+Your own credentials take precedence over managed OAuth. Provide both values;
+setting only one produces a setup error. Removing both switches back to managed
+OAuth when available. Users must reconnect after changing registrations.
 
 ## Use from another app
 
