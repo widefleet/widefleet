@@ -114,6 +114,12 @@ Extraction warnings identify missing source maps, malformed comments and
 unresolved types. Unresolvable types are shown as `unknown`; check the app's
 TypeScript configuration and installed dependencies when that happens.
 
+At most 16 overloads per method are documented; additional overloads remain
+callable. If the generated description exceeds another documentation limit, the
+CLI warns and omits the description while continuing the deployment. The app's
+code and available methods are unchanged. Check the deployment diagnostics if
+the App APIs page reports that no documentation was generated.
+
 Only published Worker entrypoints are described. Internal helpers, instance
 fields, getters and reserved event handlers are excluded from the RPC method
 list. HTTP support is reported separately. Documentation describes how to call
