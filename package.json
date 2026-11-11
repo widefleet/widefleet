@@ -23,6 +23,7 @@
     "@types/node": "26.6.4",
     "crossws": "0.4.15",
     "esbuild": "0.28.2",
+    "miniflare": "5.20261001.0-alpha",
     "oxfmt": "0.71.0",
     "oxlint": "1.86.0",
     "oxlint-tsgolint": "7.0.2003",

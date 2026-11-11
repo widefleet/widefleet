@@ -8,6 +8,7 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { bootstrapConfiguration, runtimeRelease } from "@platform/contracts";
 import { getPlatformProxy } from "wrangler";
 import { z } from "zod";
+import { managedOAuthConfiguration } from "@platform/app-runtime/oauth";
 import { cloudflareConfigurationSchema } from "../src/lib/server/cloudflare-config.ts";
 import { socialSignInConfiguration } from "../src/lib/server/social-sign-in.ts";
 import type { CloudflareBindings } from "../src/lib/server/cloudflare-config.ts";
@@ -50,6 +51,19 @@ const installation = await readHostedInstallation(z.string().parse(positionals[0
 const names = hostedResourceNames(installation);
 
 const socialCredentials = socialSignInConfiguration.parse(process.env);
+
+const managedOAuth = process.env["WIDEFLEET_OAUTH"]
+  ? managedOAuthConfiguration.parse(JSON.parse(process.env["WIDEFLEET_OAUTH"]))
+  : null;
+
+if (managedOAuth) {
+  const url = new URL(managedOAuth.origin);
+  const suffix = `.${installation.appDomain}`;
+  const label = url.hostname.slice(0, -suffix.length);
+
+  if (!url.hostname.endsWith(suffix) || !/^[a-z0-9-]+$/.test(label) || url.port)
+    throw new Error("Managed OAuth origin must be a single subdomain of the runtime app domain");
+}
 
 const secrets = z
   .object({
@@ -246,6 +260,8 @@ try {
     JSON.stringify({
       WIDEFLEET_CONTROL_TOKEN: secrets.WIDEFLEET_CONTROL_TOKEN,
       WIDEFLEET_SECRETS_KEY: secrets.WIDEFLEET_SECRETS_KEY,
+      // Empty explicitly disables the provider configuration on a subsequent deployment.
+      WIDEFLEET_OAUTH: managedOAuth ? JSON.stringify(managedOAuth) : "",
     }),
   );
 

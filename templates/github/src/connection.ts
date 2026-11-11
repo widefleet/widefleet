@@ -1,3 +1,4 @@
+import { oauthCredentials, type OAuthCredentials } from "./oauth.ts";
 import { z } from "zod";
 import { authentication } from "./auth.ts";
 import { caller, callerId, type Environment, type Properties } from "./context.ts";
@@ -38,23 +39,7 @@ export const accountConnection = (environment: Environment, properties: Properti
   };
 
   const configuration = async () => {
-    const values = new Map<string, string>();
-    const missing: string[] = [];
-
-    for (const name of ["GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "AUTH_SECRET"]) {
-      try {
-        const value = await environment.WIDEFLEET_SECRETS.get(name);
-
-        if (value) values.set(name, value);
-        else missing.push(name);
-      } catch (error) {
-        // A missing setting is actionable setup state. Storage/service failures
-        // must still surface as failures rather than masquerading as lost settings.
-        if (!(error instanceof Error) || !error.message.endsWith("App secret is not configured"))
-          throw error;
-        missing.push(name);
-      }
-    }
+    const { missing, credentials } = await oauthCredentials(environment, "github", "GITHUB");
 
     if (missing.length)
       return {
@@ -62,17 +47,22 @@ export const accountConnection = (environment: Environment, properties: Properti
         missing,
         connectUrl: environment.WIDEFLEET_ORIGIN,
       } as const;
+    z.string().min(32).parse(credentials.authSecret);
 
-    const configured = {
-      status: "configured",
-      credentials: {
-        clientId: z.string().parse(values.get("GITHUB_CLIENT_ID")),
-        clientSecret: z.string().parse(values.get("GITHUB_CLIENT_SECRET")),
-        authSecret: z.string().min(32).parse(values.get("AUTH_SECRET")),
-      },
-    } as const;
+    return { status: "configured", credentials } as const;
+  };
 
-    return configured;
+  const registrationChanged = async (id: string, credentials: OAuthCredentials) => {
+    const registration = await environment.DB.prepare(
+      "SELECT clientId, managed FROM oauth_registration WHERE userId = ?",
+    )
+      .bind(id)
+      .first<{ clientId: string; managed: number }>();
+
+    return registration
+      ? registration.clientId !== credentials.clientId ||
+          Boolean(registration.managed) !== credentials.managed
+      : credentials.managed;
   };
 
   const token = async () => {
@@ -83,6 +73,9 @@ export const accountConnection = (environment: Environment, properties: Properti
 
     if (config.status !== "configured") return config;
     const linked = await account(id);
+
+    if (linked && (await registrationChanged(id, config.credentials)))
+      return { status: "reconnect_required", connectUrl: environment.WIDEFLEET_ORIGIN } as const;
 
     if (!linked)
       return { status: "connection_required", connectUrl: environment.WIDEFLEET_ORIGIN } as const;
@@ -121,6 +114,9 @@ export const accountConnection = (environment: Environment, properties: Properti
 
       if (config.status !== "configured") return config;
       const linked = await account(id);
+
+      if (linked && (await registrationChanged(id, config.credentials)))
+        return { status: "reconnect_required", connectUrl: environment.WIDEFLEET_ORIGIN } as const;
 
       return {
         status: linked ? "connected" : "connection_required",
@@ -214,6 +210,7 @@ export const accountConnection = (environment: Environment, properties: Properti
 
         if (url.pathname === "/disconnect") {
           await environment.DB.batch([
+            environment.DB.prepare("DELETE FROM oauth_registration WHERE userId = ?").bind(id),
             environment.DB.prepare("DELETE FROM account WHERE userId = ? AND providerId = ?").bind(
               id,
               "github",
@@ -263,7 +260,15 @@ export const accountConnection = (environment: Environment, properties: Properti
         const config = await configuration();
 
         if (config.status !== "configured") return redirect("/");
-        const auth = authentication(environment, identity, id, config.credentials);
+
+        const auth = authentication(
+          environment,
+          identity,
+          id,
+          config.credentials,
+          url.searchParams.get("managed_state") ?? undefined,
+        );
+
         const session = await auth.api.getSession({ headers: request.headers });
 
         if (session?.user.id !== id)
@@ -272,7 +277,17 @@ export const accountConnection = (environment: Environment, properties: Properti
             { status: 403 },
           );
 
-        return auth.handler(request);
+        const response = await auth.handler(request);
+        const destination = response.headers.get("location");
+
+        if (destination === `${url.origin}/` && (await account(id)))
+          await environment.DB.prepare(
+            "INSERT INTO oauth_registration (userId, clientId, managed) VALUES (?, ?, ?) ON CONFLICT(userId) DO UPDATE SET clientId = excluded.clientId, managed = excluded.managed",
+          )
+            .bind(id, config.credentials.clientId, Number(config.credentials.managed))
+            .run();
+
+        return response;
       }
 
       // Token/session endpoints, including the internal bootstrap, stay private.

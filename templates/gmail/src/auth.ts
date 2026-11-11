@@ -1,3 +1,4 @@
+import { managedOAuthPlugin, type OAuthCredentials } from "./oauth.ts";
 import { z } from "zod";
 import { betterAuth } from "better-auth";
 import { createAuthEndpoint } from "better-auth/api";
@@ -11,7 +12,8 @@ export const authentication = (
   environment: Environment,
   identity: Caller,
   id: string,
-  credentials: { clientId: string; clientSecret: string; authSecret: string },
+  credentials: OAuthCredentials,
+  ticket?: string,
 ) =>
   betterAuth({
     database: environment.DB,
@@ -69,6 +71,9 @@ export const authentication = (
       },
     },
     plugins: [
+      ...(credentials.managed && environment.WIDEFLEET_OAUTH
+        ? [managedOAuthPlugin(environment.WIDEFLEET_OAUTH, "google", ticket)]
+        : []),
       {
         id: "widefleet-caller",
         endpoints: {
