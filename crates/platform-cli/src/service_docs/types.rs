@@ -15,7 +15,7 @@ pub struct Types {
 
 impl Types {
     pub fn new(project: &std::path::Path) -> Self {
-        let path = tsrs_core::tspath::normalize_path(&project.to_string_lossy());
+        let path = super::sources::compiler_path(&project.to_string_lossy());
         let quoted = json!(path.trim_end_matches('/').to_owned() + "/").to_string();
         Self {
             import_prefix: format!("import({}", quoted.trim_end_matches('"')),

@@ -30,12 +30,13 @@ impl<'a> Sources<'a> {
     pub fn new(project: &Path, bundle: &Path, map: &'a str) -> Result<Self> {
         let map = SourceMap::from_json_string(map)
             .map_err(|error| Error::invalid(format!("Cannot read API source map: {error}")))?;
-        let bundle = tspath::normalize_path(&bundle.to_string_lossy());
+        let project = compiler_path(&project.to_string_lossy());
+        let bundle = compiler_path(&bundle.to_string_lossy());
         let mut originals = BTreeMap::new();
         for (source, content) in map.get_sources().zip(map.get_source_contents()) {
             if let (Some(source), Some(content)) = (source, content) {
                 let file = source_path(&bundle, &map, source);
-                if Path::new(&file).starts_with(project)
+                if Path::new(&file).starts_with(&project)
                     && !Path::new(&file)
                         .components()
                         .any(|part| part.as_os_str() == "node_modules")
@@ -72,7 +73,7 @@ impl<'a> Sources<'a> {
         )));
         let host = ConfigHost {
             fs: fs.clone(),
-            directory: project.to_string_lossy().into_owned(),
+            directory: compiler_path(&project.to_string_lossy()),
         };
         let config_path = project
             .ancestors()
@@ -80,7 +81,7 @@ impl<'a> Sources<'a> {
             .find(|file| file.is_file());
         let mut config = if let Some(config_path) = config_path {
             tsrs_tsoptions::get_parsed_command_line_of_config_file(
-                &config_path.to_string_lossy(),
+                &compiler_path(&config_path.to_string_lossy()),
                 None,
                 None,
                 &host,
@@ -175,15 +176,25 @@ fn source_path(bundle: &str, map: &SourceMap<'_>, source: &str) -> String {
     if let Ok(url) = reqwest::Url::parse(source)
         && let Ok(file) = url.to_file_path()
     {
-        return tspath::normalize_path(&file.to_string_lossy());
+        return compiler_path(&file.to_string_lossy());
     }
     tspath::get_normalized_absolute_path(
-        source,
+        &compiler_path(source),
         &tspath::get_normalized_absolute_path(
-            map.get_source_root().unwrap_or(""),
+            &compiler_path(map.get_source_root().unwrap_or("")),
             &tspath::get_directory_path(bundle),
         ),
     )
+}
+
+pub(super) fn compiler_path(path: &str) -> String {
+    let path = tspath::normalize_slashes(path);
+    // Rust canonicalizes local Windows paths as \\?\C:\..., which tsrs's
+    // filesystem rejects as a device/network path. Preserve the local drive.
+    let local = path
+        .strip_prefix("//?/")
+        .filter(|rest| matches!(rest.as_bytes(), [b'a'..=b'z' | b'A'..=b'Z', b':', b'/', ..]));
+    tspath::normalize_path(local.unwrap_or(&path))
 }
 
 fn at_position(node: P<Node>, position: u32) -> P<Node> {
@@ -201,4 +212,51 @@ fn at_position(node: P<Node>, position: u32) -> P<Node> {
         }
     }
     node
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canonical_paths_keep_bundles_and_originals_in_the_same_project() -> Result<()> {
+        let map = serde_json::json!({
+            "version": 3,
+            "sources": ["../app.ts", "../node_modules/dependency.ts", "../../outside.ts"],
+            "sourcesContent": ["export class Service {}", "dependency", "outside"],
+            "names": [],
+            "mappings": ""
+        })
+        .to_string();
+        for (project, bundle, expected) in [
+            (
+                "/apps/docs project",
+                "/apps/docs project/build/worker.js",
+                "/apps/docs project",
+            ),
+            (
+                r"C:\apps\docs project",
+                r"C:\apps\docs project\build\worker.js",
+                "C:/apps/docs project",
+            ),
+            (
+                r"\\?\C:\apps\docs project",
+                r"\\?\C:\apps\docs project\build\worker.js",
+                "C:/apps/docs project",
+            ),
+        ] {
+            let sources = Sources::new(Path::new(project), Path::new(bundle), &map)?;
+            assert_eq!(sources.bundle, format!("{expected}/build/worker.js"));
+            assert!(!tspath::is_network_path(&sources.bundle));
+            assert_eq!(sources.originals.len(), 1);
+            assert_eq!(
+                sources
+                    .originals
+                    .get(&format!("{expected}/app.ts"))
+                    .map(String::as_str),
+                Some("export class Service {}")
+            );
+        }
+        Ok(())
+    }
 }
