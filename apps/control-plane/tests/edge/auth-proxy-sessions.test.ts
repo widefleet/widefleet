@@ -88,6 +88,7 @@ describe("Auth proxy session lifecycle", () => {
     idp.settings.issueRefreshToken = true;
     idp.settings.omitRefreshIdToken = false;
     idp.settings.subject = "pairwise-subject";
+    idp.settings.name = "Example User";
     idp.settings.groups = ["accounting"];
     idp.settings.graphFailure = "";
     idp.refreshRequests.length = 0;
@@ -104,58 +105,74 @@ describe("Auth proxy session lifecycle", () => {
     await idp?.stop();
   });
 
-  it("passes the verified caller and isolates app OAuth cookies from all company cookies", async () => {
-    const forwarded = vi.fn(async () => {
-      const headers = new Headers();
-      headers.append(
-        "set-cookie",
-        "app_session=oauth; Domain=apps.example.test; Path=/; Secure; HttpOnly; SameSite=Lax",
-      );
-      headers.append("set-cookie", "__Host-app_state=state; Path=/; Secure; HttpOnly");
+  it.each([false, true])(
+    "isolates app cookies and forwards the current caller after renewal: %s",
+    async (renew) => {
+      if (renew) {
+        expireIdentity();
+        idp.settings.name = "Renewed User";
+      }
 
-      for (const name of [
-        "platform_sso_other.session_data",
-        "__Secure-platform_sso_other.session_token",
-        "__Host-platform_sso_other.oauth_state",
-      ])
-        headers.append("set-cookie", `${name}=forged; Domain=apps.example.test; Path=/`);
+      const forwarded = vi.fn(async () => {
+        const headers = new Headers();
+        headers.append(
+          "set-cookie",
+          "app_session=oauth; Domain=apps.example.test; Path=/; Secure; HttpOnly; SameSite=Lax",
+        );
+        headers.append("set-cookie", "__Host-app_state=state; Path=/; Secure; HttpOnly");
 
-      return new Response("Connected", { headers });
-    });
+        for (const name of [
+          "platform_sso_other.session_data",
+          "__Secure-platform_sso_other.session_token",
+          "__Host-platform_sso_other.oauth_state",
+        ])
+          headers.append("set-cookie", `${name}=forged; Domain=apps.example.test; Path=/`);
 
-    const calls: { request: Request; caller: unknown }[] = [];
+        return new Response("Connected", { headers });
+      });
 
-    const proxy = createAuthProxy(configuration, {
-      ...apps,
-      fetch: (request, caller) => {
-        calls.push({ request, caller });
+      const calls: { request: Request; caller: unknown }[] = [];
 
-        return forwarded();
-      },
-    });
+      const proxy = createAuthProxy(configuration, {
+        ...apps,
+        fetch: (request, caller) => {
+          calls.push({ request, caller });
 
-    const response = await proxy.fetch(
-      new Request(app, {
-        headers: {
-          cookie: `${cookie}; app_session=oauth; __Secure-platform_sso_other.session_token=private; platform_sso_other.session_data=private`,
-          "x-auth-request-user": "forged",
+          return forwarded();
         },
-      }),
-    );
+      });
 
-    expect(response.status).toBe(200);
-    expect(calls[0]?.caller).toEqual({
-      issuer: idp.origin,
-      subject: "pairwise-subject",
-      name: "Example User",
-    });
-    expect(calls[0]?.request.headers.get("cookie")?.trim()).toBe("app_session=oauth");
-    expect(calls[0]?.request.headers.get("x-auth-request-user")).toBe("pairwise-subject");
-    expect(response.headers.getSetCookie()).toEqual([
-      "app_session=oauth; Path=/; Secure; HttpOnly; SameSite=Lax",
-      "__Host-app_state=state; Path=/; Secure; HttpOnly",
-    ]);
-  });
+      const response = await proxy.fetch(
+        new Request(app, {
+          headers: {
+            cookie: `${cookie}; app_session=oauth; __Secure-platform_sso_other.session_token=private; platform_sso_other.session_data=private`,
+            "x-auth-request-user": "forged",
+          },
+        }),
+      );
+
+      expect(response.status).toBe(200);
+      expect(calls[0]?.caller).toEqual({
+        issuer: idp.origin,
+        subject: "pairwise-subject",
+        name: renew ? "Renewed User" : "Example User",
+      });
+      expect(calls[0]?.request.headers.get("cookie")?.trim()).toBe("app_session=oauth");
+      expect(calls[0]?.request.headers.get("x-auth-request-user")).toBe("pairwise-subject");
+
+      const sessionCookies = response.headers
+        .getSetCookie()
+        .filter((value) => value.startsWith("__Secure-platform_sso_widefleet."));
+
+      expect(sessionCookies.length > 0).toBe(renew);
+      expect(
+        response.headers.getSetCookie().filter((value) => !sessionCookies.includes(value)),
+      ).toEqual([
+        "app_session=oauth; Path=/; Secure; HttpOnly; SameSite=Lax",
+        "__Host-app_state=state; Path=/; Secure; HttpOnly",
+      ]);
+    },
+  );
 
   const expireIdentity = () => {
     vi.useFakeTimers({ toFake: ["Date"] });

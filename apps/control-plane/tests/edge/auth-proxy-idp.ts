@@ -44,7 +44,6 @@ export const createIdentityProvider = async (
     rotateRefreshTokens: false,
     issueRefreshToken: true,
     omitRefreshIdToken: false,
-    subject: "pairwise-subject",
   };
 
   const graphRequests: string[] = [];
