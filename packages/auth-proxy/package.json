@@ -7,6 +7,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./publication": "./src/publication.ts",
+    "./google-directory": "./src/google-directory.ts",
     "./worker": "./src/worker.ts"
   },
   "scripts": {

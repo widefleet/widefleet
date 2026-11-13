@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { configurationSchema } from "../src/lib/server/config.ts";
 import { createDirectory } from "../src/lib/server/directory.ts";
 import { installationSettings } from "./installation/settings.ts";
 import { companyAccountProvider } from "../src/lib/server/company-identity.ts";
 import { companyIdentity } from "../src/lib/server/company-identity.ts";
+import { exportPKCS8, generateKeyPair } from "jose";
 
 const creator = {
   id: "fixture-user",
@@ -35,6 +36,101 @@ const configuration = {
 };
 
 describe("company directory", () => {
+  it("replaces rejected Google tokens and shares concurrent exchanges after expiry", async () => {
+    const keys = await generateKeyPair("RS256", { extractable: true });
+
+    const identity = companyIdentity.parse({
+      provider: { type: "google", domain: "example.test" },
+      management: { clientId: "browser", clientSecret: "browser-secret" },
+      directory: {
+        clientId: "cache@fixture.iam.gserviceaccount.com",
+        adminEmail: "admin@example.test",
+        clientSecret: await exportPKCS8(keys.privateKey),
+      },
+    });
+
+    let issued = 0;
+    let rejected = "";
+
+    const directory = createDirectory(
+      async () => identity,
+      async (input, init) => {
+        const request = new Request(input, init);
+
+        if (request.url.endsWith("/token")) {
+          issued++;
+
+          return Response.json({ access_token: `token-${issued}`, expires_in: 3600 });
+        }
+
+        if (request.headers.get("authorization") === rejected)
+          return new Response(null, { status: 401 });
+
+        return Response.json({ groups: [] });
+      },
+    );
+
+    const search = () => directory.search(creator, { query: "Accounting", limit: 10 });
+
+    expect((await search()).isOk()).toBe(true);
+    expect(issued).toBe(1);
+    rejected = "Bearer token-1";
+    expect((await search()).isOk()).toBe(true);
+    expect(issued).toBe(2);
+    vi.useFakeTimers({ toFake: ["Date"] });
+
+    try {
+      vi.setSystemTime(Date.now() + 61 * 60 * 1000);
+      const results = await Promise.all(Array.from({ length: 12 }, search));
+
+      expect(results.every((result) => result.isOk())).toBe(true);
+      expect(issued).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("uses Google directory credentials for authorized group search", async () => {
+    const keys = await generateKeyPair("RS256", { extractable: true });
+
+    const identity = companyIdentity.parse({
+      provider: { type: "google", domain: "example.test" },
+      management: { clientId: "browser", clientSecret: "browser-secret" },
+      directory: {
+        clientId: "directory@fixture.iam.gserviceaccount.com",
+        adminEmail: "admin@example.test",
+        clientSecret: await exportPKCS8(keys.privateKey),
+      },
+    });
+
+    let calls = 0;
+
+    const directory = createDirectory(
+      async () => identity,
+      async (input, init) => {
+        calls++;
+        const request = new Request(input, init);
+
+        return request.url.endsWith("/token")
+          ? Response.json({ access_token: "google-directory-token", expires_in: 3600 })
+          : Response.json({ groups: [{ id: "accounting-id", name: "Accounting" }] });
+      },
+    );
+
+    const result = await directory.search(creator, { query: "Accounting", limit: 10 });
+
+    expect(result).toMatchObject({
+      value: { groups: [{ id: "accounting-id", name: "Accounting", source: "Google Workspace" }] },
+    });
+    expect(calls).toBe(2);
+
+    const denied = await directory.search(
+      { ...creator, creator: false },
+      { query: "Accounting", limit: 10 },
+    );
+
+    expect(denied).toMatchObject({ error: { code: "FORBIDDEN" } });
+    expect(calls).toBe(2);
+  });
   it("separates organization tokens and refreshes credentials after a configuration change", async () => {
     const identities = new Map([
       [

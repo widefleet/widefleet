@@ -1,11 +1,53 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { companyProvider, settingsInput } from "@platform/contracts";
 import { companyAccountProvider, companyIdentity } from "../src/lib/server/company-identity.ts";
 import { installationSettings } from "./installation/settings.ts";
+import { createInstalledAppSignIn } from "../src/lib/server/app-sign-in-installed.ts";
+import { configurationSchema } from "../src/lib/server/config.ts";
+import { authConfiguration } from "@platform/auth-proxy";
 
 const client = { clientId: "client", clientSecret: "secret" };
 
 describe("company identity settings", () => {
+  it("publishes Google's independent directory credentials to the app proxy", async () => {
+    const identity = companyIdentity.parse({
+      provider: { type: "google", domain: "example.test" },
+      management: client,
+      directory: {
+        clientId: "directory@fixture.iam.gserviceaccount.com",
+        clientSecret: "synthetic-private-key",
+        adminEmail: "admin@example.test",
+      },
+    });
+
+    let published: z.infer<typeof authConfiguration> | undefined;
+
+    const appSignIn = createInstalledAppSignIn(
+      configurationSchema.parse({
+        ...installationSettings,
+        S3_ENDPOINT: "http://127.0.0.1:25400",
+        S3_BUCKET: "artifacts",
+      }),
+      Buffer.from(new Uint8Array(32).fill(1)).toString("base64url"),
+      async (method, body) => {
+        expect(method).toBe("PUT");
+        published = authConfiguration.parse(JSON.parse(z.string().parse(body)));
+
+        return { text: async () => "" };
+      },
+      "immediate",
+    );
+
+    await appSignIn.publish(identity, client.clientSecret);
+    expect(published?.directory).toEqual(identity.directory);
+    expect(published?.provider).toMatchObject({
+      type: "google",
+      issuer: "https://accounts.google.com",
+      domain: "example.test",
+    });
+    expect(authConfiguration.safeParse({ ...published, directory: undefined }).success).toBe(false);
+  });
   it("keeps the installation account namespace", () => {
     const identity = companyIdentity.parse({
       provider: { type: "entra", tenantId: installationSettings.ENTRA_TENANT_ID },

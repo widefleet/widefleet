@@ -57,19 +57,30 @@ export const ssoRuntimeIdentity = (
       message: "Entra app claims require a tenant-specific Entra issuer",
     });
 
+  if (
+    connection.appIdentityType === "google" &&
+    connection.issuer !== "https://accounts.google.com"
+  )
+    throw new InvalidOperation({
+      code: "BAD_REQUEST",
+      message: "Google Workspace requires https://accounts.google.com as its issuer",
+    });
+
   return companyIdentity.parse({
     scopes: configuration.scopes,
     provider:
       connection.appIdentityType === "entra"
         ? { type: "entra", authority: issuer.origin, tenantId: tenant, label: "Microsoft Entra" }
-        : {
-            type: "oidc",
-            issuer: connection.issuer,
-            label: "Company SSO",
-            nameClaim: configuration.mapping.name,
-            emailClaim: configuration.mapping.email,
-            groupsClaim: configuration.mapping.extraFields.groups,
-          },
+        : connection.appIdentityType === "google"
+          ? { type: "google", domain: connection.domain }
+          : {
+              type: "oidc",
+              issuer: connection.issuer,
+              label: "Company SSO",
+              nameClaim: configuration.mapping.name,
+              emailClaim: configuration.mapping.email,
+              groupsClaim: configuration.mapping.extraFields.groups,
+            },
     management: { clientId: configuration.clientId, clientSecret: configuration.clientSecret },
     directory: null,
   });
