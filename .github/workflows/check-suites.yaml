@@ -151,7 +151,7 @@ jobs:
           cargo clippy --workspace --all-targets -- -D warnings
           cargo test --workspace
           cargo build --workspace
-          RUN_CLI_TESTS=1 pnpm exec vitest run apps/control-plane/tests/cli.test.ts apps/control-plane/tests/network-cli.test.ts apps/control-plane/tests/access-cli.test.ts apps/control-plane/tests/app-services-cli.test.ts apps/control-plane/tests/app-services.integration.test.ts apps/control-plane/tests/workflows-cli.test.ts apps/control-plane/tests/auth-cli.test.ts apps/control-plane/tests/configuration-cli.test.ts apps/control-plane/tests/discovery-cli.test.ts apps/control-plane/tests/auth-cli.integration.test.ts apps/control-plane/tests/organization-selection.integration.test.ts apps/control-plane/tests/organization-login.integration.test.ts apps/control-plane/tests/reporting-cli.test.ts
+          RUN_CLI_TESTS=1 pnpm exec vitest run apps/control-plane/tests/cli.test.ts apps/control-plane/tests/network-cli.test.ts apps/control-plane/tests/access-cli.test.ts apps/control-plane/tests/app-services-cli.test.ts apps/control-plane/tests/service-documentation.test.ts apps/control-plane/tests/app-services.integration.test.ts apps/control-plane/tests/workflows-cli.test.ts apps/control-plane/tests/auth-cli.test.ts apps/control-plane/tests/configuration-cli.test.ts apps/control-plane/tests/discovery-cli.test.ts apps/control-plane/tests/auth-cli.integration.test.ts apps/control-plane/tests/organization-selection.integration.test.ts apps/control-plane/tests/organization-login.integration.test.ts apps/control-plane/tests/reporting-cli.test.ts
       - name: Test CLI login through the browser
         if: matrix.suite == 'rust-runtime'
         run: pnpm --filter @platform/control-plane test:e2e cli-login.spec.ts

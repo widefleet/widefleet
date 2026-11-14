@@ -1,7 +1,7 @@
 import { transact } from "./transactions.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql, ne, or } from "drizzle-orm";
 import type { z } from "zod";
 import { managedApp } from "./apps.ts";
 import { bindingState, applyCapabilityChange } from "./capability-changes.ts";
@@ -10,8 +10,51 @@ import { apps, artifacts, deployments, jobs } from "./schema.ts";
 import type { Database } from "./database.ts";
 import type { HostedExecution } from "./deployment-execution.ts";
 import type { Principal } from "./identity.ts";
+import { InvalidOperation } from "./errors.ts";
 
 export const createConnectionService = (database: Database, execution?: HostedExecution) => ({
+  describe: (principal: Principal, service: string) =>
+    transact(database, async (transaction) => {
+      const byId = contract.identifier.safeParse(service).success
+        ? eq(apps.id, service)
+        : undefined;
+
+      const [record] = await transaction
+        .select({ app: apps, metadata: artifacts.metadata, deploymentId: deployments.id })
+        .from(apps)
+        .innerJoin(
+          deployments,
+          and(eq(deployments.id, apps.activeDeploymentId), eq(deployments.appId, apps.id)),
+        )
+        .innerJoin(artifacts, eq(artifacts.id, deployments.artifactId))
+        .where(
+          and(
+            eq(apps.organizationId, principal.application.organizationId),
+            isNull(apps.removedAt),
+            ne(apps.state, "deleting"),
+            or(byId, eq(apps.slug, service)),
+          ),
+        )
+        .orderBy(desc(byId ?? apps.slug))
+        .limit(1);
+
+      if (!record)
+        return Result.err(
+          new InvalidOperation({ code: "NOT_FOUND", message: "App service not found" }),
+        );
+      const metadata = contract.workerMetadata.parse(record.metadata);
+
+      return Result.ok(
+        contract.serviceDescription.parse({
+          appId: record.app.id,
+          slug: record.app.slug,
+          displayName: record.app.displayName,
+          deploymentId: record.deploymentId,
+          entrypoints: metadata.entrypoints ?? [],
+          documentation: metadata.service_documentation ?? null,
+        }),
+      );
+    }),
   services: (principal: Principal) =>
     transact(database, async (transaction) => {
       const records = await transaction

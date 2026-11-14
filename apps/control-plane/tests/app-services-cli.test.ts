@@ -10,10 +10,14 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
+import { executeCli } from "./cli-process.ts";
 
 const execute = promisify(execFile);
 
-describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App services CLI", () => {
+const describeCli = describe.runIf(process.env["RUN_CLI_TESTS"] === "1");
+
+// Allow multiple native commands, each with its own 10-second process deadline.
+describeCli("App services CLI", { timeout: 30_000 }, () => {
   const app = contract.app.parse({
     id: "00000000-0000-4000-8000-000000000001",
     slug: "inventory",
@@ -73,6 +77,19 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App services CLI", () => {
               entrypoints: ["Reader"],
             },
           ]),
+        );
+      } else if (request.url === "/api/v1/app-services/erp-app") {
+        response.end(
+          JSON.stringify({
+            appId: app.id,
+            slug: "erp-app",
+            deploymentId: app.activeDeploymentId,
+            documentation: {
+              format: 1,
+              entrypoints: [{ name: "Reader", summary: "Read inventory" }],
+              types: [],
+            },
+          }),
         );
       } else if (request.url === `/api/v1/apps/${app.id}/assets-upload-session`) {
         response.end(
@@ -202,7 +219,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App services CLI", () => {
   });
 
   const command = (...args: string[]) =>
-    execute(executable, args, {
+    executeCli(executable, args, {
       cwd: directory,
       timeout: 10000,
       env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: "normal-credential" },
@@ -276,6 +293,67 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App services CLI", () => {
 
     expect(metadata.entrypoints ?? []).toEqual(fixture.entrypoints);
     expect(metadata.web).toBe(fixture.web);
+    expect(metadata.service_documentation?.format).toBe(1);
+
+    if (fixture.entrypoints.includes("Reader"))
+      expect(
+        metadata.service_documentation?.entrypoints.find((entry) => entry.name === "Reader")
+          ?.methods[0]?.name,
+      ).toBe("read");
+  });
+
+  it.each([
+    {
+      name: "excess overloads",
+      source: `${Array.from({ length: 17 }, (_, index) => `read(input: ${index}): ${index};`).join("\n")} read(input: number) { return input; }`,
+      warning: "Only the first 16 overloads",
+      signatures: 16,
+    },
+    {
+      name: "oversized comment",
+      source: `/** ${"x".repeat(32769)} */ read() { return 1; }`,
+      warning: "API documentation was omitted",
+      signatures: 0,
+    },
+  ])("deploys valid code when documentation exceeds limits: $name", async (fixture) => {
+    await writeFile(
+      join(directory, "bounded.ts"),
+      `import {WorkerEntrypoint} from "cloudflare:workers"; export class Reader extends WorkerEntrypoint {\n${fixture.source}\n}`,
+    );
+    await writeFile(
+      join(directory, "bounded.jsonc"),
+      JSON.stringify({ name: app.slug, main: "bounded.ts", compatibility_date: "2026-10-01" }),
+    );
+    const result = await command("deploy", "--config", "bounded.jsonc", "--no-wait", "--json");
+    expect(JSON.parse(result.stdout)).toMatchObject({ status: "queued" });
+    const upload = requests.find((entry) => entry.path.endsWith("/worker"));
+
+    const form = await new Response(upload?.body, {
+      headers: { "content-type": upload?.contentType ?? "" },
+    }).formData();
+
+    const metadata = contract.workerMetadata.parse(
+      JSON.parse(z.string().parse(form.get("metadata"))),
+    );
+
+    expect(metadata.entrypoints).toEqual(["Reader"]);
+    expect(result.stderr).toContain(fixture.warning);
+    expect(metadata.service_documentation?.entrypoints[0]?.methods[0]?.signatures.length ?? 0).toBe(
+      fixture.signatures,
+    );
+  });
+
+  it("reads API documentation through the authenticated service endpoint", async () => {
+    const result = await command("services", "describe", "erp-app");
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      slug: "erp-app",
+      documentation: { format: 1 },
+    });
+    expect(requests[0]).toMatchObject({
+      path: "/api/v1/app-services/erp-app",
+      method: "GET",
+      authorization: "Bearer normal-credential",
+    });
   });
 
   it("rejects the nonstandard widefleet Wrangler property", async () => {
@@ -331,6 +409,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("App services CLI", () => {
     );
 
     const after = contract.workerMetadata.parse(JSON.parse(z.string().parse(next.get("metadata"))));
+
     const code = form.get("worker.js");
     const nextCode = next.get("worker.js");
 

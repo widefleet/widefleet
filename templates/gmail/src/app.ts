@@ -31,7 +31,9 @@ export default class Gmail extends WorkerEntrypoint<Environment, Properties> {
    * Search messages using Gmail's search syntax. Results contain IDs; use getMessage to read them.
    * @param input - Query, page size (1–100) and the previous result's nextPageToken.
    * @example
+   * ```ts
    * await env.GMAIL.searchMessages({ query: "has:attachment filename:pdf", maxResults: 10 });
+   * ```
    */
   async searchMessages(input: z.input<typeof searchInput> = {}) {
     const result = await this.#connection().request(

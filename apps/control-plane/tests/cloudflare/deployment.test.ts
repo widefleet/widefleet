@@ -696,7 +696,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         })
       ).unwrap();
 
-      first = await seedDeployment(environment.database.db, { appId: parentApp.id });
+      first = await seedDeployment(environment.database.db, {
+        appId: parentApp.id,
+        documentation: { format: 1, entrypoints: [], types: [] },
+      });
       first.command.attribution = { userId: "fixture-owner", organizationId: first.organizationId };
       preview = await seedDeployment(environment.database.db, { appId: previewApp.id });
 
@@ -1140,6 +1143,9 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         body: { deploymentId: first.deploymentId },
         access: JSON.stringify({ revision: 1, groups: ["engineering"] }),
       });
+      expect(
+        contract.publishedApp.parse((await host(first.hostname))?.body).metadata,
+      ).not.toHaveProperty("service_documentation");
       expect((await host(preview.hostname))?.access).toBe(
         JSON.stringify({ revision: 1, groups: largeGroups }),
       );

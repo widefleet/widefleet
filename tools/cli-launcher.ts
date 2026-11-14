@@ -17,7 +17,9 @@ function launch() {
     );
   }
 
-  const child = spawn(executable, process.argv.slice(2), { stdio: "inherit" });
+  const child = spawn(executable, process.argv.slice(2), {
+    stdio: "inherit",
+  });
 
   const interrupt = () => {
     // Windows delivers console Ctrl+C to both processes. child.kill('SIGINT')

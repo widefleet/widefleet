@@ -4,6 +4,7 @@ import * as contract from "@platform/contracts";
 import { z } from "zod";
 import { remoteContext, queryValue, formValue } from "#server/remote-support";
 import { getAppConnections } from "./connections.remote.ts";
+import { renderServiceDocumentation } from "#server/service-documentation";
 
 export const getAppServices = query(async () => {
   const { runtime, principal } = await remoteContext();
@@ -11,6 +12,16 @@ export const getAppServices = query(async () => {
   return {
     admin: principal.application.admin,
     entries: queryValue(await runtime.connections.services(principal)),
+  };
+});
+
+export const getServiceDescription = query(contract.servicePath, async ({ service }) => {
+  const { runtime, principal } = await remoteContext();
+  const description = queryValue(await runtime.connections.describe(principal, service));
+
+  return {
+    ...description,
+    html: description.documentation ? renderServiceDocumentation(description.documentation) : null,
   };
 });
 
