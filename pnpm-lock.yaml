@@ -194,6 +194,9 @@ importers:
       esbuild:
         specifier: 0.28.2
         version: 0.28.2
+      miniflare:
+        specifier: 5.20261001.0-alpha
+        version: 5.20261001.0-alpha(patch_hash=14a20cb93d5b33de95aab0b33f8ba5c91a75a9c1eb4438753b017be53fb04f73)(@types/node@26.6.4)
       oxfmt:
         specifier: 0.71.0
         version: 0.71.0(svelte@5.57.1)

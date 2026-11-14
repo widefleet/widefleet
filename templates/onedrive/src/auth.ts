@@ -1,3 +1,4 @@
+import { managedOAuthPlugin, type OAuthCredentials } from "./oauth.ts";
 import { z } from "zod";
 import { betterAuth } from "better-auth";
 import { createAuthEndpoint } from "better-auth/api";
@@ -9,7 +10,9 @@ export const authentication = (
   environment: Environment,
   identity: Caller,
   id: string,
-  credentials: { clientId: string; clientSecret: string; authSecret: string },
+  credentials: OAuthCredentials,
+  ticket?: string,
+  registrationChanged = false,
 ) =>
   betterAuth({
     database: environment.DB,
@@ -54,6 +57,27 @@ export const authentication = (
         trustedProviders: ["microsoft"],
       },
     },
+    databaseHooks: {
+      account: {
+        update: {
+          before: async (account) => {
+            if (!registrationChanged) return;
+
+            // Better Auth preserves omitted tokens on relinking. A new registration
+            // must not inherit refresh grants or expiry dates from the previous one.
+            return {
+              data: {
+                ...account,
+                refreshToken: account.refreshToken ?? null,
+                idToken: account.idToken ?? null,
+                accessTokenExpiresAt: account.accessTokenExpiresAt ?? null,
+                refreshTokenExpiresAt: account.refreshTokenExpiresAt ?? null,
+              },
+            };
+          },
+        },
+      },
+    },
     advanced: { cookiePrefix: "account_microsoft" },
     socialProviders: {
       microsoft: {
@@ -67,6 +91,9 @@ export const authentication = (
       },
     },
     plugins: [
+      ...(credentials.managed && environment.WIDEFLEET_OAUTH
+        ? [managedOAuthPlugin(environment.WIDEFLEET_OAUTH, "microsoft", ticket)]
+        : []),
       {
         id: "widefleet-caller",
         endpoints: {

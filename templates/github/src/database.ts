@@ -1,6 +1,9 @@
 // Better Auth's core SQLite schema, with one provider account per Widefleet user.
 // Each app initializes its own account tables on first use.
 const schema = [
+  `CREATE TABLE IF NOT EXISTS oauth_registration (
+    userId TEXT PRIMARY KEY NOT NULL, clientId TEXT NOT NULL, managed INTEGER NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS "user" (
     id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE,
     emailVerified INTEGER NOT NULL, image TEXT, providerEmail TEXT, createdAt DATE NOT NULL, updatedAt DATE NOT NULL
