@@ -84,7 +84,10 @@ export const createCloudflareExecution = (
 
         const accepted = await admit({
           kind: "capabilities",
-          id: requestId ?? crypto.randomUUID(),
+          // A pending request may have an earlier rejected or stopped attempt. Give
+          // each approval attempt its own workflow; the request is consumed atomically
+          // with the binding, so only one accepted attempt can change it.
+          id: crypto.randomUUID(),
           connectionRequestId: requestId,
           appId,
           name,

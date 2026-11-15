@@ -159,7 +159,7 @@ export const validateCapabilityChange = async (
   if (grant?.app) {
     await resolveAppService(transaction, app.organizationId, grant);
 
-    if (!principal.application.admin && !authorization) {
+    if (!principal.application.admin && !authorization && !isDeepStrictEqual(grants[name], grant)) {
       const [service] = await transaction
         .select({ accessMode: apps.serviceAccessMode })
         .from(apps)

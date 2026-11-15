@@ -1,5 +1,10 @@
 <script lang="ts">
-  import { getAppServices, disconnectApp, setServiceAccess } from "#lib/services.remote";
+  import {
+    getAppServices,
+    disconnectApp,
+    setServiceAccess,
+    connectApp,
+  } from "#lib/services.remote";
   import { getApps } from "#lib/apps.remote";
   import ServiceConnectionForm from "#shadcn/components/ServiceConnectionForm.svelte";
   import { getAppConnections } from "#lib/connections.remote";
@@ -134,6 +139,20 @@
             : "Disconnect"}</Button
         >
       </form>
+      {#if !removing && connections.connections.state === "failed"}
+        {@const retry = connectApp.for(`retry-${binding}`)}
+        <form {...retry} class="space-y-2">
+          <OrganizationField field={retry.fields.organizationId} />
+          <input {...retry.fields.appId.as("hidden", data.app.id)} />
+          <input {...retry.fields.targetApp.as("hidden", grant.app)} />
+          <input {...retry.fields.entrypoint.as("hidden", grant.entrypoint)} />
+          <input {...retry.fields.binding.as("hidden", binding)} />
+          <FormIssues issues={retry.fields.allIssues()} />
+          <Button type="submit" variant="outline" disabled={retry.pending > 0}
+            >Retry connection {binding}</Button
+          >
+        </form>
+      {/if}
     {/each}
   {/if}
 </div>

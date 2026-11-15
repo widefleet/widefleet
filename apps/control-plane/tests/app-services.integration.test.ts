@@ -103,7 +103,7 @@ describe("App service connections", () => {
       await services().bind(
         { ...principal, application: { ...principal.application, admin: false } },
         source.id,
-        "ERP",
+        "NEW_ERP",
         grant,
       ),
     ).toMatchObject({ error: { code: "FORBIDDEN" } });
@@ -211,6 +211,52 @@ describe("App service connections", () => {
     expect((await services().bindings(creator, source.id)).unwrap().revision).toBe(1);
     expect(await services().reject(principal, request.id)).toMatchObject({
       error: { code: "CONFLICT" },
+    });
+  });
+
+  it("lets an app manager retry an approved binding without changing its target or entrypoint", async () => {
+    const creator = await person();
+    const source = await app([], creator);
+    const target = await app(["Reader", "Writer"]);
+    const other = await app(["Reader"]);
+    const grant = { app: target.id, entrypoint: "Reader" };
+
+    const request = (
+      await services().request(creator, { appId: source.id, binding: "ERP", ...grant })
+    ).unwrap();
+
+    (await services().approve(principal, request.id)).unwrap();
+    await environment.database.db
+      .update(apps)
+      .set({ capabilityError: "Synthetic activation failure" })
+      .where(eq(apps.id, source.id));
+
+    const previous = await environment.database.db
+      .select()
+      .from(jobs)
+      .where(eq(jobs.appId, source.id));
+
+    expect(
+      await services().bind(creator, source.id, "ERP", { ...grant, entrypoint: "Writer" }),
+    ).toMatchObject({ error: { code: "FORBIDDEN" } });
+    expect(
+      await services().bind(creator, source.id, "ERP", { ...grant, app: other.id }),
+    ).toMatchObject({ error: { code: "FORBIDDEN" } });
+    expect(await services().bind(creator, source.id, "NEW", grant)).toMatchObject({
+      error: { code: "FORBIDDEN" },
+    });
+    expect((await services().bind(creator, source.id, "ERP", grant)).unwrap()).toMatchObject({
+      revision: 1,
+      error: null,
+      state: "pending",
+      grants: { ERP: grant },
+    });
+    expect(
+      await environment.database.db.select().from(jobs).where(eq(jobs.appId, source.id)),
+    ).toHaveLength(previous.length + 1);
+    (await services().bind(principal, source.id, "ERP", null)).unwrap();
+    expect(await services().bind(creator, source.id, "ERP", grant)).toMatchObject({
+      error: { code: "FORBIDDEN" },
     });
   });
 

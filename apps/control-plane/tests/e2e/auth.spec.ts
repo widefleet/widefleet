@@ -259,6 +259,31 @@ for (const javaScriptEnabled of [true, false]) {
       await expect(page.getByText("Approved", { exact: true })).toBeVisible();
       await page.getByRole("link", { name: "View app connections" }).click();
       await expect(page.getByText("ERP", { exact: true })).toBeVisible();
+      await environment.database.db
+        .update(apps)
+        .set({ capabilityError: "Synthetic activation failure" })
+        .where(eq(apps.id, source.id));
+      await page.goto(`/services?app=${source.id}`);
+
+      for (const width of [1280, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+
+        for (const colorScheme of ["light", "dark"] as const) {
+          await page.emulateMedia({ colorScheme });
+          await page.screenshot({
+            path: testInfo.outputPath(`retry-${width}-${colorScheme}.png`),
+            fullPage: true,
+          });
+          expect(
+            await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+          ).toBe(true);
+        }
+      }
+
+      await page.getByRole("button", { name: "Retry connection ERP", exact: true }).click();
+      await expect(page).toHaveURL(new RegExp(`/apps/${source.id}/connections$`));
+      await expect(page.getByText("ERP", { exact: true })).toBeVisible();
+      await expect(page.getByText("Synthetic activation failure", { exact: false })).toHaveCount(0);
       await adminPage.goto("/services");
 
       const settings = adminPage
