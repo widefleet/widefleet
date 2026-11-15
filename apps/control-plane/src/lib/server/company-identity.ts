@@ -10,7 +10,7 @@ export const companyIdentity = z.object({
   provider: companyProvider,
   scopes: z.array(z.string()).optional(),
   management: credentials,
-  directory: credentials.extend({ adminEmail: z.email().optional() }).nullable().default(null),
+  directory: credentials.nullable().default(null),
 });
 
 export { companyAccountProvider, providerIssuer } from "../company-identity.ts";

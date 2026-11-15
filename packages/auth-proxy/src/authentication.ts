@@ -1,3 +1,4 @@
+import { googleGroupsScope } from "@platform/contracts";
 import type { BetterAuthOptions } from "better-auth";
 import { betterAuth } from "better-auth/minimal";
 import { genericOAuth } from "better-auth/plugins/generic-oauth";
@@ -131,7 +132,9 @@ export const createAuthentication = async (configuration: AuthConfiguration, log
                       tokens.idToken,
                       tokens.accessToken,
                       configuration.organizationId,
-                      configuration.directory,
+                      Boolean(configuration.scopes?.includes(googleGroupsScope)) &&
+                        // OAuth omits scope when the granted scopes equal those requested.
+                        (!tokens.scopes?.length || tokens.scopes.includes(googleGroupsScope)),
                     );
 
                     const expiresAt = Math.min(

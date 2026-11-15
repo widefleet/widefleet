@@ -1,6 +1,5 @@
 import { authConfiguration, createAuthProxy } from "@platform/auth-proxy";
-import { createGoogleDirectory } from "@platform/auth-proxy/google-directory";
-import { exportPKCS8, generateKeyPair, jwtVerify } from "jose";
+import { googleGroupsScope } from "@platform/contracts";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createIdentityProvider } from "./auth-proxy-idp.ts";
@@ -16,16 +15,18 @@ const cookies = (response: Response) =>
 describe("Google Workspace app identity", () => {
   let idp: Awaited<ReturnType<typeof createIdentityProvider>>;
   let configuration: z.infer<typeof authConfiguration>;
-  let keys: Awaited<ReturnType<typeof generateKeyPair>>;
   const calls: URL[] = [];
-  let memberships = ["group-accounting", "group-auditors"];
+  let memberships = ["accounting@example.test", "auditors@example.test"];
   let directoryStatus = 200;
   let workspaceDomain = "example.test";
+  let allowedGroups = ["accounting@example.test"];
+  let repeatPage = false;
+  let invalidGroup = false;
 
   const apps = {
     resolve: (hostname: string) =>
       Promise.resolve(
-        hostname === new URL(app).hostname ? { revision: 0, groups: ["group-accounting"] } : null,
+        hostname === new URL(app).hostname ? { revision: 0, groups: allowedGroups } : null,
       ),
     fetch: (request: Request) =>
       Promise.resolve(Response.json(Object.fromEntries(request.headers))),
@@ -33,7 +34,6 @@ describe("Google Workspace app identity", () => {
 
   beforeAll(async () => {
     idp = await createIdentityProvider();
-    keys = await generateKeyPair("RS256", { extractable: true });
     configuration = authConfiguration.parse({
       organizationId: "widefleet",
       provider: { type: "google", domain: "example.test" },
@@ -42,11 +42,7 @@ describe("Google Workspace app identity", () => {
       cookieSecret: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url"),
       domain: "apps.example.test",
       redirectUrl: "https://auth.apps.example.test/oauth2/widefleet/callback",
-      directory: {
-        clientId: "directory@fixture.iam.gserviceaccount.com",
-        adminEmail: "admin@example.test",
-        clientSecret: await exportPKCS8(keys.privateKey),
-      },
+      scopes: ["openid", "profile", "email", googleGroupsScope],
     });
   });
 
@@ -54,8 +50,14 @@ describe("Google Workspace app identity", () => {
     idp.settings.google = true;
     idp.settings.workspaceDomain = "example.test";
     idp.settings.failure = "";
+    idp.settings.grantedScopes = `openid profile email ${googleGroupsScope}`;
+    idp.settings.omitRefreshScopes = false;
+    configuration.scopes = ["openid", "profile", "email", googleGroupsScope];
+    allowedGroups = ["accounting@example.test"];
+    repeatPage = false;
+    invalidGroup = false;
     calls.length = 0;
-    memberships = ["group-accounting", "group-auditors"];
+    memberships = ["accounting@example.test", "auditors@example.test"];
     directoryStatus = 200;
     workspaceDomain = "example.test";
     const originalFetch = globalThis.fetch;
@@ -67,33 +69,25 @@ describe("Google Workspace app identity", () => {
       if (url.origin === "https://accounts.google.com")
         return originalFetch(new Request(new URL(url.pathname, idp.origin), request));
 
-      if (url.origin === "https://oauth2.googleapis.com") {
-        const form = new URLSearchParams(await request.text());
-
-        const assertion = await jwtVerify(z.string().parse(form.get("assertion")), keys.publicKey, {
-          audience: "https://oauth2.googleapis.com/token",
-          issuer: "directory@fixture.iam.gserviceaccount.com",
-        });
-
-        expect(assertion.payload.sub).toBe("admin@example.test");
-        expect(assertion.payload["scope"]).toBe(
-          "https://www.googleapis.com/auth/admin.directory.group.readonly",
-        );
-
-        return Response.json({ access_token: "synthetic-directory-token", expires_in: 3600 });
-      }
-
-      if (url.origin === "https://admin.googleapis.com") {
+      if (url.origin === "https://cloudidentity.googleapis.com") {
         calls.push(url);
-        expect(request.headers.get("authorization")).toBe("Bearer synthetic-directory-token");
+        expect(url.pathname).toBe("/v1/groups/-/memberships:searchDirectGroups");
+        expect(request.headers.get("authorization")).toBe("Bearer fixture-access-token");
+        expect(request.redirect).toBe("error");
 
         if (directoryStatus !== 200)
           return new Response(null, { status: directoryStatus, headers: { "retry-after": "7" } });
         const offset = Number(url.searchParams.get("pageToken") || "0");
 
         return Response.json({
-          groups: memberships.slice(offset, offset + 1).map((id) => ({ id, name: id })),
-          nextPageToken: offset + 1 < memberships.length ? String(offset + 1) : undefined,
+          memberships: memberships.slice(offset, offset + 1).map((id) => ({
+            groupKey: { id: invalidGroup ? "invalid-group" : id },
+          })),
+          nextPageToken: repeatPage
+            ? "1"
+            : offset + 1 < memberships.length
+              ? String(offset + 1)
+              : undefined,
         });
       }
 
@@ -125,6 +119,9 @@ describe("Google Workspace app identity", () => {
     expect(location.searchParams.get("prompt")).toBe("consent");
     expect(location.searchParams.get("hd")).toBe("example.test");
     expect(location.searchParams.get("scope")).not.toContain("offline_access");
+    expect(location.searchParams.get("scope")?.includes(googleGroupsScope)).toBe(
+      configuration.scopes?.includes(googleGroupsScope) ?? false,
+    );
     const authorized = await fetch(location, { redirect: "manual" });
 
     return proxy.fetch(
@@ -135,7 +132,9 @@ describe("Google Workspace app identity", () => {
   };
 
   const visit = (cookie: string) =>
-    createAuthProxy(configuration, apps).fetch(new Request(app, { headers: { cookie } }));
+    createAuthProxy(configuration, apps).fetch(
+      new Request(app, { headers: { cookie, accept: "text/html" } }),
+    );
 
   const expire = () => {
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -147,16 +146,18 @@ describe("Google Workspace app identity", () => {
 
     expect(signedIn.headers.get("location")).toBe(app);
     expect(calls).toHaveLength(2);
-    expect(calls[0]?.searchParams.get("userKey")).toBe("pairwise-subject");
+    expect(calls[0]?.searchParams.get("query")).toBe(
+      `member_key_id == "user@example.test" && 'cloudidentity.googleapis.com/groups.discussion_forum' in labels`,
+    );
     const cookie = cookies(signedIn);
     const allowed = await visit(cookie);
 
     expect(allowed.status).toBe(200);
     expect(await allowed.json()).toMatchObject({
-      "x-auth-request-groups": "group-accounting,group-auditors",
+      "x-auth-request-groups": "accounting@example.test,auditors@example.test",
     });
     expect(calls).toHaveLength(2);
-    memberships = ["group-auditors"];
+    memberships = ["auditors@example.test"];
     expire();
     const denied = await visit(cookie);
 
@@ -188,18 +189,74 @@ describe("Google Workspace app identity", () => {
     expect((await visit(cookie)).status).toBe(200);
   });
 
-  it("uses the same directory credentials for group-name search", async () => {
-    const directory = createGoogleDirectory(
-      z
-        .object({ clientId: z.string(), clientSecret: z.string(), adminEmail: z.string() })
-        .parse(configuration.directory),
-    );
-
-    const result = await directory.search({ query: "Accounting", limit: 1 });
-
-    expect(result.groups[0]?.id).toBe("group-accounting");
-    expect(result.hasMore).toBe(true);
-    expect(calls[0]?.searchParams.get("query")).toBe("name:'Accounting'*");
-    expect(calls[0]?.searchParams.get("customer")).toBe("my_customer");
+  it("supports sign-in without group scope and keeps restricted apps denied", async () => {
+    configuration.scopes = ["openid", "profile", "email"];
+    const cookie = cookies(await login());
+    expect((await visit(cookie)).status).toBe(403);
+    allowedGroups = [];
+    expect((await visit(cookie)).status).toBe(200);
+    expire();
+    expect((await visit(cookie)).status).toBe(200);
+    expect(calls).toHaveLength(0);
   });
+
+  it("continues sign-in if the user withholds group consent, including after refresh", async () => {
+    idp.settings.grantedScopes = "openid profile email";
+    const cookie = cookies(await login());
+    expect((await visit(cookie)).status).toBe(403);
+    allowedGroups = [];
+    expect((await visit(cookie)).status).toBe(200);
+    idp.settings.omitRefreshScopes = true;
+    expire();
+    expect((await visit(cookie)).status).toBe(200);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("inherits the original group grant when refresh omits scopes", async () => {
+    const cookie = cookies(await login());
+    idp.settings.omitRefreshScopes = true;
+    memberships = [];
+    expire();
+    expect((await visit(cookie)).status).toBe(403);
+    expect(calls).toHaveLength(3);
+  });
+
+  it("drops groups when the provider reduces the grant on refresh", async () => {
+    const cookie = cookies(await login());
+    idp.settings.grantedScopes = "openid profile email";
+    expire();
+    expect((await visit(cookie)).status).toBe(403);
+    expect(calls).toHaveLength(2);
+  });
+
+  it("requires fresh sign-in when the administrator removes the group scope", async () => {
+    const cookie = cookies(await login());
+    configuration.scopes = ["openid", "profile", "email"];
+    expect((await visit(cookie)).status).toBe(302);
+    expect(calls).toHaveLength(2);
+  });
+
+  it("rejects unverified email before group access", async () => {
+    idp.settings.failure = "email";
+    expect((await login()).headers.get("location")).not.toBe(app);
+    expect(calls).toHaveLength(0);
+  });
+
+  it.each([403, 500, 302])("does not reuse stale groups on lookup status %s", async (status) => {
+    const cookie = cookies(await login());
+    directoryStatus = status;
+    expire();
+    expect((await visit(cookie)).status).toBe(503);
+  });
+
+  it.each(["pagination", "group"])(
+    "rejects invalid %s instead of partial membership",
+    async (failure) => {
+      const cookie = cookies(await login());
+      repeatPage = failure === "pagination";
+      invalidGroup = failure === "group";
+      expire();
+      expect((await visit(cookie)).status).toBe(503);
+    },
+  );
 });

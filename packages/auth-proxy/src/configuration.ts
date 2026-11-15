@@ -1,8 +1,4 @@
-import {
-  companyProvider,
-  googleDirectoryCredentials,
-  organizationIdentifier,
-} from "@platform/contracts";
+import { companyProvider, googleGroupsScope, organizationIdentifier } from "@platform/contracts";
 import { base64url } from "jose";
 import { z } from "zod";
 
@@ -13,7 +9,6 @@ export const authConfiguration = z
     organizationId: organizationIdentifier,
     provider: companyProvider,
     scopes: z.array(z.string()).optional(),
-    directory: googleDirectoryCredentials.optional(),
     clientId: z.string().min(1).max(512),
     clientSecret: z.string().min(1).max(16_384),
     cookieSecret: z
@@ -27,13 +22,6 @@ export const authConfiguration = z
     redirectUrl: z.url(),
   })
   .superRefine((configuration, context) => {
-    if (configuration.provider.type === "google" && !configuration.directory)
-      context.addIssue({
-        code: "custom",
-        path: ["directory"],
-        message: "Connect the Google Workspace directory",
-      });
-
     if (!z.url().safeParse(configuration.redirectUrl).success) return;
     const url = new URL(configuration.redirectUrl);
 
@@ -66,12 +54,10 @@ export const sessionVersion = async (configuration: AuthConfiguration) => {
     clientId: configuration.clientId,
     redirectUrl: configuration.redirectUrl,
     domain: configuration.domain,
-    directory: configuration.directory
-      ? {
-          clientId: configuration.directory.clientId,
-          adminEmail: configuration.directory.adminEmail,
-        }
-      : undefined,
+    googleGroups:
+      configuration.provider.type === "google"
+        ? (configuration.scopes?.includes(googleGroupsScope) ?? false)
+        : undefined,
   });
 
   return base64url.encode(

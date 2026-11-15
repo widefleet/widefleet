@@ -1,5 +1,4 @@
-import { googleDirectoryCredentials, groupSearch, groupSearchResult } from "@platform/contracts";
-import { createGoogleDirectory } from "@platform/auth-proxy/google-directory";
+import { groupSearch, groupSearchResult } from "@platform/contracts";
 import { Result, TaggedError } from "better-result";
 import { z } from "zod";
 import type { companyIdentity } from "./company-identity.ts";
@@ -34,6 +33,12 @@ const createCompanyDirectory = (
   let pendingToken: Promise<string> | undefined;
 
   const credentials = () => {
+    if (identity?.provider.type === "google")
+      throw new DirectoryUnavailable({
+        message:
+          "For Google Workspace, enter the group's email address directly in the app's allowed groups.",
+      });
+
     if (!identity || identity.provider.type !== "entra" || !identity.directory)
       throw new DirectoryUnavailable({
         message:
@@ -87,11 +92,6 @@ const createCompanyDirectory = (
   const search = (input: z.infer<typeof groupSearch>) =>
     Result.tryPromise({
       try: async () => {
-        if (identity?.provider.type === "google")
-          return await createGoogleDirectory(
-            googleDirectoryCredentials.parse(identity.directory),
-            request,
-          ).search(input);
         const { provider } = credentials();
         const query = groupSearch.parse(input);
         const url = new URL("https://graph.microsoft.com/v1.0/groups");

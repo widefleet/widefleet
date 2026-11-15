@@ -55,16 +55,11 @@ export const companyProvider = z.discriminatedUnion("type", [
 
 const client = z.strictObject({
   clientId: z.string().min(1).max(512),
-  adminEmail: z.email().optional(),
 });
 
 const clientInput = client.extend({ clientSecret: z.string().min(1).max(16_384).optional() });
 
-export const googleDirectoryCredentials = z.strictObject({
-  clientId: z.email(),
-  clientSecret: z.string().min(1).max(16_384),
-  adminEmail: z.email(),
-});
+export const googleGroupsScope = "https://www.googleapis.com/auth/cloud-identity.groups.readonly";
 
 export const oidcProviderInput = z.strictObject({
   providerId: z.string().min(1),

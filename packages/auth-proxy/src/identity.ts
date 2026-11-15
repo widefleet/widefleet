@@ -1,13 +1,8 @@
-import {
-  accessContext,
-  appAccessGroup,
-  companyProvider,
-  googleDirectoryCredentials,
-} from "@platform/contracts";
+import { accessContext, appAccessGroup, companyProvider } from "@platform/contracts";
 import { APIError } from "better-auth/api";
 import { decodeJwt } from "jose";
 import { z } from "zod";
-import { createGoogleDirectory } from "./google-directory.ts";
+import { googleGroups } from "./google-groups.ts";
 
 const claim = z
   .string()
@@ -98,7 +93,7 @@ export const providerIdentity = async (
   idToken: string,
   accessToken: string | undefined,
   organizationId: string,
-  directory?: z.infer<typeof googleDirectoryCredentials>,
+  lookupGoogleGroups = false,
 ) => {
   // Called only by Better Auth's getUserInfo, after its signature, issuer,
   // audience and nonce verification. This maps already verified claims.
@@ -133,16 +128,19 @@ export const providerIdentity = async (
 
   const groupClaim = provider.type === "oidc" ? provider.groupsClaim : "groups";
 
-  if (provider.type === "entra" && !accessToken)
+  if (
+    (provider.type === "entra" || (provider.type === "google" && lookupGoogleGroups)) &&
+    !accessToken
+  )
     throw new Error("Company group lookup requires an access token");
 
   const membership =
     provider.type === "entra" && accessToken
       ? await graphGroups(accessToken)
       : provider.type === "google"
-        ? await createGoogleDirectory(googleDirectoryCredentials.parse(directory)).memberships(
-            subject,
-          )
+        ? lookupGoogleGroups && accessToken
+          ? await googleGroups(accessToken, z.email().parse(claims["email"]))
+          : []
         : groups.parse(claims[groupClaim] ?? []);
 
   const identity = proxyIdentity.parse({

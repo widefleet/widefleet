@@ -102,10 +102,20 @@ export const sessionRenewal = (verified: () => z.infer<typeof authorization> | u
           throw new APIError("SERVICE_UNAVAILABLE");
         }
 
+        // An omitted refresh scope inherits the original grant (OAuth 2.0 §6).
+        // Better Auth stores account scopes as a comma-separated string.
+        renewed = {
+          ...renewed,
+          scopes: renewed.scopes?.length
+            ? renewed.scopes
+            : account.scope?.split(",").filter(Boolean),
+        };
+
         // Persist rotation even if a subsequent directory lookup fails. This does
         // not extend authorization: that still requires a verified new identity.
         await setAccountCookie(ctx, {
           ...account,
+          scope: renewed.scopes?.join(",") ?? account.scope,
           accessToken: null,
           idToken: null,
           refreshToken: renewed.refreshToken ?? account.refreshToken,

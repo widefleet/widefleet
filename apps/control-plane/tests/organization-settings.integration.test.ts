@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { editableSettings } from "./settings-input.ts";
-import { settingsInput } from "@platform/contracts";
+import { googleGroupsScope, settingsInput } from "@platform/contracts";
 import {
   account,
   member,
@@ -123,7 +123,7 @@ describe("Organization login settings", () => {
     expect((await settings.resolve(second.organizationId)).identity).toBeNull();
   });
 
-  it("requires a new directory private key when changing Entra to Google", async () => {
+  it("switches from Entra to Google with optional group scope and no directory credentials", async () => {
     const target = await company("settings-google-switch");
 
     const input = settingsInput.parse({
@@ -132,31 +132,25 @@ describe("Organization login settings", () => {
         ...target.input.sso,
         appIdentityType: "google",
         issuer: "https://accounts.google.com",
+        oidcConfig: {
+          ...target.input.sso?.oidcConfig,
+          scopes: ["openid", "profile", "email", googleGroupsScope],
+        },
       },
-      directory: {
-        clientId: "directory@fixture.iam.gserviceaccount.com",
-        adminEmail: "admin@example.test",
-      },
+      directory: null,
     });
 
-    await expect(settings.plan(target.principal, input)).rejects.toMatchObject({
-      code: "BAD_REQUEST",
-      message: "Enter new directory credentials when changing the directory provider",
-    });
-    await expect(
-      settings.plan(target.principal, {
-        ...input,
-        directory: {
-          ...input.directory,
-          clientId: "directory@fixture.iam.gserviceaccount.com",
-          clientSecret: "a-microsoft-client-secret",
-        },
-      }),
-    ).rejects.toMatchObject({
-      code: "BAD_REQUEST",
-      message: "Enter the Google service account's RSA private key in PEM format",
-    });
-    expect((await settings.resolve(target.organizationId)).identity?.provider.type).toBe("entra");
+    await settings.plan(target.principal, input);
+    await settings.update(
+      target.principal,
+      { ...input, acknowledgeRestart: false },
+      false,
+      await organizationCredential(environment, target.principal),
+    );
+    const identity = (await settings.resolve(target.organizationId)).identity;
+    expect(identity?.provider.type).toBe("google");
+    expect(identity?.scopes).toContain(googleGroupsScope);
+    expect(identity?.directory).toBeNull();
   });
 
   it("disables the built-in app client for company SSO and restores the encrypted secret on return", async () => {

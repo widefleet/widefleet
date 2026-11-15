@@ -46,6 +46,8 @@ export const createIdentityProvider = async (
     rotateRefreshTokens: false,
     issueRefreshToken: true,
     omitRefreshIdToken: false,
+    grantedScopes: "",
+    omitRefreshScopes: false,
   };
 
   const graphRequests: string[] = [];
@@ -244,6 +246,10 @@ export const createIdentityProvider = async (
           access_token: "fixture-access-token",
           refresh_token: settings.issueRefreshToken ? refreshToken : undefined,
           token_type: "Bearer",
+          scope:
+            refreshing && settings.omitRefreshScopes
+              ? undefined
+              : settings.grantedScopes || undefined,
           expires_in: 3600,
           id_token:
             settings.failure === "missing-token" || (refreshing && settings.omitRefreshIdToken)
