@@ -490,8 +490,17 @@ pub async fn prepare(
     write_modules(&project, &packages.runtime.modules).await?;
     let secrets_key =
         platform_agent::runtime::secrets_key(store.as_ref(), &job.organization_id).await?;
-    let mut config =
-        platform_agent::runtime::configuration(&packages.runtime, &token, &secrets_key)?;
+    let mut config = platform_agent::runtime::configuration(
+        &packages.runtime,
+        &token,
+        &secrets_key,
+        Some(
+            configuration
+                .runtime_platform_url
+                .as_deref()
+                .unwrap_or(&configuration.url),
+        ),
+    )?;
     config["vars"]["WIDEFLEET_CONFIGURATION"] = json!(serde_json::to_string(
         &json!({ "crons": crons, "queues": queues })
     )?);

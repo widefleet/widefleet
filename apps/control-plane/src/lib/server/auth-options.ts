@@ -301,7 +301,10 @@ export const authenticationOptions = (
             organizationName: organization.name,
           }),
       }),
-      jwt({ jwt: { issuer: `${configuration.PLATFORM_URL}/api/auth` } }),
+      jwt({
+        jwt: { issuer: `${configuration.PLATFORM_URL}/api/auth` },
+        jwks: { rotationInterval: 60 * 60 * 24 * 30, gracePeriod: 60 * 60 * 24 * 30 },
+      }),
       oauthProvider({
         loginPage: "/sign-in",
         consentPage: "/device",

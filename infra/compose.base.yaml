@@ -42,6 +42,8 @@ services:
       retries: 6
 
   runtime:
+    environment:
+      PLATFORM_RUNTIME_PLATFORM_URL: ${PLATFORM_RUNTIME_PLATFORM_URL:-${PLATFORM_URL}}
     container_name: app-platform-runtime
     image: ${PLATFORM_RUNTIME_IMAGE:?Load the release images environment file}
     restart: unless-stopped

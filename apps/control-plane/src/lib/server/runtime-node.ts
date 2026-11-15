@@ -1,3 +1,5 @@
+import { join } from "node:path";
+import { readOptionalFile } from "./installation-files.ts";
 import { getRequestEvent } from "$app/server";
 import { sveltekitCookies } from "better-auth/svelte-kit";
 import { initializeRuntime } from "./runtime-initialization.ts";
@@ -37,6 +39,10 @@ const startRuntime = async () => {
     storage,
     reporting,
     encryptionKey,
+    runtimeKey: async () =>
+      (
+        await readOptionalFile(join(configuration.PLATFORM_RUNTIME_DIRECTORY, "control-token"))
+      )?.trim() ?? null,
     authCookies: sveltekitCookies(getRequestEvent),
   });
 };

@@ -143,6 +143,7 @@ export const hostedConfigurations = async (
   const emailBindings: HostedEmailBindings = {};
   const emailVariables: Record<string, string> = {};
   const executionVariables: Record<string, string> = {};
+  executionVariables["WIDEFLEET_PLATFORM_URL"] = installation.platformUrl;
 
   if (installation.executionLimits)
     executionVariables["WIDEFLEET_EXECUTION_LIMITS"] = JSON.stringify(installation.executionLimits);

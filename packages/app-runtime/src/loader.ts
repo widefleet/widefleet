@@ -2,6 +2,8 @@ import { prepareAppSecrets } from "./app-secrets.ts";
 import { oauthAppAvailable } from "./app-oauth.ts";
 import { managedOAuth } from "./oauth.ts";
 
+export { WorkloadIdentity } from "./workload-identity.ts";
+
 export { AppOAuth } from "./app-oauth.ts";
 
 import { signAppCaller } from "./app-caller.ts";

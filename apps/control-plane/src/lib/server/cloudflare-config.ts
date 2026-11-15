@@ -43,6 +43,7 @@ export interface CloudflareBindings extends CloudflareAuthRateLimitBindings {
   CLOUDFLARE_API_TOKEN?: string;
   APP_RUNTIME_NAME?: string;
   WIDEFLEET_QUEUES?: string;
+  WIDEFLEET_CONTROL_TOKEN?: string;
   PLATFORM_USAGE_REPORTING?: string;
   PLATFORM_CRASH_REPORTING?: string;
 }

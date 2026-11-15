@@ -1,3 +1,5 @@
+import { createServer as createHttpServer } from "node:http";
+import { verifyWorkloadRequest, workloadTokenPath } from "@platform/app-runtime/workload";
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { once } from "node:events";
@@ -66,10 +68,12 @@ export default class Source extends WorkerEntrypoint {
   fetch(request) { return this.env.TARGET.fetch(request); }
   secret() { return this.env.WIDEFLEET_SECRETS.get('TOKEN'); }
   root() { return this.env.WIDEFLEET_SECRETS_KEY ?? null; }
+  async identity() { return {own: await this.env.WIDEFLEET_IDENTITY.getToken('data-api', {appId: '${targetId}', organizationId: 'forged'}), target: await this.env.TARGET.identity(), key: this.env.WIDEFLEET_CONTROL_TOKEN ?? null}; }
 }`;
 
 const target = (version: string) => `import {WorkerEntrypoint} from 'cloudflare:workers';
 export class Reader extends WorkerEntrypoint {
+  identity() { return this.env.WIDEFLEET_IDENTITY.getToken('other-api'); }
   async read() { return {version:${JSON.stringify(version)}, secret:await this.env.WIDEFLEET_SECRETS.get('TOKEN')}; }
   async slow() { await this.env.KV.put('started','yes'); while (!await this.env.KV.get('release')) await new Promise(resolve=>setTimeout(resolve,10)); return this.read(); }
   fetch() { return new Response(new ReadableStream({start(controller){controller.enqueue(new TextEncoder().encode(${JSON.stringify(version)}));controller.close();}})); }
@@ -120,6 +124,10 @@ describe.runIf(process.env["RUN_SERVICE_TESTS"] === "1").each(["workerd", "celld
     let native: ReturnType<typeof spawn> | undefined;
     let origin: string;
     let identityIssuer: string;
+    let workloadServer: ReturnType<typeof createHttpServer>;
+    let workloadOrigin: string;
+    let redirectWorkload = false;
+    const workloadRequests: (string | undefined)[] = [];
 
     const request = (
       path: string,
@@ -160,6 +168,35 @@ describe.runIf(process.env["RUN_SERVICE_TESTS"] === "1").each(["workerd", "celld
     };
 
     beforeAll(async () => {
+      workloadServer = createHttpServer((request, response) => {
+        void (async () => {
+          workloadRequests.push(request.url);
+
+          if (request.url !== workloadTokenPath) throw new Error("Unexpected workload path");
+
+          const chunks: Buffer[] = [];
+
+          for await (const chunk of request) chunks.push(z.instanceof(Buffer).parse(chunk));
+          const identity = await verifyWorkloadRequest(token, Buffer.concat(chunks).toString());
+
+          if (redirectWorkload) {
+            response.writeHead(307, { location: `${workloadOrigin}/unexpected` }).end();
+
+            return;
+          }
+
+          response.setHeader("content-type", "application/json");
+          response.end(
+            JSON.stringify({
+              token: JSON.stringify(identity),
+              expiresAt: Math.floor(Date.now() / 1000) + 300,
+            }),
+          );
+        })().catch(() => response.writeHead(401).end());
+      });
+      workloadServer.listen(0, "127.0.0.1");
+      await once(workloadServer, "listening");
+      workloadOrigin = `http://127.0.0.1:${z.object({ port: z.number() }).parse(workloadServer.address()).port}`;
       directory = await mkdtemp(join(tmpdir(), "widefleet-app-services-"));
       const identity = await runtimeIdentity("apps.example.test", [], [], "bob");
       identityIssuer =
@@ -232,6 +269,7 @@ export default { async fetch(request, env, ctx) {
             WIDEFLEET_EXECUTION_LIMITS: JSON.stringify(executionProfiles),
             WIDEFLEET_HTTP_AVAILABILITY: "kv",
             WIDEFLEET_CONTROL_TOKEN: token,
+            WIDEFLEET_PLATFORM_URL: workloadOrigin,
             WIDEFLEET_SECRETS_KEY: "ab".repeat(32),
             WIDEFLEET_CONFIGURATION: '{"crons":{},"queues":{}}',
           },
@@ -295,7 +333,36 @@ export default { async fetch(request, env, ctx) {
         clearTimeout(timeout);
       }
 
+      if (workloadServer)
+        await new Promise<void>((resolve, reject) =>
+          workloadServer.close((error) => (error ? reject(error) : resolve())),
+        );
+
       if (directory) await rm(directory, { recursive: true, force: true });
+    });
+
+    it("binds workload tokens to the executing app, including service calls, without exposing runtime keys", async () => {
+      const response = await request("/identity");
+      expect(response.status, await response.clone().text()).toBe(200);
+
+      const result = z
+        .object({
+          own: z.object({ token: z.string() }),
+          target: z.object({ token: z.string() }),
+          key: z.null(),
+        })
+        .parse(await response.json());
+
+      expect(JSON.parse(result.own.token)).toMatchObject({
+        appId: sourceId,
+        organizationId: "widefleet",
+        audience: "data-api",
+      });
+      expect(JSON.parse(result.target.token)).toMatchObject({
+        appId: targetId,
+        organizationId: "widefleet",
+        audience: "other-api",
+      });
     });
 
     it("admits concurrent cold service calls and streams fetch responses", async () => {
@@ -308,6 +375,19 @@ export default { async fetch(request, env, ctx) {
 
       expect(await (await request("/fetch")).text()).toBe("v1");
       expect((await request("/web")).status).toBe(404);
+    });
+    it("does not forward workload credentials through redirects", async () => {
+      redirectWorkload = true;
+      const firstRequest = workloadRequests.length;
+
+      try {
+        const response = await request("/identity");
+        expect(response.status).toBe(409);
+        expect(workloadRequests.slice(firstRequest)).toEqual([workloadTokenPath]);
+        expect(await response.text()).toContain("Workload token issuance failed");
+      } finally {
+        redirectWorkload = false;
+      }
     });
     it("passes service execution budgets to both RPC and fetch invocations of cached apps", async () => {
       await request("/read");
@@ -352,6 +432,7 @@ export default { async fetch(request, env, ctx) {
         await request("/availability", { availability });
         expect((await request("/read")).status).toBe(409);
         expect((await request("/fetch")).status).toBe(409);
+        expect((await request("/identity")).status).toBe(409);
       }
 
       await request("/availability", { availability: "clear" });

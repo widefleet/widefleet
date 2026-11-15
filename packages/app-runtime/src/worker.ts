@@ -59,6 +59,14 @@ export const workerCode = async (
   );
 
   const bindings = new Map(Object.entries(worker.env));
+
+  if (app.organizationId && environment.WIDEFLEET_PLATFORM_URL)
+    bindings.set(
+      "WIDEFLEET_IDENTITY",
+      context.exports.WorkloadIdentity({
+        props: { appId: app.appId, organizationId: app.organizationId, hostname: app.hostname },
+      }),
+    );
   bindings.set("WIDEFLEET_DEPLOYMENT_ID", app.deploymentId);
   bindings.set("WIDEFLEET_ORIGIN", app.origin ?? `https://${app.hostname}`);
 
