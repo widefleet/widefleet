@@ -171,6 +171,42 @@ describe("App source repositories", () => {
     expect(backend.remove).not.toHaveBeenCalled();
   });
 
+  it.each(["main", "release"])(
+    "keeps preview source separate from the main app's %s branch",
+    async (primary) => {
+      const app = await create();
+
+      const preview = (
+        await service.create(creator, {
+          slug: "source-app-review",
+          displayName: "Review",
+          parentId: app.id,
+        })
+      ).unwrap();
+
+      (await source.setup(creator, app.id, { branch: primary })).unwrap();
+
+      const prepared = (
+        await source.prepare(creator, preview.id, { branch: "feature/review" })
+      ).unwrap();
+
+      expect(contract.sourcePreparation.parse(prepared)).toEqual({
+        organizationId: app.organizationId,
+        repository: { url: url(app.id), branch: "feature/review", commit: null },
+        primaryBranch: primary,
+      });
+      expect(await source.prepare(creator, preview.id, { branch: primary })).toMatchObject({
+        error: { code: "CONFLICT" },
+      });
+      expect(await source.setup(creator, preview.id, { branch: primary })).toMatchObject({
+        error: { code: "CONFLICT" },
+      });
+      expect((await source.read(creator, preview.id)).unwrap().repository?.branch).toBe(
+        "feature/review",
+      );
+    },
+  );
+
   it("retains the deployed source reference when the branch advances or changes", async () => {
     const app = await create();
     (await source.setup(creator, app.id, {})).unwrap();

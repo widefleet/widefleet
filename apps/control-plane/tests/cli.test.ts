@@ -75,6 +75,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     let historyReads = 0;
     let logFailure: { code: string; message: string } | null = null;
     let sourceRepository: z.infer<typeof contract.sourceRepository> | null = null;
+    let primaryBranch: string | undefined;
 
     const server = createServer((request, response) => {
       request.resume();
@@ -153,7 +154,11 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
 
       if (request.method === "POST" && request.url?.endsWith("/source/prepare")) {
         response.end(
-          JSON.stringify({ organizationId: app.organizationId, repository: sourceRepository }),
+          JSON.stringify({
+            organizationId: app.organizationId,
+            repository: sourceRepository,
+            primaryBranch,
+          }),
         );
 
         return;
@@ -426,6 +431,8 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     });
 
     beforeEach(() => {
+      primaryBranch = undefined;
+      sourceRepository = null;
       requests.length = 0;
       organizations.length = 0;
       requiredOrganization = undefined;
@@ -827,6 +834,114 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       const result = await failure(previewCli());
       expect(result.stderr).toContain("Choose --name NAME");
       expect(requests).toEqual([]);
+    });
+
+    it.each(["main", "release"])(
+      "requires a work branch instead of the main app's %s branch before building a preview",
+      async (primary) => {
+        const project = join(state, "project with spaces");
+        const build = join(project, "build.mjs");
+        parent = {
+          ...app,
+          source: {
+            supported: true,
+            available: false,
+            deployed: null,
+            repository: { url: "https://git.example.test/app.git", branch: primary, commit: null },
+          },
+        };
+        await execute("git", ["init", `--initial-branch=${primary}`, project]);
+        await writeFile(build, 'console.error("Reached preview build"); process.exit(1);\n');
+
+        try {
+          const blocked = await failure(previewCli("--name", "review"));
+          expect(blocked.stderr).toContain("Create or switch to a work branch");
+          expect(blocked.stderr).not.toContain("Reached preview build");
+          expect(
+            (await failure(previewCli("--name", "review", "--source-branch", "feature/review")))
+              .stderr,
+          ).toContain("Create or switch to a work branch");
+          await execute("git", ["-C", project, "switch", "-c", "feature/review"]);
+          expect(
+            (await failure(previewCli("--name", "review", "--source-branch", primary))).stderr,
+          ).toContain("cannot save source to the main app's branch");
+          expect((await failure(previewCli("--name", "review"))).stderr).toContain(
+            "Reached preview build",
+          );
+          expect(requests.every((request) => request.startsWith("GET "))).toBe(true);
+        } finally {
+          await writeFile(build, 'console.log("Synthetic build output");\n');
+          await rm(join(project, ".git"), { recursive: true, force: true });
+        }
+      },
+    );
+
+    it.each(["main", "release"])(
+      "rejects direct preview deployments from the main app's %s branch before committing",
+      async (primary) => {
+        const project = join(state, "project with spaces");
+        primaryBranch = primary;
+        sourceRepository = {
+          url: "https://git.example.test/apps/source.git",
+          branch: "preview/review",
+          commit: null,
+        };
+        await execute("git", ["init", `--initial-branch=${primary}`, project]);
+
+        try {
+          const result = await failure(cli(preview.id, "--skip-build", "--no-wait"));
+          expect(result.stderr).toContain("Create or switch to a work branch");
+          const branches = await execute("git", ["-C", project, "for-each-ref"]);
+          expect(branches.stdout).toBe("");
+          expect(requests).toEqual([`POST /api/v1/apps/${preview.id}/source/prepare`]);
+        } finally {
+          await rm(join(project, ".git"), { recursive: true, force: true });
+        }
+      },
+    );
+
+    it("requires an explicit source branch for a detached CI preview checkout", async () => {
+      const project = join(state, "project with spaces");
+      const build = join(project, "build.mjs");
+      parent = {
+        ...app,
+        source: { supported: true, available: false, repository: null, deployed: null },
+      };
+      expect((await failure(previewCli("--name", "review"))).stderr).toContain(
+        "requires a Git work branch",
+      );
+      expect(
+        (await failure(previewCli("--name", "review", "--source-branch", "feature/review"))).stderr,
+      ).toContain("requires a Git work branch");
+      await execute("git", ["init", "--initial-branch=main", project]);
+      await execute("git", ["-C", project, "add", "."]);
+      await execute("git", [
+        "-C",
+        project,
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.test",
+        "commit",
+        "-m",
+        "Fixture",
+      ]);
+      await execute("git", ["-C", project, "checkout", "--detach", "HEAD"]);
+      await writeFile(build, 'console.error("Reached preview build"); process.exit(1);\n');
+
+      try {
+        expect((await failure(previewCli("--name", "review"))).stderr).toContain(
+          "requires a Git work branch",
+        );
+        expect(
+          (await failure(previewCli("--name", "review", "--source-branch", "feature/review")))
+            .stderr,
+        ).toContain("Reached preview build");
+        expect(requests.every((request) => request.startsWith("GET "))).toBe(true);
+      } finally {
+        await writeFile(build, 'console.log("Synthetic build output");\n');
+        await rm(join(project, ".git"), { recursive: true, force: true });
+      }
     });
 
     it.each(["Review", "feature/login", "-review", "review-", "a".repeat(49)])(

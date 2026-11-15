@@ -1,4 +1,4 @@
-use crate::{apps, auth, deploy};
+use crate::{apps, auth, deploy, source};
 use clap::Args;
 use platform_core::{
     Error, Result,
@@ -121,6 +121,27 @@ pub async fn run(api: &Api, credentials: &auth::Credentials, options: Options) -
             "Choose the original app as --app; a preview cannot be the parent of another preview"
                 .into(),
         ));
+    }
+    if !options.deployment.no_source
+        && let Some(source) = parent.source.as_ref().filter(|source| source.supported)
+    {
+        if let Some(error) = &source.error {
+            return Err(Error::invalid(error.clone()));
+        }
+        let primary = source
+            .repository
+            .as_ref()
+            .map_or("main", |repository| repository.branch.as_str());
+        let config = options.deployment.config.canonicalize()?;
+        let project = config
+            .parent()
+            .ok_or_else(|| Error::invalid("Configuration has no parent directory".into()))?;
+        source::require_preview_branch(
+            project,
+            primary,
+            options.deployment.source_branch.as_deref(),
+        )
+        .await?;
     }
     let slug = shorten_slug(&format!("{}-{name}", parent.slug));
     eprintln!(

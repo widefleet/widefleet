@@ -66,4 +66,5 @@ export const sourceSetup = z.strictObject({ branch: gitBranch.optional() });
 export const sourcePreparation = z.strictObject({
   organizationId: z.string().min(1),
   repository: sourceRepository.nullable(),
+  primaryBranch: gitBranch.optional(),
 });

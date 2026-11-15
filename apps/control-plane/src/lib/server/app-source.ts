@@ -24,11 +24,15 @@ const sourceTarget = async (
   if (!candidate)
     return Result.err(new InvalidOperation({ code: "NOT_FOUND", message: "App not found" }));
 
+  let primaryBranch: string | undefined;
+
   // Use the same parent-before-child lock order as app removal and access changes.
   if (mutating && candidate.parentId) {
     const parent = await managedApp(transaction, principal, candidate.parentId);
 
     if (parent.isErr()) return parent;
+
+    primaryBranch = parent.value.sourceBranch ?? "main";
 
     if (parent.value.state === "deleting")
       return Result.err(
@@ -46,12 +50,55 @@ const sourceTarget = async (
 
   return Result.ok({
     app,
+    primaryBranch,
     id: app.parentId ?? app.id,
     branch: app.sourceBranch ?? (app.parentId ? `preview/${app.slug}` : "main"),
   });
 };
 
 export const createAppSource = (database: Database, backend?: SourceBackend) => {
+  const setup = (
+    principal: Principal,
+    appId: string,
+    input: z.infer<typeof contract.sourceSetup>,
+  ) =>
+    transact(database, async (transaction) => {
+      const target = await sourceTarget(transaction, principal, appId);
+
+      if (target.isErr()) return target;
+
+      if (!backend)
+        return Result.err(
+          new InvalidOperation({
+            code: "CONFLICT",
+            message: "This installation does not provide Git repositories",
+          }),
+        );
+      const { app, id, primaryBranch } = target.value;
+      const branch = input.branch ?? target.value.branch;
+
+      if (branch === primaryBranch)
+        return Result.err(
+          new InvalidOperation({
+            code: "CONFLICT",
+            message: "A preview must use a different source branch from the main app",
+          }),
+        );
+
+      const repository = await sourceOperation(
+        async () => (await backend.repository(id)) ?? backend.create(id),
+      );
+
+      await transaction.update(apps).set({ sourceBranch: branch }).where(eq(apps.id, app.id));
+      const commit = await sourceOperation(() => backend.head(id, branch));
+
+      return Result.ok({
+        organizationId: principal.application.organizationId,
+        repository: contract.sourceRepository.parse({ ...repository, branch, commit }),
+        primaryBranch,
+      });
+    });
+
   const source = {
     read: (principal: Principal, appId: string) =>
       transact(database, async (transaction) => {
@@ -108,31 +155,17 @@ export const createAppSource = (database: Database, backend?: SourceBackend) => 
           );
         }
       }),
-    setup: (principal: Principal, appId: string, input: z.infer<typeof contract.sourceSetup>) =>
-      transact(database, async (transaction) => {
-        const target = await sourceTarget(transaction, principal, appId);
+    setup: async (
+      principal: Principal,
+      appId: string,
+      input: z.infer<typeof contract.sourceSetup>,
+    ) => {
+      const prepared = await setup(principal, appId, input);
 
-        if (target.isErr()) return target;
+      if (prepared.isErr()) return Result.err(prepared.error);
 
-        if (!backend)
-          return Result.err(
-            new InvalidOperation({
-              code: "CONFLICT",
-              message: "This installation does not provide Git repositories",
-            }),
-          );
-        const { app, id } = target.value;
-        const branch = input.branch ?? target.value.branch;
-
-        const repository = await sourceOperation(
-          async () => (await backend.repository(id)) ?? backend.create(id),
-        );
-
-        await transaction.update(apps).set({ sourceBranch: branch }).where(eq(apps.id, app.id));
-        const commit = await sourceOperation(() => backend.head(id, branch));
-
-        return Result.ok(contract.sourceRepository.parse({ ...repository, branch, commit }));
-      }),
+      return Result.ok(prepared.value.repository);
+    },
     credential: (principal: Principal, appId: string, scope: "read" | "write") =>
       transact(database, async (transaction) => {
         const target = await sourceTarget(transaction, principal, appId);
@@ -172,16 +205,7 @@ export const createAppSource = (database: Database, backend?: SourceBackend) => 
         );
       }
 
-      const repository = await source.setup(principal, appId, input);
-
-      if (repository.isErr()) return Result.err(repository.error);
-
-      return Result.ok(
-        contract.sourcePreparation.parse({
-          organizationId: principal.application.organizationId,
-          repository: repository.value,
-        }),
-      );
+      return setup(principal, appId, input);
     },
   };
 };

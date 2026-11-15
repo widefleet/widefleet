@@ -92,13 +92,13 @@ pub struct Options {
     skip_build: bool,
     /// Deploy without saving source to Widefleet Git.
     #[arg(long, conflicts_with_all = ["commit", "source_branch"])]
-    no_source: bool,
+    pub(crate) no_source: bool,
     /// Require a clean checkout of this existing Git commit.
     #[arg(long)]
     commit: Option<String>,
     /// Save source on this repository branch.
     #[arg(long)]
-    source_branch: Option<String>,
+    pub(crate) source_branch: Option<String>,
     #[arg(long)]
     no_wait: bool,
     /// Print the deployment result as JSON, with build and progress logs on stderr.

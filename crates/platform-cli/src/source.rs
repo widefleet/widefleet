@@ -82,6 +82,7 @@ pub async fn read(api: &Api, credentials: &auth::Credentials, app: Uuid) -> Resu
 struct Preparation {
     organization_id: String,
     repository: Option<SourceRepository>,
+    primary_branch: Option<String>,
 }
 
 async fn prepare(
@@ -378,6 +379,36 @@ pub struct Saved {
     pub revision: SourceRevision,
 }
 
+pub async fn require_preview_branch(
+    project: &Path,
+    primary: &str,
+    requested_branch: Option<&str>,
+) -> Result<()> {
+    let head = git(project)
+        .args(["symbolic-ref", "--quiet", "--short", "HEAD"])
+        .output()
+        .await?;
+    let branch = String::from_utf8_lossy(&head.stdout);
+    if head.status.success() && branch.trim() == primary {
+        return Err(Error::invalid(format!(
+            "Create or switch to a work branch before deploying a preview. The main app uses {primary}; no source was committed"
+        )));
+    }
+    // A detached CI checkout can identify its work branch explicitly. Outside a
+    // repository, symbolic-ref exits with 128; do not initialize main for a preview.
+    if !head.status.success() && !(head.status.code() == Some(1) && requested_branch.is_some()) {
+        return Err(Error::invalid(
+            "A preview with source storage requires a Git work branch. For a detached CI checkout, pass --source-branch BRANCH".into(),
+        ));
+    }
+    if requested_branch == Some(primary) {
+        return Err(Error::invalid(format!(
+            "A preview cannot save source to the main app's branch {primary}. Choose a work branch"
+        )));
+    }
+    Ok(())
+}
+
 pub async fn save(
     api: &Api,
     credentials: &auth::Credentials,
@@ -404,6 +435,9 @@ pub async fn save(
         }
         return Ok(None);
     };
+    if let Some(primary) = prepared.primary_branch {
+        require_preview_branch(project, &primary, branch).await?;
+    }
     validate_url(&repository.url)?;
     let helper = helper(
         api,
