@@ -18,11 +18,11 @@ afterEach(async () => {
   );
 });
 
-async function project(source: string) {
+async function project(source: string, parent = tmpdir()) {
   // Match the CLI's canonical build directory. On macOS, tmpdir() uses /var
   // through a symlink; esbuild's relative source maps otherwise change meaning
   // when the CLI rebundles the same files through /private/var.
-  const root = await realpath(await mkdtemp(join(tmpdir(), "service documentation ")));
+  const root = await realpath(await mkdtemp(join(parent, "service documentation ")));
   directories.push(root);
   await writeFile(join(root, "app.ts"), source);
   await writeFile(
@@ -480,6 +480,55 @@ native(
     ).toContain("id: string");
   },
 );
+
+native("keeps sibling workspace types distinct without publishing absolute paths", async () => {
+  const workspace = await project("");
+  await Promise.all(
+    ["shared", "other"].map(async (name) => {
+      await mkdir(join(workspace, name));
+      await writeFile(
+        join(workspace, name, "model.ts"),
+        `export interface Item { ${name === "shared" ? "id: string" : "count: number"} }`,
+      );
+    }),
+  );
+
+  const root = await project(
+    `import {WorkerEntrypoint} from "cloudflare:workers";
+      import type {Item} from "../shared/model";
+      import type {Item as Other} from "../other/model";
+      export interface Input { item: Item; other: Other }
+      export class Reader extends WorkerEntrypoint {
+        read<T extends Item = Item>(input: T): T { return input; }
+        combine(input: Input): Other { return input.other; }
+      }`,
+    workspace,
+  );
+
+  const result = await extractServiceDocumentation(root, await bundle(root), ["Reader"]);
+  expect(result.warnings).toEqual([]);
+  const methods = result.documentation.entrypoints[0]?.methods;
+  expect(methods?.find((method) => method.name === "read")?.signatures[0]).toMatchObject({
+    typeParameters: ['T extends import("../shared/model").Item = import("../shared/model").Item'],
+    parameters: [{ type: "T" }],
+    returns: { type: "Promise<T>" },
+  });
+  expect(methods?.find((method) => method.name === "combine")?.signatures[0]?.returns.type).toBe(
+    'Promise<import("../other/model").Item>',
+  );
+  expect(
+    result.documentation.types.find((type) => type.name === 'import("../shared/model").Item')
+      ?.definition,
+  ).toContain("id: string");
+  expect(
+    result.documentation.types.find((type) => type.name === 'import("../other/model").Item')
+      ?.definition,
+  ).toContain("count: number");
+  const input = result.documentation.types.find((type) => type.name === 'import("./app").Input');
+  expect(input?.definition).toContain('import("../shared/model").Item');
+  expect(input?.definition).toContain('import("../other/model").Item');
+  expect(JSON.stringify(result.documentation)).not.toContain(workspace.replaceAll("\\", "/"));
+});
 
 native(
   "preserves generic declarations, constraints and defaults on each method signature",

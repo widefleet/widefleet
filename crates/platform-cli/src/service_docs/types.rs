@@ -1,24 +1,24 @@
 use super::comments::documentation;
 use serde_json::{Value, json};
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use tsrs_ast as ast;
 use tsrs_checker::{
     Checker, ObjectFlags, SignatureKind, Type, TypeFlags, TypeFormatFlags, VerbosityContext,
 };
-use tsrs_core::P;
+use tsrs_core::{P, tspath};
 
 pub struct Types {
-    import_prefix: String,
+    project: String,
+    external_imports: HashMap<String, String>,
     pending: VecDeque<P<Type>>,
     seen: HashSet<P<Type>>,
 }
 
 impl Types {
     pub fn new(project: &std::path::Path) -> Self {
-        let path = super::sources::compiler_path(&project.to_string_lossy());
-        let quoted = json!(path.trim_end_matches('/').to_owned() + "/").to_string();
         Self {
-            import_prefix: format!("import({}", quoted.trim_end_matches('"')),
+            project: super::sources::compiler_path(&project.to_string_lossy()),
+            external_imports: HashMap::new(),
             pending: VecDeque::new(),
             seen: HashSet::new(),
         }
@@ -55,7 +55,7 @@ impl Types {
     }
 
     fn render(
-        &self,
+        &mut self,
         checker: &mut Checker,
         value: P<Type>,
         verbosity: Option<P<VerbosityContext>>,
@@ -67,10 +67,65 @@ impl Types {
             } else {
                 TypeFormatFlags::None
             };
-        // Keep the compiler's module qualification, but never publish the author's absolute checkout path.
-        checker
-            .type_to_string_ex_exported(value, None, flags, verbosity)
-            .replace(&self.import_prefix, "import(\"./")
+        self.relative_imports(checker.type_to_string_ex_exported(value, None, flags, verbosity))
+    }
+
+    fn relative_imports(&mut self, text: String) -> String {
+        let mut scanner = tsrs_scanner::Scanner::new();
+        scanner.set_text(tsrs_core::alloc_str(&text));
+        let mut previous = (ast::Kind::Unknown, ast::Kind::Unknown);
+        let mut braces = Vec::new();
+        let mut result = String::with_capacity(text.len());
+        let mut copied = 0;
+        loop {
+            let mut token = scanner.scan();
+            match token {
+                ast::Kind::EndOfFile => break,
+                ast::Kind::TemplateHead => braces.push(true),
+                ast::Kind::OpenBraceToken => braces.push(false),
+                ast::Kind::CloseBraceToken if braces.pop() == Some(true) => {
+                    token = scanner.re_scan_template_token(false);
+                    if token == ast::Kind::TemplateMiddle {
+                        braces.push(true);
+                    }
+                }
+                _ => {}
+            }
+            // Only rewrite module specifiers, never string or template literal type values.
+            if token == ast::Kind::StringLiteral
+                && previous == (ast::Kind::ImportKeyword, ast::Kind::OpenParenToken)
+            {
+                let path = super::sources::compiler_path(scanner.token_value());
+                if tspath::is_rooted_disk_path(&path) {
+                    let mut relative = tspath::get_relative_path_from_directory(
+                        &self.project,
+                        &path,
+                        &tspath::ComparePathsOptions {
+                            use_case_sensitive_file_names: !cfg!(windows),
+                            ..Default::default()
+                        },
+                    );
+                    if tspath::is_rooted_disk_path(&relative) {
+                        // Different Windows volumes have no relative path. Keep a unique
+                        // documentation identity without exposing either volume's directories.
+                        let next = self.external_imports.len() + 1;
+                        relative = self
+                            .external_imports
+                            .entry(path)
+                            .or_insert_with(|| format!("widefleet:external/{next}"))
+                            .clone();
+                    } else {
+                        relative = tspath::ensure_path_is_non_module_name(&relative);
+                    }
+                    result.push_str(&text[copied..scanner.token_start() as usize]);
+                    result.push_str(&json!(relative).to_string());
+                    copied = scanner.token_end() as usize;
+                }
+            }
+            previous = (previous.1, token);
+        }
+        result.push_str(&text[copied..]);
+        result
     }
 
     pub fn definitions(&mut self, checker: &mut Checker) -> Option<Vec<Value>> {
@@ -177,5 +232,66 @@ impl Types {
             }
         }
         Some(definitions)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn import_paths_are_relative_inside_and_outside_the_project() {
+        for (project, module, expected) in [
+            ("/workspace/app", "/workspace/app/model", "./model"),
+            (
+                "/workspace/app",
+                "/workspace/shared/model",
+                "../shared/model",
+            ),
+            (
+                "C:/workspace/app",
+                "C:/workspace/shared/model",
+                "../shared/model",
+            ),
+            (
+                r"\\?\C:\workspace\app",
+                r"C:\workspace\shared\model",
+                "../shared/model",
+            ),
+            ("/workspace/app", "/workspace/quo\"ted/ö", "../quo\"ted/ö"),
+        ] {
+            let mut types = Types::new(Path::new(project));
+            assert_eq!(
+                types.relative_imports(format!("import({}).Item", json!(module))),
+                format!("import({}).Item", json!(expected))
+            );
+        }
+    }
+
+    #[test]
+    fn imports_on_other_volumes_keep_distinct_repeatable_identities() {
+        let mut types = Types::new(Path::new("C:/workspace/app"));
+        let first = types.relative_imports(r#"import("D:/private/one/model").Item"#.into());
+        let second = types.relative_imports(r#"import("D:/private/two/model").Item"#.into());
+        assert_eq!(first, r#"import("widefleet:external/1").Item"#);
+        assert_eq!(second, r#"import("widefleet:external/2").Item"#);
+        assert_eq!(
+            types.relative_imports(r#"import("D:/private/one/model").Item"#.into()),
+            first
+        );
+    }
+
+    #[test]
+    fn import_rewriting_preserves_literal_types_and_package_names() {
+        let mut types = Types::new(Path::new("/workspace/app"));
+        let literal = r#"["import(\"/workspace/app/model\").Item", `import("/workspace/app/model").Item`, import("package").Item]"#;
+        assert_eq!(types.relative_imports(literal.into()), literal);
+        assert_eq!(
+            types.relative_imports(
+                r#"`before ${import("/workspace/shared/model").Text} import("/workspace/app/model").Item`"#.into()
+            ),
+            r#"`before ${import("../shared/model").Text} import("/workspace/app/model").Item`"#
+        );
     }
 }
