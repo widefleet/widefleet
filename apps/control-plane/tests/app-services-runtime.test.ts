@@ -174,6 +174,11 @@ describe.runIf(process.env["RUN_SERVICE_TESTS"] === "1").each(["workerd", "celld
 
           if (request.url !== workloadTokenPath) throw new Error("Unexpected workload path");
 
+          if (request.headers["content-type"] !== "application/octet-stream")
+            throw new Error("Expected a non-form workload request");
+
+          if (request.headers.origin) throw new Error("Workload requests do not need an Origin");
+
           const chunks: Buffer[] = [];
 
           for await (const chunk of request) chunks.push(z.instanceof(Buffer).parse(chunk));

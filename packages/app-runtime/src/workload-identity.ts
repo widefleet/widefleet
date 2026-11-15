@@ -36,7 +36,7 @@ export class WorkloadIdentity extends WorkerEntrypoint<
 
     const response = await fetch(new URL(workloadTokenPath, this.env.WIDEFLEET_PLATFORM_URL), {
       method: "POST",
-      headers: { "content-type": "text/plain" },
+      headers: { "content-type": "application/octet-stream" },
       body: proof,
       redirect: "manual",
       signal: AbortSignal.timeout(10_000),

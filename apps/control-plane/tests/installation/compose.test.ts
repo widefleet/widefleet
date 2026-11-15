@@ -108,6 +108,26 @@ describe.runIf(process.env["RUN_INSTALLATION_TESTS"] === "1")(
         expect(services[name]?.environment).not.toHaveProperty("GITHUB_TOKEN");
     });
 
+    it.each([undefined, "http://control-plane:3000"])(
+      "keeps the runtime platform address consistent across startup and agent deployments (%s)",
+      async (override) => {
+        const settings = override
+          ? { ...installationSettings, PLATFORM_RUNTIME_PLATFORM_URL: override }
+          : installationSettings;
+
+        const { services } = await render(["compose.base", "compose.azure"], settings);
+
+        for (const name of ["runtime", "agent"])
+          expect(services[name]?.environment["PLATFORM_RUNTIME_PLATFORM_URL"]).toBe(
+            override ?? installationSettings.PLATFORM_URL,
+          );
+
+        expect(services["control-plane"]?.environment["PLATFORM_URL"]).toBe(
+          installationSettings.PLATFORM_URL,
+        );
+      },
+    );
+
     it.each(matrix)(
       "renders $database PostgreSQL, $storage storage and $tls TLS",
       async ({ database, storage, tls }) => {
