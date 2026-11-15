@@ -1,7 +1,7 @@
 ---
 title: Single-host installation
 description: Install, configure and recover a company installation.
-lastModified: 2026-11-13
+lastModified: 2026-11-15
 ---
 
 This guide installs Widefleet **0.4.15** using the reference Compose deployment. Use Linux x86-64, Docker Engine 29.8.1, Docker Compose 2.20.0 or newer (including v5), and a checkout of the matching release. Published images contain the required runtime and setup tools; the operator host needs no Node, pnpm or Rust installation. The operator owns DNS, certificates, identity-provider registrations, backups and upgrades. Commands below change the selected installation; choose its environment file deliberately.
@@ -153,7 +153,7 @@ cover the configuration needed to keep users signed in and update their groups.
 
 To let app owners search Entra groups by name, follow
 [Enable searching for groups by name](/guides/company-sign-in#enable-searching-for-groups-by-name).
-Google Workspace includes group search through its required directory connection.
+For Google Workspace, enter the group's primary email address in the app's allowed groups.
 
 ## Pull the release images
 
