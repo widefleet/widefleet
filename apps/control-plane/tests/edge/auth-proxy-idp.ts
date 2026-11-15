@@ -26,26 +26,43 @@ export const createIdentityProvider = async (
   const wrongKeys = await generateKeyPair("RS256");
   const publicKey = { ...(await exportJWK(keys.publicKey)), kid: "test", alg: "RS256", use: "sig" };
   const codes = new Map<string, z.infer<typeof authorization> & { person?: "Alice" | "Bob" }>();
+  const refreshes = new Map<string, z.infer<typeof authorization> & { person?: "Alice" | "Bob" }>();
+  const replays = new Map<string, { response: string; expiresAt: number }>();
+  let queue = Promise.resolve();
 
   const settings = {
     available: true,
     failure: "",
     entra: false,
+    google: false,
+    workspaceDomain: "example.test",
     groups: ["accounting"],
     name: "Example User",
     subject: "pairwise-subject",
     email: "user@example.test",
     graphFailure: "",
     issuerSuffix: "",
+    refreshFailure: "",
+    rotateRefreshTokens: false,
+    issueRefreshToken: true,
+    omitRefreshIdToken: false,
+    grantedScopes: "",
+    omitRefreshScopes: false,
   };
 
   const graphRequests: string[] = [];
   const tokenOrigins: (string | undefined)[] = [];
+  const refreshRequests: string[] = [];
 
   const server = createServer((request, response) => {
     const handle = async () => {
       const url = new URL(request.url ?? "/", origin);
-      const issuer = settings.entra ? `${origin}/${tenantId}/v2.0` : origin + settings.issuerSuffix;
+
+      const issuer = settings.google
+        ? "https://accounts.google.com"
+        : settings.entra
+          ? `${origin}/${tenantId}/v2.0`
+          : origin + settings.issuerSuffix;
 
       response.setHeader("content-type", "application/json");
 
@@ -124,7 +141,43 @@ export const createIdentityProvider = async (
 
         for await (const chunk of request) chunks.push(z.instanceof(Buffer).parse(chunk));
         const fields = new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
-        const parameters = codes.get(fields.get("code") ?? "");
+        const refreshing = fields.get("grant_type") === "refresh_token";
+        const credential = fields.get("refresh_token") ?? "";
+
+        const parameters = refreshing
+          ? refreshes.get(credential)
+          : codes.get(fields.get("code") ?? "");
+
+        if (refreshing) {
+          refreshRequests.push(credential);
+
+          const replay = settings.rotateRefreshTokens ? replays.get(credential) : undefined;
+
+          if (
+            replay &&
+            fields.get("client_id") === "app-login" &&
+            fields.get("client_secret") === "synthetic-client-secret"
+          ) {
+            if (replay.expiresAt > Date.now()) response.end(replay.response);
+            else response.writeHead(400).end(JSON.stringify({ error: "invalid_grant" }));
+
+            return;
+          }
+
+          if (settings.refreshFailure) {
+            response
+              .writeHead(
+                settings.refreshFailure === "invalid_grant"
+                  ? 400
+                  : settings.refreshFailure === "access_denied"
+                    ? 403
+                    : 503,
+              )
+              .end(JSON.stringify({ error: settings.refreshFailure }));
+
+            return;
+          }
+        }
 
         codes.delete(fields.get("code") ?? "");
 
@@ -132,10 +185,11 @@ export const createIdentityProvider = async (
           !parameters ||
           fields.get("client_id") !== "app-login" ||
           fields.get("client_secret") !== "synthetic-client-secret" ||
-          fields.get("redirect_uri") !== parameters.redirect_uri ||
-          createHash("sha256")
-            .update(fields.get("code_verifier") ?? "")
-            .digest("base64url") !== parameters.code_challenge
+          (!refreshing &&
+            (fields.get("redirect_uri") !== parameters.redirect_uri ||
+              createHash("sha256")
+                .update(fields.get("code_verifier") ?? "")
+                .digest("base64url") !== parameters.code_challenge))
         ) {
           response.writeHead(400).end(JSON.stringify({ error: "invalid_grant" }));
 
@@ -145,6 +199,7 @@ export const createIdentityProvider = async (
         const claims = new SignJWT({
           nonce: settings.failure === "nonce" ? "wrong-nonce" : parameters.nonce,
           email_verified: settings.failure !== "email",
+          hd: settings.google ? settings.workspaceDomain : undefined,
           ...(settings.entra
             ? {
                 oid: objectId,
@@ -184,17 +239,38 @@ export const createIdentityProvider = async (
           settings.failure === "signature" ? wrongKeys.privateKey : keys.privateKey,
         );
 
-        response.end(
-          JSON.stringify({
-            access_token: "fixture-access-token",
-            refresh_token: "fixture-refresh-token",
-            token_type: "Bearer",
-            expires_in: 3600,
-            id_token: settings.failure === "missing-token" ? undefined : token,
-          }),
-        );
+        const refreshToken = randomUUID();
+        refreshes.set(refreshToken, parameters);
+
+        const result = JSON.stringify({
+          access_token: "fixture-access-token",
+          refresh_token: settings.issueRefreshToken ? refreshToken : undefined,
+          token_type: "Bearer",
+          scope:
+            refreshing && settings.omitRefreshScopes
+              ? undefined
+              : settings.grantedScopes || undefined,
+          expires_in: 3600,
+          id_token:
+            settings.failure === "missing-token" || (refreshing && settings.omitRefreshIdToken)
+              ? undefined
+              : token,
+        });
+
+        if (refreshing && settings.rotateRefreshTokens) {
+          refreshes.delete(credential);
+          replays.set(credential, { response: result, expiresAt: Date.now() + 30_000 });
+        }
+
+        response.end(result);
       } else if (url.pathname === "/v1.0/me/transitiveMemberOf") {
         graphRequests.push(url.href);
+
+        if (settings.graphFailure === "throttled") {
+          response.writeHead(429, { "Retry-After": "5" }).end();
+
+          return;
+        }
 
         if (
           request.headers.authorization !== "Bearer fixture-access-token" ||
@@ -221,7 +297,9 @@ export const createIdentityProvider = async (
       } else response.writeHead(404).end();
     };
 
-    void handle().catch(() => response.writeHead(500).end());
+    queue = queue.then(handle).catch(() => {
+      response.writeHead(500).end();
+    });
   });
 
   server.listen(0, browser?.hostname ?? "127.0.0.1");
@@ -233,6 +311,7 @@ export const createIdentityProvider = async (
     settings,
     graphRequests,
     tokenOrigins,
+    refreshRequests,
     stop: () =>
       new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve())),

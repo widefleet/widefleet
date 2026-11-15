@@ -1,6 +1,7 @@
 import { env, waitUntil } from "cloudflare:workers";
 import type { Handle, HandleServerError } from "@sveltejs/kit/hooks";
 import { createCloudflareRuntime } from "#server/runtime-cloudflare";
+import { handleSession } from "#server/session";
 
 import { proxyAnalyticsRequest } from "#server/analytics-proxy";
 import { analyticsEnvironmentSchema, readAnalyticsConfiguration } from "#lib/analytics-config";
@@ -21,7 +22,7 @@ export const handle: Handle = async ({ event, resolve }) => {
   };
 
   try {
-    const response = await resolve(event);
+    const response = await handleSession({ event, resolve });
 
     if (!response.body) {
       close();

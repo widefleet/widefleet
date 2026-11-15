@@ -317,7 +317,7 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               organizationId: app.organizationId,
               id: record.id,
               appId: app.id,
-              metadata: record.metadata,
+              metadata: contract.executionWorkerMetadata(metadata),
               manifest: record.manifest,
               modules: record.modules,
               hostname: app.hostname,

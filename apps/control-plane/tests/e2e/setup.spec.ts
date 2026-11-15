@@ -88,11 +88,11 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
     await page.getByRole("button", { name: "Create account and continue" }).click();
     await expect(page).toHaveURL(/\/sign-in\?/);
     await expect(page.getByLabel("Email", { exact: true })).toHaveValue("sso@example.test");
-    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.getByRole("button", { name: "Continue with email", exact: true }).click();
     await expect.poll(() => logs.match(/code is (\d{6})/)?.[1]).toBeTruthy();
     const otp = z.string().parse(logs.match(/code is (\d{6})/)?.[1]);
     await page.getByLabel("Sign-in code", { exact: true }).fill(otp);
-    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    await page.getByRole("button", { name: "Verify and sign in", exact: true }).click();
     await expect(page).toHaveURL(/\/settings$/);
     await expect(page.getByRole("button", { name: "Activate Widefleet sign-in" })).toBeVisible();
     environment.authControl.available(true);
@@ -123,7 +123,7 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
       .fill(
         `${environment.environment.ENTRA_AUTHORITY}/${environment.environment.ENTRA_TENANT_ID}/v2.0`,
       );
-    await page.getByLabel("App identity claims").selectOption("entra");
+    await page.getByLabel("App identity provider").selectOption("entra");
     await expect(
       page.getByText("http://localhost:25430/api/auth/sso/callback/company-widefleet", {
         exact: true,

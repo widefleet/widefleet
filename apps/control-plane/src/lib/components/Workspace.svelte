@@ -199,7 +199,6 @@
           >{section}</span
         >
       </div>
-      <span class="text-muted-foreground hidden text-xs md:block">Widefleet</span>
       <details bind:open={mobileOpen} class="group relative md:hidden">
         <summary
           bind:this={mobileTrigger}

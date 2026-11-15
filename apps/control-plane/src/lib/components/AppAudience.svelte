@@ -182,8 +182,9 @@
             class="font-mono text-sm"
           />
           <p id="groups-help" class="text-muted-foreground text-xs leading-6">
-            One group ID per line. Leave blank to allow all signed-in users. All existing and new
-            previews inherit these rules automatically.
+            One group ID per line; for Google Workspace, use the group’s email address. Leave blank
+            to allow all signed-in users. All existing and new previews inherit these rules
+            automatically.
           </p>
         </div>
         <FormIssues issues={editor.fields.allIssues()} />
@@ -203,7 +204,7 @@
       </form>
     {/key}
     <details class="rounded-xl border p-5 sm:p-6">
-      <summary class="text-sm font-medium">Search the company directory for groups</summary>
+      <summary class="text-sm font-medium">Search the Microsoft Entra directory for groups</summary>
       <form {...search} class="mt-5 max-w-lg space-y-3">
         <input {...search.fields.appId.as("hidden", appId)} />
         <Label for="group-search">Group name</Label>

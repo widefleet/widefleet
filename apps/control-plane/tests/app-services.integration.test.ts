@@ -115,6 +115,121 @@ describe("App service connections", () => {
     });
   });
 
+  it("describes only the active provider version in the selected organization, including rollback and legacy artifacts", async () => {
+    const target = await app(["Reader"]);
+    const legacy = (await services().describe(principal, target.id)).unwrap();
+    expect(legacy.documentation).toBeNull();
+
+    const first = contract.workerMetadata.parse(
+      (
+        await environment.database.db
+          .select()
+          .from(artifacts)
+          .where(eq(artifacts.id, target.artifactId))
+      )[0]?.metadata,
+    );
+
+    const documentation = (summary: string) =>
+      contract.serviceDocumentation.parse({
+        format: 1,
+        entrypoints: [
+          { name: "Reader", summary, remarks: "", examples: [], methods: [], http: false },
+        ],
+        types: [],
+      });
+
+    await environment.database.db
+      .update(artifacts)
+      .set({ metadata: { ...first, service_documentation: documentation("First version") } })
+      .where(eq(artifacts.id, target.artifactId));
+    const nextArtifact = crypto.randomUUID();
+    const nextDeployment = crypto.randomUUID();
+    await environment.database.db.insert(artifacts).values({
+      id: nextArtifact,
+      appId: target.id,
+      metadata: { ...first, service_documentation: documentation("Next version") },
+      manifest: {},
+      modules: [],
+    });
+    await environment.database.db.insert(deployments).values({
+      id: nextDeployment,
+      appId: target.id,
+      artifactId: nextArtifact,
+      status: "queued",
+      requestId: crypto.randomUUID(),
+    });
+    expect((await services().describe(principal, target.slug)).unwrap().documentation).toEqual(
+      documentation("First version"),
+    );
+    expect(
+      await services().describe(
+        { ...principal, application: { organizationId: "foreign", admin: true } },
+        target.id,
+      ),
+    ).toMatchObject({ error: { code: "NOT_FOUND" } });
+    await environment.database.db
+      .update(apps)
+      .set({ activeDeploymentId: nextDeployment })
+      .where(eq(apps.id, target.id));
+    expect((await services().describe(principal, target.id)).unwrap()).toMatchObject({
+      deploymentId: nextDeployment,
+      documentation: documentation("Next version"),
+    });
+    await environment.database.db
+      .update(apps)
+      .set({ activeDeploymentId: legacy.deploymentId })
+      .where(eq(apps.id, target.id));
+    expect((await services().describe(principal, target.id)).unwrap().documentation).toEqual(
+      documentation("First version"),
+    );
+  });
+
+  it("resolves UUID-shaped slugs with app IDs taking precedence within the selected organization", async () => {
+    const named = await app(["Reader"]);
+    const slug = `a${crypto.randomUUID().slice(1)}`;
+    await environment.database.db.update(apps).set({ slug }).where(eq(apps.id, named.id));
+    expect((await services().describe(principal, slug)).unwrap().appId).toBe(named.id);
+
+    const artifactId = crypto.randomUUID();
+    const deploymentId = crypto.randomUUID();
+    await environment.database.db.insert(apps).values({
+      id: slug,
+      slug: `id-${slug}`,
+      displayName: "ID match",
+      organizationId: principal.application.organizationId,
+      ownerId: principal.id,
+      hostname: `id-${slug}.apps.localhost`,
+      activeDeploymentId: deploymentId,
+      state: "active",
+    });
+    await environment.database.db.insert(artifacts).values({
+      id: artifactId,
+      appId: slug,
+      metadata: contract.workerMetadata.parse({
+        main_module: "worker.js",
+        compatibility_date: "2026-10-01",
+        entrypoints: ["Reader"],
+        assets: { upload_session: artifactId },
+      }),
+      manifest: {},
+      modules: [],
+    });
+    await environment.database.db.insert(deployments).values({
+      id: deploymentId,
+      appId: slug,
+      artifactId,
+      status: "succeeded",
+      requestId: crypto.randomUUID(),
+    });
+    expect((await services().describe(principal, slug)).unwrap().appId).toBe(slug);
+    expect(
+      await services().describe(
+        { ...principal, application: { organizationId: "foreign", admin: true } },
+        slug,
+      ),
+    ).toMatchObject({ error: { code: "NOT_FOUND" } });
+  });
+
   it("rejects cycles through desired or still-active connections", async () => {
     const a = await app(["Reader"]);
     const b = await app(["Reader"]);

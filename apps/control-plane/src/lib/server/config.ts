@@ -59,6 +59,7 @@ export const runtimeConfigurationSchema = z.object({
   APP_DOMAIN: z.string().regex(/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/),
   APP_HTTPS_PORT: z.coerce.number().int().min(1).max(65535).default(443),
   BETTER_AUTH_SECRET: z.string().min(32).optional(),
+  GITHUB_TOKEN: z.string().trim().optional(),
   PLATFORM_STATE_DIRECTORY: z.string().min(1).default("/var/lib/widefleet"),
   PLATFORM_APP_RUNTIME_URL: telemetryUrl.default("http://runtime:8080"),
   PLATFORM_RUNTIME_DIRECTORY: z.string().min(1).default("/var/lib/widefleet/runtime"),

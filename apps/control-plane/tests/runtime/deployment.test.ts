@@ -53,6 +53,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
   let state: string;
   let accessToken: string;
   let managementHeaders: Headers;
+  let managementUserId: string;
   let agentToken: string;
   let organizationId: string;
   let dockerHost: string;
@@ -171,6 +172,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       email: "runtime@example.test",
     });
 
+    managementUserId = person.id;
     await environment.users.saveUser(person);
     await environment.linkMicrosoftUser(person.id, z.uuid().parse(environment.ownerSubject));
     managementHeaders = new Headers((await environment.users.login({ userId: person.id })).headers);
@@ -2547,11 +2549,22 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     const browser = await chromium.launch();
 
     try {
-      const page = await browser.newPage({
-        extraHTTPHeaders: Object.fromEntries(managementHeaders),
-      });
+      const page = await browser.newPage();
+      const login = await environment.users.login({ userId: managementUserId });
 
-      await page.goto(`${environment.configuration.PLATFORM_URL}/apps/${app.id}`);
+      await page.context().addCookies(
+        login.cookies.map((cookie) => ({
+          ...cookie,
+          domain: "localhost",
+          sameSite: "Lax",
+          secure: false,
+        })),
+      );
+
+      const appUrl = `${environment.configuration.PLATFORM_URL}/apps/${app.id}`;
+      const response = await page.goto(appUrl);
+      expect(response?.status()).toBe(200);
+      expect(page.url()).toBe(appUrl);
       await page.getByRole("link", { name: "Workflows", exact: true }).click();
       await page.getByRole("heading", { name: "Workflows", exact: true }).waitFor();
       await page.getByLabel("Action", { exact: true }).selectOption("create");

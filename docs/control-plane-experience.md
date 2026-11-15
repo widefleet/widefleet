@@ -1,6 +1,6 @@
 # Control-plane interaction constraints
 
-Use these constraints when changing flows that cross authentication, permissions or background operations. The [contributor UI rules](../AGENTS.md#control-plane-ui) own the visual and component guidance; [local verification](development.md#local-verification) explains how to exercise changes.
+Use these constraints when changing flows that cross authentication, permissions or background operations. The [design guidelines](design.md) cover visual decisions and review; [local verification](development.md#local-verification) explains how to exercise changes.
 
 ## Keep app usage separate from management
 

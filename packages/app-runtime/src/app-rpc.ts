@@ -1,42 +1,12 @@
 import { z } from "zod";
+import { appRpcMethod } from "@platform/contracts";
 
 // The common RPC contract is deliberately value based. celld does not transfer
 // callbacks, RPC targets or streams across isolates.
 export type AppValue = string | number | boolean | bigint | object | null | undefined;
 
-const reserved = new Set([
-  "constructor",
-  "__proto__",
-  "prototype",
-  "then",
-  "catch",
-  "finally",
-  "fetch",
-  "connect",
-  "scheduled",
-  "queue",
-  "alarm",
-  "webSocketMessage",
-  "webSocketClose",
-  "webSocketError",
-  "toString",
-  "toLocaleString",
-  "valueOf",
-  "hasOwnProperty",
-  "isPrototypeOf",
-  "propertyIsEnumerable",
-  "__defineGetter__",
-  "__defineSetter__",
-  "__lookupGetter__",
-  "__lookupSetter__",
-]);
-
 export const appMethod = (method: string) => {
-  if (
-    !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(method) ||
-    reserved.has(method) ||
-    method.startsWith("WIDEFLEET_")
-  )
+  if (!appRpcMethod.safeParse(method).success)
     throw new Error("App RPC method is reserved or invalid");
 
   return method;

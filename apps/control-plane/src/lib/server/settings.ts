@@ -218,6 +218,12 @@ const createOrganizationSettingsService = (
         });
     }
 
+    if (next.sso?.appIdentityType === "google" && next.sso.issuer !== "https://accounts.google.com")
+      throw new InvalidOperation({
+        code: "BAD_REQUEST",
+        message: "Use https://accounts.google.com as the Google Workspace issuer",
+      });
+
     if (next.directory && next.sso?.appIdentityType !== "entra")
       throw new InvalidOperation({
         code: "BAD_REQUEST",

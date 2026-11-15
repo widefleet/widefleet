@@ -1,5 +1,5 @@
 import { command, getRequestEvent, query } from "$app/server";
-import { error, redirect } from "@sveltejs/kit";
+import { error } from "@sveltejs/kit";
 import {
   settingsInput,
   settingsUpdate,
@@ -12,9 +12,11 @@ import { getRuntime } from "#server/runtime";
 import { readSettingsAccount } from "#server/settings-account";
 
 export const getSettings = query(async () => {
-  const { runtime, principal, request } = await remoteContext();
+  const { runtime, principal } = await remoteContext();
 
-  return remoteOperation(() => readSettingsAccount(runtime, principal, request.headers));
+  return remoteOperation(() =>
+    readSettingsAccount(runtime, principal, getRequestEvent().locals.session),
+  );
 });
 
 export const planSettings = command(
@@ -38,8 +40,10 @@ export const updateSettings = command(
     );
 
     if (!(await runtime.auth.api.getSession({ headers: request.headers })))
-      redirect(303, "/sign-in?next=/settings");
+      return { signedOut: true };
     await getSettings().refresh();
+
+    return { signedOut: false };
   },
 );
 

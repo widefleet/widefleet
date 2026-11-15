@@ -76,7 +76,7 @@ export const companySsoPlugin = (
             type: "string",
             required: false,
             defaultValue: "oidc",
-            validator: { input: z.enum(["oidc", "entra"]) },
+            validator: { input: z.enum(["oidc", "entra", "google"]) },
           },
         },
       },

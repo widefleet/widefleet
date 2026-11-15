@@ -1,9 +1,11 @@
+import { googleGroupsScope } from "@platform/contracts";
 import type { BetterAuthOptions } from "better-auth";
 import { betterAuth } from "better-auth/minimal";
 import { genericOAuth } from "better-auth/plugins/generic-oauth";
 import { z } from "zod";
 import { sessionVersion, type AuthConfiguration } from "./configuration.ts";
 import { issuer, providerIdentity, proxyIdentity } from "./identity.ts";
+import { authorization, sessionRenewal } from "./renewal.ts";
 
 export const cookiePrefix = (configuration: AuthConfiguration) =>
   `platform_sso_${configuration.organizationId}`;
@@ -23,23 +25,22 @@ const authenticationOptions = async (configuration: AuthConfiguration) =>
     ],
     account: {
       storeStateStrategy: "cookie",
-      storeAccountCookie: false,
+      storeAccountCookie: true,
       accountLinking: { enabled: false },
     },
     session: {
-      expiresIn: 3600,
       disableSessionRefresh: true,
       cookieCache: {
         enabled: true,
         strategy: "jwe",
-        maxAge: 3600,
+        maxAge: 60 * 60 * 24 * 7,
         refreshCache: false,
         version: await sessionVersion(configuration),
       },
     },
     user: {
       additionalFields: {
-        appIdentity: { type: "json", required: false, input: false },
+        appAuthorization: { type: "json", required: false, input: false },
       },
     },
     advanced: {
@@ -65,76 +66,116 @@ const authenticationOptions = async (configuration: AuthConfiguration) =>
           name: `__Secure-${cookiePrefix(configuration)}.session_data`,
           attributes: { domain: configuration.domain },
         },
+        account_data: {
+          name: `__Secure-${cookiePrefix(configuration)}.account_data`,
+          attributes: { domain: configuration.domain },
+        },
       },
     },
   }) satisfies BetterAuthOptions;
 
 export const createAuthentication = async (configuration: AuthConfiguration, login: boolean) => {
   const options = await authenticationOptions(configuration);
-  let identity: z.infer<typeof proxyIdentity> | undefined;
+  let verified: z.infer<typeof authorization> | undefined;
 
   // A new instance per request keeps Better Auth's temporary in-memory records
   // out of subsequent logins. Session checks do not initialize OIDC discovery.
   return betterAuth({
     ...options,
-    plugins: login
-      ? [
-          genericOAuth({
-            config: [
-              {
-                providerId: "company",
-                clientId: configuration.clientId,
-                clientSecret: configuration.clientSecret,
-                discoveryUrl: `${issuer(configuration.provider)}/.well-known/openid-configuration`,
-                // Only Widefleet needs the form-origin check; Entra rejects Origin
-                // on confidential-client token requests.
-                authorizationHeaders:
-                  configuration.provider.type === "oidc" &&
-                  configuration.provider.sendTokenRequestOrigin
-                    ? { origin: new URL(issuer(configuration.provider)).origin }
-                    : undefined,
-                requireIdTokenVerification: true,
-                redirectURI: configuration.redirectUrl,
-                disableProviderLogout: true,
-                scopes: [
-                  ...new Set([
-                    "openid",
-                    "profile",
-                    "email",
-                    ...(configuration.scopes ?? []),
-                    ...(configuration.provider.type === "entra" ? ["User.Read"] : []),
-                  ]),
-                ],
-                getUserInfo: async (tokens) => {
-                  if (!tokens.idToken) return null;
+    plugins: [
+      sessionRenewal(() => verified),
+      ...(login
+        ? [
+            genericOAuth({
+              config: [
+                {
+                  providerId: "company",
+                  clientId: configuration.clientId,
+                  clientSecret: configuration.clientSecret,
+                  discoveryUrl: `${issuer(configuration.provider)}/.well-known/openid-configuration`,
+                  // Only Widefleet needs the form-origin check; Entra rejects Origin
+                  // on confidential-client token requests.
+                  authorizationHeaders:
+                    configuration.provider.type === "oidc" &&
+                    configuration.provider.sendTokenRequestOrigin
+                      ? { origin: new URL(issuer(configuration.provider)).origin }
+                      : undefined,
+                  requireIdTokenVerification: true,
+                  redirectURI: configuration.redirectUrl,
+                  disableProviderLogout: true,
+                  authorizationUrlParams:
+                    configuration.provider.type === "google"
+                      ? {
+                          access_type: "offline",
+                          prompt: "consent",
+                          hd: configuration.provider.domain,
+                        }
+                      : undefined,
+                  scopes: [
+                    ...new Set([
+                      "openid",
+                      "profile",
+                      "email",
+                      ...(configuration.provider.type === "google" ? [] : ["offline_access"]),
+                      ...(configuration.scopes ?? []).filter(
+                        (scope) =>
+                          configuration.provider.type !== "google" || scope !== "offline_access",
+                      ),
+                      ...(configuration.provider.type === "entra" ? ["User.Read"] : []),
+                    ]),
+                  ],
+                  getUserInfo: async (tokens) => {
+                    if (!tokens.idToken) return null;
 
-                  const result = await providerIdentity(
-                    configuration.provider,
-                    tokens.idToken,
-                    tokens.accessToken,
-                    configuration.organizationId,
-                  );
+                    const result = await providerIdentity(
+                      configuration.provider,
+                      tokens.idToken,
+                      tokens.accessToken,
+                      configuration.organizationId,
+                      Boolean(configuration.scopes?.includes(googleGroupsScope)) &&
+                        // OAuth omits scope when the granted scopes equal those requested.
+                        (!tokens.scopes?.length || tokens.scopes.includes(googleGroupsScope)),
+                    );
 
-                  identity = result.identity;
+                    const expiresAt = Math.min(
+                      z.number().parse(result.claims.exp) * 1000,
+                      tokens.accessTokenExpiresAt?.getTime() ?? Infinity,
+                    );
 
-                  return {
-                    ...result.claims,
-                    name: identity.name,
-                    email: identity.email,
-                    emailVerified: true,
-                  };
+                    verified = authorization.parse({
+                      identity: result.identity,
+                      subject: result.claims.sub,
+                      nonce: result.claims["nonce"],
+                      expiresAt,
+                    });
+
+                    return {
+                      ...result.claims,
+                      name: result.identity.name,
+                      email: result.identity.email,
+                      emailVerified: true,
+                    };
+                  },
+                  accountSubject: () => proxyIdentity.parse(verified?.identity).id,
                 },
-                accountSubject: () => proxyIdentity.parse(identity).id,
-              },
-            ],
-          }),
-        ]
-      : [],
+              ],
+            }),
+          ]
+        : []),
+    ],
     databaseHooks: {
+      account: {
+        create: {
+          // The verified identity is in the session. Neither large provider JWT
+          // is needed after login; only the refresh credential must persist.
+          before: (account) =>
+            Promise.resolve({ data: { ...account, accessToken: null, idToken: null } }),
+        },
+      },
       user: {
         create: {
           before: (user) =>
-            Promise.resolve({ data: { ...user, appIdentity: proxyIdentity.parse(identity) } }),
+            Promise.resolve({ data: { ...user, appAuthorization: authorization.parse(verified) } }),
         },
       },
     },

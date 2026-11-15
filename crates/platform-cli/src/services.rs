@@ -11,6 +11,18 @@ use std::{io::IsTerminal, path::PathBuf};
 use uuid::Uuid;
 
 #[derive(Args)]
+pub struct Catalog {
+    #[command(subcommand)]
+    command: Option<CatalogCommand>,
+}
+
+#[derive(Subcommand)]
+enum CatalogCommand {
+    /// Describe the methods and types in an app's active deployment.
+    Describe { app: String },
+}
+
+#[derive(Args)]
 pub struct Connect {
     target: String,
     #[arg(long = "as")]
@@ -45,8 +57,18 @@ struct Service {
     entrypoints: Vec<String>,
 }
 
-pub async fn catalog(api: &Api, credentials: &auth::Credentials) -> Result<()> {
+pub async fn catalog(api: &Api, credentials: &auth::Credentials, options: Catalog) -> Result<()> {
     let token = auth::access_token(api, credentials).await?;
+    if let Some(CatalogCommand::Describe { app }) = options.command {
+        let service = app_bindings::segment(&app)?;
+        let description: serde_json::Value = json(
+            api.authenticated(Method::GET, &format!("/app-services/{service}"), &token)
+                .send()
+                .await?,
+        )
+        .await?;
+        return crate::print_json(&description);
+    }
     let entries: Vec<Service> = json(
         api.authenticated(Method::GET, "/app-services", &token)
             .send()

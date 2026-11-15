@@ -30,6 +30,28 @@ const workerUploadDescription =
   "Use one metadata field containing JSON and one file part per module, named after that module. Source maps are private artifacts referenced by metadata.debug.source_maps, never public assets or runtime modules. Up to 32 runtime modules and 500 source maps, 20 MiB per file, 64 KiB of UTF-8 metadata and 100 MiB per request.";
 
 export const binaryPaths = {
+  "/apps/{appId}/icon": {
+    get: {
+      operationId: "getAppIcon",
+      summary: "Read the managed app's favicon from its active deployment",
+      description:
+        "Returns a conventional SVG, ICO or PNG favicon from uploaded assets, up to 256 KiB. Requires app management access. Missing icons return 404.",
+      parameters: [
+        { name: "appId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+      ],
+      responses: {
+        "200": {
+          description: "App icon",
+          content: {
+            "image/svg+xml": { schema: { type: "string", format: "binary" } },
+            "image/x-icon": { schema: { type: "string", format: "binary" } },
+            "image/png": { schema: { type: "string", format: "binary" } },
+          },
+        },
+        "404": { description: "No accessible active app icon" },
+      },
+    },
+  },
   "/apps/{appId}/assets/{sessionId}/{hash}": {
     put: {
       operationId: "uploadAsset",

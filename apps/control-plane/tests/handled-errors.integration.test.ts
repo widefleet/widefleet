@@ -8,7 +8,8 @@ import { createAuthentication } from "../src/lib/server/auth.ts";
 import { createApi } from "../src/lib/server/api.ts";
 import { AuthenticationFailed } from "../src/lib/server/identity.ts";
 import * as runtimeModule from "../src/lib/server/runtime.ts";
-import { pageFailure, identityFailure } from "../src/lib/server/page-auth.ts";
+import { pageFailure } from "../src/lib/server/page-auth.ts";
+import { organizationOperation } from "../src/lib/server/organization-operations.ts";
 import { remoteOperation } from "../src/lib/server/remote-support.ts";
 import {
   DatabaseUnavailable,
@@ -139,7 +140,7 @@ it("captures a binary upload's storage error and preserves its cause", async () 
   expect(exception.mock.calls[0]?.[0]).toBe(error);
 });
 
-it.each(["identity", "database", "storage"])(
+it.each(["database", "storage"])(
   "reports handled %s page failures without changing HTTP status",
   async (kind) => {
     const original = new Error("Unavailable connection");
@@ -150,20 +151,16 @@ it.each(["identity", "database", "storage"])(
         : new DatabaseUnavailable({ message: "Database unavailable", cause: original });
 
     try {
-      if (kind === "identity" && cause instanceof DatabaseUnavailable)
-        identityFailure(cause, new Request("http://localhost/"));
-      else pageFailure(cause);
+      pageFailure(cause);
       expect.fail("Expected HTTP error");
     } catch (error) {
       expect(error).toMatchObject({
         status: 503,
         body: {
           message:
-            kind === "identity"
-              ? "Sign-in is temporarily unavailable."
-              : kind === "storage"
-                ? "File storage is temporarily unavailable."
-                : "The database is temporarily unavailable.",
+            kind === "storage"
+              ? "File storage is temporarily unavailable."
+              : "The database is temporarily unavailable.",
         },
       });
     }
@@ -230,3 +227,18 @@ it("routes handled authentication failures through installation reporting withou
   expect(reporting).toHaveBeenCalledOnce();
   expect(reporting.mock.calls[0]?.[0]).toBe(original);
 });
+
+it.each(["UNAUTHORIZED", "SERVICE_UNAVAILABLE"] as const)(
+  "preserves native %s failures from organization operations",
+  async (status) => {
+    const cause = new APIError(status, { message: "Organization operation failed" });
+    await expect(
+      remoteOperation(() =>
+        organizationOperation({ auth: runtime.auth, headers: new Headers() }, async () => {
+          throw cause;
+        }),
+      ),
+    ).rejects.toMatchObject({ status: cause.statusCode });
+    expect(exception).toHaveBeenCalledTimes(status === "SERVICE_UNAVAILABLE" ? 1 : 0);
+  },
+);

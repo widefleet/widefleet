@@ -391,7 +391,7 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
       ).toBe(404);
     });
 
-    it("completes PKCE/nonce login and issues encrypted, one-hour Better Auth cookies", async () => {
+    it("completes PKCE/nonce login and issues encrypted Better Auth cookies", async () => {
       const result = await login();
       const cookies = result.headers.getSetCookie();
 
@@ -401,7 +401,7 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
       expect(session.length).toBeGreaterThanOrEqual(2);
 
       for (const value of session) {
-        expect(value).toContain("Max-Age=3600");
+        expect(value).toContain("Max-Age=604800");
         expect(value).toContain("Domain=apps.example.test");
         expect(value).toContain("HttpOnly");
         expect(value).toContain("Secure");
@@ -410,7 +410,7 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
         expect(value).not.toContain("fixture-access-token");
       }
 
-      expect(cookies.some((value) => value.includes("account_data"))).toBe(false);
+      expect(cookies.some((value) => value.includes("account_data"))).toBe(true);
       expect(
         (
           await request("https://ledger.apps.example.test", {

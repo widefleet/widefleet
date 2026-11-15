@@ -1,4 +1,5 @@
 import { and, eq, gt } from "drizzle-orm";
+import { APIError } from "better-auth/api";
 import { Result } from "better-result";
 import { invitationEntry, invitationInput, memberRoleInput } from "@platform/contracts";
 import type { z } from "zod";
@@ -71,7 +72,7 @@ const changeMembership = (
       return { changed: true };
     },
     catch: (cause) =>
-      cause instanceof InvalidOperation
+      cause instanceof InvalidOperation || cause instanceof APIError
         ? cause
         : new DatabaseUnavailable({ message: "Could not change organization membership", cause }),
   });

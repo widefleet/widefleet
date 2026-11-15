@@ -5,6 +5,7 @@ This directory documents work on Widefleet itself. App creators and installation
 - [Development and checks](development.md): local setup, test fixtures and verification.
 - [Architecture](architecture.md): availability, trust and activation boundaries; [native runtime pitfalls](runtime-implementation.md) explain compatibility checks for upgrades.
 - [Control-plane experience](control-plane-experience.md): interaction constraints across authentication, permissions and background operations.
+- [Control-plane design](design.md): visual hierarchy, interface copy and review criteria for UI changes.
 - [Container releases](container-releases.md), [CLI releases](cli-releases.md) and [runtime releases](runtime-releases.md): build, verify and publish platform artifacts.
 - [Documentation website](documentation-site.md): local authoring, build, routing and publication.
 

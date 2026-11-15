@@ -19,7 +19,7 @@ describe.runIf(process.env["RUN_LOCAL_TESTS"] === "1")("local quickstart", () =>
       await page.getByRole("button", { name: "Sign in with Microsoft" }).click();
       await page.getByRole("button", { name: /admin@example.test/ }).click();
       await expect
-        .poll(() => page.getByRole("heading", { name: "Your apps", exact: true }).count())
+        .poll(() => page.getByRole("heading", { name: "Apps", exact: true }).count())
         .toBe(1);
       await page.getByRole("link", { name: "Team Notes", exact: true }).click();
       const appLink = page.getByRole("link", { name: "Open app", exact: true });

@@ -76,9 +76,11 @@
     "cloudflare": "7.3.0",
     "drizzle-orm": "0.45.3",
     "jose": "6.2.10",
+    "markdown-it": "15.0.3",
     "pg": "8.23.1",
     "posthog-js": "1.438.23",
     "posthog-node": "5.55.0",
+    "yaml": "2.9.1",
     "zod": "4.6.5"
   },
   "devDependencies": {

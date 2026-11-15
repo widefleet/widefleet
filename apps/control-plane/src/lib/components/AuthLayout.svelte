@@ -1,8 +1,13 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import Brand from "./Brand.svelte";
+  import { cn } from "#shadcn/utils.js";
 
-  let { children, wide = false }: { children: Snippet; wide?: boolean } = $props();
+  let {
+    children,
+    wide = false,
+    class: className,
+  }: { children: Snippet; wide?: boolean; class?: string } = $props();
 </script>
 
 <div class="bg-sidebar flex min-h-svh flex-col">
@@ -15,7 +20,7 @@
     id="main-content"
     class={`mx-auto flex w-full flex-1 items-center px-5 py-10 sm:py-16 ${wide ? "max-w-2xl" : "max-w-md"}`}
   >
-    <div class="bg-background w-full rounded-2xl border p-7 shadow-xs sm:p-9">
+    <div class={cn("bg-background w-full rounded-2xl border p-7 shadow-xs sm:p-9", className)}>
       {@render children()}
     </div>
   </main>

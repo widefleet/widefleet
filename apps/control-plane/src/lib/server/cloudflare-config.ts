@@ -33,6 +33,7 @@ export interface CloudflareBindings extends CloudflareAuthRateLimitBindings {
   LOGIN_CODE_DELIVERY?: string;
   APP_DOMAIN: string;
   BETTER_AUTH_SECRET: string;
+  GITHUB_TOKEN?: string;
   PLATFORM_ENCRYPTION_KEY: string;
   DEPLOYMENTS?: Workflow<z.infer<typeof deploymentWorkflowCommand>>;
   APP_OPERATIONS?: Workflow<z.infer<typeof cloudflareAppOperation>>;

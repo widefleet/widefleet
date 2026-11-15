@@ -15,7 +15,23 @@ export const identityUrl = z.url().refine((value) => {
 
 const claimName = z.string().regex(/^[A-Za-z_][A-Za-z0-9_.-]{0,127}$/);
 
+export const companyDomain = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .max(253)
+  .regex(
+    /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/,
+    "Enter the company's email domain, without a URL or wildcard",
+  );
+
 export const companyProvider = z.discriminatedUnion("type", [
+  z.strictObject({
+    type: z.literal("google"),
+    issuer: z.literal("https://accounts.google.com").default("https://accounts.google.com"),
+    domain: companyDomain,
+    label: z.string().min(1).max(100).default("Google Workspace"),
+  }),
   z.strictObject({
     type: z.literal("entra"),
     tenantId: z.uuid(),
@@ -37,23 +53,17 @@ export const companyProvider = z.discriminatedUnion("type", [
   }),
 ]);
 
-const client = z.strictObject({ clientId: z.string().min(1).max(512) });
+const client = z.strictObject({
+  clientId: z.string().min(1).max(512),
+});
 
 const clientInput = client.extend({ clientSecret: z.string().min(1).max(16_384).optional() });
 
-export const companyDomain = z
-  .string()
-  .trim()
-  .toLowerCase()
-  .max(253)
-  .regex(
-    /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/,
-    "Enter the company's email domain, without a URL or wildcard",
-  );
+export const googleGroupsScope = "https://www.googleapis.com/auth/cloud-identity.groups.readonly";
 
 export const oidcProviderInput = z.strictObject({
   providerId: z.string().min(1),
-  appIdentityType: z.enum(["oidc", "entra"]).default("oidc"),
+  appIdentityType: z.enum(["oidc", "entra", "google"]).default("oidc"),
   issuer: identityUrl,
   domain: companyDomain,
   oidcConfig: z.strictObject({

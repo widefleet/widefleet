@@ -53,9 +53,11 @@ Most code changes do not need an internal documentation change. Read the relevan
 
 ## Control-plane UI
 
+Before changing control-plane UI, read [the design guidelines](docs/design.md) and inspect the closest existing flow and shared components.
 Design around the user's context, current task, and next step. Prefer focused flows over crowded pages; reveal secondary controls when needed.
+Every visible element must help users orient themselves, understand information, or act. Keep branding and context purposeful; leave unused space empty.
 Use the installed shadcn-svelte components and Tailwind tokens.
-Use Linear as the visual reference: calm layouts, clear hierarchy, and precise interactions. When unsure about design details, look to Emil Kowalski's work for guidance.
+Before opening or updating a UI PR, inspect the rendered result using the [visual review checklist](docs/design.md#review-the-rendered-result). Report what was checked and any verification gaps.
 Prefer SvelteKit remote functions for control-plane UI data access and mutations.
 Keep remote functions and HTTP API handlers thin; put business logic and resource authorization in shared server modules called directly by both.
 Reuse input schemas where the contracts match.

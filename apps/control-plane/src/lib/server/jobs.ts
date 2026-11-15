@@ -348,7 +348,9 @@ export const createJobService = (
         contract.artifact.parse({
           id: record.artifact.id,
           appId: record.artifact.appId,
-          metadata: record.artifact.metadata,
+          metadata: contract.executionWorkerMetadata(
+            contract.workerMetadata.parse(record.artifact.metadata),
+          ),
           manifest: record.artifact.manifest,
           modules: record.artifact.modules,
         }),

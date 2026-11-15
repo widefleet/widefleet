@@ -12,6 +12,8 @@ import { binaryPaths, binarySchemas } from "./openapi-binary.ts";
 import { DirectoryUnavailable } from "./directory.ts";
 import { InvalidOperation, TelemetryNotConfigured, TelemetryUnavailable } from "./errors.ts";
 import { readInstallation } from "./installation-store.ts";
+import { templateCatalog, readTemplate } from "./app-templates.ts";
+import { readAppIcon } from "./app-icons.ts";
 
 import { changeMemberRole, listMembers, removeMember } from "./members.ts";
 import { readCompanyAccount } from "./settings-account.ts";
@@ -36,6 +38,13 @@ const apiOperation = async <T>(operation: () => Promise<T>) => {
 const unwrap = <T, E extends { message: string }>(result: Result<T, E>) => {
   if (result.isOk()) return result.value;
   const error = result.error;
+
+  if (error instanceof APIError)
+    throw new ORPCError("AUTH_OPERATION_FAILED", {
+      status: error.statusCode,
+      message: error.message,
+      cause: error,
+    });
 
   if (error instanceof DirectoryUnavailable)
     throw new ORPCError("SERVICE_UNAVAILABLE", { message: error.message, cause: error });
@@ -143,8 +152,13 @@ export const createApi = (runtime: Runtime) => {
     account: read
       .route({ method: "GET", path: "/account" })
       .output(contract.companyAccount)
-      .handler(({ context }) =>
-        readCompanyAccount(runtime, context.principal, context.request.headers),
+      .handler(async ({ context }) =>
+        readCompanyAccount(
+          runtime,
+          context.principal,
+          (await runtime.auth.api.getSession({ headers: context.request.headers }))?.session ??
+            null,
+        ),
       ),
     organizations: base
       .route({ method: "GET", path: "/organizations" })
@@ -337,6 +351,13 @@ export const createApi = (runtime: Runtime) => {
       .output(z.array(contract.serviceCatalogEntry))
       .handler(async ({ context }) =>
         unwrap(await runtime.connections.services(context.principal)),
+      ),
+    serviceDescription: read
+      .route({ method: "GET", path: "/app-services/{service}" })
+      .input(contract.servicePath)
+      .output(contract.serviceDescription)
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.connections.describe(context.principal, input.service)),
       ),
     appConnections: read
       .route({ method: "GET", path: "/apps/{appId}/connections" })
@@ -548,6 +569,20 @@ export const createApi = (runtime: Runtime) => {
       .route({ method: "GET", path: "/catalog" })
       .output(z.array(contract.catalogEntry))
       .handler(async ({ context }) => unwrap(await runtime.apps.catalog(context.principal))),
+    listTemplates: read
+      .route({ method: "GET", path: "/catalog/templates" })
+      .input(contract.templateSearch)
+      .output(contract.appTemplateCatalog)
+      .handler(async ({ context, input }) =>
+        unwrap(await templateCatalog(context.principal, runtime.configuration, input.search)),
+      ),
+    getTemplate: read
+      .route({ method: "GET", path: "/catalog/templates/{templateId}" })
+      .input(contract.templatePath)
+      .output(contract.appTemplate)
+      .handler(async ({ context, input }) =>
+        unwrap(await readTemplate(context.principal, runtime.configuration, input.templateId)),
+      ),
     setCatalogListing: write
       .route({ method: "PUT", path: "/apps/{appId}/catalog" })
       .input(contract.catalogListingInput)
@@ -813,6 +848,26 @@ export const createApi = (runtime: Runtime) => {
         components: {
           ...document.components,
           schemas: { ...document.components?.schemas, ...binarySchemas },
+        },
+      });
+    }
+
+    const icon = /^\/api\/v1\/apps\/([^/]+)\/icon$/.exec(url.pathname);
+
+    if (icon && request.method === "GET") {
+      const principal = unwrap(await runtime.identity.authenticate(request, "platform:read"));
+      const appId = contract.identifier.parse(icon[1]);
+
+      const result = unwrap(
+        await readAppIcon(runtime.database.db, runtime.storage, principal, appId),
+      );
+
+      return new Response(Buffer.from(result.bytes), {
+        headers: {
+          "content-type": result.contentType,
+          "x-content-type-options": "nosniff",
+          "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+          "cross-origin-resource-policy": "same-origin",
         },
       });
     }
