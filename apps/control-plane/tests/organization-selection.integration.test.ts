@@ -482,7 +482,10 @@ describe("Organization discovery and selection", () => {
           application: { organizationId: alpha, admin: true },
         });
         const listed = await execute(binary, ["apps"], options);
-        expect(z.array(app).parse(JSON.parse(listed.stdout))).toContainEqual(fixture);
+        expect(z.array(app).parse(JSON.parse(listed.stdout))).toContainEqual({
+          ...fixture,
+          source: { supported: false, available: false, repository: null, deployed: null },
+        });
 
         const executableName = process.platform === "win32" ? "widefleet.exe" : "widefleet";
         const installed = join(directory, executableName);
