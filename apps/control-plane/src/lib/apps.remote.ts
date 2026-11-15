@@ -25,9 +25,15 @@ export const getAppDetails = query(appQuery, async ({ appId, search }) => {
   const history = queryValue(await runtime.apps.history(principal, appId));
   const access = queryValue(await runtime.apps.access(principal, appId, search));
 
-  const source = queryValue(await runtime.source.read(principal, appId));
+  const source = app.source;
 
   return { app, history, access, source };
+});
+
+export const getAppSource = query(appPath, async ({ appId }) => {
+  const { runtime, principal } = await remoteContext();
+
+  return queryValue(await runtime.source.read(principal, appId));
 });
 
 export const createApp = form(

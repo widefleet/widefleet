@@ -138,7 +138,7 @@ export const createRuntime = ({
     discoverPlatform: (domain: string) => discoverPlatform(domain, discoveryTransport),
     cliLogin: createCliLogin(database.db, configuration),
     source: createAppSource(database.db, source),
-    apps: createAppService(database.db, configuration, execution, observation),
+    apps: createAppService(database.db, configuration, execution, observation, Boolean(source)),
     agents: createAgentService(database.db),
     jobs: createJobService(
       database.db,

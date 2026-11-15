@@ -134,9 +134,9 @@ test("source guidance, saved and deployed commits, deletion wording and denied a
     page.getByRole("button", { name: "Create Git repository", exact: true }),
   ).toHaveCount(0);
 
-  const setup = await context.request.put(`/api/v1/apps/${app.id}/source`, {
+  const setup = await context.request.post(`/api/v1/apps/${app.id}/source/prepare`, {
     headers: { origin: environment.configuration.PLATFORM_URL },
-    data: { branch: "feature/search" },
+    data: {},
   });
 
   expect(setup.ok()).toBe(true);
@@ -170,10 +170,7 @@ test("source guidance, saved and deployed commits, deletion wording and denied a
     .update(apps)
     .set({ activeDeploymentId: deploymentId, state: "active" })
     .where(eq(apps.id, app.id));
-  await writeFile(
-    state,
-    JSON.stringify({ [app.id]: { "feature/search": "b".repeat(40), main: deployed.commit } }),
-  );
+  await writeFile(state, JSON.stringify({ [app.id]: { main: "b".repeat(40) } }));
   await page.reload();
   await expect(page.getByText(deployed.commit, { exact: true })).toBeVisible();
   await expect(page.getByText("b".repeat(40), { exact: true })).toBeVisible();
@@ -183,6 +180,9 @@ test("source guidance, saved and deployed commits, deletion wording and denied a
   await page.keyboard.press("Enter");
   await expect(page.getByRole("button", { name: "Copied", exact: true })).toBeVisible();
   await page.reload();
+  await page.getByRole("button", { name: "Copy clone command" }).click();
+  await expect(page.getByRole("button", { name: "Copied", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Copy clone command" })).toBeVisible();
 
   for (const theme of ["light", "dark"] as const) {
     for (const [name, width, height] of [
@@ -201,7 +201,7 @@ test("source guidance, saved and deployed commits, deletion wording and denied a
   await page.goto(`/apps/${app.id}/settings`);
   await expect(
     page.getByText(
-      "Its Widefleet Git repository and all source branches will also be permanently deleted.",
+      "Any associated Widefleet Git repository and its branches will also be permanently deleted.",
     ),
   ).toBeVisible();
   await page.getByText("Permanently delete app", { exact: true }).click();
@@ -235,8 +235,12 @@ test("source guidance, saved and deployed commits, deletion wording and denied a
       "Any associated Widefleet Git repository and its branches will also be permanently deleted.",
     ),
   ).toBeVisible();
+  const sourceReads = await readFile(`${state}.reads`, "utf8");
   await page.getByRole("link", { name: /^Deployments/ }).click();
   await expect(page.getByTitle("Deployment ID", { exact: true })).toHaveText(deploymentId);
+  await page.getByRole("button", { name: "Refresh app" }).click();
+  await expect(page.getByRole("button", { name: "Refresh app" })).toBeEnabled();
+  expect(await readFile(`${state}.reads`, "utf8")).toBe(sourceReads);
   await writeFile(state, savedState);
   await page.goto(`/apps/${app.id}/source`);
   await expect(page.getByRole("alert")).toHaveCount(0);
@@ -251,7 +255,7 @@ test("source guidance, saved and deployed commits, deletion wording and denied a
   await noScript.addCookies(cookies);
   const plain = await noScript.newPage();
   await plain.goto(`/apps/${app.id}/source`);
-  await expect(plain.getByText("feature/search", { exact: true })).toBeVisible();
+  await expect(plain.getByText("main", { exact: true })).toBeVisible();
   await expect(plain.getByText(deployed.commit, { exact: true })).toBeVisible();
   await expect(plain.getByText("Change source branch", { exact: true })).toHaveCount(0);
   await noScript.close();

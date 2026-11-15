@@ -44,8 +44,6 @@ pub enum Action {
         target: Target,
         #[arg(long, default_value = "widefleet")]
         remote: String,
-        #[arg(long)]
-        branch: Option<String>,
     },
     #[command(hide = true)]
     Credential {
@@ -82,20 +80,14 @@ pub async fn read(api: &Api, credentials: &auth::Credentials, app: Uuid) -> Resu
 struct Preparation {
     organization_id: String,
     repository: Option<SourceRepository>,
-    primary_branch: Option<String>,
+    preview: bool,
 }
 
-async fn prepare(
-    api: &Api,
-    credentials: &auth::Credentials,
-    app: Uuid,
-    branch: Option<&str>,
-) -> Result<Preparation> {
+async fn prepare(api: &Api, credentials: &auth::Credentials, app: Uuid) -> Result<Preparation> {
     let token = auth::access_token(api, credentials).await?;
-    let body = branch.map_or_else(|| value!({}), |branch| value!({"branch": branch}));
     json(
         api.authenticated(Method::POST, &format!("/apps/{app}/source/prepare"), &token)
-            .json(&body)
+            .json(&value!({}))
             .send()
             .await?,
     )
@@ -382,7 +374,7 @@ pub async fn confirm_deployment_branch(
     target: &serde_json::Value,
     requested_branch: Option<&str>,
     allow_mismatch: bool,
-) -> Result<()> {
+) -> Result<bool> {
     #[derive(Deserialize)]
     struct Target {
         supported: bool,
@@ -397,13 +389,33 @@ pub async fn confirm_deployment_branch(
             .await?,
     )
     .await?;
-    if !target.supported || target.preview {
-        return Ok(());
+    if !target.supported {
+        if requested_branch.is_some() {
+            return Err(Error::invalid(
+                "This installation does not provide Git repositories".into(),
+            ));
+        }
+        return Ok(false);
     }
-    let branch = requested_branch.unwrap_or(&target.branch);
+    if target.preview {
+        let branch = require_preview_branch(project, requested_branch).await?;
+        if branch != target.branch {
+            return Err(Error::invalid(format!(
+                "This preview is linked to branch {}. Switch to that branch or deploy a separate preview",
+                target.branch
+            )));
+        }
+        return Ok(true);
+    }
+    if requested_branch.is_some() {
+        return Err(Error::invalid(
+            "Use --source-branch only for Git previews. The main app saves source to main".into(),
+        ));
+    }
+    let branch = &target.branch;
     let local = deployment_branch(project).await?;
-    if local.as_deref() == Some(branch) {
-        return Ok(());
+    if local.as_deref() == Some(branch.as_str()) {
+        return Ok(true);
     }
     let message = format!(
         "You are on {}. This deploy updates branch {branch} in Widefleet Git and publishes the code as the main app.",
@@ -414,7 +426,7 @@ pub async fn confirm_deployment_branch(
     );
     if allow_mismatch {
         eprintln!("{message}");
-        return Ok(());
+        return Ok(true);
     }
     let stdin = std::io::stdin();
     let stderr = std::io::stderr();
@@ -423,7 +435,8 @@ pub async fn confirm_deployment_branch(
             "{message} Switch to {branch}, or pass --allow-branch-mismatch to confirm this deployment"
         )));
     }
-    confirm_branch(&message, &mut stdin.lock(), &mut stderr.lock())
+    confirm_branch(&message, &mut stdin.lock(), &mut stderr.lock())?;
+    Ok(true)
 }
 
 async fn deployment_branch(project: &Path) -> Result<Option<String>> {
@@ -471,7 +484,6 @@ fn confirm_branch(message: &str, input: &mut impl BufRead, output: &mut impl Wri
 
 pub async fn require_preview_branch(
     project: &Path,
-    primary: &str,
     requested_branch: Option<&str>,
 ) -> Result<String> {
     let head = git(project)
@@ -492,15 +504,16 @@ pub async fn require_preview_branch(
             "A preview with source storage requires a Git work branch. For a detached CI checkout, pass --source-branch BRANCH".into(),
         ));
     };
-    if branch == primary {
-        return Err(Error::invalid(format!(
-            "Create or switch to a work branch before deploying a preview. The main app uses {primary}; no source was committed"
-        )));
+    if branch == "main" {
+        return Err(Error::invalid(
+            "Create or switch to a work branch before deploying a preview. The main app uses main; no source was committed".into()
+        ));
     }
-    if requested_branch == Some(primary) {
-        return Err(Error::invalid(format!(
-            "A preview cannot save source to the main app's branch {primary}. Choose a work branch"
-        )));
+    if requested_branch == Some("main") {
+        return Err(Error::invalid(
+            "A preview cannot save source to the main app's branch main. Choose a work branch"
+                .into(),
+        ));
     }
     if requested_branch.is_some_and(|requested| requested != branch) {
         return Err(Error::invalid(format!(
@@ -516,9 +529,9 @@ pub async fn save(
     app: Uuid,
     project: &Path,
     branch: Option<&str>,
-    before_build: Result<String>,
+    before_build: &str,
 ) -> Result<Option<SourceRevision>> {
-    let prepared = prepare(api, credentials, app, branch).await?;
+    let prepared = prepare(api, credentials, app).await?;
     let Some(repository) = prepared.repository else {
         if branch.is_some() {
             return Err(Error::invalid(
@@ -527,8 +540,8 @@ pub async fn save(
         }
         return Ok(None);
     };
-    if let Some(primary) = prepared.primary_branch {
-        let current = require_preview_branch(project, &primary, branch).await?;
+    if prepared.preview {
+        let current = require_preview_branch(project, branch).await?;
         if current != repository.branch {
             return Err(Error::invalid(format!(
                 "This preview is linked to branch {}. Switch to that branch or use widefleet preview to deploy {current} separately",
@@ -546,7 +559,7 @@ pub async fn save(
         false,
     )?;
     Ok(Some(
-        save_repository(project, repository, &helper, &before_build?).await?,
+        save_repository(project, repository, &helper, before_build).await?,
     ))
 }
 
@@ -651,9 +664,7 @@ pub async fn run(api: &Api, credentials: &auth::Credentials, options: Options) -
                     .await?,
             )
             .await?;
-            let source = app
-                .source
-                .ok_or_else(|| Error::invalid("This app has no saved source repository".into()))?;
+            let source = read(api, credentials, id).await?;
             if let Some(error) = source.error {
                 return Err(Error::invalid(error));
             }
@@ -689,13 +700,9 @@ pub async fn run(api: &Api, credentials: &auth::Credentials, options: Options) -
                 &value!({ "directory": directory, "branch": branch, "source": source.deployed }),
             )
         }
-        Action::Connect {
-            target,
-            remote,
-            branch,
-        } => {
+        Action::Connect { target, remote } => {
             let id = apps::resolve(api, credentials, target.app.as_deref(), &target.config).await?;
-            let prepared = prepare(api, credentials, id, branch.as_deref()).await?;
+            let prepared = prepare(api, credentials, id).await?;
             let repository = prepared.repository.ok_or_else(|| {
                 Error::invalid("This installation does not provide Git repositories".into())
             })?;

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { page } from "$app/state";
+  import { getAppSource } from "#lib/apps.remote";
   import { getAppContext } from "#lib/app-context";
   import CopyValue from "#shadcn/components/CopyValue.svelte";
 
@@ -7,7 +8,7 @@
 
   const app = $derived(context.data.app);
 
-  const source = $derived(context.data.source);
+  const source = $derived(await getAppSource({ appId: app.id }));
 
   const repository = $derived(source.repository);
 

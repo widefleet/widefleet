@@ -27,7 +27,7 @@ pub struct Target {
     slug: String,
     display_name: String,
     name: String,
-    source_branch: Option<String>,
+    pub(crate) source_branch: Option<String>,
     hostname: String,
     flat_hostname: String,
 }
@@ -124,27 +124,30 @@ pub async fn run(api: &Api, credentials: &auth::Credentials, mut options: Option
                 .into(),
         ));
     }
+    if options.deployment.source_branch.is_some()
+        && !parent
+            .source
+            .as_ref()
+            .is_some_and(|source| source.supported)
+    {
+        return Err(Error::invalid(
+            "This installation does not provide Git repositories".into(),
+        ));
+    }
     let mut source_branch = None;
     if !options.deployment.no_source
-        && let Some(source) = parent.source.as_ref().filter(|source| source.supported)
-    {
-        if let Some(error) = &source.error {
-            return Err(Error::invalid(error.clone()));
-        }
-        let primary = source
-            .repository
+        && parent
+            .source
             .as_ref()
-            .map_or("main", |repository| repository.branch.as_str());
+            .is_some_and(|source| source.supported)
+    {
         let config = options.deployment.config.canonicalize()?;
         let project = config
             .parent()
             .ok_or_else(|| Error::invalid("Configuration has no parent directory".into()))?;
-        let branch = source::require_preview_branch(
-            project,
-            primary,
-            options.deployment.source_branch.as_deref(),
-        )
-        .await?;
+        let branch =
+            source::require_preview_branch(project, options.deployment.source_branch.as_deref())
+                .await?;
         let expected_name = branch_name(&branch);
         if name != expected_name {
             return Err(Error::invalid(format!(

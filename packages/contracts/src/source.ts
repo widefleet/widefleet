@@ -46,6 +46,12 @@ export const sourceRepository = z.strictObject({
   commit: gitCommit.nullable(),
 });
 
+export const appSourceSummary = z.strictObject({
+  supported: z.boolean(),
+  branch: gitBranch.nullable(),
+  deployed: sourceRevision.nullable(),
+});
+
 export const appSource = z.strictObject({
   supported: z.boolean(),
   available: z.boolean(),
@@ -61,8 +67,6 @@ export const sourceCredential = z.strictObject({
   expiresAt: z.iso.datetime(),
 });
 
-export const sourceSetup = z.strictObject({ branch: gitBranch.optional() });
-
 export const sourceDeployTarget = z.strictObject({
   supported: z.boolean(),
   branch: gitBranch,
@@ -72,7 +76,7 @@ export const sourceDeployTarget = z.strictObject({
 export const sourcePreparation = z.strictObject({
   organizationId: z.string().min(1),
   repository: sourceRepository.nullable(),
-  primaryBranch: gitBranch.optional(),
+  preview: z.boolean(),
 });
 
 export const previewNameFromBranch = async (branch: string) => {

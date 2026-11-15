@@ -19,7 +19,7 @@ pub struct App {
     pub state: String,
     pub active_deployment_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub source: Option<AppSource>,
+    pub source: Option<AppSourceSummary>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -34,6 +34,13 @@ pub struct SourceRepository {
     pub url: String,
     pub branch: String,
     pub commit: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AppSourceSummary {
+    pub supported: bool,
+    pub branch: Option<String>,
+    pub deployed: Option<SourceRevision>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

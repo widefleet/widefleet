@@ -65,13 +65,11 @@
     <p class="text-muted-foreground mt-2 text-sm leading-6">
       This app, all its previews and their published versions will be removed.
     </p>
-    {#if data.source.repository || data.source.error}
+    {#if data.source.supported && data.source.branch}
       <p class="text-muted-foreground mt-2 text-sm leading-6">
         {app.parentId
           ? "Its source branch remains in the main app’s Git repository."
-          : data.source.error
-            ? "Any associated Widefleet Git repository and its branches will also be permanently deleted."
-            : "Its Widefleet Git repository and all source branches will also be permanently deleted."}
+          : "Any associated Widefleet Git repository and its branches will also be permanently deleted."}
       </p>
     {/if}
     <p class="text-muted-foreground mt-2 text-xs leading-6">This action cannot be undone.</p>
@@ -87,7 +85,7 @@
             required
             class="accent-destructive mt-1 size-4 shrink-0"
           />I want to permanently delete this app and all its previews{!app.parentId &&
-          (data.source.repository || data.source.error)
+          data.source.supported
             ? ", including its Widefleet Git repository"
             : ""}.</label
         ><Button type="submit" variant="destructive" disabled={removeApp.pending > 0}

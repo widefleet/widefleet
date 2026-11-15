@@ -1,6 +1,6 @@
 <script lang="ts">
   import { page } from "$app/state";
-  import { getAppDetails } from "#lib/apps.remote";
+  import { getAppDetails, getAppSource } from "#lib/apps.remote";
   import { getAppConnections } from "#lib/connections.remote";
   import type { manageWorkflow } from "#lib/workflows.remote";
   import { Button } from "#shadcn/components/ui/button/index.js";
@@ -51,6 +51,8 @@
 
     try {
       await details.refresh();
+
+      if (activeTab === "source") await getAppSource({ appId: route.appId }).refresh();
 
       if (activeTab === "connections") await getAppConnections({ appId: route.appId }).refresh();
     } catch {

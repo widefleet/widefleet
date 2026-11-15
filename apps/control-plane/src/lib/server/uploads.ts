@@ -136,13 +136,13 @@ export const createUploadService = (
           return yield* new InvalidOperation({ code: "CONFLICT", message: "App is being deleted" });
 
         if (
-          record.parentId &&
           metadata.source &&
-          contract.sourceRevision.parse(metadata.source).branch !== record.sourceBranch
+          contract.sourceRevision.parse(metadata.source).branch !==
+            (record.parentId ? record.sourceBranch : "main")
         )
           return yield* new InvalidOperation({
             code: "BAD_REQUEST",
-            message: "The deployment source branch does not match this preview",
+            message: "The deployment source branch does not match this app",
           });
 
         if (

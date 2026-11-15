@@ -605,19 +605,12 @@ export const createApi = (runtime: Runtime) => {
       .handler(async ({ context, input }) =>
         unwrap(await runtime.source.read(context.principal, input.appId)),
       ),
-    setupSource: write
-      .route({ method: "PUT", path: "/apps/{appId}/source" })
-      .input(contract.appPath.extend(contract.sourceSetup.shape))
-      .output(contract.sourceRepository)
-      .handler(async ({ context, input: { appId, ...input } }) =>
-        unwrap(await runtime.source.setup(context.principal, appId, input)),
-      ),
     prepareSource: write
       .route({ method: "POST", path: "/apps/{appId}/source/prepare" })
-      .input(contract.appPath.extend(contract.sourceSetup.shape))
+      .input(contract.appPath.strict())
       .output(contract.sourcePreparation)
-      .handler(async ({ context, input: { appId, ...input } }) =>
-        unwrap(await runtime.source.prepare(context.principal, appId, input)),
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.source.prepare(context.principal, input.appId)),
       ),
     sourceReadCredential: read
       .route({ method: "POST", path: "/apps/{appId}/source/read-credential" })
@@ -636,22 +629,7 @@ export const createApi = (runtime: Runtime) => {
     listApps: read
       .route({ method: "GET", path: "/apps" })
       .output(z.array(contract.app))
-      .handler(async ({ context }) => {
-        const apps = unwrap(await runtime.apps.list(context.principal));
-        const listed = [];
-
-        for (let index = 0; index < apps.length; index += 4)
-          listed.push(
-            ...(await Promise.all(
-              apps.slice(index, index + 4).map(async (app) => ({
-                ...app,
-                source: unwrap(await runtime.source.read(context.principal, app.id)),
-              })),
-            )),
-          );
-
-        return listed;
-      }),
+      .handler(async ({ context }) => unwrap(await runtime.apps.list(context.principal))),
     createApp: write
       .route({ method: "POST", path: "/apps" })
       .input(contract.createAppInput)
@@ -663,10 +641,9 @@ export const createApi = (runtime: Runtime) => {
       .route({ method: "GET", path: "/apps/{appId}" })
       .input(contract.appPath)
       .output(contract.app)
-      .handler(async ({ context, input }) => ({
-        ...unwrap(await runtime.apps.get(context.principal, input.appId)),
-        source: unwrap(await runtime.source.read(context.principal, input.appId)),
-      })),
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.apps.get(context.principal, input.appId)),
+      ),
     resolveApp: write
       .route({ method: "PUT", path: "/apps/by-name/{slug}" })
       .input(contract.createAppInput.pick({ slug: true }))
@@ -684,7 +661,7 @@ export const createApi = (runtime: Runtime) => {
 
         if (!app) throw new ORPCError("NOT_FOUND", { message: "App not found" });
 
-        return { ...app, source: unwrap(await runtime.source.read(context.principal, app.id)) };
+        return app;
       }),
     runtimeLogs: read
       .route({ method: "GET", path: "/apps/{appId}/logs" })

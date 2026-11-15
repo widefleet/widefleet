@@ -5,7 +5,7 @@ export { workerHostname } from "./hostnames.ts";
 export * from "./source.ts";
 
 import { z } from "zod";
-import { appSource, gitBranch, sourceRevision } from "./source.ts";
+import { appSourceSummary, gitBranch, sourceRevision } from "./source.ts";
 
 import { serviceDocumentation } from "./service-documentation.ts";
 import { organizationIdentifier } from "./organizations.ts";
@@ -56,7 +56,7 @@ export const createAppInput = z.strictObject({
 });
 
 export const app = z.strictObject({
-  source: appSource.optional(),
+  source: appSourceSummary.optional(),
   id: identifier,
   slug: appSlug,
   displayName: z.string(),

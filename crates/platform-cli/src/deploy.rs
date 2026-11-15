@@ -93,7 +93,7 @@ pub struct Options {
     /// Deploy without saving source to Widefleet Git.
     #[arg(long, conflicts_with_all = ["source_branch", "allow_branch_mismatch"])]
     pub(crate) no_source: bool,
-    /// Save source on this repository branch.
+    /// Identify a Git preview branch in a detached CI checkout.
     #[arg(long)]
     pub(crate) source_branch: Option<String>,
     /// Confirm deploying the main app from a different local Git branch (or detached HEAD).
@@ -251,14 +251,9 @@ async fn publish(
     let project = config_path
         .parent()
         .ok_or_else(|| Error::invalid("Configuration has no parent directory".into()))?;
-    // Defer Git errors until we know the installation supports source storage.
-    let source_tree = if options.no_source {
-        None
-    } else {
-        Some(source::snapshot(project).await)
-    };
+    let configuration_text = std::fs::read_to_string(&config_path)?;
     let configuration: Configuration = jsonc_parser::parse_to_serde_value(
-        &std::fs::read_to_string(&config_path)?,
+        &configuration_text,
         &jsonc_parser::ParseOptions {
             allow_comments: true,
             allow_trailing_commas: true,
@@ -313,23 +308,41 @@ async fn publish(
         eprintln!("Target: {} on {}", name, api.origin_text());
     }
     let bundler = installation::bundler().await?;
-    if !options.no_source
-        && let Target::App(app) = &target
-    {
-        let target = app.map_or_else(
-            || value!({ "slug": configuration.name }),
-            |app| value!({ "appId": app }),
-        );
-        source::confirm_deployment_branch(
-            api,
-            credentials,
-            project,
-            &target,
-            options.source_branch.as_deref(),
-            options.allow_branch_mismatch,
-        )
-        .await?;
-    }
+    let source_supported = if options.no_source {
+        false
+    } else {
+        match &target {
+            Target::App(app) => {
+                let target = app.map_or_else(
+                    || value!({ "slug": configuration.name }),
+                    |app| value!({ "appId": app }),
+                );
+                source::confirm_deployment_branch(
+                    api,
+                    credentials,
+                    project,
+                    &target,
+                    options.source_branch.as_deref(),
+                    options.allow_branch_mismatch,
+                )
+                .await?
+            }
+            Target::Preview(preview) => preview.source_branch.is_some(),
+        }
+    };
+    let source_tree = if source_supported {
+        let tree = source::snapshot(project).await?;
+        // The target lookup needs the app name before snapshotting. Ensure the
+        // configuration used by the build is still the one included in that snapshot.
+        if std::fs::read_to_string(&config_path)? != configuration_text {
+            return Err(Error::invalid(
+                "Project files changed before the build. Retry the deployment".into(),
+            ));
+        }
+        Some(tree)
+    } else {
+        None
+    };
     if !options.skip_build && project.join("package.json").exists() {
         local_command(project, &["run", "build"]).await?;
     }
@@ -442,7 +455,7 @@ async fn publish(
             app,
             project,
             options.source_branch.as_deref(),
-            source_tree,
+            &source_tree,
         )
         .await?
     } else {

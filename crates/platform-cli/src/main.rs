@@ -350,7 +350,7 @@ async fn run(args: Arguments) -> Result<()> {
                 let source = record
                     .source
                     .as_ref()
-                    .is_some_and(|source| source.repository.is_some() || source.error.is_some());
+                    .is_some_and(|source| source.supported && source.branch.is_some());
                 let consequence = if source && record.parent_id.is_none() {
                     " Any associated Widefleet Git repository and its branches will also be deleted."
                 } else if source {

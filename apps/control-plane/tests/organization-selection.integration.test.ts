@@ -246,11 +246,11 @@ describe("Organization discovery and selection", () => {
 
     expect(b).toMatchObject({ hostname: "shared-name-beta.apps.localhost" });
     expect(await (await api(request("/apps"))).json()).toEqual([
-      { ...b, source: { supported: false, available: false, repository: null, deployed: null } },
+      { ...b, source: { supported: false, branch: "main", deployed: null } },
     ]);
     headers.set("x-widefleet-organization", alpha);
     expect(await (await api(request("/apps"))).json()).toEqual([
-      { ...a, source: { supported: false, available: false, repository: null, deployed: null } },
+      { ...a, source: { supported: false, branch: "main", deployed: null } },
     ]);
     headers.delete("x-widefleet-organization");
   });
@@ -502,7 +502,7 @@ describe("Organization discovery and selection", () => {
         const listed = await execute(binary, ["apps"], options);
         expect(z.array(app).parse(JSON.parse(listed.stdout))).toContainEqual({
           ...fixture,
-          source: { supported: false, available: false, repository: null, deployed: null },
+          source: { supported: false, branch: "main", deployed: null },
         });
 
         const executableName = process.platform === "win32" ? "widefleet.exe" : "widefleet";

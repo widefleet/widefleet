@@ -136,6 +136,17 @@ export const presentApp = (record: typeof apps.$inferSelect, configuration: Conf
     createdAt: record.createdAt.toISOString(),
   });
 
+const presentAppSource = (
+  app: Pick<typeof apps.$inferSelect, "parentId" | "sourceBranch">,
+  deployed: z.infer<typeof contract.sourceRevision> | null,
+  supported: boolean,
+) =>
+  contract.appSourceSummary.parse({
+    supported,
+    branch: app.parentId ? app.sourceBranch : "main",
+    deployed,
+  });
+
 export const presentDeployment = (record: typeof deployments.$inferSelect) =>
   contract.deployment.parse({
     id: record.id,
@@ -326,7 +337,7 @@ const provisionApp = async (
       accessGroups = contract.appAccessGroups.parse(parent.value.accessGroups);
       accessRevision = parent.value.accessRevision;
 
-      if (input.previewBranch === (parent.value.sourceBranch ?? "main"))
+      if (input.previewBranch === "main")
         return Result.err(
           new InvalidOperation({
             code: "BAD_REQUEST",
@@ -400,6 +411,7 @@ export const createAppService = (
   configuration: Configuration,
   execution?: HostedExecution,
   observation?: Observation,
+  sourceSupported = false,
 ) => ({
   catalog: (principal: Principal) =>
     transact(database, async (transaction) => {
@@ -459,12 +471,23 @@ export const createAppService = (
   list: (principal: Principal) =>
     transact(database, async (transaction) => {
       const records = await transaction
-        .select()
+        .select({ app: apps, metadata: artifacts.metadata })
         .from(apps)
+        .leftJoin(deployments, eq(deployments.id, apps.activeDeploymentId))
+        .leftJoin(artifacts, eq(artifacts.id, deployments.artifactId))
         .where(appVisibility(transaction, principal))
         .orderBy(apps.slug);
 
-      return Result.ok(records.map((record) => presentApp(record, configuration)));
+      return Result.ok(
+        records.map(({ app, metadata }) => ({
+          ...presentApp(app, configuration),
+          source: presentAppSource(
+            app,
+            metadata ? (contract.workerMetadata.parse(metadata).source ?? null) : null,
+            sourceSupported,
+          ),
+        })),
+      );
     }),
   get: (principal: Principal, appId: string) =>
     transact(database, async (transaction) => {
@@ -472,7 +495,22 @@ export const createAppService = (
 
       if (record.isErr()) return record;
 
-      return Result.ok(presentApp(record.value, configuration));
+      const [active] = record.value.activeDeploymentId
+        ? await transaction
+            .select({ metadata: artifacts.metadata })
+            .from(deployments)
+            .innerJoin(artifacts, eq(artifacts.id, deployments.artifactId))
+            .where(eq(deployments.id, record.value.activeDeploymentId))
+        : [];
+
+      return Result.ok({
+        ...presentApp(record.value, configuration),
+        source: presentAppSource(
+          record.value,
+          active ? (contract.workerMetadata.parse(active.metadata).source ?? null) : null,
+          sourceSupported,
+        ),
+      });
     }),
   create: (principal: Principal, input: z.infer<typeof contract.createAppInput>) =>
     provisionApp(database, configuration, principal, input, "create", observation),

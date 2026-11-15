@@ -94,7 +94,7 @@ describe("App source repositories", () => {
       available: false,
       repository: null,
     });
-    expect((await source.setup(creator, app.id, {})).unwrap()).toEqual({
+    expect((await source.prepare(creator, app.id)).unwrap().repository).toEqual({
       url: url(app.id),
       branch: "main",
       commit: null,
@@ -121,16 +121,12 @@ describe("App source repositories", () => {
         .supported,
     ).toBe(false);
     const app = await create();
-    await environment.database.db
-      .update(apps)
-      .set({ sourceBranch: "release" })
-      .where(eq(apps.id, app.id));
     const before = await environment.database.db.select().from(apps);
 
     for (const input of [target, { appId: app.id }]) {
       expect((await source.deploymentTarget(creator, input)).unwrap()).toEqual({
         supported: true,
-        branch: "release",
+        branch: "main",
         preview: false,
       });
     }
@@ -162,7 +158,7 @@ describe("App source repositories", () => {
 
   it("checks management grants and organization before issuing repository credentials", async () => {
     const app = await create();
-    await source.setup(creator, app.id, {});
+    await source.prepare(creator, app.id);
     expect(await source.read(colleague, app.id)).toMatchObject({ error: { code: "NOT_FOUND" } });
     expect(await source.credential(colleague, app.id, "write")).toMatchObject({
       error: { code: "NOT_FOUND" },
@@ -201,11 +197,11 @@ describe("App source repositories", () => {
     ).unwrap();
 
     const [main, branch] = await Promise.all([
-      source.setup(creator, app.id, {}),
-      source.setup(creator, preview.id, { branch: "review" }),
+      source.prepare(creator, app.id),
+      source.prepare(creator, preview.id),
     ]);
 
-    expect(main.unwrap().url).toBe(branch.unwrap().url);
+    expect(main.unwrap().repository?.url).toBe(branch.unwrap().repository?.url);
     expect(backend.create).toHaveBeenCalledTimes(1);
     expect((await source.read(creator, app.id)).unwrap().repository?.branch).toBe("main");
     expect((await source.read(creator, preview.id)).unwrap().repository?.branch).toBe("review");
@@ -222,45 +218,28 @@ describe("App source repositories", () => {
     expect(backend.remove).not.toHaveBeenCalled();
   });
 
-  it.each(["main", "release"])(
-    "keeps preview source separate from the main app's %s branch",
-    async (primary) => {
-      const app = await create();
+  it("keeps the main branch and preview assignment fixed during preparation", async () => {
+    const app = await create();
 
-      const preview = (
-        await service.create(creator, {
-          slug: "source-app-review",
-          displayName: "Review",
-          parentId: app.id,
-          previewBranch: "feature/review",
-        })
-      ).unwrap();
+    const preview = (
+      await service.create(creator, {
+        slug: "source-app-review",
+        displayName: "Review",
+        parentId: app.id,
+        previewBranch: "feature/review",
+      })
+    ).unwrap();
 
-      (await source.setup(creator, app.id, { branch: primary })).unwrap();
-
-      const prepared = (
-        await source.prepare(creator, preview.id, { branch: "feature/review" })
-      ).unwrap();
-
-      expect(contract.sourcePreparation.parse(prepared)).toEqual({
-        organizationId: app.organizationId,
-        repository: { url: url(app.id), branch: "feature/review", commit: null },
-        primaryBranch: primary,
-      });
-      expect(await source.prepare(creator, preview.id, { branch: primary })).toMatchObject({
-        error: { code: "CONFLICT" },
-      });
-      expect(await source.setup(creator, preview.id, { branch: primary })).toMatchObject({
-        error: { code: "CONFLICT" },
-      });
-      expect(await source.setup(creator, preview.id, { branch: "other-work" })).toMatchObject({
-        error: { code: "CONFLICT" },
-      });
-      expect((await source.read(creator, preview.id)).unwrap().repository?.branch).toBe(
-        "feature/review",
-      );
-    },
-  );
+    const before = await environment.database.db.select().from(apps);
+    const prepared = (await source.prepare(creator, preview.id)).unwrap();
+    expect(prepared).toEqual({
+      organizationId: app.organizationId,
+      repository: { url: url(app.id), branch: "feature/review", commit: null },
+      preview: true,
+    });
+    expect((await source.prepare(creator, app.id)).unwrap().repository?.branch).toBe("main");
+    expect(await environment.database.db.select().from(apps)).toEqual(before);
+  });
 
   it("derives preview names from Git branches and keeps unnamed previews without a source binding", async () => {
     const app = await create();
@@ -302,7 +281,7 @@ describe("App source repositories", () => {
         previewBranch: "main",
       }),
     ).toMatchObject({ error: { code: "BAD_REQUEST" } });
-    (await source.setup(creator, app.id, {})).unwrap();
+    (await source.prepare(creator, app.id)).unwrap();
 
     const unnamed = (
       await service.create(creator, {
@@ -313,52 +292,57 @@ describe("App source repositories", () => {
     ).unwrap();
 
     expect((await source.read(creator, unnamed.id)).unwrap().repository).toBeNull();
-    expect(await source.setup(creator, unnamed.id, { branch: "review" })).toMatchObject({
+    expect(await source.prepare(creator, unnamed.id)).toMatchObject({
       error: { code: "CONFLICT" },
     });
   });
 
-  it("rejects preview source metadata from a different branch", async () => {
+  it.each([false, true])(
+    "rejects source metadata for the wrong branch (preview: %s)",
+    async (preview) => {
+      const app = await create();
+
+      const target = preview
+        ? (
+            await service.create(creator, {
+              slug: "source-app-review",
+              displayName: "Review",
+              parentId: app.id,
+              previewBranch: "review",
+            })
+          ).unwrap()
+        : app;
+
+      const uploads = createUploadService(
+        environment.database.db,
+        createStorage(environment.configuration),
+        environment.configuration,
+        undefined,
+        backend,
+      );
+
+      const metadata = contract.workerMetadata.parse({
+        main_module: "worker.js",
+        compatibility_date: "2026-10-01",
+        assets: { binding: "ASSETS", upload_session: crypto.randomUUID() },
+        source: { branch: "different", commit: "f".repeat(40), directory: "." },
+      });
+
+      expect(
+        await uploads.publish(creator, target.id, metadata, [], crypto.randomUUID()),
+      ).toMatchObject({
+        error: {
+          code: "BAD_REQUEST",
+          message: "The deployment source branch does not match this app",
+        },
+      });
+      expect(backend.hasCommit).not.toHaveBeenCalled();
+    },
+  );
+
+  it("retains the deployed source reference when the branch advances", async () => {
     const app = await create();
-
-    const preview = (
-      await service.create(creator, {
-        slug: "source-app-review",
-        displayName: "Review",
-        parentId: app.id,
-        previewBranch: "review",
-      })
-    ).unwrap();
-
-    const uploads = createUploadService(
-      environment.database.db,
-      createStorage(environment.configuration),
-      environment.configuration,
-      undefined,
-      backend,
-    );
-
-    const metadata = contract.workerMetadata.parse({
-      main_module: "worker.js",
-      compatibility_date: "2026-10-01",
-      assets: { binding: "ASSETS", upload_session: crypto.randomUUID() },
-      source: { branch: "different", commit: "f".repeat(40), directory: "." },
-    });
-
-    expect(
-      await uploads.publish(creator, preview.id, metadata, [], crypto.randomUUID()),
-    ).toMatchObject({
-      error: {
-        code: "BAD_REQUEST",
-        message: "The deployment source branch does not match this preview",
-      },
-    });
-    expect(backend.hasCommit).not.toHaveBeenCalled();
-  });
-
-  it("retains the deployed source reference when the branch advances or changes", async () => {
-    const app = await create();
-    (await source.setup(creator, app.id, {})).unwrap();
+    (await source.prepare(creator, app.id)).unwrap();
     const deployed = { commit: "a".repeat(40), branch: "main", directory: "apps/mail" };
     const artifactId = crypto.randomUUID();
     const deploymentId = crypto.randomUUID();
@@ -388,13 +372,22 @@ describe("App source repositories", () => {
     repositories.get(app.id)?.set("main", "b".repeat(40));
     const result = (await source.read(creator, app.id)).unwrap();
     expect(result.deployed).toEqual(deployed);
-    expect(result.repository?.commit).toBe("b".repeat(40));
-    (await source.setup(creator, app.id, { branch: "release" })).unwrap();
-    expect((await source.read(creator, app.id)).unwrap()).toMatchObject({
-      available: false,
-      repository: { branch: "release", commit: null },
+
+    const local = createAppService(
+      environment.database.db,
+      environment.configuration,
+      undefined,
+      undefined,
+      true,
+    );
+
+    expect((await local.get(creator, app.id)).unwrap().source).toEqual({
+      supported: true,
+      branch: "main",
       deployed,
     });
+    expect((await local.list(creator)).unwrap()[0]?.source.deployed).toEqual(deployed);
+    expect(result.repository?.commit).toBe("b".repeat(40));
     expect(contract.executionWorkerMetadata(metadata)).not.toHaveProperty("source");
     backend.head.mockRejectedValueOnce(new Error("Synthetic Git outage"));
     expect((await source.read(creator, app.id)).unwrap()).toEqual({
@@ -406,7 +399,7 @@ describe("App source repositories", () => {
     });
   });
 
-  it("serves the same authorized repository through app discovery, setup and Git credentials", async () => {
+  it("separates app discovery from live repository details and protects Git credentials", async () => {
     const app = await create();
 
     const runtime = await createRuntime({
@@ -442,6 +435,7 @@ describe("App source repositories", () => {
     expect(contract.sourcePreparation.parse(await prepared.json())).toEqual({
       organizationId: app.organizationId,
       repository: { url: url(app.id), branch: "main", commit: null },
+      preview: false,
     });
 
     for (const scope of ["read", "write"] as const) {
@@ -453,35 +447,55 @@ describe("App source repositories", () => {
     }
 
     repositories.get(app.id)?.set("main", "c".repeat(40));
-    const listed = contract.app.array().parse(await (await request("/apps")).json());
-    expect(listed[0]?.source).toMatchObject({
-      supported: true,
-      available: true,
-      repository: { commit: "c".repeat(40) },
-    });
+    backend.repository.mockClear();
+    backend.head.mockClear();
 
-    for (const path of [
-      "/apps",
-      `/apps/${app.id}`,
-      `/apps/by-name/${app.slug}`,
-      `/apps/${app.id}/source`,
-    ]) {
-      backend.repository.mockRejectedValueOnce(new Error("Synthetic Git outage"));
+    for (const path of ["/apps", `/apps/${app.id}`, `/apps/by-name/${app.slug}`]) {
       const response = await request(path);
       expect(response.status).toBe(200);
       const body: unknown = await response.json();
 
-      const status = path.endsWith("/source")
-        ? contract.appSource.parse(body)
-        : path === "/apps"
+      const status =
+        path === "/apps"
           ? contract.app.array().parse(body)[0]?.source
           : contract.app.parse(body).source;
 
-      expect(status).toMatchObject({
-        supported: true,
-        error: "The source repository is unavailable",
-      });
+      expect(status).toEqual({ supported: true, branch: "main", deployed: null });
     }
+
+    expect(backend.repository).not.toHaveBeenCalled();
+    expect(backend.head).not.toHaveBeenCalled();
+    const details = await request(`/apps/${app.id}/source`);
+    expect(contract.appSource.parse(await details.json())).toMatchObject({
+      available: true,
+      repository: { commit: "c".repeat(40) },
+    });
+    expect((await request(`/apps/${app.id}/source`, "PUT")).status).toBe(404);
+
+    const branchChange = await api(
+      new Request(
+        `${environment.configuration.PLATFORM_URL}/api/v1/apps/${app.id}/source/prepare`,
+        {
+          method: "POST",
+          headers: {
+            ...Object.fromEntries(new Headers(login.headers)),
+            origin: environment.configuration.PLATFORM_URL,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ branch: "release" }),
+        },
+      ),
+    );
+
+    expect(branchChange.status).toBe(400);
+    expect((await source.deploymentTarget(creator, { appId: app.id })).unwrap().branch).toBe(
+      "main",
+    );
+    backend.repository.mockRejectedValueOnce(new Error("Synthetic Git outage"));
+    const failedDetails = await request(`/apps/${app.id}/source`);
+    expect(contract.appSource.parse(await failedDetails.json()).error).toBe(
+      "The source repository is unavailable",
+    );
 
     backend.repository.mockRejectedValueOnce(new Error("Synthetic Git outage"));
     expect((await request(`/apps/${app.id}/source/prepare`, "POST")).status).toBe(503);
@@ -494,40 +508,19 @@ describe("App source repositories", () => {
     ).toBe(401);
   });
 
-  it("bounds source lookups without holding database connections while Git is slow", async () => {
-    const failing = await create();
-    repositories.set(failing.id, new Map([["main", "a".repeat(40)]]));
-
-    for (let index = 1; index < 9; index++) {
-      const app = (
-        await service.create(creator, {
-          slug: `source-app-${index}`,
-          displayName: `Source app ${index}`,
-          parentId: null,
-        })
-      ).unwrap();
-
-      repositories.set(app.id, new Map([["main", "a".repeat(40)]]));
-    }
-
+  it("serves app lists and details while an explicit Git read is blocked", async () => {
+    const app = await create();
+    repositories.set(app.id, new Map([["main", "a".repeat(40)]]));
     const database = createDatabase(environment.configuration, 1);
     const gate = new EventEmitter();
-    const repositoryGate = once(gate, "repositories");
-    const headGate = once(gate, "heads");
+    const release = once(gate, "release");
 
     const slowBackend = {
       ...backend,
       repository: vi.fn(async (id: string) => {
-        await repositoryGate;
+        await release;
 
         return backend.repository(id);
-      }),
-      head: vi.fn(async (id: string, branch: string) => {
-        await headGate;
-
-        if (id === failing.id) throw new Error("Synthetic Git outage");
-
-        return backend.head(id, branch);
       }),
     };
 
@@ -542,44 +535,37 @@ describe("App source repositories", () => {
     })();
 
     const login = await environment.users.login({ userId: creator.id });
-
-    const listing = createApi(runtime)(
-      new Request(`${environment.configuration.PLATFORM_URL}/api/v1/apps`, {
-        headers: login.headers,
-      }),
-    );
+    const api = createApi(runtime);
+    const details = runtime.source.read(creator, app.id);
 
     try {
-      await expect.poll(() => slowBackend.repository.mock.calls.length).toBeGreaterThan(0);
-      // All database work must finish even while every Git request is blocked.
-      await expect
-        .poll(() => [database.db.$client.idleCount, database.db.$client.waitingCount])
-        .toEqual([1, 0]);
-      expect(slowBackend.repository).toHaveBeenCalledTimes(4);
-      expect((await runtime.apps.list(creator)).unwrap()).toHaveLength(9);
+      await expect.poll(() => slowBackend.repository.mock.calls.length).toBe(1);
 
-      gate.emit("repositories");
-      await expect.poll(() => slowBackend.head.mock.calls.length).toBe(4);
-      expect((await runtime.apps.list(creator)).unwrap()).toHaveLength(9);
-      expect(slowBackend.repository).toHaveBeenCalledTimes(4);
-      gate.emit("heads");
+      for (const path of ["/apps", `/apps/${app.id}`, `/apps/by-name/${app.slug}`]) {
+        const response = await api(
+          new Request(`${environment.configuration.PLATFORM_URL}/api/v1${path}`, {
+            headers: login.headers,
+          }),
+        );
 
-      const response = await listing;
-      expect(response.status).toBe(200);
-      const listed = contract.app.array().parse(await response.json());
-      expect(listed.map((app) => app.id)).toEqual(
-        (await runtime.apps.list(creator)).unwrap().map((app) => app.id),
-      );
-      expect(slowBackend.repository).toHaveBeenCalledTimes(9);
-      expect(slowBackend.head).toHaveBeenCalledTimes(9);
-      expect(listed.find((app) => app.id === failing.id)?.source?.error).toBe(
-        "The source repository is unavailable",
-      );
-      expect(listed.filter((app) => app.source?.available)).toHaveLength(8);
+        expect(response.status).toBe(200);
+        const body: unknown = await response.json();
+
+        const summary =
+          path === "/apps"
+            ? contract.app.array().parse(body)[0]?.source
+            : contract.app.parse(body).source;
+
+        expect(summary).toEqual({ supported: true, branch: "main", deployed: null });
+      }
+
+      expect(slowBackend.repository).toHaveBeenCalledTimes(1);
+      expect(backend.head).not.toHaveBeenCalled();
+      gate.emit("release");
+      expect((await details).unwrap().repository?.commit).toBe("a".repeat(40));
     } finally {
-      gate.emit("repositories");
-      gate.emit("heads");
-      await listing;
+      gate.emit("release");
+      await details;
       await database.close();
     }
   });
@@ -601,7 +587,7 @@ describe("App source repositories", () => {
       await service.create(creator, { slug: "review", displayName: "Review", parentId: app.id })
     ).unwrap();
 
-    (await source.setup(creator, app.id, {})).unwrap();
+    (await source.prepare(creator, app.id)).unwrap();
 
     const { agent } = (
       await runtime.agents.create({ ...creator, admin: true }, { name: "Source removal" })

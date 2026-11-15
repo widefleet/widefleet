@@ -24,15 +24,11 @@ const sourceTarget = async (
   if (!candidate)
     return Result.err(new InvalidOperation({ code: "NOT_FOUND", message: "App not found" }));
 
-  let primaryBranch: string | undefined;
-
   // Use the same parent-before-child lock order as app removal and access changes.
   if (mutating && candidate.parentId) {
     const parent = await managedApp(transaction, principal, candidate.parentId);
 
     if (parent.isErr()) return parent;
-
-    primaryBranch = parent.value.sourceBranch ?? "main";
 
     if (parent.value.state === "deleting")
       return Result.err(
@@ -50,18 +46,13 @@ const sourceTarget = async (
 
   return Result.ok({
     app,
-    primaryBranch,
     id: app.parentId ?? app.id,
-    branch: app.sourceBranch ?? "main",
+    branch: app.parentId ? (app.sourceBranch ?? "main") : "main",
   });
 };
 
 export const createAppSource = (database: Database, backend?: SourceBackend) => {
-  const setup = (
-    principal: Principal,
-    appId: string,
-    input: z.infer<typeof contract.sourceSetup>,
-  ) =>
+  const prepare = (principal: Principal, appId: string) =>
     transact(database, async (transaction) => {
       const target = await sourceTarget(transaction, principal, appId);
 
@@ -74,42 +65,29 @@ export const createAppSource = (database: Database, backend?: SourceBackend) => 
             message: "This installation does not provide Git repositories",
           }),
         );
-      const { app, id, primaryBranch } = target.value;
+      const { app, id } = target.value;
 
-      if (
-        app.parentId &&
-        (!app.sourceBranch || (input.branch !== undefined && input.branch !== app.sourceBranch))
-      )
+      if (app.parentId && !app.sourceBranch)
         return Result.err(
           new InvalidOperation({
             code: "CONFLICT",
-            message: app.sourceBranch
-              ? `This preview is linked to branch ${app.sourceBranch}. Deploy another branch as its own preview`
-              : "This preview was created without a Git branch. Create a preview from another work branch to save source",
+            message:
+              "This preview was created without a Git branch. Create a preview from a work branch to save source",
           }),
         );
 
-      const branch = input.branch ?? target.value.branch;
-
-      if (branch === primaryBranch)
-        return Result.err(
-          new InvalidOperation({
-            code: "CONFLICT",
-            message: "A preview must use a different source branch from the main app",
-          }),
-        );
+      const branch = target.value.branch;
 
       const repository = await sourceOperation(
         async () => (await backend.repository(id)) ?? backend.create(id),
       );
 
-      await transaction.update(apps).set({ sourceBranch: branch }).where(eq(apps.id, app.id));
       const commit = await sourceOperation(() => backend.head(id, branch));
 
       return Result.ok({
         organizationId: principal.application.organizationId,
         repository: contract.sourceRepository.parse({ ...repository, branch, commit }),
-        primaryBranch,
+        preview: app.parentId !== null,
       });
     });
 
@@ -135,7 +113,7 @@ export const createAppSource = (database: Database, backend?: SourceBackend) => 
       // check must not create an app/repository or contact the Git backend.
       return Result.ok({
         supported: Boolean(backend),
-        branch: app?.branch ?? "main",
+        branch: app?.parentId ? (app.branch ?? "main") : "main",
         preview: app?.parentId != null,
       });
     },
@@ -201,17 +179,6 @@ export const createAppSource = (database: Database, backend?: SourceBackend) => 
         );
       }
     },
-    setup: async (
-      principal: Principal,
-      appId: string,
-      input: z.infer<typeof contract.sourceSetup>,
-    ) => {
-      const prepared = await setup(principal, appId, input);
-
-      if (prepared.isErr()) return Result.err(prepared.error);
-
-      return Result.ok(prepared.value.repository);
-    },
     credential: (principal: Principal, appId: string, scope: "read" | "write") =>
       transact(database, async (transaction) => {
         const target = await sourceTarget(transaction, principal, appId);
@@ -233,13 +200,9 @@ export const createAppSource = (database: Database, backend?: SourceBackend) => 
 
   return {
     ...source,
-    prepare: async (
-      principal: Principal,
-      appId: string,
-      input: z.infer<typeof contract.sourceSetup>,
-    ) => {
+    prepare: async (principal: Principal, appId: string) => {
       if (!backend) {
-        const status = await source.read(principal, appId);
+        const status = await source.deploymentTarget(principal, { appId });
 
         if (status.isErr()) return Result.err(status.error);
 
@@ -247,11 +210,12 @@ export const createAppSource = (database: Database, backend?: SourceBackend) => 
           contract.sourcePreparation.parse({
             organizationId: principal.application.organizationId,
             repository: null,
+            preview: status.value.preview,
           }),
         );
       }
 
-      return setup(principal, appId, input);
+      return prepare(principal, appId);
     },
   };
 };

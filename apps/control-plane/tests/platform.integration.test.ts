@@ -553,7 +553,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     await json(`/agents/${registration.agent.id}`, "DELETE");
     expect(contract.app.parse(await (await json(`/apps/${app.id}`, "GET")).json())).toEqual({
       ...app,
-      source: { supported: false, available: false, repository: null, deployed: null },
+      source: { supported: false, branch: "main", deployed: null },
     });
   });
 

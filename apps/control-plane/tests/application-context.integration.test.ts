@@ -466,7 +466,7 @@ describe("Mandatory application context", () => {
     expect(await result.json()).toEqual(
       (await current.apps.list(first.principal)).unwrap().map((app) => ({
         ...app,
-        source: { supported: false, available: false, repository: null, deployed: null },
+        source: { supported: false, branch: "main", deployed: null },
       })),
     );
   });
