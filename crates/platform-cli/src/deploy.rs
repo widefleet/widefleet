@@ -1,7 +1,7 @@
 use crate::{auth, installation, preview, upload};
 use clap::Args;
 use platform_core::{
-    Error, Result, asset_hash,
+    Error, FailureReason, Result, asset_hash,
     http::{Api, json},
     model::{
         App, Asset, AssetManifest, Binding, DebugMetadata, Deployment, ModuleType, QueueConsumer,
@@ -300,7 +300,7 @@ async fn publish(
                 character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
             })
         {
-            return Err(Error::invalid("Set a valid name in the Wrangler configuration: 1-48 lowercase letters, digits or hyphens, starting with a letter and ending with a letter or digit; auth is reserved".into()));
+            return Err(Error::invalid("Set a valid name in the Wrangler configuration: 1-48 lowercase letters, digits or hyphens, starting with a letter and ending with a letter or digit; auth is reserved".into()).with_reason(FailureReason::InvalidAppName));
         }
         eprintln!("Target: {} on {}", name, api.origin_text());
     }
@@ -381,6 +381,7 @@ async fn publish(
         Target::App(None) => {
             let name = configuration.name.as_deref().ok_or_else(|| {
                 Error::invalid("Set name in the Wrangler configuration before deploying".into())
+                    .with_reason(FailureReason::AppNameMissing)
             })?;
             let token = auth::access_token(api, credentials).await?;
             let mut url = api.origin.clone();
@@ -427,6 +428,7 @@ async fn publish(
     for hash in &session.missing {
         let path = assets.files.get(hash).ok_or_else(|| {
             Error::invalid("Server requested an asset outside the manifest".into())
+                .with_reason(FailureReason::AssetManifestMismatch)
         })?;
         let bytes = std::fs::read(path)?;
         let token = auth::access_token(api, credentials).await?;
@@ -682,7 +684,7 @@ pub async fn wait(
         biased;
         signal = tokio::signal::ctrl_c() => {
             signal?;
-            Err(Error::invalid("Stopped waiting; the queued deployment continues on the agent".into()))
+            Err(Error::invalid("Stopped waiting; the queued deployment continues on the agent".into()).with_reason(FailureReason::DeploymentWaitCancelled))
         }
         result = poll_deployment(api, credentials, app, deployment) => result,
     }
@@ -726,7 +728,10 @@ async fn poll_deployment(
         let current = history
             .into_iter()
             .find(|item| item.id == deployment)
-            .ok_or_else(|| Error::invalid("Deployment no longer appears in history".into()))?;
+            .ok_or_else(|| {
+                Error::invalid("Deployment no longer appears in history".into())
+                    .with_reason(FailureReason::DeploymentMissing)
+            })?;
         match current.status.as_str() {
             "succeeded" => return Ok(current),
             "failed" => {
@@ -734,13 +739,15 @@ async fn poll_deployment(
                     current
                         .message
                         .unwrap_or_else(|| "Deployment failed".into()),
-                ));
+                )
+                .with_reason(FailureReason::DeploymentFailed));
             }
             "queued" | "running" => {}
             status => {
-                return Err(Error::invalid(format!(
-                    "Unknown deployment status: {status}"
-                )));
+                return Err(
+                    Error::invalid(format!("Unknown deployment status: {status}"))
+                        .with_reason(FailureReason::DeploymentStatusInvalid),
+                );
             }
         }
         tokio::time::sleep(Duration::from_secs(2)).await;

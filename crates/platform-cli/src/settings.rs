@@ -1,6 +1,6 @@
 use clap::{Args, Subcommand};
 use platform_core::{
-    Error, Result,
+    Error, FailureReason, Result,
     http::{Api, json},
 };
 use reqwest::Method;
@@ -111,11 +111,13 @@ pub async fn run(api: &Api, token: &str, options: Options) -> Result<()> {
                 return Err(Error::invalid(format!(
                     "{} Repeat with --acknowledge-restart to apply.",
                     plan.message
-                )));
+                ))
+                .with_reason(FailureReason::SettingsRestartUnacknowledged));
             }
-            let object = input
-                .as_object_mut()
-                .ok_or_else(|| Error::invalid("Settings must be a JSON object".into()))?;
+            let object = input.as_object_mut().ok_or_else(|| {
+                Error::invalid("Settings must be a JSON object".into())
+                    .with_reason(FailureReason::SettingsNotObject)
+            })?;
             object.insert("acknowledgeRestart".into(), value!(acknowledge_restart));
             let view: Value = json(
                 api.authenticated(Method::PUT, "/settings", token)

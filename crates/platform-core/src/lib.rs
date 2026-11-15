@@ -1,3 +1,6 @@
+mod diagnostics;
+pub use diagnostics::{FailureCategory, FailureReason};
+
 pub mod http;
 pub mod migrations;
 pub mod model;
@@ -13,6 +16,7 @@ pub struct Error {
     #[source]
     kind: ErrorKind,
     location: &'static std::panic::Location<'static>,
+    reason: Option<FailureReason>,
 }
 
 #[derive(Debug, Error)]
@@ -37,6 +41,7 @@ impl Error {
         Self {
             kind,
             location: std::panic::Location::caller(),
+            reason: None,
         }
     }
 
@@ -53,6 +58,16 @@ impl Error {
     #[track_caller]
     pub fn api(status: u16, message: String) -> Self {
         Self::new(ErrorKind::Api { status, message })
+    }
+
+    // Outer operations may add context, but must preserve a more specific cause.
+    pub fn with_reason(mut self, reason: FailureReason) -> Self {
+        self.reason.get_or_insert(reason);
+        self
+    }
+
+    pub fn reason(&self) -> Option<FailureReason> {
+        self.reason
     }
 
     pub fn kind(&self) -> &ErrorKind {

@@ -1,6 +1,6 @@
 use clap::{Args, Subcommand};
 use platform_core::{
-    Error, Result,
+    Error, FailureCategory, Result,
     reporting::{self, Preferences},
 };
 use serde::{Deserialize, Serialize};
@@ -169,6 +169,7 @@ fn events(
     let mut diagnostic = json!({});
     if let Some(failure) = &failure {
         diagnostic["error_code"] = json!(failure.code);
+        diagnostic["error_category"] = json!(failure.category);
         if let Some(status) = failure.http_status {
             diagnostic["http_status"] = json!(status);
         }
@@ -182,7 +183,7 @@ fn events(
     }
     if preferences.crashes
         && let Some(failure) = failure
-        && !failure.expected
+        && failure.category != FailureCategory::Cancelled
     {
         let handled = failure.code != "panic";
         let title = format!("{command}: {}", failure.summary);
@@ -203,7 +204,11 @@ fn events(
         properties["command"] = json!(command);
         properties["$issue_name"] = json!(title);
         properties["$exception_fingerprint"] = json!(fingerprint);
-        properties["$exception_level"] = json!("error");
+        properties["$exception_level"] = json!(if failure.category == FailureCategory::Usage {
+            "warning"
+        } else {
+            "error"
+        });
         properties["$exception_list"] = json!([{
             "type": failure.report.kind,
             "value": title,

@@ -88,7 +88,9 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
 
         expect(failure?.code).toBe(1);
         expect(failure?.stderr).toContain('"event":"cli_command_completed"');
-        expect(failure?.stderr).not.toContain('"event":"$exception"');
+        expect(failure?.stderr).toContain('"event":"$exception"');
+        expect(failure?.stderr).toContain('"$exception_level":"warning"');
+        expect(failure?.stderr).toContain('"error_category":"usage"');
         expect(failure?.stderr).not.toContain('"message":');
         const diagnostic = failure?.stderr.split("[widefleet telemetry]")[0];
 
@@ -101,7 +103,9 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
           );
         }
 
-        expect(failure?.stderr).toContain('"error_code":"invalid_input"');
+        expect(failure?.stderr).toContain(
+          `"error_code":"${command === "apps" ? "platform_not_configured" : "invalid_login_scope"}"`,
+        );
 
         await execute(binary, ["telemetry", "disable"], { env: environment() });
 
@@ -116,7 +120,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         expect(disabled?.stderr).not.toContain("[widefleet telemetry]");
       },
     );
-    it.each([401, 403, 404, 409, 422, 429, 500, 503])(
+    it.each([400, 401, 403, 404, 409, 422, 429, 500, 503])(
       "classifies HTTP %i and excludes sensitive response details from telemetry",
       async (httpStatus) => {
         await execute(binary, ["telemetry", "enable"], { env: environment() });
@@ -170,29 +174,28 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
               outcome: "failed",
               http_status: httpStatus,
               error_code: httpStatus < 500 ? "api_rejected" : "api_failure",
+              error_category: httpStatus < 500 ? "unknown" : "technical",
             },
           });
 
-          if (httpStatus < 500) expect(events).toHaveLength(1);
-          else {
-            expect(events).toHaveLength(2);
-            expect(events[1]).toMatchObject({
-              event: "$exception",
-              properties: {
-                $issue_name: `whoami: API request failed (HTTP ${httpStatus})`,
-                http_status: httpStatus,
-                $exception_list: [
-                  {
-                    type: "Api",
-                    value: `whoami: API request failed (HTTP ${httpStatus})`,
-                    mechanism: { handled: true, synthetic: true },
-                    stacktrace: { frames: [{ filename: "crates/platform-core/src/http.rs" }] },
-                  },
-                ],
-              },
-            });
-            expect(lines.join("\n")).not.toContain("<unknown>");
-          }
+          const summary = httpStatus < 500 ? "API rejected the request" : "API request failed";
+          expect(events).toHaveLength(2);
+          expect(events[1]).toMatchObject({
+            event: "$exception",
+            properties: {
+              $issue_name: `whoami: ${summary} (HTTP ${httpStatus})`,
+              http_status: httpStatus,
+              $exception_list: [
+                {
+                  type: "Api",
+                  value: `whoami: ${summary} (HTTP ${httpStatus})`,
+                  mechanism: { handled: true, synthetic: true },
+                  stacktrace: { frames: [{ filename: "crates/platform-core/src/http.rs" }] },
+                },
+              ],
+            },
+          });
+          expect(lines.join("\n")).not.toContain("<unknown>");
         } finally {
           const closed = once(server, "close");
           server.close();

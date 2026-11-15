@@ -434,7 +434,17 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       executeCli(join(state, "installation", executableName), ["deploy", ...args], {
         cwd: join(state, "project with spaces"),
         timeout: 15_000,
-        env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken },
+        env: {
+          ...process.env,
+          PLATFORM_URL: origin,
+          PLATFORM_ACCESS_TOKEN: accessToken,
+          XDG_STATE_HOME: state,
+          CI: undefined,
+          WIDEFLEET_TELEMETRY_DISABLED: "0",
+          WIDEFLEET_TELEMETRY_DEBUG: "1",
+          PLATFORM_USAGE_REPORTING: undefined,
+          PLATFORM_CRASH_REPORTING: undefined,
+        },
       });
 
     const previewCli = (...args: string[]) =>
@@ -1033,6 +1043,9 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
           if (settled.status === "rejected") throw settled.reason;
           expect(settled.value).toMatchObject({ code: 1, stdout: "" });
           expect(settled.value.stderr).toContain("Stopped waiting");
+          expect(settled.value.stderr).toContain('"error_code":"deployment_wait_cancelled"');
+          expect(settled.value.stderr).toContain('"error_category":"cancelled"');
+          expect(settled.value.stderr).not.toContain('"event":"$exception"');
         } finally {
           deployment.child.kill("SIGKILL");
           await interrupted;
@@ -1047,8 +1060,20 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         const result = await failure(cli(...args, "--skip-build"));
         expect(result).toMatchObject({ code: 1, stdout: "" });
         expect(result.stderr).toContain("Synthetic activation failure");
+        expect(result.stderr).toContain('"error_code":"deployment_failed"');
+        expect(result.stderr).toContain('"error_category":"technical"');
+        expect(result.stderr).toContain('"event":"$exception"');
       },
     );
+
+    it("reports an unknown deployment status as a protocol failure", async () => {
+      outcome = "unknown-server-status";
+      const result = await failure(cli("--json", "--skip-build"));
+      expect(result).toMatchObject({ code: 1, stdout: "" });
+      expect(result.stderr).toContain('"error_code":"deployment_status_invalid"');
+      expect(result.stderr).toContain('"error_category":"technical"');
+      expect(result.stderr).toContain('"event":"$exception"');
+    });
 
     it("requires a server-provided URL before uploading to an older server", async () => {
       includeUrl = false;

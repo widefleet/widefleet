@@ -1,4 +1,4 @@
-use platform_core::{Error, Result, http::Api};
+use platform_core::{Error, FailureReason, Result, http::Api};
 use reqwest::{Client, Url};
 use serde::Deserialize;
 use std::time::Duration;
@@ -85,10 +85,12 @@ impl Domain {
 
 fn invalid_domain() -> Error {
     Error::invalid("Enter a company domain such as example.com, without a URL, port or path".into())
+        .with_reason(FailureReason::InvalidDomain)
 }
 
 fn invalid_email() -> Error {
     Error::invalid("Enter a work email such as employee@example.com".into())
+        .with_reason(FailureReason::InvalidEmail)
 }
 
 enum DnsLookup {

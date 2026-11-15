@@ -205,7 +205,7 @@ async fn run(args: Arguments) -> Result<()> {
                 }
                 None => return Err(platform_core::Error::invalid(
                     "No platform is configured. Run widefleet login; it opens company discovery in your browser".into(),
-                )),
+                ).with_reason(platform_core::FailureReason::PlatformNotConfigured)),
             },
         }
     };

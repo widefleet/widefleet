@@ -1,4 +1,4 @@
-use platform_core::{Error, Result};
+use platform_core::{Error, FailureReason, Result};
 use std::{
     fs::{File, OpenOptions},
     io::{Read, Write},
@@ -16,6 +16,7 @@ impl SessionFile {
         let absolute = std::path::absolute(&self.0)?;
         let parent = absolute.parent().ok_or_else(|| {
             Error::credentials("Choose a session file in a private directory".into())
+                .with_reason(FailureReason::SessionPathInvalid)
         })?;
         std::fs::DirBuilder::new()
             .recursive(true)
@@ -26,11 +27,13 @@ impl SessionFile {
             return Err(Error::credentials(
                 "The session file directory must be accessible only to its owner (chmod 700)"
                     .into(),
-            ));
+            )
+            .with_reason(FailureReason::SessionPermissions));
         }
-        let name = absolute
-            .file_name()
-            .ok_or_else(|| Error::credentials("Choose a session file, not a directory".into()))?;
+        let name = absolute.file_name().ok_or_else(|| {
+            Error::credentials("Choose a session file, not a directory".into())
+                .with_reason(FailureReason::SessionPathInvalid)
+        })?;
         Ok(parent.join(name))
     }
 
@@ -38,7 +41,7 @@ impl SessionFile {
     fn path(&self) -> Result<PathBuf> {
         Err(Error::credentials(
             "Session files require Unix file permissions; use the operating system credential store or PLATFORM_ACCESS_TOKEN on this platform".into(),
-        ))
+        ).with_reason(FailureReason::SessionPathInvalid))
     }
 
     #[cfg(unix)]
@@ -50,28 +53,32 @@ impl SessionFile {
             return Err(Error::credentials(
                 "Session and lock files must be regular files without symbolic or hard links"
                     .into(),
-            ));
+            )
+            .with_reason(FailureReason::SessionPathInvalid));
         }
         if metadata.permissions().mode() & 0o077 != 0 {
             return Err(Error::credentials(
                 "Session and lock files must be accessible only to their owner (chmod 600)".into(),
-            ));
+            )
+            .with_reason(FailureReason::SessionPermissions));
         }
         let file = OpenOptions::new().read(true).write(writable).open(path)?;
         let opened = file.metadata()?;
         if (metadata.dev(), metadata.ino()) != (opened.dev(), opened.ino()) {
             return Err(Error::credentials(
                 "The session file changed while opening it; retry the command".into(),
-            ));
+            )
+            .with_reason(FailureReason::SessionChanged));
         }
         Ok(file)
     }
 
     #[cfg(not(unix))]
     fn open(_path: &Path, _writable: bool) -> Result<File> {
-        Err(Error::credentials(
-            "Session files require Unix file permissions".into(),
-        ))
+        Err(
+            Error::credentials("Session files require Unix file permissions".into())
+                .with_reason(FailureReason::SessionPathInvalid),
+        )
     }
 
     pub fn lock(&self) -> Result<File> {
@@ -117,6 +124,7 @@ impl SessionFile {
         let path = self.path()?;
         let parent = path.parent().ok_or_else(|| {
             Error::credentials("Choose a session file in a private directory".into())
+                .with_reason(FailureReason::SessionPathInvalid)
         })?;
         let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
         // NamedTempFile creates the file with mode 0600, before any secrets are written.
