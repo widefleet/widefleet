@@ -1,7 +1,7 @@
 ---
 title: API and uploads
 description: Authentication, app publication and the Worker upload contract.
-lastModified: 2026-10-29
+lastModified: 2026-11-15
 ---
 
 Authenticated clients can fetch `/api/v1/openapi.json`. The document covers management operations, agent jobs, binary assets and multipart Workers.
@@ -143,6 +143,68 @@ verified DNS but does not require a completed test login. These operations accep
 same browser or CLI write credentials as settings changes and operate on the selected organization.
 See [activation](/guides/members#activate-company-sso).
 
+## App source repositories
+
+Source operations use the selected organization and the app's management
+permissions. Token clients need `platform:read` for status and read credentials,
+or `platform:write` for setup, deployment preparation and write credentials.
+Browser mutations require same-origin requests.
+
+| Endpoint                                            | Response and purpose                                                                                                                                                             |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/v1/apps/{appId}/source`                   | Read source status.                                                                                                                                                              |
+| `PUT /api/v1/apps/{appId}/source`                   | Create the repository if needed and optionally select a branch; accepts `{ "branch": "main" }` or `{}`. Returns `{ url, branch, commit }`.                                       |
+| `POST /api/v1/apps/{appId}/source/prepare`          | Prepare a source save using write scope; accepts the same body as setup. Returns `{ organizationId, repository }`. On installations without a Git backend, `repository` is null. |
+| `POST /api/v1/apps/{appId}/source/read-credential`  | Issue a read credential; body `{}`.                                                                                                                                              |
+| `POST /api/v1/apps/{appId}/source/write-credential` | Issue a write credential; body `{}`.                                                                                                                                             |
+
+Source status is also included as `source` in app lists, app reads by ID and app
+reads by name:
+
+```json
+{
+  "supported": true,
+  "available": true,
+  "repository": {
+    "url": "https://git.example.com/apps/app-id.git",
+    "branch": "main",
+    "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "deployed": {
+    "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "branch": "main",
+    "directory": "apps/inventory"
+  }
+}
+```
+
+`supported` indicates whether the installation provides repositories. `available`
+means the selected branch has a commit. `repository` is null before setup; an
+empty repository has `commit: null`. `deployed` identifies the active deployment's
+source and is null when that deployment has no source reference. The saved branch
+head can advance without deploying an update.
+
+If the Git backend is unavailable, reads still return `200` with a `source.error`
+message, `available: false` and `repository: null`. Check `error` before treating
+the source as empty. The known `deployed` reference remains available. Ordinary
+app reads and management pages remain usable.
+
+Branches use Git branch-name rules and are limited to 200 characters. Main apps
+default to `main`; new previews default to `preview/<previewName>` in the parent
+app's repository. Selecting a branch neither creates a commit nor deploys code.
+
+Credential responses contain `{ url, username, password, expiresAt }` and use
+`Cache-Control: no-store`. Use the returned username and password for Git HTTPS
+Basic authentication. Cloud credentials expire after five minutes; existing
+credentials remain usable until expiry if management access is revoked. Each
+new credential request checks current app access. The CLI handles this exchange
+through its Git credential helper.
+
+Missing or inaccessible apps return `404`. Setup without a Git backend, or writes
+while the app is being deleted, return `409`. Backend failures during source
+setup, preparation or credential issuance return `503`.
+See [source code](/guides/source-code) for cloning and deletion behavior.
+
 ## Publish an app
 
 1. Resolve or create the configured name with `PUT /api/v1/apps/by-name/{slug}`. The server checks permissions and assigns the deployment host on creation. Names are unique within the selected organization. Explicit `POST /api/v1/apps` remains available for previews and administrative scripts.
@@ -158,6 +220,12 @@ for naming and version requirements. Occupied complete hostnames return `409 CON
 invalid or overlong hostnames return `400 BAD_REQUEST` before app creation.
 
 Upload sessions expire after one hour. Repeating an identical publish within its valid session returns the original deployment. A session's Worker content is immutable. Asset hashes follow Wrangler's BLAKE3 algorithm over base64 content plus the case-sensitive file extension; modules use SHA-256. Preview apps have separate identities and artifact prefixes.
+
+Clients that save source before publishing can include
+`source: { commit, branch, directory }` in the Worker metadata. The commit must
+already exist in the app's managed repository; otherwise the upload returns
+`400`. The directory is relative to the repository root (`.` for a root project).
+This reference follows the activated artifact, including after rollback.
 
 Rollback queues a retained code artifact from the same app while preserving its current database and files. Deletion marks the app unwritable and queues teardown after earlier jobs; management records and artifacts are removed after the agent confirms teardown.
 

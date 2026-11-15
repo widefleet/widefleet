@@ -8,6 +8,7 @@ export default defineMeta({
     "applications",
     "members",
     "deployments",
+    "source-code",
     "migrations",
     "workflows",
     "network",

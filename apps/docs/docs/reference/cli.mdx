@@ -1,7 +1,7 @@
 ---
 title: CLI
 description: Common Widefleet commands, app selection, authentication and deployment output.
-lastModified: 2026-10-29
+lastModified: 2026-11-15
 ---
 
 For installation and your first deployment, start with [CLI setup](/getting-started/installation).
@@ -121,16 +121,44 @@ bindings and the next deployment.
 
 These flags apply to both `deploy` and `preview`:
 
-| Flag            | Behavior                                                                      |
-| --------------- | ----------------------------------------------------------------------------- |
-| `--config PATH` | Read another Wrangler configuration; project paths are relative to that file. |
-| `--skip-build`  | Upload the existing build instead of running the app build.                   |
-| `--no-wait`     | Return the queued deployment; activation follows asynchronously.              |
-| `--json`        | Print one result on stdout; build output and progress go to stderr.           |
+| Flag                     | Behavior                                                                                        |
+| ------------------------ | ----------------------------------------------------------------------------------------------- |
+| `--config PATH`          | Read another Wrangler configuration; project paths are relative to that file.                   |
+| `--skip-build`           | Upload the existing build instead of running the app build.                                     |
+| `--no-source`            | Deploy without saving source to Widefleet Git. Conflicts with `--commit` and `--source-branch`. |
+| `--commit HASH`          | Save and deploy the checked-out commit; requires its full hash and a clean checkout.            |
+| `--source-branch BRANCH` | Select the app's remote source branch for this and subsequent deployments.                      |
+| `--no-wait`              | Return the queued deployment; activation follows asynchronously.                                |
+| `--json`                 | Print one result on stdout; build output and progress go to stderr.                             |
 
 After activation, the command prints `Deployment succeeded` and the app URL. Headless apps have no launch URL; their JSON deployment result uses `url: null`. For automation, use `widefleet deploy --json`: stdout contains one JSON object with the final deployment fields and `url`, while build output and progress go to stderr. The `id` field identifies the deployment and `appId` identifies the app. Existing scripts that parsed the default JSON output must add `--json`. With `--no-wait --json`, the result describes the queued deployment. Uploading with `--no-wait` requires only `platform:write`; waiting for deployment events and history also requires `platform:read`. Failures exit nonzero and leave stdout empty. Update the management server together with the CLI so it can provide the complete URL, including its configured HTTPS port.
 
 Each command's help documents its output options.
+
+On Widefleet Cloud, the JSON result also includes `source` with `commit`, `branch`
+and repository-relative `directory`. The field is null when source saving is
+disabled or the installation has no Git backend. Builds still run locally.
+
+## Source repositories
+
+These commands use the selected installation and organization. Git must be
+installed. Widefleet Cloud provides app repositories; self-hosted installations
+report `supported: false` in source status.
+
+| Command                                                                                         | Behavior                                                                                                                                              |
+| ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `widefleet source status [--app NAME_OR_ID] [--config PATH]`                                    | Print source availability, repository URL, selected branch, branch head and active deployment source as JSON. Defaults to the configured app.         |
+| `widefleet source clone NAME_OR_ID DIRECTORY [--branch BRANCH] [--read-only]`                   | Clone the selected branch and configure a `widefleet` remote with the CLI credential helper. `--branch` only selects the clone branch.                |
+| `widefleet source connect [--app NAME_OR_ID] [--config PATH] [--remote NAME] [--branch BRANCH]` | Create the app repository if needed and add an authenticated remote to the current project. `--branch` also changes the app's selected source branch. |
+
+The credential helper uses the login and organization used when connecting or
+cloning. Read-only clones need `platform:read`; connecting and pushing need
+`platform:write`, plus management access to the app. The helper obtains
+short-lived Git credentials as needed.
+
+`widefleet apps` includes the same `source` information for each app. See
+[source code](/guides/source-code) for automatic commits, `.gitignore`, external
+remotes, preview branches and conflict recovery.
 
 For a complete task, follow [sharing an app](/guides/applications) or
 [deployments and recovery](/guides/deployments).
