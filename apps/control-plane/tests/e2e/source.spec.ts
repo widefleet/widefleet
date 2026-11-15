@@ -80,7 +80,7 @@ test.afterAll(async () => {
   await rm(directory, { recursive: true, force: true });
 });
 
-test("source setup, saved and deployed commits, deletion wording and denied access", async ({
+test("source guidance, saved and deployed commits, deletion wording and denied access", async ({
   page,
   context,
   browser,
@@ -120,16 +120,30 @@ test("source setup, saved and deployed commits, deletion wording and denied acce
   await start(true);
   await page.goto(`/apps/${app.id}/source`);
   await expect(page.getByText("No source has been saved yet.", { exact: false })).toBeVisible();
-  await page.getByRole("button", { name: "Create Git repository", exact: true }).click();
+
+  for (const [name, width, height, theme] of [
+    ["desktop-light", 1440, 1000, "light"],
+    ["mobile-dark", 390, 844, "dark"],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    await page.emulateMedia({ colorScheme: theme });
+    await page.screenshot({ path: testInfo.outputPath(`empty-${name}.png`), fullPage: true });
+  }
+
+  await expect(
+    page.getByRole("button", { name: "Create Git repository", exact: true }),
+  ).toHaveCount(0);
+
+  const setup = await context.request.put(`/api/v1/apps/${app.id}/source`, {
+    headers: { origin: environment.configuration.PLATFORM_URL },
+    data: { branch: "feature/search" },
+  });
+
+  expect(setup.ok()).toBe(true);
+  await page.reload();
   await expect(page.getByRole("heading", { name: "Git URL", exact: true })).toBeVisible();
   await expect(page.getByText("No commits", { exact: true })).toBeVisible();
-  await page.getByText("Change source branch", { exact: true }).click();
-  await page.getByLabel("Branch", { exact: true }).fill("bad..branch");
-  await page.getByRole("button", { name: "Save branch", exact: true }).click();
-  await expect(page.getByText("Use a valid Git branch name", { exact: false })).toBeVisible();
-  await page.getByLabel("Branch", { exact: true }).fill("feature/search");
-  await page.getByRole("button", { name: "Save branch", exact: true }).click();
-  await expect(page.getByText("feature/search", { exact: true })).toBeVisible();
+  await expect(page.getByText("Change source branch", { exact: true })).toHaveCount(0);
 
   const deployed = { branch: "main", commit: "a".repeat(40), directory: "apps/inventory" };
   const artifactId = crypto.randomUUID();
@@ -237,11 +251,45 @@ test("source setup, saved and deployed commits, deletion wording and denied acce
   await noScript.addCookies(cookies);
   const plain = await noScript.newPage();
   await plain.goto(`/apps/${app.id}/source`);
-  await plain.getByText("Change source branch", { exact: true }).click();
-  await plain.getByLabel("Branch", { exact: true }).fill("main");
-  await plain.getByRole("button", { name: "Save branch", exact: true }).click();
-  await expect(plain.getByText("main", { exact: true })).toBeVisible();
+  await expect(plain.getByText("feature/search", { exact: true })).toBeVisible();
+  await expect(plain.getByText(deployed.commit, { exact: true })).toBeVisible();
+  await expect(plain.getByText("Change source branch", { exact: true })).toHaveCount(0);
   await noScript.close();
+
+  const previewResponse = await context.request.post("/api/v1/apps", {
+    headers: { origin: environment.configuration.PLATFORM_URL },
+    data: {
+      slug: "inventory-review",
+      displayName: "Inventory review",
+      parentId: app.id,
+      previewBranch: "review",
+    },
+  });
+
+  expect(previewResponse.ok()).toBe(true);
+  const preview = contract.app.parse(await previewResponse.json());
+  await page.goto(`/apps/${preview.id}/source`);
+  await expect(page.getByText("review", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("This preview uses a branch in the main app’s repository."),
+  ).toBeVisible();
+  await expect(page.getByText("Change source branch", { exact: true })).toHaveCount(0);
+
+  const manualResponse = await context.request.post("/api/v1/apps", {
+    headers: { origin: environment.configuration.PLATFORM_URL },
+    data: {
+      slug: "inventory-manual",
+      displayName: "Manual preview",
+      parentId: app.id,
+      previewName: "manual",
+    },
+  });
+
+  expect(manualResponse.ok()).toBe(true);
+  const manual = contract.app.parse(await manualResponse.json());
+  await page.goto(`/apps/${manual.id}/source`);
+  await expect(page.getByRole("button", { name: "Copy preview command" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Git URL" })).toHaveCount(0);
 
   // Unauthenticated requests never expose the repository URL or source metadata.
   const anonymous = await browser.newContext({

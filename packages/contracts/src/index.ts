@@ -5,7 +5,7 @@ export { workerHostname } from "./hostnames.ts";
 export * from "./source.ts";
 
 import { z } from "zod";
-import { appSource, sourceRevision } from "./source.ts";
+import { appSource, gitBranch, sourceRevision } from "./source.ts";
 
 import { serviceDocumentation } from "./service-documentation.ts";
 import { organizationIdentifier } from "./organizations.ts";
@@ -46,6 +46,7 @@ export const createAppInput = z.strictObject({
   slug: appSlug.refine((value) => value !== "auth", "The auth hostname is reserved for SSO"),
   displayName: z.string().trim().min(1).max(120),
   parentId: identifier.nullable().default(null),
+  previewBranch: gitBranch.optional(),
   previewName: z
     .string()
     .min(1)

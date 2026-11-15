@@ -68,3 +68,23 @@ export const sourcePreparation = z.strictObject({
   repository: sourceRepository.nullable(),
   primaryBranch: gitBranch.optional(),
 });
+
+export const previewNameFromBranch = async (branch: string) => {
+  const hash = async (value: string) => {
+    const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+
+    return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0"))
+      .join("")
+      .slice(0, 8);
+  };
+
+  const normalized = branch
+    .split(/[^a-zA-Z0-9]+/)
+    .filter(Boolean)
+    .join("-")
+    .toLowerCase();
+
+  const name = normalized === branch ? branch : `${normalized || "branch"}-${await hash(branch)}`;
+
+  return name.length <= 48 ? name : `${name.slice(0, 39).replace(/-+$/, "")}-${await hash(name)}`;
+};

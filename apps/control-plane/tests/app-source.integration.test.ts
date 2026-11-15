@@ -142,20 +142,19 @@ describe("App source repositories", () => {
         slug: "source-app-review",
         displayName: "Review",
         parentId: app.id,
+        previewBranch: "review",
       })
     ).unwrap();
 
     const [main, branch] = await Promise.all([
       source.setup(creator, app.id, {}),
-      source.setup(creator, preview.id, { branch: "preview/review" }),
+      source.setup(creator, preview.id, { branch: "review" }),
     ]);
 
     expect(main.unwrap().url).toBe(branch.unwrap().url);
     expect(backend.create).toHaveBeenCalledTimes(1);
     expect((await source.read(creator, app.id)).unwrap().repository?.branch).toBe("main");
-    expect((await source.read(creator, preview.id)).unwrap().repository?.branch).toBe(
-      "preview/review",
-    );
+    expect((await source.read(creator, preview.id)).unwrap().repository?.branch).toBe("review");
     (await source.credential(creator, preview.id, "write")).unwrap();
     expect(backend.credential).toHaveBeenLastCalledWith(app.id, "write");
     await environment.database.db
@@ -165,9 +164,7 @@ describe("App source repositories", () => {
     expect(await source.credential(creator, preview.id, "write")).toMatchObject({
       error: { code: "CONFLICT" },
     });
-    expect((await source.read(creator, preview.id)).unwrap().repository?.branch).toBe(
-      "preview/review",
-    );
+    expect((await source.read(creator, preview.id)).unwrap().repository?.branch).toBe("review");
     expect(backend.remove).not.toHaveBeenCalled();
   });
 
@@ -181,6 +178,7 @@ describe("App source repositories", () => {
           slug: "source-app-review",
           displayName: "Review",
           parentId: app.id,
+          previewBranch: "feature/review",
         })
       ).unwrap();
 
@@ -201,11 +199,108 @@ describe("App source repositories", () => {
       expect(await source.setup(creator, preview.id, { branch: primary })).toMatchObject({
         error: { code: "CONFLICT" },
       });
+      expect(await source.setup(creator, preview.id, { branch: "other-work" })).toMatchObject({
+        error: { code: "CONFLICT" },
+      });
       expect((await source.read(creator, preview.id)).unwrap().repository?.branch).toBe(
         "feature/review",
       );
     },
   );
+
+  it("derives preview names from Git branches and keeps unnamed previews without a source binding", async () => {
+    const app = await create();
+    const branch = "feature/review";
+    const name = await contract.previewNameFromBranch(branch);
+
+    const preview = (
+      await service.create(creator, {
+        slug: "source-app-review",
+        displayName: "Review",
+        parentId: app.id,
+        previewBranch: branch,
+      })
+    ).unwrap();
+
+    expect(preview.hostname).toBe(`${name}.${app.hostname}`);
+    expect(
+      await service.create(creator, {
+        slug: "duplicate-review",
+        displayName: "Duplicate",
+        parentId: app.id,
+        previewBranch: branch,
+      }),
+    ).toMatchObject({ error: { code: "CONFLICT" } });
+    expect(
+      await service.create(creator, {
+        slug: "renamed-review",
+        displayName: "Renamed",
+        parentId: app.id,
+        previewBranch: branch,
+        previewName: "other-name",
+      }),
+    ).toMatchObject({ error: { code: "BAD_REQUEST" } });
+    expect(
+      await service.create(creator, {
+        slug: "main-review",
+        displayName: "Main",
+        parentId: app.id,
+        previewBranch: "main",
+      }),
+    ).toMatchObject({ error: { code: "BAD_REQUEST" } });
+    (await source.setup(creator, app.id, {})).unwrap();
+
+    const unnamed = (
+      await service.create(creator, {
+        slug: "manual-review",
+        displayName: "Manual",
+        parentId: app.id,
+      })
+    ).unwrap();
+
+    expect((await source.read(creator, unnamed.id)).unwrap().repository).toBeNull();
+    expect(await source.setup(creator, unnamed.id, { branch: "review" })).toMatchObject({
+      error: { code: "CONFLICT" },
+    });
+  });
+
+  it("rejects preview source metadata from a different branch", async () => {
+    const app = await create();
+
+    const preview = (
+      await service.create(creator, {
+        slug: "source-app-review",
+        displayName: "Review",
+        parentId: app.id,
+        previewBranch: "review",
+      })
+    ).unwrap();
+
+    const uploads = createUploadService(
+      environment.database.db,
+      createStorage(environment.configuration),
+      environment.configuration,
+      undefined,
+      backend,
+    );
+
+    const metadata = contract.workerMetadata.parse({
+      main_module: "worker.js",
+      compatibility_date: "2026-10-01",
+      assets: { binding: "ASSETS", upload_session: crypto.randomUUID() },
+      source: { branch: "different", commit: "f".repeat(40), directory: "." },
+    });
+
+    expect(
+      await uploads.publish(creator, preview.id, metadata, [], crypto.randomUUID()),
+    ).toMatchObject({
+      error: {
+        code: "BAD_REQUEST",
+        message: "The deployment source branch does not match this preview",
+      },
+    });
+    expect(backend.hasCommit).not.toHaveBeenCalled();
+  });
 
   it("retains the deployed source reference when the branch advances or changes", async () => {
     const app = await create();

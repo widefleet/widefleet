@@ -7,7 +7,6 @@ import {
   identifier,
   organizationSelection,
   rollbackInput,
-  sourceSetup,
 } from "@platform/contracts";
 import { z } from "zod";
 import { formValue, queryValue, remoteContext } from "#server/remote-support";
@@ -120,18 +119,5 @@ export const removeApp = form(
     formValue(await runtime.apps.remove(principal, appId));
     await getApps().refresh();
     redirect(303, "/");
-  },
-);
-
-export const setupAppSource = form(
-  appPath.extend(organizationSelection.shape).extend(sourceSetup.shape),
-  async ({ organizationId, appId, ...input }) => {
-    const { runtime, principal } = await remoteContext({ organizationId });
-    formValue(await runtime.source.setup(principal, appId, input));
-    await getAppDetails({ appId, search: "" }).refresh();
-
-    if (!getRequestEvent().isRemoteRequest) redirect(303, `/apps/${appId}/source`);
-
-    return { saved: true };
   },
 );

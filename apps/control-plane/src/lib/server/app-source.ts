@@ -52,7 +52,7 @@ const sourceTarget = async (
     app,
     primaryBranch,
     id: app.parentId ?? app.id,
-    branch: app.sourceBranch ?? (app.parentId ? `preview/${app.slug}` : "main"),
+    branch: app.sourceBranch ?? "main",
   });
 };
 
@@ -75,6 +75,20 @@ export const createAppSource = (database: Database, backend?: SourceBackend) => 
           }),
         );
       const { app, id, primaryBranch } = target.value;
+
+      if (
+        app.parentId &&
+        (!app.sourceBranch || (input.branch !== undefined && input.branch !== app.sourceBranch))
+      )
+        return Result.err(
+          new InvalidOperation({
+            code: "CONFLICT",
+            message: app.sourceBranch
+              ? `This preview is linked to branch ${app.sourceBranch}. Deploy another branch as its own preview`
+              : "This preview was created without a Git branch. Create a preview from another work branch to save source",
+          }),
+        );
+
       const branch = input.branch ?? target.value.branch;
 
       if (branch === primaryBranch)
@@ -119,10 +133,10 @@ export const createAppSource = (database: Database, backend?: SourceBackend) => 
           ? (contract.workerMetadata.parse(active.metadata).source ?? null)
           : null;
 
-        if (!backend)
+        if (!backend || (app.parentId && !app.sourceBranch))
           return Result.ok(
             contract.appSource.parse({
-              supported: false,
+              supported: Boolean(backend),
               available: false,
               repository: null,
               deployed,

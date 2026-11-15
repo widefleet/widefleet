@@ -76,6 +76,8 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     let logFailure: { code: string; message: string } | null = null;
     let sourceRepository: z.infer<typeof contract.sourceRepository> | null = null;
     let primaryBranch: string | undefined;
+    let preparationFailure = false;
+    const preparedBranches: z.infer<typeof contract.sourceSetup>[] = [];
 
     const server = createServer((request, response) => {
       request.resume();
@@ -153,13 +155,27 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       }
 
       if (request.method === "POST" && request.url?.endsWith("/source/prepare")) {
-        response.end(
-          JSON.stringify({
-            organizationId: app.organizationId,
-            repository: sourceRepository,
-            primaryBranch,
-          }),
-        );
+        let body = "";
+        request.setEncoding("utf8").on("data", (chunk: string) => {
+          body += chunk;
+        });
+        request.on("end", () => {
+          preparedBranches.push(contract.sourceSetup.parse(JSON.parse(body)));
+
+          if (preparationFailure) {
+            response.writeHead(503).end(JSON.stringify({ message: "Synthetic source outage" }));
+
+            return;
+          }
+
+          response.end(
+            JSON.stringify({
+              organizationId: app.organizationId,
+              repository: sourceRepository,
+              primaryBranch,
+            }),
+          );
+        });
 
         return;
       }
@@ -432,6 +448,8 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
 
     beforeEach(() => {
       primaryBranch = undefined;
+      preparationFailure = false;
+      preparedBranches.length = 0;
       sourceRepository = null;
       requests.length = 0;
       organizations.length = 0;
@@ -832,7 +850,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
 
     it("requires an explicit name outside Git before making requests", async () => {
       const result = await failure(previewCli());
-      expect(result.stderr).toContain("Choose --name NAME");
+      expect(result.stderr).toContain("--name NAME");
       expect(requests).toEqual([]);
     });
 
@@ -865,9 +883,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
           expect(
             (await failure(previewCli("--name", "review", "--source-branch", primary))).stderr,
           ).toContain("cannot save source to the main app's branch");
-          expect((await failure(previewCli("--name", "review"))).stderr).toContain(
-            "Reached preview build",
-          );
+          expect((await failure(previewCli())).stderr).toContain("Reached preview build");
           expect(requests.every((request) => request.startsWith("GET "))).toBe(true);
         } finally {
           await writeFile(build, 'console.log("Synthetic build output");\n');
@@ -899,6 +915,70 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         }
       },
     );
+
+    it("derives a Git preview and its saved branch from the same local branch", async () => {
+      const project = join(state, "project with spaces");
+      parent = {
+        ...app,
+        source: { supported: true, available: false, repository: null, deployed: null },
+      };
+      preparationFailure = true;
+      await execute("git", ["init", "--initial-branch=feature/login", project]);
+
+      try {
+        expect((await failure(previewCli("--name", "unrelated", "--skip-build"))).stderr).toContain(
+          "Git previews use the branch-derived name",
+        );
+        expect(
+          (await failure(previewCli("--source-branch", "different", "--skip-build"))).stderr,
+        ).toContain("must use the checked-out branch");
+        expect(createdPreviews).toHaveLength(0);
+
+        for (let attempt = 0; attempt < 2; attempt++) {
+          expect((await failure(previewCli("--skip-build"))).stderr).toContain(
+            "Synthetic source outage",
+          );
+        }
+
+        const name = await contract.previewNameFromBranch("feature/login");
+        expect(createdPreviews).toEqual([
+          {
+            slug: `server-app-${name}`,
+            displayName: `server-app (${name})`,
+            parentId: app.id,
+            previewName: name,
+            previewBranch: "feature/login",
+          },
+        ]);
+        expect(preparedBranches).toEqual([
+          { branch: "feature/login" },
+          { branch: "feature/login" },
+        ]);
+      } finally {
+        await rm(join(project, ".git"), { recursive: true, force: true });
+      }
+    });
+
+    it("rejects redeploying an existing Git preview from a different work branch", async () => {
+      const project = join(state, "project with spaces");
+      primaryBranch = "main";
+      sourceRepository = {
+        url: "https://git.example.test/apps/source.git",
+        branch: "review",
+        commit: null,
+      };
+      await execute("git", ["init", "--initial-branch=different", project]);
+
+      try {
+        expect((await failure(cli(preview.id, "--skip-build"))).stderr).toContain(
+          "This preview is linked to branch review",
+        );
+        expect((await execute("git", ["-C", project, "for-each-ref"])).stdout).toBe("");
+        expect(requests).toEqual([`POST /api/v1/apps/${preview.id}/source/prepare`]);
+      } finally {
+        await rm(join(project, ".git"), { recursive: true, force: true });
+      }
+    });
 
     it("requires an explicit source branch for a detached CI preview checkout", async () => {
       const project = join(state, "project with spaces");
@@ -933,10 +1013,9 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         expect((await failure(previewCli("--name", "review"))).stderr).toContain(
           "requires a Git work branch",
         );
-        expect(
-          (await failure(previewCli("--name", "review", "--source-branch", "feature/review")))
-            .stderr,
-        ).toContain("Reached preview build");
+        expect((await failure(previewCli("--source-branch", "feature/review"))).stderr).toContain(
+          "Reached preview build",
+        );
         expect(requests.every((request) => request.startsWith("GET "))).toBe(true);
       } finally {
         await writeFile(build, 'console.log("Synthetic build output");\n');

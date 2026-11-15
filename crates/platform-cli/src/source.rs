@@ -383,30 +383,41 @@ pub async fn require_preview_branch(
     project: &Path,
     primary: &str,
     requested_branch: Option<&str>,
-) -> Result<()> {
+) -> Result<String> {
     let head = git(project)
         .args(["symbolic-ref", "--quiet", "--short", "HEAD"])
         .output()
         .await?;
-    let branch = String::from_utf8_lossy(&head.stdout);
-    if head.status.success() && branch.trim() == primary {
-        return Err(Error::invalid(format!(
-            "Create or switch to a work branch before deploying a preview. The main app uses {primary}; no source was committed"
-        )));
-    }
-    // A detached CI checkout can identify its work branch explicitly. Outside a
-    // repository, symbolic-ref exits with 128; do not initialize main for a preview.
-    if !head.status.success() && !(head.status.code() == Some(1) && requested_branch.is_some()) {
+    let branch = if head.status.success() {
+        String::from_utf8(head.stdout)
+            .map_err(|_| Error::invalid("Git branch name is not UTF-8".into()))?
+            .trim()
+            .to_owned()
+    } else if head.status.code() == Some(1)
+        && let Some(branch) = requested_branch
+    {
+        branch.to_owned()
+    } else {
         return Err(Error::invalid(
             "A preview with source storage requires a Git work branch. For a detached CI checkout, pass --source-branch BRANCH".into(),
         ));
+    };
+    if branch == primary {
+        return Err(Error::invalid(format!(
+            "Create or switch to a work branch before deploying a preview. The main app uses {primary}; no source was committed"
+        )));
     }
     if requested_branch == Some(primary) {
         return Err(Error::invalid(format!(
             "A preview cannot save source to the main app's branch {primary}. Choose a work branch"
         )));
     }
-    Ok(())
+    if requested_branch.is_some_and(|requested| requested != branch) {
+        return Err(Error::invalid(format!(
+            "Preview source must use the checked-out branch {branch}. Switch branches before deploying another preview"
+        )));
+    }
+    Ok(branch)
 }
 
 pub async fn save(
@@ -436,7 +447,13 @@ pub async fn save(
         return Ok(None);
     };
     if let Some(primary) = prepared.primary_branch {
-        require_preview_branch(project, &primary, branch).await?;
+        let current = require_preview_branch(project, &primary, branch).await?;
+        if current != repository.branch {
+            return Err(Error::invalid(format!(
+                "This preview is linked to branch {}. Switch to that branch or use widefleet preview to deploy {current} separately",
+                repository.branch
+            )));
+        }
     }
     validate_url(&repository.url)?;
     let helper = helper(

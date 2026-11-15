@@ -1,12 +1,7 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { getAppContext } from "#lib/app-context";
-  import { setupAppSource } from "#lib/apps.remote";
-  import OrganizationField from "#shadcn/OrganizationField.svelte";
-  import FormIssues from "#shadcn/FormIssues.svelte";
   import CopyValue from "#shadcn/components/CopyValue.svelte";
-  import { Button } from "#shadcn/components/ui/button/index.js";
-  import { Input } from "#shadcn/components/ui/input/index.js";
 
   const context = getAppContext();
 
@@ -39,11 +34,18 @@
       </p>
     {:else if !source.available}
       <p class="text-muted-foreground mt-2 text-sm leading-6">
-        No source has been saved{repository ? ` on ${repository.branch}` : ""} yet. Deploy from your project
-        to save its code, or connect an existing Git repository.
+        No source has been saved{repository ? ` on ${repository.branch}` : ""} yet.
+        {#if app.parentId && !repository}Deploy a Git preview from your work branch to save its
+          code.
+        {:else}Deploy from your project to save its code, or connect an existing Git repository.{/if}
       </p>
       <div class="mt-4">
-        <CopyValue value={`${cli} source connect --app ${app.id}`} label="Copy Git setup command" />
+        <CopyValue
+          value={app.parentId && !repository
+            ? `${cli} preview --app ${app.parentId}`
+            : `${cli} source connect --app ${app.id}`}
+          label={app.parentId && !repository ? "Copy preview command" : "Copy Git setup command"}
+        />
       </div>
     {:else}
       <p class="text-muted-foreground mt-2 mb-4 text-sm leading-6">
@@ -51,7 +53,7 @@
       </p>
       <CopyValue value={`${cli} source clone ${app.id} ${app.slug}`} label="Copy clone command" />
     {/if}
-    {#if app.parentId && source.supported}<p class="text-muted-foreground mt-3 text-xs leading-6">
+    {#if app.parentId && repository}<p class="text-muted-foreground mt-3 text-xs leading-6">
         This preview uses a branch in the main app’s repository.
       </p>{/if}
   </section>
@@ -90,39 +92,6 @@
           ? " or widefleet preview"
           : ""} to publish a new version.
       </p>
-    </section>
-  {/if}
-  {#if source.supported && !source.error && app.state !== "deleting"}
-    <section>
-      {#if repository}
-        <details>
-          <summary class="text-sm font-medium">Change source branch</summary>
-          <form {...setupAppSource} class="mt-4 max-w-sm space-y-4">
-            <OrganizationField field={setupAppSource.fields.organizationId} />
-            <input {...setupAppSource.fields.appId.as("hidden", app.id)} />
-            <div class="space-y-2">
-              <label for="source-branch" class="text-sm">Branch</label><Input
-                id="source-branch"
-                {...setupAppSource.fields.branch.as("text", repository.branch)}
-                required
-              />
-            </div>
-            <FormIssues issues={setupAppSource.fields.allIssues()} />
-            <Button type="submit" variant="outline" disabled={setupAppSource.pending > 0}
-              >{setupAppSource.pending ? "Saving …" : "Save branch"}</Button
-            >
-          </form>
-        </details>
-      {:else}
-        <form {...setupAppSource} class="space-y-4">
-          <OrganizationField field={setupAppSource.fields.organizationId} />
-          <input {...setupAppSource.fields.appId.as("hidden", app.id)} />
-          <FormIssues issues={setupAppSource.fields.allIssues()} />
-          <Button type="submit" variant="outline" disabled={setupAppSource.pending > 0}
-            >{setupAppSource.pending ? "Creating …" : "Create Git repository"}</Button
-          >
-        </form>
-      {/if}
     </section>
   {/if}
 </div>

@@ -285,7 +285,20 @@ const provisionApp = async (
     let accessGroups: string[] = [];
     let accessRevision = 0;
 
-    if (input.previewName !== undefined && input.parentId === null)
+    const previewName =
+      input.previewBranch === undefined
+        ? input.previewName
+        : await contract.previewNameFromBranch(input.previewBranch);
+
+    if (input.previewName !== undefined && input.previewName !== previewName)
+      return Result.err(
+        new InvalidOperation({
+          code: "BAD_REQUEST",
+          message: "A Git preview's name must be derived from its branch",
+        }),
+      );
+
+    if (previewName !== undefined && input.parentId === null)
       return Result.err(
         new InvalidOperation({
           code: "BAD_REQUEST",
@@ -313,7 +326,15 @@ const provisionApp = async (
       accessGroups = contract.appAccessGroups.parse(parent.value.accessGroups);
       accessRevision = parent.value.accessRevision;
 
-      if (input.previewName !== undefined) {
+      if (input.previewBranch === (parent.value.sourceBranch ?? "main"))
+        return Result.err(
+          new InvalidOperation({
+            code: "BAD_REQUEST",
+            message: "A preview must use a different source branch from the main app",
+          }),
+        );
+
+      if (previewName !== undefined) {
         if (
           parent.value.parentId !== null ||
           parent.value.hostname !== hostnameFor(parent.value.slug)
@@ -326,7 +347,7 @@ const provisionApp = async (
           );
 
         // A suffixed execution shares one wildcard domain for apps and named previews.
-        hostname = `${input.previewName}${execution.appHostnameSuffix === null ? "." : "-"}${parent.value.hostname}`;
+        hostname = `${previewName}${execution.appHostnameSuffix === null ? "." : "-"}${parent.value.hostname}`;
       }
     }
 
@@ -339,7 +360,7 @@ const provisionApp = async (
         slug: input.slug,
         displayName: input.displayName,
         parentId: input.parentId,
-        sourceBranch: input.previewName ? `preview/${input.previewName}` : null,
+        sourceBranch: input.previewBranch ?? null,
         accessGroups,
         accessRevision,
         organizationId: execution.organizationId,
