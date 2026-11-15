@@ -847,7 +847,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
             await env.DEPLOYMENTS.create({ id: url.searchParams.get('instanceId') ?? command.id, params: command });
             return new Response(null, { status: 200 });
           }
-          let attemptedId = null;
+          let attemptedId;
           const deploymentBinding = {
             async create(options) {
               attemptedId = options.id;
