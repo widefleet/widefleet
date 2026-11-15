@@ -106,13 +106,22 @@ Resolve any merge conflicts locally. Automatic source saving never force-pushes.
 
 ## Keep preview work separate
 
+Switch to a work branch before saving a preview's source. `widefleet preview` rejects the
+main app's source branch before building. Direct deployments to an existing
+preview also reject that branch before committing.
+
 ```sh
+git switch -c feature/review
 widefleet preview --name review
 ```
 
 The preview saves code to `preview/review` in the main app's repository. Repeated
 deployments update that branch. Use `--source-branch BRANCH` to choose a different
 branch for that preview.
+
+For a detached CI checkout, pass both `--name review` and
+`--source-branch feature/review`. The source branch must differ from the main
+app's branch.
 
 Deleting a preview keeps its branch. Deleting the main app removes its managed
 repository and all its branches; the deletion confirmation states this. External

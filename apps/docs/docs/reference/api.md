@@ -158,6 +158,9 @@ Browser mutations require same-origin requests.
 | `POST /api/v1/apps/{appId}/source/read-credential`  | Issue a read credential; body `{}`.                                                                                                                                              |
 | `POST /api/v1/apps/{appId}/source/write-credential` | Issue a write credential; body `{}`.                                                                                                                                             |
 
+For previews, the preparation response also includes `primaryBranch`, the main
+app's source branch. The CLI rejects saving a preview from that local branch.
+
 Source status is also included as `source` in app lists, app reads by ID and app
 reads by name:
 

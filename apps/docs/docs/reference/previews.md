@@ -1,7 +1,7 @@
 ---
 title: Previews
 description: Preview names, flags, isolation, DNS and cleanup.
-lastModified: 2026-10-23
+lastModified: 2026-11-15
 ---
 
 Run these commands from an existing app project:
@@ -23,6 +23,12 @@ The command builds locally, creates or reuses the preview, uploads the build, wa
 Explicit names contain 1–48 lowercase letters, digits or internal hyphens. Git branch names are converted to lowercase DNS labels; changed names receive a hash suffix so branches such as `feature/login` and `feature-login` remain distinct. Without Git or on a detached HEAD, pass `--name` explicitly.
 
 Each preview has a stable app ID and an internal slug based on the parent slug and preview name. Long slugs are shortened with a hash suffix to fit the existing 48-character limit. This does not shorten the hostname. Deploying the same name again preserves its data and deployment history.
+
+With Git source storage enabled, switch to a work branch before deploying a
+preview. The main app's source branch is rejected as both the local working branch
+and an explicit `--source-branch` target. A detached CI checkout requires
+`--name NAME --source-branch BRANCH`. See [source code](/guides/source-code) for
+automatic saving and preview repository branches.
 
 Manage access groups on the original app with `widefleet access set --group GROUP_ID`. Its previews inherit the rule and all later changes automatically. See [app access](/reference/app-access).
 
