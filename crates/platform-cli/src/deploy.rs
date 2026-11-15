@@ -515,9 +515,6 @@ async fn publish(
             .into_iter()
             .map(|(name, bytes)| (name, ModuleType::Sourcemap, bytes)),
     );
-    if let Some(saved) = &saved {
-        saved.verify().await?;
-    }
     let deployment = upload::publish(
         api,
         credentials,

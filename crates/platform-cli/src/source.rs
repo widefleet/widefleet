@@ -376,17 +376,6 @@ async fn commit_all(project: &Path, branch: &str) -> Result<String> {
 
 pub struct Saved {
     pub revision: SourceRevision,
-    root: PathBuf,
-    tree: String,
-}
-
-impl Saved {
-    pub async fn verify(&self) -> Result<()> {
-        if tree(&self.root).await? != self.tree {
-            return Err(Error::invalid("Project files changed after their source commit was saved. Review the changes and retry the deployment".into()));
-        }
-        Ok(())
-    }
 }
 
 pub async fn save(
@@ -499,11 +488,6 @@ async fn save_repository(
     if committed_tree != source_tree {
         return Err(Error::invalid("Git changed project files while creating the commit. Retry the deployment to rebuild the committed source".into()));
     }
-    if tree(&root).await? != committed_tree {
-        return Err(Error::invalid(
-            "Project files changed while saving source; retry the deployment".into(),
-        ));
-    }
     // A normal push rejects a concurrently advanced remote; never force a source save.
     output(remote_git(&root, &repository.url, helper).args([
         "push",
@@ -526,8 +510,6 @@ async fn save_repository(
             commit: saved_commit,
             directory,
         },
-        root,
-        tree: committed_tree,
     })
 }
 
@@ -892,8 +874,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn explicit_commit_requires_matching_checkout_and_build_checks_preserve_index()
-    -> Result<()> {
+    async fn explicit_commit_requires_matching_checkout_without_changing_index() -> Result<()> {
         let fixture = Fixture::new().await?;
         std::fs::write(fixture.project.join("app.ts"), "first")?;
         let first = fixture.save("main").await?;
@@ -907,7 +888,6 @@ mod tests {
         .await?;
         assert_eq!(same.revision.commit, first.revision.commit);
         std::fs::write(fixture.project.join("app.ts"), "during build")?;
-        assert!(first.verify().await.is_err());
         assert!(
             save_repository(
                 &fixture.project,
@@ -1164,6 +1144,36 @@ mod tests {
         assert_eq!(
             output(git(&fixture.remote).args(["show", "main:app.ts"])).await?,
             "formatted"
+        );
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn saves_the_built_source_when_working_files_change_after_the_commit() -> Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        let fixture = Fixture::new().await?;
+        std::fs::write(fixture.project.join("app.ts"), "first")?;
+        fixture.save("main").await?;
+        let hook = fixture.project.join(".git/hooks/post-commit");
+        std::fs::write(&hook, "#!/bin/sh\nprintf 'next edit' > app.ts\n")?;
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o700))?;
+        std::fs::write(fixture.project.join("app.ts"), "built source")?;
+        let saved = fixture.save("main").await?;
+        assert_eq!(
+            revision(&fixture.remote, "main").await?,
+            Some(saved.revision.commit.clone())
+        );
+        assert_eq!(
+            output(
+                git(&fixture.remote).args(["show", &format!("{}:app.ts", saved.revision.commit)])
+            )
+            .await?,
+            "built source"
+        );
+        assert_eq!(
+            std::fs::read_to_string(fixture.project.join("app.ts"))?,
+            "next edit"
         );
         Ok(())
     }
