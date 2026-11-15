@@ -1,5 +1,6 @@
 ---
 title: Template OAuth
+lastModified: 2026-11-15
 ---
 
 The Gmail, GitHub and OneDrive templates can use an OAuth registration supplied by
@@ -25,12 +26,14 @@ Every template still needs its own persistent `AUTH_SECRET` of at least 32
 characters. It encrypts saved account tokens in that app's D1 database. Provider API
 requests continue to run in the template, using its existing network policy.
 
-Older saved connections require a one-time reconnection after upgrading these
-templates. This records which registration issued their tokens.
+Existing connections keep working after a template upgrade with unchanged custom
+credentials. Upgrading does not require a new provider authorization.
 
-After switching registrations, users must reconnect. A `reconnect_required` result
-includes the connection page URL. Keep the old registration available until its
-users have migrated.
+To switch between your own and managed credentials, or replace a client ID,
+each user must disconnect and connect again. Disconnecting clears the previous
+registration's saved tokens. Updating credentials alone does not replace or revoke
+existing grants. There is one managed registration per provider; replacing it
+does not keep the previous registration available for refresh.
 
 ## Configure a managed registration
 
@@ -62,6 +65,12 @@ origin. Supply the JSON through your deployment secret store:
   }
 }
 ```
+
+The runtime offers three fixed permission profiles: `gmail-readonly` for Gmail,
+`github-repo` for repositories and user identity, and `onedrive-read` for OneDrive.
+The provider keys in the secret remain `google`, `github` and `microsoft`.
+GitHub's `repo` scope includes write permissions, although the template exposes
+read methods.
 
 Omit providers you do not offer. Register these exact callbacks for the providers
 you enable:
@@ -100,6 +109,6 @@ the runtime's `WIDEFLEET_SECRETS_KEY` as well as each app's database and
 `AUTH_SECRET` when backing up an installation.
 
 If consent is cancelled or a callback expires, start again from the template's
-connection page. If the OAuth registration changes, reconnect each account. A
-provider outage during refresh returns `refresh_failed` and preserves the saved
-connection so it can be retried.
+connection page. If the OAuth registration changes, disconnect and connect each
+account again. A provider outage during refresh returns `refresh_failed` and
+preserves the saved connection so it can be retried.

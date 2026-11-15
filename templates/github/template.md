@@ -53,8 +53,9 @@ for the OAuth app before their repositories become available.
 
 Your own credentials take precedence over managed OAuth. Provide both values;
 setting only one produces a setup error. Removing both switches back to managed
-OAuth when available. Users must reconnect after changing registrations. Older
-saved connections require a one-time reconnection after upgrading this template.
+OAuth when available. Existing connections keep working after a template upgrade
+with unchanged credentials. To change registrations, each user must disconnect
+and connect again so the saved tokens belong to the new registration.
 
 ## Use from another app
 
