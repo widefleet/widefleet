@@ -114,6 +114,31 @@ export const createAppSource = (database: Database, backend?: SourceBackend) => 
     });
 
   const source = {
+    deploymentTarget: async (
+      principal: Principal,
+      input: z.infer<typeof contract.sourceDeployTargetInput>,
+    ) => {
+      const [app] = await database
+        .select({ branch: apps.sourceBranch, parentId: apps.parentId })
+        .from(apps)
+        .where(
+          and(
+            "appId" in input ? eq(apps.id, input.appId) : eq(apps.slug, input.slug),
+            appVisibility(database, principal),
+          ),
+        );
+
+      if (!app && "appId" in input)
+        return Result.err(new InvalidOperation({ code: "NOT_FOUND", message: "App not found" }));
+
+      // A first deployment by name uses main. Inspect only local metadata: this
+      // check must not create an app/repository or contact the Git backend.
+      return Result.ok({
+        supported: Boolean(backend),
+        branch: app?.branch ?? "main",
+        preview: app?.parentId != null,
+      });
+    },
     read: async (principal: Principal, appId: string) => {
       const snapshot = await transact(database, async (transaction) => {
         const target = await sourceTarget(transaction, principal, appId, false);

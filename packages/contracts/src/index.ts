@@ -91,6 +91,8 @@ export const deploymentEvent = z.strictObject({
 
 export const appPath = z.strictObject({ appId: identifier });
 
+export const sourceDeployTargetInput = z.union([appPath, z.strictObject({ slug: appSlug })]);
+
 export const catalogEntry = app.pick({ id: true, displayName: true, hostname: true, url: true });
 
 export const catalogListing = z.strictObject({ listed: z.boolean() });

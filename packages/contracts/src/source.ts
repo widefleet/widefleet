@@ -63,6 +63,12 @@ export const sourceCredential = z.strictObject({
 
 export const sourceSetup = z.strictObject({ branch: gitBranch.optional() });
 
+export const sourceDeployTarget = z.strictObject({
+  supported: z.boolean(),
+  branch: gitBranch,
+  preview: z.boolean(),
+});
+
 export const sourcePreparation = z.strictObject({
   organizationId: z.string().min(1),
   repository: sourceRepository.nullable(),

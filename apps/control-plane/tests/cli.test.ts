@@ -6,7 +6,7 @@ import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -78,6 +78,8 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     let primaryBranch: string | undefined;
     let preparationFailure = false;
     const preparedBranches: z.infer<typeof contract.sourceSetup>[] = [];
+    let sourceTarget = { supported: false, branch: "main", preview: false };
+    const checkedTargets: z.infer<typeof contract.sourceDeployTargetInput>[] = [];
 
     const server = createServer((request, response) => {
       request.resume();
@@ -96,6 +98,19 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       }
 
       response.setHeader("content-type", "application/json");
+
+      if (request.method === "POST" && request.url === "/api/v1/apps/source-target") {
+        let body = "";
+        request.setEncoding("utf8").on("data", (chunk: string) => {
+          body += chunk;
+        });
+        request.on("end", () => {
+          checkedTargets.push(contract.sourceDeployTargetInput.parse(JSON.parse(body)));
+          response.end(JSON.stringify(sourceTarget));
+        });
+
+        return;
+      }
 
       if (request.method === "POST" && request.url?.endsWith("-credential")) {
         response.end(
@@ -447,6 +462,8 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     });
 
     beforeEach(() => {
+      sourceTarget = { supported: false, branch: "main", preview: false };
+      checkedTargets.length = 0;
       primaryBranch = undefined;
       preparationFailure = false;
       preparedBranches.length = 0;
@@ -490,6 +507,127 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         timeout: 15_000,
         env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken },
       });
+
+    it.each([{ args: [] }, { args: [app.id] }])(
+      "rejects an unconfirmed main-app branch mismatch before building: %j",
+      async ({ args }) => {
+        const project = join(state, "project with spaces");
+        sourceTarget.supported = true;
+        await execute("git", ["init", "--initial-branch=feature", project]);
+
+        try {
+          const result = await failure(cli(...args, "--no-wait", "--json"));
+          expect(result.stdout).toBe("");
+          expect(result.stderr).toContain("local branch feature");
+          expect(result.stderr).toContain("updates branch main in Widefleet Git");
+          expect(result.stderr).toContain("publishes the code as the main app");
+          expect(result.stderr).toContain("--allow-branch-mismatch");
+          expect(result.stderr).not.toContain("Synthetic build output");
+          expect(requests).toEqual(["POST /api/v1/apps/source-target"]);
+          expect(checkedTargets).toEqual([args.length ? { appId: app.id } : { slug: "fixture" }]);
+          expect((await execute("git", ["-C", project, "for-each-ref"])).stdout).toBe("");
+        } finally {
+          await rm(join(project, ".git"), { recursive: true, force: true });
+        }
+      },
+    );
+
+    it.each([
+      { local: "release", target: "release", allow: false, detached: false },
+      { local: "feature", target: "main", allow: true, detached: false },
+      { local: "main", target: "main", allow: true, detached: true },
+    ])(
+      "saves and deploys the main app with an allowed branch: %j",
+      async ({ local, target, allow, detached }) => {
+        const project = join(state, "project with spaces");
+        const remote = join(state, "main-app-source.git");
+        sourceTarget = { supported: true, branch: target, preview: false };
+        sourceRepository = {
+          url: "https://git.example.test/apps/source.git",
+          branch: target,
+          commit: null,
+        };
+        await execute("git", ["init", `--initial-branch=${local}`, project]);
+        await execute("git", ["init", "--bare", remote]);
+        await execute("git", [
+          "-C",
+          project,
+          "config",
+          `url.${pathToFileURL(remote).href}.insteadOf`,
+          sourceRepository.url,
+        ]);
+
+        try {
+          if (detached) {
+            await execute("git", [
+              "-C",
+              project,
+              "-c",
+              "user.name=Fixture",
+              "-c",
+              "user.email=fixture@example.test",
+              "commit",
+              "--allow-empty",
+              "-m",
+              "Initial",
+            ]);
+            await execute("git", ["-C", project, "checkout", "--detach", "HEAD"]);
+            const denied = await failure(cli("--no-wait"));
+            expect(denied.stderr).toContain("detached HEAD");
+            expect(denied.stderr).not.toContain("Synthetic build output");
+            expect(requests).toEqual(["POST /api/v1/apps/source-target"]);
+          }
+
+          const result = await cli(
+            "--no-wait",
+            "--json",
+            ...(allow ? ["--allow-branch-mismatch"] : []),
+          );
+
+          const { source: saved } = z
+            .object({ source: contract.sourceRevision })
+            .parse(JSON.parse(result.stdout));
+
+          expect(saved.branch).toBe(target);
+          expect(
+            (await execute("git", ["--git-dir", remote, "rev-parse", target])).stdout.trim(),
+          ).toBe(saved.commit);
+          expect(
+            (await execute("git", ["-C", project, "branch", "--show-current"])).stdout.trim(),
+          ).toBe(detached ? "" : local);
+          expect(result.stderr).toContain("Synthetic build output");
+          expect(preparedBranches).toEqual([{}]);
+          expect(requests).toContain(`PUT /api/v1/apps/${app.id}/worker`);
+
+          // Permission is per invocation, not remembered after the confirmed save.
+          if (allow) {
+            requests.length = 0;
+            expect((await failure(cli("--no-wait"))).stderr).toContain("--allow-branch-mismatch");
+            expect(requests).toEqual(["POST /api/v1/apps/source-target"]);
+          }
+        } finally {
+          await rm(join(project, ".git"), { recursive: true, force: true });
+          await rm(remote, { recursive: true, force: true });
+        }
+      },
+    );
+
+    it("does not require branch confirmation without source storage or with --no-source", async () => {
+      const project = join(state, "project with spaces");
+      await execute("git", ["init", "--initial-branch=feature", project]);
+
+      try {
+        expect((await cli("--no-wait", "--skip-build")).stdout).toContain("Deployment queued");
+        sourceTarget.supported = true;
+        requests.length = 0;
+        expect((await cli("--no-source", "--no-wait", "--skip-build")).stdout).toContain(
+          "Deployment queued",
+        );
+        expect(requests).not.toContain("POST /api/v1/apps/source-target");
+      } finally {
+        await rm(join(project, ".git"), { recursive: true, force: true });
+      }
+    });
 
     it("issues Git credentials only for the configured repository and respects read-only scope", async () => {
       const credential = async (input: string, extra: string[] = [], operation = "get") => {
@@ -905,11 +1043,17 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         await execute("git", ["init", `--initial-branch=${primary}`, project]);
 
         try {
-          const result = await failure(cli(preview.id, "--skip-build", "--no-wait"));
+          const result = await failure(
+            cli(preview.id, "--skip-build", "--no-wait", "--allow-branch-mismatch"),
+          );
+
           expect(result.stderr).toContain("Create or switch to a work branch");
           const branches = await execute("git", ["-C", project, "for-each-ref"]);
           expect(branches.stdout).toBe("");
-          expect(requests).toEqual([`POST /api/v1/apps/${preview.id}/source/prepare`]);
+          expect(requests).toEqual([
+            "POST /api/v1/apps/source-target",
+            `POST /api/v1/apps/${preview.id}/source/prepare`,
+          ]);
         } finally {
           await rm(join(project, ".git"), { recursive: true, force: true });
         }
@@ -974,7 +1118,10 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
           "This preview is linked to branch review",
         );
         expect((await execute("git", ["-C", project, "for-each-ref"])).stdout).toBe("");
-        expect(requests).toEqual([`POST /api/v1/apps/${preview.id}/source/prepare`]);
+        expect(requests).toEqual([
+          "POST /api/v1/apps/source-target",
+          `POST /api/v1/apps/${preview.id}/source/prepare`,
+        ]);
       } finally {
         await rm(join(project, ".git"), { recursive: true, force: true });
       }
@@ -1245,7 +1392,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         );
 
         expect(JSON.parse(result.stdout)).toMatchObject({ status: "succeeded", appId: app.id });
-        expect(requests[0]).toBe("PUT /api/v1/apps/by-name/fixture");
+        expect(requests[0]).toBe("POST /api/v1/apps/source-target");
         expect(requests).toContain(`PUT /api/v1/apps/${app.id}/worker`);
         expect(historyReads).toBe(2);
         expect(organizations).toEqual(requests.map(() => requiredOrganization));
@@ -1292,6 +1439,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         url: app.url,
       });
       expect(requests).toEqual([
+        "POST /api/v1/apps/source-target",
         `POST /api/v1/apps/${app.id}/source/prepare`,
         `POST /api/v1/apps/${app.id}/assets-upload-session`,
         `PUT /api/v1/apps/${app.id}/worker`,
@@ -1314,7 +1462,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         const result = await failure(cli("--json"));
         expect(result).toMatchObject({ code: 1, stdout: "" });
         expect(result.stderr).toContain("Synthetic build failure");
-        expect(requests).toEqual([]);
+        expect(requests).toEqual(["POST /api/v1/apps/source-target"]);
       } finally {
         await writeFile(build, 'console.log("Synthetic build output");\n');
       }
@@ -1361,6 +1509,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       expect(result).toMatchObject({ code: 1, stdout: "" });
       expect(result.stderr).toContain("Upgrade the server");
       expect(requests).toEqual([
+        "POST /api/v1/apps/source-target",
         "PUT /api/v1/apps/by-name/fixture",
         `POST /api/v1/apps/${app.id}/source/prepare`,
         `POST /api/v1/apps/${app.id}/assets-upload-session`,

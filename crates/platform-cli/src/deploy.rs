@@ -91,7 +91,7 @@ pub struct Options {
     #[arg(long)]
     skip_build: bool,
     /// Deploy without saving source to Widefleet Git.
-    #[arg(long, conflicts_with_all = ["commit", "source_branch"])]
+    #[arg(long, conflicts_with_all = ["commit", "source_branch", "allow_branch_mismatch"])]
     pub(crate) no_source: bool,
     /// Require a clean checkout of this existing Git commit.
     #[arg(long)]
@@ -99,6 +99,9 @@ pub struct Options {
     /// Save source on this repository branch.
     #[arg(long)]
     pub(crate) source_branch: Option<String>,
+    /// Confirm deploying the main app from a different local Git branch (or detached HEAD).
+    #[arg(long)]
+    allow_branch_mismatch: bool,
     #[arg(long)]
     no_wait: bool,
     /// Print the deployment result as JSON, with build and progress logs on stderr.
@@ -313,6 +316,23 @@ async fn publish(
         eprintln!("Target: {} on {}", name, api.origin_text());
     }
     let bundler = installation::bundler().await?;
+    if !options.no_source
+        && let Target::App(app) = &target
+    {
+        let target = app.map_or_else(
+            || value!({ "slug": configuration.name }),
+            |app| value!({ "appId": app }),
+        );
+        source::confirm_deployment_branch(
+            api,
+            credentials,
+            project,
+            &target,
+            options.source_branch.as_deref(),
+            options.allow_branch_mismatch,
+        )
+        .await?;
+    }
     if !options.skip_build && project.join("package.json").exists() {
         local_command(project, &["run", "build"]).await?;
     }

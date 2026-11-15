@@ -9,7 +9,7 @@ use reqwest::Method;
 use serde::Deserialize;
 use serde_json::json as value;
 use std::{
-    io::BufRead,
+    io::{BufRead, IsTerminal, Write},
     path::{Path, PathBuf},
     process::Output,
 };
@@ -379,6 +379,100 @@ pub struct Saved {
     pub revision: SourceRevision,
 }
 
+pub async fn confirm_deployment_branch(
+    api: &Api,
+    credentials: &auth::Credentials,
+    project: &Path,
+    target: &serde_json::Value,
+    requested_branch: Option<&str>,
+    allow_mismatch: bool,
+) -> Result<()> {
+    #[derive(Deserialize)]
+    struct Target {
+        supported: bool,
+        branch: String,
+        preview: bool,
+    }
+    let token = auth::access_token(api, credentials).await?;
+    let target: Target = json(
+        api.authenticated(Method::POST, "/apps/source-target", &token)
+            .json(target)
+            .send()
+            .await?,
+    )
+    .await?;
+    if !target.supported || target.preview {
+        return Ok(());
+    }
+    let branch = requested_branch.unwrap_or(&target.branch);
+    let local = deployment_branch(project).await?;
+    if local.as_deref() == Some(branch) {
+        return Ok(());
+    }
+    let message = format!(
+        "You are on {}. This deploy updates branch {branch} in Widefleet Git and publishes the code as the main app.",
+        local.map_or_else(
+            || "detached HEAD".into(),
+            |name| format!("local branch {name}")
+        ),
+    );
+    if allow_mismatch {
+        eprintln!("{message}");
+        return Ok(());
+    }
+    let stdin = std::io::stdin();
+    let stderr = std::io::stderr();
+    if !stdin.is_terminal() || !stderr.is_terminal() {
+        return Err(Error::invalid(format!(
+            "{message} Switch to {branch}, or pass --allow-branch-mismatch to confirm this deployment"
+        )));
+    }
+    confirm_branch(&message, &mut stdin.lock(), &mut stderr.lock())
+}
+
+async fn deployment_branch(project: &Path) -> Result<Option<String>> {
+    let probe = git(project)
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .await?;
+    if !probe.status.success() {
+        // Source saving initializes a new local repository on main.
+        return Ok(Some("main".into()));
+    }
+    let head = git(project)
+        .args(["symbolic-ref", "--quiet", "--short", "HEAD"])
+        .output()
+        .await?;
+    if head.status.code() == Some(1) {
+        return Ok(None);
+    }
+    if !head.status.success() {
+        return Err(Error::invalid(
+            "Could not read the checked-out Git branch".into(),
+        ));
+    }
+    Ok(Some(
+        String::from_utf8(head.stdout)
+            .map_err(|_| Error::invalid("Git branch name is not UTF-8".into()))?
+            .trim()
+            .to_owned(),
+    ))
+}
+
+fn confirm_branch(message: &str, input: &mut impl BufRead, output: &mut impl Write) -> Result<()> {
+    write!(output, "{message}\nContinue? [y/N] ")?;
+    output.flush()?;
+    let mut answer = String::new();
+    input.read_line(&mut answer)?;
+    if matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+        Ok(())
+    } else {
+        Err(Error::invalid(
+            "Deployment cancelled; no source was committed or pushed".into(),
+        ))
+    }
+}
+
 pub async fn require_preview_branch(
     project: &Path,
     primary: &str,
@@ -737,6 +831,51 @@ pub async fn run(api: &Api, credentials: &auth::Credentials, options: Options) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn branch_confirmation_requires_an_explicit_yes() {
+        for answer in ["", "\n", "n\n", "no\n", "maybe\n"] {
+            let mut prompt = Vec::new();
+            assert!(
+                confirm_branch(
+                    "Deploy feature to main",
+                    &mut answer.as_bytes(),
+                    &mut prompt
+                )
+                .is_err()
+            );
+            assert!(String::from_utf8_lossy(&prompt).ends_with("Continue? [y/N] "));
+        }
+        for answer in ["y\n", "Y\n", "yes\n", "YES\n"] {
+            assert!(
+                confirm_branch(
+                    "Deploy feature to main",
+                    &mut answer.as_bytes(),
+                    &mut Vec::new()
+                )
+                .is_ok()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn reads_branch_without_initializing_or_changing_the_checkout() -> Result<()> {
+        let fixture = Fixture::new().await?;
+        assert_eq!(
+            deployment_branch(&fixture.project).await?,
+            Some("main".into())
+        );
+        assert!(!fixture.project.join(".git").exists());
+        output(git(&fixture.project).args(["init", "--initial-branch=feature"])).await?;
+        assert_eq!(
+            deployment_branch(&fixture.project).await?,
+            Some("feature".into())
+        );
+        commit_all(&fixture.project, "feature").await?;
+        output(git(&fixture.project).args(["checkout", "--detach", "HEAD"])).await?;
+        assert_eq!(deployment_branch(&fixture.project).await?, None);
+        Ok(())
+    }
 
     struct Fixture {
         _temporary: tempfile::TempDir,

@@ -108,6 +108,58 @@ describe("App source repositories", () => {
     });
   });
 
+  it("checks deployment branches without creating apps, changing settings or contacting Git", async () => {
+    const target = { slug: "source-app" };
+    expect((await source.deploymentTarget(creator, target)).unwrap()).toEqual({
+      supported: true,
+      branch: "main",
+      preview: false,
+    });
+    expect(await environment.database.db.select().from(apps)).toEqual([]);
+    expect(
+      (await createAppSource(environment.database.db).deploymentTarget(creator, target)).unwrap()
+        .supported,
+    ).toBe(false);
+    const app = await create();
+    await environment.database.db
+      .update(apps)
+      .set({ sourceBranch: "release" })
+      .where(eq(apps.id, app.id));
+    const before = await environment.database.db.select().from(apps);
+
+    for (const input of [target, { appId: app.id }]) {
+      expect((await source.deploymentTarget(creator, input)).unwrap()).toEqual({
+        supported: true,
+        branch: "release",
+        preview: false,
+      });
+    }
+
+    expect(await source.deploymentTarget(colleague, { appId: app.id })).toMatchObject({
+      error: { code: "NOT_FOUND" },
+    });
+    expect((await source.deploymentTarget(colleague, target)).unwrap().branch).toBe("main");
+    expect(await environment.database.db.select().from(apps)).toEqual(before);
+    expect(backend.repository).not.toHaveBeenCalled();
+    expect(backend.create).not.toHaveBeenCalled();
+    expect(backend.head).not.toHaveBeenCalled();
+
+    const preview = (
+      await service.create(creator, {
+        slug: "source-app-review",
+        displayName: "Review",
+        parentId: app.id,
+        previewBranch: "review",
+      })
+    ).unwrap();
+
+    expect((await source.deploymentTarget(creator, { appId: preview.id })).unwrap()).toEqual({
+      supported: true,
+      branch: "review",
+      preview: true,
+    });
+  });
+
   it("checks management grants and organization before issuing repository credentials", async () => {
     const app = await create();
     await source.setup(creator, app.id, {});
