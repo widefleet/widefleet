@@ -7,7 +7,7 @@ import type { Principal } from "./identity.ts";
 import { sourceOperation, type SourceBackend } from "./source-backend.ts";
 import { appVisibility, managedApp } from "./apps.ts";
 import { apps, artifacts, deployments } from "./schema.ts";
-import { InvalidOperation } from "./errors.ts";
+import { InvalidOperation, StorageUnavailable } from "./errors.ts";
 import { transact, type Transaction } from "./transactions.ts";
 
 const sourceTarget = async (
@@ -81,17 +81,32 @@ export const createAppSource = (database: Database, backend?: SourceBackend) => 
               deployed,
             }),
           );
-        const repository = await sourceOperation(() => backend.repository(id));
-        const commit = repository ? await sourceOperation(() => backend.head(id, branch)) : null;
 
-        return Result.ok(
-          contract.appSource.parse({
-            supported: true,
-            available: commit !== null,
-            repository: repository ? { ...repository, branch, commit } : null,
-            deployed,
-          }),
-        );
+        try {
+          const repository = await sourceOperation(() => backend.repository(id));
+          const commit = repository ? await sourceOperation(() => backend.head(id, branch)) : null;
+
+          return Result.ok(
+            contract.appSource.parse({
+              supported: true,
+              available: commit !== null,
+              repository: repository ? { ...repository, branch, commit } : null,
+              deployed,
+            }),
+          );
+        } catch (error) {
+          if (!(error instanceof StorageUnavailable)) throw error;
+
+          return Result.ok(
+            contract.appSource.parse({
+              supported: true,
+              available: false,
+              repository: null,
+              deployed,
+              error: error.message,
+            }),
+          );
+        }
       }),
     setup: (principal: Principal, appId: string, input: z.infer<typeof contract.sourceSetup>) =>
       transact(database, async (transaction) => {

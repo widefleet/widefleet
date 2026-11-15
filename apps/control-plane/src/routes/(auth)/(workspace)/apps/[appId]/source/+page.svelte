@@ -32,6 +32,11 @@
       <p class="text-muted-foreground mt-2 text-sm">
         This installation does not provide Git repositories.
       </p>
+    {:else if source.error}
+      <p role="alert" class="text-destructive mt-2 text-sm leading-6">
+        {source.error}. Refresh to try again. Your app settings and deployment history remain
+        available.
+      </p>
     {:else if !source.available}
       <p class="text-muted-foreground mt-2 text-sm leading-6">
         No source has been saved{repository ? ` on ${repository.branch}` : ""} yet. Deploy from your project
@@ -87,7 +92,7 @@
       </p>
     </section>
   {/if}
-  {#if source.supported && app.state !== "deleting"}
+  {#if source.supported && !source.error && app.state !== "deleting"}
     <section>
       {#if repository}
         <details>

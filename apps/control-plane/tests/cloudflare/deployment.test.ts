@@ -745,6 +745,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       import { createArtifactStorage } from ${JSON.stringify(server + "artifact-storage.ts")};
       import { createR2Storage } from ${JSON.stringify(server + "storage/r2.ts")};
       import { createAppService } from ${JSON.stringify(server + "apps.ts")};
+      import { createCloudflareRemover } from ${JSON.stringify(server + "cloudflare-removal.ts")};
       import { createRuntimeReleaseService } from ${JSON.stringify(server + "runtime-releases.ts")};
       import { runScheduledExtension } from ${JSON.stringify(server + "scheduled-extension.ts")};
       import { readCloudflareConfiguration } from ${JSON.stringify(server + "cloudflare-config.ts")};
@@ -866,6 +867,21 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
               command.refreshSecrets ? {refreshSecrets:true} : undefined);
           });
           return Response.json(result.isErr() ? { error: result.error.message } : result.value, { status: result.isErr() ? 400 : 200 });
+        }
+        if (url.hostname === 'fixture' && url.pathname === '/finish-source-removal') {
+          const input = await request.json();
+          const removed = [];
+          const unexpected = async () => { throw new Error('Unexpected source operation'); };
+          const remover = createCloudflareRemover(env, globalThis.fetch, () => ({source: {
+            repository: unexpected, create: unexpected, head: unexpected,
+            hasCommit: unexpected, credential: unexpected,
+            remove: async id => {
+              if (input.fail) throw new Error('Synthetic Git outage');
+              removed.push(id);
+            },
+          }}));
+          try { await remover.finishApp(input.appId); return Response.json(removed); }
+          catch (error) { return Response.json({message:error.message}, {status:503}); }
         }
         if (url.hostname === 'fixture' && url.pathname === '/remove') {
           const input = await request.json();
@@ -2605,6 +2621,34 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         (await environment.database.db.select().from(apps).where(eq(apps.id, appId)))[0]?.removedAt,
       ).toBeInstanceOf(Date);
     };
+
+    it("deletes source through the configured extension, retaining preview source and retrying outages", async () => {
+      const parent = await seedDeployment(environment.database.db, { bindings: [] });
+      const child = await seedDeployment(environment.database.db, { bindings: [] });
+      const db = environment.database.db;
+      await db.update(apps).set({ state: "deleting" }).where(eq(apps.id, parent.appId));
+      await db
+        .update(apps)
+        .set({ state: "deleting", parentId: parent.appId })
+        .where(eq(apps.id, child.appId));
+
+      const finish = (appId: string, fail = false) =>
+        worker.fetch("http://fixture/finish-source-removal", {
+          method: "POST",
+          body: JSON.stringify({ appId, fail }),
+        });
+
+      expect(await (await finish(child.appId)).json()).toEqual([]);
+      expect((await finish(parent.appId, true)).status).toBe(503);
+      expect(
+        (await db.select().from(apps).where(eq(apps.id, parent.appId)))[0]?.removedAt,
+      ).toBeNull();
+      expect(await (await finish(parent.appId)).json()).toEqual([parent.appId]);
+      expect(
+        (await db.select().from(apps).where(eq(apps.id, parent.appId)))[0]?.removedAt,
+      ).toBeInstanceOf(Date);
+      expect(await (await finish(parent.appId)).json()).toEqual([]);
+    });
 
     it("authorizes removal before admission and leaves an app active when native admission fails", async () => {
       const entry = await seedDeployment(environment.database.db, { bindings: [] });

@@ -40,6 +40,8 @@ pub struct SourceRepository {
 pub struct AppSource {
     pub supported: bool,
     pub available: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
     pub repository: Option<SourceRepository>,
     pub deployed: Option<SourceRevision>,
 }

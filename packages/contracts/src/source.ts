@@ -49,6 +49,7 @@ export const sourceRepository = z.strictObject({
 export const appSource = z.strictObject({
   supported: z.boolean(),
   available: z.boolean(),
+  error: z.string().optional(),
   repository: sourceRepository.nullable(),
   deployed: sourceRevision.nullable(),
 });

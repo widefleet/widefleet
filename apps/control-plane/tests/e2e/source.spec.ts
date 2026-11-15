@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -194,6 +194,39 @@ test("source setup, saved and deployed commits, deletion wording and denied acce
   await expect(page.getByRole("checkbox")).toHaveAccessibleName(
     /including its Widefleet Git repository/,
   );
+
+  const savedState = await readFile(state, "utf8");
+  await writeFile(state, "invalid fixture state");
+  await page.goto(`/apps/${app.id}/source`);
+  await expect(page.getByRole("alert")).toContainText("The source repository is unavailable");
+  await expect(page.getByRole("button", { name: "Create Git repository" })).toHaveCount(0);
+
+  for (const theme of ["light", "dark"] as const) {
+    for (const [name, width, height] of [
+      ["desktop", 1440, 1000],
+      ["mobile", 390, 844],
+    ] as const) {
+      await page.setViewportSize({ width, height });
+      await page.emulateMedia({ colorScheme: theme });
+      await page.screenshot({
+        path: testInfo.outputPath(`outage-${name}-${theme}.png`),
+        fullPage: true,
+      });
+    }
+  }
+
+  await page.getByRole("link", { name: "App settings", exact: true }).click();
+  await expect(
+    page.getByText(
+      "Any associated Widefleet Git repository and its branches will also be permanently deleted.",
+    ),
+  ).toBeVisible();
+  await page.getByRole("link", { name: /^Deployments/ }).click();
+  await expect(page.getByTitle("Deployment ID", { exact: true })).toHaveText(deploymentId);
+  await writeFile(state, savedState);
+  await page.goto(`/apps/${app.id}/source`);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(page.getByText(deployed.commit, { exact: true })).toBeVisible();
 
   const noScript = await browser.newContext({
     javaScriptEnabled: false,

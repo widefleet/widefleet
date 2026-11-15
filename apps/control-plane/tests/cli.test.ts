@@ -74,6 +74,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     let includeUrl = true;
     let historyReads = 0;
     let logFailure: { code: string; message: string } | null = null;
+    let sourceRepository: z.infer<typeof contract.sourceRepository> | null = null;
 
     const server = createServer((request, response) => {
       request.resume();
@@ -151,7 +152,9 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       }
 
       if (request.method === "POST" && request.url?.endsWith("/source/prepare")) {
-        response.end(JSON.stringify({ organizationId: app.organizationId, repository: null }));
+        response.end(
+          JSON.stringify({ organizationId: app.organizationId, repository: sourceRepository }),
+        );
 
         return;
       }
@@ -898,6 +901,36 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         "preview is being deleted",
       );
       expect(requests.every((request) => request.startsWith("GET "))).toBe(true);
+    });
+
+    it("rejects source changed during a build before uploading a worker", async () => {
+      const project = join(state, "project with spaces");
+      const build = join(project, "build.mjs");
+      sourceRepository = {
+        url: "https://git.example.test/apps/source.git",
+        branch: "main",
+        commit: null,
+      };
+      await writeFile(
+        build,
+        'import { writeFileSync } from "node:fs"; writeFileSync("changed.txt", "Changed during build");',
+      );
+
+      try {
+        const result = await failure(previewCli("--name", "review", "--no-wait"));
+        expect(result.stderr).toContain("Project files changed during the build");
+        expect(
+          requests.some(
+            (path) => path.endsWith("/worker") || path.endsWith("/assets-upload-session"),
+          ),
+        ).toBe(false);
+        expect(requests.some((path) => path.endsWith("-credential"))).toBe(false);
+      } finally {
+        sourceRepository = null;
+        await writeFile(build, 'console.log("Synthetic build output");\n');
+        await rm(join(project, "changed.txt"), { force: true });
+        await rm(join(project, ".git"), { recursive: true, force: true });
+      }
     });
 
     it("does not create a preview when the local build fails", async () => {

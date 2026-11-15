@@ -286,6 +286,90 @@ async fn tree(project: &Path) -> Result<String> {
     output(git(project).env("GIT_INDEX_FILE", &index).arg("write-tree")).await
 }
 
+pub async fn snapshot(project: &Path) -> Result<String> {
+    let probe = git(project)
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .await?;
+    if probe.status.success() {
+        let root = PathBuf::from(String::from_utf8_lossy(&probe.stdout).trim_end());
+        return tree(&root).await;
+    }
+
+    // Check Git's file selection without initializing the project before a build
+    // succeeds or requiring source storage on the target installation.
+    let temporary = tempfile::tempdir()?;
+    output(git(project).args(["init", "--bare"]).arg(temporary.path())).await?;
+    output(
+        git(project)
+            .env("GIT_DIR", temporary.path())
+            .env("GIT_WORK_TREE", project)
+            .args(["add", "--all", "--", "."]),
+    )
+    .await?;
+    output(
+        git(project)
+            .env("GIT_DIR", temporary.path())
+            .env("GIT_WORK_TREE", project)
+            .arg("write-tree"),
+    )
+    .await
+}
+
+async fn commit_all(project: &Path, branch: &str) -> Result<String> {
+    let index =
+        output(git(project).args(["rev-parse", "--path-format=absolute", "--git-path", "index"]))
+            .await?;
+    let original = match std::fs::read(&index) {
+        Ok(bytes) => Some(bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.into()),
+    };
+    let result = async {
+        output(git(project).args(["add", "--all", "--", "."])).await?;
+        let mut command = git(project);
+        // A new agent workspace may not have a Git author configured yet.
+        for (key, fallback) in [
+            ("user.name", "Widefleet"),
+            ("user.email", "noreply@widefleet.app"),
+        ] {
+            if !git(project)
+                .args(["config", "--get", key])
+                .output()
+                .await?
+                .status
+                .success()
+            {
+                command.args(["-c", &format!("{key}={fallback}")]);
+            }
+        }
+        output(command.args([
+            "commit",
+            "--allow-empty",
+            "-m",
+            &format!("Save source for {branch}"),
+        ]))
+        .await?;
+        revision(project, "HEAD")
+            .await?
+            .ok_or_else(|| Error::invalid("Git did not create a source commit".into()))
+    }
+    .await;
+    if let Err(cause) = &result {
+        let restored = match original {
+            Some(bytes) => std::fs::write(&index, bytes),
+            None => match std::fs::remove_file(&index) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                result => result,
+            },
+        };
+        restored.map_err(|error| {
+            Error::invalid(format!("{cause}. Could not restore the Git index: {error}"))
+        })?;
+    }
+    result
+}
+
 pub struct Saved {
     pub revision: SourceRevision,
     root: PathBuf,
@@ -308,6 +392,7 @@ pub async fn save(
     project: &Path,
     branch: Option<&str>,
     commit: Option<&str>,
+    before_build: Result<String>,
 ) -> Result<Option<Saved>> {
     if let Some(commit) = commit
         && (!matches!(commit.len(), 40 | 64)
@@ -336,7 +421,7 @@ pub async fn save(
         false,
     )?;
     Ok(Some(
-        save_repository(project, repository, &helper, commit).await?,
+        save_repository(project, repository, &helper, commit, &before_build?).await?,
     ))
 }
 
@@ -345,9 +430,17 @@ async fn save_repository(
     repository: SourceRepository,
     helper: &str,
     commit: Option<&str>,
+    before_build: &str,
 ) -> Result<Saved> {
     let project = project.canonicalize()?;
     let root = root(&project).await?;
+    let source_tree = tree(&root).await?;
+    if source_tree != before_build {
+        return Err(Error::invalid(
+            "Project files changed during the build. Review the changes and retry the deployment"
+                .into(),
+        ));
+    }
     let reference = format!("refs/heads/{}", repository.branch);
     let remote = output(remote_git(&root, &repository.url, helper).args([
         "ls-remote",
@@ -377,7 +470,6 @@ async fn save_repository(
             )));
         }
     }
-    let source_tree = tree(&root).await?;
     let head = revision(&root, "HEAD").await?;
     let saved_commit = if let Some(commit) = commit {
         let requested = revision(&root, &format!("{commit}^{{commit}}"))
@@ -396,33 +488,7 @@ async fn save_repository(
     {
         head
     } else {
-        output(git(&root).args(["add", "--all", "--", "."])).await?;
-        let mut command = git(&root);
-        // A new agent workspace may not have a Git author configured yet.
-        for (key, fallback) in [
-            ("user.name", "Widefleet"),
-            ("user.email", "noreply@widefleet.app"),
-        ] {
-            if !git(&root)
-                .args(["config", "--get", key])
-                .output()
-                .await?
-                .status
-                .success()
-            {
-                command.args(["-c", &format!("{key}={fallback}")]);
-            }
-        }
-        output(command.args([
-            "commit",
-            "--allow-empty",
-            "-m",
-            &format!("Save source for {}", repository.branch),
-        ]))
-        .await?;
-        revision(&root, "HEAD")
-            .await?
-            .ok_or_else(|| Error::invalid("Git did not create a source commit".into()))?
+        commit_all(&root, &repository.branch).await?
     };
     let committed_tree =
         output(git(&root).args(["rev-parse", &format!("{saved_commit}^{{tree}}")])).await?;
@@ -485,6 +551,9 @@ pub async fn run(api: &Api, credentials: &auth::Credentials, options: Options) -
             let source = app
                 .source
                 .ok_or_else(|| Error::invalid("This app has no saved source repository".into()))?;
+            if let Some(error) = source.error {
+                return Err(Error::invalid(error));
+            }
             let repository = source
                 .repository
                 .ok_or_else(|| Error::invalid("This app has no saved source repository".into()))?;
@@ -664,7 +733,14 @@ mod tests {
             }
         }
         async fn save(&self, branch: &str) -> Result<Saved> {
-            save_repository(&self.project, self.repository(branch), "", None).await
+            save_repository(
+                &self.project,
+                self.repository(branch),
+                "",
+                None,
+                &snapshot(&self.project).await?,
+            )
+            .await
         }
         async fn clone(&self, name: &str) -> Result<PathBuf> {
             let path = self._temporary.path().join(name);
@@ -774,7 +850,14 @@ mod tests {
         fixture.save("main").await?;
         let other = fixture.clone("other").await?;
         std::fs::write(other.join("app.ts"), "newer remote")?;
-        let saved = save_repository(&other, fixture.repository("main"), "", None).await?;
+        let saved = save_repository(
+            &other,
+            fixture.repository("main"),
+            "",
+            None,
+            &snapshot(&other).await?,
+        )
+        .await?;
         std::fs::write(fixture.project.join("app.ts"), "local work")?;
         let before = revision(&fixture.project, "HEAD").await?;
         let failure = fixture
@@ -810,6 +893,7 @@ mod tests {
             fixture.repository("main"),
             "",
             Some(&first.revision.commit),
+            &snapshot(&fixture.project).await?,
         )
         .await?;
         assert_eq!(same.revision.commit, first.revision.commit);
@@ -820,7 +904,8 @@ mod tests {
                 &fixture.project,
                 fixture.repository("main"),
                 "",
-                Some(&first.revision.commit)
+                Some(&first.revision.commit),
+                &snapshot(&fixture.project).await?,
             )
             .await
             .is_err()
@@ -834,6 +919,78 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rejects_source_changes_during_build_before_committing_or_pushing() -> Result<()> {
+        let fixture = Fixture::new().await?;
+        std::fs::write(fixture.project.join("app.ts"), "before build")?;
+        let before = snapshot(&fixture.project).await?;
+        assert!(!fixture.project.join(".git").exists());
+        std::fs::write(fixture.project.join("app.ts"), "after build")?;
+        let error = save_repository(
+            &fixture.project,
+            fixture.repository("main"),
+            "",
+            None,
+            &before,
+        )
+        .await
+        .err()
+        .ok_or_else(|| Error::invalid("Expected changed source to fail".into()))?;
+        assert!(error.to_string().contains("changed during the build"));
+        assert_eq!(revision(&fixture.project, "HEAD").await?, None);
+        assert_eq!(revision(&fixture.remote, "main").await?, None);
+        assert_eq!(
+            std::fs::read_to_string(fixture.project.join("app.ts"))?,
+            "after build"
+        );
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn restores_partial_staging_when_a_commit_hook_rejects_the_save() -> Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        let fixture = Fixture::new().await?;
+        std::fs::write(fixture.project.join("app.ts"), "committed")?;
+        let first = fixture.save("main").await?;
+        std::fs::write(fixture.project.join("app.ts"), "staged")?;
+        output(git(&fixture.project).args(["add", "app.ts"])).await?;
+        std::fs::write(fixture.project.join("app.ts"), "unstaged")?;
+        std::fs::write(fixture.project.join("new.ts"), "untracked")?;
+        let index = fixture.project.join(".git/index");
+        let before = std::fs::read(&index)?;
+        let hook = fixture.project.join(".git/hooks/pre-commit");
+        std::fs::write(&hook, "#!/bin/sh\nexit 1\n")?;
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o700))?;
+        assert!(fixture.save("main").await.is_err());
+        assert_eq!(std::fs::read(&index)?, before);
+        assert_eq!(
+            output(git(&fixture.project).args(["show", ":app.ts"])).await?,
+            "staged"
+        );
+        assert_eq!(
+            output(git(&fixture.project).args(["ls-files", "new.ts"])).await?,
+            ""
+        );
+        assert_eq!(
+            std::fs::read_to_string(fixture.project.join("app.ts"))?,
+            "unstaged"
+        );
+        assert_eq!(
+            std::fs::read_to_string(fixture.project.join("new.ts"))?,
+            "untracked"
+        );
+        assert_eq!(
+            revision(&fixture.project, "HEAD").await?,
+            Some(first.revision.commit.clone())
+        );
+        assert_eq!(
+            revision(&fixture.remote, "main").await?,
+            Some(first.revision.commit)
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn saves_existing_monorepo_and_reports_app_directory() -> Result<()> {
         let fixture = Fixture::new().await?;
         root(&fixture.project).await?;
@@ -841,7 +998,14 @@ mod tests {
         std::fs::create_dir_all(&app)?;
         std::fs::write(app.join("app.ts"), "source")?;
         std::fs::write(fixture.project.join("package.json"), "{}")?;
-        let saved = save_repository(&app, fixture.repository("main"), "", None).await?;
+        let saved = save_repository(
+            &app,
+            fixture.repository("main"),
+            "",
+            None,
+            &snapshot(&app).await?,
+        )
+        .await?;
         assert_eq!(saved.revision.directory, "apps/mail");
         assert_eq!(
             output(git(&fixture.remote).args(["ls-tree", "-r", "--name-only", "main"])).await?,
@@ -865,6 +1029,7 @@ mod tests {
             fixture.repository("main"),
             "",
             None,
+            &snapshot(&alias).await?,
         )
         .await?;
         assert_eq!(saved.revision.directory, "apps/mail");
@@ -872,7 +1037,14 @@ mod tests {
             output(git(&fixture.remote).args(["show", "main:apps/mail/app.ts"])).await?,
             "source"
         );
-        let saved_root = save_repository(&alias, fixture.repository("main"), "", None).await?;
+        let saved_root = save_repository(
+            &alias,
+            fixture.repository("main"),
+            "",
+            None,
+            &snapshot(&alias).await?,
+        )
+        .await?;
         assert_eq!(saved_root.revision.directory, ".");
         Ok(())
     }

@@ -10,6 +10,7 @@ import { createStorage } from "../src/lib/server/storage.ts";
 import { createUploadService } from "../src/lib/server/uploads.ts";
 import { apps, artifacts, deployments } from "../src/lib/server/schema.ts";
 import { createTestEnvironment } from "./environment.ts";
+import { memoryStorage } from "./memory-storage.fixture.ts";
 
 describe("App source repositories", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
@@ -210,6 +211,14 @@ describe("App source repositories", () => {
       deployed,
     });
     expect(contract.executionWorkerMetadata(metadata)).not.toHaveProperty("source");
+    backend.head.mockRejectedValueOnce(new Error("Synthetic Git outage"));
+    expect((await source.read(creator, app.id)).unwrap()).toEqual({
+      supported: true,
+      available: false,
+      repository: null,
+      deployed,
+      error: "The source repository is unavailable",
+    });
   });
 
   it("serves the same authorized repository through app discovery, setup and Git credentials", async () => {
@@ -219,7 +228,7 @@ describe("App source repositories", () => {
       configuration: environment.configuration,
       database: environment.database,
       settings: environment.settings,
-      storage: createStorage(environment.configuration),
+      storage: createStorage(environment.configuration, memoryStorage()),
       reporting: environment.reporting,
       encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
       source: backend,
@@ -265,6 +274,32 @@ describe("App source repositories", () => {
       available: true,
       repository: { commit: "c".repeat(40) },
     });
+
+    for (const path of [
+      "/apps",
+      `/apps/${app.id}`,
+      `/apps/by-name/${app.slug}`,
+      `/apps/${app.id}/source`,
+    ]) {
+      backend.repository.mockRejectedValueOnce(new Error("Synthetic Git outage"));
+      const response = await request(path);
+      expect(response.status).toBe(200);
+      const body: unknown = await response.json();
+
+      const status = path.endsWith("/source")
+        ? contract.appSource.parse(body)
+        : path === "/apps"
+          ? contract.app.array().parse(body)[0]?.source
+          : contract.app.parse(body).source;
+
+      expect(status).toMatchObject({
+        supported: true,
+        error: "The source repository is unavailable",
+      });
+    }
+
+    backend.repository.mockRejectedValueOnce(new Error("Synthetic Git outage"));
+    expect((await request(`/apps/${app.id}/source/prepare`, "POST")).status).toBe(503);
     expect(
       (
         await api(
@@ -272,6 +307,67 @@ describe("App source repositories", () => {
         )
       ).status,
     ).toBe(401);
+  });
+
+  it("uses the configured backend when deleting a main app and retains it when deleting a preview", async () => {
+    const runtime = await createRuntime({
+      configuration: environment.configuration,
+      database: environment.database,
+      settings: environment.settings,
+      storage: createStorage(environment.configuration, memoryStorage()),
+      reporting: environment.reporting,
+      encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
+      source: backend,
+    })();
+
+    const app = await create();
+
+    const preview = (
+      await service.create(creator, { slug: "review", displayName: "Review", parentId: app.id })
+    ).unwrap();
+
+    (await source.setup(creator, app.id, {})).unwrap();
+
+    const { agent } = (
+      await runtime.agents.create({ ...creator, admin: true }, { name: "Source removal" })
+    ).unwrap();
+
+    (await service.remove(creator, preview.id)).unwrap();
+
+    const finish = async () => {
+      const job = (await runtime.jobs.claim(agent.id)).unwrap();
+
+      if (!job) throw new Error("Missing removal job");
+
+      const result = {
+        leaseToken: job.leaseToken,
+        outcome: "succeeded" as const,
+        message: "Removed",
+      };
+
+      return { job, result };
+    };
+
+    const child = await finish();
+    (await runtime.jobs.complete(agent.id, child.job.id, child.result)).unwrap();
+    expect(backend.remove).not.toHaveBeenCalled();
+    expect(repositories.has(app.id)).toBe(true);
+
+    (await service.remove(creator, app.id)).unwrap();
+    const parent = await finish();
+    backend.remove.mockRejectedValueOnce(new Error("Synthetic Git outage"));
+    const failed = await runtime.jobs.complete(agent.id, parent.job.id, parent.result);
+    expect(failed).toMatchObject({
+      error: { _tag: "StorageUnavailable" },
+    });
+    expect((await service.get(creator, app.id)).unwrap().state).toBe("deleting");
+    expect(repositories.has(app.id)).toBe(true);
+    (await runtime.jobs.complete(agent.id, parent.job.id, parent.result)).unwrap();
+    expect(backend.remove).toHaveBeenLastCalledWith(app.id);
+    expect(repositories.has(app.id)).toBe(false);
+    expect(await service.get(creator, app.id)).toMatchObject({ error: { code: "NOT_FOUND" } });
+    (await runtime.jobs.complete(agent.id, parent.job.id, parent.result)).unwrap();
+    expect(backend.remove).toHaveBeenCalledTimes(2);
   });
 
   it("rejects a deployment commit that is not stored in this app's repository", async () => {

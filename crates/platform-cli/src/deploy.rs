@@ -251,6 +251,12 @@ async fn publish(
     let project = config_path
         .parent()
         .ok_or_else(|| Error::invalid("Configuration has no parent directory".into()))?;
+    // Defer Git errors until we know the installation supports source storage.
+    let source_tree = if options.no_source {
+        None
+    } else {
+        Some(source::snapshot(project).await)
+    };
     let configuration: Configuration = jsonc_parser::parse_to_serde_value(
         &std::fs::read_to_string(&config_path)?,
         &jsonc_parser::ParseOptions {
@@ -412,9 +418,7 @@ async fn publish(
             resolved.id
         }
     };
-    let saved = if options.no_source {
-        None
-    } else {
+    let saved = if let Some(source_tree) = source_tree {
         source::save(
             api,
             credentials,
@@ -422,8 +426,11 @@ async fn publish(
             project,
             options.source_branch.as_deref(),
             options.commit.as_deref(),
+            source_tree,
         )
         .await?
+    } else {
+        None
     };
     let token = auth::access_token(api, credentials).await?;
     let session: UploadSession = json(

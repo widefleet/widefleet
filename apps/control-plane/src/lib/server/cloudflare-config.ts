@@ -31,7 +31,6 @@ export interface CloudflareBindings extends CloudflareAuthRateLimitBindings {
   EMAIL?: SendEmail;
   EMAIL_FROM?: string;
   ARTIFACTS: R2Bucket;
-  SOURCE_REPOSITORIES?: Artifacts;
   PLATFORM_URL: string;
   LOGIN_CODE_DELIVERY?: string;
   APP_DOMAIN: string;
