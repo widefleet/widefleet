@@ -1,7 +1,7 @@
 ---
 title: Connect apps
 description: Expose app APIs, connect callers and keep provider secrets private.
-lastModified: 2026-11-11
+lastModified: 2026-11-15
 ---
 
 An app can expose exported Worker entrypoints to other apps in its organization.
@@ -26,7 +26,8 @@ type Environment = {
 export class Reader extends WorkerEntrypoint<Environment> {
   /**
    * Check whether this provider has an API token.
-   * @returns Whether the provider is configured, without exposing the token.
+   * @returns An object with `configured` set to true for a non-empty token.
+   * @throws If `API_TOKEN` has not been set.
    * @example
    * ```ts
    * const status = await env.INVENTORY.status();
@@ -72,60 +73,35 @@ No Widefleet-specific properties belong in `wrangler.jsonc`.
 
 ## Document service methods
 
-Write TSDoc comments on exported `WorkerEntrypoint` classes and their callable
-methods, as in the `status()` example above. Then run the usual `widefleet deploy`.
-The CLI extracts the comments and TypeScript signatures and attaches the resulting
-API documentation to the deployment. You do not install a documentation package,
-add configuration or run a separate documentation build.
+Add TSDoc comments to your exported `WorkerEntrypoint` classes and methods so
+callers and agents can understand how to use the API. Widefleet publishes the
+comments and TypeScript parameter and return types when you deploy the app.
+The `status()` example above includes a return description and a usage example.
 
-Use an updated CLI and control plane. Documentation extraction runs inside the
-native CLI and needs no Node.js process or separately installed compiler. Your
-project still needs its normal dependencies installed so imported types can be
-resolved. Your app's build command keeps its usual toolchain requirements; use
-`--skip-build` when deploying an already built app.
+Start with a short description of what the method does. Add details as needed:
 
-Start each comment with what the method does. Use `@param name - Description`
-for arguments, `@returns` for the result, `@remarks` for usage requirements,
-`@throws` for errors, `@example` with a fenced code block for an invocation, and
-`@deprecated` for a replacement recommendation. Keep types in TypeScript
-signatures. Comments on referenced interfaces and their properties provide
-additional context. `@privateRemarks` is omitted from the published description.
+| Tag                         | What to describe                                      |
+| --------------------------- | ----------------------------------------------------- |
+| `@param name - Description` | What an argument means and which values are accepted. |
+| `@returns`                  | What the caller receives.                             |
+| `@throws`                   | When the call can fail.                               |
+| `@example`                  | A call using the binding, in a fenced code block.     |
+| `@remarks`                  | Additional usage requirements.                        |
+| `@deprecated`               | What callers should use instead.                      |
 
-After the deployment becomes active, inspect it:
+Keep types in TypeScript signatures. You can also document interfaces and their
+properties to explain the data your API accepts and returns.
+
+After deploying, open **App APIs**, then **View API documentation** on the
+provider app. To read the same information as JSON, run:
 
 ```sh
 widefleet services describe inventory-api
 ```
 
-The command accepts an app slug or UUID and returns JSON with the active
-`deploymentId`, entrypoints and `documentation`. The format includes method
-signatures, parameter and return descriptions, examples and referenced data
-types. Agents can use this information to choose and call a binding. In the UI,
-open **App APIs**, then **View API documentation** on the provider app.
-
-Documentation follows the active deployment. A pending deployment leaves the
-previous description visible; a successful rollback restores its description
-alongside the code. Apps deployed with older CLIs return `documentation: null`;
-redeploy them with an updated CLI to publish documentation.
-
-The supported starters preserve source maps automatically. If you use a custom
-build, keep source maps with embedded source content next to the generated
-Worker, referenced by its `sourceMappingURL`, so the CLI can recover comments and
-types after bundling or minification. The CLI warns when a service's source
-cannot be recovered. If a signature lacks expected type information, check the
-app's TypeScript configuration and installed dependencies.
-
-At most 16 overloads per method are documented; additional overloads remain
-callable. If the generated description exceeds another documentation limit, the
-CLI warns and omits the description while continuing the deployment. The app's
-code and available methods are unchanged. Check the deployment diagnostics if
-the App APIs page reports that no documentation was generated.
-
-Only published Worker entrypoints are described. Internal helpers, instance
-fields, getters and reserved event handlers are excluded from the RPC method
-list. HTTP support is reported separately. Documentation describes how to call
-an API; a connection grant and the provider's own authorization checks still
-control access.
+The command accepts an app slug or UUID. The response includes methods, parameter
+and return types, descriptions and examples from the active deployment. Redeploy
+after editing comments; rolling back the app also restores its API documentation.
 
 ## Connect a caller
 
@@ -140,7 +116,7 @@ Use `--app CALLER` to select a caller by slug or UUID outside its project. The
 target accepts a service catalog slug or UUID. Bindings default to the `default`
 entrypoint; the provider must export a default Worker handler or `WorkerEntrypoint` class.
 
-In the UI, browse **Services**, then open the caller app's **Connections** to
+In the UI, browse **App APIs**, then open the caller app's **Connections** to
 select a service, entrypoint and binding name. The UI, CLI and API show the same
 desired and active grants.
 
@@ -268,6 +244,18 @@ errors. An unavailable service can indicate a removed deployment, a missing
 entrypoint or organization suspension. Confirm the target is deployed, the grant
 is active and the selected organization is correct. Hosted service calls use the
 operator's [`service` execution budget](/reference/configuration#dynamic-worker-execution-limits).
+
+### Missing API documentation
+
+If an app has no API documentation, redeploy it with a current CLI. Check the
+deploy command's warnings if documentation is still missing; they report missing
+source files or documentation that is too large to publish.
+
+For custom builds, enable source maps with embedded source content and keep each
+map at the location referenced by the generated Worker's `sourceMappingURL`.
+The supplied starters already preserve these maps. If parameter or return types
+are incomplete, check the project's TypeScript configuration and installed
+dependencies.
 
 ## API
 
