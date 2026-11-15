@@ -1,7 +1,7 @@
 ---
 title: Save and recover source code
 description: Save an app's code in Git and continue working from another session or machine.
-lastModified: 2026-11-15
+lastModified: 2026-11-16
 ---
 
 Use Widefleet Cloud's app repositories to keep source code available to people,
@@ -32,8 +32,8 @@ Changes are committed on your current local branch. Outside an existing Git
 repository, the CLI initializes one in the project directory. Inside a monorepo,
 it saves the repository and records the app's relative directory.
 
-The main app initially uses the remote `main` branch. To choose another branch,
-use `widefleet deploy --source-branch BRANCH`. That choice applies to subsequent deployments of the app.
+The main app saves source to the remote `main` branch. Git previews save to their
+own work branches.
 
 If your local branch differs from the target branch, the CLI asks before building,
 committing or pushing. For example, deploying from local `feature` to remote
@@ -47,7 +47,7 @@ widefleet deploy --allow-branch-mismatch
 
 Agents and CI must use this flag for a branch mismatch or a detached checkout;
 noninteractive commands otherwise stop without building. The confirmation does
-not change the app's selected branch or permit a force-push. Git previews still
+not change branch assignments or permit a force-push. Git previews still
 require their own matching work branch.
 
 `widefleet source status` reports the repository URL, selected branch and latest
@@ -57,9 +57,9 @@ information.
 
 ## Continue in another session
 
-Find the app with `widefleet apps`. Its `source.available` field tells an agent
-whether the selected branch contains saved code. Clone that code before editing
-the existing app:
+Find the app with `widefleet apps`. Its `source` summary identifies the assigned
+branch and the active deployment's saved commit. Run `widefleet source status`
+to check the repository's current state, then clone the code before editing:
 
 ```sh
 widefleet source clone APP_UUID my-app
@@ -73,11 +73,10 @@ monorepo, enter the project directory shown in the source status before deployin
 Use `--read-only` with the clone command when your CLI token has only
 `platform:read` scope.
 
-An existing repository can still be empty. If `source.available` is false, inspect
-`source.error` first: when Git is unavailable, retry instead of treating the app
-as empty. Otherwise inspect `source.repository` and the selected branch before
-creating new code. A null `source.deployed` means the active deployment has no
-saved source reference.
+The status command's `available` field indicates whether the branch contains a
+commit. Check `error` first: when Git is unavailable, retry instead of treating
+the repository as empty. A null `deployed` field means the active deployment has
+no saved source reference; code may still have been pushed separately.
 
 ## Use normal Git commands
 
@@ -92,7 +91,7 @@ git push widefleet HEAD:main
 
 The command adds a `widefleet` remote and preserves existing remotes such as
 GitHub or GitLab's `origin`. Choose `--remote NAME` if that name is already in use.
-Use your selected branch instead of `main` when appropriate.
+For a preview, push to its work branch instead of `main`.
 
 A push saves code. Run `widefleet deploy` separately to publish it. With a clean
 checkout, deployment reuses the checked-out commit. The `--json` result includes
@@ -116,7 +115,7 @@ Resolve any merge conflicts locally. Automatic source saving never force-pushes.
 
 Switch to a work branch before saving a preview's source. `widefleet preview` rejects the
 main app's source branch before building. Direct deployments to an existing
-preview also reject that branch before committing.
+preview also reject that branch before building.
 
 ```sh
 git switch -c feature/review

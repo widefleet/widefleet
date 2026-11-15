@@ -1,7 +1,7 @@
 ---
 title: CLI
 description: Common Widefleet commands, app selection, authentication and deployment output.
-lastModified: 2026-11-15
+lastModified: 2026-11-16
 ---
 
 For installation and your first deployment, start with [CLI setup](/getting-started/installation).
@@ -126,7 +126,7 @@ These flags apply to both `deploy` and `preview`:
 | `--config PATH`           | Read another Wrangler configuration; project paths are relative to that file.                                  |
 | `--skip-build`            | Upload the existing build instead of running the app build.                                                    |
 | `--no-source`             | Deploy without saving source to Widefleet Git. Conflicts with `--source-branch` and `--allow-branch-mismatch`. |
-| `--source-branch BRANCH`  | Choose the main app's source branch, or identify a Git preview's branch in CI.                                 |
+| `--source-branch BRANCH`  | Identify a Git preview's branch in a detached CI checkout.                                                     |
 | `--allow-branch-mismatch` | Confirm deploying the main app from another local branch or a detached checkout for this invocation.           |
 | `--no-wait`               | Return the queued deployment; activation follows asynchronously.                                               |
 | `--json`                  | Print one result on stdout; build output and progress go to stderr.                                            |
@@ -150,11 +150,11 @@ These commands use the selected installation and organization. Git must be
 installed. Widefleet Cloud provides app repositories; self-hosted installations
 report `supported: false` in source status.
 
-| Command                                                                                         | Behavior                                                                                                                                                              |
-| ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `widefleet source status [--app NAME_OR_ID] [--config PATH]`                                    | Print source availability, repository URL, selected branch, branch head and active deployment source as JSON. Defaults to the configured app.                         |
-| `widefleet source clone NAME_OR_ID DIRECTORY [--branch BRANCH] [--read-only]`                   | Clone the selected branch and configure a `widefleet` remote with the CLI credential helper. `--branch` only selects the clone branch.                                |
-| `widefleet source connect [--app NAME_OR_ID] [--config PATH] [--remote NAME] [--branch BRANCH]` | Create the app repository if needed and add an authenticated remote to the current project. `--branch` can select the main app's branch; a preview's branch is fixed. |
+| Command                                                                       | Behavior                                                                                                                                       |
+| ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `widefleet source status [--app NAME_OR_ID] [--config PATH]`                  | Print source availability, repository URL, selected branch, branch head and active deployment source as JSON. Defaults to the configured app.  |
+| `widefleet source clone NAME_OR_ID DIRECTORY [--branch BRANCH] [--read-only]` | Clone the selected branch and configure a `widefleet` remote with the CLI credential helper. `--branch` only selects the clone branch.         |
+| `widefleet source connect [--app NAME_OR_ID] [--config PATH] [--remote NAME]` | Create the app repository if needed and add an authenticated remote to the current project. Preserves existing remotes and branch assignments. |
 
 The credential helper uses the login and organization used when connecting or
 cloning. Read-only clones need `platform:read`; connecting and pushing need

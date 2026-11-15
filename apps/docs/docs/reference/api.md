@@ -1,7 +1,7 @@
 ---
 title: API and uploads
 description: Authentication, app publication and the Worker upload contract.
-lastModified: 2026-11-15
+lastModified: 2026-11-16
 ---
 
 Authenticated clients can fetch `/api/v1/openapi.json`. The document covers management operations, agent jobs, binary assets and multipart Workers.
@@ -147,23 +147,40 @@ See [activation](/guides/members#activate-company-sso).
 
 Source operations use the selected organization and the app's management
 permissions. Token clients need `platform:read` for status and read credentials,
-or `platform:write` for setup, deployment preparation and write credentials.
+or `platform:write` for deployment preparation and write credentials.
 Browser mutations require same-origin requests.
 
 | Endpoint                                            | Response and purpose                                                                                                                                                                                                                      |
 | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GET /api/v1/apps/{appId}/source`                   | Read source status.                                                                                                                                                                                                                       |
-| `PUT /api/v1/apps/{appId}/source`                   | Create the repository if needed and optionally select a branch; accepts `{ "branch": "main" }` or `{}`. Returns `{ url, branch, commit }`.                                                                                                |
-| `POST /api/v1/apps/{appId}/source/prepare`          | Prepare a source save using write scope; accepts the same body as setup. Returns `{ organizationId, repository }`. On installations without a Git backend, `repository` is null.                                                          |
+| `POST /api/v1/apps/{appId}/source/prepare`          | Prepare a source save using write scope; accepts `{}` and creates the repository if needed. Returns `{ organizationId, repository, preview }`. On installations without a Git backend, `repository` is null.                              |
 | `POST /api/v1/apps/source-target`                   | Inspect the deployment target with `platform:write` scope. Accepts `{ appId }` or `{ slug }`; returns `{ supported, branch, preview }`. Reads local metadata without creating apps or repositories. A new app by name defaults to `main`. |
 | `POST /api/v1/apps/{appId}/source/read-credential`  | Issue a read credential; body `{}`.                                                                                                                                                                                                       |
 | `POST /api/v1/apps/{appId}/source/write-credential` | Issue a write credential; body `{}`.                                                                                                                                                                                                      |
 
-For previews, the preparation response also includes `primaryBranch`, the main
-app's source branch. The CLI rejects saving a preview from that local branch.
+The preparation response identifies previews with `preview: true`. The main app
+uses `main`; a Git preview retains the branch assigned when it was created.
 
-Source status is also included as `source` in app lists, app reads by ID and app
-reads by name:
+App lists and reads by ID or name include a `source` summary from stored app and
+deployment metadata. These reads do not contact Git:
+
+```json
+{
+  "supported": true,
+  "branch": "main",
+  "deployed": {
+    "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "branch": "main",
+    "directory": "apps/inventory"
+  }
+}
+```
+
+`branch` is null for a preview created without a Git branch. `deployed` is null
+when the active deployment has no saved source reference; it does not indicate
+whether someone has pushed code separately.
+
+The source-status endpoint reads the repository and its current branch head:
 
 ```json
 {
@@ -188,19 +205,18 @@ empty repository has `commit: null`. `deployed` identifies the active deployment
 source and is null when that deployment has no source reference. The saved branch
 head can advance without deploying an update.
 
-If the Git backend is unavailable, reads still return `200` with a `source.error`
+If the Git backend is unavailable, reads still return `200` with an `error`
 message, `available: false` and `repository: null`. Check `error` before treating
 the source as empty. The known `deployed` reference remains available. Ordinary
 app reads and management pages remain usable.
 
 Branches use Git branch-name rules and are limited to 200 characters. Main apps
-default to `main`. Create a Git preview with `POST /api/v1/apps`, including
+use `main`. Create a Git preview with `POST /api/v1/apps`, including
 `parentId` and `previewBranch`. Its hostname uses a URL-safe name derived from that
 branch; if `previewName` is also supplied, it must match the derived name.
 The preview shares its parent's repository and keeps that branch permanently.
-Source setup and deployment metadata cannot select a different branch. A preview
+Repository preparation and deployment metadata cannot select a different branch. A preview
 created without `previewBranch` has no Git source binding.
-Selecting a main app's branch neither creates a commit nor deploys code.
 
 Credential responses contain `{ url, username, password, expiresAt }` and use
 `Cache-Control: no-store`. Use the returned username and password for Git HTTPS
