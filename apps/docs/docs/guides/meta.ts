@@ -12,6 +12,7 @@ export default defineMeta({
     "workflows",
     "network",
     "app-services",
+    "workload-identity",
     "gmail-app",
   ],
 });

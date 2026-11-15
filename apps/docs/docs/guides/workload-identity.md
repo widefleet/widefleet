@@ -1,0 +1,180 @@
+---
+title: Authenticate apps to external APIs
+description: Use short-lived app identities to call APIs without storing an API key in each app.
+lastModified: 2026-11-15
+---
+
+Widefleet apps can request a signed token identifying their organization and app.
+An external API verifies that token and decides which data the app may access.
+This works without a signed-in user and without an API key in the app.
+
+Upgrade the control plane, deployment agent and app runtime together before using
+the `WIDEFLEET_IDENTITY` binding. The receiving API must support EdDSA JWT
+verification and trust your installation's workload issuer.
+
+## Call an API from an app
+
+The runtime provides `WIDEFLEET_IDENTITY` automatically to deployed apps, including
+headless services and previews. Do not declare it in `wrangler.jsonc`.
+
+The following Worker calls a data API using `https://data.example.com` as its
+audience. Replace the API address and audience with the receiving API's values.
+
+```ts
+type Environment = {
+  WIDEFLEET_IDENTITY: {
+    getToken(audience: string): Promise<{ token: string; expiresAt: number }>;
+  };
+};
+
+export default {
+  async fetch(_request: Request, env: Environment) {
+    const { token } = await env.WIDEFLEET_IDENTITY.getToken("https://data.example.com");
+    const response = await fetch("https://data.example.com/orders", {
+      headers: { authorization: `Bearer ${token}` },
+      redirect: "manual",
+    });
+
+    if (!response.ok) return new Response("Data API request failed", { status: 502 });
+    return Response.json(await response.json());
+  },
+};
+```
+
+Deploy the app and allow its outbound API origin:
+
+```sh
+widefleet deploy
+widefleet network allow https://data.example.com
+```
+
+After the receiving API grants this app access, opening the authenticated app URL
+returns its orders. Keep tokens in server-side code: do not return them to the
+browser or write them to logs. Cache a token only until shortly before `expiresAt`,
+which is a Unix timestamp in seconds. A fresh `getToken` call issues a fresh token;
+there is no refresh token.
+
+The audience is an exact, case-sensitive identifier chosen by the receiving API.
+It can be a URL or another nonempty printable ASCII string without spaces, up to
+2048 characters. Widefleet does not require audience registration and does not
+contact the audience. [Network permissions](/guides/network) still govern the
+app's outbound HTTP requests.
+
+## Verify and authorize on the receiving API
+
+For a platform at `https://platform.example.com`, configure these trusted values:
+
+| Setting                | Value                                                                        |
+| ---------------------- | ---------------------------------------------------------------------------- |
+| Issuer                 | `https://platform.example.com/api/workload`                                  |
+| Discovery document     | `https://platform.example.com/api/workload/.well-known/openid-configuration` |
+| JWKS URL               | `https://platform.example.com/api/auth/jwks`                                 |
+| Algorithm              | `EdDSA`                                                                      |
+| Maximum token lifetime | Five minutes                                                                 |
+
+Load issuer and key URLs from your API's configuration, never from an unverified
+token. Verify the signature, exact issuer, your expected audience and expiry before
+using any claims. Better Auth manages the signing keys and their public JWKS.
+User and CLI tokens have a different issuer even though they share the key set.
+
+For a JavaScript API, install `jose` and use a verification function like this:
+
+```sh
+pnpm add jose
+```
+
+```ts
+import { createRemoteJWKSet, jwtVerify } from "jose";
+
+const issuer = "https://platform.example.com/api/workload";
+const audience = "https://data.example.com";
+const keys = createRemoteJWKSet(new URL("https://platform.example.com/api/auth/jwks"));
+
+// Configure this mapping on the receiving API using the organization's and
+// app's actual IDs. The value selects a data scope owned by this API.
+const grants = new Map([
+  ["organization:example:app:11111111-1111-4111-8111-111111111111", "example-data"],
+]);
+
+export async function authorizeWorkload(token: string) {
+  const { payload } = await jwtVerify(token, keys, {
+    issuer,
+    audience,
+    algorithms: ["EdDSA"],
+    requiredClaims: ["sub", "exp", "iat", "jti"],
+    maxTokenAge: "5m",
+  });
+
+  const organizationId = payload["organization_id"];
+  const appId = payload["app_id"];
+  if (
+    payload["workload_type"] !== "app" ||
+    typeof organizationId !== "string" ||
+    typeof appId !== "string" ||
+    payload.sub !== `organization:${organizationId}:app:${appId}`
+  ) {
+    throw new Error("Invalid workload identity");
+  }
+
+  const dataScope = grants.get(payload.sub);
+  if (!dataScope) throw new Error("App has no data access");
+  return { organizationId, appId, dataScope };
+}
+```
+
+Pass the Bearer token from the incoming request to this function. Reject the
+request if verification or authorization fails. Use the returned `dataScope` to
+restrict database queries; do not let a request parameter select another
+organization's data. A valid token proves identity, while the API's grant determines
+access. Requesting your API's audience alone gives an app no data permissions.
+
+## Identity and lifecycle
+
+- `sub` has the form `organization:ORGANIZATION_ID:app:APP_UUID`. Deployments and
+  rollbacks preserve that identity. Deleting and recreating an app produces a new
+  app ID.
+- `organization_id`, `app_id` and `workload_type: "app"` identify the executing app.
+  The runtime supplies them; app code supplies only the audience.
+- Service calls use the service app's identity. Grant the service app data access
+  when it owns the external integration, then connect callers through
+  [app services](/guides/app-services).
+- Previews have independent app IDs and need their own API grants. A parent's
+  permissions do not authorize its previews.
+- Tokens contain no user identity or user permissions. They work in HTTP, service,
+  cron, queue and Workflow code. User-specific access requires a separate check by
+  the app or service.
+- Suspended organizations, unavailable organizations and deleting apps cannot
+  obtain new tokens. Already issued tokens remain valid until their five-minute
+  expiry unless the receiving API revokes its grant sooner.
+
+The runtime contacts the control plane for each issuance, so the control plane
+must be reachable. The trusted runtime uses its existing installation credential;
+neither that credential nor the JWT signing key is available to app code.
+
+Signing keys rotate after 30 days on the next signing request. Public keys remain
+available for a further 30 days. An upgrade enrolls existing keys in rotation with
+a 30-day transition period. Receivers should refresh JWKS when encountering an
+unknown key ID, as `createRemoteJWKSet` does.
+
+## Troubleshooting
+
+| Symptom                         | Check                                                                                                                                                                     |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WIDEFLEET_IDENTITY` is missing | Upgrade all platform components. Local standalone Wrangler development needs a test binding; it cannot mint deployed app identities.                                      |
+| Token issuance fails            | Check the app and organization are active, and that the runtime can reach the control plane. The standard deployment configures their shared credential and platform URL. |
+| Signature or issuer is rejected | Use the workload issuer and its advertised JWKS. The receiving library must support EdDSA.                                                                                |
+| Audience is rejected            | Match the API's configured audience exactly in `getToken`.                                                                                                                |
+| API returns forbidden           | Grant the executing app's ID access on the API; check whether the caller is a preview or a service app.                                                                   |
+| Outbound request is blocked     | Allow the API origin in the app's backend network permissions.                                                                                                            |
+
+For self-hosted installations, `PLATFORM_RUNTIME_PLATFORM_URL` can override the
+control-plane address used by the native runtime and agent when the public
+`PLATFORM_URL` is unreachable internally. The signed issuer still uses the public
+`PLATFORM_URL`. Hosted deployment supplies the parent runtime's
+`WIDEFLEET_PLATFORM_URL` automatically.
+
+The discovery document describes these workload JWTs. The issuance endpoint is
+for trusted runtimes; it is not a public OAuth token exchange or client-credentials
+endpoint. A third-party federation service needs to support this issuer's signing
+algorithm and token contract. Use direct verification for APIs you control, then
+connect apps to a shared service when several apps need the same integration.

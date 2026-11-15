@@ -1,7 +1,7 @@
 ---
 title: App development
 description: Develop an independent app with identity, storage and platform integrations.
-lastModified: 2026-10-12
+lastModified: 2026-11-15
 ---
 
 Start with an [installed CLI and a generated app](/getting-started/installation). SvelteKit is the default; the [CLI template option](/reference/cli#create-a-project) also supports TanStack Start for React. Both starters are independent projects with no workspace dependencies and include D1 notes, private R2 photos and platform error reporting.
@@ -34,3 +34,6 @@ Run `widefleet preview` from the app project to build and deploy an isolated pre
 The existing `widefleet create notes-preview --name 'Notes Preview' --parent APP_UUID` workflow keeps its flat hostname; deploy to the returned ID explicitly. Use `widefleet rollback APP_UUID ARTIFACT_UUID` to restore retained code and `widefleet delete APP_UUID --yes` to remove an app and its published versions. See [app removal](/reference/runtime#app-removal) for the cleanup process and remaining native storage cells.
 
 External requests need [network permissions](/guides/network). For IT-managed system access, use [app services](/guides/app-services). Apps can also declare [Workflows](/guides/workflows) with a compatible deployment agent and runtime.
+
+Use [workload identity](/guides/workload-identity) to authenticate an app or service
+to an external API with a short-lived token, without storing an API key in the app.
