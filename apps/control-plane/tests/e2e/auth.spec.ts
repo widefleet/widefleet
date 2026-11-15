@@ -4,7 +4,7 @@ import { createServer, request as httpRequest } from "node:http";
 import { EventEmitter, once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { app, artifact, workerMetadata } from "@platform/contracts";
 import {
   account,
@@ -101,6 +101,229 @@ test.beforeAll(async () => {
     )
     .toBe(true);
 });
+
+for (const javaScriptEnabled of [true, false]) {
+  test(`connects open APIs and requests restricted APIs with JavaScript ${javaScriptEnabled}`, async ({
+    browser,
+  }, testInfo) => {
+    const creator = environment.users.createUser({
+      name: "Connection creator",
+      email: `connections-${javaScriptEnabled}@example.test`,
+    });
+
+    await environment.users.saveUser(creator);
+    await environment.linkMicrosoftUser(creator.id);
+
+    const contexts = await Promise.all(
+      [creator.id, environment.ownerId].map(async (userId) => {
+        const context = await browser.newContext({
+          javaScriptEnabled,
+          baseURL: environment.configuration.PLATFORM_URL,
+          extraHTTPHeaders: { "x-forwarded-proto": "http" },
+        });
+
+        const login = await environment.users.login({ userId });
+        await context.addCookies(
+          login.cookies.map((cookie) => ({
+            ...cookie,
+            domain: "localhost",
+            sameSite: "Lax" as const,
+            secure: false,
+          })),
+        );
+
+        return context;
+      }),
+    );
+
+    const [memberContext, adminContext] = contexts;
+
+    if (!memberContext || !adminContext) throw new Error("Missing test context");
+
+    try {
+      const page = await memberContext.newPage();
+      const adminPage = await adminContext.newPage();
+
+      const create = async (context: typeof memberContext, slug: string, displayName: string) => {
+        const response = await context.request.post("/api/v1/apps", {
+          headers: { origin: environment.configuration.PLATFORM_URL },
+          data: { slug, displayName },
+        });
+
+        expect(response.ok()).toBe(true);
+
+        return app.parse(await response.json());
+      };
+
+      const source = await create(
+        memberContext,
+        `requester-${javaScriptEnabled}`,
+        `Warehouse application with a longer name ${javaScriptEnabled ? "A" : "B"}`,
+      );
+
+      const target = await create(
+        adminContext,
+        `request-api-${javaScriptEnabled}`,
+        `Inventory and fulfillment service ${javaScriptEnabled ? "A" : "B"}`,
+      );
+
+      const artifactId = crypto.randomUUID();
+      const deploymentId = crypto.randomUUID();
+      await environment.database.db.insert(artifacts).values({
+        id: artifactId,
+        appId: target.id,
+        manifest: {},
+        modules: [],
+        metadata: workerMetadata.parse({
+          main_module: "worker.js",
+          compatibility_date: "2026-10-01",
+          entrypoints: ["Reader"],
+          assets: { upload_session: artifactId },
+        }),
+      });
+      await environment.database.db.insert(deployments).values({
+        id: deploymentId,
+        appId: target.id,
+        artifactId,
+        status: "succeeded",
+        requestId: crypto.randomUUID(),
+      });
+      await environment.database.db
+        .update(apps)
+        .set({ activeDeploymentId: deploymentId })
+        .where(eq(apps.id, target.id));
+      await page.goto("/services/requests");
+      await expect(page.getByText("No connection requests yet.")).toBeVisible();
+      await page.goto("/services");
+      await expect(page.getByText("Manage availability", { exact: true })).toHaveCount(0);
+      await page.getByLabel("Connect to your app").selectOption(source.id);
+      await page.getByRole("button", { name: "Select app", exact: true }).click();
+      await expect(page).toHaveURL(new RegExp(`app=${source.id}`));
+
+      const row = page
+        .locator("div.space-y-2.p-4")
+        .filter({ has: page.getByRole("heading", { name: target.displayName, exact: true }) });
+
+      await row.getByText("Request connection", { exact: true }).focus();
+      await page.keyboard.press("Enter");
+      await row.getByLabel("Binding name in your code").fill("ERP");
+      await row.getByRole("button", { name: "Submit request" }).click();
+      await expect(page).toHaveURL(/services\/requests$/);
+      await expect(page.getByText("Awaiting approval", { exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Approve and connect" })).toHaveCount(0);
+      const requests = await memberContext.request.get("/api/v1/connection-requests");
+
+      const entries = z
+        .array(z.object({ id: z.string(), status: z.string() }))
+        .parse(await requests.json());
+
+      const id = entries[0]?.id;
+
+      if (!id) throw new Error("Missing request");
+
+      const denied = await memberContext.request.post(`/api/v1/connection-requests/${id}/approve`, {
+        headers: { origin: environment.configuration.PLATFORM_URL },
+        data: {},
+      });
+
+      expect(denied.status()).toBe(403);
+      await adminPage.goto("/services/requests");
+
+      const review = adminPage
+        .getByRole("region", {
+          name: `${source.displayName} to ${target.displayName}`,
+          exact: true,
+        })
+        .filter({ hasText: "Awaiting approval" });
+
+      for (const width of [1280, 390]) {
+        await adminPage.setViewportSize({ width, height: 900 });
+
+        for (const colorScheme of ["light", "dark"] as const) {
+          await adminPage.emulateMedia({ colorScheme });
+          await adminPage.screenshot({
+            path: testInfo.outputPath(`review-${width}-${colorScheme}.png`),
+            fullPage: true,
+          });
+          expect(
+            await adminPage.evaluate(
+              () => document.documentElement.scrollWidth <= window.innerWidth,
+            ),
+          ).toBe(true);
+        }
+      }
+
+      await review.getByRole("button", { name: "Approve and connect" }).click();
+      await expect(review).toHaveCount(0);
+      await page.reload();
+      await expect(page.getByText("Approved", { exact: true })).toBeVisible();
+      await page.getByRole("link", { name: "View app connections" }).click();
+      await expect(page.getByText("ERP", { exact: true })).toBeVisible();
+      await adminPage.goto("/services");
+
+      const settings = adminPage
+        .locator("div.space-y-2.p-4")
+        .filter({ has: adminPage.getByRole("heading", { name: target.displayName, exact: true }) });
+
+      await settings.getByText("Manage availability", { exact: true }).click();
+      await settings.getByLabel("Who can connect this API?").selectOption("organization");
+      await settings.getByRole("button", { name: "Save availability" }).click();
+      await expect(settings.getByText("Available to everyone in this organization")).toBeVisible();
+      await page.goto(`/services?app=${source.id}`);
+      await row.getByText("Connect API", { exact: true }).click();
+      await row.getByLabel("Binding name in your code").fill("FREE");
+
+      for (const width of [1280, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+
+        for (const colorScheme of ["light", "dark"] as const) {
+          await page.emulateMedia({ colorScheme });
+          await page.screenshot({
+            path: testInfo.outputPath(`services-${width}-${colorScheme}.png`),
+            fullPage: true,
+          });
+          expect(
+            await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+          ).toBe(true);
+        }
+      }
+
+      await row.getByRole("button", { name: "Connect", exact: true }).click();
+      await expect(page).toHaveURL(new RegExp(`/apps/${source.id}/connections$`));
+      await expect(page.getByText("FREE", { exact: true })).toBeVisible();
+      await adminPage.goto("/services");
+      await settings.getByText("Manage availability", { exact: true }).click();
+      await settings.getByLabel("Who can connect this API?").selectOption("approval_required");
+      await settings.getByRole("button", { name: "Save availability" }).click();
+      await page.goto(`/services?app=${source.id}`);
+      await row.getByText("Request connection", { exact: true }).click();
+      await row.getByLabel("Binding name in your code").fill("ERP");
+      await row.getByRole("button", { name: "Submit request" }).click();
+      await expect(row.getByRole("alert")).toContainText("Choose an unused binding name");
+      await expect(row.getByLabel("Binding name in your code")).toHaveValue("ERP");
+      await row.getByLabel("Binding name in your code").fill("REJECTED");
+      await row.getByRole("button", { name: "Submit request" }).click();
+      await expect(page).toHaveURL(/services\/requests$/);
+      await adminPage.goto("/services/requests");
+      await review.getByRole("button", { name: "Reject", exact: true }).click();
+      await expect(review).toHaveCount(0);
+      await page.reload();
+      await expect(page.getByText("Rejected", { exact: true })).toBeVisible();
+      await page.screenshot({ path: testInfo.outputPath("request-statuses.png"), fullPage: true });
+    } finally {
+      await Promise.all(contexts.map((context) => context.close()));
+      await environment.database.db
+        .delete(apps)
+        .where(
+          inArray(apps.slug, [
+            `requester-${javaScriptEnabled}`,
+            `request-api-${javaScriptEnabled}`,
+          ]),
+        );
+      await environment.database.db.delete(user).where(eq(user.id, creator.id));
+    }
+  });
+}
 
 test("shows versioned service documentation through authenticated API and accessible pages", async ({
   page,

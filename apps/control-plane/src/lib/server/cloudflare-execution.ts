@@ -67,16 +67,25 @@ export const createCloudflareExecution = (
     runtime: createCloudflareRuntimeReleases(bindings, database, storage),
     remove: createCloudflareRemoval(bindings, database),
     connections: {
-      bind: async (actor, appId, name, grant) => {
+      bind: async (actor, appId, name, grant, requestId) => {
         const valid = await transact(database, (transaction) =>
-          validateCapabilityChange(transaction, actor, appId, name, grant, false),
+          validateCapabilityChange(
+            transaction,
+            actor,
+            appId,
+            name,
+            grant,
+            false,
+            requestId ? { requestId } : undefined,
+          ),
         );
 
         if (valid.isErr()) return valid;
 
         const accepted = await admit({
           kind: "capabilities",
-          id: crypto.randomUUID(),
+          id: requestId ?? crypto.randomUUID(),
+          connectionRequestId: requestId,
           appId,
           name,
           grant,

@@ -1,3 +1,4 @@
+import { createServiceAccess } from "./service-access.ts";
 import { transact } from "./transactions.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
@@ -13,6 +14,7 @@ import type { Principal } from "./identity.ts";
 import { InvalidOperation } from "./errors.ts";
 
 export const createConnectionService = (database: Database, execution?: HostedExecution) => ({
+  ...createServiceAccess(database, execution),
   describe: (principal: Principal, service: string) =>
     transact(database, async (transaction) => {
       const byId = contract.identifier.safeParse(service).success
@@ -49,6 +51,7 @@ export const createConnectionService = (database: Database, execution?: HostedEx
           appId: record.app.id,
           slug: record.app.slug,
           displayName: record.app.displayName,
+          accessMode: record.app.serviceAccessMode,
           deploymentId: record.deploymentId,
           entrypoints: metadata.entrypoints ?? [],
           documentation: metadata.service_documentation ?? null,
@@ -74,6 +77,7 @@ export const createConnectionService = (database: Database, execution?: HostedEx
           slug: app.slug,
           displayName: app.displayName,
           entrypoints: await serviceEntrypoints(transaction, app),
+          accessMode: app.serviceAccessMode,
         })),
       );
 

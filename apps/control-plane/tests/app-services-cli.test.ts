@@ -75,6 +75,7 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
               slug: "erp-app",
               displayName: "ERP",
               entrypoints: ["Reader"],
+              accessMode: "approval_required",
             },
           ]),
         );
@@ -90,6 +91,25 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
               types: [],
             },
           }),
+        );
+      } else if (
+        request.url === "/api/v1/app-services/00000000-0000-4000-8000-000000000099/access"
+      ) {
+        response.end(body);
+      } else if (request.url?.startsWith("/api/v1/connection-requests")) {
+        response.end(
+          JSON.stringify(
+            request.method === "GET"
+              ? []
+              : {
+                  id: app.id,
+                  status: request.url.endsWith("approve")
+                    ? "approved"
+                    : request.url.endsWith("reject")
+                      ? "rejected"
+                      : "pending",
+                },
+          ),
         );
       } else if (request.url === `/api/v1/apps/${app.id}/assets-upload-session`) {
         response.end(
@@ -224,6 +244,51 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
       timeout: 10000,
       env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: "normal-credential" },
     });
+
+  it("requests a connection without binding and exposes administrator decisions and availability", async () => {
+    const requested = await command(
+      "connect",
+      "erp-app",
+      "--app",
+      "inventory",
+      "--as",
+      "ERP",
+      "--entrypoint",
+      "Reader",
+      "--request",
+    );
+
+    expect(JSON.parse(requested.stdout)).toMatchObject({ status: "pending" });
+    expect(requests.some((entry) => entry.path.includes("/bindings/"))).toBe(false);
+    expect(
+      JSON.parse(
+        requests.find((entry) => entry.path === "/api/v1/connection-requests")?.body ?? "null",
+      ),
+    ).toEqual({
+      appId: app.id,
+      app: "00000000-0000-4000-8000-000000000099",
+      binding: "ERP",
+      entrypoint: "Reader",
+    });
+    expect(JSON.parse((await command("services", "requests")).stdout)).toEqual([]);
+    expect(JSON.parse((await command("services", "approve", app.id)).stdout)).toMatchObject({
+      status: "approved",
+    });
+    expect(JSON.parse((await command("services", "reject", app.id)).stdout)).toMatchObject({
+      status: "rejected",
+    });
+    expect(
+      JSON.parse((await command("services", "access", "erp-app", "--mode", "organization")).stdout),
+    ).toEqual({ accessMode: "organization" });
+    expect(
+      JSON.parse(
+        (await command("services", "access", "erp-app", "--mode", "approval-required")).stdout,
+      ),
+    ).toEqual({ accessMode: "approval_required" });
+    expect(requests.every((entry) => entry.authorization === "Bearer normal-credential")).toBe(
+      true,
+    );
+  });
 
   it.each([
     {

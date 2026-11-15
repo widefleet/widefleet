@@ -171,7 +171,7 @@
                   : "No apps connected"}
               </p>
               <p class="text-muted-foreground mt-2 text-xs leading-5">
-                Browse the catalog and ask an administrator to connect an integration.
+                Browse app APIs to connect an integration or request administrator approval.
               </p>
             </div>
           {:else}

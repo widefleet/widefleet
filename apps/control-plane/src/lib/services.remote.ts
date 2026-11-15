@@ -25,9 +25,64 @@ export const getServiceDescription = query(contract.servicePath, async ({ servic
   };
 });
 
+export const getConnectionRequests = query(async () => {
+  const { runtime, principal } = await remoteContext();
+
+  return {
+    admin: principal.application.admin,
+    entries: queryValue(await runtime.connections.requests(principal)),
+  };
+});
+
+export const setServiceAccess = form(
+  contract.appPath.extend({
+    ...contract.organizationSelection.shape,
+    ...contract.serviceAccessChange.shape,
+    id: z.string().max(160).optional(),
+  }),
+  async ({ organizationId, appId, accessMode }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
+    formValue(await runtime.connections.setAccess(principal, appId, accessMode));
+    await getAppServices().refresh();
+    redirect(303, "/services");
+  },
+);
+
+export const requestAppConnection = form(
+  contract.capabilityPath.extend({
+    ...contract.organizationSelection.shape,
+    id: z.string().max(160).optional(),
+    targetApp: contract.identifier,
+    entrypoint: contract.capabilityGrant.shape.entrypoint,
+  }),
+  async ({ organizationId, targetApp, appId, binding, entrypoint }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
+    formValue(
+      await runtime.connections.request(principal, { appId, binding, entrypoint, app: targetApp }),
+    );
+    await getConnectionRequests().refresh();
+    redirect(303, "/services/requests");
+  },
+);
+
+export const decideConnectionRequest = form(
+  contract.connectionRequestPath.extend({
+    ...contract.organizationSelection.shape,
+    decision: z.enum(["approve", "reject"]),
+    id: z.string().max(160).optional(),
+  }),
+  async ({ organizationId, requestId, decision }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
+    formValue(await runtime.connections[decision](principal, requestId));
+    await getConnectionRequests().refresh();
+    redirect(303, "/services/requests");
+  },
+);
+
 export const connectApp = form(
   contract.capabilityPath.extend({
     ...contract.organizationSelection.shape,
+    id: z.string().max(160).optional(),
     targetApp: contract.identifier,
     entrypoint: contract.capabilityGrant.shape.entrypoint,
   }),
