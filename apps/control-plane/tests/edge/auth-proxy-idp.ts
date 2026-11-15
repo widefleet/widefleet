@@ -34,6 +34,8 @@ export const createIdentityProvider = async (
     available: true,
     failure: "",
     entra: false,
+    google: false,
+    workspaceDomain: "example.test",
     groups: ["accounting"],
     name: "Example User",
     subject: "pairwise-subject",
@@ -44,6 +46,8 @@ export const createIdentityProvider = async (
     rotateRefreshTokens: false,
     issueRefreshToken: true,
     omitRefreshIdToken: false,
+    grantedScopes: "",
+    omitRefreshScopes: false,
   };
 
   const graphRequests: string[] = [];
@@ -53,7 +57,12 @@ export const createIdentityProvider = async (
   const server = createServer((request, response) => {
     const handle = async () => {
       const url = new URL(request.url ?? "/", origin);
-      const issuer = settings.entra ? `${origin}/${tenantId}/v2.0` : origin + settings.issuerSuffix;
+
+      const issuer = settings.google
+        ? "https://accounts.google.com"
+        : settings.entra
+          ? `${origin}/${tenantId}/v2.0`
+          : origin + settings.issuerSuffix;
 
       response.setHeader("content-type", "application/json");
 
@@ -190,6 +199,7 @@ export const createIdentityProvider = async (
         const claims = new SignJWT({
           nonce: settings.failure === "nonce" ? "wrong-nonce" : parameters.nonce,
           email_verified: settings.failure !== "email",
+          hd: settings.google ? settings.workspaceDomain : undefined,
           ...(settings.entra
             ? {
                 oid: objectId,
@@ -236,6 +246,10 @@ export const createIdentityProvider = async (
           access_token: "fixture-access-token",
           refresh_token: settings.issueRefreshToken ? refreshToken : undefined,
           token_type: "Bearer",
+          scope:
+            refreshing && settings.omitRefreshScopes
+              ? undefined
+              : settings.grantedScopes || undefined,
           expires_in: 3600,
           id_token:
             settings.failure === "missing-token" || (refreshing && settings.omitRefreshIdToken)

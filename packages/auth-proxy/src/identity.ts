@@ -2,6 +2,7 @@ import { accessContext, appAccessGroup, companyProvider } from "@platform/contra
 import { APIError } from "better-auth/api";
 import { decodeJwt } from "jose";
 import { z } from "zod";
+import { googleGroups } from "./google-groups.ts";
 
 const claim = z
   .string()
@@ -92,6 +93,7 @@ export const providerIdentity = async (
   idToken: string,
   accessToken: string | undefined,
   organizationId: string,
+  lookupGoogleGroups = false,
 ) => {
   // Called only by Better Auth's getUserInfo, after its signature, issuer,
   // audience and nonce verification. This maps already verified claims.
@@ -105,6 +107,14 @@ export const providerIdentity = async (
     throw new Error("The company identity is not trusted");
 
   if (
+    provider.type === "google" &&
+    (claims["hd"] !== provider.domain || claims["email_verified"] !== true)
+  )
+    throw new APIError("UNAUTHORIZED", {
+      message: "The identity is not a verified Workspace account in this domain",
+    });
+
+  if (
     provider.type === "oidc" &&
     provider.organizationClaim &&
     claims[provider.organizationClaim] !== organizationId
@@ -116,20 +126,27 @@ export const providerIdentity = async (
       ? z.object({ oid: z.uuid(), tid: z.literal(provider.tenantId) }).parse(claims).oid
       : z.string().min(1).parse(claims.sub);
 
-  const groupClaim = provider.type === "entra" ? "groups" : provider.groupsClaim;
+  const groupClaim = provider.type === "oidc" ? provider.groupsClaim : "groups";
 
-  if (provider.type === "entra" && !accessToken)
+  if (
+    (provider.type === "entra" || (provider.type === "google" && lookupGoogleGroups)) &&
+    !accessToken
+  )
     throw new Error("Company group lookup requires an access token");
 
   const membership =
     provider.type === "entra" && accessToken
       ? await graphGroups(accessToken)
-      : groups.parse(claims[groupClaim] ?? []);
+      : provider.type === "google"
+        ? lookupGoogleGroups && accessToken
+          ? await googleGroups(accessToken, z.email().parse(claims["email"]))
+          : []
+        : groups.parse(claims[groupClaim] ?? []);
 
   const identity = proxyIdentity.parse({
     id: subject,
-    name: claims[provider.type === "entra" ? "name" : provider.nameClaim] ?? "",
-    email: claims[provider.type === "entra" ? "email" : provider.emailClaim],
+    name: claims[provider.type === "oidc" ? provider.nameClaim : "name"] ?? "",
+    email: claims[provider.type === "oidc" ? provider.emailClaim : "email"],
     groups: membership,
   });
 

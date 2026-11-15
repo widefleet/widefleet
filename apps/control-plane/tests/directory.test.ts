@@ -35,6 +35,23 @@ const configuration = {
 };
 
 describe("company directory", () => {
+  it("guides Google administrators to group email addresses without directory credentials", async () => {
+    const directory = createDirectory(
+      async () =>
+        companyIdentity.parse({
+          provider: { type: "google", domain: "example.test" },
+          management: { clientId: "login", clientSecret: "synthetic-secret" },
+        }),
+      async () => {
+        throw new Error("Unexpected directory request");
+      },
+    );
+
+    const result = await directory.search(creator, { query: "Accounting", limit: 10 });
+    expect(result.isErr()).toBe(true);
+
+    if (result.isErr()) expect(result.error.message).toContain("group's email address");
+  });
   it("separates organization tokens and refreshes credentials after a configuration change", async () => {
     const identities = new Map([
       [
