@@ -375,10 +375,6 @@ async fn commit_all(project: &Path, branch: &str) -> Result<String> {
         .ok_or_else(|| Error::invalid("Git did not create a source commit".into()))
 }
 
-pub struct Saved {
-    pub revision: SourceRevision,
-}
-
 pub async fn confirm_deployment_branch(
     api: &Api,
     credentials: &auth::Credentials,
@@ -520,20 +516,11 @@ pub async fn save(
     app: Uuid,
     project: &Path,
     branch: Option<&str>,
-    commit: Option<&str>,
     before_build: Result<String>,
-) -> Result<Option<Saved>> {
-    if let Some(commit) = commit
-        && (!matches!(commit.len(), 40 | 64)
-            || !commit.bytes().all(|byte| byte.is_ascii_hexdigit()))
-    {
-        return Err(Error::invalid(
-            "Use the full Git commit hash with --commit".into(),
-        ));
-    }
+) -> Result<Option<SourceRevision>> {
     let prepared = prepare(api, credentials, app, branch).await?;
     let Some(repository) = prepared.repository else {
-        if commit.is_some() || branch.is_some() {
+        if branch.is_some() {
             return Err(Error::invalid(
                 "This installation does not provide Git repositories".into(),
             ));
@@ -559,7 +546,7 @@ pub async fn save(
         false,
     )?;
     Ok(Some(
-        save_repository(project, repository, &helper, commit, &before_build?).await?,
+        save_repository(project, repository, &helper, &before_build?).await?,
     ))
 }
 
@@ -567,9 +554,8 @@ async fn save_repository(
     project: &Path,
     repository: SourceRepository,
     helper: &str,
-    commit: Option<&str>,
     before_build: &str,
-) -> Result<Saved> {
+) -> Result<SourceRevision> {
     let project = project.canonicalize()?;
     let root = root(&project).await?;
     let source_tree = tree(&root).await?;
@@ -609,19 +595,7 @@ async fn save_repository(
         }
     }
     let head = revision(&root, "HEAD").await?;
-    let saved_commit = if let Some(commit) = commit {
-        let requested = revision(&root, &format!("{commit}^{{commit}}"))
-            .await?
-            .ok_or_else(|| {
-                Error::invalid("The requested commit is missing from this checkout".into())
-            })?;
-        let commit_tree =
-            output(git(&root).args(["rev-parse", &format!("{requested}^{{tree}}")])).await?;
-        if head.as_deref() != Some(&requested) || source_tree != commit_tree {
-            return Err(Error::invalid("--commit requires that commit to be checked out with no uncommitted project changes".into()));
-        }
-        requested
-    } else if let Some(head) = head
+    let saved_commit = if let Some(head) = head
         && output(git(&root).args(["rev-parse", "HEAD^{tree}"])).await? == source_tree
     {
         head
@@ -649,12 +623,10 @@ async fn save_repository(
         directory.to_string_lossy().replace('\\', "/")
     };
     eprintln!("Source saved: {} at {}", repository.branch, saved_commit);
-    Ok(Saved {
-        revision: SourceRevision {
-            branch: repository.branch,
-            commit: saved_commit,
-            directory,
-        },
+    Ok(SourceRevision {
+        branch: repository.branch,
+        commit: saved_commit,
+        directory,
     })
 }
 
@@ -908,12 +880,11 @@ mod tests {
                 commit: None,
             }
         }
-        async fn save(&self, branch: &str) -> Result<Saved> {
+        async fn save(&self, branch: &str) -> Result<SourceRevision> {
             save_repository(
                 &self.project,
                 self.repository(branch),
                 "",
-                None,
                 &snapshot(&self.project).await?,
             )
             .await
@@ -947,26 +918,16 @@ mod tests {
         let files =
             output(git(&fixture.remote).args(["ls-tree", "-r", "--name-only", "main"])).await?;
         assert_eq!(files, ".env\n.gitignore\napp.ts\nkeep.local");
-        assert_eq!(
-            fixture.save("main").await?.revision.commit,
-            first.revision.commit
-        );
+        assert_eq!(fixture.save("main").await?.commit, first.commit);
         std::fs::write(fixture.project.join("app.ts"), "second")?;
         let second = fixture.save("main").await?;
-        assert_ne!(second.revision.commit, first.revision.commit);
+        assert_ne!(second.commit, first.commit);
         assert!(
             output(git(&fixture.project).args(["status", "--porcelain"]))
                 .await?
                 .is_empty()
         );
-        assert!(
-            is_ancestor(
-                &fixture.project,
-                &first.revision.commit,
-                &second.revision.commit
-            )
-            .await?
-        );
+        assert!(is_ancestor(&fixture.project, &first.commit, &second.commit).await?);
         let clone = fixture.clone("next-session").await?;
         assert_eq!(std::fs::read_to_string(clone.join("app.ts"))?, "second");
         assert!(!clone.join("skip.local").exists());
@@ -1009,13 +970,10 @@ mod tests {
         .await?;
         std::fs::write(fixture.project.join("app.ts"), "preview")?;
         let preview = fixture.save("preview/search").await?;
-        assert_eq!(
-            revision(&fixture.remote, "main").await?,
-            Some(main.revision.commit)
-        );
+        assert_eq!(revision(&fixture.remote, "main").await?, Some(main.commit));
         assert_eq!(
             revision(&fixture.remote, "preview/search").await?,
-            Some(preview.revision.commit)
+            Some(preview.commit)
         );
         assert_eq!(
             output(git(&fixture.project).args(["remote", "get-url", "origin"])).await?,
@@ -1035,7 +993,6 @@ mod tests {
             &other,
             fixture.repository("main"),
             "",
-            None,
             &snapshot(&other).await?,
         )
         .await?;
@@ -1051,48 +1008,11 @@ mod tests {
                 .to_string()
                 .contains("changes missing from this checkout")
         );
-        assert_eq!(
-            revision(&fixture.remote, "main").await?,
-            Some(saved.revision.commit)
-        );
+        assert_eq!(revision(&fixture.remote, "main").await?, Some(saved.commit));
         assert_eq!(revision(&fixture.project, "HEAD").await?, before);
         assert_eq!(
             std::fs::read_to_string(fixture.project.join("app.ts"))?,
             "local work"
-        );
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn explicit_commit_requires_matching_checkout_without_changing_index() -> Result<()> {
-        let fixture = Fixture::new().await?;
-        std::fs::write(fixture.project.join("app.ts"), "first")?;
-        let first = fixture.save("main").await?;
-        let same = save_repository(
-            &fixture.project,
-            fixture.repository("main"),
-            "",
-            Some(&first.revision.commit),
-            &snapshot(&fixture.project).await?,
-        )
-        .await?;
-        assert_eq!(same.revision.commit, first.revision.commit);
-        std::fs::write(fixture.project.join("app.ts"), "during build")?;
-        assert!(
-            save_repository(
-                &fixture.project,
-                fixture.repository("main"),
-                "",
-                Some(&first.revision.commit),
-                &snapshot(&fixture.project).await?,
-            )
-            .await
-            .is_err()
-        );
-        assert!(
-            output(git(&fixture.project).args(["diff", "--cached", "--name-only"]))
-                .await?
-                .is_empty()
         );
         Ok(())
     }
@@ -1104,16 +1024,10 @@ mod tests {
         let before = snapshot(&fixture.project).await?;
         assert!(!fixture.project.join(".git").exists());
         std::fs::write(fixture.project.join("app.ts"), "after build")?;
-        let error = save_repository(
-            &fixture.project,
-            fixture.repository("main"),
-            "",
-            None,
-            &before,
-        )
-        .await
-        .err()
-        .ok_or_else(|| Error::invalid("Expected changed source to fail".into()))?;
+        let error = save_repository(&fixture.project, fixture.repository("main"), "", &before)
+            .await
+            .err()
+            .ok_or_else(|| Error::invalid("Expected changed source to fail".into()))?;
         assert!(error.to_string().contains("changed during the build"));
         assert_eq!(revision(&fixture.project, "HEAD").await?, None);
         assert_eq!(revision(&fixture.remote, "main").await?, None);
@@ -1160,12 +1074,9 @@ mod tests {
         );
         assert_eq!(
             revision(&fixture.project, "HEAD").await?,
-            Some(first.revision.commit.clone())
+            Some(first.commit.clone())
         );
-        assert_eq!(
-            revision(&fixture.remote, "main").await?,
-            Some(first.revision.commit)
-        );
+        assert_eq!(revision(&fixture.remote, "main").await?, Some(first.commit));
         Ok(())
     }
 
@@ -1199,12 +1110,9 @@ mod tests {
         );
         assert_eq!(
             revision(&fixture.project, "HEAD").await?,
-            Some(first.revision.commit.clone())
+            Some(first.commit.clone())
         );
-        assert_eq!(
-            revision(&fixture.remote, "main").await?,
-            Some(first.revision.commit)
-        );
+        assert_eq!(revision(&fixture.remote, "main").await?, Some(first.commit));
         assert!(!fixture.project.join(".git/index.lock").exists());
         output(git(&fixture.project).args(["add", "app.ts"])).await?;
         assert_eq!(
@@ -1231,12 +1139,9 @@ mod tests {
         assert_eq!(std::fs::read(&index)?, before);
         assert_eq!(
             revision(&fixture.project, "HEAD").await?,
-            Some(first.revision.commit.clone())
+            Some(first.commit.clone())
         );
-        assert_eq!(
-            revision(&fixture.remote, "main").await?,
-            Some(first.revision.commit)
-        );
+        assert_eq!(revision(&fixture.remote, "main").await?, Some(first.commit));
         Ok(())
     }
 
@@ -1248,15 +1153,9 @@ mod tests {
         std::fs::create_dir_all(&app)?;
         std::fs::write(app.join("app.ts"), "source")?;
         std::fs::write(fixture.project.join("package.json"), "{}")?;
-        let saved = save_repository(
-            &app,
-            fixture.repository("main"),
-            "",
-            None,
-            &snapshot(&app).await?,
-        )
-        .await?;
-        assert_eq!(saved.revision.directory, "apps/mail");
+        let saved =
+            save_repository(&app, fixture.repository("main"), "", &snapshot(&app).await?).await?;
+        assert_eq!(saved.directory, "apps/mail");
         assert_eq!(
             output(git(&fixture.remote).args(["ls-tree", "-r", "--name-only", "main"])).await?,
             "apps/mail/app.ts\npackage.json"
@@ -1278,11 +1177,10 @@ mod tests {
             &alias.join("apps/mail"),
             fixture.repository("main"),
             "",
-            None,
             &snapshot(&alias).await?,
         )
         .await?;
-        assert_eq!(saved.revision.directory, "apps/mail");
+        assert_eq!(saved.directory, "apps/mail");
         assert_eq!(
             output(git(&fixture.remote).args(["show", "main:apps/mail/app.ts"])).await?,
             "source"
@@ -1291,11 +1189,10 @@ mod tests {
             &alias,
             fixture.repository("main"),
             "",
-            None,
             &snapshot(&alias).await?,
         )
         .await?;
-        assert_eq!(saved_root.revision.directory, ".");
+        assert_eq!(saved_root.directory, ".");
         Ok(())
     }
 
@@ -1322,14 +1219,11 @@ mod tests {
                 .to_string()
                 .contains("Retry the deployment to rebuild")
         );
-        assert_eq!(
-            revision(&fixture.remote, "main").await?,
-            Some(first.revision.commit)
-        );
+        assert_eq!(revision(&fixture.remote, "main").await?, Some(first.commit));
         let retried = fixture.save("main").await?;
         assert_eq!(
             revision(&fixture.remote, "main").await?,
-            Some(retried.revision.commit)
+            Some(retried.commit)
         );
         assert_eq!(
             output(git(&fixture.remote).args(["show", "main:app.ts"])).await?,
@@ -1352,13 +1246,11 @@ mod tests {
         let saved = fixture.save("main").await?;
         assert_eq!(
             revision(&fixture.remote, "main").await?,
-            Some(saved.revision.commit.clone())
+            Some(saved.commit.clone())
         );
         assert_eq!(
-            output(
-                git(&fixture.remote).args(["show", &format!("{}:app.ts", saved.revision.commit)])
-            )
-            .await?,
+            output(git(&fixture.remote).args(["show", &format!("{}:app.ts", saved.commit)]))
+                .await?,
             "built source"
         );
         assert_eq!(

@@ -91,11 +91,8 @@ pub struct Options {
     #[arg(long)]
     skip_build: bool,
     /// Deploy without saving source to Widefleet Git.
-    #[arg(long, conflicts_with_all = ["commit", "source_branch", "allow_branch_mismatch"])]
+    #[arg(long, conflicts_with_all = ["source_branch", "allow_branch_mismatch"])]
     pub(crate) no_source: bool,
-    /// Require a clean checkout of this existing Git commit.
-    #[arg(long)]
-    commit: Option<String>,
     /// Save source on this repository branch.
     #[arg(long)]
     pub(crate) source_branch: Option<String>,
@@ -445,7 +442,6 @@ async fn publish(
             app,
             project,
             options.source_branch.as_deref(),
-            options.commit.as_deref(),
             source_tree,
         )
         .await?
@@ -518,7 +514,7 @@ async fn publish(
         web: Some(web),
         entrypoints,
         service_documentation: Some(service_documentation),
-        source: saved.as_ref().map(|saved| saved.revision.clone()),
+        source: saved,
         crons: configuration.triggers.crons,
         queue_consumers: configuration.queues.consumers,
         worker: worker_metadata,
