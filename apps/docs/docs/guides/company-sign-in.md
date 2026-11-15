@@ -1,7 +1,7 @@
 ---
 title: Set up company sign-in
 description: Connect Microsoft Entra, Google Workspace or another identity provider, then check that colleagues can sign in and open the right apps.
-lastModified: 2026-11-13
+lastModified: 2026-11-15
 ---
 
 Connect your company's login so colleagues can use their work accounts for
@@ -71,17 +71,16 @@ setting app access.
    registration above. Add Microsoft Graph's **GroupMember.Read.All** application
    permission and grant administrator consent.
 2. Create a client secret for that registration.
-3. In Widefleet, expand **Company directory** and enable **Connect Microsoft Graph**.
+3. In Widefleet, expand **Directory search** and enable **Connect Microsoft Graph**.
 4. Enter its **Directory client ID** and **Directory client secret**, then **Save**.
 
 Continue with [verify and activate](#verify-and-activate).
 
 ## Google Workspace
 
-You also need a Google Cloud project belonging to your Workspace organization,
-permission to create an OAuth client and a service account key, and a Workspace
-super administrator who can authorize directory access. Personal Gmail accounts
-cannot use this connection.
+You need a Google Cloud project belonging to your Workspace organization and
+permission to create an OAuth client. Personal Gmail accounts cannot use this
+connection.
 
 ### Set up Google sign-in
 
@@ -93,51 +92,47 @@ cannot use this connection.
 3. In Widefleet, select **Google Workspace** under **App identity provider**.
    This fills **Issuer URL** with `https://accounts.google.com`.
 4. Enter the OAuth client's **Client ID** and **Client secret**. Set **Company
-   email domain** to the Workspace domain your users belong to.
+   email domain** to the Workspace domain your users belong to. Keep **OAuth
+   scopes** at `openid profile email` for sign-in only.
+5. Choose **Save**. If all signed-in colleagues should be able to open your apps,
+   continue with [verify and activate](#verify-and-activate).
 
-Keep this form open while you connect the directory below. Google Workspace
-requires both the sign-in client and the directory connection.
+### Allow app access by Google group
 
-### Connect the Workspace directory
+Complete this optional step when you want to restrict an app to particular groups.
+You need permission to enable an API in your Google Cloud project and to change
+the relevant groups' settings. No service account or private key is needed.
 
-The directory connection lets Widefleet check group membership and lets app
-owners find groups by name.
-
-1. In the same Google Cloud project, enable the **Admin SDK API**.
-2. Under **IAM & Admin → Service Accounts**, create a service account for
-   Widefleet's directory access. Open its **Keys** tab and choose **Add key →
-   Create new key → JSON**. Keep the downloaded file private. Google's
-   [credential guide](https://developers.google.com/workspace/guides/create-credentials#create_a_service_account_key)
-   covers these steps.
-3. As a Workspace super administrator, open **Security → Access and data control
-   → API controls → Manage Domain Wide Delegation** in the Google Admin console.
-   Choose **Add new**, enter the service account's numeric **Client ID** and
-   authorize this scope:
+1. In the OAuth client's Google Cloud project, enable the **Cloud Identity API**
+   under **APIs & Services → Library**.
+2. In **Google Auth platform → Data Access**, add this scope to the app's requested
+   permissions:
 
    ```text
-   https://www.googleapis.com/auth/admin.directory.group.readonly
+   https://www.googleapis.com/auth/cloud-identity.groups.readonly
    ```
 
-   Use the service account's ID here, not the OAuth client from the sign-in step.
-   See Google's [domain-wide delegation instructions](https://developers.google.com/identity/protocols/oauth2/service-account#delegatingauthority).
+3. In Widefleet, add the same scope to **OAuth scopes**, separated from the existing
+   scopes by a space. Choose **Save**. Existing app users will sign in again after
+   the updated configuration becomes active.
+4. In Google Groups, open each group you want to use. Under **Group settings →
+   Who can view members**, allow **Group members** to view the membership list.
+   If you cannot change that setting, ask a group owner or Workspace administrator.
+   See Google's [group permissions guide](https://support.google.com/groups/answer/2464975).
+5. Add the intended users **directly** to that group and copy its primary email
+   address, such as `finance@example.com`. You will enter that address in the
+   app's allowed groups; Google group-name search is not available in Widefleet.
 
-4. Choose a Workspace administrator account with permission to read company
-   groups. Widefleet uses that account's permissions for directory reads.
-5. In Widefleet, expand **Company directory** and fill in the fields below.
-   Choose **Save** when both the sign-in and directory fields are complete.
+At sign-in, users may be asked to allow Widefleet to read their Google groups.
+If your organization blocks that request, a Workspace administrator needs to
+approve the OAuth app and scope under its API access policy. A user who declines
+the group permission can still sign in and use apps open to all signed-in users,
+but cannot open group-restricted apps.
 
-| Widefleet field                   | What to enter                                                                                     |
-| --------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Service account email             | The downloaded key file's `client_email` value                                                    |
-| Delegated administrator email     | The Workspace administrator chosen in step 4                                                      |
-| Service account private key (PEM) | The key file's `private_key` value, including the `BEGIN PRIVATE KEY` and `END PRIVATE KEY` lines |
-
-Paste the private key with real line breaks in place of the JSON file's `\n`
-escapes. Do not paste the whole JSON file.
-
-For app access, add people **directly** to the Google groups you plan to use.
-For example, if the app allows **Finance**, add the person to Finance itself;
-membership in another group nested inside Finance does not grant access.
+Widefleet checks the user's direct memberships using that permission. A nested
+group does not grant access, and a group hidden from the user is not returned.
+For example, if the app allows Finance, add the person to Finance itself and
+allow Finance members to view its membership list.
 
 Continue with [verify and activate](#verify-and-activate).
 
@@ -175,8 +170,9 @@ and roles. Colleagues who use the CLI need to run `widefleet login` again.
 ## Check app access
 
 1. Open a published app in Widefleet and choose **Access → App access**.
-2. Search for the group you want to allow, select it, and choose **Save app rules**.
-   If group search is not configured, enter the provider's group ID instead.
+2. For Google Workspace, enter the group's primary email address, one per line.
+   For Entra, search for the group or enter its object ID. For another provider,
+   enter the value it supplies in its group claim. Choose **Save app rules**.
 3. Wait for **Active**. Open the app's launch URL in a separate browser profile
    using an allowed test account. It should open after company sign-in.
 4. Use another browser profile for an account outside the allowed groups.
@@ -191,14 +187,14 @@ expected result. Next, [share the app with colleagues](/guides/applications).
 
 ## If setup fails
 
-| What you see                                         | What to do                                                                                                                                                                                                   |
-| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Redirect URI mismatch                                | Copy both redirect URIs from Widefleet again and register them exactly, including the path, on the same provider client.                                                                                     |
-| Domain verification fails                            | Check the displayed DNS name and TXT value. Allow the DNS change to propagate, then choose **Verify domain** again.                                                                                          |
-| Google rejects directory access                      | Check that Admin SDK is enabled, delegation uses the service account's numeric client ID and the scope above, and the delegated administrator can read groups. New delegation grants may take time to apply. |
-| Google rejects the private key when saving           | Paste only the `private_key` value with its header, footer and real line breaks. Use an RSA service account key.                                                                                             |
-| Sign-in works, but a colleague cannot open the app   | Check the app's allowed groups and the colleague's membership. For Google, check direct membership. Repeat the test in a fresh browser profile.                                                              |
-| Settings are saved, but app sign-in activation fails | Check the activation error in Settings. Ask the installation operator to resolve it, then save again and repeat the app test.                                                                                |
+| What you see                                         | What to do                                                                                                                                                                                      |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Redirect URI mismatch                                | Copy both redirect URIs from Widefleet again and register them exactly, including the path, on the same provider client.                                                                        |
+| Domain verification fails                            | Check the displayed DNS name and TXT value. Allow the DNS change to propagate, then choose **Verify domain** again.                                                                             |
+| Google group access is unavailable                   | Check that Cloud Identity API is enabled in the OAuth client's project, the group scope is configured, and your organization permits it.                                                        |
+| Google sign-in works, but group access is denied     | Check the group's primary email address, direct membership and **Who can view members** setting. If the user declined group permission, repeat sign-in in a fresh browser profile and allow it. |
+| Sign-in works, but a colleague cannot open the app   | Check the app's allowed groups and the colleague's membership. Repeat the test in a fresh browser profile.                                                                                      |
+| Settings are saved, but app sign-in activation fails | Check the activation error in Settings. Ask the installation operator to resolve it, then save again and repeat the app test.                                                                   |
 
 If company sign-in locks you out of a self-hosted installation, use
 [administrator recovery](/self-hosting/installation#secrets-and-administrator-recovery).

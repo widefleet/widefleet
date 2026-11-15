@@ -1,7 +1,7 @@
 ---
 title: Company sign-in settings
 description: Configure company sign-in through the CLI or API, manage credentials and check OpenID Connect requirements.
-lastModified: 2026-11-13
+lastModified: 2026-11-15
 ---
 
 For setup through the browser, follow [Set up company sign-in](/guides/company-sign-in).
@@ -75,15 +75,17 @@ different company provider requires its own company sign-in.
 
 ## Provider values
 
-| `appIdentityType` | `issuer`                                           | App group membership                                                |
-| ----------------- | -------------------------------------------------- | ------------------------------------------------------------------- |
-| `entra`           | `https://login.microsoftonline.com/TENANT_ID/v2.0` | Microsoft Graph, including nested groups                            |
-| `google`          | `https://accounts.google.com`                      | Google Workspace Directory, direct membership only                  |
-| `oidc` (default)  | Your provider's issuer URL                         | The ID-token field named by `oidcConfig.mapping.extraFields.groups` |
+| `appIdentityType` | `issuer`                                           | App group membership                                                  |
+| ----------------- | -------------------------------------------------- | --------------------------------------------------------------------- |
+| `entra`           | `https://login.microsoftonline.com/TENANT_ID/v2.0` | Microsoft Graph, including nested groups                              |
+| `google`          | `https://accounts.google.com`                      | Cloud Identity API with optional user consent, direct membership only |
+| `oidc` (default)  | Your provider's issuer URL                         | The ID-token field named by `oidcConfig.mapping.extraFields.groups`   |
 
 `domain` is the company email domain, without a URL or wildcard. For Google it
-must match the user's Workspace domain. The default name, email and group fields
-are `name`, `email` and `groups`; the mapping is shared by workspace and app sign-in.
+must match the user's Workspace domain. For generic OIDC, the default name, email
+and group fields are `name`, `email` and `groups`; its mapping is shared by workspace
+and app sign-in. Google app identity uses its standard verified email, name and
+subject claims.
 
 ### Directory credentials
 
@@ -101,27 +103,44 @@ The registration must be in the same tenant and have the Microsoft Graph
 App membership checks use the sign-in registration's delegated `User.Read`
 permission independently of this search connection.
 
-For Google Workspace, `directory` is required:
-
-```json
-{
-  "clientId": "directory@PROJECT_ID.iam.gserviceaccount.com",
-  "adminEmail": "directory-admin@example.com",
-  "clientSecret": "PEM_PRIVATE_KEY"
-}
-```
-
-Here `clientId` is the service account's email, `adminEmail` is the delegated
-Workspace administrator, and `clientSecret` is the RSA private key in PKCS#8 PEM
-format. Replace `PEM_PRIVATE_KEY` with the downloaded key file's `private_key`
-value, preserving its `\n` escapes in JSON. Complete the
-[Google directory setup](/guides/company-sign-in#connect-the-workspace-directory)
-before applying it.
-
-Both connections support `widefleet groups search "Finance" --json` and
+This Entra connection supports `widefleet groups search "Finance" --json` and
 `GET /api/v1/groups?query=Finance`. Results contain `id`, `name`, `description`,
 `source` and a `hasMore` flag. Narrow the query when `hasMore` is true.
 API access requires `platform:read`.
+
+### Optional Google group access
+
+Set `appIdentityType` to `google`, use `https://accounts.google.com` as the issuer
+and leave `directory` as `null`. For sign-in only, use the default scopes:
+
+```json
+{ "scopes": ["openid", "profile", "email"] }
+```
+
+To check direct group membership, enable Cloud Identity API in the OAuth client's
+Google project and add the group scope to `sso.oidcConfig.scopes`:
+
+```json
+{
+  "scopes": [
+    "openid",
+    "profile",
+    "email",
+    "https://www.googleapis.com/auth/cloud-identity.groups.readonly"
+  ]
+}
+```
+
+Complete the [group permission setup](/guides/company-sign-in#allow-app-access-by-google-group)
+and use each group's primary email address in app access rules. No directory
+credentials are needed. The runtime calls Cloud Identity with the signed-in
+user's access token. Without the configured scope, or when the user declines it,
+the runtime makes no group request and the user's app identity contains no groups.
+
+Groups must allow the user to view their membership lists. Only direct groups
+returned by Google's [searchDirectGroups API](https://docs.cloud.google.com/identity/docs/reference/rest/v1/groups.memberships/searchDirectGroups)
+can grant access. Company-wide Google group-name search is not supported; enter
+group addresses directly through the UI, CLI or app access API.
 
 ## Change credentials or providers
 
@@ -130,9 +149,10 @@ Omitting these fields in an update preserves their saved values for the same
 provider. Blank secret fields in the browser have the same effect. To rotate a
 secret, enter its replacement and save; no platform restart is needed.
 
-Switching between Entra and Google requires new directory credentials. Setting
-`directory` to `null` removes the saved connection and secret; Google requires
-a directory connection and cannot use that setting.
+Setting `directory` to `null` removes the saved Entra search connection and secret.
+Use `null` when switching to Google or generic OIDC. Adding or removing Google's
+group scope requires fresh app sign-in after configuration activation; existing
+app group restrictions remain in effect.
 
 Rotating only the sign-in client secret preserves domain verification, linked
 accounts and app sessions. Other changes to the sign-in configuration can
@@ -149,7 +169,8 @@ when offboarding a person.
 
 ## OpenID Connect requirements
 
-App sign-in uses `openid profile email` and requests `offline_access`. Enable
+App sign-in uses `openid profile email`. Entra and generic OIDC also request
+`offline_access`; Google uses `access_type=offline` with consent instead. Enable
 refresh tokens for the client. To keep users signed in while updating their
 permissions, the provider must return a newly signed ID token with current
 identity and group claims on refresh. If it omits that token, users must sign

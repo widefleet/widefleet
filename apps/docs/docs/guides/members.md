@@ -1,7 +1,7 @@
 ---
 title: Members and app sign-in
 description: Join your organization, open shared apps, invite colleagues and remove access.
-lastModified: 2026-11-13
+lastModified: 2026-11-15
 ---
 
 Use your work account to join your organization and open apps shared with you.
@@ -41,6 +41,11 @@ You stay signed in as you use apps, while Widefleet automatically checks that
 you still have access. You may need to sign in again after seven days without
 using an app, after your company revokes the login, or when your company's
 sign-in policy requires it.
+
+With Google Workspace, your organization may ask you to allow Widefleet to read
+your groups during sign-in. That permission is needed for group-restricted apps.
+If you declined it, sign in again in a fresh browser profile and allow it, or
+contact your administrator if Google blocks the request.
 
 Permission to manage an app does not automatically let you use it. If access is
 denied, check that you chose the correct work account, then ask the app owner
