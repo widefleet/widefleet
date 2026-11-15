@@ -94,15 +94,9 @@ The command adds a `widefleet` remote and preserves existing remotes such as
 GitHub or GitLab's `origin`. Choose `--remote NAME` if that name is already in use.
 Use your selected branch instead of `main` when appropriate.
 
-A push saves code. Run `widefleet deploy` separately to publish it. To deploy a
-specific checked-out commit from CI, use:
-
-```sh
-widefleet deploy --commit "$(git rev-parse HEAD)" --json
-```
-
-The checkout must match that commit with no uncommitted project changes. The JSON
-result includes the source commit, branch and project directory. Use
+A push saves code. Run `widefleet deploy` separately to publish it. With a clean
+checkout, deployment reuses the checked-out commit. The `--json` result includes
+the source commit, branch and project directory. Use
 `widefleet deploy --no-source` when keeping source exclusively in another Git
 provider; that deployment has no Widefleet source reference.
 

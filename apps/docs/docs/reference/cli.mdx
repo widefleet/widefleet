@@ -121,16 +121,15 @@ bindings and the next deployment.
 
 These flags apply to both `deploy` and `preview`:
 
-| Flag                      | Behavior                                                                                                                   |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `--config PATH`           | Read another Wrangler configuration; project paths are relative to that file.                                              |
-| `--skip-build`            | Upload the existing build instead of running the app build.                                                                |
-| `--no-source`             | Deploy without saving source to Widefleet Git. Conflicts with `--commit`, `--source-branch` and `--allow-branch-mismatch`. |
-| `--commit HASH`           | Save and deploy the checked-out commit; requires its full hash and a clean checkout.                                       |
-| `--source-branch BRANCH`  | Choose the main app's source branch, or identify a Git preview's branch in CI.                                             |
-| `--allow-branch-mismatch` | Confirm deploying the main app from another local branch or a detached checkout for this invocation.                       |
-| `--no-wait`               | Return the queued deployment; activation follows asynchronously.                                                           |
-| `--json`                  | Print one result on stdout; build output and progress go to stderr.                                                        |
+| Flag                      | Behavior                                                                                                       |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `--config PATH`           | Read another Wrangler configuration; project paths are relative to that file.                                  |
+| `--skip-build`            | Upload the existing build instead of running the app build.                                                    |
+| `--no-source`             | Deploy without saving source to Widefleet Git. Conflicts with `--source-branch` and `--allow-branch-mismatch`. |
+| `--source-branch BRANCH`  | Choose the main app's source branch, or identify a Git preview's branch in CI.                                 |
+| `--allow-branch-mismatch` | Confirm deploying the main app from another local branch or a detached checkout for this invocation.           |
+| `--no-wait`               | Return the queued deployment; activation follows asynchronously.                                               |
+| `--json`                  | Print one result on stdout; build output and progress go to stderr.                                            |
 
 Git previews derive their name from the checked-out branch and save to that same
 branch. `--source-branch` must match the checked-out branch, or identify it in a
