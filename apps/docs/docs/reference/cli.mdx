@@ -70,7 +70,7 @@ IDs with `widefleet apps` and deployment IDs and artifact IDs with `widefleet hi
 | `widefleet init DIRECTORY [--template TEMPLATE]`     | Create an independent app; defaults to SvelteKit. No login required.   |
 | `widefleet apps`                                     | List apps you can manage.                                              |
 | `widefleet deploy [APP_UUID]`                        | Build and deploy; normally selects the configured app name.            |
-| `widefleet preview --name review`                    | Build and deploy an isolated preview of an existing app.               |
+| `widefleet preview`                                  | Build and deploy an isolated preview of an existing app.               |
 | `widefleet history APP_UUID`                         | Read deployment history as JSON.                                       |
 | `widefleet events APP_UUID DEPLOYMENT_UUID`          | Read deployment events.                                                |
 | `widefleet rollback APP_UUID ARTIFACT_UUID`          | Activate a retained code artifact.                                     |
@@ -127,9 +127,14 @@ These flags apply to both `deploy` and `preview`:
 | `--skip-build`           | Upload the existing build instead of running the app build.                                     |
 | `--no-source`            | Deploy without saving source to Widefleet Git. Conflicts with `--commit` and `--source-branch`. |
 | `--commit HASH`          | Save and deploy the checked-out commit; requires its full hash and a clean checkout.            |
-| `--source-branch BRANCH` | Select the app's remote source branch for this and subsequent deployments.                      |
+| `--source-branch BRANCH` | Choose the main app's source branch, or identify a Git preview's branch in CI.                  |
 | `--no-wait`              | Return the queued deployment; activation follows asynchronously.                                |
 | `--json`                 | Print one result on stdout; build output and progress go to stderr.                             |
+
+Git previews derive their name from the checked-out branch and save to that same
+branch. `--source-branch` must match the checked-out branch, or identify it in a
+detached CI checkout. It cannot reassign an existing preview. See
+[previews](/reference/previews).
 
 After activation, the command prints `Deployment succeeded` and the app URL. Headless apps have no launch URL; their JSON deployment result uses `url: null`. For automation, use `widefleet deploy --json`: stdout contains one JSON object with the final deployment fields and `url`, while build output and progress go to stderr. The `id` field identifies the deployment and `appId` identifies the app. Existing scripts that parsed the default JSON output must add `--json`. With `--no-wait --json`, the result describes the queued deployment. Uploading with `--no-wait` requires only `platform:write`; waiting for deployment events and history also requires `platform:read`. Failures exit nonzero and leave stdout empty. Update the management server together with the CLI so it can provide the complete URL, including its configured HTTPS port.
 
@@ -145,11 +150,11 @@ These commands use the selected installation and organization. Git must be
 installed. Widefleet Cloud provides app repositories; self-hosted installations
 report `supported: false` in source status.
 
-| Command                                                                                         | Behavior                                                                                                                                              |
-| ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `widefleet source status [--app NAME_OR_ID] [--config PATH]`                                    | Print source availability, repository URL, selected branch, branch head and active deployment source as JSON. Defaults to the configured app.         |
-| `widefleet source clone NAME_OR_ID DIRECTORY [--branch BRANCH] [--read-only]`                   | Clone the selected branch and configure a `widefleet` remote with the CLI credential helper. `--branch` only selects the clone branch.                |
-| `widefleet source connect [--app NAME_OR_ID] [--config PATH] [--remote NAME] [--branch BRANCH]` | Create the app repository if needed and add an authenticated remote to the current project. `--branch` also changes the app's selected source branch. |
+| Command                                                                                         | Behavior                                                                                                                                                              |
+| ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `widefleet source status [--app NAME_OR_ID] [--config PATH]`                                    | Print source availability, repository URL, selected branch, branch head and active deployment source as JSON. Defaults to the configured app.                         |
+| `widefleet source clone NAME_OR_ID DIRECTORY [--branch BRANCH] [--read-only]`                   | Clone the selected branch and configure a `widefleet` remote with the CLI credential helper. `--branch` only selects the clone branch.                                |
+| `widefleet source connect [--app NAME_OR_ID] [--config PATH] [--remote NAME] [--branch BRANCH]` | Create the app repository if needed and add an authenticated remote to the current project. `--branch` can select the main app's branch; a preview's branch is fixed. |
 
 The credential helper uses the login and organization used when connecting or
 cloning. Read-only clones need `platform:read`; connecting and pushing need

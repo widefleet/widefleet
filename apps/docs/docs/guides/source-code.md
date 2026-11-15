@@ -33,8 +33,7 @@ repository, the CLI initializes one in the project directory. Inside a monorepo,
 it saves the repository and records the app's relative directory.
 
 The main app initially uses the remote `main` branch. To choose another branch,
-use `widefleet deploy --source-branch BRANCH` or change the branch on the app's
-**Source** tab. That choice applies to subsequent deployments of the app.
+use `widefleet deploy --source-branch BRANCH`. That choice applies to subsequent deployments of the app.
 
 `widefleet source status` reports the repository URL, selected branch and latest
 saved commit. Its `deployed` field identifies the active deployment's source,
@@ -112,16 +111,19 @@ preview also reject that branch before committing.
 
 ```sh
 git switch -c feature/review
-widefleet preview --name review
+widefleet preview
 ```
 
-The preview saves code to `preview/review` in the main app's repository. Repeated
-deployments update that branch. Use `--source-branch BRANCH` to choose a different
-branch for that preview.
+The preview saves code to the same `feature/review` branch in the main app's
+repository. Widefleet derives a URL-safe preview name from the branch. Repeated
+deployments from that branch update the same preview; another branch gets its
+own preview. The branch assignment is fixed.
 
-For a detached CI checkout, pass both `--name review` and
-`--source-branch feature/review`. The source branch must differ from the main
-app's branch.
+For a detached CI checkout, use `widefleet preview --source-branch feature/review`.
+The branch must differ from the main app's branch. With a local branch checked
+out, an explicit source branch must match it.
+
+Previews without source storage remain freely nameable with `--name NAME`.
 
 Deleting a preview keeps its branch. Deleting the main app removes its managed
 repository and all its branches; the deletion confirmation states this. External

@@ -193,8 +193,13 @@ the source as empty. The known `deployed` reference remains available. Ordinary
 app reads and management pages remain usable.
 
 Branches use Git branch-name rules and are limited to 200 characters. Main apps
-default to `main`; new previews default to `preview/<previewName>` in the parent
-app's repository. Selecting a branch neither creates a commit nor deploys code.
+default to `main`. Create a Git preview with `POST /api/v1/apps`, including
+`parentId` and `previewBranch`. Its hostname uses a URL-safe name derived from that
+branch; if `previewName` is also supplied, it must match the derived name.
+The preview shares its parent's repository and keeps that branch permanently.
+Source setup and deployment metadata cannot select a different branch. A preview
+created without `previewBranch` has no Git source binding.
+Selecting a main app's branch neither creates a commit nor deploys code.
 
 Credential responses contain `{ url, username, password, expiresAt }` and use
 `Cache-Control: no-store`. Use the returned username and password for Git HTTPS
