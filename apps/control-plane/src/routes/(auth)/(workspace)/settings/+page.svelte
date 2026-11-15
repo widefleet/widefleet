@@ -172,6 +172,7 @@
             ...draft.sso,
             oidcConfig: {
               ...draft.sso.oidcConfig,
+              scopes: draft.sso.oidcConfig.scopes.filter(Boolean),
               clientSecret: draft.sso.oidcConfig.clientSecret || undefined,
             },
           },
@@ -458,7 +459,7 @@
               bind:value={
                 () => draft.sso.oidcConfig.scopes.join(" "),
                 (value) => {
-                  draft.sso.oidcConfig.scopes = value.split(/\s+/).filter(Boolean);
+                  draft.sso.oidcConfig.scopes = value.split(/\s/);
                 }
               }
               aria-describedby="scopes-help"
