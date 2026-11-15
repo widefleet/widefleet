@@ -51,7 +51,9 @@ describe.runIf(process.env["RUN_CLI_PACKAGE_TESTS"] === "1")(
 
         response.setHeader("content-type", "application/json");
 
-        if (request.method === "POST" && path === `api/v1/apps/${appId}/source/prepare`) {
+        if (request.method === "POST" && path === "api/v1/apps/source-target") {
+          response.end(JSON.stringify({ supported: false, branch: "main", preview: false }));
+        } else if (request.method === "POST" && path === `api/v1/apps/${appId}/source/prepare`) {
           response.end(JSON.stringify({ organizationId: appId, repository: null }));
         } else if (
           request.method === "POST" &&

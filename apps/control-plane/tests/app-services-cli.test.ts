@@ -91,6 +91,8 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
             },
           }),
         );
+      } else if (request.method === "POST" && request.url === "/api/v1/apps/source-target") {
+        response.end(JSON.stringify({ supported: false, branch: "main", preview: false }));
       } else if (
         request.method === "POST" &&
         request.url === `/api/v1/apps/${app.id}/source/prepare`
