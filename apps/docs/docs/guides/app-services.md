@@ -187,8 +187,9 @@ widefleet services reject REQUEST_UUID
 
 Approval rechecks the requester's current app permissions, the available API and
 the binding name before saving the connection. If these have changed, the request
-stays pending and the administrator sees an error. Reject the stale request and
-submit a new one with the intended settings.
+stays pending and the administrator sees an error. After restoring access or
+fixing the API, any organization administrator can retry approval. To change the
+requested settings, reject the stale request and submit a new one.
 
 **Approved** confirms the connection was saved, not that runtime activation has
 finished. Check the caller's **Connections** page or `widefleet connections --app
@@ -202,6 +203,11 @@ Connections can be saved before the caller's first deployment. Otherwise the
 CLI waits for activation unless `--no-wait` is set. **Saved**, **pending**,
 **active** and **failed** describe grant activation independently of code updates.
 Retry a failed change by submitting it again and inspect `widefleet connections`.
+App owners and collaborators can retry an unchanged saved connection even when
+its provider requires approval. In **Connections → Browse app APIs**, choose
+**Retry connection** for that binding, or repeat the original `widefleet connect`
+command. Changing its target or entrypoint still requires permission, and a
+removed connection cannot be restored using its old approval.
 
 Each new call resolves the provider's active app version. Calls already running
 retain their selected code and secret snapshot. A caller does not need to be
