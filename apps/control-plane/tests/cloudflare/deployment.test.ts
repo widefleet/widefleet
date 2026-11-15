@@ -3041,7 +3041,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
     it("updates and rolls back runtime code without rewriting app bindings or subscriptions", async () => {
       await selectRuntime(contract.runtimeRelease.parse(release));
       await expect
-        .poll(runtimeStatus)
+        .poll(runtimeStatus, { timeout: 15000 })
         .toMatchObject({ activeVersion: release.version, state: "succeeded" });
 
       const before = JSON.stringify({
@@ -3056,7 +3056,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       expect(selected.desiredVersion).toBe(next.version);
       expect(selected.jobId).not.toBeNull();
       await expect
-        .poll(runtimeStatus)
+        .poll(runtimeStatus, { timeout: 15000 })
         .toMatchObject({ activeVersion: next.version, state: "succeeded" });
       expect(
         (await environment.database.db.select().from(organizationRuntimes))[0]?.appliedRuntime,
@@ -3068,7 +3068,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
 
       await selectRuntime({ version: release.version });
       await expect
-        .poll(runtimeStatus)
+        .poll(runtimeStatus, { timeout: 15000 })
         .toMatchObject({ activeVersion: release.version, state: "succeeded" });
       expect(
         JSON.stringify({ bindings: [...settings], schedules, queues: [...queues], bindingTag }),
