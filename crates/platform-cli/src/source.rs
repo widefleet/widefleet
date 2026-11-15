@@ -320,54 +320,58 @@ async fn commit_all(project: &Path, branch: &str) -> Result<String> {
     let index =
         output(git(project).args(["rev-parse", "--path-format=absolute", "--git-path", "index"]))
             .await?;
-    let original = match std::fs::read(&index) {
-        Ok(bytes) => Some(bytes),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+    // Hold Git's normal index lock while committing with a separate index. Failed
+    // hooks/signing leave the real index untouched; other Git writers cannot race
+    // the successful replacement. Hooks inherit the separate index as usual.
+    let lock_path = format!("{index}.lock");
+    std::fs::File::create_new(&lock_path).map_err(|cause| {
+        Error::invalid(format!(
+            "Could not lock the Git index at {lock_path}: {cause}"
+        ))
+    })?;
+    let lock = tempfile::TempPath::try_from_path(lock_path)?;
+    let temporary = tempfile::tempdir()?;
+    let pending = temporary.path().join("index");
+    match std::fs::copy(&index, &pending) {
+        Ok(_) => (),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
         Err(error) => return Err(error.into()),
-    };
-    let result = async {
-        output(git(project).args(["add", "--all", "--", "."])).await?;
-        let mut command = git(project);
-        // A new agent workspace may not have a Git author configured yet.
-        for (key, fallback) in [
-            ("user.name", "Widefleet"),
-            ("user.email", "noreply@widefleet.app"),
-        ] {
-            if !git(project)
-                .args(["config", "--get", key])
-                .output()
-                .await?
-                .status
-                .success()
-            {
-                command.args(["-c", &format!("{key}={fallback}")]);
-            }
-        }
-        output(command.args([
-            "commit",
-            "--allow-empty",
-            "-m",
-            &format!("Save source for {branch}"),
-        ]))
-        .await?;
-        revision(project, "HEAD")
+    }
+    output(
+        git(project)
+            .env("GIT_INDEX_FILE", &pending)
+            .args(["add", "--all", "--", "."]),
+    )
+    .await?;
+    let mut command = git(project);
+    command.env("GIT_INDEX_FILE", &pending);
+    // A new agent workspace may not have a Git author configured yet.
+    for (key, fallback) in [
+        ("user.name", "Widefleet"),
+        ("user.email", "noreply@widefleet.app"),
+    ] {
+        if !git(project)
+            .args(["config", "--get", key])
+            .output()
             .await?
-            .ok_or_else(|| Error::invalid("Git did not create a source commit".into()))
+            .status
+            .success()
+        {
+            command.args(["-c", &format!("{key}={fallback}")]);
+        }
     }
-    .await;
-    if let Err(cause) = &result {
-        let restored = match original {
-            Some(bytes) => std::fs::write(&index, bytes),
-            None => match std::fs::remove_file(&index) {
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-                result => result,
-            },
-        };
-        restored.map_err(|error| {
-            Error::invalid(format!("{cause}. Could not restore the Git index: {error}"))
-        })?;
-    }
-    result
+    output(command.args([
+        "commit",
+        "--allow-empty",
+        "-m",
+        &format!("Save source for {branch}"),
+    ]))
+    .await?;
+    std::fs::copy(&pending, &lock)?;
+    lock.persist(&index).map_err(std::io::Error::from)?;
+    revision(project, "HEAD")
+        .await?
+        .ok_or_else(|| Error::invalid("Git did not create a source commit".into()))
 }
 
 pub struct Saved {
@@ -779,6 +783,11 @@ mod tests {
         let second = fixture.save("main").await?;
         assert_ne!(second.revision.commit, first.revision.commit);
         assert!(
+            output(git(&fixture.project).args(["status", "--porcelain"]))
+                .await?
+                .is_empty()
+        );
+        assert!(
             is_ancestor(
                 &fixture.project,
                 &first.revision.commit,
@@ -947,7 +956,7 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn restores_partial_staging_when_a_commit_hook_rejects_the_save() -> Result<()> {
+    async fn preserves_partial_staging_when_a_commit_hook_rejects_the_save() -> Result<()> {
         use std::os::unix::fs::PermissionsExt;
         let fixture = Fixture::new().await?;
         std::fs::write(fixture.project.join("app.ts"), "committed")?;
@@ -979,6 +988,77 @@ mod tests {
             std::fs::read_to_string(fixture.project.join("new.ts"))?,
             "untracked"
         );
+        assert_eq!(
+            revision(&fixture.project, "HEAD").await?,
+            Some(first.revision.commit.clone())
+        );
+        assert_eq!(
+            revision(&fixture.remote, "main").await?,
+            Some(first.revision.commit)
+        );
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn locks_out_other_staging_until_a_failed_commit_finishes() -> Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+        let fixture = Fixture::new().await?;
+        std::fs::write(fixture.project.join("app.ts"), "committed")?;
+        let first = fixture.save("main").await?;
+        std::fs::write(fixture.project.join("app.ts"), "staged")?;
+        output(git(&fixture.project).args(["add", "app.ts"])).await?;
+        std::fs::write(fixture.project.join("app.ts"), "unstaged")?;
+        let index = fixture.project.join(".git/index");
+        let before = std::fs::read(&index)?;
+        let hook = fixture.project.join(".git/hooks/pre-commit");
+        std::fs::write(
+            &hook,
+            "#!/bin/sh\nprintf concurrent > app.ts\nGIT_INDEX_FILE=\"$PWD/.git/index\" git add app.ts 2> .git/writer-error\nexit 1\n",
+        )?;
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o700))?;
+        assert!(fixture.save("main").await.is_err());
+        assert!(
+            std::fs::read_to_string(fixture.project.join(".git/writer-error"))?
+                .contains("index.lock")
+        );
+        assert_eq!(std::fs::read(&index)?, before);
+        assert_eq!(
+            output(git(&fixture.project).args(["show", ":app.ts"])).await?,
+            "staged"
+        );
+        assert_eq!(
+            revision(&fixture.project, "HEAD").await?,
+            Some(first.revision.commit.clone())
+        );
+        assert_eq!(
+            revision(&fixture.remote, "main").await?,
+            Some(first.revision.commit)
+        );
+        assert!(!fixture.project.join(".git/index.lock").exists());
+        output(git(&fixture.project).args(["add", "app.ts"])).await?;
+        assert_eq!(
+            output(git(&fixture.project).args(["show", ":app.ts"])).await?,
+            "concurrent"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn leaves_an_existing_index_lock_and_staging_untouched() -> Result<()> {
+        let fixture = Fixture::new().await?;
+        std::fs::write(fixture.project.join("app.ts"), "committed")?;
+        let first = fixture.save("main").await?;
+        std::fs::write(fixture.project.join("app.ts"), "staged")?;
+        output(git(&fixture.project).args(["add", "app.ts"])).await?;
+        std::fs::write(fixture.project.join("app.ts"), "unstaged")?;
+        let index = fixture.project.join(".git/index");
+        let before = std::fs::read(&index)?;
+        let lock = fixture.project.join(".git/index.lock");
+        std::fs::write(&lock, "another Git operation")?;
+        assert!(fixture.save("main").await.is_err());
+        assert_eq!(std::fs::read_to_string(&lock)?, "another Git operation");
+        assert_eq!(std::fs::read(&index)?, before);
         assert_eq!(
             revision(&fixture.project, "HEAD").await?,
             Some(first.revision.commit.clone())
