@@ -13,9 +13,9 @@ const native = it.runIf(process.env["RUN_CLI_TESTS"] === "1");
 const directories: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(
-    directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })),
-  );
+  // Concurrent removal of a nested fixture and its parent races on Windows.
+  for (const directory of directories.splice(0).reverse())
+    await rm(directory, { recursive: true, force: true });
 });
 
 async function project(source: string, parent = tmpdir()) {
