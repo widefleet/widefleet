@@ -4,30 +4,34 @@ import { decryptSecrets, encryptSecrets } from "./secrets.ts";
 import {
   managedOAuthConfiguration,
   oauthProvider,
+  oauthProfile,
   oauthRequest,
   type OAuthRequest,
 } from "./oauth-protocol.ts";
 
-const providers = {
-  google: {
+const profiles = {
+  "gmail-readonly": {
+    provider: "google",
     authorize: "https://accounts.google.com/o/oauth2/v2/auth",
     token: "https://oauth2.googleapis.com/token",
     issuer: /^https:\/\/accounts\.google\.com$/,
     scopes: ["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.readonly"],
   },
-  github: {
+  "github-repo": {
+    provider: "github",
     authorize: "https://github.com/login/oauth/authorize",
     token: "https://github.com/login/oauth/access_token",
     issuer: /^https:\/\/github\.com$/,
     scopes: ["read:user", "user:email", "repo"],
   },
-  microsoft: {
+  "onedrive-read": {
+    provider: "microsoft",
     authorize: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
     token: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
     issuer: /^https:\/\/login\.microsoftonline\.com\/(?:common|[a-f0-9-]{36})\/v2\.0$/i,
     scopes: ["openid", "profile", "email", "offline_access", "User.Read", "Files.Read"],
   },
-};
+} as const;
 
 const ownership = z.object({
   appId: z.uuid(),
@@ -35,6 +39,7 @@ const ownership = z.object({
   origin: z.url(),
   caller: appCaller.pick({ issuer: true, subject: true }).strip(),
   provider: oauthProvider,
+  profile: oauthProfile,
   clientId: z.string(),
 });
 
@@ -58,12 +63,18 @@ const tokenResponse = z.object({
 
 type Environment = { WIDEFLEET_SECRETS_KEY: string; WIDEFLEET_OAUTH?: string };
 
-export type OAuthIdentity = Omit<z.infer<typeof ownership>, "provider" | "clientId">;
+export type OAuthIdentity = Omit<z.infer<typeof ownership>, "provider" | "profile" | "clientId">;
 
-const configuration = (environment: Environment) =>
-  environment.WIDEFLEET_OAUTH
-    ? managedOAuthConfiguration.parse(JSON.parse(environment.WIDEFLEET_OAUTH))
-    : null;
+const configuration = (environment: Environment) => {
+  if (!environment.WIDEFLEET_OAUTH) return null;
+
+  try {
+    return managedOAuthConfiguration.parse(JSON.parse(environment.WIDEFLEET_OAUTH));
+  } catch {
+    // JSON parser errors may include secret values from the input.
+    throw new Error("Managed OAuth configuration is invalid");
+  }
+};
 
 const callbackPath = (provider: z.infer<typeof oauthProvider>) => `/oauth/callback/${provider}`;
 
@@ -92,6 +103,7 @@ const requireOwner = (actual: z.infer<typeof ownership>, expected: z.infer<typeo
     actual.organizationId !== expected.organizationId ||
     actual.origin !== expected.origin ||
     actual.provider !== expected.provider ||
+    actual.profile !== expected.profile ||
     actual.clientId !== expected.clientId ||
     actual.caller.issuer !== expected.caller.issuer ||
     actual.caller.subject !== expected.caller.subject
@@ -102,8 +114,9 @@ const requireOwner = (actual: z.infer<typeof ownership>, expected: z.infer<typeo
 export const managedOAuth = (environment: Environment, transport: typeof fetch = fetch) => ({
   async request(identity: OAuthIdentity, input: OAuthRequest) {
     const request = oauthRequest.parse(input);
+    const profile = profiles[request.profile];
     const config = configuration(environment);
-    const client = config?.providers[request.provider];
+    const client = config?.providers[profile.provider];
 
     if (request.action === "configuration") return client ? { clientId: client.clientId } : null;
 
@@ -111,12 +124,12 @@ export const managedOAuth = (environment: Environment, transport: typeof fetch =
 
     const owner = ownership.parse({
       ...identity,
-      provider: request.provider,
+      provider: profile.provider,
+      profile: request.profile,
       clientId: client.clientId,
     });
 
-    const provider = providers[request.provider];
-    const redirect = `${config.origin}${callbackPath(request.provider)}`;
+    const redirect = `${config.origin}${callbackPath(profile.provider)}`;
 
     if (request.action === "authorize") {
       const ticket = await seal(
@@ -132,18 +145,18 @@ export const managedOAuth = (environment: Environment, transport: typeof fetch =
         ),
       );
 
-      const url = new URL(provider.authorize);
+      const url = new URL(profile.authorize);
       url.search = new URLSearchParams({
         client_id: client.clientId,
         redirect_uri: redirect,
         response_type: "code",
-        scope: provider.scopes.join(" "),
+        scope: profile.scopes.join(" "),
         state: ticket,
         code_challenge: request.codeChallenge,
         code_challenge_method: "S256",
       }).toString();
 
-      if (request.provider === "google") {
+      if (profile.provider === "google") {
         url.searchParams.set("access_type", "offline");
         url.searchParams.set("prompt", "select_account consent");
       }
@@ -182,7 +195,7 @@ export const managedOAuth = (environment: Environment, transport: typeof fetch =
       body.set("refresh_token", grant.token);
     }
 
-    const response = await transport(provider.token, {
+    const response = await transport(profile.token, {
       method: "POST",
       body,
       headers: { accept: "application/json" },
@@ -217,17 +230,25 @@ export const managedOAuth = (environment: Environment, transport: typeof fetch =
       refreshTokenExpiresAt: tokens.refresh_token_expires_in
         ? new Date(Date.now() + tokens.refresh_token_expires_in * 1000)
         : undefined,
-      scopes: tokens.scope?.split(/[ ,]+/).filter(Boolean) ?? provider.scopes,
+      scopes: tokens.scope?.split(/[ ,]+/).filter(Boolean) ?? profile.scopes,
       tokenType: tokens.token_type ?? "Bearer",
     };
   },
 
   async callback(request: Request, available: (identity: OAuthIdentity) => Promise<boolean>) {
-    const config = configuration(environment);
     const url = new URL(request.url);
 
-    if (!config || url.origin !== config.origin || !url.pathname.startsWith("/oauth/callback/"))
+    if (!url.pathname.startsWith("/oauth/callback/")) return null;
+    let config;
+
+    try {
+      config = configuration(environment);
+    } catch {
+      // An optional OAuth configuration must not prevent normal app routing.
       return null;
+    }
+
+    if (!config || url.origin !== config.origin) return null;
     const headers = { "cache-control": "no-store", "referrer-policy": "no-referrer" };
 
     if (request.method !== "GET" || url.href.length > 20000)
@@ -246,7 +267,7 @@ export const managedOAuth = (environment: Environment, transport: typeof fetch =
         throw new Error("OAuth transaction is not available");
       const issuer = url.searchParams.get("iss");
 
-      if (issuer && !providers[pending.provider].issuer.test(issuer))
+      if (issuer && !profiles[pending.profile].issuer.test(issuer))
         throw new Error("Unexpected OAuth issuer");
       const target = new URL(`/auth/callback/${pending.provider}`, pending.origin);
       target.searchParams.set("state", pending.state);

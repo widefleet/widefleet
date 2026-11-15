@@ -55,7 +55,7 @@ const setup = async () => {
   const result = z.object({ url: z.url() }).parse(
     await broker.request(identity, {
       action: "authorize",
-      provider: "google",
+      profile: "gmail-readonly",
       state: "local-better-auth-state",
       codeChallenge,
     }),
@@ -66,7 +66,7 @@ const setup = async () => {
 
   const exchange = {
     action: "exchange",
-    provider: "google",
+    profile: "gmail-readonly",
     ticket,
     code: "one-time-code",
     codeVerifier: verifier,
@@ -109,7 +109,7 @@ describe("managed OAuth relay", () => {
     const refreshed = z.object({ refreshToken: z.string() }).parse(
       await broker.request(identity, {
         action: "refresh",
-        provider: "google",
+        profile: "gmail-readonly",
         refreshToken: tokens.refreshToken,
       }),
     );
@@ -117,7 +117,7 @@ describe("managed OAuth relay", () => {
     expect(refreshed.refreshToken).not.toBe(tokens.refreshToken);
     await broker.request(identity, {
       action: "refresh",
-      provider: "google",
+      profile: "gmail-readonly",
       refreshToken: refreshed.refreshToken,
     });
     expect(requests[2]?.get("refresh_token")).toBe("provider-refresh-2");
@@ -144,19 +144,19 @@ describe("managed OAuth relay", () => {
       await expect(
         broker.request(other, {
           action: "refresh",
-          provider: "google",
+          profile: "gmail-readonly",
           refreshToken: tokens.refreshToken,
         }),
       ).rejects.toThrow("another app");
     }
 
-    await expect(broker.request(identity, { ...exchange, provider: "github" })).rejects.toThrow(
+    await expect(broker.request(identity, { ...exchange, profile: "github-repo" })).rejects.toThrow(
       "another app",
     );
     await expect(
       broker.request(identity, {
         action: "refresh",
-        provider: "google",
+        profile: "gmail-readonly",
         refreshToken: exchange.ticket,
       }),
     ).rejects.toThrow();
@@ -188,16 +188,16 @@ describe("managed OAuth relay", () => {
   it("keeps unconfigured runtimes disabled and rejects credentials selected by a caller", async () => {
     const disabled = managedOAuth({ WIDEFLEET_SECRETS_KEY: environment.WIDEFLEET_SECRETS_KEY });
     expect(
-      await disabled.request(identity, { action: "configuration", provider: "google" }),
+      await disabled.request(identity, { action: "configuration", profile: "gmail-readonly" }),
     ).toBeNull();
     const { broker } = await setup();
-    expect(await broker.request(identity, { action: "configuration", provider: "google" })).toEqual(
-      { clientId: "test-client" },
-    );
+    expect(
+      await broker.request(identity, { action: "configuration", profile: "gmail-readonly" }),
+    ).toEqual({ clientId: "test-client" });
 
     const input = {
       action: "configuration",
-      provider: "google",
+      profile: "gmail-readonly",
       clientSecret: "attacker",
     } as const;
 
@@ -224,6 +224,23 @@ describe("managed OAuth relay", () => {
     callback.searchParams.delete("iss");
     callback.pathname = "/oauth/callback/github";
     expect((await broker.callback(new Request(callback), async () => true))?.status).toBe(400);
+  });
+
+  it.each([
+    "{invalid-json-secret",
+    JSON.stringify({ origin: "https://oauth.example.test", providers: { google: {} } }),
+  ])("keeps invalid managed configuration out of normal app routing", async (value) => {
+    const transport = vi.fn<typeof fetch>();
+    const available = vi.fn(async () => true);
+    const broker = managedOAuth({ ...environment, WIDEFLEET_OAUTH: value }, transport);
+
+    for (const path of ["/", "/api/data", "/oauth/callback/google"])
+      expect(await broker.callback(new Request(`${identity.origin}${path}`), available)).toBeNull();
+    expect(available).not.toHaveBeenCalled();
+    await expect(
+      broker.request(identity, { action: "configuration", profile: "gmail-readonly" }),
+    ).rejects.toThrow(/^Managed OAuth configuration is invalid$/);
+    expect(transport).not.toHaveBeenCalled();
   });
 
   it("does not follow token endpoint redirects or expose malformed provider responses", async () => {

@@ -90,6 +90,7 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft") => {
 
   return {
     state,
+    tokens,
     authorize(location: string, user: string) {
       const url = new URL(location);
       const redirect = z.url().parse(url.searchParams.get("redirect_uri"));

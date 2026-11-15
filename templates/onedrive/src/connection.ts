@@ -1,4 +1,4 @@
-import { oauthCredentials, type OAuthCredentials } from "./oauth.ts";
+import { oauthCredentials } from "./oauth.ts";
 import { z } from "zod";
 import { authentication } from "./auth.ts";
 import { caller, callerId, type Environment, type Properties } from "./context.ts";
@@ -52,20 +52,6 @@ export const accountConnection = (environment: Environment, properties: Properti
     return { status: "configured", credentials } as const;
   };
 
-  const registrationChanged = async (id: string, credentials: OAuthCredentials) => {
-    const registration = await environment.DB.prepare(
-      "SELECT clientId, managed FROM oauth_registration WHERE userId = ?",
-    )
-      .bind(id)
-      .first<{ clientId: string; managed: number }>();
-
-    // Legacy accounts cannot prove which OAuth registration issued their tokens.
-    return registration
-      ? registration.clientId !== credentials.clientId ||
-          Boolean(registration.managed) !== credentials.managed
-      : true;
-  };
-
   const token = async () => {
     if (!caller.safeParse(properties.caller).success)
       return { status: "authentication_required" } as const;
@@ -74,9 +60,6 @@ export const accountConnection = (environment: Environment, properties: Properti
 
     if (config.status !== "configured") return config;
     const linked = await account(id);
-
-    if (linked && (await registrationChanged(id, config.credentials)))
-      return { status: "reconnect_required", connectUrl: environment.WIDEFLEET_ORIGIN } as const;
 
     if (!linked)
       return { status: "connection_required", connectUrl: environment.WIDEFLEET_ORIGIN } as const;
@@ -115,9 +98,6 @@ export const accountConnection = (environment: Environment, properties: Properti
 
       if (config.status !== "configured") return config;
       const linked = await account(id);
-
-      if (linked && (await registrationChanged(id, config.credentials)))
-        return { status: "reconnect_required", connectUrl: environment.WIDEFLEET_ORIGIN } as const;
 
       return {
         status: linked ? "connected" : "connection_required",
@@ -175,7 +155,6 @@ export const accountConnection = (environment: Environment, properties: Properti
 
         if (url.pathname === "/disconnect") {
           await environment.DB.batch([
-            environment.DB.prepare("DELETE FROM oauth_registration WHERE userId = ?").bind(id),
             environment.DB.prepare("DELETE FROM account WHERE userId = ? AND providerId = ?").bind(
               id,
               "microsoft",
@@ -232,7 +211,6 @@ export const accountConnection = (environment: Environment, properties: Properti
           id,
           config.credentials,
           url.searchParams.get("managed_state") ?? undefined,
-          await registrationChanged(id, config.credentials),
         );
 
         const session = await auth.api.getSession({ headers: request.headers });
@@ -243,17 +221,7 @@ export const accountConnection = (environment: Environment, properties: Properti
             { status: 403 },
           );
 
-        const response = await auth.handler(request);
-        const destination = response.headers.get("location");
-
-        if (destination === `${url.origin}/` && (await account(id)))
-          await environment.DB.prepare(
-            "INSERT INTO oauth_registration (userId, clientId, managed) VALUES (?, ?, ?) ON CONFLICT(userId) DO UPDATE SET clientId = excluded.clientId, managed = excluded.managed",
-          )
-            .bind(id, config.credentials.clientId, Number(config.credentials.managed))
-            .run();
-
-        return response;
+        return auth.handler(request);
       }
 
       // Token/session endpoints, including the internal bootstrap, stay private.

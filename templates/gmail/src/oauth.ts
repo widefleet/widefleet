@@ -11,13 +11,21 @@ const tokens = z.object({
   tokenType: z.string(),
 });
 
-type Provider = "google" | "github" | "microsoft";
+const profiles = {
+  google: "gmail-readonly",
+  github: "github-repo",
+  microsoft: "onedrive-read",
+} as const;
+
+type Provider = keyof typeof profiles;
+
+type Profile = (typeof profiles)[Provider];
 
 type Request =
-  | { action: "configuration"; provider: Provider }
-  | { action: "authorize"; provider: Provider; state: string; codeChallenge: string }
-  | { action: "exchange"; provider: Provider; ticket: string; code: string; codeVerifier: string }
-  | { action: "refresh"; provider: Provider; refreshToken: string };
+  | { action: "configuration"; profile: Profile }
+  | { action: "authorize"; profile: Profile; state: string; codeChallenge: string }
+  | { action: "exchange"; profile: Profile; ticket: string; code: string; codeVerifier: string }
+  | { action: "refresh"; profile: Profile; refreshToken: string };
 
 export type OAuthBinding = {
   request(
@@ -70,7 +78,10 @@ export const oauthCredentials = async (
   }
 
   const managed = environment.WIDEFLEET_OAUTH
-    ? await environment.WIDEFLEET_OAUTH.request({ action: "configuration", provider })
+    ? await environment.WIDEFLEET_OAUTH.request({
+        action: "configuration",
+        profile: profiles[provider],
+      })
     : null;
 
   if (managed)
@@ -111,7 +122,7 @@ export const managedOAuthPlugin = (
 
       const result = await binding.request({
         action: "authorize",
-        provider: id,
+        profile: profiles[id],
         state,
         codeChallenge,
       });
@@ -124,11 +135,19 @@ export const managedOAuthPlugin = (
         throw new Error("Managed OAuth callback is missing its transaction");
 
       return tokens.parse(
-        await binding.request({ action: "exchange", provider: id, ticket, code, codeVerifier }),
+        await binding.request({
+          action: "exchange",
+          profile: profiles[id],
+          ticket,
+          code,
+          codeVerifier,
+        }),
       );
     };
 
     provider.refreshAccessToken = async (refreshToken) =>
-      tokens.parse(await binding.request({ action: "refresh", provider: id, refreshToken }));
+      tokens.parse(
+        await binding.request({ action: "refresh", profile: profiles[id], refreshToken }),
+      );
   },
 });

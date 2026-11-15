@@ -24,10 +24,10 @@ const compile = async (file: string) => {
   return z.string().parse(result.outputFiles[0]?.text);
 };
 
-for (const [template, kind, prefix] of [
-  ["gmail", "google", "GOOGLE"],
-  ["github", "github", "GITHUB"],
-  ["onedrive", "microsoft", "MICROSOFT"],
+for (const [template, kind, prefix, profile] of [
+  ["gmail", "google", "GOOGLE", "gmail-readonly"],
+  ["github", "github", "GITHUB", "github-repo"],
+  ["onedrive", "microsoft", "MICROSOFT", "onedrive-read"],
 ] as const)
   describe(`${template} managed OAuth`, () => {
     const origin = `https://${template}.example.test:25453`;
@@ -35,16 +35,19 @@ for (const [template, kind, prefix] of [
     let upstream: ReturnType<typeof oauthProvider>;
     let script: string;
     let relayScript: string;
+    let legacyScript: string;
     beforeAll(async () => {
-      [script, relayScript] = await Promise.all([
+      [script, relayScript, legacyScript] = await Promise.all([
         compile(`templates/${template}/tests/worker.ts`),
         compile("packages/app-runtime/fixtures/oauth.ts"),
+        compile("apps/control-plane/tests/fixtures/legacy-oauth-account.ts"),
       ]);
     });
 
     const configuration = (
       custom: "none" | "complete" | "partial" = "none",
-      clientId = `test-${kind}-client`,
+      managed = true,
+      legacy = false,
     ) =>
       ({
         telemetry: { enabled: false },
@@ -56,7 +59,7 @@ for (const [template, kind, prefix] of [
               compatibilityFlags: ["nodejs_compat"],
               manifest: {
                 mainModule: "worker.js",
-                modules: { "worker.js": { type: "esm", contents: script } },
+                modules: { "worker.js": { type: "esm", contents: legacy ? legacyScript : script } },
               },
               env: {
                 TEST_OAUTH: { type: "worker", worker: "relay", exportName: "TestOAuth" },
@@ -64,7 +67,7 @@ for (const [template, kind, prefix] of [
                 WIDEFLEET_ORIGIN: { type: "json", value: origin },
                 [`${prefix}_CLIENT_ID`]: {
                   type: "json",
-                  value: custom === "none" ? "" : clientId,
+                  value: custom === "none" ? "" : `test-${kind}-client`,
                 },
                 [`${prefix}_CLIENT_SECRET`]: {
                   type: "json",
@@ -97,15 +100,17 @@ for (const [template, kind, prefix] of [
                 WIDEFLEET_SECRETS_KEY: { type: "json", value: "ab".repeat(32) },
                 WIDEFLEET_OAUTH: {
                   type: "json",
-                  value: JSON.stringify({
-                    origin: "https://oauth.example.test:25453",
-                    providers: {
-                      [kind]: {
-                        clientId: `test-${kind}-client`,
-                        clientSecret: `test-${kind}-secret`,
-                      },
-                    },
-                  }),
+                  value: managed
+                    ? JSON.stringify({
+                        origin: "https://oauth.example.test:25453",
+                        providers: {
+                          [kind]: {
+                            clientId: `test-${kind}-client`,
+                            clientSecret: `test-${kind}-secret`,
+                          },
+                        },
+                      })
+                    : "",
                 },
               },
             },
@@ -267,28 +272,29 @@ for (const [template, kind, prefix] of [
         status: "connected",
       });
       await alice.request("/disconnect", "POST");
-      expect(
-        await db.prepare("SELECT COUNT(*) AS count FROM oauth_registration").first("count"),
-      ).toBe(0);
+      expect(await db.prepare("SELECT COUNT(*) AS count FROM account").first("count")).toBe(0);
     });
-    it("keeps custom credentials preferred and requires reconnection after changing registration", async () => {
+    it("keeps custom credentials preferred and switches registrations after disconnecting", async () => {
       await runtime.setOptions(configuration("complete"));
       const alice = browser("alice");
       expect(new URL(await start(alice)).searchParams.get("redirect_uri")).toBe(
         `${origin}/auth/callback/${kind}`,
       );
       await connect(alice, "101");
+      await alice.request("/disconnect", "POST");
       await runtime.setOptions(configuration());
       expect(await (await alice.request("/rpc/list")).json()).toMatchObject({
-        status: "reconnect_required",
+        status: "connection_required",
       });
       await connect(alice, "101");
       expect(await (await alice.request("/rpc/list")).json()).toMatchObject({
         status: "connected",
       });
+      await alice.request("/disconnect", "POST");
       await runtime.setOptions(configuration("complete"));
+      await connect(alice, "101");
       expect(await (await alice.request("/rpc/list")).json()).toMatchObject({
-        status: "reconnect_required",
+        status: "connected",
       });
       await runtime.setOptions(configuration("partial"));
       expect(await (await alice.request("/rpc/status")).json()).toMatchObject({
@@ -296,31 +302,65 @@ for (const [template, kind, prefix] of [
         missing: [`${prefix}_CLIENT_SECRET`],
       });
     });
-    it("requires one reconnect for legacy accounts before trusting a registration", async () => {
-      await runtime.setOptions(configuration("complete"));
+    it.each(
+      [false, true].flatMap((managed) =>
+        (kind === "github" ? [false, true] : [true]).map((expiring) => ({ managed, expiring })),
+      ),
+    )(
+      "preserves main-format custom accounts (managed=$managed, expiring=$expiring)",
+      async ({ managed, expiring }) => {
+        await runtime.setOptions(configuration("complete", false, true));
+        upstream.state.expiring = expiring;
 
-      if (kind === "github") upstream.state.expiring = false;
-      const alice = browser("alice");
-      await connect(alice, "101");
-      const db = await runtime.getD1Database("DB", "template");
-      await db.prepare("DELETE FROM oauth_registration").run();
+        const issued = z
+          .object({
+            access_token: z.string(),
+            refresh_token: z.string().optional(),
+            scope: z.string(),
+          })
+          .parse(await upstream.tokens("101").json());
 
-      for (const path of ["/rpc/status", "/rpc/list"])
-        expect(await (await alice.request(path)).json()).toMatchObject({
-          status: "reconnect_required",
+        const seeded = await runtime.dispatchFetch(origin, {
+          method: "POST",
+          body: JSON.stringify({
+            provider: kind,
+            scope: issued.scope,
+            accessToken: issued.access_token,
+            refreshToken: issued.refresh_token,
+            expiresAt: expiring ? Date.now() + 3600_000 : null,
+          }),
         });
-      expect(await db.prepare("SELECT COUNT(*) AS count FROM account").first("count")).toBe(1);
-      await connect(alice, "101");
-      expect(await (await alice.request("/rpc/list")).json()).toMatchObject({
-        status: "connected",
-      });
-      await runtime.setOptions(configuration("complete", "other-client"));
 
-      for (const path of ["/rpc/status", "/rpc/list"])
-        expect(await (await alice.request(path)).json()).toMatchObject({
-          status: "reconnect_required",
+        expect(seeded.status).toBe(204);
+
+        const saved = await (
+          await runtime.getD1Database("DB", "template")
+        )
+          .prepare("SELECT * FROM account")
+          .first();
+
+        await runtime.setOptions(configuration("complete", managed));
+        const db = await runtime.getD1Database("DB", "template");
+        const alice = browser("alice");
+
+        for (const path of ["/rpc/status", "/rpc/list"])
+          expect(await (await alice.request(path)).json()).toMatchObject({ status: "connected" });
+        expect(await (await alice.request("/")).text()).toContain("connected</h1>");
+        expect(await db.prepare("SELECT * FROM account").first()).toEqual(saved);
+        expect(
+          await db
+            .prepare("SELECT name FROM sqlite_master WHERE name = 'oauth_registration'")
+            .first(),
+        ).toBeNull();
+
+        if (expiring) await expire();
+        expect(await (await alice.request("/rpc/list")).json()).toMatchObject({
+          status: "connected",
         });
-    });
+        expect(upstream.state.refreshes).toBe(expiring ? 1 : 0);
+        expect(upstream.state.exchanges).toBe(0);
+      },
+    );
 
     it("rejects missing or forged caller proofs and callbacks to deleted apps", async () => {
       const relay = await runtime.getWorker("relay");
@@ -331,7 +371,7 @@ for (const [template, kind, prefix] of [
             await relay.fetch("https://oauth.example.test:25453/binding", {
               method: "POST",
               headers: { "test-proof": proof },
-              body: JSON.stringify({ action: "configuration", provider: kind }),
+              body: JSON.stringify({ action: "configuration", profile }),
             })
           ).status,
         ).toBe(403);
@@ -352,6 +392,7 @@ for (const [template, kind, prefix] of [
         const alice = browser("alice");
         await connect(alice, "101");
         await expire();
+        await alice.request("/disconnect", "POST");
         await runtime.setOptions(configuration());
         upstream.state.expiring = false;
         await connect(alice, "101");

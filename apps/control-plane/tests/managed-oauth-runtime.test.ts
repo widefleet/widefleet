@@ -98,7 +98,7 @@ it("connects through the real loader and refreshes OAuth through a consuming app
 export default class Consumer extends WorkerEntrypoint {
   async fetch(request) {
     if (new URL(request.url).pathname === '/configuration') return Response.json({
-      provider: await this.env.WIDEFLEET_OAUTH.request({action:'configuration',provider:'github'}),
+      provider: await this.env.WIDEFLEET_OAUTH.request({action:'configuration',profile:'github-repo'}),
       controlToken: this.env.WIDEFLEET_CONTROL_TOKEN ?? null,
       encryptionKey: this.env.WIDEFLEET_SECRETS_KEY ?? null,
     });
