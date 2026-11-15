@@ -172,6 +172,7 @@
             ...draft.sso,
             oidcConfig: {
               ...draft.sso.oidcConfig,
+              scopes: draft.sso.oidcConfig.scopes.filter(Boolean),
               clientSecret: draft.sso.oidcConfig.clientSecret || undefined,
             },
           },
@@ -431,21 +432,45 @@
               </p>{/if}
           </div>
           <div class="space-y-2">
-            <Label for="app-identity">App identity claims</Label>
+            <Label for="app-identity">App identity provider</Label>
             <NativeSelect
               id="app-identity"
               value={draft.sso.appIdentityType}
               onchange={(event) => {
-                draft.sso.appIdentityType =
-                  event.currentTarget.value === "entra" ? "entra" : "oidc";
+                draft.sso.appIdentityType = oidcProviderInput.shape.appIdentityType.parse(
+                  event.currentTarget.value,
+                );
+                if (draft.sso.appIdentityType === "google")
+                  draft.sso.issuer = "https://accounts.google.com";
                 if (draft.sso.appIdentityType !== "entra") draft.directory = null;
               }}
               ><option value="oidc">OpenID Connect</option><option value="entra"
                 >Microsoft Entra</option
-              ></NativeSelect
+              ><option value="google">Google Workspace</option></NativeSelect
             >
             <p class="text-muted-foreground text-xs">
-              Choose Entra to use Microsoft object IDs and group memberships for app access.
+              Choose the provider your company uses to sign in and manage app access.
+            </p>
+          </div>
+          <div class="space-y-2">
+            <Label for="sso-scopes">OAuth scopes</Label>
+            <Input
+              id="sso-scopes"
+              bind:value={
+                () => draft.sso.oidcConfig.scopes.join(" "),
+                (value) => {
+                  draft.sso.oidcConfig.scopes = value.split(/\s/);
+                }
+              }
+              aria-describedby="scopes-help"
+            />
+            <p id="scopes-help" class="text-muted-foreground text-xs wrap-anywhere">
+              Separate scopes with spaces. Keep openid, profile and email for sign-in.
+              {#if draft.sso.appIdentityType === "google"}
+                For group-based app access, enable the Cloud Identity API in your Google project and
+                add https://www.googleapis.com/auth/cloud-identity.groups.readonly. Each group must
+                let its members view the membership list.
+              {/if}
             </p>
           </div>
           <details class="rounded-lg border p-4">
