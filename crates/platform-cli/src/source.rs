@@ -225,9 +225,9 @@ async fn root(project: &Path) -> Result<PathBuf> {
         .output()
         .await?;
     if probe.status.success() {
-        return Ok(PathBuf::from(
-            String::from_utf8_lossy(&probe.stdout).trim_end(),
-        ));
+        return Ok(
+            PathBuf::from(String::from_utf8_lossy(&probe.stdout).trim_end()).canonicalize()?,
+        );
     }
     output(git(project).args(["init", "--initial-branch=main"])).await?;
     Ok(project.canonicalize()?)
@@ -346,7 +346,8 @@ async fn save_repository(
     helper: &str,
     commit: Option<&str>,
 ) -> Result<Saved> {
-    let root = root(project).await?;
+    let project = project.canonicalize()?;
+    let root = root(&project).await?;
     let reference = format!("refs/heads/{}", repository.branch);
     let remote = output(remote_git(&root, &repository.url, helper).args([
         "ls-remote",
@@ -846,6 +847,33 @@ mod tests {
             output(git(&fixture.remote).args(["ls-tree", "-r", "--name-only", "main"])).await?,
             "apps/mail/app.ts\npackage.json"
         );
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn saves_projects_accessed_through_a_symlink() -> Result<()> {
+        let fixture = Fixture::new().await?;
+        root(&fixture.project).await?;
+        let app = fixture.project.join("apps/mail");
+        std::fs::create_dir_all(&app)?;
+        std::fs::write(app.join("app.ts"), "source")?;
+        let alias = fixture._temporary.path().join("linked-project");
+        std::os::unix::fs::symlink(&fixture.project, &alias)?;
+        let saved = save_repository(
+            &alias.join("apps/mail"),
+            fixture.repository("main"),
+            "",
+            None,
+        )
+        .await?;
+        assert_eq!(saved.revision.directory, "apps/mail");
+        assert_eq!(
+            output(git(&fixture.remote).args(["show", "main:apps/mail/app.ts"])).await?,
+            "source"
+        );
+        let saved_root = save_repository(&alias, fixture.repository("main"), "", None).await?;
+        assert_eq!(saved_root.revision.directory, ".");
         Ok(())
     }
 
