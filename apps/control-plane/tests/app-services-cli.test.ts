@@ -91,6 +91,11 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
             },
           }),
         );
+      } else if (
+        request.method === "POST" &&
+        request.url === `/api/v1/apps/${app.id}/source/prepare`
+      ) {
+        response.end(JSON.stringify({ organizationId: app.organizationId, repository: null }));
       } else if (request.url === `/api/v1/apps/${app.id}/assets-upload-session`) {
         response.end(
           JSON.stringify({
