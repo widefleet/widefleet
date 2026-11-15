@@ -1,16 +1,17 @@
 ---
 title: Connect apps
 description: Expose app APIs, connect callers and keep provider secrets private.
-lastModified: 2026-10-29
+lastModified: 2026-11-15
 ---
 
 An app can expose exported Worker entrypoints to other apps in its organization.
 It uses the same deployment, resources, networking and logs as any other app.
 Use a headless app when the service does not need browser access.
 
-Use Widefleet platform, CLI and runtime **0.5.0 or newer**. Publishing requires app
-creation or collaboration permissions; granting a connection requires organization
-administrator access. The provider and caller must belong to the same organization.
+Install the current Widefleet platform, CLI and runtime together. Publishing
+requires app creation or collaboration permissions. To connect a caller, you must
+manage that app. The provider and caller must belong to the same organization.
+Organization administrators decide whether each API needs approval.
 
 ## Publish a service
 
@@ -64,7 +65,9 @@ No Widefleet-specific properties belong in `wrangler.jsonc`.
 
 ## Connect a caller
 
-From the caller's project, an organization administrator runs:
+For an API available to everyone in the organization, an app owner or collaborator
+runs the following from the caller's project. Organization administrators can
+also connect APIs that require approval:
 
 ```sh
 widefleet connect inventory-api --as INVENTORY --entrypoint Reader
@@ -75,9 +78,10 @@ Use `--app CALLER` to select a caller by slug or UUID outside its project. The
 target accepts a service catalog slug or UUID. Bindings default to the `default`
 entrypoint; the provider must export a default Worker handler or `WorkerEntrypoint` class.
 
-In the UI, browse **Services**, then open the caller app's **Connections** to
-select a service, entrypoint and binding name. The UI, CLI and API show the same
-desired and active grants.
+In the UI, open **App APIs**, select an app you manage, then expand **Connect API**
+for the provider. Select its entrypoint and enter a binding name. You can also
+start from the caller app's **Connections → Browse app APIs**. The UI, CLI and API
+show the same desired and active grants.
 
 Call the binding from server-side app code:
 
@@ -138,6 +142,59 @@ user checks and CSRF protection in the app.
 
 The [Gmail app example](/guides/gmail-app) connects each user's personal Google
 account and shares that account across authorized calling apps.
+
+## API availability and connection requests
+
+APIs require administrator approval by default. In **App APIs → Manage
+availability**, an organization administrator can select **Everyone in this
+organization** to let app owners and collaborators connect their apps themselves.
+This permission covers the provider's available entrypoints. It does not grant
+management access to the provider or expose its secrets.
+
+The equivalent CLI commands are:
+
+```sh
+widefleet services access inventory-api --mode organization
+widefleet services access inventory-api --mode approval-required
+```
+
+Changing availability keeps existing connections. Use **Disconnect** or
+`widefleet disconnect INVENTORY --app CALLER` to remove a connection from a caller
+you manage.
+
+For a restricted API, choose **Request connection** in the catalog. Select the
+entrypoint and an unused binding name, then submit the request. From the CLI:
+
+```sh
+widefleet connect inventory-api --app CALLER --as INVENTORY --entrypoint Reader --request
+widefleet services requests
+```
+
+Submitting the same pending request again returns the existing request. A binding
+can have only one pending request. The request is for that caller, binding and
+entrypoint; it does not authorize connections from other apps.
+
+Open **App APIs → Connection requests** to see **Awaiting approval**, **Approved**
+or **Rejected**. Members see their own requests; organization administrators see
+all requests in the selected organization and can choose **Approve and connect**
+or **Reject**. CLI administrators use:
+
+```sh
+widefleet services requests
+widefleet services approve REQUEST_UUID
+widefleet services reject REQUEST_UUID
+```
+
+Approval rechecks the requester's current app permissions, the available API and
+the binding name before saving the connection. If these have changed, the request
+stays pending and the administrator sees an error. Reject the stale request and
+submit a new one with the intended settings.
+
+**Approved** confirms the connection was saved, not that runtime activation has
+finished. Check the caller's **Connections** page or `widefleet connections --app
+CALLER` for activation status. A rejected request creates no connection; you can
+submit another request if needed. Personal OAuth sign-in to an external service
+remains separate from this approval.
 
 ## Activation and updates
 
@@ -208,15 +265,20 @@ operator's [`service` execution budget](/reference/configuration#dynamic-worker-
 
 All routes use normal OAuth authentication and the selected organization.
 
-| Action                                           | Route                                                                                                 |
-| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
-| Discover available apps and entrypoints          | `GET /api/v1/app-services`                                                                            |
-| Inspect resources and active/desired connections | `GET /api/v1/apps/{appId}/connections`                                                                |
-| Inspect grants                                   | `GET /api/v1/apps/{appId}/bindings`                                                                   |
-| Grant one binding                                | `PUT /api/v1/apps/{appId}/bindings/{binding}` with `{ "app": "TARGET_UUID", "entrypoint": "Reader" }` |
-| Revoke one binding                               | `DELETE /api/v1/apps/{appId}/bindings/{binding}`                                                      |
-| List secret names and activation status          | `GET /api/v1/apps/{appId}/secrets`                                                                    |
-| Set a secret                                     | `PUT /api/v1/apps/{appId}/secrets/{secret}` with `{ "value": "..." }`                                 |
-| Delete a secret                                  | `DELETE /api/v1/apps/{appId}/secrets/{secret}`                                                        |
+| Action                                           | Route                                                                                                                                      |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Discover available apps and entrypoints          | `GET /api/v1/app-services`                                                                                                                 |
+| Set API availability                             | `PUT /api/v1/app-services/{appId}/access` with `{ "accessMode": "organization" }` or `{ "accessMode": "approval_required" }`               |
+| Request a connection                             | `POST /api/v1/connection-requests` with `{ "appId": "CALLER_UUID", "app": "TARGET_UUID", "binding": "INVENTORY", "entrypoint": "Reader" }` |
+| List connection requests                         | `GET /api/v1/connection-requests`                                                                                                          |
+| Approve and connect                              | `POST /api/v1/connection-requests/{requestId}/approve`                                                                                     |
+| Reject a request                                 | `POST /api/v1/connection-requests/{requestId}/reject`                                                                                      |
+| Inspect resources and active/desired connections | `GET /api/v1/apps/{appId}/connections`                                                                                                     |
+| Inspect grants                                   | `GET /api/v1/apps/{appId}/bindings`                                                                                                        |
+| Grant one binding                                | `PUT /api/v1/apps/{appId}/bindings/{binding}` with `{ "app": "TARGET_UUID", "entrypoint": "Reader" }`                                      |
+| Revoke one binding                               | `DELETE /api/v1/apps/{appId}/bindings/{binding}`                                                                                           |
+| List secret names and activation status          | `GET /api/v1/apps/{appId}/secrets`                                                                                                         |
+| Set a secret                                     | `PUT /api/v1/apps/{appId}/secrets/{secret}` with `{ "value": "..." }`                                                                      |
+| Delete a secret                                  | `DELETE /api/v1/apps/{appId}/secrets/{secret}`                                                                                             |
 
 See the authenticated [OpenAPI document](/reference/api) for response schemas.
