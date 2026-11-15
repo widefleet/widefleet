@@ -1,3 +1,4 @@
+import { oauthCredentials } from "./oauth.ts";
 import { z } from "zod";
 import { authentication } from "./auth.ts";
 import { caller, callerId, type Environment, type Properties } from "./context.ts";
@@ -38,23 +39,7 @@ export const accountConnection = (environment: Environment, properties: Properti
   };
 
   const configuration = async () => {
-    const values = new Map<string, string>();
-    const missing: string[] = [];
-
-    for (const name of ["MICROSOFT_CLIENT_ID", "MICROSOFT_CLIENT_SECRET", "AUTH_SECRET"]) {
-      try {
-        const value = await environment.WIDEFLEET_SECRETS.get(name);
-
-        if (value) values.set(name, value);
-        else missing.push(name);
-      } catch (error) {
-        // A missing setting is actionable setup state. Storage/service failures
-        // must still surface as failures rather than masquerading as lost settings.
-        if (!(error instanceof Error) || !error.message.endsWith("App secret is not configured"))
-          throw error;
-        missing.push(name);
-      }
-    }
+    const { missing, credentials } = await oauthCredentials(environment, "microsoft", "MICROSOFT");
 
     if (missing.length)
       return {
@@ -62,17 +47,9 @@ export const accountConnection = (environment: Environment, properties: Properti
         missing,
         connectUrl: environment.WIDEFLEET_ORIGIN,
       } as const;
+    z.string().min(32).parse(credentials.authSecret);
 
-    const configured = {
-      status: "configured",
-      credentials: {
-        clientId: z.string().parse(values.get("MICROSOFT_CLIENT_ID")),
-        clientSecret: z.string().parse(values.get("MICROSOFT_CLIENT_SECRET")),
-        authSecret: z.string().min(32).parse(values.get("AUTH_SECRET")),
-      },
-    } as const;
-
-    return configured;
+    return { status: "configured", credentials } as const;
   };
 
   const token = async () => {
@@ -227,7 +204,15 @@ export const accountConnection = (environment: Environment, properties: Properti
         const config = await configuration();
 
         if (config.status !== "configured") return redirect("/");
-        const auth = authentication(environment, identity, id, config.credentials);
+
+        const auth = authentication(
+          environment,
+          identity,
+          id,
+          config.credentials,
+          url.searchParams.get("managed_state") ?? undefined,
+        );
+
         const session = await auth.api.getSession({ headers: request.headers });
 
         if (session?.user.id !== id)
