@@ -1,0 +1,172 @@
+import * as contract from "@platform/contracts";
+import { Result } from "better-result";
+import { and, eq } from "drizzle-orm";
+import type { z } from "zod";
+import type { Database } from "./database.ts";
+import type { Principal } from "./identity.ts";
+import { sourceOperation, type SourceBackend } from "./source-backend.ts";
+import { appVisibility, managedApp } from "./apps.ts";
+import { apps, artifacts, deployments } from "./schema.ts";
+import { InvalidOperation } from "./errors.ts";
+import { transact, type Transaction } from "./transactions.ts";
+
+const sourceTarget = async (
+  transaction: Transaction,
+  principal: Principal,
+  appId: string,
+  mutating = true,
+) => {
+  const [candidate] = await transaction
+    .select()
+    .from(apps)
+    .where(and(eq(apps.id, appId), appVisibility(transaction, principal)));
+
+  if (!candidate)
+    return Result.err(new InvalidOperation({ code: "NOT_FOUND", message: "App not found" }));
+
+  // Use the same parent-before-child lock order as app removal and access changes.
+  if (mutating && candidate.parentId) {
+    const parent = await managedApp(transaction, principal, candidate.parentId);
+
+    if (parent.isErr()) return parent;
+
+    if (parent.value.state === "deleting")
+      return Result.err(
+        new InvalidOperation({ code: "CONFLICT", message: "The parent app is being deleted" }),
+      );
+  }
+
+  const access = mutating ? await managedApp(transaction, principal, appId) : Result.ok(candidate);
+
+  if (access.isErr()) return access;
+  const app = access.value;
+
+  if (mutating && app.state === "deleting")
+    return Result.err(new InvalidOperation({ code: "CONFLICT", message: "App is being deleted" }));
+
+  return Result.ok({
+    app,
+    id: app.parentId ?? app.id,
+    branch: app.sourceBranch ?? (app.parentId ? `preview/${app.slug}` : "main"),
+  });
+};
+
+export const createAppSource = (database: Database, backend?: SourceBackend) => {
+  const source = {
+    read: (principal: Principal, appId: string) =>
+      transact(database, async (transaction) => {
+        const target = await sourceTarget(transaction, principal, appId, false);
+
+        if (target.isErr()) return target;
+        const { app, id, branch } = target.value;
+
+        const [active] = app.activeDeploymentId
+          ? await transaction
+              .select({ metadata: artifacts.metadata })
+              .from(deployments)
+              .innerJoin(artifacts, eq(artifacts.id, deployments.artifactId))
+              .where(eq(deployments.id, app.activeDeploymentId))
+          : [];
+
+        const deployed = active
+          ? (contract.workerMetadata.parse(active.metadata).source ?? null)
+          : null;
+
+        if (!backend)
+          return Result.ok(
+            contract.appSource.parse({
+              supported: false,
+              available: false,
+              repository: null,
+              deployed,
+            }),
+          );
+        const repository = await sourceOperation(() => backend.repository(id));
+        const commit = repository ? await sourceOperation(() => backend.head(id, branch)) : null;
+
+        return Result.ok(
+          contract.appSource.parse({
+            supported: true,
+            available: commit !== null,
+            repository: repository ? { ...repository, branch, commit } : null,
+            deployed,
+          }),
+        );
+      }),
+    setup: (principal: Principal, appId: string, input: z.infer<typeof contract.sourceSetup>) =>
+      transact(database, async (transaction) => {
+        const target = await sourceTarget(transaction, principal, appId);
+
+        if (target.isErr()) return target;
+
+        if (!backend)
+          return Result.err(
+            new InvalidOperation({
+              code: "CONFLICT",
+              message: "This installation does not provide Git repositories",
+            }),
+          );
+        const { app, id } = target.value;
+        const branch = input.branch ?? target.value.branch;
+
+        const repository = await sourceOperation(
+          async () => (await backend.repository(id)) ?? backend.create(id),
+        );
+
+        await transaction.update(apps).set({ sourceBranch: branch }).where(eq(apps.id, app.id));
+        const commit = await sourceOperation(() => backend.head(id, branch));
+
+        return Result.ok(contract.sourceRepository.parse({ ...repository, branch, commit }));
+      }),
+    credential: (principal: Principal, appId: string, scope: "read" | "write") =>
+      transact(database, async (transaction) => {
+        const target = await sourceTarget(transaction, principal, appId);
+
+        if (target.isErr()) return target;
+
+        if (!backend)
+          return Result.err(
+            new InvalidOperation({
+              code: "CONFLICT",
+              message: "This installation does not provide Git repositories",
+            }),
+          );
+        const credential = await sourceOperation(() => backend.credential(target.value.id, scope));
+
+        return Result.ok(contract.sourceCredential.parse(credential));
+      }),
+  };
+
+  return {
+    ...source,
+    prepare: async (
+      principal: Principal,
+      appId: string,
+      input: z.infer<typeof contract.sourceSetup>,
+    ) => {
+      if (!backend) {
+        const status = await source.read(principal, appId);
+
+        if (status.isErr()) return Result.err(status.error);
+
+        return Result.ok(
+          contract.sourcePreparation.parse({
+            organizationId: principal.application.organizationId,
+            repository: null,
+          }),
+        );
+      }
+
+      const repository = await source.setup(principal, appId, input);
+
+      if (repository.isErr()) return Result.err(repository.error);
+
+      return Result.ok(
+        contract.sourcePreparation.parse({
+          organizationId: principal.application.organizationId,
+          repository: repository.value,
+        }),
+      );
+    },
+  };
+};

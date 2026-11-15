@@ -339,6 +339,7 @@ const provisionApp = async (
         slug: input.slug,
         displayName: input.displayName,
         parentId: input.parentId,
+        sourceBranch: input.previewName ? `preview/${input.previewName}` : null,
         accessGroups,
         accessRevision,
         organizationId: execution.organizationId,

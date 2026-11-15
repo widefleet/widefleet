@@ -93,6 +93,19 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
 
       response.setHeader("content-type", "application/json");
 
+      if (request.method === "POST" && request.url?.endsWith("-credential")) {
+        response.end(
+          JSON.stringify({
+            url: "https://git.example.test/apps/source.git",
+            username: "x",
+            password: "synthetic-git-password",
+            expiresAt: "2027-01-01T00:00:00.000Z",
+          }),
+        );
+
+        return;
+      }
+
       if (request.method === "GET" && request.url?.startsWith("/api/v1/catalog/templates")) {
         response.end(
           JSON.stringify(
@@ -133,6 +146,12 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
           catalogUpdates.push(input);
           response.end(JSON.stringify(input));
         });
+
+        return;
+      }
+
+      if (request.method === "POST" && request.url?.endsWith("/source/prepare")) {
+        response.end(JSON.stringify({ organizationId: app.organizationId, repository: null }));
 
         return;
       }
@@ -443,6 +462,58 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         timeout: 15_000,
         env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken },
       });
+
+    it("issues Git credentials only for the configured repository and respects read-only scope", async () => {
+      const credential = async (input: string, extra: string[] = [], operation = "get") => {
+        const result = executeCli(
+          join(state, "installation", executableName),
+          [
+            "source",
+            "credential",
+            "--app",
+            app.id,
+            "--repository-url",
+            "https://git.example.test/apps/source.git",
+            ...extra,
+            operation,
+          ],
+          {
+            encoding: "utf8",
+            env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken },
+            timeout: 5000,
+          },
+        );
+
+        result.child.stdin?.end(input);
+
+        return result;
+      };
+
+      for (const input of [
+        "protocol=https\nhost=elsewhere.test\npath=apps/source.git\n\n",
+        "protocol=https\nhost=git.example.test\npath=apps/other.git\n\n",
+        "protocol=http\nhost=git.example.test\npath=apps/source.git\n\n",
+      ]) {
+        expect((await credential(input)).stdout).toBe("");
+      }
+
+      expect(requests).toEqual([]);
+      const input = "protocol=https\nhost=git.example.test\npath=apps/source.git\n\n";
+      expect((await credential(input, ["--read-only"])).stdout).toBe(
+        "username=x\npassword=synthetic-git-password\n\n",
+      );
+      expect(requests).toEqual([`POST /api/v1/apps/${app.id}/source/read-credential`]);
+      requests.length = 0;
+      accessToken = "synthetic-write-only-token";
+      expect((await credential(input)).stdout).toBe(
+        "username=x\npassword=synthetic-git-password\n\n",
+      );
+      expect(requests).toEqual([`POST /api/v1/apps/${app.id}/source/write-credential`]);
+      requests.length = 0;
+      expect((await credential(input, [], "store")).stdout).toBe("");
+      expect((await credential(input, [], "erase")).stdout).toBe("");
+      expect(requests).toEqual([]);
+    });
 
     it.each([
       [
@@ -965,15 +1036,18 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
 
     it("prints one JSON result with the final status and timestamps", async () => {
       const result = await cli("--json");
-      expect(contract.deployment.extend({ url: z.url() }).parse(JSON.parse(result.stdout))).toEqual(
-        {
-          ...queued,
-          status: "succeeded",
-          finishedAt,
-          message: "Activated",
-          url: app.url,
-        },
-      );
+      expect(
+        contract.deployment
+          .extend({ url: z.url(), source: contract.sourceRevision.nullable() })
+          .parse(JSON.parse(result.stdout)),
+      ).toEqual({
+        ...queued,
+        source: null,
+        status: "succeeded",
+        finishedAt,
+        message: "Activated",
+        url: app.url,
+      });
       expect(result.stderr).toContain("Synthetic build output");
       expect(result.stderr).toContain("Synthetic deployment progress");
     });
@@ -981,13 +1055,17 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     it("deploys to an explicit app with a write-only token and returns its URL without waiting", async () => {
       accessToken = "synthetic-write-only-token";
       const result = await cli(app.id, "--json", "--no-wait", "--skip-build");
-      expect(contract.deployment.extend({ url: z.url() }).parse(JSON.parse(result.stdout))).toEqual(
-        {
-          ...queued,
-          url: app.url,
-        },
-      );
+      expect(
+        contract.deployment
+          .extend({ url: z.url(), source: contract.sourceRevision.nullable() })
+          .parse(JSON.parse(result.stdout)),
+      ).toEqual({
+        ...queued,
+        source: null,
+        url: app.url,
+      });
       expect(requests).toEqual([
+        `POST /api/v1/apps/${app.id}/source/prepare`,
         `POST /api/v1/apps/${app.id}/assets-upload-session`,
         `PUT /api/v1/apps/${app.id}/worker`,
       ]);
@@ -1057,6 +1135,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       expect(result.stderr).toContain("Upgrade the server");
       expect(requests).toEqual([
         "PUT /api/v1/apps/by-name/fixture",
+        `POST /api/v1/apps/${app.id}/source/prepare`,
         `POST /api/v1/apps/${app.id}/assets-upload-session`,
       ]);
     });

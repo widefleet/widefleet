@@ -1,4 +1,4 @@
-use crate::{auth, installation, preview, upload};
+use crate::{auth, installation, preview, source, upload};
 use clap::Args;
 use platform_core::{
     Error, Result, asset_hash,
@@ -90,6 +90,15 @@ pub struct Options {
     pub config: PathBuf,
     #[arg(long)]
     skip_build: bool,
+    /// Deploy without saving source to Widefleet Git.
+    #[arg(long, conflicts_with_all = ["commit", "source_branch"])]
+    no_source: bool,
+    /// Require a clean checkout of this existing Git commit.
+    #[arg(long)]
+    commit: Option<String>,
+    /// Save source on this repository branch.
+    #[arg(long)]
+    source_branch: Option<String>,
     #[arg(long)]
     no_wait: bool,
     /// Print the deployment result as JSON, with build and progress logs on stderr.
@@ -108,14 +117,7 @@ pub async fn run(
     target: Target,
     options: Options,
 ) -> Result<()> {
-    let mut result = publish(
-        api,
-        credentials,
-        target,
-        &options.config,
-        options.skip_build,
-    )
-    .await?;
+    let mut result = publish(api, credentials, target, &options).await?;
     eprintln!("Deployment ID: {}", result.deployment.id);
     if !options.no_wait {
         result.deployment = wait(
@@ -236,16 +238,16 @@ pub struct DeploymentResult {
     #[serde(flatten)]
     pub deployment: Deployment,
     pub url: Option<String>,
+    pub source: Option<platform_core::model::SourceRevision>,
 }
 
 async fn publish(
     api: &Api,
     credentials: &auth::Credentials,
     target: Target,
-    config: &Path,
-    skip_build: bool,
+    options: &Options,
 ) -> Result<DeploymentResult> {
-    let config_path = config.canonicalize()?;
+    let config_path = options.config.canonicalize()?;
     let project = config_path
         .parent()
         .ok_or_else(|| Error::invalid("Configuration has no parent directory".into()))?;
@@ -305,7 +307,7 @@ async fn publish(
         eprintln!("Target: {} on {}", name, api.origin_text());
     }
     let bundler = installation::bundler().await?;
-    if !skip_build && project.join("package.json").exists() {
+    if !options.skip_build && project.join("package.json").exists() {
         local_command(project, &["run", "build"]).await?;
     }
     let temporary = tempfile::tempdir_in(project)?;
@@ -375,6 +377,7 @@ async fn publish(
             &source_maps,
         ))?),
     };
+    temporary.close()?;
     let app = match target {
         Target::Preview(preview) => preview.resolve(api, credentials).await?,
         Target::App(Some(app)) => app,
@@ -408,6 +411,19 @@ async fn publish(
             );
             resolved.id
         }
+    };
+    let saved = if options.no_source {
+        None
+    } else {
+        source::save(
+            api,
+            credentials,
+            app,
+            project,
+            options.source_branch.as_deref(),
+            options.commit.as_deref(),
+        )
+        .await?
     };
     let token = auth::access_token(api, credentials).await?;
     let session: UploadSession = json(
@@ -475,6 +491,7 @@ async fn publish(
         web: Some(web),
         entrypoints,
         service_documentation: Some(service_documentation),
+        source: saved.as_ref().map(|saved| saved.revision.clone()),
         crons: configuration.triggers.crons,
         queue_consumers: configuration.queues.consumers,
         worker: worker_metadata,
@@ -491,6 +508,9 @@ async fn publish(
             .into_iter()
             .map(|(name, bytes)| (name, ModuleType::Sourcemap, bytes)),
     );
+    if let Some(saved) = &saved {
+        saved.verify().await?;
+    }
     let deployment = upload::publish(
         api,
         credentials,
@@ -502,6 +522,7 @@ async fn publish(
     Ok(DeploymentResult {
         deployment,
         url: (metadata.web != Some(false)).then_some(app_url),
+        source: metadata.source,
     })
 }
 

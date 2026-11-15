@@ -42,7 +42,9 @@
     "./queue-availability": "./src/lib/server/queue-availability.ts",
     "./observation": "./src/lib/server/observation.ts",
     "./analytics": "./src/lib/server/analytics.ts",
-    "./auth-client-extension": "./src/lib/auth-client-extension.ts"
+    "./auth-client-extension": "./src/lib/auth-client-extension.ts",
+    "./source-backend": "./src/lib/server/source-backend.ts",
+    "./source-artifacts": "./src/lib/server/source-artifacts.ts"
   },
   "scripts": {
     "test:e2e": "playwright test",

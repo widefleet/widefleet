@@ -45,16 +45,6 @@
 
   const refreshFailed = $derived(Boolean(details.error));
 
-  const tabs = [
-    { id: "overview", label: "Overview" },
-    { id: "deployments", label: "Deployments" },
-    { id: "connections", label: "Connections" },
-    { id: "workflows", label: "Workflows" },
-    { id: "secrets", label: "Secrets" },
-    { id: "access", label: "Access" },
-    { id: "settings", label: "App settings" },
-  ];
-
   const refresh = async () => {
     if (refreshing) return;
     refreshing = true;
@@ -105,6 +95,17 @@
       throw cause;
     }),
   );
+
+  const tabs = $derived([
+    { id: "overview", label: "Overview" },
+    { id: "deployments", label: "Deployments" },
+    ...(data.source.supported ? [{ id: "source", label: "Source" }] : []),
+    { id: "connections", label: "Connections" },
+    { id: "workflows", label: "Workflows" },
+    { id: "secrets", label: "Secrets" },
+    { id: "access", label: "Access" },
+    { id: "settings", label: "App settings" },
+  ]);
 </script>
 
 <svelte:head><title>{data.app.displayName} · Widefleet</title></svelte:head>

@@ -245,9 +245,13 @@ describe("Organization discovery and selection", () => {
     );
 
     expect(b).toMatchObject({ hostname: "shared-name-beta.apps.localhost" });
-    expect(await (await api(request("/apps"))).json()).toEqual([b]);
+    expect(await (await api(request("/apps"))).json()).toEqual([
+      { ...b, source: { supported: false, available: false, repository: null, deployed: null } },
+    ]);
     headers.set("x-widefleet-organization", alpha);
-    expect(await (await api(request("/apps"))).json()).toEqual([a]);
+    expect(await (await api(request("/apps"))).json()).toEqual([
+      { ...a, source: { supported: false, available: false, repository: null, deployed: null } },
+    ]);
     headers.delete("x-widefleet-organization");
   });
 

@@ -1,0 +1,221 @@
+import { test, expect } from "@playwright/test";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import * as contract from "@platform/contracts";
+import { eq } from "drizzle-orm";
+import { apps, artifacts, deployments } from "../../src/lib/server/schema.ts";
+import { createTestEnvironment } from "../environment.ts";
+
+test.skip(process.env["RUN_SOURCE_TESTS"] !== "1", "Build with the source-extension fixture first");
+
+test.use({ baseURL: "http://localhost:28430" });
+
+let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
+
+let server: ReturnType<typeof spawn>;
+
+let directory: string;
+
+let state: string;
+
+const start = async (enabled: boolean) => {
+  let logs = "";
+  server = spawn(process.execPath, ["build"], {
+    cwd: fileURLToPath(new URL("../../", import.meta.url)),
+    env: {
+      ...process.env,
+      ...environment.environment,
+      NODE_ENV: "production",
+      HOST: "127.0.0.1",
+      PORT: "28430",
+      PROTOCOL_HEADER: "x-forwarded-proto",
+      SHUTDOWN_TIMEOUT: "1",
+      WIDEFLEET_TEST_SOURCE_ENABLED: enabled ? "1" : "0",
+      WIDEFLEET_TEST_SOURCE_STATE: state,
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  server.stdout?.setEncoding("utf8").on("data", (chunk: string) => {
+    logs += chunk;
+  });
+  server.stderr?.setEncoding("utf8").on("data", (chunk: string) => {
+    logs += chunk;
+  });
+  await expect
+    .poll(
+      async () => {
+        if (server.exitCode !== null) throw new Error(logs);
+
+        return fetch("http://localhost:28430/healthz")
+          .then((response) => response.ok)
+          .catch(() => false);
+      },
+      { timeout: 15_000 },
+    )
+    .toBe(true);
+};
+
+const stop = async () => {
+  if (server.exitCode === null) {
+    server.kill("SIGTERM");
+    await once(server, "exit");
+  }
+};
+
+test.beforeAll(async () => {
+  environment = await createTestEnvironment("http://localhost:28430");
+  directory = await mkdtemp(join(tmpdir(), "widefleet-source-ui-"));
+  state = join(directory, "source.json");
+  await writeFile(state, "{}");
+  await start(false);
+});
+
+test.afterAll(async () => {
+  await stop();
+  await environment.close();
+  await rm(directory, { recursive: true, force: true });
+});
+
+test("source setup, saved and deployed commits, deletion wording and denied access", async ({
+  page,
+  context,
+  browser,
+}, testInfo) => {
+  const login = await environment.users.login({ userId: environment.owner.id });
+
+  const cookies = login.cookies.map((cookie) => ({
+    ...cookie,
+    domain: "localhost",
+    sameSite: "Lax" as const,
+    secure: false,
+  }));
+
+  await context.addCookies(cookies);
+
+  const response = await context.request.post("/api/v1/apps", {
+    headers: { origin: environment.configuration.PLATFORM_URL },
+    data: { slug: "inventory", displayName: "Inventory and warehouse operations" },
+  });
+
+  expect(response.ok()).toBe(true);
+  const app = contract.app.parse(await response.json());
+
+  await page.goto(`/apps/${app.id}`);
+  await expect(page.getByRole("link", { name: "Source", exact: true })).toHaveCount(0);
+
+  for (const [name, width, height, theme] of [
+    ["desktop-light", 1440, 1000, "light"],
+    ["mobile-dark", 390, 844, "dark"],
+  ] as const) {
+    await page.setViewportSize({ width, height });
+    await page.emulateMedia({ colorScheme: theme });
+    await page.screenshot({ path: testInfo.outputPath(`before-${name}.png`), fullPage: true });
+  }
+
+  await stop();
+  await start(true);
+  await page.goto(`/apps/${app.id}/source`);
+  await expect(page.getByText("No source has been saved yet.", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "Create Git repository", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Git URL", exact: true })).toBeVisible();
+  await expect(page.getByText("No commits", { exact: true })).toBeVisible();
+  await page.getByText("Change source branch", { exact: true }).click();
+  await page.getByLabel("Branch", { exact: true }).fill("bad..branch");
+  await page.getByRole("button", { name: "Save branch", exact: true }).click();
+  await expect(page.getByText("Use a valid Git branch name", { exact: false })).toBeVisible();
+  await page.getByLabel("Branch", { exact: true }).fill("feature/search");
+  await page.getByRole("button", { name: "Save branch", exact: true }).click();
+  await expect(page.getByText("feature/search", { exact: true })).toBeVisible();
+
+  const deployed = { branch: "main", commit: "a".repeat(40), directory: "apps/inventory" };
+  const artifactId = crypto.randomUUID();
+  const deploymentId = crypto.randomUUID();
+
+  const metadata = contract.workerMetadata.parse({
+    main_module: "worker.js",
+    compatibility_date: "2026-10-01",
+    assets: { binding: "ASSETS", upload_session: crypto.randomUUID() },
+    source: deployed,
+  });
+
+  await environment.database.db
+    .insert(artifacts)
+    .values({ id: artifactId, appId: app.id, metadata, modules: [], manifest: {} });
+  await environment.database.db.insert(deployments).values({
+    id: deploymentId,
+    appId: app.id,
+    artifactId,
+    status: "succeeded",
+    requestId: crypto.randomUUID(),
+  });
+  await environment.database.db
+    .update(apps)
+    .set({ activeDeploymentId: deploymentId, state: "active" })
+    .where(eq(apps.id, app.id));
+  await writeFile(
+    state,
+    JSON.stringify({ [app.id]: { "feature/search": "b".repeat(40), main: deployed.commit } }),
+  );
+  await page.reload();
+  await expect(page.getByText(deployed.commit, { exact: true })).toBeVisible();
+  await expect(page.getByText("b".repeat(40), { exact: true })).toBeVisible();
+  await expect(page.getByText(deployed.directory, { exact: true })).toBeVisible();
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page.getByRole("button", { name: "Copy clone command" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("button", { name: "Copied", exact: true })).toBeVisible();
+  await page.reload();
+
+  for (const theme of ["light", "dark"] as const) {
+    for (const [name, width, height] of [
+      ["desktop", 1440, 1000],
+      ["mobile", 390, 844],
+    ] as const) {
+      await page.setViewportSize({ width, height });
+      await page.emulateMedia({ colorScheme: theme });
+      await page.screenshot({
+        path: testInfo.outputPath(`after-${name}-${theme}.png`),
+        fullPage: true,
+      });
+    }
+  }
+
+  await page.goto(`/apps/${app.id}/settings`);
+  await expect(
+    page.getByText(
+      "Its Widefleet Git repository and all source branches will also be permanently deleted.",
+    ),
+  ).toBeVisible();
+  await page.getByText("Permanently delete app", { exact: true }).click();
+  await expect(page.getByRole("checkbox")).toHaveAccessibleName(
+    /including its Widefleet Git repository/,
+  );
+
+  const noScript = await browser.newContext({
+    javaScriptEnabled: false,
+    baseURL: "http://localhost:28430",
+    extraHTTPHeaders: { "x-forwarded-proto": "http" },
+  });
+
+  await noScript.addCookies(cookies);
+  const plain = await noScript.newPage();
+  await plain.goto(`/apps/${app.id}/source`);
+  await plain.getByText("Change source branch", { exact: true }).click();
+  await plain.getByLabel("Branch", { exact: true }).fill("main");
+  await plain.getByRole("button", { name: "Save branch", exact: true }).click();
+  await expect(plain.getByText("main", { exact: true })).toBeVisible();
+  await noScript.close();
+
+  // Unauthenticated requests never expose the repository URL or source metadata.
+  const anonymous = await browser.newContext({
+    baseURL: "http://localhost:28430",
+    extraHTTPHeaders: { "x-forwarded-proto": "http" },
+  });
+
+  expect((await anonymous.request.get(`/api/v1/apps/${app.id}/source`)).status()).toBe(401);
+  await anonymous.close();
+});

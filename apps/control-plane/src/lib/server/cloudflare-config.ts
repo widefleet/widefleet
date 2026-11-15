@@ -1,4 +1,5 @@
 import type {
+  Artifacts,
   SendEmail,
   Fetcher,
   Hyperdrive,
@@ -16,6 +17,7 @@ import type { CloudflareAuthRateLimitBindings } from "./auth-rate-limit-cloudfla
 export interface CloudflareBindings extends CloudflareAuthRateLimitBindings {
   [binding: string]:
     | string
+    | Artifacts
     | Fetcher
     | Hyperdrive
     | R2Bucket
@@ -29,6 +31,7 @@ export interface CloudflareBindings extends CloudflareAuthRateLimitBindings {
   EMAIL?: SendEmail;
   EMAIL_FROM?: string;
   ARTIFACTS: R2Bucket;
+  SOURCE_REPOSITORIES?: Artifacts;
   PLATFORM_URL: string;
   LOGIN_CODE_DELIVERY?: string;
   APP_DOMAIN: string;

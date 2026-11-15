@@ -551,7 +551,10 @@ describe("Platform API with PostgreSQL and RustFS", () => {
 
     expect((await createApp("same-execution")).organizationId).toBe(organizationId);
     await json(`/agents/${registration.agent.id}`, "DELETE");
-    expect(contract.app.parse(await (await json(`/apps/${app.id}`, "GET")).json())).toEqual(app);
+    expect(contract.app.parse(await (await json(`/apps/${app.id}`, "GET")).json())).toEqual({
+      ...app,
+      source: { supported: false, available: false, repository: null, deployed: null },
+    });
   });
 
   it("allows members to create apps while no executor is connected", async () => {

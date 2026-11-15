@@ -20,6 +20,7 @@ mod runtime;
 mod service_docs;
 mod services;
 mod settings;
+mod source;
 mod upload;
 mod worker;
 mod workflows;
@@ -104,6 +105,8 @@ enum Command {
     Connections(connections::Options),
     /// Discover app APIs in the organization.
     Services(services::Catalog),
+    /// Clone and manage saved app source using Git.
+    Source(source::Options),
     /// Connect an app to another app API.
     Connect(services::Connect),
     /// Remove an app connection.
@@ -237,6 +240,10 @@ async fn run(args: Arguments) -> Result<()> {
         Command::Logout => return auth::logout(&api, &credentials).await,
         _ => {}
     }
+    if matches!(&args.command, Command::Source(source::Options { command: source::Action::Credential { operation, .. } }) if operation != "get")
+    {
+        return Ok(());
+    }
     let token = auth::access_token(&api, &credentials).await?;
     let grant = matches!(&args.command, Command::Grant { .. });
     match args.command {
@@ -255,6 +262,7 @@ async fn run(args: Arguments) -> Result<()> {
         Command::Network(options) => network::run(&api, &credentials, options).await,
         Command::Access(options) => access::run(&api, &credentials, options).await,
         Command::Services(options) => services::catalog(&api, &credentials, options).await,
+        Command::Source(options) => source::run(&api, &credentials, options).await,
         Command::Connect(options) => services::connect(&api, &credentials, options).await,
         Command::Disconnect(options) => services::disconnect(&api, &credentials, options).await,
         Command::Secret(options) => services::secrets(&api, &credentials, options).await,
@@ -333,10 +341,26 @@ async fn run(args: Arguments) -> Result<()> {
         }
         Command::Delete { app, yes } => {
             if !yes {
-                return Err(platform_core::Error::invalid(
-                    "Deletion is permanent. Repeat with --yes to remove this app, all its previews and their published versions"
-                        .into(),
-                ));
+                let record: App = json(
+                    api.authenticated(Method::GET, &format!("/apps/{app}"), &token)
+                        .send()
+                        .await?,
+                )
+                .await?;
+                let source = record
+                    .source
+                    .as_ref()
+                    .and_then(|source| source.repository.as_ref());
+                let consequence = if source.is_some() && record.parent_id.is_none() {
+                    " Its Widefleet Git repository and all branches will also be deleted."
+                } else if source.is_some() {
+                    " Its source branch will remain in the main app's repository."
+                } else {
+                    ""
+                };
+                return Err(platform_core::Error::invalid(format!(
+                    "Deletion is permanent. Repeat with --yes to remove this app, all its previews and their published versions.{consequence}"
+                )));
             }
             print_json(
                 &json::<Value>(
@@ -420,6 +444,7 @@ async fn main() {
         Command::Network(_) => "network",
         Command::Access(_) => "access",
         Command::Services(_) => "services",
+        Command::Source(_) => "source",
         Command::Connect(_) => "connect",
         Command::Disconnect(_) => "disconnect",
         Command::Secret(_) => "secret",

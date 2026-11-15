@@ -12,6 +12,7 @@ import { updateCloudflareBindings } from "./cloudflare-binding-updates.ts";
 import { createCloudflareEvents } from "./cloudflare-events.ts";
 import { retryable } from "./cloudflare-deployment.ts";
 import { apps, artifacts, cloudflareOperations } from "./schema.ts";
+import { createArtifactsSource } from "./source-artifacts.ts";
 import { finishAppRemoval } from "./app-removal.ts";
 import { InvalidOperation } from "./errors.ts";
 import { removeAuthRoute } from "./cloudflare-auth-proxy.ts";
@@ -186,6 +187,9 @@ export const createCloudflareRemover = (bindings: CloudflareBindings, transport 
             .limit(1);
 
           if (child) throw new Error("App previews have not finished removal");
+
+          if (!app.parentId && bindings.SOURCE_REPOSITORIES)
+            await createArtifactsSource(bindings.SOURCE_REPOSITORIES).remove(app.id);
           await finishAppRemoval(transaction, appId);
         }),
       ),
