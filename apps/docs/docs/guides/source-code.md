@@ -35,6 +35,21 @@ it saves the repository and records the app's relative directory.
 The main app initially uses the remote `main` branch. To choose another branch,
 use `widefleet deploy --source-branch BRANCH`. That choice applies to subsequent deployments of the app.
 
+If your local branch differs from the target branch, the CLI asks before building,
+committing or pushing. For example, deploying from local `feature` to remote
+`main` updates `main` in Widefleet Git and publishes that code as the main app.
+Press Enter to cancel. Switch to the intended branch, or explicitly confirm the
+exception for this invocation:
+
+```sh
+widefleet deploy --allow-branch-mismatch
+```
+
+Agents and CI must use this flag for a branch mismatch or a detached checkout;
+noninteractive commands otherwise stop without building. The confirmation does
+not change the app's selected branch or permit a force-push. Git previews still
+require their own matching work branch.
+
 `widefleet source status` reports the repository URL, selected branch and latest
 saved commit. Its `deployed` field identifies the active deployment's source,
 which can differ from the latest saved commit. The Source tab shows the same

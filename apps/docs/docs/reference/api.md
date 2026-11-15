@@ -150,13 +150,14 @@ permissions. Token clients need `platform:read` for status and read credentials,
 or `platform:write` for setup, deployment preparation and write credentials.
 Browser mutations require same-origin requests.
 
-| Endpoint                                            | Response and purpose                                                                                                                                                             |
-| --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/v1/apps/{appId}/source`                   | Read source status.                                                                                                                                                              |
-| `PUT /api/v1/apps/{appId}/source`                   | Create the repository if needed and optionally select a branch; accepts `{ "branch": "main" }` or `{}`. Returns `{ url, branch, commit }`.                                       |
-| `POST /api/v1/apps/{appId}/source/prepare`          | Prepare a source save using write scope; accepts the same body as setup. Returns `{ organizationId, repository }`. On installations without a Git backend, `repository` is null. |
-| `POST /api/v1/apps/{appId}/source/read-credential`  | Issue a read credential; body `{}`.                                                                                                                                              |
-| `POST /api/v1/apps/{appId}/source/write-credential` | Issue a write credential; body `{}`.                                                                                                                                             |
+| Endpoint                                            | Response and purpose                                                                                                                                                                                                                      |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/v1/apps/{appId}/source`                   | Read source status.                                                                                                                                                                                                                       |
+| `PUT /api/v1/apps/{appId}/source`                   | Create the repository if needed and optionally select a branch; accepts `{ "branch": "main" }` or `{}`. Returns `{ url, branch, commit }`.                                                                                                |
+| `POST /api/v1/apps/{appId}/source/prepare`          | Prepare a source save using write scope; accepts the same body as setup. Returns `{ organizationId, repository }`. On installations without a Git backend, `repository` is null.                                                          |
+| `POST /api/v1/apps/source-target`                   | Inspect the deployment target with `platform:write` scope. Accepts `{ appId }` or `{ slug }`; returns `{ supported, branch, preview }`. Reads local metadata without creating apps or repositories. A new app by name defaults to `main`. |
+| `POST /api/v1/apps/{appId}/source/read-credential`  | Issue a read credential; body `{}`.                                                                                                                                                                                                       |
+| `POST /api/v1/apps/{appId}/source/write-credential` | Issue a write credential; body `{}`.                                                                                                                                                                                                      |
 
 For previews, the preparation response also includes `primaryBranch`, the main
 app's source branch. The CLI rejects saving a preview from that local branch.
