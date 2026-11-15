@@ -58,21 +58,30 @@ export const organization = pgTable("organization", {
   createdAt: timestamp("created_at").notNull(),
 });
 
-export const ssoProvider = pgTable("sso_provider", {
-  id: text("id").primaryKey(),
-  providerId: text("provider_id").notNull().unique(),
-  issuer: text("issuer").notNull(),
-  domain: text("domain").notNull(),
-  domainVerified: boolean("domain_verified").notNull().default(false),
-  appIdentityType: text("app_identity_type").notNull().default("oidc"),
-  oidcConfig: text("oidc_config"),
-  samlConfig: text("saml_config"),
-  userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
-  organizationId: text("organization_id")
-    .notNull()
-    .unique()
-    .references(() => organization.id, { onDelete: "cascade" }),
-});
+export const ssoProvider = pgTable(
+  "sso_provider",
+  {
+    id: text("id").primaryKey(),
+    providerId: text("provider_id").notNull().unique(),
+    issuer: text("issuer").notNull(),
+    domain: text("domain").notNull(),
+    domainVerified: boolean("domain_verified").notNull().default(false),
+    appIdentityType: text("app_identity_type").notNull().default("oidc"),
+    oidcConfig: text("oidc_config"),
+    samlConfig: text("saml_config"),
+    userId: text("user_id").references(() => user.id, { onDelete: "set null" }),
+    organizationId: text("organization_id")
+      .notNull()
+      .unique()
+      .references(() => organization.id, { onDelete: "cascade" }),
+  },
+  (table) => [
+    check(
+      "sso_provider_app_identity_type_check",
+      sql`${table.appIdentityType} IN ('oidc', 'entra', 'google')`,
+    ),
+  ],
+);
 
 export const member = pgTable(
   "member",
