@@ -384,7 +384,16 @@ describe("Organization discovery and selection", () => {
       expect(created.ok).toBe(true);
       const fixture = app.parse(await created.json());
 
+      const started = Date.now();
+      const events: string[] = [];
+      const trace = (event: string) => events.push(`${Date.now() - started}ms ${event}`);
+
       const server = createServer((incoming, outgoing) => {
+        const port = incoming.socket.remotePort;
+        const description = `${port} ${incoming.method} ${incoming.url}`;
+        trace(`request ${description}`);
+        outgoing.once("finish", () => trace(`response ${description}: ${outgoing.statusCode}`));
+
         const handle = async () => {
           const forwarded = new Headers();
 
@@ -407,9 +416,18 @@ describe("Organization discovery and selection", () => {
           outgoing.end(Buffer.from(await response.arrayBuffer()));
         };
 
-        void handle().catch(() => outgoing.writeHead(500).end());
+        void handle().catch((cause: unknown) => {
+          trace(`handler failed: ${String(cause)}`);
+          outgoing.writeHead(500).end();
+        });
       });
 
+      server.on("connection", (socket) => {
+        const port = socket.remotePort;
+        trace(`connected ${port}`);
+        socket.on("timeout", () => trace(`timeout ${port}`));
+        socket.on("close", (hadError) => trace(`closed ${port}, error=${hadError}`));
+      });
       server.listen(0, "127.0.0.1");
       await once(server, "listening");
       const address = z.object({ port: z.number() }).parse(server.address());
@@ -567,6 +585,9 @@ describe("Organization discovery and selection", () => {
             hostname: "review-cli-selection-alpha.apps.localhost",
           });
         }
+      } catch (cause) {
+        console.error(`Local API requests and connections:\n${events.join("\n")}`);
+        throw cause;
       } finally {
         await new Promise<void>((resolve, reject) =>
           server.close((error) => (error ? reject(error) : resolve())),
