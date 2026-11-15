@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { EventEmitter, once } from "node:events";
 import { eq } from "drizzle-orm";
 import * as contract from "@platform/contracts";
 import type { SourceBackend } from "../src/lib/server/source-backend.ts";
@@ -6,6 +7,7 @@ import { createAppSource } from "../src/lib/server/app-source.ts";
 import { createAppService } from "../src/lib/server/apps.ts";
 import { createRuntime } from "../src/lib/server/runtime-services.ts";
 import { createApi } from "../src/lib/server/api.ts";
+import { createDatabase } from "../src/lib/server/database.ts";
 import { createStorage } from "../src/lib/server/storage.ts";
 import { createUploadService } from "../src/lib/server/uploads.ts";
 import { apps, artifacts, deployments } from "../src/lib/server/schema.ts";
@@ -438,6 +440,96 @@ describe("App source repositories", () => {
         )
       ).status,
     ).toBe(401);
+  });
+
+  it("bounds source lookups without holding database connections while Git is slow", async () => {
+    const failing = await create();
+    repositories.set(failing.id, new Map([["main", "a".repeat(40)]]));
+
+    for (let index = 1; index < 9; index++) {
+      const app = (
+        await service.create(creator, {
+          slug: `source-app-${index}`,
+          displayName: `Source app ${index}`,
+          parentId: null,
+        })
+      ).unwrap();
+
+      repositories.set(app.id, new Map([["main", "a".repeat(40)]]));
+    }
+
+    const database = createDatabase(environment.configuration, 1);
+    const gate = new EventEmitter();
+    const repositoryGate = once(gate, "repositories");
+    const headGate = once(gate, "heads");
+
+    const slowBackend = {
+      ...backend,
+      repository: vi.fn(async (id: string) => {
+        await repositoryGate;
+
+        return backend.repository(id);
+      }),
+      head: vi.fn(async (id: string, branch: string) => {
+        await headGate;
+
+        if (id === failing.id) throw new Error("Synthetic Git outage");
+
+        return backend.head(id, branch);
+      }),
+    };
+
+    const runtime = await createRuntime({
+      configuration: environment.configuration,
+      database,
+      settings: environment.settings,
+      storage: createStorage(environment.configuration, memoryStorage()),
+      reporting: environment.reporting,
+      encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
+      source: slowBackend,
+    })();
+
+    const login = await environment.users.login({ userId: creator.id });
+
+    const listing = createApi(runtime)(
+      new Request(`${environment.configuration.PLATFORM_URL}/api/v1/apps`, {
+        headers: login.headers,
+      }),
+    );
+
+    try {
+      await expect.poll(() => slowBackend.repository.mock.calls.length).toBeGreaterThan(0);
+      // All database work must finish even while every Git request is blocked.
+      await expect
+        .poll(() => [database.db.$client.idleCount, database.db.$client.waitingCount])
+        .toEqual([1, 0]);
+      expect(slowBackend.repository).toHaveBeenCalledTimes(4);
+      expect((await runtime.apps.list(creator)).unwrap()).toHaveLength(9);
+
+      gate.emit("repositories");
+      await expect.poll(() => slowBackend.head.mock.calls.length).toBe(4);
+      expect((await runtime.apps.list(creator)).unwrap()).toHaveLength(9);
+      expect(slowBackend.repository).toHaveBeenCalledTimes(4);
+      gate.emit("heads");
+
+      const response = await listing;
+      expect(response.status).toBe(200);
+      const listed = contract.app.array().parse(await response.json());
+      expect(listed.map((app) => app.id)).toEqual(
+        (await runtime.apps.list(creator)).unwrap().map((app) => app.id),
+      );
+      expect(slowBackend.repository).toHaveBeenCalledTimes(9);
+      expect(slowBackend.head).toHaveBeenCalledTimes(9);
+      expect(listed.find((app) => app.id === failing.id)?.source?.error).toBe(
+        "The source repository is unavailable",
+      );
+      expect(listed.filter((app) => app.source?.available)).toHaveLength(8);
+    } finally {
+      gate.emit("repositories");
+      gate.emit("heads");
+      await listing;
+      await database.close();
+    }
   });
 
   it("uses the configured backend when deleting a main app and retains it when deleting a preview", async () => {

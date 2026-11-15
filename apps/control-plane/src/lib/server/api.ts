@@ -630,13 +630,19 @@ export const createApi = (runtime: Runtime) => {
       .output(z.array(contract.app))
       .handler(async ({ context }) => {
         const apps = unwrap(await runtime.apps.list(context.principal));
+        const listed = [];
 
-        return Promise.all(
-          apps.map(async (app) => ({
-            ...app,
-            source: unwrap(await runtime.source.read(context.principal, app.id)),
-          })),
-        );
+        for (let index = 0; index < apps.length; index += 4)
+          listed.push(
+            ...(await Promise.all(
+              apps.slice(index, index + 4).map(async (app) => ({
+                ...app,
+                source: unwrap(await runtime.source.read(context.principal, app.id)),
+              })),
+            )),
+          );
+
+        return listed;
       }),
     createApp: write
       .route({ method: "POST", path: "/apps" })

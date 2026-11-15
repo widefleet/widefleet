@@ -114,12 +114,12 @@ export const createAppSource = (database: Database, backend?: SourceBackend) => 
     });
 
   const source = {
-    read: (principal: Principal, appId: string) =>
-      transact(database, async (transaction) => {
+    read: async (principal: Principal, appId: string) => {
+      const snapshot = await transact(database, async (transaction) => {
         const target = await sourceTarget(transaction, principal, appId, false);
 
         if (target.isErr()) return target;
-        const { app, id, branch } = target.value;
+        const { app } = target.value;
 
         const [active] = app.activeDeploymentId
           ? await transaction
@@ -133,42 +133,49 @@ export const createAppSource = (database: Database, backend?: SourceBackend) => 
           ? (contract.workerMetadata.parse(active.metadata).source ?? null)
           : null;
 
-        if (!backend || (app.parentId && !app.sourceBranch))
-          return Result.ok(
-            contract.appSource.parse({
-              supported: Boolean(backend),
-              available: false,
-              repository: null,
-              deployed,
-            }),
-          );
+        return Result.ok({ ...target.value, deployed });
+      });
 
-        try {
-          const repository = await sourceOperation(() => backend.repository(id));
-          const commit = repository ? await sourceOperation(() => backend.head(id, branch)) : null;
+      if (snapshot.isErr()) return Result.err(snapshot.error);
+      const { app, id, branch, deployed } = snapshot.value;
 
-          return Result.ok(
-            contract.appSource.parse({
-              supported: true,
-              available: commit !== null,
-              repository: repository ? { ...repository, branch, commit } : null,
-              deployed,
-            }),
-          );
-        } catch (error) {
-          if (!(error instanceof StorageUnavailable)) throw error;
+      if (!backend || (app.parentId && !app.sourceBranch))
+        return Result.ok(
+          contract.appSource.parse({
+            supported: Boolean(backend),
+            available: false,
+            repository: null,
+            deployed,
+          }),
+        );
 
-          return Result.ok(
-            contract.appSource.parse({
-              supported: true,
-              available: false,
-              repository: null,
-              deployed,
-              error: error.message,
-            }),
-          );
-        }
-      }),
+      // Git latency must not keep a database connection occupied.
+      try {
+        const repository = await sourceOperation(() => backend.repository(id));
+        const commit = repository ? await sourceOperation(() => backend.head(id, branch)) : null;
+
+        return Result.ok(
+          contract.appSource.parse({
+            supported: true,
+            available: commit !== null,
+            repository: repository ? { ...repository, branch, commit } : null,
+            deployed,
+          }),
+        );
+      } catch (error) {
+        if (!(error instanceof StorageUnavailable)) throw error;
+
+        return Result.ok(
+          contract.appSource.parse({
+            supported: true,
+            available: false,
+            repository: null,
+            deployed,
+            error: error.message,
+          }),
+        );
+      }
+    },
     setup: async (
       principal: Principal,
       appId: string,
