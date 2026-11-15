@@ -48,6 +48,9 @@
         <h2 class="font-medium">{entry.displayName}</h2>
         <p class="text-muted-foreground text-sm">{entry.slug}</p>
         <p class="text-sm">Available entrypoints: <code>{entry.entrypoints.join(", ")}</code></p>
+        <a class="text-sm underline underline-offset-4" href={`/services/${entry.appId}`}
+          >View API documentation</a
+        >
       </div>
     {:else}<p class="text-muted-foreground p-4 text-sm">
         No apps with published APIs match your search.

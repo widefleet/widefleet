@@ -642,6 +642,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
         compatibility_date: "2026-10-01",
         assets: { upload_session: sessionId },
         bindings,
+        service_documentation: { format: 1, entrypoints: [], types: [] },
       }),
     );
     form.set("worker.js", new Blob([code], { type: "application/javascript+module" }), "worker.js");
@@ -997,7 +998,18 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     );
 
     expect(artifact.status).toBe(200);
-    expect(contract.artifact.parse(await artifact.json()).id).toBe(first.artifactId);
+    const executionArtifact = contract.artifact.parse(await artifact.json());
+    expect(executionArtifact.id).toBe(first.artifactId);
+    expect(executionArtifact.metadata).not.toHaveProperty("service_documentation");
+
+    const [storedArtifact] = await environment.database.db
+      .select()
+      .from(artifacts)
+      .where(eq(artifacts.id, first.artifactId));
+
+    expect(
+      contract.workerMetadata.parse(storedArtifact?.metadata).service_documentation,
+    ).toMatchObject({ format: 1 });
     expect(
       (
         await json(

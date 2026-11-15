@@ -112,7 +112,9 @@ for (const [name, target] of [
   await runPnpm(["install", "--lockfile-only", "--frozen-lockfile", "--ignore-scripts"], template);
 }
 
-await mkdir(join(release, "licenses"));
+await cp(join(root, "crates/platform-cli/licenses"), join(release, "licenses"), {
+  recursive: true,
+});
 
 await copyFile(
   join(dirname(fileURLToPath(import.meta.resolve("esbuild/package.json"))), "LICENSE.md"),

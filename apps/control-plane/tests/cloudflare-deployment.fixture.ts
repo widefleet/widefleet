@@ -26,6 +26,7 @@ export const seedDeployment = async (
     appId?: string;
     web?: boolean;
     entrypoints?: string[];
+    documentation?: z.infer<typeof contract.serviceDocumentation>;
     source?: string;
     bindings?: z.infer<typeof contract.workerBinding>[];
     groups?: string[];
@@ -68,6 +69,7 @@ export const seedDeployment = async (
     metadata: {
       web: options.web,
       entrypoints: options.entrypoints,
+      service_documentation: options.documentation,
       main_module: "app.js",
       compatibility_date: "2026-10-01",
       assets: { binding: "ASSETS", upload_session: crypto.randomUUID() },

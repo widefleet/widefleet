@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import { executeCli } from "./cli-process.ts";
 
 const execute = promisify(execFile);
 
@@ -430,14 +431,14 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     });
 
     const cli = (...args: string[]) =>
-      execute(join(state, "installation", executableName), ["deploy", ...args], {
+      executeCli(join(state, "installation", executableName), ["deploy", ...args], {
         cwd: join(state, "project with spaces"),
         timeout: 15_000,
         env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken },
       });
 
     const previewCli = (...args: string[]) =>
-      execute(join(state, "installation", executableName), ["preview", ...args], {
+      executeCli(join(state, "installation", executableName), ["preview", ...args], {
         cwd: join(state, "project with spaces"),
         timeout: 15_000,
         env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken },
@@ -686,7 +687,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
           { mode: 0o600 },
         );
 
-        const result = await execute(
+        const result = await executeCli(
           join(state, "installation", executableName),
           ["preview", "--name", "review", "--skip-build", "--session-file", sessionFile],
           {
@@ -1019,16 +1020,22 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       "does not emit a result when waiting is interrupted",
       async () => {
         const deployment = cli("--json", "--skip-build");
-        const interrupted = failure(deployment);
+        // Observe an early process failure even while waiting for readiness.
+        const interrupted = Promise.allSettled([failure(deployment)]);
 
         try {
-          await vi.waitFor(() => expect(historyReads).toBe(1));
+          await vi.waitFor(() => expect(historyReads).toBe(1), { timeout: 15_000 });
           deployment.child.kill("SIGINT");
-          const result = await interrupted;
-          expect(result).toMatchObject({ code: 1, stdout: "" });
-          expect(result.stderr).toContain("Stopped waiting");
+          const [settled] = await interrupted;
+
+          if (!settled) throw new Error("Missing CLI interruption result");
+
+          if (settled.status === "rejected") throw settled.reason;
+          expect(settled.value).toMatchObject({ code: 1, stdout: "" });
+          expect(settled.value.stderr).toContain("Stopped waiting");
         } finally {
           deployment.child.kill("SIGKILL");
+          await interrupted;
         }
       },
     );
@@ -1054,4 +1061,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       ]);
     });
   },
+  // Real deployments start the compiler and bundler; some cases run two CLI
+  // commands, each with a 15-second process deadline.
+  30_000,
 );

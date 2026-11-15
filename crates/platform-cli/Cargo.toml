@@ -23,6 +23,15 @@ jsonc-parser.workspace = true
 tempfile.workspace = true
 system-resolver.workspace = true
 
+oxc_sourcemap.workspace = true
+tsrs_ast.workspace = true
+tsrs_checker.workspace = true
+tsrs_compiler.workspace = true
+tsrs_core.workspace = true
+tsrs_scanner.workspace = true
+tsrs_tsoptions.workspace = true
+tsrs_vfs.workspace = true
+
 [target.'cfg(unix)'.dependencies]
 rustix.workspace = true
 

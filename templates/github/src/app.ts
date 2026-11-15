@@ -69,7 +69,9 @@ export default class GitHub extends WorkerEntrypoint<Environment, Properties> {
   /**
    * Read a repository file as bytes, up to 8 MiB. ref may be a branch, tag or commit SHA.
    * @example
+   * ```ts
    * await env.GITHUB.readFile({ owner: "example", repository: "project", path: "README.md" });
+   * ```
    */
   async readFile(input: z.input<typeof fileInput>) {
     const result = await this.#request(filePath(input), true);

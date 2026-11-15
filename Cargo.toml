@@ -40,6 +40,15 @@ futures-util = "=0.3.34"
 bollard = "=0.21.1"
 object_store = { version = "=0.14.2", features = ["aws", "azure", "gcp"] }
 
+oxc_sourcemap = "=10.0.0"
+tsrs_ast = { git = "https://github.com/oxc-project/tsrs", rev = "cbbce5e33a2b57b44360f3aebd6f951011f67671" }
+tsrs_checker = { git = "https://github.com/oxc-project/tsrs", rev = "cbbce5e33a2b57b44360f3aebd6f951011f67671" }
+tsrs_compiler = { git = "https://github.com/oxc-project/tsrs", rev = "cbbce5e33a2b57b44360f3aebd6f951011f67671" }
+tsrs_core = { git = "https://github.com/oxc-project/tsrs", rev = "cbbce5e33a2b57b44360f3aebd6f951011f67671" }
+tsrs_scanner = { git = "https://github.com/oxc-project/tsrs", rev = "cbbce5e33a2b57b44360f3aebd6f951011f67671" }
+tsrs_tsoptions = { git = "https://github.com/oxc-project/tsrs", rev = "cbbce5e33a2b57b44360f3aebd6f951011f67671" }
+tsrs_vfs = { git = "https://github.com/oxc-project/tsrs", rev = "cbbce5e33a2b57b44360f3aebd6f951011f67671" }
+
 [workspace.lints.rust]
 unsafe_code = "forbid"
 

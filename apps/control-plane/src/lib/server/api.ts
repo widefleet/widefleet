@@ -352,6 +352,13 @@ export const createApi = (runtime: Runtime) => {
       .handler(async ({ context }) =>
         unwrap(await runtime.connections.services(context.principal)),
       ),
+    serviceDescription: read
+      .route({ method: "GET", path: "/app-services/{service}" })
+      .input(contract.servicePath)
+      .output(contract.serviceDescription)
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.connections.describe(context.principal, input.service)),
+      ),
     appConnections: read
       .route({ method: "GET", path: "/apps/{appId}/connections" })
       .input(contract.appPath)
