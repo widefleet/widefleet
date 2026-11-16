@@ -8,9 +8,9 @@ export const load: PageServerLoad = async ({ params, url, setHeaders }) => {
 
   if (!catalog.admin) error(403, "Organization administrator permission is required");
 
-  const service = catalog.entries.find(
-    (entry) => entry.appId === params.service || entry.slug === params.service,
-  );
+  const service =
+    catalog.entries.find((entry) => entry.appId === params.service) ??
+    catalog.entries.find((entry) => entry.slug === params.service);
 
   if (!service) error(404, "API not found");
 

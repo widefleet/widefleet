@@ -139,6 +139,7 @@ for (const javaScriptEnabled of [true, false]) {
     const [memberContext, adminContext] = contexts;
 
     if (!memberContext || !adminContext) throw new Error("Missing test context");
+    const createdAppIds: string[] = [];
 
     try {
       const page = await memberContext.newPage();
@@ -152,7 +153,10 @@ for (const javaScriptEnabled of [true, false]) {
 
         expect(response.ok()).toBe(true);
 
-        return app.parse(await response.json());
+        const created = app.parse(await response.json());
+        createdAppIds.push(created.id);
+
+        return created;
       };
 
       const source = await create(
@@ -161,37 +165,65 @@ for (const javaScriptEnabled of [true, false]) {
         `Warehouse application with a longer name ${javaScriptEnabled ? "A" : "B"}`,
       );
 
-      const target = await create(
-        adminContext,
-        `request-api-${javaScriptEnabled}`,
-        `Inventory and fulfillment service ${javaScriptEnabled ? "A" : "B"}`,
-      );
+      const target = {
+        // A colliding UUID must also satisfy the slug's leading-letter requirement.
+        id: `a${crypto.randomUUID().slice(1)}`,
+        slug: `request-api-${javaScriptEnabled}`,
+        displayName: `Inventory and fulfillment service ${javaScriptEnabled ? "A" : "B"}`,
+      };
 
-      const artifactId = crypto.randomUUID();
+      await environment.database.db.insert(apps).values({
+        ...target,
+        organizationId: "widefleet",
+        ownerId: environment.ownerId,
+        hostname: `${target.slug}.${environment.configuration.APP_DOMAIN}`,
+      });
+      createdAppIds.push(target.id);
+
+      const collision = await create(adminContext, target.id, "UUID-shaped slug API");
       const deploymentId = crypto.randomUUID();
-      await environment.database.db.insert(artifacts).values({
-        id: artifactId,
-        appId: target.id,
-        manifest: {},
-        modules: [],
-        metadata: workerMetadata.parse({
-          main_module: "worker.js",
-          compatibility_date: "2026-10-01",
-          entrypoints: ["Reader"],
-          assets: { upload_session: artifactId },
-        }),
-      });
-      await environment.database.db.insert(deployments).values({
-        id: deploymentId,
-        appId: target.id,
-        artifactId,
-        status: "succeeded",
-        requestId: crypto.randomUUID(),
-      });
-      await environment.database.db
-        .update(apps)
-        .set({ activeDeploymentId: deploymentId })
-        .where(eq(apps.id, target.id));
+
+      for (const provider of [target, collision]) {
+        const artifactId = crypto.randomUUID();
+        const id = provider.id === target.id ? deploymentId : crypto.randomUUID();
+        await environment.database.db.insert(artifacts).values({
+          id: artifactId,
+          appId: provider.id,
+          manifest: {},
+          modules: [],
+          metadata: workerMetadata.parse({
+            main_module: "worker.js",
+            compatibility_date: "2026-10-01",
+            entrypoints: ["Reader"],
+            assets: { upload_session: artifactId },
+          }),
+        });
+        await environment.database.db.insert(deployments).values({
+          id,
+          appId: provider.id,
+          artifactId,
+          status: "succeeded",
+          requestId: crypto.randomUUID(),
+        });
+        await environment.database.db
+          .update(apps)
+          .set({ activeDeploymentId: id })
+          .where(eq(apps.id, provider.id));
+      }
+
+      for (const service of [target.id, target.slug]) {
+        await adminPage.goto(`/services/${service}/availability`);
+        await expect(
+          adminPage.getByText(`Choose who can connect ${target.displayName} to their apps.`, {
+            exact: true,
+          }),
+        ).toBeVisible();
+        await page.goto(`/services/${service}/connect`);
+        await expect(
+          page.getByRole("heading", { name: `Connect ${target.displayName}`, exact: true }),
+        ).toBeVisible();
+      }
+
       await page.goto("/services/requests");
       await expect(page.getByText("No connection requests yet.")).toBeVisible();
       await page.goto("/services");
@@ -217,9 +249,10 @@ for (const javaScriptEnabled of [true, false]) {
       const requests = await memberContext.request.get("/api/v1/connection-requests");
 
       const entries = z
-        .array(z.object({ id: z.string(), status: z.string() }))
+        .array(z.object({ id: z.string(), status: z.string(), serviceId: z.string() }))
         .parse(await requests.json());
 
+      expect(entries[0]?.serviceId).toBe(target.id);
       const id = entries[0]?.id;
 
       if (!id) throw new Error("Missing request");
@@ -307,6 +340,18 @@ for (const javaScriptEnabled of [true, false]) {
       await adminPage.getByLabel("Who can connect this API?").selectOption("organization");
       await adminPage.getByRole("button", { name: "Save availability" }).click();
       await expect(adminPage.getByText("Availability saved.", { exact: true })).toBeVisible();
+
+      const availability = await environment.database.db
+        .select({ id: apps.id, accessMode: apps.serviceAccessMode })
+        .from(apps)
+        .where(inArray(apps.id, [target.id, collision.id]));
+
+      expect(availability).toEqual(
+        expect.arrayContaining([
+          { id: target.id, accessMode: "organization" },
+          { id: collision.id, accessMode: "approval_required" },
+        ]),
+      );
       await page.goto(`/services?app=${source.id}`);
       await page.getByRole("link", { name: `Set up connection to ${target.displayName}` }).click();
       await expect(page.getByLabel("Your app", { exact: true })).toHaveCount(0);
@@ -369,14 +414,7 @@ for (const javaScriptEnabled of [true, false]) {
       await page.screenshot({ path: testInfo.outputPath("request-statuses.png"), fullPage: true });
     } finally {
       await Promise.all(contexts.map((context) => context.close()));
-      await environment.database.db
-        .delete(apps)
-        .where(
-          inArray(apps.slug, [
-            `requester-${javaScriptEnabled}`,
-            `request-api-${javaScriptEnabled}`,
-          ]),
-        );
+      await environment.database.db.delete(apps).where(inArray(apps.id, createdAppIds));
       await environment.database.db.delete(user).where(eq(user.id, creator.id));
     }
   });
