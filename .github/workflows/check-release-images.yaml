@@ -25,10 +25,13 @@ on:
       - "!**/*.md"
   push:
     branches: [main]
-    paths-ignore:
-      - "**/*.md"
-      - "docs/**"
-      - "apps/docs/docs/**"
+    paths:
+      - "**"
+      - "!**/*.md"
+      - "!docs/**"
+      - "!apps/docs/**"
+      # The control-plane deployment reads this workspace package manifest.
+      - "apps/docs/package.json"
 
 permissions:
   contents: read

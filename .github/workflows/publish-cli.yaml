@@ -4,6 +4,17 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
+    # Keep code changes covered; skip documentation that is not shipped in the CLI.
+    # GitHub does not evaluate path filters for tag pushes.
+    paths:
+      - "**"
+      - "!README.md"
+      - "!AGENTS.md"
+      - "!docs/**"
+      - "!apps/docs/**"
+      # Preserve workspace dependency changes and the packaged CLI README.
+      - "apps/docs/package.json"
+      - "apps/docs/docs/getting-started/installation.md"
 
 permissions:
   contents: read

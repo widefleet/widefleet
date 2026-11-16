@@ -50,7 +50,7 @@ Native packages must be available before the shared launcher, because it selects
 
 ## Use automatic CLI canaries
 
-Every push to `main`, including a merged pull request, starts a CLI-only publication in **Publish Widefleet**. All four native targets are built and tested before publication. The existing npm trusted publisher configuration above also authorizes this path; no additional token or workflow registration is needed.
+Pushes to `main`, including merged pull requests, start a CLI-only publication in **Publish Widefleet**, except when all changed files are the root `README.md` or `AGENTS.md`, contributor documentation under `docs/`, or the documentation site under `apps/docs/`. Changes to `apps/docs/package.json` and `apps/docs/docs/getting-started/installation.md` still trigger publication: they affect workspace dependencies and the packaged CLI README, respectively. All four native targets are built and tested before publication. The existing npm trusted publisher configuration above also authorizes this path; no additional token or workflow registration is needed.
 
 Each build uses `BASE-canary.RUN.gSHA`, where `BASE` is the product version, `RUN` is the workflow run number and `SHA` is the first twelve commit characters. The version is stamped only in the build checkout. The binary, launcher and native packages use the same version, without committing a version bump to `main`.
 
