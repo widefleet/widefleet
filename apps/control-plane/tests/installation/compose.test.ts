@@ -78,6 +78,22 @@ const matrix = ["local", "external"].flatMap((database) =>
 describe.runIf(process.env["RUN_INSTALLATION_TESTS"] === "1")(
   "supported Compose installations",
   () => {
+    it("shares the workload issuer's domain and HTTPS port between bootstrap and agent deployments", async () => {
+      for (const port of ["443", "25453"]) {
+        const { services } = await render(["compose.base", "compose.azure"], {
+          ...installationSettings,
+          APP_HTTPS_PORT: port,
+        });
+
+        for (const name of ["control-plane", "runtime", "agent"]) {
+          expect(services[name]?.environment["APP_DOMAIN"]).toBe(
+            installationSettings["APP_DOMAIN"],
+          );
+          expect(services[name]?.environment["APP_HTTPS_PORT"]).toBe(port);
+        }
+      }
+    });
+
     it("starts without identity settings and separates shared proxy state from the database", async () => {
       const { services } = await render(["compose.base", "compose.azure"]);
       const control = serviceSchema.parse(services["control-plane"]);

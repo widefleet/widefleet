@@ -59,8 +59,28 @@ export const workerCode = async (
   );
 
   const bindings = new Map(Object.entries(worker.env));
+
+  if (app.organizationId)
+    bindings.set(
+      "WIDEFLEET_IDENTITY",
+      context.exports.WorkloadIdentity({
+        props: { appId: app.appId, organizationId: app.organizationId, hostname: app.hostname },
+      }),
+    );
   bindings.set("WIDEFLEET_DEPLOYMENT_ID", app.deploymentId);
   bindings.set("WIDEFLEET_ORIGIN", app.origin ?? `https://${app.hostname}`);
+
+  if (app.organizationId && environment.WIDEFLEET_OAUTH)
+    bindings.set(
+      "WIDEFLEET_OAUTH_SERVICE",
+      context.exports.AppOAuth({
+        props: {
+          appId: app.appId,
+          organizationId: app.organizationId,
+          origin: app.origin ?? `https://${app.hostname}`,
+        },
+      }),
+    );
   bindings.set(
     "WIDEFLEET_SECRETS",
     context.exports.AppSecrets({ props: { appId: app.appId, revision: app.secretRevision ?? 0 } }),

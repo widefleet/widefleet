@@ -9,6 +9,8 @@ export { RuntimeObserver } from "../src/runtime-observer.ts";
 
 export { AppSecrets } from "../src/app-secrets.ts";
 
+export { WorkloadIdentity } from "../src/workload-identity.ts";
+
 export { Assets } from "../src/assets.ts";
 
 export { Gateway } from "../src/egress.ts";
@@ -90,7 +92,7 @@ const source = `export default {
       pages: [firstPage.objects.length, secondPage.objects.length], truncated: firstPage.truncated,
       empty: empty.objects.length, completedSize: completed.size, multipartValue, nativeErrors, invalidInputRejected,
       unexpectedBindings: Object.keys(env).filter(name => ![
-        'FILES', 'ASSETS', 'WIDEFLEET_R2_FILES', 'WIDEFLEET_DEPLOYMENT_ID', 'WIDEFLEET_SECRETS', 'WIDEFLEET_ORIGIN'
+        'FILES', 'ASSETS', 'WIDEFLEET_R2_FILES', 'WIDEFLEET_DEPLOYMENT_ID', 'WIDEFLEET_SECRETS', 'WIDEFLEET_ORIGIN', 'WIDEFLEET_IDENTITY'
       ].includes(name))
     });
   }

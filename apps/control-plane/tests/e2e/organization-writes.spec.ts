@@ -240,12 +240,14 @@ for (const javaScriptEnabled of [true, false]) {
           capabilityError: "Synthetic disconnection failure",
         })
         .where(eq(apps.id, id));
-      await page.goto(`/services?app=${id}`);
+      await page.goto(`/apps/${id}/connections`);
+      await page.locator("summary").filter({ hasText: "API" }).click();
       await page.getByRole("button", { name: "Retry disconnection", exact: true }).click();
       await expect(page).toHaveURL(
         `${environment.configuration.PLATFORM_URL}/apps/${id}/connections`,
       );
-      await page.getByRole("link", { name: "Browse app APIs", exact: true }).click();
+      await page.reload();
+      await page.locator("summary").filter({ hasText: "API" }).click();
       await expect(
         page.getByRole("button", { name: "Removal pending", exact: true }),
       ).toBeDisabled();

@@ -26,6 +26,8 @@ export type ParentEnvironment = {
   WIDEFLEET_SECRETS_KEY: string;
   WIDEFLEET_CONFIGURATION: string;
   WIDEFLEET_EXECUTION_LIMITS?: string;
+  WIDEFLEET_WORKLOAD_ISSUER?: string;
+  WIDEFLEET_OAUTH?: string;
   [name: string]:
     | undefined
     | NativeBindings[keyof NativeBindings]

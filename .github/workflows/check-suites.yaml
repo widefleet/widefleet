@@ -10,6 +10,8 @@ permissions:
 jobs:
   cli-platforms:
     uses: ./.github/workflows/cli-platforms.yaml
+    with:
+      canary: true
 
   checks:
     name: ${{ matrix.suite }}
@@ -97,6 +99,20 @@ jobs:
       - name: Test browser login and management
         if: matrix.suite == 'integration'
         run: pnpm --filter @platform/control-plane test:e2e --grep-invert cli-login.spec.ts
+      - name: Test source storage in the browser
+        if: matrix.suite == 'integration'
+        run: |
+          WIDEFLEET_RUNTIME_EXTENSION="$GITHUB_WORKSPACE/apps/control-plane/tests/e2e/source-extension.ts" pnpm --filter @platform/control-plane build
+          RUN_SOURCE_TESTS=1 pnpm --filter @platform/control-plane test:e2e source.spec.ts
+      - name: Save source UI review images
+        if: always() && matrix.suite == 'integration'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: source-ui-review
+          path: .local/playwright/source-*/
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: ignore
       - name: Build the control-plane image
         if: matrix.suite == 'packaged-runtime'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0

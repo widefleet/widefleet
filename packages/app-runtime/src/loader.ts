@@ -1,4 +1,12 @@
+import { workloadDiscovery } from "./workload-identity.ts";
 import { prepareAppSecrets } from "./app-secrets.ts";
+import { oauthAppAvailable } from "./app-oauth.ts";
+import { managedOAuth } from "./oauth.ts";
+
+export { WorkloadIdentity } from "./workload-identity.ts";
+
+export { AppOAuth } from "./app-oauth.ts";
+
 import { signAppCaller } from "./app-caller.ts";
 import type { appCaller } from "@platform/contracts";
 
@@ -299,6 +307,16 @@ export class RuntimeManagement extends WorkerEntrypoint<ParentEnvironment> {
 
 export default {
   async fetch(request: Request, environment: ParentEnvironment, context: ExecutionContext) {
+    const discovery = await workloadDiscovery(request, environment);
+
+    if (discovery) return discovery;
+
+    const oauthResponse = await managedOAuth(environment).callback(request, (identity) =>
+      oauthAppAvailable(environment, identity),
+    );
+
+    if (oauthResponse) return oauthResponse;
+
     if (isManagementRequest(request)) {
       // Only the private native listener accepts token-authenticated HTTP management.
       // Hosted management is available exclusively through RuntimeManagement.
