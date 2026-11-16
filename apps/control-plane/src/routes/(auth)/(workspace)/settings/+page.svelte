@@ -15,7 +15,6 @@
     setExternalManagement,
     updateSettings,
   } from "#lib/settings.remote";
-  import ReportingSettings from "#shadcn/ReportingSettings.svelte";
   import { Button } from "#shadcn/components/ui/button/index.js";
   import { Input } from "#shadcn/components/ui/input/index.js";
   import { Label } from "#shadcn/components/ui/label/index.js";
@@ -95,11 +94,10 @@
 
   const callback = $derived(`${data.platformUrl}/api/auth/sso/callback/${draft.sso.providerId}`);
 
-  const sections = $derived([
+  const sections = [
     { id: "identity", label: "Company sign-in" },
-    ...(data.reporting ? [{ id: "reporting", label: "Privacy" }] : []),
     { id: "management", label: "Administration" },
-  ]);
+  ];
 
   beforeNavigate(({ cancel, to, type }) => {
     if (!dirty || (to?.url.origin === page.url.origin && to.url.pathname === "/settings")) return;
@@ -313,7 +311,7 @@
 </script>
 
 <svelte:head><title>Settings · Widefleet</title></svelte:head>
-<PageHeading title="Settings" description="Sign-in, privacy and workspace administration." />
+<PageHeading title="Settings" description="Sign-in and workspace administration." />
 <nav aria-label="Settings sections" class="mt-7 mb-8 flex gap-6 overflow-x-auto border-b">
   {#each sections as section (section.id)}
     <a
@@ -331,9 +329,7 @@
   {#if message}<Feedback kind="error">{message}</Feedback>{/if}
   {#if view.error}<Feedback kind="error">{view.error}</Feedback>{/if}
   {#if saved}<Feedback kind="success">Settings saved.</Feedback>{/if}
-  {#if route.section === "reporting" && data.reporting}
-    <ReportingSettings initial={data.reporting} />
-  {:else if route.section === "management"}
+  {#if route.section === "management"}
     <section class="space-y-4 rounded-xl border p-6">
       <h2 class="text-base font-semibold">Manage configuration</h2>
       <p class="text-muted-foreground text-sm">
