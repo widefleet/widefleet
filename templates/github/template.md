@@ -22,45 +22,26 @@ and its declared database. Keep your local source for subsequent changes.
 
 ## Configure GitHub
 
-If your installation provides [managed template OAuth](https://widefleet.com/docs/reference/template-oauth),
-leave `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` unset. The template uses
-that registration automatically. You can supply your own registration instead,
-using the instructions below.
+An administrator needs to:
 
-Set the app's `AUTH_SECRET` to a random value of at least 32 characters and keep it
-stable; it encrypts saved account tokens. Use the app's Secrets page or
-`widefleet secret put AUTH_SECRET --file /path/to/secret`.
+1. Register a GitHub OAuth app. Set its authorization callback URL to
+   `https://YOUR-APP-URL/auth/callback/github`.
+2. Set the app secrets `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` and `AUTH_SECRET`.
+   Generate `AUTH_SECRET` randomly with at least 32 characters and keep it stable;
+   it encrypts the saved account tokens. Use the app's Secrets page or
+   `widefleet secret put NAME --file /path/to/secret` to provide values.
+3. Allow these backend origins from the app directory:
 
-Allow these backend origins from the app directory:
-
-```sh
-widefleet network allow https://github.com
-widefleet network allow https://api.github.com
-```
+   ```sh
+   widefleet network allow https://github.com
+   widefleet network allow https://api.github.com
+   ```
 
 Network changes require the CLI's `network:manage` scope. Wait for the configuration
-to activate, then open the app URL and connect your GitHub account.
-
-Private repositories require the `repo` scope, which also grants write access;
-the supplied app exposes read methods. GitHub organizations may require approval
-for the OAuth app before their repositories become available.
-
-### Use your own OAuth registration
-
-1. Open [New OAuth App](https://github.com/settings/applications/new) to register an
-   app under your personal account. For an organization-owned app, open the
-   organization's **Settings → Developer settings → OAuth apps → New OAuth App**
-   instead. Set its homepage URL to your app's HTTPS URL and its authorization callback URL to
-   `https://YOUR-APP-URL/auth/callback/github`.
-2. On the registered app's settings page, copy the **Client ID** and choose
-   **Generate a new client secret**. Set both `GITHUB_CLIENT_ID` and
-   `GITHUB_CLIENT_SECRET` as app secrets. You can return through
-   [OAuth apps](https://github.com/settings/developers) for a personal registration
-   or the organization's OAuth app settings.
-
-To change OAuth registrations, have users disconnect and connect again. See
-[Choose a registration](https://widefleet.com/docs/reference/template-oauth#choose-a-registration)
-for credential selection and switching between custom and managed OAuth.
+to activate, then open the app URL and connect your GitHub account. Private
+repositories require the `repo` scope, which also grants write access; the supplied
+app exposes read methods. GitHub organizations may require approval for the OAuth
+app before their repositories become available.
 
 ## Use from another app
 

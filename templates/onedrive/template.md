@@ -23,44 +23,28 @@ and its declared database. Keep your local source for subsequent changes.
 
 ## Configure Microsoft
 
-If your installation provides [managed template OAuth](https://widefleet.com/docs/reference/template-oauth),
-leave `MICROSOFT_CLIENT_ID` and `MICROSOFT_CLIENT_SECRET` unset. The template uses
-that registration automatically. You can supply your own registration instead,
-using the instructions below.
+An administrator needs to:
 
-Set the app's `AUTH_SECRET` to a random value of at least 32 characters and keep it
-stable; it encrypts saved account tokens. Use the app's Secrets page or
-`widefleet secret put AUTH_SECRET --file /path/to/secret`.
+1. Register a Microsoft Entra application. Choose **Accounts in any organizational
+   directory and personal Microsoft accounts** to support work, school and personal
+   accounts.
+2. Add `https://YOUR-APP-URL/auth/callback/microsoft` as a **Web** redirect URI and
+   add the delegated Microsoft Graph permission `Files.Read`.
+3. Create a client secret. Set the app secrets `MICROSOFT_CLIENT_ID`,
+   `MICROSOFT_CLIENT_SECRET` and `AUTH_SECRET`. Use the application client ID and
+   the client secret's **value**, not its ID. Generate `AUTH_SECRET` randomly with
+   at least 32 characters and keep it stable; it encrypts the saved account tokens.
+   Use the app's Secrets page or `widefleet secret put NAME --file /path/to/secret`
+   to provide values.
+4. Allow these backend origins from the app directory:
 
-Allow these backend origins from the app directory:
-
-```sh
-widefleet network allow https://login.microsoftonline.com
-widefleet network allow https://graph.microsoft.com
-```
+   ```sh
+   widefleet network allow https://login.microsoftonline.com
+   widefleet network allow https://graph.microsoft.com
+   ```
 
 Network changes require the CLI's `network:manage` scope. Wait for the configuration
 to activate, then open the app URL and connect your Microsoft account.
-
-### Use your own OAuth registration
-
-1. Open [Microsoft Entra app registrations](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade),
-   select the directory that will own the app and choose **New registration**.
-   Choose **Accounts in any organizational
-   directory and personal Microsoft accounts** to support work, school and personal
-   accounts.
-2. Under **Authentication → Add a platform → Web**, add
-   `https://YOUR-APP-URL/auth/callback/microsoft` as the redirect URI. Under
-   **API permissions → Add a permission → Microsoft Graph → Delegated permissions**,
-   add `Files.Read` and retain `User.Read`.
-3. Open **Certificates & secrets → Client secrets → New client secret**.
-   Set both `MICROSOFT_CLIENT_ID` and
-   `MICROSOFT_CLIENT_SECRET` as app secrets. Use the application client ID and the
-   client secret's **value**, not its ID.
-
-To change OAuth registrations, have users disconnect and connect again. See
-[Choose a registration](https://widefleet.com/docs/reference/template-oauth#choose-a-registration)
-for credential selection and switching between custom and managed OAuth.
 
 ## Use from another app
 

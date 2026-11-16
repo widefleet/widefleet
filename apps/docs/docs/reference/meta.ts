@@ -9,7 +9,6 @@ export default defineMeta({
     "authentication",
     "social-sign-in",
     "company-sign-in",
-    "template-oauth",
     "configuration",
     "api",
     "app-access",
