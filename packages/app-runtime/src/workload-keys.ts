@@ -8,15 +8,23 @@ import {
 } from "./workload-protocol.ts";
 import type { ParentEnvironment } from "./types.ts";
 
-const path = "workload/signing-keys.json";
+// A separate ring keeps older runtimes from reading or overwriting RSA keys during rollout.
+const path = "workload/signing-keys-rs256.json";
 
 const publicKey = z.strictObject({
-  kty: z.literal("OKP"),
-  crv: z.literal("Ed25519"),
-  x: z.string().min(1),
+  kty: z.literal("RSA"),
+  n: z.string().min(1),
+  e: z.string().min(1),
 });
 
-const privateKey = publicKey.extend({ d: z.string().min(1) });
+const privateKey = publicKey.extend({
+  d: z.string().min(1),
+  p: z.string().min(1),
+  q: z.string().min(1),
+  dp: z.string().min(1),
+  dq: z.string().min(1),
+  qi: z.string().min(1),
+});
 
 const signingKey = z.strictObject({
   kid: z.string().min(1),
@@ -39,7 +47,7 @@ type Environment = Pick<ParentEnvironment, "WIDEFLEET_SECRETS_KEY"> & {
 };
 
 const generate = async (activatesAt: number) => {
-  const pair = await generateKeyPair("EdDSA", { extractable: true });
+  const pair = await generateKeyPair("RS256", { extractable: true, modulusLength: 2048 });
   const exported = publicKey.parse(await exportJWK(pair.publicKey));
 
   return {
@@ -108,7 +116,7 @@ export const workloadKeys = async (
         keys: ring.keys.map((key) => ({
           ...key.publicKey,
           kid: key.kid,
-          alg: "EdDSA",
+          alg: "RS256",
           use: "sig",
         })),
       },
@@ -133,14 +141,14 @@ export const signWorkloadToken = async (
     organization_id: identity.organizationId,
     app_id: identity.appId,
   })
-    .setProtectedHeader({ alg: "EdDSA", kid: current.kid, typ: "JWT" })
+    .setProtectedHeader({ alg: "RS256", kid: current.kid, typ: "JWT" })
     .setIssuer(issuer)
     .setSubject(`organization:${identity.organizationId}:app:${identity.appId}`)
     .setAudience(audience)
     .setIssuedAt(now)
     .setExpirationTime(expiresAt)
     .setJti(crypto.randomUUID())
-    .sign(await importJWK(privateKey.parse(current.privateKey), "EdDSA"));
+    .sign(await importJWK(privateKey.parse(current.privateKey), "RS256"));
 
   return { token, expiresAt };
 };

@@ -3,9 +3,16 @@ import { Miniflare } from "miniflare";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createLocalJWKSet, decodeProtectedHeader, jwtVerify } from "jose";
+import {
+  createLocalJWKSet,
+  decodeProtectedHeader,
+  exportJWK,
+  generateKeyPair,
+  jwtVerify,
+} from "jose";
 import { signWorkloadToken, workloadKeys } from "./workload-keys.ts";
 import { workloadKeyGrace, workloadRotationInterval } from "./workload-protocol.ts";
+import { encryptSecrets } from "./secrets.ts";
 
 let runtime: Miniflare;
 
@@ -67,8 +74,12 @@ it("persists one encrypted authority across concurrent initialization and cold r
   expect(new Set(tokens.map(({ token }) => decodeProtectedHeader(token).kid)).size).toBe(1);
 
   for (const { token } of tokens)
-    await jwtVerify(token, createLocalJWKSet(jwks), { issuer, audience: "data" });
-  const stored = await env.WIDEFLEET_PACKAGES.get("workload/signing-keys.json");
+    await jwtVerify(token, createLocalJWKSet(jwks), {
+      issuer,
+      audience: "data",
+      algorithms: ["RS256"],
+    });
+  const stored = await env.WIDEFLEET_PACKAGES.get("workload/signing-keys-rs256.json");
   expect(await stored!.text()).not.toContain('"privateKey"');
   expect(JSON.stringify(jwks)).not.toContain('"d"');
   await runtime.dispose();
@@ -76,7 +87,11 @@ it("persists one encrypted authority across concurrent initialization and cold r
   const after = await workloadKeys(await environment());
   expect(after.jwks).toEqual(jwks);
   const token = await signWorkloadToken(await environment(), issuer, identity, "data");
-  await jwtVerify(token.token, createLocalJWKSet(jwks), { issuer, audience: "data" });
+  await jwtVerify(token.token, createLocalJWKSet(jwks), {
+    issuer,
+    audience: "data",
+    algorithms: ["RS256"],
+  });
 });
 
 it("prepublishes the next key, rotates offline, and keeps old verification keys through token expiry", async () => {
@@ -95,7 +110,11 @@ it("prepublishes the next key, rotates offline, and keeps old verification keys 
 
   // Even a receiver that has not refreshed its original JWKS knows the next key.
   for (const { token } of [oldToken, newToken])
-    await jwtVerify(token, createLocalJWKSet(original.jwks), { issuer, audience: "data" });
+    await jwtVerify(token, createLocalJWKSet(original.jwks), {
+      issuer,
+      audience: "data",
+      algorithms: ["RS256"],
+    });
   const rotated = await workloadKeys(env);
   expect(rotated.jwks.keys).toHaveLength(3);
   vi.setSystemTime((startTime + workloadRotationInterval + workloadKeyGrace + 1) * 1000);
@@ -105,7 +124,11 @@ it("prepublishes the next key, rotates offline, and keeps old verification keys 
     retired.jwks.keys.some((key) => key.kid === decodeProtectedHeader(oldToken.token).kid),
   ).toBe(false);
   await expect(
-    jwtVerify(oldToken.token, createLocalJWKSet(original.jwks), { issuer, audience: "data" }),
+    jwtVerify(oldToken.token, createLocalJWKSet(original.jwks), {
+      issuer,
+      audience: "data",
+      algorithms: ["RS256"],
+    }),
   ).rejects.toThrow();
 });
 
@@ -115,4 +138,43 @@ it("refuses issuance with the wrong encryption key without replacing the stored 
   const wrongKey = { ...env, WIDEFLEET_SECRETS_KEY: "cd".repeat(32) };
   await expect(signWorkloadToken(wrongKey, issuer, identity, "data")).rejects.toThrow();
   expect((await workloadKeys(env)).jwks).toEqual(original.jwks);
+});
+
+it("starts an independent RSA authority without changing a persisted Ed25519 ring", async () => {
+  const env = await environment();
+  const legacyPath = "workload/signing-keys.json";
+  const legacyKey = await generateKeyPair("EdDSA", { extractable: true });
+  const now = Math.floor(Date.now() / 1000);
+
+  const legacyRing = {
+    keys: [now, now + workloadRotationInterval].map((activatesAt) => ({
+      kid: "legacy-key",
+      activatesAt,
+    })),
+  };
+
+  const legacyPublicKey = await exportJWK(legacyKey.publicKey);
+  const legacyPrivateKey = await exportJWK(legacyKey.privateKey);
+
+  const ciphertext = await encryptSecrets(env, legacyPath, {
+    KEYRING: JSON.stringify({
+      keys: legacyRing.keys.map((key) => ({
+        ...key,
+        publicKey: legacyPublicKey,
+        privateKey: legacyPrivateKey,
+      })),
+    }),
+  });
+
+  await env.WIDEFLEET_PACKAGES.put(legacyPath, ciphertext);
+
+  const { token } = await signWorkloadToken(env, issuer, identity, "data");
+  const { jwks } = await workloadKeys(env);
+  await jwtVerify(token, createLocalJWKSet(jwks), {
+    issuer,
+    audience: "data",
+    algorithms: ["RS256"],
+  });
+  expect(jwks.keys.every((key) => key.kty === "RSA" && key.alg === "RS256")).toBe(true);
+  expect(await (await env.WIDEFLEET_PACKAGES.get(legacyPath))!.text()).toBe(ciphertext);
 });
