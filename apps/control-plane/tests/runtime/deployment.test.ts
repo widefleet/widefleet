@@ -73,6 +73,8 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
 
   const clientEnvironment = {
     ...process.env,
+    // CPU-heavy documentation must not starve the CLI's HTTP connection tasks.
+    TOKIO_WORKER_THREADS: "1",
     PATH: (process.env["PATH"] ?? "")
       .split(delimiter)
       .filter((entry) => !entry.startsWith(root))
@@ -234,6 +236,9 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       upstream.on("error", () => outgoing.writeHead(502).end());
       incoming.pipe(upstream);
     });
+    // Exercise idle connections closing during real starter-app type analysis.
+    proxy.keepAliveTimeout = 1000;
+    proxy.keepAliveTimeoutBuffer = 0;
     proxy.listen(proxyPort, "127.0.0.1");
     await once(proxy, "listening");
     const [execution] = await environment.database.db.select().from(organizationRuntimes);
