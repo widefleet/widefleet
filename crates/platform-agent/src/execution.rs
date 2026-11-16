@@ -204,6 +204,7 @@ pub async fn prepare(
     packages: &RuntimePackages,
     directory: &Path,
     telemetry: Option<platform_core::model::TelemetryDestination>,
+    reporting: Option<crate::reporting::RuntimeReporting>,
 ) -> Result<Prepared> {
     if packages.runtime.protocol != 3
         || packages.runtime.auth != 1
@@ -497,6 +498,9 @@ pub async fn prepare(
         configuration.app_domain.as_deref(),
         configuration.app_https_port,
     )?;
+    if let Some(reporting) = reporting {
+        config["vars"]["WIDEFLEET_USAGE_REPORTING"] = json!(serde_json::to_string(&reporting)?);
+    }
     config["vars"]["WIDEFLEET_CONFIGURATION"] = json!(serde_json::to_string(
         &json!({ "crons": crons, "queues": queues })
     )?);

@@ -7,6 +7,7 @@ import {
 import { workflowRestartFrom } from "@platform/contracts";
 import type { z } from "zod";
 import { workflowApp } from "./workflow-app.ts";
+import { recordAppInvocation } from "./app-usage.ts";
 import { workerCode } from "./worker.ts";
 import { WorkflowCatalog } from "./workflow-catalog.ts";
 import type { ParentEnvironment, PublishedApp } from "./types.ts";
@@ -99,6 +100,8 @@ export class CloudflareAppWorkflow extends WorkflowEntrypoint<ParentEnvironment,
   override async run(event: WorkflowEvent<Start>, step: WorkflowStep) {
     const start = event.payload;
     const app = await workflowApp(start, this.env);
+
+    recordAppInvocation(this.env, this.ctx, app.appId);
 
     const worker = this.env.WIDEFLEET_LOADER.get(
       await workflowWorkerKey(app, start.workflow, this.env),

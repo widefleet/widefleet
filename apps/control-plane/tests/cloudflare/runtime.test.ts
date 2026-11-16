@@ -181,6 +181,13 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
         // error behavior enabled on Workers since 2026-05-14.
         compatibility_flags: ["nodejs_compat", "workflows_preserve_non_retryable_error_message"],
         vars: {
+          WIDEFLEET_USAGE_REPORTING: JSON.stringify({
+            url: "https://usage.example.test/",
+            token: `usage_${"a".repeat(64)}`,
+            organizationId: "widefleet",
+            enabled: true,
+            revision: 0,
+          }),
           WIDEFLEET_EXECUTION_LIMITS: JSON.stringify(executionProfiles),
           WIDEFLEET_HTTP_AVAILABILITY: "kv",
           WIDEFLEET_LOGS: "cloudflare",
@@ -272,6 +279,32 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
 
     if (directory) await rm(directory, { recursive: true, force: true });
   });
+
+  it("counts app and preview HTTP, cron, queue and workflow execution without counting readiness probes", async () => {
+    await json("/.well-known/widefleet/ready");
+    expect(await json("/fixture/usage")).toEqual({});
+    await json("/env");
+    await json("/env", undefined, previewHostname);
+    await json("/fixture/scheduled", {
+      method: "POST",
+      body: JSON.stringify({ time: 1, reset: true }),
+    });
+    await json("/fixture/queue");
+    await json("/fixture/workflow-session", {
+      method: "POST",
+      body: JSON.stringify({
+        appId: app.appId,
+        version: app.version,
+        hostname,
+        workflow: "fixture",
+        id: crypto.randomUUID(),
+        params: {},
+      }),
+    });
+    await expect
+      .poll(() => json("/fixture/usage"), { timeout: 10000 })
+      .toEqual({ [app.appId]: 4, [preview.appId]: 2 });
+  }, 15000);
 
   it("protects runtime management endpoints and app assets from unauthenticated requests", async () => {
     for (const path of [
@@ -584,6 +617,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("App runtime in work
     for (const key of [
       "PRIVATE_ROOT_SECRET",
       "WIDEFLEET_CONTROL_TOKEN",
+      "WIDEFLEET_USAGE_REPORTING",
       "WIDEFLEET_LOADER",
       "WIDEFLEET_PACKAGES",
       "PREVIEW_DB",

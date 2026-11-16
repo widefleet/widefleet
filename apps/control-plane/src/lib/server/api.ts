@@ -309,6 +309,10 @@ export const createApi = (runtime: Runtime) => {
       .route({ method: "GET", path: "/agent/reporting" })
       .output(contract.reportingPreferences)
       .handler(async () => (await runtime.reporting.status()).effective),
+    runtimeReportingCredentials: agent
+      .route({ method: "GET", path: "/agent/reporting/runtime" })
+      .output(contract.runtimeReportingCredentials)
+      .handler(({ context }) => runtime.reporting.appUsage.credentials(context.agent.id)),
     agentReporting: agent
       .route({ method: "POST", path: "/agent/reporting" })
       .input(contract.agentReporting)
@@ -880,6 +884,11 @@ export const createApi = (runtime: Runtime) => {
 
   const dispatch = async (request: Request) => {
     const url = new URL(request.url);
+
+    const appUsage = /^\/api\/v1\/reporting\/runtime\/([^/]+)$/.exec(url.pathname);
+
+    if (appUsage?.[1] && request.method === "POST")
+      return runtime.reporting.appUsage.ingest(request, decodeURIComponent(appUsage[1]));
 
     const telemetry = /^\/api\/v1\/telemetry\/([^/]+)\/v1\/(logs|traces)$/.exec(url.pathname);
 

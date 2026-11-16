@@ -1,4 +1,5 @@
 import { requireOrganizationAvailability } from "./availability.ts";
+import { recordAppInvocation } from "./app-usage.ts";
 import { executionOptions } from "./execution-limits.ts";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import type { publishedCapability } from "@platform/contracts";
@@ -37,6 +38,8 @@ export class AppService extends WorkerEntrypoint<
       throw new Error("App service entrypoint is not available");
 
     const worker = await appWorker(app, this.env, this.ctx);
+
+    recordAppInvocation(this.env, this.ctx, app.appId);
 
     return worker.getEntrypoint(entrypoint === "default" ? undefined : entrypoint, {
       ...executionOptions(this.env.WIDEFLEET_EXECUTION_LIMITS, "service"),

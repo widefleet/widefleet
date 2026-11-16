@@ -1,4 +1,5 @@
 import { workloadDiscovery } from "./workload-identity.ts";
+import { recordAppInvocation } from "./app-usage.ts";
 import { prepareAppSecrets } from "./app-secrets.ts";
 import { oauthAppAvailable } from "./app-oauth.ts";
 import { managedOAuth } from "./oauth.ts";
@@ -208,6 +209,8 @@ const dispatchApp = async (
 
   if (app.metadata.web === false) return new Response(null, { status: 404 });
 
+  recordAppInvocation(environment, context, app.appId);
+
   if (request.method === "GET" || request.method === "HEAD") {
     const asset = await serveAsset(request, environment, app);
 
@@ -353,6 +356,8 @@ export default {
 
           if (await cronBlocked(environment, app)) return;
 
+          recordAppInvocation(environment, context, app.appId);
+
           const result = await run(app, environment, context, (worker) =>
             worker
               .getEntrypoint<Events>(
@@ -384,6 +389,8 @@ export default {
 
     if (!app || !app.metadata.queue_consumers.some((consumer) => consumer.queue === target.queue))
       throw new Error("Queue consumer is not published");
+
+    recordAppInvocation(environment, context, app.appId);
 
     const result = await run(app, environment, context, (worker) =>
       worker.getEntrypoint<Events>("Events").runQueue({

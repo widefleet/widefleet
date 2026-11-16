@@ -6,6 +6,7 @@ import {
   type WorkflowStep,
 } from "cloudflare:workers";
 import { workflowApp } from "./workflow-app.ts";
+import { recordAppInvocation } from "./app-usage.ts";
 import { workerCode } from "./worker.ts";
 import type { ParentEnvironment } from "./types.ts";
 import type { WorkflowRunner } from "./workflow-runner.ts";
@@ -58,6 +59,8 @@ export class WorkflowSessions extends WorkerEntrypoint<ParentEnvironment> {
   async open(start: Start) {
     const options = executionOptions(this.env.WIDEFLEET_EXECUTION_LIMITS, "workflow");
     const app = await workflowApp(start, this.env);
+
+    recordAppInvocation(this.env, this.ctx, app.appId);
 
     // A fresh isolate per replay keeps app globals and callbacks instance-local.
     return new Session(

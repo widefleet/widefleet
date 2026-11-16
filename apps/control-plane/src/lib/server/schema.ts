@@ -318,6 +318,19 @@ export const installation = pgTable("installation", {
   bootstrapPending: boolean("bootstrap_pending").notNull().default(false),
 });
 
+// App identities stay in the installation. Sources distinguish runtime processes;
+// cumulative counters make retries and out-of-order delivery idempotent.
+export const appUsage = pgTable(
+  "app_usage",
+  {
+    weekStart: text("week_start").notNull(),
+    appId: uuid("app_id").notNull(),
+    source: uuid().notNull(),
+    invocations: bigint({ mode: "number" }).notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.weekStart, table.appId, table.source] })],
+);
+
 export const organizationSettings = pgTable("organization_settings", {
   organizationId: text("organization_id")
     .primaryKey()

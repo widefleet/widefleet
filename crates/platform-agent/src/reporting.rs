@@ -3,6 +3,45 @@ use platform_core::reporting::{self, Preferences, Report};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeReporting {
+    organization_id: String,
+    token: String,
+    enabled: bool,
+    revision: u64,
+    #[serde(default)]
+    url: String,
+}
+
+pub async fn runtime(
+    api: &platform_core::http::Api,
+    configuration: &Configuration,
+) -> platform_core::Result<Option<RuntimeReporting>> {
+    if !Preferences::default().effective().usage {
+        return Ok(None);
+    }
+    let response = api
+        .authenticated(
+            reqwest::Method::GET,
+            "/agent/reporting/runtime",
+            &configuration.token,
+        )
+        .send()
+        .await?;
+    // The independently released agent also works with older control planes.
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    let mut settings: RuntimeReporting = platform_core::http::json(response).await?;
+    settings.url = crate::telemetry::destination_url(
+        api,
+        configuration,
+        &format!("/api/v1/reporting/runtime/{}", settings.organization_id),
+    )?;
+    Ok(Some(settings))
+}
+
 pub fn start(
     configuration: &Configuration,
 ) -> Option<(mpsc::Sender<Report>, tokio::task::JoinHandle<()>)> {

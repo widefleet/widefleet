@@ -41,7 +41,11 @@ pub async fn destination(
     }))
 }
 
-fn destination_url(api: &Api, configuration: &Configuration, path: &str) -> Result<String> {
+pub(crate) fn destination_url(
+    api: &Api,
+    configuration: &Configuration,
+    path: &str,
+) -> Result<String> {
     let origin = configuration
         .runtime_platform_url
         .as_deref()

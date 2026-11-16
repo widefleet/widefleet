@@ -1,4 +1,5 @@
 import { readSsoProvider } from "./sso-settings.ts";
+import { createAppUsage } from "./app-usage.ts";
 import { readOrganizationSettings } from "./installation-store.ts";
 import { installationOrganizationId } from "../organization.ts";
 import { createReportingSymbolicator } from "./reporting-maps.ts";
@@ -34,6 +35,7 @@ export const createReporting = (
   transport: typeof fetch = fetch,
 ) => {
   const symbolicate = createReportingSymbolicator();
+  const appUsage = createAppUsage(configuration, database);
   let stopped = false;
   const pending = new Set<Promise<void>>();
   let observedRevision: number | undefined;
@@ -231,7 +233,19 @@ export const createReporting = (
         event: "installation_snapshot",
         properties: { ...envelope.properties, ...(await snapshot(current.identity)) },
       });
+
+      // These are cumulative weekly snapshots. Analytics takes MAX per metric
+      // and installation/week before summing, never sums successive snapshots.
+      for (const usage of await appUsage.snapshot()) {
+        client("usage", current.revision).capture({
+          ...envelope,
+          event: "installation_app_usage",
+          properties: { ...envelope.properties, ...usage },
+        });
+      }
     }
+
+    await appUsage.prune();
 
     activeUsers.clear();
     windowStart = Date.now();
@@ -282,6 +296,7 @@ export const createReporting = (
   };
 
   return {
+    appUsage,
     start: () => {
       if (timer || stopped) return;
       schedule(heartbeat);
@@ -329,6 +344,7 @@ export const createReporting = (
         ...envelope,
         event: "installation_snapshot",
         properties: { ...envelope.properties, ...(await snapshot(current.identity)) },
+        app_usage: await appUsage.snapshot(),
       };
     },
     active: (id: string) => {

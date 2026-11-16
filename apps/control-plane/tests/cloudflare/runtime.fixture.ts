@@ -182,6 +182,7 @@ export class RuntimeManagement extends BaseManagement {
 const logRecords = [];
 const workflowWorkers = [];
 const collectorRequests = [];
+const usageCounts = {};
 for (const level of ['log', 'debug', 'info', 'warn', 'error']) {
   const originalLog = console[level];
   console[level] = (...args) => {
@@ -303,6 +304,11 @@ export class PauseWorkflow extends WorkflowEntrypoint {
 globalThis.fetch = async (input, init) => {
   const request = new Request(input, init);
   const url = new URL(request.url);
+  if (url.origin === 'https://usage.example.test') {
+    const batch = await request.json();
+    for (const entry of batch.counts) usageCounts[entry.appId] = entry.invocations;
+    return Response.json({ enabled: true, revision: 0 });
+  }
   if (url.origin === 'https://collector.example.test') {
     collectorRequests.push({ url: request.url, authorization: request.headers.get('authorization'), body: await request.text() });
     return new Response(null, { status: 204 });
@@ -328,6 +334,11 @@ export default {
       return env.RUNTIME_MANAGEMENT.fetch(request);
     }
     if (url.pathname === '/fixture/logs') return Response.json(logRecords);
+    if (url.pathname === '/fixture/usage') return Response.json(usageCounts);
+    if (url.pathname === '/fixture/queue') {
+      await runtime.queue({queue:'fixture',messages:[{id:'usage-fixture',body:{value:'usage'},timestamp:new Date(),attempts:1,ack(){},retry(){}}]},env,ctx);
+      return Response.json(true);
+    }
     if (url.pathname === '/fixture/executions') return Response.json(executions.splice(0));
     if (url.pathname === '/fixture/workflow-workers') return Response.json(workflowWorkers);
     if (url.pathname === '/fixture/collector-requests') return Response.json(collectorRequests);

@@ -181,6 +181,15 @@ describe.runIf(process.env["RUN_SERVICE_TESTS"] === "1").each(["workerd", "celld
         `
 import * as workers from 'cloudflare:workers';
 import runtime, {AppService as Service, WorkloadIdentity as Identity} from './runtime.js'; export * from './runtime.js';
+const usageCounts = {};
+const originalFetch = globalThis.fetch;
+globalThis.fetch = async (input, init) => {
+  const request = new Request(input, init);
+  if (new URL(request.url).origin !== 'https://usage.example.test') return originalFetch(input, init);
+  const batch = await request.json();
+  for (const entry of batch.counts) usageCounts[entry.appId] = entry.invocations;
+  return Response.json({enabled:true,revision:0});
+};
 ${executionRecorder}
 export class AppService extends Service { constructor(ctx, env) { super(ctx, recordExecution(env)); } }
 export class UnconfiguredIdentity extends Identity { constructor(ctx, env) { super(ctx, {...env,WIDEFLEET_WORKLOAD_ISSUER:undefined}); } }
@@ -194,6 +203,7 @@ export default { async fetch(request, env, ctx) {
     }
     if(url.pathname.startsWith('/workload/')) return runtime.fetch(new Request((url.searchParams.get('origin') ?? 'https://auth.apps.example.test')+url.pathname),env,ctx);
     if(url.pathname === '/executions') return Response.json(executions);
+    if(url.pathname === '/usage') return Response.json(usageCounts);
     if(url.pathname === '/seed') {
       const {app,source,assets} = await request.json();
       await env.WIDEFLEET_PACKAGES.put('apps/'+app.appId+'/modules/'+app.modules[0].sha256,source);
@@ -241,6 +251,13 @@ export default { async fetch(request, env, ctx) {
           compatibility_date: "2026-10-01",
           compatibility_flags: ["nodejs_compat"],
           vars: {
+            WIDEFLEET_USAGE_REPORTING: JSON.stringify({
+              url: "https://usage.example.test/",
+              token: `usage_${"a".repeat(64)}`,
+              organizationId: "widefleet",
+              enabled: true,
+              revision: 0,
+            }),
             WIDEFLEET_EXECUTION_LIMITS: JSON.stringify(executionProfiles),
             WIDEFLEET_HTTP_AVAILABILITY: "kv",
             WIDEFLEET_CONTROL_TOKEN: token,
@@ -310,6 +327,18 @@ export default { async fetch(request, env, ctx) {
 
       if (directory) await rm(directory, { recursive: true, force: true });
     });
+
+    it("counts every service RPC and fetch hop", async () => {
+      expect((await request("/read")).status).toBe(200);
+      expect((await request("/fetch")).status).toBe(200);
+      await expect
+        .poll(
+          async () =>
+            z.record(z.string(), z.number()).parse(await (await request("/usage")).json()),
+          { timeout: 10000 },
+        )
+        .toEqual({ [sourceId]: 2, [targetId]: 2 });
+    }, 15000);
 
     it("issues app and service tokens with public verification and no control plane, including concurrent cold calls", async () => {
       const results = await Promise.all(

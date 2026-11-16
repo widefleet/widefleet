@@ -2,6 +2,37 @@ import { z } from "zod";
 
 export const reportingPreferences = z.strictObject({ usage: z.boolean(), crashes: z.boolean() });
 
+export const reportingWeek = (time = Date.now()) => {
+  const day = new Date(time);
+  day.setUTCDate(day.getUTCDate() - ((day.getUTCDay() + 6) % 7));
+
+  return day.toISOString().slice(0, 10);
+};
+
+export const runtimeReportingStatus = z.strictObject({
+  enabled: z.boolean(),
+  revision: z.number().int().nonnegative(),
+});
+
+export const runtimeReportingCredentials = runtimeReportingStatus.extend({
+  organizationId: z.string().min(1).max(128),
+  token: z.string().regex(/^usage_[a-f0-9]{64}$/),
+});
+
+export const runtimeUsage = z.strictObject({
+  source: z.uuid(),
+  revision: z.number().int().nonnegative(),
+  counts: z
+    .array(
+      z.strictObject({
+        appId: z.uuid(),
+        weekStart: z.iso.date().refine((value) => reportingWeek(Date.parse(value)) === value),
+        invocations: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+      }),
+    )
+    .max(100),
+});
+
 export const reportingFrame = z.strictObject({
   function: z
     .string()
