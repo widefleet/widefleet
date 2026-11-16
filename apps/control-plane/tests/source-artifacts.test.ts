@@ -87,10 +87,31 @@ describe("Artifacts source backend", () => {
     expect(repo[Symbol.dispose]).toHaveBeenCalledTimes(1);
   });
 
-  it("looks up full branch refs, verifies commit presence, and deletes idempotently", async () => {
+  it.each(["main", "feature/search"])("reads the saved commit on %s", async (branch) => {
+    const { repo, source } = fixture();
+
+    const commit = {
+      hash: "a".repeat(40),
+      treeHash: "b".repeat(40),
+      message: "Save source",
+      author: { name: "Test", email: "test@example.test" },
+      committer: { name: "Test", email: "test@example.test" },
+      parents: [],
+      authoredAt: 1_700_000_000,
+      committedAt: 1_700_000_000,
+    };
+
+    // Artifacts resolves branch names; a full refs/heads/... ref returns no history.
+    repo.log.mockImplementation(async (options) => (options?.ref === branch ? [commit] : []));
+
+    expect(await source.head("id", branch)).toBe(commit.hash);
+    expect(repo.log).toHaveBeenCalledWith({ ref: branch, limit: 1 });
+    expect(await source.head("id", "missing")).toBeNull();
+    expect(repo[Symbol.dispose]).toHaveBeenCalledTimes(2);
+  });
+
+  it("verifies commit presence and deletes idempotently", async () => {
     const { binding, repo, source } = fixture();
-    expect(await source.head("id", "preview/search")).toBeNull();
-    expect(repo.log).toHaveBeenCalledWith({ ref: "refs/heads/preview/search", limit: 1 });
     expect(await source.hasCommit("id", "a".repeat(40))).toBe(false);
     expect(repo.readCommit).toHaveBeenCalledWith("a".repeat(40));
     binding.get.mockRejectedValueOnce(Object.assign(new Error("Not found"), { code: "NOT_FOUND" }));
