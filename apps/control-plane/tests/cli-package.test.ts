@@ -132,6 +132,42 @@ describe.runIf(process.env["RUN_CLI_PACKAGE_TESTS"] === "1")(
       await rm(directory, { recursive: true, force: true });
     }, 60_000);
 
+    it("preserves starter ignore rules through npm exec", async () => {
+      const ignored = await readFile(".gitignore", "utf8");
+
+      for (const template of ["sveltekit", "tanstack-start"]) {
+        const project = join(directory, `npm ${template} app`);
+
+        await runPnpm(
+          [
+            "exec",
+            "npm",
+            "exec",
+            "--yes",
+            "--ignore-scripts",
+            "--registry",
+            registry.url,
+            "--cache",
+            join(directory, "npm cache"),
+            "--package",
+            `widefleet@${version}`,
+            "--",
+            "widefleet",
+            "init",
+            project,
+            "--template",
+            template,
+          ],
+          directory,
+          environment,
+        );
+        expect(await readFile(join(project, ".gitignore"), "utf8")).toBe(ignored);
+        await expect(readFile(join(project, ".npmignore"))).rejects.toMatchObject({
+          code: "ENOENT",
+        });
+      }
+    }, 60_000);
+
     it("installs only the matching native package without scripts and builds an independent starter", async () => {
       await runPnpm(
         [
