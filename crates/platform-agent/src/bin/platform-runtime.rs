@@ -24,8 +24,6 @@ struct Options {
     celld: PathBuf,
     #[arg(long, env = "CELLD_ADVERTISE")]
     advertise: Option<String>,
-    #[arg(long, env = "PLATFORM_RUNTIME_PLATFORM_URL")]
-    platform_url: Option<String>,
     #[command(flatten)]
     storage: StorageOptions,
 }
@@ -95,12 +93,7 @@ async fn main() -> Result<()> {
             serde_json::from_slice(&tokio::fs::read(&options.release).await?)?;
         let secrets_key =
             runtime::secrets_key(store.as_ref(), &installation.organization_id).await?;
-        let config = runtime::configuration(
-            &release,
-            &installation.control_token,
-            &secrets_key,
-            options.platform_url.as_deref(),
-        )?;
+        let config = runtime::configuration(&release, &installation.control_token, &secrets_key)?;
         let directory = tempfile::tempdir()?;
         for module in &release.modules {
             if module.name != "loader.js"

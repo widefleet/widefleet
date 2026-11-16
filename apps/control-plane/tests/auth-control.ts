@@ -1,3 +1,4 @@
+import { workloadControlPath, workloadConfiguration } from "@platform/app-runtime/workload";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -12,6 +13,7 @@ export const createAuthControl = async (directory: string) => {
   const configurations = new Map<string, { configuration: AuthConfiguration; revision: string }>();
   let available = true;
   let publications = 0;
+  let workload: z.infer<typeof workloadConfiguration> | null = null;
 
   await mkdir(directory, { recursive: true });
   await writeFile(join(directory, "control-token"), key, { mode: 0o600 });
@@ -28,6 +30,16 @@ export const createAuthControl = async (directory: string) => {
 
     if (!available) {
       response.writeHead(503).end();
+
+      return;
+    }
+
+    if (request.url === workloadControlPath && request.method === "PUT") {
+      const chunks: Buffer[] = [];
+
+      for await (const chunk of request) chunks.push(z.instanceof(Buffer).parse(chunk));
+      workload = workloadConfiguration.parse(JSON.parse(Buffer.concat(chunks).toString()));
+      response.writeHead(204).end();
 
       return;
     }
@@ -80,6 +92,7 @@ export const createAuthControl = async (directory: string) => {
 
   return {
     url: `http://127.0.0.1:${address.port}`,
+    workload: () => workload,
     read: (organizationId = "widefleet") => ({
       configuration: configurations.get(organizationId)?.configuration ?? null,
       revision: configurations.get(organizationId)?.revision ?? "",

@@ -270,7 +270,6 @@ try {
     JSON.stringify({
       ...controlSecretOverrides,
       ...socialCredentials,
-      WIDEFLEET_CONTROL_TOKEN: secrets.WIDEFLEET_CONTROL_TOKEN,
       BETTER_AUTH_SECRET: secrets.BETTER_AUTH_SECRET,
       PLATFORM_ENCRYPTION_KEY: secrets.PLATFORM_ENCRYPTION_KEY,
       APP_COOKIE_SECRET: secrets.APP_COOKIE_SECRET,

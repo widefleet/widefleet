@@ -1,4 +1,3 @@
-import { createWorkloadIdentity } from "./workload-identity.ts";
 import type { AuthenticationExtension } from "./runtime-extension.ts";
 import { createConnectionService } from "./connections.ts";
 import { createAppSecrets } from "./app-secrets.ts";
@@ -52,7 +51,6 @@ export const createRuntime = ({
   createOrganization,
   authentication,
   discoveryTransport = "node",
-  runtimeKey,
 }: {
   configuration: Configuration & { BETTER_AUTH_SECRET: string };
   database: ReturnType<typeof createDatabase>;
@@ -71,7 +69,6 @@ export const createRuntime = ({
   authCookies?: ReturnType<typeof sveltekitCookies>;
   hostedLogs?: ReturnType<typeof createCloudflareLogs>;
   discoveryTransport?: "node" | "cloudflare";
-  runtimeKey?: () => Promise<string | null>;
 }) => {
   const publicSignup = Boolean(createOrganization);
 
@@ -112,13 +109,6 @@ export const createRuntime = ({
   const runtime = {
     auth,
     publicSignup,
-    workloadIdentity: createWorkloadIdentity(
-      auth,
-      database.db,
-      configuration.PLATFORM_URL,
-      runtimeKey,
-      organizationAccess,
-    ),
     onboarding: createOnboardingService(database.db, settings, createOrganization, observation),
     identity: createIdentityService(
       auth,

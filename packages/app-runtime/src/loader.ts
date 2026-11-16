@@ -1,3 +1,5 @@
+import { publishWorkloadConfiguration, workloadDiscovery } from "./workload-identity.ts";
+import { workloadControlPath } from "./workload-protocol.ts";
 import { prepareAppSecrets } from "./app-secrets.ts";
 import { oauthAppAvailable } from "./app-oauth.ts";
 import { managedOAuth } from "./oauth.ts";
@@ -248,6 +250,9 @@ const manageRuntime = async (
 ) => {
   const url = new URL(request.url);
 
+  if (url.pathname === workloadControlPath)
+    return publishWorkloadConfiguration(request, environment);
+
   if (url.pathname === "/.well-known/widefleet/runtime") {
     return Response.json({ runtimeVersion: WIDEFLEET_RUNTIME_VERSION });
   }
@@ -306,6 +311,10 @@ export class RuntimeManagement extends WorkerEntrypoint<ParentEnvironment> {
 
 export default {
   async fetch(request: Request, environment: ParentEnvironment, context: ExecutionContext) {
+    const discovery = await workloadDiscovery(request, environment);
+
+    if (discovery) return discovery;
+
     const oauthResponse = await managedOAuth(environment).callback(request, (identity) =>
       oauthAppAvailable(environment, identity),
     );

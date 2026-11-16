@@ -1,3 +1,5 @@
+import { workloadPublicationCron } from "@platform/app-runtime/workload";
+import { publishHostedWorkloadAdmission } from "./workload-publication.ts";
 import { createProductAnalytics } from "./analytics.ts";
 import { analyticsEnvironmentSchema } from "../analytics-config.ts";
 import type { CloudflareBindings } from "./cloudflare-config.ts";
@@ -17,6 +19,17 @@ export const runScheduledExtension = async (
         binding: (name, schema) => schema.parse(bindings[name]),
         configuration: readCloudflareConfiguration(bindings),
       });
+
+      if (event.cron === workloadPublicationCron) {
+        await publishHostedWorkloadAdmission(
+          bindings,
+          db,
+          readCloudflareConfiguration(bindings),
+          extension,
+        );
+
+        return;
+      }
 
       await extension.scheduled?.(event, (name, schema) => schema.parse(bindings[name]));
     });

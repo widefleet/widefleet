@@ -60,7 +60,7 @@ export const workerCode = async (
 
   const bindings = new Map(Object.entries(worker.env));
 
-  if (app.organizationId && environment.WIDEFLEET_PLATFORM_URL)
+  if (app.organizationId)
     bindings.set(
       "WIDEFLEET_IDENTITY",
       context.exports.WorkloadIdentity({

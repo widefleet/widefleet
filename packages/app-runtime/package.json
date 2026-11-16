@@ -27,6 +27,7 @@
   "dependencies": {
     "@platform/auth-proxy": "workspace:*",
     "@platform/contracts": "workspace:*",
+    "jose": "6.2.10",
     "zod": "4.6.5"
   },
   "devDependencies": {

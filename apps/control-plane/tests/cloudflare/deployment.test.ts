@@ -17,6 +17,7 @@ import { z } from "zod";
 import { Result } from "better-result";
 import * as contract from "@platform/contracts";
 import release from "@platform/app-runtime/release" with { type: "json" };
+import { workloadPublicationCron } from "@platform/app-runtime/workload";
 import { createTestEnvironment } from "../environment.ts";
 import { deployHostedRuntime } from "../../tools/hosted-runtime.ts";
 import { createCloudflareProvisioner } from "../../src/lib/server/cloudflare-provisioning.ts";
@@ -788,6 +789,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
             await runScheduledExtension(env, {cron:'7 * * * *',scheduledTime:Date.now()}, () => ({scheduled:async () => {throw new Error('Scheduled fixture failed');}}));
             return new Response(null,{status:204});
           } catch (error) { return Response.json({error:error.message},{status:500}); }
+        }
+        if (url.hostname === 'fixture' && url.pathname === '/scheduled-workload') {
+          await runScheduledExtension(env, {cron:${JSON.stringify(workloadPublicationCron)},scheduledTime:Date.now()}, () => ({scheduled:async () => {throw new Error('Reserved cron reached extension');}}));
+          return new Response(null,{status:204});
         }
         if (url.hostname === 'fixture' && url.pathname === '/runtime') {
           const input = request.method === 'GET' ? null : await request.json();
@@ -3306,6 +3311,21 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       await completed(entry.command.id);
       expect((await host(entry.hostname))?.body).toMatchObject({ deploymentId: entry.command.id });
     }, 20000);
+    it("publishes workload discovery through the reserved cron and runtime management binding", async () => {
+      const response = await worker.fetch("http://fixture/scheduled-workload");
+      expect(response.status).toBe(204);
+
+      const discovery = await worker.fetch(
+        "https://auth.apps.localhost/workload/.well-known/openid-configuration",
+      );
+
+      expect(discovery.status).toBe(200);
+      expect(await discovery.json()).toMatchObject({
+        issuer: "https://auth.apps.localhost/workload",
+        jwks_uri: "https://auth.apps.localhost/workload/jwks",
+      });
+    });
+
     it("reports scheduled extension errors without changing their response", async () => {
       const before = exceptions.length;
       const response = await worker.fetch("http://fixture/scheduled-extension");

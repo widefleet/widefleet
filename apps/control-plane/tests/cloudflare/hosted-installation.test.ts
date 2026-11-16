@@ -1,3 +1,4 @@
+import { workloadPublicationCron } from "@platform/app-runtime/workload";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { once } from "node:events";
@@ -61,7 +62,6 @@ describe("Hosted resource provisioning", () => {
       JSON.stringify(executionLimits),
     );
     expect(configs.runtime.vars["OBSERVER_LABEL"]).toBe("fixture");
-    expect(configs.runtime.vars["WIDEFLEET_PLATFORM_URL"]).toBe(installation.platformUrl);
     expect(configs.controlPlane.vars).not.toHaveProperty("WIDEFLEET_EXECUTION_LIMITS");
     expect(configs.initialize.vars).not.toHaveProperty("WIDEFLEET_EXECUTION_LIMITS");
     expect((await hostedConfigurations(installation, ids)).runtime.vars).not.toHaveProperty(
@@ -267,7 +267,7 @@ describe("Hosted resource provisioning", () => {
     );
 
     expect(configs.controlPlane).toMatchObject({
-      triggers: { crons: ["* * * * *"] },
+      triggers: { crons: [workloadPublicationCron, "* * * * *"] },
       vpc_networks: [{ binding: "EXAMPLE" }],
       hyperdrive: [{ binding: "HYPERDRIVE", id: installation.hyperdriveId }],
       r2_buckets: [{ binding: "ARTIFACTS" }],
@@ -290,7 +290,6 @@ describe("Hosted resource provisioning", () => {
     expect(configs.runtime.vars).toEqual({
       WIDEFLEET_CONFIGURATION: JSON.stringify({ source: "r2" }),
       WIDEFLEET_LOGS: "cloudflare",
-      WIDEFLEET_PLATFORM_URL: installation.platformUrl,
       OBSERVER_LABEL: "installation-fixture",
     });
     expect(configs.controlPlane.vars).not.toHaveProperty("OBSERVER_LABEL");

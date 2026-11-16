@@ -55,7 +55,6 @@ export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
     hostedLogs: createCloudflareLogs(bindings),
     reporting,
     encryptionKey: configuration.PLATFORM_ENCRYPTION_KEY,
-    runtimeKey: async () => bindings.WIDEFLEET_CONTROL_TOKEN ?? null,
     authRateLimit: cloudflareAuthRateLimit(bindings, configuration.PLATFORM_URL),
     authIpAddressHeaders: ["cf-connecting-ip"],
     authCookies: sveltekitCookies(getRequestEvent),

@@ -1,5 +1,5 @@
-import { createServer as createHttpServer } from "node:http";
-import { verifyWorkloadRequest, workloadTokenPath } from "@platform/app-runtime/workload";
+import { workloadControlPath, workloadToken } from "@platform/app-runtime/workload";
+import { createLocalJWKSet, jwtVerify } from "jose";
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { once } from "node:events";
@@ -124,10 +124,6 @@ describe.runIf(process.env["RUN_SERVICE_TESTS"] === "1").each(["workerd", "celld
     let native: ReturnType<typeof spawn> | undefined;
     let origin: string;
     let identityIssuer: string;
-    let workloadServer: ReturnType<typeof createHttpServer>;
-    let workloadOrigin: string;
-    let redirectWorkload = false;
-    const workloadRequests: (string | undefined)[] = [];
 
     const request = (
       path: string,
@@ -135,6 +131,7 @@ describe.runIf(process.env["RUN_SERVICE_TESTS"] === "1").each(["workerd", "celld
         | { app: z.infer<typeof publishedApp>; source: string; assets: Record<string, string> }
         | z.infer<typeof appSecretPreparation>
         | { key: string }
+        | { workloadOrganizations: string[] }
         | { availability: "blocked" | "clear" | "unavailable" },
       headers: Record<string, string> = {},
     ) =>
@@ -168,40 +165,6 @@ describe.runIf(process.env["RUN_SERVICE_TESTS"] === "1").each(["workerd", "celld
     };
 
     beforeAll(async () => {
-      workloadServer = createHttpServer((request, response) => {
-        void (async () => {
-          workloadRequests.push(request.url);
-
-          if (request.url !== workloadTokenPath) throw new Error("Unexpected workload path");
-
-          if (request.headers["content-type"] !== "application/octet-stream")
-            throw new Error("Expected a non-form workload request");
-
-          if (request.headers.origin) throw new Error("Workload requests do not need an Origin");
-
-          const chunks: Buffer[] = [];
-
-          for await (const chunk of request) chunks.push(z.instanceof(Buffer).parse(chunk));
-          const identity = await verifyWorkloadRequest(token, Buffer.concat(chunks).toString());
-
-          if (redirectWorkload) {
-            response.writeHead(307, { location: `${workloadOrigin}/unexpected` }).end();
-
-            return;
-          }
-
-          response.setHeader("content-type", "application/json");
-          response.end(
-            JSON.stringify({
-              token: JSON.stringify(identity),
-              expiresAt: Math.floor(Date.now() / 1000) + 300,
-            }),
-          );
-        })().catch(() => response.writeHead(401).end());
-      });
-      workloadServer.listen(0, "127.0.0.1");
-      await once(workloadServer, "listening");
-      workloadOrigin = `http://127.0.0.1:${z.object({ port: z.number() }).parse(workloadServer.address()).port}`;
       directory = await mkdtemp(join(tmpdir(), "widefleet-app-services-"));
       const identity = await runtimeIdentity("apps.example.test", [], [], "bob");
       identityIssuer =
@@ -223,6 +186,11 @@ export class AppService extends Service { constructor(ctx, env) { super(ctx, rec
 export default { async fetch(request, env, ctx) {
   const url = new URL(request.url);
   try {
+    if(url.pathname === '/workload-configuration') {
+      const {workloadOrganizations}=await request.json();
+      return ctx.exports.RuntimeManagement({props:{}}).fetch(new Request('https://runtime.internal${workloadControlPath}',{method:'PUT',body:JSON.stringify({issuer:'https://auth.apps.example.test/workload',organizations:workloadOrganizations})}));
+    }
+    if(url.pathname.startsWith('/workload/')) return runtime.fetch(new Request('https://auth.apps.example.test'+url.pathname),env,ctx);
     if(url.pathname === '/executions') return Response.json(executions);
     if(url.pathname === '/seed') {
       const {app,source,assets} = await request.json();
@@ -274,7 +242,6 @@ export default { async fetch(request, env, ctx) {
             WIDEFLEET_EXECUTION_LIMITS: JSON.stringify(executionProfiles),
             WIDEFLEET_HTTP_AVAILABILITY: "kv",
             WIDEFLEET_CONTROL_TOKEN: token,
-            WIDEFLEET_PLATFORM_URL: workloadOrigin,
             WIDEFLEET_SECRETS_KEY: "ab".repeat(32),
             WIDEFLEET_CONFIGURATION: '{"crons":{},"queues":{}}',
           },
@@ -338,36 +305,92 @@ export default { async fetch(request, env, ctx) {
         clearTimeout(timeout);
       }
 
-      if (workloadServer)
-        await new Promise<void>((resolve, reject) =>
-          workloadServer.close((error) => (error ? reject(error) : resolve())),
-        );
-
       if (directory) await rm(directory, { recursive: true, force: true });
     });
 
-    it("binds workload tokens to the executing app, including service calls, without exposing runtime keys", async () => {
-      const response = await request("/identity");
-      expect(response.status, await response.clone().text()).toBe(200);
+    it("issues app and service tokens with public verification and no control plane, including concurrent cold calls", async () => {
+      expect((await request("/identity")).status).toBe(409);
+      expect(
+        (await request("/workload-configuration", { workloadOrganizations: ["widefleet"] })).status,
+      ).toBe(204);
 
-      const result = z
+      const results = await Promise.all(
+        Array.from({ length: 4 }, async () => {
+          const response = await request("/identity");
+          expect(response.status, await response.clone().text()).toBe(200);
+
+          return z
+            .object({ own: workloadToken, target: workloadToken, key: z.null() })
+            .parse(await response.json());
+        }),
+      );
+
+      const response = await request("/workload/jwks");
+      expect(response.status).toBe(200);
+
+      const published = z
         .object({
-          own: z.object({ token: z.string() }),
-          target: z.object({ token: z.string() }),
-          key: z.null(),
+          keys: z.array(
+            z.strictObject({
+              kty: z.literal("OKP"),
+              crv: z.literal("Ed25519"),
+              x: z.string(),
+              kid: z.string(),
+              alg: z.literal("EdDSA"),
+              use: z.literal("sig"),
+            }),
+          ),
         })
         .parse(await response.json());
 
-      expect(JSON.parse(result.own.token)).toMatchObject({
-        appId: sourceId,
-        organizationId: "widefleet",
-        audience: "data-api",
-      });
-      expect(JSON.parse(result.target.token)).toMatchObject({
-        appId: targetId,
-        organizationId: "widefleet",
-        audience: "other-api",
-      });
+      expect(published.keys).toHaveLength(2);
+      const keys = createLocalJWKSet(published);
+      const issuer = "https://auth.apps.example.test/workload";
+      expect(
+        await (await request("/workload/.well-known/openid-configuration")).json(),
+      ).toMatchObject({ issuer, jwks_uri: `${issuer}/jwks` });
+
+      for (const result of results) {
+        const own = await jwtVerify(result.own.token, keys, { issuer, audience: "data-api" });
+        expect(own.payload).toMatchObject({
+          app_id: sourceId,
+          organization_id: "widefleet",
+          aud: "data-api",
+          sub: `organization:widefleet:app:${sourceId}`,
+          workload_type: "app",
+        });
+        expect(own.payload.exp! - own.payload.iat!).toBe(300);
+        expect(
+          (await jwtVerify(result.target.token, keys, { issuer, audience: "other-api" })).payload,
+        ).toMatchObject({ app_id: targetId, organization_id: "widefleet" });
+        await expect(
+          jwtVerify(result.own.token, keys, { issuer, audience: "wrong-api" }),
+        ).rejects.toThrow();
+        await expect(
+          jwtVerify(result.own.token, keys, {
+            issuer: "https://platform.example.test/api/auth",
+            audience: "data-api",
+          }),
+        ).rejects.toThrow();
+        await expect(
+          jwtVerify(result.own.token, keys, {
+            issuer,
+            audience: "data-api",
+            currentDate: new Date((result.own.expiresAt + 1) * 1000),
+          }),
+        ).rejects.toThrow();
+      }
+    });
+
+    it("applies published admission changes without calling management during token issuance", async () => {
+      expect((await request("/workload-configuration", { workloadOrganizations: [] })).status).toBe(
+        204,
+      );
+      expect((await request("/identity")).status).toBe(409);
+      // Public verification remains available even when every organization is disabled.
+      expect((await request("/workload/jwks")).status).toBe(200);
+      await request("/workload-configuration", { workloadOrganizations: ["widefleet"] });
+      expect((await request("/identity")).status).toBe(200);
     });
 
     it("admits concurrent cold service calls and streams fetch responses", async () => {
@@ -380,19 +403,6 @@ export default { async fetch(request, env, ctx) {
 
       expect(await (await request("/fetch")).text()).toBe("v1");
       expect((await request("/web")).status).toBe(404);
-    });
-    it("does not forward workload credentials through redirects", async () => {
-      redirectWorkload = true;
-      const firstRequest = workloadRequests.length;
-
-      try {
-        const response = await request("/identity");
-        expect(response.status).toBe(409);
-        expect(workloadRequests.slice(firstRequest)).toEqual([workloadTokenPath]);
-        expect(await response.text()).toContain("Workload token issuance failed");
-      } finally {
-        redirectWorkload = false;
-      }
     });
     it("passes service execution budgets to both RPC and fetch invocations of cached apps", async () => {
       await request("/read");

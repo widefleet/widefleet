@@ -52,12 +52,7 @@ pub async fn secrets_key(store: &dyn ObjectStore, organization_id: &str) -> Resu
     Ok(value)
 }
 
-pub fn configuration(
-    release: &RuntimeRelease,
-    token: &str,
-    secrets_key: &str,
-    platform_url: Option<&str>,
-) -> Result<Value> {
+pub fn configuration(release: &RuntimeRelease, token: &str, secrets_key: &str) -> Result<Value> {
     if release.protocol != 3 || release.auth != 1 || release.celld != "0.6.2" {
         return Err(Error::invalid(
             "Unsupported runtime installation protocol or celld version".into(),
@@ -74,9 +69,6 @@ pub fn configuration(
         "durable_objects": { "bindings": [
         ] },
     });
-    if let Some(url) = platform_url {
-        config["vars"]["WIDEFLEET_PLATFORM_URL"] = json!(url);
-    }
     if release.workflows == Some(1) {
         config["services"] = json!([{ "binding": "WIDEFLEET_WORKFLOW_SESSIONS", "service": "widefleet", "entrypoint": "WorkflowSessions" }]);
         config["workflows"] = json!([{ "binding": "WIDEFLEET_WORKFLOWS", "name": "widefleet-apps", "class_name": "AppWorkflow" }]);

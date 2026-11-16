@@ -42,8 +42,6 @@ services:
       retries: 6
 
   runtime:
-    environment:
-      PLATFORM_RUNTIME_PLATFORM_URL: ${PLATFORM_RUNTIME_PLATFORM_URL:-${PLATFORM_URL}}
     container_name: app-platform-runtime
     image: ${PLATFORM_RUNTIME_IMAGE:?Load the release images environment file}
     restart: unless-stopped
@@ -88,7 +86,6 @@ services:
       runtime: { condition: service_healthy }
     environment:
       PLATFORM_URL: ${PLATFORM_URL}
-      PLATFORM_RUNTIME_PLATFORM_URL: ${PLATFORM_RUNTIME_PLATFORM_URL:-${PLATFORM_URL}}
       PLATFORM_USAGE_REPORTING: ${PLATFORM_USAGE_REPORTING:-}
       PLATFORM_CRASH_REPORTING: ${PLATFORM_CRASH_REPORTING:-}
       PLATFORM_AGENT_TOKEN: ${PLATFORM_AGENT_TOKEN:-}

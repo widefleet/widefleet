@@ -1,13 +1,5 @@
 import { expect, test } from "@playwright/test";
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
-import { createRemoteJWKSet, jwtVerify } from "jose";
-import {
-  signWorkloadRequest,
-  workloadToken,
-  workloadTokenPath,
-} from "@platform/app-runtime/workload";
 import { createServer, request as httpRequest } from "node:http";
 import { EventEmitter, once } from "node:events";
 import { fileURLToPath } from "node:url";
@@ -552,6 +544,15 @@ test("selects an organization, repairs stale selection and explains removed acce
   await expect(page).toHaveURL("http://localhost:25430/sign-in");
 });
 
+test("publishes workload admission to the runtime on native startup", async () => {
+  await expect
+    .poll(() => environment.authControl.workload())
+    .toEqual({
+      issuer: "https://auth.apps.localhost/workload",
+      organizations: ["widefleet"],
+    });
+});
+
 test("preserves SvelteKit form protection and accepts the CLI with an explicit Origin", async ({
   request,
 }) => {
@@ -589,70 +590,6 @@ test("preserves SvelteKit form protection and accepts the CLI with an explicit O
   });
 
   expect(foreignOrigin.status()).toBe(403);
-});
-
-test("issues workload tokens through the built server without a browser Origin", async ({
-  request,
-}) => {
-  const appId = crypto.randomUUID();
-  await environment.database.db.insert(apps).values({
-    id: appId,
-    slug: "workload-http-test",
-    displayName: "Workload HTTP test",
-    hostname: "workload-http-test.apps.localhost",
-    ownerId: environment.ownerId,
-    organizationId: "widefleet",
-    state: "active",
-  });
-
-  const secret = (
-    await readFile(
-      join(environment.configuration.PLATFORM_RUNTIME_DIRECTORY, "control-token"),
-      "utf8",
-    )
-  ).trim();
-
-  const audience = "https://data.example.test";
-  const proof = await signWorkloadRequest(secret, { appId, organizationId: "widefleet" }, audience);
-
-  const blocked = await request.post(workloadTokenPath, {
-    headers: { "content-type": "text/plain" },
-    data: proof,
-  });
-
-  expect(blocked.status()).toBe(403);
-  expect(await blocked.text()).toBe("Cross-site POST form submissions are forbidden");
-
-  const response = await request.post(workloadTokenPath, {
-    headers: { "content-type": "application/octet-stream" },
-    data: proof,
-  });
-
-  expect(response.status(), await response.text()).toBe(200);
-  const { token } = workloadToken.parse(await response.json());
-  const platformUrl = environment.configuration.PLATFORM_URL;
-  const discovery = await request.get("/api/workload/.well-known/openid-configuration");
-  expect(discovery.status()).toBe(200);
-  expect(await discovery.json()).toMatchObject({
-    issuer: `${platformUrl}/api/workload`,
-    jwks_uri: `${platformUrl}/api/auth/jwks`,
-  });
-
-  const { payload } = await jwtVerify(
-    token,
-    createRemoteJWKSet(new URL(`${platformUrl}/api/auth/jwks`)),
-    {
-      issuer: `${platformUrl}/api/workload`,
-      audience,
-      algorithms: ["EdDSA"],
-    },
-  );
-
-  expect(payload).toMatchObject({
-    app_id: appId,
-    organization_id: "widefleet",
-    sub: `organization:widefleet:app:${appId}`,
-  });
 });
 
 test("renews the browser session cookie while rendering a protected page", async ({

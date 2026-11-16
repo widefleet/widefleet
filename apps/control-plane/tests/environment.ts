@@ -2,7 +2,6 @@ import { organizationSettings } from "../src/lib/server/schema.ts";
 import { createAuthenticationAdmission } from "../src/lib/server/auth-admission.ts";
 import { discoverPlatform } from "../src/lib/server/platform-discovery.ts";
 import { createCliLogin } from "../src/lib/server/cli-login.ts";
-import { createWorkloadIdentity } from "../src/lib/server/workload-identity.ts";
 import { createOnboardingService } from "../src/lib/server/onboarding.ts";
 import { createInvitationService } from "../src/lib/server/members.ts";
 import { createAuthControl } from "./auth-control.ts";
@@ -234,12 +233,6 @@ export const createTestEnvironment = async (
     environment,
     database,
     auth,
-    workloadIdentity: createWorkloadIdentity(
-      auth,
-      database.db,
-      configuration.PLATFORM_URL,
-      undefined,
-    ),
     users: helpers,
     linkMicrosoftUser: async (userId: string, objectId: string = crypto.randomUUID()) => {
       await database.db.insert(account).values({

@@ -218,13 +218,6 @@
       "when": 1794700800000,
       "tag": "0030_google_app_identity",
       "breakpoints": true
-    },
-    {
-      "idx": 31,
-      "version": "7",
-      "when": 1794787200000,
-      "tag": "0031_signing_key_rotation",
-      "breakpoints": true
     }
   ]
 }
