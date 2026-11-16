@@ -16,6 +16,8 @@
     "./network": "./src/network.ts",
     "./logs": "./src/cloudflare-logs.ts",
     "./execution-limits": "./src/execution-limits.ts",
+    "./oauth": "./src/oauth-protocol.ts",
+    "./workload": "./src/workload-protocol.ts",
     "./runtime-extension": "./src/runtime-extension.ts"
   },
   "scripts": {
@@ -25,6 +27,7 @@
   "dependencies": {
     "@platform/auth-proxy": "workspace:*",
     "@platform/contracts": "workspace:*",
+    "jose": "6.2.10",
     "zod": "4.6.5"
   },
   "devDependencies": {

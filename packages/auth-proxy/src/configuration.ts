@@ -1,4 +1,4 @@
-import { companyProvider, organizationIdentifier } from "@platform/contracts";
+import { companyProvider, googleGroupsScope, organizationIdentifier } from "@platform/contracts";
 import { base64url } from "jose";
 import { z } from "zod";
 
@@ -54,6 +54,10 @@ export const sessionVersion = async (configuration: AuthConfiguration) => {
     clientId: configuration.clientId,
     redirectUrl: configuration.redirectUrl,
     domain: configuration.domain,
+    googleGroups:
+      configuration.provider.type === "google"
+        ? (configuration.scopes?.includes(googleGroupsScope) ?? false)
+        : undefined,
   });
 
   return base64url.encode(

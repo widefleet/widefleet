@@ -1,3 +1,5 @@
+import { createAppSource } from "./app-source.ts";
+import type { SourceBackend } from "./source-backend.ts";
 import type { AuthenticationExtension } from "./runtime-extension.ts";
 import { createConnectionService } from "./connections.ts";
 import { createAppSecrets } from "./app-secrets.ts";
@@ -50,6 +52,7 @@ export const createRuntime = ({
   authCookies,
   createOrganization,
   authentication,
+  source,
   discoveryTransport = "node",
 }: {
   configuration: Configuration & { BETTER_AUTH_SECRET: string };
@@ -64,6 +67,7 @@ export const createRuntime = ({
   sendEmail?: SendEmail;
   createOrganization?: CreateOrganization;
   authentication?: AuthenticationExtension;
+  source?: SourceBackend;
   authRateLimit?: BetterAuthOptions["rateLimit"];
   authIpAddressHeaders?: string[];
   authCookies?: ReturnType<typeof sveltekitCookies>;
@@ -133,7 +137,8 @@ export const createRuntime = ({
     signInProvider: createAuthenticationAdmission(database.db, organizationAccess).signInProvider,
     discoverPlatform: (domain: string) => discoverPlatform(domain, discoveryTransport),
     cliLogin: createCliLogin(database.db, configuration),
-    apps: createAppService(database.db, configuration, execution, observation),
+    source: createAppSource(database.db, source),
+    apps: createAppService(database.db, configuration, execution, observation, Boolean(source)),
     agents: createAgentService(database.db),
     jobs: createJobService(
       database.db,
@@ -141,6 +146,7 @@ export const createRuntime = ({
       encryptionKey,
       reporting.operation,
       configuration.APP_HTTPS_PORT,
+      source,
     ),
     network: createNetworkService(database.db, execution),
     appAccess: createAppAccessService(database.db, execution),
@@ -149,7 +155,7 @@ export const createRuntime = ({
     connections: createConnectionService(database.db, execution),
     appSecrets: createAppSecrets(database.db, encryptionKey, execution),
     releases: createRuntimeReleaseService(database.db, storage, execution),
-    uploads: createUploadService(database.db, storage, configuration, execution),
+    uploads: createUploadService(database.db, storage, configuration, execution, source),
     telemetry: createTelemetry(database.db, storage, configuration, hostedLogs),
   };
 

@@ -177,8 +177,8 @@ but company sign-in cookies are filtered. App responses can set only host-scoped
 cookies and cannot overwrite company sign-in cookies. Keep OAuth state, callback
 user checks and CSRF protection in the app.
 
-The [Gmail app example](/guides/gmail-app) connects each user's personal Google
-account and shares that account across authorized calling apps.
+Find ready-made integrations in [App templates](/guides/app-templates), then
+connect the deployed app using the same flow.
 
 ## Activation and updates
 

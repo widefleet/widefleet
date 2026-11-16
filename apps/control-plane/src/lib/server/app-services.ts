@@ -112,7 +112,9 @@ export const resolveAppService = async (
   const [target] = await transaction
     .select()
     .from(apps)
-    .where(and(eq(apps.id, grant.app), eq(apps.organizationId, organizationId)))
+    .where(
+      and(eq(apps.id, grant.app), eq(apps.organizationId, organizationId), isNull(apps.removedAt)),
+    )
     .for("update");
 
   if (!target || !(await serviceEntrypoints(transaction, target)).includes(grant.entrypoint))

@@ -463,6 +463,11 @@ describe("Mandatory application context", () => {
     );
 
     expect(result.status).toBe(200);
-    expect(await result.json()).toEqual((await current.apps.list(first.principal)).unwrap());
+    expect(await result.json()).toEqual(
+      (await current.apps.list(first.principal)).unwrap().map((app) => ({
+        ...app,
+        source: { supported: false, branch: "main", deployed: null },
+      })),
+    );
   });
 });

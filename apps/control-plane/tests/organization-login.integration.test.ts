@@ -301,8 +301,12 @@ describe("Invited organization members with Widefleet OIDC", () => {
       })
     ).unwrap();
 
-    expect((await runtime.apps.list(alpha.principal)).unwrap()).toEqual([first]);
-    expect((await runtime.apps.list(beta.principal)).unwrap()).toEqual([second]);
+    expect((await runtime.apps.list(alpha.principal)).unwrap()).toEqual([
+      { ...first, source: { supported: false, branch: "main", deployed: null } },
+    ]);
+    expect((await runtime.apps.list(beta.principal)).unwrap()).toEqual([
+      { ...second, source: { supported: false, branch: "main", deployed: null } },
+    ]);
     const logged = await login(alpha);
     expect(logged.completed.headers.get("location"), await logged.completed.clone().text()).toBe(
       logged.app,

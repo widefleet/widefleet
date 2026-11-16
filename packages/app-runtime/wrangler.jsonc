@@ -12,7 +12,11 @@
   "kv_namespaces": [{ "binding": "AUTH_CONFIG", "id": "00000000000000000000000000000000" }],
   "worker_loaders": [{ "binding": "WIDEFLEET_LOADER" }],
   "r2_buckets": [{ "binding": "WIDEFLEET_PACKAGES", "bucket_name": "widefleet-artifacts" }],
-  "vars": { "WIDEFLEET_CONFIGURATION": "{\"source\":\"r2\"}", "WIDEFLEET_LOGS": "cloudflare" },
+  "vars": {
+    "WIDEFLEET_CONFIGURATION": "{\"source\":\"r2\"}",
+    "WIDEFLEET_LOGS": "cloudflare",
+    "WIDEFLEET_WORKLOAD_ISSUER": "https://auth.apps.example.com/workload",
+  },
   "durable_objects": {
     "bindings": [
       { "name": "WIDEFLEET_WORKFLOW_CATALOG", "class_name": "CloudflareWorkflowCatalog" },

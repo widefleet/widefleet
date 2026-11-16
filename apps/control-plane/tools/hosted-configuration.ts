@@ -143,6 +143,8 @@ export const hostedConfigurations = async (
   const emailBindings: HostedEmailBindings = {};
   const emailVariables: Record<string, string> = {};
   const executionVariables: Record<string, string> = {};
+  executionVariables["WIDEFLEET_WORKLOAD_ISSUER"] =
+    `https://auth.${installation.appDomain}/workload`;
 
   if (installation.executionLimits)
     executionVariables["WIDEFLEET_EXECUTION_LIMITS"] = JSON.stringify(installation.executionLimits);

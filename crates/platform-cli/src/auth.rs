@@ -28,6 +28,10 @@ impl Credentials {
         }
     }
 
+    pub fn session_path(&self) -> Option<&std::path::Path> {
+        self.session_file.as_ref().map(|file| file.0.as_path())
+    }
+
     async fn lock(&self, origin: String) -> Result<File> {
         if let Some(file) = self.stored_file(&origin)? {
             return tokio::task::spawn_blocking(move || file.lock())
