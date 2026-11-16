@@ -77,6 +77,10 @@ token. Verify the signature, exact issuer, your expected audience and expiry bef
 using any claims. The trusted app runtime signs tokens and serves the public JWKS. Workload keys
 are separate from the keys used for user and CLI authentication.
 
+For an installation with a custom app HTTPS port, include that port in the issuer
+and key URLs. Configure your verifier to refresh JWKS when it encounters an unknown
+key ID, as `createRemoteJWKSet` does.
+
 For a JavaScript API, install `jose` and use a verification function like this:
 
 ```sh
@@ -148,37 +152,14 @@ access. Requesting your API's audience alone gives an app no data permissions.
   configured. Already issued tokens remain valid until their five-minute
   expiry unless the receiving API revokes its grant sooner.
 
-The runtime issues tokens and serves discovery and JWKS without contacting the
-control plane or its database. This also works after runtime restarts. The existing
-runtime storage must remain available; the private signing keys are encrypted with
-the runtime's existing secret-encryption key and stay outside app code.
+To revoke data access, remove the app's grant on the receiving API. To stop new
+token issuance, remove its published route or use the installation's runtime
+suspension controls. These changes take effect when they reach the runtime.
 
-Deployment configures `WIDEFLEET_WORKLOAD_ISSUER` on the parent runtime. Hosted
-deployment derives it from the installation's app domain. Native bootstrap and
-agent deployments derive it from `APP_DOMAIN` and `APP_HTTPS_PORT` (default `443`);
-the supplied Compose configurations pass those settings to both components.
-A runtime without a configured issuer refuses issuance. No organization admission
-list, background poller or workload-specific cron is needed.
-
-Each token request checks the app's published identity and existing runtime
-availability state. Control-plane membership and onboarding restrictions do not
-create a separate workload-token policy. To revoke data access, remove the app's
-grant on the receiving API. To stop new token issuance, remove its published route
-or use the installation's configured runtime suspension mechanism. Runtime-state
-changes take effect when they reach the runtime; changing a control-plane-only
-flag does not implicitly stop a deployed app.
-
-Each installation's runtime storage holds its workload key ring. Runtime replicas
-sharing that storage use the same ring. Conditional writes coordinate concurrent
-initialization and rotation. Back up that storage and the runtime's secret-encryption
-key together so restarts and recovery preserve the issuer's signing authority.
-
-The runtime prepares the next signing key in advance and includes its public key
-in JWKS immediately. It activates after 30 days; the next access prepares its
-successor. Rotation needs no control-plane job. Retired public keys remain available
-through the five-minute token lifetime plus a one-minute margin. Metadata responses
-can be cached for 60 seconds. Receivers should refresh JWKS on an unknown key ID,
-as `createRemoteJWKSet` does. User and CLI signing keys are unaffected.
+Token issuance and key discovery remain available during a control-plane outage
+while the app runtime and its storage are healthy. Installation backups must
+preserve runtime storage and its encryption key together; see
+[backup and restore](/self-hosting/installation#whole-installation-backup-and-restore).
 
 ## Troubleshooting
 
@@ -191,14 +172,7 @@ as `createRemoteJWKSet` does. User and CLI signing keys are unaffected.
 | API returns forbidden           | Grant the executing app's ID access on the API; check whether the caller is a preview or a service app.                              |
 | Outbound request is blocked     | Allow the API origin in the app's backend network permissions.                                                                       |
 
-Discovery and JWKS are served directly by the parent runtime on the existing
-`auth.<app-domain>` host. Native installations with a custom app HTTPS port include
-that port in the issuer. The management hostname and internal control-plane
-address are not used for token issuance or verification.
-
-The discovery document describes these workload JWTs. Tokens are issued only
-through the runtime binding; there is no public OAuth token-exchange or
-client-credentials endpoint. A third-party federation service needs to support this
-issuer's signing algorithm and token contract. Use direct verification for APIs
-you control, then connect apps to a shared service when several apps need the same
+For a third-party federation service, check that it accepts your workload issuer,
+EdDSA signatures and the app identity claims. Use direct verification for APIs you
+control, then connect apps to a shared service when several apps need the same
 integration.
