@@ -1,3 +1,5 @@
+import { createConnectionService } from "../src/lib/server/connections.ts";
+import { connectionRequests } from "../src/lib/server/schema.ts";
 import { checkServiceConsumers } from "../src/lib/server/app-services.ts";
 import { Result } from "better-result";
 import { transact } from "../src/lib/server/transactions.ts";
@@ -68,6 +70,91 @@ describe("Cloudflare operation history", () => {
     for (const attempt of attempts) expect(attempt.unwrap().id).toBe(entry.command.id);
     expect(await environment.database.db.select().from(cloudflareOperations)).toHaveLength(1);
     expect(await environment.database.db.select().from(deployments)).toHaveLength(1);
+    expect(await environment.database.db.select().from(jobs)).toHaveLength(0);
+  });
+
+  it("approves a connection in the same transaction as its hosted command and replays it only once", async () => {
+    const principal = {
+      id: environment.ownerId,
+      name: "Owner",
+      email: "owner@example.test",
+      role: "owner" as const,
+      admin: true,
+      creator: true,
+      application: { organizationId: "widefleet", admin: true },
+    };
+
+    const source = await seedDeployment(environment.database.db);
+    const target = await seedDeployment(environment.database.db, { entrypoints: ["Reader"] });
+
+    for (const entry of [source, target]) {
+      (await registerCloudflareOperation(environment.database.db, storage, entry.command)).unwrap();
+      await environment.database.db
+        .update(apps)
+        .set({ ownerId: principal.id, activeDeploymentId: entry.command.id })
+        .where(eq(apps.id, entry.appId));
+      await environment.database.db
+        .update(deployments)
+        .set({ status: "succeeded" })
+        .where(eq(deployments.id, entry.command.id));
+    }
+
+    const services = createConnectionService(environment.database.db);
+
+    const request = (
+      await services.request(
+        { ...principal, application: { ...principal.application, admin: false } },
+        {
+          appId: source.appId,
+          app: target.appId,
+          binding: "ERP",
+          entrypoint: "Reader",
+        },
+      )
+    ).unwrap();
+
+    const command = deploymentCommand.parse({
+      kind: "capabilities",
+      id: request.id,
+      appId: source.appId,
+      name: request.binding,
+      grant: { app: target.appId, entrypoint: "Reader" },
+      actor: principal,
+      connectionRequestId: request.id,
+      createdAt: new Date().toISOString(),
+    });
+
+    const rejectedActor = deploymentCommand.parse({
+      ...command,
+      actor: { ...principal, application: { ...principal.application, admin: false } },
+    });
+
+    expect(
+      (await registerCloudflareOperation(environment.database.db, storage, rejectedActor)).isErr(),
+    ).toBe(true);
+
+    const [pending] = await environment.database.db
+      .select()
+      .from(connectionRequests)
+      .where(eq(connectionRequests.id, request.id));
+
+    expect(pending?.status).toBe("pending");
+
+    const first = (
+      await registerCloudflareOperation(environment.database.db, storage, command)
+    ).unwrap();
+
+    expect(first.result).toMatchObject({
+      revision: 1,
+      grants: { ERP: { app: target.appId, entrypoint: "Reader" } },
+    });
+    expect(
+      (await registerCloudflareOperation(environment.database.db, storage, command)).unwrap(),
+    ).toEqual(first);
+    expect((await services.requests(principal)).unwrap()).toContainEqual({
+      ...request,
+      status: "approved",
+    });
     expect(await environment.database.db.select().from(jobs)).toHaveLength(0);
   });
 

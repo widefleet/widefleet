@@ -388,11 +388,16 @@ export const appSecretStatus = z.strictObject({
   deployment: deployment.nullable(),
 });
 
+export const serviceAccessMode = z.enum(["approval_required", "organization"]);
+
+export const serviceAccessChange = z.strictObject({ accessMode: serviceAccessMode });
+
 export const serviceCatalogEntry = z.strictObject({
   appId: identifier,
   slug: appSlug,
   displayName: z.string(),
   entrypoints: z.array(bindingName),
+  accessMode: serviceAccessMode.default("approval_required"),
 });
 
 export const serviceDescription = serviceCatalogEntry.extend({
@@ -444,6 +449,24 @@ export const capabilityPath = appPath.extend({
     (name) => !name.startsWith("WIDEFLEET_"),
     "Platform bindings are reserved",
   ),
+});
+
+export const connectionRequestInput = capabilityPath.extend(capabilityGrant.shape);
+
+export const connectionRequestPath = z.strictObject({ requestId: identifier });
+
+export const connectionRequest = z.strictObject({
+  id: identifier,
+  appId: identifier,
+  appName: z.string(),
+  serviceId: identifier,
+  serviceName: z.string(),
+  binding: bindingName,
+  entrypoint: bindingName,
+  requesterId: z.string(),
+  requesterName: z.string(),
+  status: z.enum(["pending", "approved", "rejected"]),
+  createdAt: z.iso.datetime(),
 });
 
 export const runtimePackages = z.strictObject({

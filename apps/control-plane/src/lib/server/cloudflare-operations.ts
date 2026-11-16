@@ -165,6 +165,7 @@ export const registerCloudflareOperation = (
             command.name,
             command.grant,
             false,
+            command.connectionRequestId,
           ),
         );
       } else {

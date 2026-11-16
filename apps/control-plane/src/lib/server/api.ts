@@ -359,6 +359,42 @@ export const createApi = (runtime: Runtime) => {
       .handler(async ({ context, input }) =>
         unwrap(await runtime.connections.describe(context.principal, input.service)),
       ),
+    serviceAccess: write
+      .route({ method: "PUT", path: "/app-services/{appId}/access" })
+      .input(contract.appPath.extend(contract.serviceAccessChange.shape))
+      .output(contract.serviceAccessChange)
+      .handler(async ({ context, input }) =>
+        unwrap(
+          await runtime.connections.setAccess(context.principal, input.appId, input.accessMode),
+        ),
+      ),
+    connectionRequests: read
+      .route({ method: "GET", path: "/connection-requests" })
+      .output(z.array(contract.connectionRequest))
+      .handler(async ({ context }) =>
+        unwrap(await runtime.connections.requests(context.principal)),
+      ),
+    connectionRequest: write
+      .route({ method: "POST", path: "/connection-requests" })
+      .input(contract.connectionRequestInput)
+      .output(contract.connectionRequest)
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.connections.request(context.principal, input)),
+      ),
+    connectionRequestApprove: write
+      .route({ method: "POST", path: "/connection-requests/{requestId}/approve" })
+      .input(contract.connectionRequestPath)
+      .output(contract.connectionRequest)
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.connections.approve(context.principal, input.requestId)),
+      ),
+    connectionRequestReject: write
+      .route({ method: "POST", path: "/connection-requests/{requestId}/reject" })
+      .input(contract.connectionRequestPath)
+      .output(contract.connectionRequest)
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.connections.reject(context.principal, input.requestId)),
+      ),
     appConnections: read
       .route({ method: "GET", path: "/apps/{appId}/connections" })
       .input(contract.appPath)
