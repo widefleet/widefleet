@@ -1,14 +1,14 @@
 ---
 title: Connect apps
 description: Expose app APIs, connect callers and keep provider secrets private.
-lastModified: 2026-11-15
+lastModified: 2026-11-16
 ---
 
 An app can expose exported Worker entrypoints to other apps in its organization.
 It uses the same deployment, resources, networking and logs as any other app.
 Use a headless app when the service does not need browser access.
 
-Use Widefleet platform, CLI and runtime **0.5.0 or newer**. Publishing requires app
+Use Widefleet platform, CLI and runtime **0.7.1 or newer**. Publishing requires app
 creation or collaboration permissions; granting a connection requires organization
 administrator access. The provider and caller must belong to the same organization.
 
@@ -247,9 +247,9 @@ operator's [`service` execution budget](/reference/configuration#dynamic-worker-
 
 ### Missing API documentation
 
-If an app has no API documentation, redeploy it with a current CLI. Check the
-deploy command's warnings if documentation is still missing; they report missing
-source files or documentation that is too large to publish.
+Redeploy the app to publish its API documentation. If documentation is still
+missing, check the deploy command's warnings for missing source files or
+documentation that is too large to publish.
 
 For custom builds, enable source maps with embedded source content and keep each
 map at the location referenced by the generated Worker's `sourceMappingURL`.
