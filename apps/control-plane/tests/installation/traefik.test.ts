@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { createCertificates } from "./certificates.ts";
 import { installationSettings } from "./settings.ts";
 
@@ -13,9 +13,23 @@ const execute = promisify(execFile);
 
 const root = fileURLToPath(new URL("../../../../", import.meta.url));
 
+const traefikImage =
+  "traefik:v3.7.13@sha256:24841fe2de7304c149343d877d2923b4c8800a38ba015dea9174c23b20e344a0";
+
+const probeImage = "node:26.8.2-bookworm-slim";
+
 describe.runIf(process.env["RUN_INSTALLATION_TESTS"] === "1")(
   "Traefik certificate persistence",
   () => {
+    beforeAll(async () => {
+      // Image downloads must finish before the TLS readiness deadline starts.
+      for (const image of [traefikImage, probeImage]) {
+        await execute("docker", ["image", "inspect", image]).catch(() =>
+          execute("docker", ["pull", image]),
+        );
+      }
+    }, 120_000);
+
     it.each(["provided", "cloudflare"])(
       "serves management and wildcard certificates in %s mode across restart",
       async (mode) => {
@@ -113,7 +127,7 @@ describe.runIf(process.env["RUN_INSTALLATION_TESTS"] === "1")(
             "--volume",
             `${directory}/acme:/acme`,
             "--env=CF_DNS_API_TOKEN=fixture-only",
-            "traefik:v3.7.13@sha256:24841fe2de7304c149343d877d2923b4c8800a38ba015dea9174c23b20e344a0",
+            traefikImage,
             "--configFile=/config/traefik.json",
           ]);
 
@@ -127,7 +141,7 @@ describe.runIf(process.env["RUN_INSTALLATION_TESTS"] === "1")(
                   `container:${name}`,
                   "--volume",
                   `${directory}:/fixtures:ro`,
-                  "node:26.8.2-bookworm-slim",
+                  probeImage,
                   "node",
                   "--input-type=module",
                   "--eval",
