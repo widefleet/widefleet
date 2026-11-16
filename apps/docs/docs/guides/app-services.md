@@ -152,8 +152,8 @@ account and shares that account across authorized calling apps.
 APIs require administrator approval by default. An organization administrator can open the provider's
 **View API documentation → Manage availability** page and select **Everyone in
 this organization** to let app owners and collaborators connect their apps themselves.
-This permission covers the provider's available entrypoints. It does not grant
-management access to the provider or expose its secrets.
+This setting covers connections to the provider's available entrypoints.
+Provider management permissions stay unchanged.
 
 The equivalent CLI commands are:
 
@@ -177,9 +177,9 @@ widefleet connect inventory-api --app CALLER --as INVENTORY --entrypoint Reader 
 widefleet services requests
 ```
 
-Submitting the same pending request again returns the existing request. A binding
-can have only one pending request. The request is for that caller, binding and
-entrypoint; it does not authorize connections from other apps.
+Approval applies to the selected app, binding and entrypoint. Submitting the same
+pending request again returns the existing request. Each binding has at most one
+pending request.
 
 Open **App APIs → Connection requests** to see **Awaiting approval**, **Approved**
 or **Rejected**. Members see their own requests; organization administrators see
@@ -198,11 +198,10 @@ stays pending and the administrator sees an error. After restoring access or
 fixing the API, any organization administrator can retry approval. To change the
 requested settings, reject the stale request and submit a new one.
 
-**Approved** confirms the connection was saved, not that runtime activation has
-finished. Check the caller's **Connections** page or `widefleet connections --app
-CALLER` for activation status. A rejected request creates no connection; you can
-submit another request if needed. Personal OAuth sign-in to an external service
-remains separate from this approval.
+**Approved** confirms the connection was saved. Wait for **Active** on the caller's
+**Connections** page or check `widefleet connections --app CALLER` before using the
+API. You can submit another request after a rejection. Personal OAuth sign-in to an
+external service remains separate from this approval.
 
 ## Activation and updates
 
