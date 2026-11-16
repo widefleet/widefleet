@@ -1,4 +1,4 @@
-use crate::{auth, installation, preview, upload};
+use crate::{auth, installation, preview, source, upload};
 use clap::Args;
 use platform_core::{
     Error, Result, asset_hash,
@@ -90,6 +90,15 @@ pub struct Options {
     pub config: PathBuf,
     #[arg(long)]
     skip_build: bool,
+    /// Deploy without saving source to Widefleet Git.
+    #[arg(long, conflicts_with_all = ["source_branch", "allow_branch_mismatch"])]
+    pub(crate) no_source: bool,
+    /// Identify a Git preview branch in a detached CI checkout.
+    #[arg(long)]
+    pub(crate) source_branch: Option<String>,
+    /// Confirm deploying the main app from a different local Git branch (or detached HEAD).
+    #[arg(long)]
+    allow_branch_mismatch: bool,
     #[arg(long)]
     no_wait: bool,
     /// Print the deployment result as JSON, with build and progress logs on stderr.
@@ -108,14 +117,7 @@ pub async fn run(
     target: Target,
     options: Options,
 ) -> Result<()> {
-    let mut result = publish(
-        api,
-        credentials,
-        target,
-        &options.config,
-        options.skip_build,
-    )
-    .await?;
+    let mut result = publish(api, credentials, target, &options).await?;
     eprintln!("Deployment ID: {}", result.deployment.id);
     if !options.no_wait {
         result.deployment = wait(
@@ -236,21 +238,22 @@ pub struct DeploymentResult {
     #[serde(flatten)]
     pub deployment: Deployment,
     pub url: Option<String>,
+    pub source: Option<platform_core::model::SourceRevision>,
 }
 
 async fn publish(
     api: &Api,
     credentials: &auth::Credentials,
     target: Target,
-    config: &Path,
-    skip_build: bool,
+    options: &Options,
 ) -> Result<DeploymentResult> {
-    let config_path = config.canonicalize()?;
+    let config_path = options.config.canonicalize()?;
     let project = config_path
         .parent()
         .ok_or_else(|| Error::invalid("Configuration has no parent directory".into()))?;
+    let configuration_text = std::fs::read_to_string(&config_path)?;
     let configuration: Configuration = jsonc_parser::parse_to_serde_value(
-        &std::fs::read_to_string(&config_path)?,
+        &configuration_text,
         &jsonc_parser::ParseOptions {
             allow_comments: true,
             allow_trailing_commas: true,
@@ -305,7 +308,42 @@ async fn publish(
         eprintln!("Target: {} on {}", name, api.origin_text());
     }
     let bundler = installation::bundler().await?;
-    if !skip_build && project.join("package.json").exists() {
+    let source_supported = if options.no_source {
+        false
+    } else {
+        match &target {
+            Target::App(app) => {
+                let target = app.map_or_else(
+                    || value!({ "slug": configuration.name }),
+                    |app| value!({ "appId": app }),
+                );
+                source::confirm_deployment_branch(
+                    api,
+                    credentials,
+                    project,
+                    &target,
+                    options.source_branch.as_deref(),
+                    options.allow_branch_mismatch,
+                )
+                .await?
+            }
+            Target::Preview(preview) => preview.source_branch.is_some(),
+        }
+    };
+    let source_tree = if source_supported {
+        let tree = source::snapshot(project).await?;
+        // The target lookup needs the app name before snapshotting. Ensure the
+        // configuration used by the build is still the one included in that snapshot.
+        if std::fs::read_to_string(&config_path)? != configuration_text {
+            return Err(Error::invalid(
+                "Project files changed before the build. Retry the deployment".into(),
+            ));
+        }
+        Some(tree)
+    } else {
+        None
+    };
+    if !options.skip_build && project.join("package.json").exists() {
         local_command(project, &["run", "build"]).await?;
     }
     let temporary = tempfile::tempdir_in(project)?;
@@ -375,6 +413,7 @@ async fn publish(
             &source_maps,
         ))?),
     };
+    temporary.close()?;
     let app = match target {
         Target::Preview(preview) => preview.resolve(api, credentials).await?,
         Target::App(Some(app)) => app,
@@ -408,6 +447,19 @@ async fn publish(
             );
             resolved.id
         }
+    };
+    let saved = if let Some(source_tree) = source_tree {
+        source::save(
+            api,
+            credentials,
+            app,
+            project,
+            options.source_branch.as_deref(),
+            &source_tree,
+        )
+        .await?
+    } else {
+        None
     };
     let token = auth::access_token(api, credentials).await?;
     let session: UploadSession = json(
@@ -475,6 +527,7 @@ async fn publish(
         web: Some(web),
         entrypoints,
         service_documentation: Some(service_documentation),
+        source: saved,
         crons: configuration.triggers.crons,
         queue_consumers: configuration.queues.consumers,
         worker: worker_metadata,
@@ -502,6 +555,7 @@ async fn publish(
     Ok(DeploymentResult {
         deployment,
         url: (metadata.web != Some(false)).then_some(app_url),
+        source: metadata.source,
     })
 }
 

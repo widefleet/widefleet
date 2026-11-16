@@ -2,7 +2,11 @@ export { appEventConfiguration } from "./app-events.ts";
 
 export { workerHostname } from "./hostnames.ts";
 
+export * from "./source.ts";
+
 import { z } from "zod";
+import { appSourceSummary, gitBranch, sourceRevision } from "./source.ts";
+
 import { serviceDocumentation } from "./service-documentation.ts";
 import { organizationIdentifier } from "./organizations.ts";
 import { appAccessSnapshot } from "./app-access.ts";
@@ -42,6 +46,7 @@ export const createAppInput = z.strictObject({
   slug: appSlug.refine((value) => value !== "auth", "The auth hostname is reserved for SSO"),
   displayName: z.string().trim().min(1).max(120),
   parentId: identifier.nullable().default(null),
+  previewBranch: gitBranch.optional(),
   previewName: z
     .string()
     .min(1)
@@ -51,6 +56,7 @@ export const createAppInput = z.strictObject({
 });
 
 export const app = z.strictObject({
+  source: appSourceSummary.optional(),
   id: identifier,
   slug: appSlug,
   displayName: z.string(),
@@ -84,6 +90,8 @@ export const deploymentEvent = z.strictObject({
 });
 
 export const appPath = z.strictObject({ appId: identifier });
+
+export const sourceDeployTargetInput = z.union([appPath, z.strictObject({ slug: appSlug })]);
 
 export const catalogEntry = app.pick({ id: true, displayName: true, hostname: true, url: true });
 
@@ -239,6 +247,7 @@ export {
 
 export const workerMetadata = workerConfiguration
   .extend({
+    source: sourceRevision.optional(),
     web: z.boolean().optional(),
     service_documentation: serviceDocumentation.optional(),
     entrypoints: z
@@ -295,6 +304,7 @@ export const workerMetadata = workerConfiguration
 export function executionWorkerMetadata(value: z.infer<typeof workerMetadata>) {
   const metadata = { ...value };
   delete metadata.service_documentation;
+  delete metadata.source;
 
   return metadata;
 }

@@ -551,7 +551,10 @@ describe("Platform API with PostgreSQL and RustFS", () => {
 
     expect((await createApp("same-execution")).organizationId).toBe(organizationId);
     await json(`/agents/${registration.agent.id}`, "DELETE");
-    expect(contract.app.parse(await (await json(`/apps/${app.id}`, "GET")).json())).toEqual(app);
+    expect(contract.app.parse(await (await json(`/apps/${app.id}`, "GET")).json())).toEqual({
+      ...app,
+      source: { supported: false, branch: "main", deployed: null },
+    });
   });
 
   it("allows members to create apps while no executor is connected", async () => {
@@ -1287,6 +1290,9 @@ describe("Platform API with PostgreSQL and RustFS", () => {
 
     const credentials = new Headers({ authorization: `Bearer ${token}` });
     expect((await json(`/apps/${app.id}`, "GET", undefined, credentials)).status).toBe(403);
+    const target = await json("/apps/source-target", "POST", { appId: app.id }, credentials);
+    expect(target.status).toBe(200);
+    expect(await target.json()).toEqual({ supported: false, branch: "main", preview: false });
     const directoryCalls = directoryRequests.length;
     expect((await json("/groups?query=Einkauf", "GET", undefined, credentials)).status).toBe(403);
     expect(directoryRequests).toHaveLength(directoryCalls);
@@ -1309,6 +1315,9 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     });
 
     const denied = await createApp("write-only-denied");
+    expect(
+      (await json("/apps/source-target", "POST", { appId: denied.id }, credentials)).status,
+    ).toBe(404);
     expect(
       (
         await json(
