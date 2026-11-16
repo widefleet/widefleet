@@ -175,9 +175,10 @@ describe("managed OAuth relay", () => {
       );
 
     expect((await broker.callback(callback(), async () => false))?.status).toBe(400);
-    expect((await broker.callback(callback(`X${ticket.slice(1)}`), async () => true))?.status).toBe(
-      400,
-    );
+    // The encrypted ticket may already start with X; always change the IV bytes.
+    const tampered = `${ticket.startsWith("X") ? "Y" : "X"}${ticket.slice(1)}`;
+
+    expect((await broker.callback(callback(tampered), async () => true))?.status).toBe(400);
     vi.useFakeTimers();
     vi.setSystemTime(Date.now() + 601000);
     await expect(broker.request(identity, exchange)).rejects.toThrow("expired");

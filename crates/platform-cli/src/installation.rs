@@ -156,7 +156,14 @@ fn write_project(template: &Path, directory: &Path) -> Result<()> {
             directory.display()
         )));
     }
-    copy_directory(template, directory)
+    copy_directory(template, directory)?;
+    // npm renames packaged .gitignore files to .npmignore during installation.
+    let gitignore = directory.join(".gitignore");
+    let npmignore = directory.join(".npmignore");
+    if !gitignore.try_exists()? && npmignore.is_file() {
+        fs::rename(npmignore, gitignore)?;
+    }
+    Ok(())
 }
 
 pub fn initialize(directory: &Path, template: Template) -> Result<()> {
@@ -396,6 +403,23 @@ mod tests {
         fs::write(app.join("src/app.ts"), "existing work")?;
         assert!(write_project(&template, &app).is_err());
         assert_eq!(fs::read(app.join("src/app.ts"))?, b"existing work");
+        Ok(())
+    }
+
+    #[test]
+    fn init_restores_gitignore_renamed_by_npm() -> Result<()> {
+        let temporary = tempfile::tempdir()?;
+        let template = temporary.path().join("template");
+        fs::create_dir(&template)?;
+        fs::write(template.join(".npmignore"), "node_modules/\nbuild/\n")?;
+        let app = temporary.path().join("app");
+        write_project(&template, &app)?;
+        assert_eq!(
+            fs::read(app.join(".gitignore"))?,
+            b"node_modules/\nbuild/\n"
+        );
+        assert!(!app.join(".npmignore").exists());
+        assert!(template.join(".npmignore").is_file());
         Ok(())
     }
 }

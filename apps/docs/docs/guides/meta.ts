@@ -13,6 +13,6 @@ export default defineMeta({
     "network",
     "app-services",
     "workload-identity",
-    "gmail-app",
+    "app-templates",
   ],
 });

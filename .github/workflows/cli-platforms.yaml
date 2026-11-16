@@ -7,6 +7,10 @@ on:
         description: Commit to build and test
         type: string
         default: ""
+      canary:
+        description: Stamp a unique CLI prerelease for this workflow run
+        type: boolean
+        default: false
       platforms:
         description: Native platforms to build as a JSON array
         type: string
@@ -66,6 +70,14 @@ jobs:
           key: cli-cargo-v1-${{ matrix.platform }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', '**/Cargo.toml') }}-${{ hashFiles('crates/**') }}
           restore-keys: |
             cli-cargo-v1-${{ matrix.platform }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', '**/Cargo.toml') }}-
+      - name: Check canary source and publication safeguards
+        if: inputs.canary && runner.os == 'Linux'
+        run: |
+          pnpm check
+          pnpm exec vitest run apps/control-plane/tests/installation/cli-canary.test.ts apps/control-plane/tests/installation/publish-cli.test.ts apps/control-plane/tests/installation/release-source.test.ts
+      - name: Stamp the canary version
+        if: inputs.canary
+        run: ${{ runner.os == 'Windows' && 'python' || 'python3' }} tools/prepare-cli-canary.py
       - name: Check and test the native Rust CLI
         env:
           CARGO_INCREMENTAL: "0"
