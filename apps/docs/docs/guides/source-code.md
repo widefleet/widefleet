@@ -1,15 +1,17 @@
 ---
 title: Save and recover source code
-description: Save an app's code in Git and continue working from another session or machine.
+description: Keep your app's code in Git and continue working from another session or machine.
 lastModified: 2026-11-16
 ---
 
-Use Widefleet Cloud's app repositories to keep source code available to people,
-agents and CI. Install Git and the Widefleet CLI, sign in and select your
-organization. You need management access to the app. Self-hosted installations
-can continue using their existing Git provider; they do not provide app repositories.
+Widefleet keeps your app's source code so you or your agent can pick up where you
+left off, even in a new workspace. Source storage is available on Widefleet Cloud.
+Support for self-hosted installations is coming soon.
 
-## Save a deployment's source
+Install Git and the [Widefleet CLI](/getting-started/installation), sign in and
+select your organization. You need management access to the app.
+
+## Save your code
 
 From your app's project, run:
 
@@ -18,90 +20,110 @@ widefleet deploy
 widefleet source status
 ```
 
-The CLI builds locally, commits changed project files and pushes the commit before
-uploading the deployment. If the checkout is already clean, it uses the existing
-commit. A failed source save stops the deployment. The CLI checks project files
-before and after the build; changes during the build stop the deployment so its
-source reference cannot describe a different version. Review those changes and
-deploy again. If a commit hook or signing fails, the previous staging selection
-is restored.
+Deploying automatically commits your changes and pushes them to the app's Git
+repository before publishing the app. If you have already committed everything,
+Widefleet uses that commit. If saving fails, the deployment stops.
 
-File selection follows Git and `.gitignore`. Tracked files remain tracked even
-when an ignore rule matches them. Widefleet adds no extra file exclusions.
-Changes are committed on your current local branch. Outside an existing Git
-repository, the CLI initializes one in the project directory. Inside a monorepo,
-it saves the repository and records the app's relative directory.
+The commit includes all changes, not just files you have staged. File selection
+follows Git and `.gitignore`, including Git's rules for files already tracked.
+Widefleet creates commits on your current branch. It initializes Git if needed;
+in a monorepo, it saves the whole repository and remembers the app's directory.
 
-The main app saves source to the remote `main` branch. Git previews save to their
-own work branches.
-
-If your local branch differs from the target branch, the CLI asks before building,
-committing or pushing. For example, deploying from local `feature` to remote
-`main` updates `main` in Widefleet Git and publishes that code as the main app.
-Press Enter to cancel. Switch to the intended branch, or explicitly confirm the
-exception for this invocation:
-
-```sh
-widefleet deploy --allow-branch-mismatch
-```
-
-Agents and CI must use this flag for a branch mismatch or a detached checkout;
-noninteractive commands otherwise stop without building. The confirmation does
-not change branch assignments or permit a force-push. Git previews still
-require their own matching work branch.
-
-`widefleet source status` reports the repository URL, selected branch and latest
-saved commit. Its `deployed` field identifies the active deployment's source,
-which can differ from the latest saved commit. The Source tab shows the same
-information.
+Open the app's **Source** tab or run `widefleet source status` to see where the
+code is saved. Both show the latest saved commit and the commit used by the
+running app. These can differ if you push code without deploying it.
 
 ## Continue in another session
 
-Find the app with `widefleet apps`. Its `source` summary identifies the assigned
-branch and the active deployment's saved commit. Run `widefleet source status`
-to check the repository's current state, then clone the code before editing:
+Find your app and clone its code:
 
 ```sh
+widefleet apps
 widefleet source clone APP_UUID my-app
 cd my-app
-widefleet source status --app APP_UUID
 ```
 
-Replace `APP_UUID` with the app's ID. The clone uses the app's selected branch and
-sets up a `widefleet` remote authenticated through your Widefleet login. For a
-monorepo, enter the project directory shown in the source status before deploying.
-Use `--read-only` with the clone command when your CLI token has only
-`platform:read` scope.
+Replace `APP_UUID` with the app's ID. The clone includes the latest code on the
+app's branch and sets up Git to use your Widefleet login. Install the project's
+dependencies, then continue editing and deploying as usual.
 
-The status command's `available` field indicates whether the branch contains a
-commit. Check `error` first: when Git is unavailable, retry instead of treating
-the repository as empty. A null `deployed` field means the active deployment has
-no saved source reference; code may still have been pushed separately.
+For a monorepo, enter the app's project directory before deploying. You can find
+that directory with `widefleet source status --app APP_UUID`.
 
-## Use normal Git commands
+## Work on a preview
 
-Connect an existing checkout to an app that already exists:
+Create a branch for your changes, then deploy a preview:
+
+```sh
+git switch -c feature/review
+widefleet preview
+```
+
+Widefleet saves your code to `feature/review` in the app's repository and uses
+that branch to name the preview. Deploying from the same branch updates the same
+preview. Another branch gets its own preview.
+
+A preview keeps its branch. To update it, check out that branch again. The main
+app uses `main`, so preview deployments from `main` are rejected.
+
+When you're ready to publish the changes to the main app:
+
+```sh
+git switch main
+git merge feature/review
+widefleet deploy
+```
+
+For CI checkouts without a local branch, pass the branch name explicitly:
+
+```sh
+widefleet preview --source-branch feature/review
+```
+
+Without Widefleet source storage, you can choose a preview name with `--name`.
+See [previews](/reference/previews) for naming rules and other options.
+
+## Use your existing Git workflow
+
+You can keep using GitHub or GitLab. To also push and pull with Widefleet, connect
+your local project to an app that already exists:
 
 ```sh
 widefleet source connect --app APP_UUID
-git add .
-git commit -m "Update the app"
-git push widefleet HEAD:main
 ```
 
-The command adds a `widefleet` remote and preserves existing remotes such as
-GitHub or GitLab's `origin`. Choose `--remote NAME` if that name is already in use.
-For a preview, push to its work branch instead of `main`.
+This adds a remote named `widefleet` and sets up authentication using your
+Widefleet login. Existing remotes such as `origin` stay in place. If `widefleet`
+already points elsewhere, choose another name with `--remote NAME`.
 
-A push saves code. Run `widefleet deploy` separately to publish it. With a clean
-checkout, deployment reuses the checked-out commit. The `--json` result includes
-the source commit, branch and project directory. Use
-`widefleet deploy --no-source` when keeping source exclusively in another Git
-provider; that deployment has no Widefleet source reference.
+You can then use normal Git commands. For the main app, from your local `main`
+branch:
 
-If a source save reports newer remote changes, commit your local work, then fetch
-and merge the selected branch before deploying again. In a connected checkout
-using `main`:
+```sh
+git add .
+git commit -m "Update the app"
+git push widefleet main
+```
+
+Pushing saves the code. Run `widefleet deploy` when you want to publish it.
+If you prefer to keep code only in your existing Git provider, deploy with
+`widefleet deploy --no-source`.
+
+## Deploy the main app from another branch
+
+Normally, deploy the main app from `main`. If you deploy from another branch,
+Widefleet asks you to confirm: it will update `main` in the app's repository and
+publish that code as the main app. Press Enter to cancel.
+
+To confirm this for a single command in an agent or CI session, use
+`widefleet deploy --allow-branch-mismatch`. This also applies to checkouts without
+a local branch. The flag does not bypass a preview's branch requirement or
+allow overwriting newer remote commits.
+
+## Resolve a failed save
+
+If the remote branch has changes missing from your checkout, commit your local
+work, then fetch and merge them. For a connected checkout on `main`:
 
 ```sh
 git fetch widefleet
@@ -109,34 +131,22 @@ git merge widefleet/main
 widefleet deploy
 ```
 
-Resolve any merge conflicts locally. Automatic source saving never force-pushes.
+Resolve any merge conflicts before deploying again. Widefleet never force-pushes
+when saving a deployment's source.
 
-## Keep preview work separate
+If project files change during the build, review those changes and deploy again.
+Widefleet stops so the saved code and the build stay in sync. If a Git commit hook
+or signing fails, fix the reported error and retry; your previous staging
+selection is preserved.
 
-Switch to a work branch before saving a preview's source. `widefleet preview` rejects the
-main app's source branch before building. Direct deployments to an existing
-preview also reject that branch before building.
+If Git is temporarily unavailable, retry once it recovers. A failed status
+request does not mean your saved code is gone.
 
-```sh
-git switch -c feature/review
-widefleet preview
-```
+## Delete an app or preview
 
-The preview saves code to the same `feature/review` branch in the main app's
-repository. Widefleet derives a URL-safe preview name from the branch. Repeated
-deployments from that branch update the same preview; another branch gets its
-own preview. The branch assignment is fixed.
+Deleting a preview keeps its Git branch. Deleting the main app removes its
+Widefleet repository and all branches. The deletion confirmation explains what
+will be removed. Your GitHub and GitLab repositories are unaffected.
 
-For a detached CI checkout, use `widefleet preview --source-branch feature/review`.
-The branch must differ from the main app's branch. With a local branch checked
-out, an explicit source branch must match it.
-
-Previews without source storage remain freely nameable with `--name NAME`.
-
-Deleting a preview keeps its branch. Deleting the main app removes its managed
-repository and all its branches; the deletion confirmation states this. External
-GitHub and GitLab repositories are unaffected.
-
-Once the source status shows the saved commit, another authorized session can
-clone it and continue. See [deployments](/guides/deployments) for activation,
-failure recovery and rollback.
+See [deployments](/guides/deployments) for publishing and rollback, or the
+[CLI reference](/reference/cli#source-repositories) for command options and JSON output.

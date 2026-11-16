@@ -1,7 +1,7 @@
 ---
 title: Deployments
 description: Preview changes, publish an app update and recover from a failed deployment.
-lastModified: 2026-11-15
+lastModified: 2026-11-16
 ---
 
 Use this guide after [deploying your first app](/getting-started/installation).
@@ -11,17 +11,20 @@ You need management access to the app and compatible CLI, management and agent b
 
 ## Publish a preview
 
-The parent app must already exist. Check the project, then publish a named preview:
+The app must already exist. Create a branch for your changes, check the project,
+then publish a preview:
 
 ```sh
+git switch -c review
 pnpm check
-widefleet preview --name review
+widefleet preview
 ```
 
 The CLI builds locally and prints the preview URL after activation. Open it, sign
 in and exercise the change. Repeating the command updates the same preview and
-preserves its data. Without `--name`, the CLI derives a name from the Git branch;
-use an explicit name outside Git or with a detached HEAD.
+preserves its data. Widefleet names the preview after your branch. When source
+storage is disabled or unavailable, you can instead use
+`widefleet preview --name review` without creating a Git branch.
 
 Previews start with their own empty databases and file storage. On builds supporting
 app access groups, they inherit the parent's rule. Configure network permissions
@@ -36,6 +39,15 @@ still be pending.
 
 ## Publish the update
 
+If you used a branch for the preview, merge your changes into `main` first:
+
+```sh
+git switch main
+git merge review
+```
+
+Then deploy the app:
+
 ```sh
 widefleet deploy
 ```
@@ -44,10 +56,10 @@ This builds and publishes the current project to the app named in `wrangler.json
 preserving that app's existing data. Open the printed app URL and verify the changed
 behavior.
 
-On Widefleet Cloud, deployment also saves your source to the app's Git repository.
-Preview deployments use a separate branch in that repository. See
-[saving and recovering source code](/guides/source-code) for Git commands,
-continuing in another session and working with an existing repository.
+Widefleet Cloud automatically saves your source code to the app's Git repository
+when you deploy. Support for self-hosted installations is coming soon. See
+[saving and recovering source code](/guides/source-code) to pick up your work in
+another session or keep using your existing Git repository.
 
 For scripts, `widefleet deploy --json` returns the completed deployment, including
 `appId`, deployment `id`, `status` and `url`. Build output and progress go to stderr.

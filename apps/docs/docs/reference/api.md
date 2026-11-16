@@ -145,24 +145,31 @@ See [activation](/guides/members#activate-company-sso).
 
 ## App source repositories
 
-Source operations use the selected organization and the app's management
-permissions. Token clients need `platform:read` for status and read credentials,
-or `platform:write` for deployment preparation and write credentials.
-Browser mutations require same-origin requests.
+Use these endpoints to find an app's saved code, prepare a repository for a push
+and authenticate Git requests. They use the selected organization and require
+management access to the app. Token clients need `platform:read` for status and
+read credentials, or `platform:write` for preparation and write credentials.
+Requests that change state from a browser must come from the same origin.
 
-| Endpoint                                            | Response and purpose                                                                                                                                                                                                                      |
-| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/v1/apps/{appId}/source`                   | Read source status.                                                                                                                                                                                                                       |
-| `POST /api/v1/apps/{appId}/source/prepare`          | Prepare a source save using write scope; accepts `{}` and creates the repository if needed. Returns `{ organizationId, repository, preview }`. On installations without a Git backend, `repository` is null.                              |
-| `POST /api/v1/apps/source-target`                   | Inspect the deployment target with `platform:write` scope. Accepts `{ appId }` or `{ slug }`; returns `{ supported, branch, preview }`. Reads local metadata without creating apps or repositories. A new app by name defaults to `main`. |
-| `POST /api/v1/apps/{appId}/source/read-credential`  | Issue a read credential; body `{}`.                                                                                                                                                                                                       |
-| `POST /api/v1/apps/{appId}/source/write-credential` | Issue a write credential; body `{}`.                                                                                                                                                                                                      |
+| Endpoint                                            | Response and purpose                                                                                       |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `GET /api/v1/apps/{appId}/source`                   | Get the repository, latest saved commit and deployed commit.                                               |
+| `POST /api/v1/apps/{appId}/source/prepare`          | Create the repository if needed and return its URL and branch. Body: `{}`.                                 |
+| `POST /api/v1/apps/source-target`                   | Check the destination branch before deploying. Body: `{ appId }` or `{ slug }`. Requires `platform:write`. |
+| `POST /api/v1/apps/{appId}/source/read-credential`  | Get credentials for cloning and fetching. Body: `{}`.                                                      |
+| `POST /api/v1/apps/{appId}/source/write-credential` | Get credentials that also allow pushing. Body: `{}`.                                                       |
 
-The preparation response identifies previews with `preview: true`. The main app
-uses `main`; a Git preview retains the branch assigned when it was created.
+Preparation returns `{ organizationId, repository, preview }`. `repository`
+contains `{ url, branch, commit }`, or is null when source storage is unavailable
+on the installation. `preview` is true for a preview app.
 
-App lists and reads by ID or name include a `source` summary from stored app and
-deployment metadata. These reads do not contact Git:
+The source-target response is `{ supported, branch, preview }`. It checks the
+app without creating an app or repository. A new app selected by `slug` uses
+`main`, as do existing main apps. A preview keeps its assigned branch.
+
+### Find saved and deployed code
+
+App lists and reads by ID or name include a `source` summary:
 
 ```json
 {
@@ -180,7 +187,7 @@ deployment metadata. These reads do not contact Git:
 when the active deployment has no saved source reference; it does not indicate
 whether someone has pushed code separately.
 
-The source-status endpoint reads the repository and its current branch head:
+To get the latest saved commit as well, use `GET /api/v1/apps/{appId}/source`:
 
 ```json
 {
@@ -200,23 +207,27 @@ The source-status endpoint reads the repository and its current branch head:
 ```
 
 `supported` indicates whether the installation provides repositories. `available`
-means the selected branch has a commit. `repository` is null before setup; an
-empty repository has `commit: null`. `deployed` identifies the active deployment's
-source and is null when that deployment has no source reference. The saved branch
-head can advance without deploying an update.
+means the app's branch has a commit. `repository` is null if no repository has
+been created; a branch with no commits has `commit: null`. `deployed` identifies
+the running app's source. Pushing without deploying updates `repository.commit`
+but leaves `deployed` unchanged.
 
-If the Git backend is unavailable, reads still return `200` with an `error`
+If Git is temporarily unavailable, source status returns `200` with an `error`
 message, `available: false` and `repository: null`. Check `error` before treating
-the source as empty. The known `deployed` reference remains available. Ordinary
-app reads and management pages remain usable.
+the source as empty. The known `deployed` value remains available. Ordinary app
+reads return the stored summary without waiting for Git.
+
+### Preview branches
 
 Branches use Git branch-name rules and are limited to 200 characters. Main apps
 use `main`. Create a Git preview with `POST /api/v1/apps`, including
 `parentId` and `previewBranch`. Its hostname uses a URL-safe name derived from that
 branch; if `previewName` is also supplied, it must match the derived name.
-The preview shares its parent's repository and keeps that branch permanently.
-Repository preparation and deployment metadata cannot select a different branch. A preview
-created without `previewBranch` has no Git source binding.
+The preview shares its parent's repository and keeps the assigned branch.
+Neither preparation nor deployment can change it. A preview created without
+`previewBranch` cannot save source to Widefleet Git.
+
+### Git credentials and errors
 
 Credential responses contain `{ url, username, password, expiresAt }` and use
 `Cache-Control: no-store`. Use the returned username and password for Git HTTPS
@@ -225,9 +236,10 @@ credentials remain usable until expiry if management access is revoked. Each
 new credential request checks current app access. The CLI handles this exchange
 through its Git credential helper.
 
-Missing or inaccessible apps return `404`. Setup without a Git backend, or writes
-while the app is being deleted, return `409`. Backend failures during source
-setup, preparation or credential issuance return `503`.
+Missing or inaccessible apps return `404`. Credential requests without source
+storage return `409`, as does preparing a preview created without a Git branch.
+Preparation and credential requests also return `409` while the app is being
+deleted. Git failures during preparation or credential requests return `503`.
 See [source code](/guides/source-code) for cloning and deletion behavior.
 
 ## Publish an app
@@ -250,7 +262,8 @@ Clients that save source before publishing can include
 `source: { commit, branch, directory }` in the Worker metadata. The commit must
 already exist in the app's managed repository; otherwise the upload returns
 `400`. The directory is relative to the repository root (`.` for a root project).
-This reference follows the activated artifact, including after rollback.
+After a rollback, the app's source status identifies the commit used by the
+restored version.
 
 Rollback queues a retained code artifact from the same app while preserving its current database and files. Deletion marks the app unwritable and queues teardown after earlier jobs; management records and artifacts are removed after the agent confirms teardown.
 
