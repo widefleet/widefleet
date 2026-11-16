@@ -1,4 +1,3 @@
-import { startWorkloadPublication } from "./workload-publication-node.ts";
 import { getRequestEvent } from "$app/server";
 import { sveltekitCookies } from "better-auth/svelte-kit";
 import { initializeRuntime } from "./runtime-initialization.ts";
@@ -17,14 +16,6 @@ const startRuntime = async () => {
   const reporting = createReporting(configuration, database.db);
 
   reporting.start();
-
-  const stopWorkloadPublication = startWorkloadPublication(
-    database.db,
-    configuration,
-    extension,
-    (error) => console.error("Workload configuration publication failed", error),
-  );
-
   process.once("uncaughtException", (error) => {
     console.error("Control plane stopped after an uncaught exception", error);
     reporting.exception(error);
@@ -32,8 +23,7 @@ const startRuntime = async () => {
   });
 
   process.once("sveltekit:shutdown", () => {
-    void stopWorkloadPublication()
-      .then(() => Promise.allSettled([reporting.close(), observation.close()]))
+    void Promise.allSettled([reporting.close(), observation.close()])
       .then(() => database.close())
       .catch((cause: unknown) => console.error("Database shutdown failed", cause));
   });

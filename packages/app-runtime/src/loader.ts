@@ -1,5 +1,4 @@
-import { publishWorkloadConfiguration, workloadDiscovery } from "./workload-identity.ts";
-import { workloadControlPath } from "./workload-protocol.ts";
+import { workloadDiscovery } from "./workload-identity.ts";
 import { prepareAppSecrets } from "./app-secrets.ts";
 import { oauthAppAvailable } from "./app-oauth.ts";
 import { managedOAuth } from "./oauth.ts";
@@ -249,9 +248,6 @@ const manageRuntime = async (
   context: ExecutionContext,
 ) => {
   const url = new URL(request.url);
-
-  if (url.pathname === workloadControlPath)
-    return publishWorkloadConfiguration(request, environment);
 
   if (url.pathname === "/.well-known/widefleet/runtime") {
     return Response.json({ runtimeVersion: WIDEFLEET_RUNTIME_VERSION });

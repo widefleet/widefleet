@@ -1,4 +1,3 @@
-import { workloadPublicationCron } from "@platform/app-runtime/workload";
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
@@ -144,6 +143,8 @@ export const hostedConfigurations = async (
   const emailBindings: HostedEmailBindings = {};
   const emailVariables: Record<string, string> = {};
   const executionVariables: Record<string, string> = {};
+  executionVariables["WIDEFLEET_WORKLOAD_ISSUER"] =
+    `https://auth.${installation.appDomain}/workload`;
 
   if (installation.executionLimits)
     executionVariables["WIDEFLEET_EXECUTION_LIMITS"] = JSON.stringify(installation.executionLimits);
@@ -213,17 +214,6 @@ export const hostedConfigurations = async (
       kv_namespaces: [{ binding: "AUTH_CONFIG", id: ids.auth }],
       r2_buckets: [{ binding: "ARTIFACTS", bucket_name: names.artifacts }],
       ...controlOverrides,
-      triggers: {
-        crons: [
-          ...new Set([
-            workloadPublicationCron,
-            ...(z
-              .object({ crons: z.array(z.string()) })
-              .optional()
-              .parse(controlOverrides["triggers"])?.crons ?? []),
-          ]),
-        ],
-      },
       vars: {
         ...control.vars,
         APP_RUNTIME_NAME: names.runtime,

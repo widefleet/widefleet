@@ -1,4 +1,4 @@
-import { workloadControlPath, workloadToken } from "@platform/app-runtime/workload";
+import { workloadToken } from "@platform/app-runtime/workload";
 import { createLocalJWKSet, jwtVerify } from "jose";
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
@@ -131,7 +131,7 @@ describe.runIf(process.env["RUN_SERVICE_TESTS"] === "1").each(["workerd", "celld
         | { app: z.infer<typeof publishedApp>; source: string; assets: Record<string, string> }
         | z.infer<typeof appSecretPreparation>
         | { key: string }
-        | { workloadOrganizations: string[] }
+        | { identity: { appId: string; organizationId: string; hostname: string } }
         | { availability: "blocked" | "clear" | "unavailable" },
       headers: Record<string, string> = {},
     ) =>
@@ -180,17 +180,19 @@ describe.runIf(process.env["RUN_SERVICE_TESTS"] === "1").each(["workerd", "celld
         join(directory, "fixture.js"),
         `
 import * as workers from 'cloudflare:workers';
-import runtime, {AppService as Service} from './runtime.js'; export * from './runtime.js';
+import runtime, {AppService as Service, WorkloadIdentity as Identity} from './runtime.js'; export * from './runtime.js';
 ${executionRecorder}
 export class AppService extends Service { constructor(ctx, env) { super(ctx, recordExecution(env)); } }
+export class UnconfiguredIdentity extends Identity { constructor(ctx, env) { super(ctx, {...env,WIDEFLEET_WORKLOAD_ISSUER:undefined}); } }
 export default { async fetch(request, env, ctx) {
   const url = new URL(request.url);
   try {
-    if(url.pathname === '/workload-configuration') {
-      const {workloadOrganizations}=await request.json();
-      return ctx.exports.RuntimeManagement({props:{}}).fetch(new Request('https://runtime.internal${workloadControlPath}',{method:'PUT',body:JSON.stringify({issuer:'https://auth.apps.example.test/workload',organizations:workloadOrganizations})}));
+    if(url.pathname === '/workload-proof' || url.pathname === '/unconfigured-identity') {
+      const {identity}=await request.json();
+      const binding=url.pathname === '/workload-proof' ? ctx.exports.WorkloadIdentity : ctx.exports.UnconfiguredIdentity;
+      return Response.json(await binding({props:identity}).getToken('data-api'));
     }
-    if(url.pathname.startsWith('/workload/')) return runtime.fetch(new Request('https://auth.apps.example.test'+url.pathname),env,ctx);
+    if(url.pathname.startsWith('/workload/')) return runtime.fetch(new Request((url.searchParams.get('origin') ?? 'https://auth.apps.example.test')+url.pathname),env,ctx);
     if(url.pathname === '/executions') return Response.json(executions);
     if(url.pathname === '/seed') {
       const {app,source,assets} = await request.json();
@@ -243,6 +245,7 @@ export default { async fetch(request, env, ctx) {
             WIDEFLEET_HTTP_AVAILABILITY: "kv",
             WIDEFLEET_CONTROL_TOKEN: token,
             WIDEFLEET_SECRETS_KEY: "ab".repeat(32),
+            WIDEFLEET_WORKLOAD_ISSUER: "https://auth.apps.example.test/workload",
             WIDEFLEET_CONFIGURATION: '{"crons":{},"queues":{}}',
           },
           worker_loaders: [{ binding: "WIDEFLEET_LOADER" }],
@@ -309,11 +312,6 @@ export default { async fetch(request, env, ctx) {
     });
 
     it("issues app and service tokens with public verification and no control plane, including concurrent cold calls", async () => {
-      expect((await request("/identity")).status).toBe(409);
-      expect(
-        (await request("/workload-configuration", { workloadOrganizations: ["widefleet"] })).status,
-      ).toBe(204);
-
       const results = await Promise.all(
         Array.from({ length: 4 }, async () => {
           const response = await request("/identity");
@@ -382,15 +380,29 @@ export default { async fetch(request, env, ctx) {
       }
     });
 
-    it("applies published admission changes without calling management during token issuance", async () => {
-      expect((await request("/workload-configuration", { workloadOrganizations: [] })).status).toBe(
-        204,
+    it("requires a configured issuer and the published app identity", async () => {
+      const identity = {
+        appId: sourceId,
+        organizationId: "widefleet",
+        hostname: `${sourceId}.apps.example.test`,
+      };
+
+      expect((await request("/workload-proof", { identity })).status).toBe(200);
+      expect((await request("/unconfigured-identity", { identity })).status).toBe(409);
+
+      for (const changes of [
+        { appId: targetId },
+        { organizationId: "other" },
+        { hostname: "unpublished.apps.example.test" },
+      ]) {
+        expect(
+          (await request("/workload-proof", { identity: { ...identity, ...changes } })).status,
+        ).toBe(409);
+      }
+
+      expect((await request("/workload/jwks?origin=https://unrelated.example.test")).status).toBe(
+        404,
       );
-      expect((await request("/identity")).status).toBe(409);
-      // Public verification remains available even when every organization is disabled.
-      expect((await request("/workload/jwks")).status).toBe(200);
-      await request("/workload-configuration", { workloadOrganizations: ["widefleet"] });
-      expect((await request("/identity")).status).toBe(200);
     });
 
     it("admits concurrent cold service calls and streams fetch responses", async () => {
@@ -448,6 +460,7 @@ export default { async fetch(request, env, ctx) {
         expect((await request("/read")).status).toBe(409);
         expect((await request("/fetch")).status).toBe(409);
         expect((await request("/identity")).status).toBe(409);
+        expect((await request("/workload/jwks")).status).toBe(200);
       }
 
       await request("/availability", { availability: "clear" });

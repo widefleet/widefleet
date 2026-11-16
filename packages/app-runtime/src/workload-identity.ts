@@ -2,35 +2,8 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 import { requireOrganizationAvailability } from "./availability.ts";
 import { readApp } from "./catalog.ts";
 import { signWorkloadToken, workloadKeys } from "./workload-keys.ts";
-import {
-  workloadAudience,
-  workloadConfiguration,
-  workloadConfigurationKey,
-} from "./workload-protocol.ts";
+import { workloadAudience, workloadIssuer } from "./workload-protocol.ts";
 import type { ParentEnvironment } from "./types.ts";
-
-const configuration = async (environment: ParentEnvironment) => {
-  const object = await environment.WIDEFLEET_PACKAGES.get(workloadConfigurationKey);
-
-  if (!object) return null;
-
-  return workloadConfiguration.parse(await object.json());
-};
-
-export const publishWorkloadConfiguration = async (
-  request: Request,
-  environment: ParentEnvironment,
-) => {
-  if (request.method !== "PUT") return new Response(null, { status: 405 });
-  const value = workloadConfiguration.parse(await request.json());
-  const serialized = JSON.stringify(value);
-  const current = await environment.WIDEFLEET_PACKAGES.get(workloadConfigurationKey);
-
-  if (!current || (await current.text()) !== serialized)
-    await environment.WIDEFLEET_PACKAGES.put(workloadConfigurationKey, serialized);
-
-  return new Response(null, { status: 204 });
-};
 
 // This public metadata is served by the parent runtime, on the existing SSO host.
 // It needs neither the control-plane process nor its database, including on cold starts.
@@ -39,9 +12,11 @@ export const workloadDiscovery = async (request: Request, environment: ParentEnv
 
   if (!["/workload/jwks", "/workload/.well-known/openid-configuration"].includes(url.pathname))
     return null;
-  const value = await configuration(environment);
 
-  if (!value || url.origin !== new URL(value.issuer).origin) return null;
+  if (!environment.WIDEFLEET_WORKLOAD_ISSUER) return null;
+  const issuer = workloadIssuer.parse(environment.WIDEFLEET_WORKLOAD_ISSUER);
+
+  if (url.origin !== new URL(issuer).origin) return null;
 
   if (request.method !== "GET" && request.method !== "HEAD")
     return new Response(null, { status: 405 });
@@ -49,8 +24,8 @@ export const workloadDiscovery = async (request: Request, environment: ParentEnv
   const document = url.pathname.endsWith("/jwks")
     ? (await workloadKeys(environment)).jwks
     : {
-        issuer: value.issuer,
-        jwks_uri: `${value.issuer}/jwks`,
+        issuer,
+        jwks_uri: `${issuer}/jwks`,
         id_token_signing_alg_values_supported: ["EdDSA"],
         subject_types_supported: ["public"],
         response_types_supported: [],
@@ -67,23 +42,15 @@ export class WorkloadIdentity extends WorkerEntrypoint<
 > {
   async getToken(audience: string) {
     workloadAudience.parse(audience);
+    const issuer = workloadIssuer.parse(this.env.WIDEFLEET_WORKLOAD_ISSUER);
     const { appId, organizationId, hostname } = this.ctx.props;
     await requireOrganizationAvailability(this.env, organizationId);
 
-    const [app, published] = await Promise.all([
-      readApp(this.env, `hosts/${hostname}.json`),
-      configuration(this.env),
-    ]);
+    const app = await readApp(this.env, `hosts/${hostname}.json`);
 
-    if (
-      !published ||
-      !app ||
-      app.appId !== appId ||
-      app.organizationId !== organizationId ||
-      !published.organizations.includes(organizationId)
-    )
+    if (!app || app.appId !== appId || app.organizationId !== organizationId)
       throw new Error("Workload is not available");
 
-    return signWorkloadToken(this.env, published.issuer, { appId, organizationId }, audience);
+    return signWorkloadToken(this.env, issuer, { appId, organizationId }, audience);
   }
 }

@@ -544,15 +544,6 @@ test("selects an organization, repairs stale selection and explains removed acce
   await expect(page).toHaveURL("http://localhost:25430/sign-in");
 });
 
-test("publishes workload admission to the runtime on native startup", async () => {
-  await expect
-    .poll(() => environment.authControl.workload())
-    .toEqual({
-      issuer: "https://auth.apps.localhost/workload",
-      organizations: ["widefleet"],
-    });
-});
-
 test("preserves SvelteKit form protection and accepts the CLI with an explicit Origin", async ({
   request,
 }) => {

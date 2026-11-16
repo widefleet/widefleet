@@ -5,7 +5,6 @@
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
-  "triggers": { "crons": ["0-59 * * * *"] },
   "preview_urls": false,
   "assets": { "directory": "dist/cloudflare/public", "binding": "ASSETS" },
   "observability": { "enabled": true },
