@@ -8,7 +8,7 @@ Widefleet apps can request a signed token identifying their organization and app
 An external API verifies that token and decides which data the app may access.
 This works without a signed-in user and without an API key in the app.
 
-Upgrade the control plane and app runtime before using
+Upgrade the installation's deployment tools, native agent and app runtime before using
 the `WIDEFLEET_IDENTITY` binding. The receiving API must support EdDSA JWT
 verification and trust your installation's workload issuer.
 
@@ -144,8 +144,8 @@ access. Requesting your API's audience alone gives an app no data permissions.
   cron, queue and Workflow code. User-specific access requires a separate check by
   the app or service.
 - An app stops receiving tokens when its published route is removed or replaced.
-  Organization admission changes take effect when their updated configuration
-  reaches the runtime. Already issued tokens remain valid until their five-minute
+  The runtime also applies its existing organization-availability checks when
+  configured. Already issued tokens remain valid until their five-minute
   expiry unless the receiving API revokes its grant sooner.
 
 The runtime issues tokens and serves discovery and JWKS without contacting the
@@ -153,19 +153,20 @@ control plane or its database. This also works after runtime restarts. The exist
 runtime storage must remain available; the private signing keys are encrypted with
 the runtime's existing secret-encryption key and stay outside app code.
 
-The control plane publishes a complete organization-admission snapshot at startup
-and every minute on native installations. Hosted installations use the reserved
-`0-59 * * * *` control-plane cron; custom extension schedules remain separate.
-Allow initial publication to complete after deploying the components. A runtime
-with no published configuration refuses issuance.
+Deployment configures `WIDEFLEET_WORKLOAD_ISSUER` on the parent runtime. Hosted
+deployment derives it from the installation's app domain. Native bootstrap and
+agent deployments derive it from `APP_DOMAIN` and `APP_HTTPS_PORT` (default `443`);
+the supplied Compose configurations pass those settings to both components.
+A runtime without a configured issuer refuses issuance. No organization admission
+list, background poller or workload-specific cron is needed.
 
-Publication includes organization-access extensions and database suspension state.
-Subsequent changes normally arrive on the next reconciliation plus storage
-propagation. Publication failures are reported and retried on the next run. During
-a control-plane outage, the last published snapshot remains valid indefinitely:
-existing workloads continue issuing fresh tokens, but new admission changes cannot
-arrive. There is no hard upper bound on suspension delay during such an outage.
-Existing runtime suspension checks still apply as well.
+Each token request checks the app's published identity and existing runtime
+availability state. Control-plane membership and onboarding restrictions do not
+create a separate workload-token policy. To revoke data access, remove the app's
+grant on the receiving API. To stop new token issuance, remove its published route
+or use the installation's configured runtime suspension mechanism. Runtime-state
+changes take effect when they reach the runtime; changing a control-plane-only
+flag does not implicitly stop a deployed app.
 
 Each installation's runtime storage holds its workload key ring. Runtime replicas
 sharing that storage use the same ring. Conditional writes coordinate concurrent
@@ -181,14 +182,14 @@ as `createRemoteJWKSet` does. User and CLI signing keys are unaffected.
 
 ## Troubleshooting
 
-| Symptom                         | Check                                                                                                                                 |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `WIDEFLEET_IDENTITY` is missing | Upgrade all platform components. Local standalone Wrangler development needs a test binding; it cannot mint deployed app identities.  |
-| Token issuance fails            | Check that the app is published, organization admission has been published, and runtime storage and its encryption key are available. |
-| Signature or issuer is rejected | Use the workload issuer and its advertised JWKS. The receiving library must support EdDSA.                                            |
-| Audience is rejected            | Match the API's configured audience exactly in `getToken`.                                                                            |
-| API returns forbidden           | Grant the executing app's ID access on the API; check whether the caller is a preview or a service app.                               |
-| Outbound request is blocked     | Allow the API origin in the app's backend network permissions.                                                                        |
+| Symptom                         | Check                                                                                                                                |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `WIDEFLEET_IDENTITY` is missing | Upgrade all platform components. Local standalone Wrangler development needs a test binding; it cannot mint deployed app identities. |
+| Token issuance fails            | Check the configured issuer, published app identity, runtime suspension state, and availability of storage and its encryption key.   |
+| Signature or issuer is rejected | Use the workload issuer and its advertised JWKS. The receiving library must support EdDSA.                                           |
+| Audience is rejected            | Match the API's configured audience exactly in `getToken`.                                                                           |
+| API returns forbidden           | Grant the executing app's ID access on the API; check whether the caller is a preview or a service app.                              |
+| Outbound request is blocked     | Allow the API origin in the app's backend network permissions.                                                                       |
 
 Discovery and JWKS are served directly by the parent runtime on the existing
 `auth.<app-domain>` host. Native installations with a custom app HTTPS port include
