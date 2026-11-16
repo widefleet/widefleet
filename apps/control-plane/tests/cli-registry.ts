@@ -23,7 +23,14 @@ const packageManifest = z.object({
 
 // Install the exact release bytes without publishing packages or relying on npm.
 export async function startCliRegistry(archive: string) {
-  const version = z.string().parse(/^widefleet-(\d+\.\d+\.\d+)\.tgz$/.exec(basename(archive))?.[1]);
+  const version = z
+    .string()
+    .parse(
+      /^widefleet-(\d+\.\d+\.\d+(?:-canary\.[1-9]\d*\.g[0-9a-f]{12})?)\.tgz$/.exec(
+        basename(archive),
+      )?.[1],
+    );
+
   const directory = dirname(archive);
   const platform = cliPlatform(process.platform, process.arch);
   const downloads: string[] = [];
@@ -91,7 +98,7 @@ export async function startCliRegistry(archive: string) {
     response.end(
       JSON.stringify({
         name: manifest.name,
-        "dist-tags": { latest: version },
+        "dist-tags": { [version.includes("-canary.") ? "canary" : "latest"]: version },
         versions: {
           [version]: {
             ...manifest,

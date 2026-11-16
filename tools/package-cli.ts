@@ -43,7 +43,8 @@ const binary = resolve(root, values.binary ?? `target/release/${executableName}`
 
 const version = (await execute(binary, ["--version"])).stdout.trim().replace(/^widefleet /, "");
 
-if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error("Unexpected CLI version output");
+if (!/^\d+\.\d+\.\d+(-canary\.[1-9]\d*\.g[0-9a-f]{12})?$/.test(version))
+  throw new Error("Unexpected CLI version output");
 
 const esbuild = esbuildBinary();
 
@@ -165,7 +166,11 @@ const metadata = {
     "LICENSE",
   ],
   repository: { type: "git", url: "git+https://github.com/widefleet/widefleet.git" },
-  publishConfig: { registry: "https://registry.npmjs.org", access: "public" },
+  publishConfig: {
+    registry: "https://registry.npmjs.org",
+    access: "public",
+    tag: version.includes("-canary.") ? "canary" : "latest",
+  },
 };
 
 if (platform.os === "linux") Object.assign(metadata, { libc: ["glibc"] });
