@@ -5,8 +5,7 @@ lastModified: 2026-11-16
 
 The Gmail, GitHub and OneDrive templates can use an OAuth registration supplied by
 the installation operator. App owners can also provide their own registration.
-Each user still connects their own provider account through the template's existing
-connection page.
+Each user connects their own provider account through the template's connection page.
 
 ## Choose a registration
 
@@ -22,18 +21,15 @@ The names are `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` for Gmail,
 `MICROSOFT_CLIENT_SECRET` for OneDrive. Use the app's Secrets page or
 [`widefleet secret`](/reference/cli) to manage them.
 
-Every template still needs its own persistent `AUTH_SECRET` of at least 32
-characters. It encrypts saved account tokens in that app's D1 database. Provider API
-requests continue to run in the template, using its existing network policy.
+Each template needs a persistent `AUTH_SECRET` of at least 32 characters to protect
+saved account tokens. Configure its network permissions using the template's setup
+instructions.
 
-Existing connections keep working after a template upgrade with unchanged custom
-credentials. Upgrading does not require a new provider authorization.
-
-To switch between your own and managed credentials, or replace a client ID,
-each user must disconnect and connect again. Disconnecting clears the previous
-registration's saved tokens. Updating credentials alone does not replace or revoke
-existing grants. There is one managed registration per provider; replacing it
-does not keep the previous registration available for refresh.
+Template upgrades preserve connections when custom credentials stay unchanged.
+When switching between custom and managed credentials or changing the client ID,
+have each user disconnect and connect again. Disconnecting clears the previous
+registration's saved tokens. The installation supports one managed registration
+per provider; replacing it requires users of that registration to reconnect.
 
 ## Configure a managed registration
 
@@ -148,17 +144,9 @@ report that setup is required.
 
 ## Storage and recovery
 
-The runtime keeps provider client secrets outside customer app code. It checks the
-app, organization and signed-in caller during token exchange and refresh. The
-central callback returns the user to the originating template; it does not put
-access or refresh tokens in a browser URL.
-
-The template stores account tokens locally. Managed refresh tokens carry an
-additional encrypted envelope tied to that app, user and registration. Preserve
-the runtime's `WIDEFLEET_SECRETS_KEY` as well as each app's database and
-`AUTH_SECRET` when backing up an installation.
+Back up the runtime's `WIDEFLEET_SECRETS_KEY` together with each app's database and
+`AUTH_SECRET` so saved account connections can be restored.
 
 If consent is cancelled or a callback expires, start again from the template's
-connection page. If the OAuth registration changes, disconnect and connect each
-account again. A provider outage during refresh returns `refresh_failed` and
+connection page. A provider outage during refresh returns `refresh_failed` and
 preserves the saved connection so it can be retried.

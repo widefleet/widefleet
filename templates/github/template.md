@@ -58,11 +58,9 @@ for the OAuth app before their repositories become available.
    [OAuth apps](https://github.com/settings/developers) for a personal registration
    or the organization's OAuth app settings.
 
-Your own credentials take precedence over managed OAuth. Provide both values;
-setting only one produces a setup error. Removing both switches back to managed
-OAuth when available. Existing connections keep working after a template upgrade
-with unchanged credentials. To change registrations, each user must disconnect
-and connect again so the saved tokens belong to the new registration.
+To change OAuth registrations, have users disconnect and connect again. See
+[Choose a registration](https://widefleet.com/docs/reference/template-oauth#choose-a-registration)
+for credential selection and switching between custom and managed OAuth.
 
 ## Use from another app
 
