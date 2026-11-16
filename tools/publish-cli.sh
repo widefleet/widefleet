@@ -3,7 +3,12 @@ set -euo pipefail
 
 directory=${CLI_RELEASE_DIRECTORY:?}
 version=${VERSION:?}
-[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+tag=${NPM_DIST_TAG:-latest}
+case "$tag" in
+  latest) [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ;;
+  canary) [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-canary\.([1-9][0-9]*)\.g[0-9a-f]{12}$ ]]; run_number=${BASH_REMATCH[1]} ;;
+  *) echo "Unsupported npm dist-tag: $tag" >&2; exit 1 ;;
+esac
 native_packages=(widefleet-linux-x64-gnu widefleet-darwin-arm64 widefleet-darwin-x64 widefleet-win32-x64-msvc)
 packages=("${native_packages[@]}" widefleet)
 
@@ -12,10 +17,11 @@ for package in "${packages[@]}"; do
   archive="$directory/$package-$version.tgz"
   (cd "$directory" && sha256sum --check "$package-$version.tgz.sha256")
   tar -xOf "$archive" package/package.json > "$directory/$package.manifest.json"
-  jq -e --arg name "$package" --arg version "$version" '
+  jq -e --arg name "$package" --arg version "$version" --arg tag "$tag" '
     .name == $name and .version == $version and .scripts == null and
     .repository.url == "git+https://github.com/widefleet/widefleet.git" and
-    .publishConfig.registry == "https://registry.npmjs.org" and .publishConfig.access == "public"
+    .publishConfig.registry == "https://registry.npmjs.org" and .publishConfig.access == "public" and
+    (.publishConfig.tag // "latest") == $tag
   ' "$directory/$package.manifest.json"
 
   if [[ "$package" != widefleet ]]; then
@@ -29,6 +35,24 @@ for package in "${packages[@]}"; do
       .os == [$os] and .cpu == [$cpu] and .libc == $libc and
       .exports["./widefleet"] == $executable
     ' "$directory/$package.manifest.json"
+  fi
+
+  if [[ "$tag" == canary ]]; then
+    channel="$directory/$package.canary.json"
+    status=$(curl --silent --show-error --retry 3 --connect-timeout 15 --max-time 60 \
+      --output "$channel" --write-out '%{http_code}' "https://registry.npmjs.org/$package/canary")
+    case "$status" in
+      200)
+        current=$(jq -er '.version' "$channel")
+        [[ "$current" =~ -canary\.([1-9][0-9]*)\.g[0-9a-f]{12}$ ]]
+        if (( BASH_REMATCH[1] > run_number )); then
+          echo "Refusing to move $package@canary backwards from $current to $version" >&2
+          exit 1
+        fi
+        ;;
+      404) ;;
+      *) echo "npm canary lookup failed for $package: HTTP $status" >&2; exit 1 ;;
+    esac
   fi
 
   expected="sha512-$(openssl dgst -sha512 -binary "$archive" | openssl base64 -A)"
@@ -63,7 +87,7 @@ publish_package() {
   local package=$1
   if [[ "$(cat "$directory/$package.state")" == missing ]]; then
     npm publish "$directory/$package-$version.tgz" \
-      --registry=https://registry.npmjs.org --access=public --provenance --ignore-scripts
+      --registry=https://registry.npmjs.org --access=public --provenance --ignore-scripts --tag="$tag"
   fi
   bash "$(dirname "${BASH_SOURCE[0]}")/wait-for-npm-package.sh" \
     "$package" "$version" "$(cat "$directory/$package.integrity")"
