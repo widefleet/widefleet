@@ -34,3 +34,6 @@ Create a work branch and run `widefleet preview` from the app project to build a
 Use `widefleet rollback APP_UUID ARTIFACT_UUID` to restore retained code and `widefleet delete APP_UUID --yes` to remove an app and its published versions. See [app removal](/reference/runtime#app-removal) for the cleanup process and remaining native storage cells.
 
 External requests need [network permissions](/guides/network). For IT-managed system access, use [app services](/guides/app-services). Apps can also declare [Workflows](/guides/workflows) with a compatible deployment agent and runtime.
+
+Use [workload identity](/guides/workload-identity) to authenticate an app or service
+to an external API with a short-lived token, without storing an API key in the app.
