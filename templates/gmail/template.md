@@ -58,8 +58,15 @@ The requested `gmail.readonly` scope permits reading mail.
 3. Set both `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` as app secrets.
 
 The console links use the currently selected project. Check that the API, consent
-settings and client all belong to the same project. Before making the app available
-beyond testing, review [Google's Gmail scope verification requirements](https://developers.google.com/workspace/gmail/api/auth/scopes).
+settings and client all belong to the same project. A new project is optional;
+choose a separate one when its branding, audience or publishing settings must be
+independent of existing clients.
+
+In external Testing mode, Gmail authorizations and refresh tokens expire after
+seven days, requiring users to authorize again. Public use of `gmail.readonly`
+requires Google's restricted-scope verification and, for this server-based app,
+a security assessment unless an exception applies. See
+[Google testing and public availability](https://widefleet.com/docs/reference/template-oauth#google-testing-and-public-availability).
 
 Your own credentials take precedence over managed OAuth. Provide both values;
 setting only one produces a setup error. Removing both switches back to managed

@@ -39,6 +39,10 @@ configure [OAuth branding](https://console.cloud.google.com/auth/branding) and c
 a **Web application** client under [OAuth clients](https://console.cloud.google.com/auth/clients).
 For an external application in Testing mode, add your intended Google accounts
 under [Audience → Test users](https://console.cloud.google.com/auth/audience).
+An existing project is sufficient if its project-wide branding, audience and
+publishing settings suit this app. Use a separate project for independent settings.
+In external Testing mode, [Gmail authorizations and refresh tokens expire after
+seven days](https://support.google.com/cloud/answer/15549945), requiring authorization again.
 Set `GOOGLE_CLIENT_ID` in
 `wrangler.jsonc` to that client's ID, then deploy:
 
@@ -89,6 +93,9 @@ The requested scopes are Google profile, email and `gmail.readonly`.
 Google classifies `gmail.readonly` as a restricted scope. Check the
 [Google verification requirements](https://developers.google.com/workspace/gmail/api/auth/scopes)
 for your application's audience and data use before distributing it beyond testing.
+Unless an exception applies, public use requires restricted-scope verification
+and a [security assessment](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification)
+because the example accesses Gmail data through a server.
 
 ## Connect a user and an app
 

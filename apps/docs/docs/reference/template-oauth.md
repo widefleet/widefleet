@@ -88,14 +88,19 @@ links require sign-in; select the project, organization or directory that should
 own the registration.
 
 - **Google:** [Enable Gmail API](https://console.cloud.google.com/apis/library/gmail.googleapis.com)
-  in the selected project. Configure [branding](https://console.cloud.google.com/auth/branding),
-  [audience and test users](https://console.cloud.google.com/auth/audience), and
-  [data access](https://console.cloud.google.com/auth/scopes) for `gmail.readonly`.
+  in the selected project. An existing project can host another OAuth client;
+  a new project is not required by this integration. However, clients in one
+  project share [branding and consent configuration](https://developers.google.com/identity/siwg/best-practices#google-cloud-project-setup).
+  Use a separate project if managed Gmail needs independent branding, audience
+  or publishing settings from management sign-in.
+  Configure [branding](https://console.cloud.google.com/auth/branding),
+  [audience](https://console.cloud.google.com/auth/audience), and
+  [data access](https://console.cloud.google.com/auth/scopes). Declare the requested
+  `openid`, `email`, `profile` and `https://www.googleapis.com/auth/gmail.readonly`
+  scopes. Choose **External** to serve accounts outside the project's organization.
   In [OAuth clients](https://console.cloud.google.com/auth/clients), create a
   **Web application** client with the Google callback above. Save its client ID
-  and secret as `providers.google`. Gmail read access is a restricted scope;
-  review [Google's verification requirements](https://developers.google.com/workspace/gmail/api/auth/scopes)
-  before making the registration available beyond testing.
+  and secret as `providers.google`.
 - **GitHub:** Open [New OAuth App](https://github.com/settings/applications/new)
   for a personal registration, or the owning organization's **Settings → Developer
   settings → OAuth apps → New OAuth App**. Use your installation's website as the
@@ -110,6 +115,24 @@ own the registration.
   `User.Read`. Under **Certificates & secrets**, create a client secret. Save the
   application client ID and the secret's **value**, not its ID, as
   `providers.microsoft`. Tenant consent policies still apply.
+
+### Google testing and public availability
+
+For an external project in **Testing**, add the accounts that will connect under
+[Audience → Test users](https://console.cloud.google.com/auth/audience).
+[Google limits this mode to 100 test users and expires Gmail authorizations,
+including refresh tokens, after seven days](https://support.google.com/cloud/answer/15549945).
+Users must authorize again after expiry; this mode is for testing the integration.
+
+Public Gmail access requires more than a client ID and secret. `gmail.readonly`
+is a [restricted scope](https://developers.google.com/workspace/gmail/api/auth/scopes).
+Unless a documented exception applies, complete Google's restricted-scope
+verification before public use. The template reads Gmail through a server, so
+Google's [security assessment requirement](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification)
+also applies. Verification includes domain ownership and accurate public app and
+privacy information. Register the domains used for branding and the callback;
+with the example above, the callback's authorized domain is `example.com`.
+Changing the publishing status alone does not complete verification.
 
 ### Activate and verify
 
