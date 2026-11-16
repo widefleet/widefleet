@@ -888,7 +888,10 @@ export const createApi = (runtime: Runtime) => {
     const appUsage = /^\/api\/v1\/reporting\/runtime\/([^/]+)$/.exec(url.pathname);
 
     if (appUsage?.[1] && request.method === "POST")
-      return runtime.reporting.appUsage.ingest(request, decodeURIComponent(appUsage[1]));
+      return runtime.reporting.appUsage.ingest(
+        request,
+        contract.organizationIdentifier.parse(appUsage[1]),
+      );
 
     const telemetry = /^\/api\/v1\/telemetry\/([^/]+)\/v1\/(logs|traces)$/.exec(url.pathname);
 

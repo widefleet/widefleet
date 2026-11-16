@@ -172,7 +172,7 @@ async fn execute(
         &packages,
         temporary.path(),
         telemetry,
-        reporting::runtime(api, configuration).await?,
+        reporting::runtime(api, configuration).await,
     )
     .await?;
     let activation = async {

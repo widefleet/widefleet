@@ -17,29 +17,36 @@ pub struct RuntimeReporting {
 pub async fn runtime(
     api: &platform_core::http::Api,
     configuration: &Configuration,
-) -> platform_core::Result<Option<RuntimeReporting>> {
+) -> Option<RuntimeReporting> {
     if !Preferences::default().effective().usage {
-        return Ok(None);
+        return None;
     }
-    let response = api
-        .authenticated(
-            reqwest::Method::GET,
-            "/agent/reporting/runtime",
-            &configuration.token,
-        )
-        .send()
-        .await?;
-    // The independently released agent also works with older control planes.
-    if response.status() == reqwest::StatusCode::NOT_FOUND {
-        return Ok(None);
-    }
-    let mut settings: RuntimeReporting = platform_core::http::json(response).await?;
+    let mut settings = runtime_credentials(api, &configuration.token).await?;
     settings.url = crate::telemetry::destination_url(
         api,
         configuration,
         &format!("/api/v1/reporting/runtime/{}", settings.organization_id),
-    )?;
-    Ok(Some(settings))
+    )
+    .ok()?;
+    Some(settings)
+}
+
+async fn runtime_credentials(
+    api: &platform_core::http::Api,
+    token: &str,
+) -> Option<RuntimeReporting> {
+    // Optional reporting cannot fail a deployment or hold its job lease while
+    // the endpoint is unavailable. Older control planes also return 404 here.
+    api.authenticated(reqwest::Method::GET, "/agent/reporting/runtime", token)
+        .timeout(Duration::from_secs(2))
+        .send()
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?
+        .json()
+        .await
+        .ok()
 }
 
 pub fn start(
@@ -111,4 +118,101 @@ pub fn start(
         }
     });
     Some((sender, task))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::runtime_credentials;
+    use platform_core::{Error, Result, http::Api};
+    use std::time::Duration;
+    use tokio::{
+        io::{AsyncReadExt, AsyncWriteExt},
+        net::TcpListener,
+    };
+
+    async fn endpoint(
+        status: u16,
+        body: &str,
+        stall_body: bool,
+    ) -> Result<(Api, tokio::task::JoinHandle<std::io::Result<()>>)> {
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let api = Api::new(&format!("http://{}", listener.local_addr()?))?;
+        let body = body.to_string();
+        let task = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await?;
+            let mut request = Vec::new();
+            let mut buffer = [0; 1024];
+            loop {
+                let length = stream.read(&mut buffer).await?;
+                if length == 0 {
+                    return Err(std::io::ErrorKind::UnexpectedEof.into());
+                }
+                request.extend_from_slice(&buffer[..length]);
+                if request.ends_with(b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let request = String::from_utf8_lossy(&request);
+            assert!(request.starts_with("GET /api/v1/agent/reporting/runtime "));
+            assert!(request.contains("authorization: Bearer fixture"));
+            stream.write_all(format!("HTTP/1.1 {status} Fixture\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).as_bytes()).await?;
+            if stall_body {
+                std::future::pending::<()>().await;
+            }
+            stream.write_all(body.as_bytes()).await
+        });
+        Ok((api, task))
+    }
+
+    #[tokio::test]
+    async fn runtime_settings_are_optional_for_unavailable_or_invalid_endpoints() -> Result<()> {
+        for (status, body) in [(404, "{}"), (503, "{}"), (200, "not json"), (200, "{}")] {
+            let (api, server) = endpoint(status, body, false).await?;
+            assert!(runtime_credentials(&api, "fixture").await.is_none());
+            server
+                .await
+                .map_err(|error| Error::invalid(error.to_string()))??;
+        }
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let api = Api::new(&format!("http://{}", listener.local_addr()?))?;
+        drop(listener);
+        assert!(runtime_credentials(&api, "fixture").await.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn runtime_settings_bound_stalled_response_bodies() -> Result<()> {
+        let (api, server) = endpoint(200, "{}", true).await?;
+        let result =
+            tokio::time::timeout(Duration::from_secs(5), runtime_credentials(&api, "fixture"))
+                .await;
+        server.abort();
+        assert!(
+            result
+                .map_err(|error| Error::invalid(error.to_string()))?
+                .is_none()
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn runtime_settings_accept_valid_credentials() -> Result<()> {
+        let (api, server) = endpoint(
+            200,
+            r#"{"organizationId":"widefleet","token":"usage_fixture","enabled":true,"revision":2}"#,
+            false,
+        )
+        .await?;
+        let settings = runtime_credentials(&api, "fixture")
+            .await
+            .ok_or_else(|| Error::invalid("Expected runtime reporting credentials".into()))?;
+        assert_eq!(settings.organization_id, "widefleet");
+        assert_eq!(settings.token, "usage_fixture");
+        assert!(settings.enabled);
+        assert_eq!(settings.revision, 2);
+        server
+            .await
+            .map_err(|error| Error::invalid(error.to_string()))??;
+        Ok(())
+    }
 }

@@ -145,4 +145,49 @@ describe("Runtime usage aggregation", () => {
     await Promise.all(pending);
     expect(batches.map((batch) => batch.counts[0]?.invocations)).toEqual([1, 2]);
   });
+
+  it("drains the last invocation after both flush slots were busy, without another app call", async () => {
+    vi.useFakeTimers();
+    const delivered = new Map<string, number>();
+    const tasks: Promise<unknown>[] = [];
+    let inflight = 0;
+    let peak = 0;
+
+    const record = createRuntimeUsage(settings, async (_url, init) => {
+      const batch = runtimeUsage.parse(await new Request(settings.url, init).json());
+      inflight++;
+      peak = Math.max(peak, inflight);
+      await new Promise<void>((resolve) => setTimeout(resolve, 1500));
+
+      for (const entry of batch.counts)
+        delivered.set(entry.appId, Math.max(delivered.get(entry.appId) ?? 0, entry.invocations));
+      inflight--;
+
+      return Response.json({ enabled: true, revision: 0 });
+    });
+
+    const context = {
+      waitUntil: (task: Promise<unknown>) => {
+        tasks.push(task);
+      },
+    };
+
+    const app = crypto.randomUUID();
+    record(app, context);
+
+    for (let index = 0; index < 799; index++) record(crypto.randomUUID(), context);
+    await vi.advanceTimersByTimeAsync(5000);
+    record(app, context);
+    await vi.advanceTimersByTimeAsync(5000);
+    const lastApp = crypto.randomUUID();
+    record(lastApp, context);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(inflight).toBe(2);
+    expect(delivered.has(lastApp)).toBe(false);
+    await vi.advanceTimersByTimeAsync(30000);
+    await Promise.all(tasks);
+    expect(delivered.get(lastApp)).toBe(1);
+    expect(delivered.get(app)).toBe(2);
+    expect(peak).toBe(2);
+  });
 });

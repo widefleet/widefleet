@@ -19,6 +19,7 @@ export const createRuntimeUsage = (
   let enabled = settings.enabled;
   let scheduled = false;
   let inflight = 0;
+  let available: (() => void) | undefined;
   let observedWeek = "";
 
   const counts = new Map<
@@ -27,9 +28,13 @@ export const createRuntimeUsage = (
   >();
 
   const flush = async () => {
+    // Keep this request's waitUntil alive and coalesce further increments while
+    // both slots are busy. No additional app call is needed to drain the batch.
+    if (inflight >= 2)
+      await new Promise<void>((resolve) => {
+        available = resolve;
+      });
     scheduled = false;
-
-    if (inflight >= 2) return;
     inflight++;
     const generation = { source, revision };
 
@@ -84,6 +89,8 @@ export const createRuntimeUsage = (
       // resends cumulative counters; the installation merges them with MAX.
     } finally {
       inflight--;
+      available?.();
+      available = undefined;
     }
   };
 

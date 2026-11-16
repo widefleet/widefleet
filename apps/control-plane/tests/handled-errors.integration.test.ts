@@ -45,6 +45,32 @@ afterEach(() => vi.restoreAllMocks());
 
 afterAll(async () => environment?.close());
 
+it.each(["%ZZ", "%E0%A4%A", "%2F", "a".repeat(129)])(
+  "rejects malformed reporting organization paths without reporting a server error: %s",
+  async (organization) => {
+    const ingest = vi.spyOn(runtime.reporting.appUsage, "ingest");
+    const report = vi.spyOn(runtime.reporting, "exception");
+
+    const response = await createApi(runtime)(
+      new Request(`http://localhost/api/v1/reporting/runtime/${organization}`, { method: "POST" }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(ingest).not.toHaveBeenCalled();
+    expect(report).not.toHaveBeenCalled();
+    expect(exception).not.toHaveBeenCalled();
+  },
+);
+
+it("still authenticates reporting requests with valid organization paths", async () => {
+  const response = await createApi(runtime)(
+    new Request("http://localhost/api/v1/reporting/runtime/widefleet", { method: "POST" }),
+  );
+
+  expect(response.status).toBe(401);
+  expect(exception).not.toHaveBeenCalled();
+});
+
 it.each(["GET", "PUT"])("reports database errors once for %s API requests", async (method) => {
   const original = new Error("Database disconnected");
   const error = new DatabaseUnavailable({ message: "Identity unavailable", cause: original });
