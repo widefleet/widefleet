@@ -1,7 +1,7 @@
 ---
 title: Connect apps
 description: Expose app APIs, connect callers and keep provider secrets private.
-lastModified: 2026-11-15
+lastModified: 2026-11-16
 ---
 
 An app can expose exported Worker entrypoints to other apps in its organization.
@@ -78,10 +78,14 @@ Use `--app CALLER` to select a caller by slug or UUID outside its project. The
 target accepts a service catalog slug or UUID. Bindings default to the `default`
 entrypoint; the provider must export a default Worker handler or `WorkerEntrypoint` class.
 
-In the UI, open **App APIs**, select an app you manage, then expand **Connect API**
-for the provider. Select its entrypoint and enter a binding name. You can also
-start from the caller app's **Connections → Browse app APIs**. The UI, CLI and API
-show the same desired and active grants.
+In the UI, open **App APIs** and choose **Set up connection** for the provider.
+Choose an app you manage and continue to the connection settings. Select the API
+entrypoint, enter a binding name and choose **Connect API**. The result page shows
+whether the connection is saved, activating, active or needs attention.
+
+Starting from the caller app's **Connections → Browse app APIs** keeps that app
+selected and skips the app-selection step. The UI, CLI and API show the same
+desired and active grants.
 
 Call the binding from server-side app code:
 
@@ -145,9 +149,9 @@ account and shares that account across authorized calling apps.
 
 ## API availability and connection requests
 
-APIs require administrator approval by default. In **App APIs → Manage
-availability**, an organization administrator can select **Everyone in this
-organization** to let app owners and collaborators connect their apps themselves.
+APIs require administrator approval by default. An organization administrator can open the provider's
+**View API documentation → Manage availability** page and select **Everyone in
+this organization** to let app owners and collaborators connect their apps themselves.
 This permission covers the provider's available entrypoints. It does not grant
 management access to the provider or expose its secrets.
 
@@ -158,12 +162,15 @@ widefleet services access inventory-api --mode organization
 widefleet services access inventory-api --mode approval-required
 ```
 
-Changing availability keeps existing connections. Use **Disconnect** or
+Changing availability keeps existing connections. On the caller's **Connections**
+page, expand a binding and choose **Disconnect**, or use
 `widefleet disconnect INVENTORY --app CALLER` to remove a connection from a caller
 you manage.
 
-For a restricted API, choose **Request connection** in the catalog. Select the
-entrypoint and an unused binding name, then submit the request. From the CLI:
+For a restricted API, choose **Set up connection** in the catalog and select the
+caller app. Choose the entrypoint and an unused binding name, then choose
+**Submit request**. The confirmation page shows the requested connection and
+explains that the app has no access until an administrator approves it. From the CLI:
 
 ```sh
 widefleet connect inventory-api --app CALLER --as INVENTORY --entrypoint Reader --request
@@ -204,8 +211,8 @@ CLI waits for activation unless `--no-wait` is set. **Saved**, **pending**,
 **active** and **failed** describe grant activation independently of code updates.
 Retry a failed change by submitting it again and inspect `widefleet connections`.
 App owners and collaborators can retry an unchanged saved connection even when
-its provider requires approval. In **Connections → Browse app APIs**, choose
-**Retry connection** for that binding, or repeat the original `widefleet connect`
+its provider requires approval. On the caller's **Connections** page, expand the
+binding and choose **Retry connection**, or repeat the original `widefleet connect`
 command. Changing its target or entrypoint still requires permission, and a
 removed connection cannot be restored using its old approval.
 
