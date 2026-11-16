@@ -22,29 +22,55 @@ and its declared database. Keep your local source for subsequent changes.
 
 ## Configure Google
 
-An administrator needs to:
+If your installation provides [managed template OAuth](https://widefleet.com/docs/reference/template-oauth),
+leave `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` unset. The template uses
+that registration automatically. You can supply your own registration instead,
+using the instructions below.
 
-1. Create a Google Cloud project, enable the Gmail API and configure the OAuth
-   consent screen. For an external app in testing mode, add the Google accounts
-   that will connect as test users.
-2. Create an OAuth client with the **Web application** type. Register
-   `https://YOUR-APP-URL/auth/callback/google` as an authorized redirect URI.
-3. Set the app secrets `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `AUTH_SECRET`.
-   Generate `AUTH_SECRET` randomly with at least 32 characters and keep it stable;
-   it encrypts the saved account tokens. Use the app's Secrets page or
-   `widefleet secret put NAME --file /path/to/secret` to provide values.
-4. Allow these backend origins from the app directory:
+Set the app's `AUTH_SECRET` to a random value of at least 32 characters and keep it
+stable; it encrypts saved account tokens. Use the app's Secrets page or
+`widefleet secret put AUTH_SECRET --file /path/to/secret`.
 
-   ```sh
-   widefleet network allow https://accounts.google.com
-   widefleet network allow https://oauth2.googleapis.com
-   widefleet network allow https://www.googleapis.com
-   widefleet network allow https://gmail.googleapis.com
-   ```
+Allow these backend origins from the app directory:
+
+```sh
+widefleet network allow https://accounts.google.com
+widefleet network allow https://oauth2.googleapis.com
+widefleet network allow https://www.googleapis.com
+widefleet network allow https://gmail.googleapis.com
+```
 
 Network changes require the CLI's `network:manage` scope. Wait for the configuration
-to activate, then open the app URL and connect your Google account. The requested
-`gmail.readonly` scope permits reading mail.
+to activate, then open the app URL and connect your Google account.
+
+The requested `gmail.readonly` scope permits reading mail.
+
+### Use your own OAuth registration
+
+1. Select your project in Google Cloud and [enable the Gmail API](https://console.cloud.google.com/apis/library/gmail.googleapis.com).
+   Configure [Google Auth Platform branding](https://console.cloud.google.com/auth/branding)
+   and [data access](https://console.cloud.google.com/auth/scopes) for the requested
+   `gmail.readonly` scope. For an external app in testing mode, add the Google
+   accounts that will connect under [Audience → Test users](https://console.cloud.google.com/auth/audience).
+2. Open [OAuth clients](https://console.cloud.google.com/auth/clients), select
+   **Create client**, and choose **Web application**. Register
+   `https://YOUR-APP-URL/auth/callback/google` as an authorized redirect URI.
+3. Set both `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` as app secrets.
+
+The console links use the currently selected project. Check that the API, consent
+settings and client all belong to the same project. A new project is optional;
+choose a separate one when its branding, audience or publishing settings must be
+independent of existing clients.
+
+In external Testing mode, Gmail authorizations and refresh tokens expire after
+seven days, requiring users to authorize again. Public use of `gmail.readonly`
+requires Google's restricted-scope verification and, for this server-based app,
+a security assessment unless an exception applies. See
+[Google testing and public availability](https://widefleet.com/docs/reference/template-oauth#google-testing-and-public-availability).
+
+To change OAuth registrations, have users disconnect and connect again. See
+[Choose a registration](https://widefleet.com/docs/reference/template-oauth#choose-a-registration)
+for credential selection and switching between custom and managed OAuth.
 
 ## Use from another app
 
