@@ -4,7 +4,7 @@ description: Enable app telemetry and query errors with private source maps.
 lastModified: 2026-11-16
 ---
 
-Runtime logs remain in the operator's infrastructure. Usage data and Widefleet error reports are covered separately in [installation reporting](/self-hosting/installation-reporting).
+Runtime logs stay in your infrastructure.
 
 Widefleet uses ClickHouse as its telemetry store. The starter captures browser and server errors automatically; app authors and coding agents query the same authorized API through `widefleet logs`. The local `./dev` installation starts ClickHouse and the Collector automatically. For an existing installation, use matching CLI, management and agent builds with telemetry support and enable the versioned configuration below.
 
