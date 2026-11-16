@@ -73,6 +73,8 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     let accessToken = "synthetic-cli-token";
     let includeUrl = true;
     let historyReads = 0;
+    let resolveDisconnects = 0;
+    let resolveStatus = 200;
     let logFailure: { code: string; message: string } | null = null;
     let sourceRepository: z.infer<typeof contract.sourceRepository> | null = null;
     let sourcePreview = false;
@@ -382,6 +384,21 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         return;
       }
 
+      if (request.method === "PUT" && request.url === "/api/v1/apps/by-name/fixture") {
+        if (resolveDisconnects > 0) {
+          resolveDisconnects -= 1;
+          request.socket.destroy();
+
+          return;
+        }
+
+        if (resolveStatus !== 200) {
+          response.writeHead(resolveStatus).end(JSON.stringify({ message: "App access denied" }));
+
+          return;
+        }
+      }
+
       if (
         (request.method === "PUT" && request.url === "/api/v1/apps/by-name/fixture") ||
         (request.method === "GET" && request.url === `/api/v1/apps/${app.id}`)
@@ -477,6 +494,8 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       accessToken = "synthetic-cli-token";
       includeUrl = true;
       historyReads = 0;
+      resolveDisconnects = 0;
+      resolveStatus = 200;
       logFailure = null;
       createdPreviews.length = 0;
       storedPreview = null;
@@ -1406,6 +1425,42 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         expect(organizations).toEqual(requests.map(() => requiredOrganization));
       },
     );
+
+    it("recovers from lost app resolution responses and uploads the deployment once", async () => {
+      resolveDisconnects = 2;
+      const result = await cli("--json", "--no-wait", "--skip-build");
+      expect(JSON.parse(result.stdout)).toMatchObject({ status: "queued", appId: app.id });
+      expect(requests).toEqual([
+        "POST /api/v1/apps/source-target",
+        ...Array<string>(3).fill("PUT /api/v1/apps/by-name/fixture"),
+        `POST /api/v1/apps/${app.id}/assets-upload-session`,
+        `PUT /api/v1/apps/${app.id}/worker`,
+      ]);
+    });
+
+    it("stops after three lost app resolution responses without uploading", async () => {
+      resolveDisconnects = 10;
+      const result = await failure(cli("--json", "--no-wait", "--skip-build"));
+      expect(result).toMatchObject({ code: 1, stdout: "" });
+      expect(result.stderr).toContain("HTTP request failed");
+      expect(requests).toEqual([
+        "POST /api/v1/apps/source-target",
+        ...Array<string>(3).fill("PUT /api/v1/apps/by-name/fixture"),
+      ]);
+    });
+
+    it.each([403, 404])("does not retry an app resolution HTTP %s response", async (status) => {
+      resolveStatus = status;
+      const result = await failure(cli("--json", "--no-wait", "--skip-build"));
+      expect(result).toMatchObject({ code: 1, stdout: "" });
+      expect(result.stderr).toContain(
+        status === 404 ? "The app is not accessible" : "App access denied",
+      );
+      expect(requests).toEqual([
+        "POST /api/v1/apps/source-target",
+        "PUT /api/v1/apps/by-name/fixture",
+      ]);
+    });
 
     it("prints the server's URL after successful activation and keeps build logs on stderr", async () => {
       const result = await cli();

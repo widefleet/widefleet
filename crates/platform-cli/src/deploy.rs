@@ -426,15 +426,27 @@ async fn publish(
             url.path_segments_mut()
                 .map_err(|()| Error::invalid("Invalid platform origin".into()))?
                 .extend(["api", "v1", "apps", "by-name", name]);
-            let response = api
-                .authenticated(
-                    Method::PUT,
-                    url.path().trim_start_matches("/api/v1"),
-                    &token,
-                )
-                .json(&value!({}))
-                .send()
-                .await?;
+            // Resolution reuses the same app by name, even if its response was lost.
+            let mut retries = 0;
+            let response = loop {
+                let sent = api
+                    .authenticated(
+                        Method::PUT,
+                        url.path().trim_start_matches("/api/v1"),
+                        &token,
+                    )
+                    .json(&value!({}))
+                    .send()
+                    .await;
+                match sent {
+                    Ok(response) => break response,
+                    Err(_) if retries < 2 => {
+                        retries += 1;
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                    }
+                    Err(error) => return Err(error.into()),
+                }
+            };
             if response.status() == reqwest::StatusCode::NOT_FOUND {
                 return Err(Error::invalid("The app is not accessible, or the management server does not support deployment by name. Check your app permissions and update the server to 0.1.5 or newer".into()));
             }
