@@ -1,7 +1,7 @@
 ---
 title: API and uploads
 description: Authentication, app publication and the Worker upload contract.
-lastModified: 2026-10-29
+lastModified: 2026-11-10
 ---
 
 Authenticated clients can fetch `/api/v1/openapi.json`. The document covers management operations, agent jobs, binary assets and multipart Workers.
@@ -80,6 +80,47 @@ Use [CLI organization selection](/reference/cli-configuration#select-an-organiza
 for equivalent CLI commands. If a browser selection becomes unavailable, the
 workspace returns to organization selection. With no available memberships, ask
 an administrator to grant access.
+
+## App templates
+
+Template discovery requires an authenticated session or a token with
+`platform:read`, together with the selected organization.
+
+`GET /api/v1/catalog/templates` returns `{ templates, createPrompt }`.
+Each entry in `templates` contains `id`, `name` and `description`. The optional
+`search` query parameter filters names and descriptions
+case-insensitively; it accepts up to 200 characters. An unmatched search returns
+an empty list. `createPrompt` guides an agent through creating an app for another
+use case.
+
+`GET /api/v1/catalog/templates/{templateId}` returns one template with:
+
+- `id`, `name`, `description` and a source URL in `source`.
+- `markdown`, the body of the template's `template.md` file.
+- `prompt`, a setup prompt containing the installation URL and selected organization.
+
+Templates are read from the [Widefleet repository](https://github.com/widefleet/widefleet/tree/main/templates).
+Each directory with a `template.md` is a template; its YAML frontmatter supplies
+`name` and `description`, and its directory name supplies `id`. IDs contain
+1–64 characters, start with a lowercase ASCII letter, and use only lowercase
+ASCII letters, digits and hyphens. Directories with other names are skipped.
+
+An unknown template ID returns `404`; an invalid ID returns `400`. A repository
+or template parsing failure returns `503`. These read operations leave app
+creation and configuration to the normal app APIs.
+
+Installation operators can set the optional `GITHUB_TOKEN` on the control plane
+to authenticate GitHub directory requests. Public-repository read access is
+sufficient. For Compose, add it to the private deployment environment file and
+recreate the control-plane service. For Cloudflare, include it in the deployment's
+`--control-secrets` file. The token stays on the server.
+
+An unset or empty token uses GitHub's unauthenticated
+[request limit](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api).
+An exhausted limit or an invalid token makes catalog listing return `503`.
+Replace an expired token or wait for the limit to reset before retrying.
+
+See [Use an app template](/guides/app-templates) for the UI and CLI workflow.
 
 ## Organization creation
 

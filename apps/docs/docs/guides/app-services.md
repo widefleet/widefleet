@@ -8,8 +8,8 @@ An app can expose exported Worker entrypoints to other apps in its organization.
 It uses the same deployment, resources, networking and logs as any other app.
 Use a headless app when the service does not need browser access.
 
-Install the current Widefleet platform, CLI and runtime together. Publishing
-requires app creation or collaboration permissions. To connect a caller, you must
+Use Widefleet platform, CLI and runtime **0.7.1 or newer**. Publishing requires app
+creation or collaboration permissions. To connect a caller, you must
 manage that app. The provider and caller must belong to the same organization.
 Organization administrators decide whether each API needs approval.
 
@@ -144,8 +144,8 @@ but company sign-in cookies are filtered. App responses can set only host-scoped
 cookies and cannot overwrite company sign-in cookies. Keep OAuth state, callback
 user checks and CSRF protection in the app.
 
-The [Gmail app example](/guides/gmail-app) connects each user's personal Google
-account and shares that account across authorized calling apps.
+Find ready-made integrations in [App templates](/guides/app-templates), then
+connect the deployed app using the same flow.
 
 ## API availability and connection requests
 
