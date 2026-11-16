@@ -1,6 +1,6 @@
 ---
 title: Template OAuth
-lastModified: 2026-11-15
+lastModified: 2026-11-16
 ---
 
 The Gmail, GitHub and OneDrive templates can use an OAuth registration supplied by
@@ -81,10 +81,37 @@ you enable:
 | GitHub    | `https://oauth.apps.example.com/oauth/callback/github`    |
 | Microsoft | `https://oauth.apps.example.com/oauth/callback/microsoft` |
 
-Google requires a web application registration with Gmail API enabled. Microsoft
-uses a web redirect and delegated Graph permissions, with support for the account
-types your users need. Provider consent and organization approval requirements
-still apply. The template guides list their requested permissions.
+### Create the provider clients
+
+Use the callback from the table above for each managed registration. The provider
+links require sign-in; select the project, organization or directory that should
+own the registration.
+
+- **Google:** [Enable Gmail API](https://console.cloud.google.com/apis/library/gmail.googleapis.com)
+  in the selected project. Configure [branding](https://console.cloud.google.com/auth/branding),
+  [audience and test users](https://console.cloud.google.com/auth/audience), and
+  [data access](https://console.cloud.google.com/auth/scopes) for `gmail.readonly`.
+  In [OAuth clients](https://console.cloud.google.com/auth/clients), create a
+  **Web application** client with the Google callback above. Save its client ID
+  and secret as `providers.google`. Gmail read access is a restricted scope;
+  review [Google's verification requirements](https://developers.google.com/workspace/gmail/api/auth/scopes)
+  before making the registration available beyond testing.
+- **GitHub:** Open [New OAuth App](https://github.com/settings/applications/new)
+  for a personal registration, or the owning organization's **Settings → Developer
+  settings → OAuth apps → New OAuth App**. Use your installation's website as the
+  homepage and the GitHub callback above as the authorization callback URL. After
+  registration, copy the **Client ID** and select **Generate a new client secret**.
+  Save the pair as `providers.github`. Organization access policies still apply.
+- **Microsoft:** Open [App registrations](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade)
+  in the owning directory and select **New registration**. Choose **Accounts in any
+  organizational directory and personal Microsoft accounts** to support both.
+  Under **Authentication**, add the Microsoft callback above as a **Web** redirect.
+  Under **API permissions**, add delegated Microsoft Graph `Files.Read` and retain
+  `User.Read`. Under **Certificates & secrets**, create a client secret. Save the
+  application client ID and the secret's **value**, not its ID, as
+  `providers.microsoft`. Tenant consent policies still apply.
+
+### Activate and verify
 
 Deploy the runtime configuration and use template versions that support managed
 OAuth. Open a template with both provider credential secrets absent, connect a

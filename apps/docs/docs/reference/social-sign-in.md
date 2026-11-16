@@ -1,7 +1,7 @@
 ---
 title: Google and Microsoft sign-in
 description: Sign in with a personal provider account and configure providers for an installation.
-lastModified: 2026-10-29
+lastModified: 2026-11-16
 ---
 
 Widefleet **0.4.15 or newer** supports Google and Microsoft sign-in. When enabled
@@ -30,13 +30,16 @@ shown on their sign-in page. See [members and company sign-in](/guides/members).
 Configure email-code delivery first so users can complete confirmation when
 required. Keep company SSO configured separately in **Settings**.
 
-Create a Google OAuth client for a **Web application**. Register
+Open [Google Auth Platform → Clients](https://console.cloud.google.com/auth/clients)
+in the owning project and create a **Web application** client. Register
 `PLATFORM_URL/api/auth/callback/widefleet-google` as an authorized redirect URI,
 replacing `PLATFORM_URL` with the installation's exact HTTPS origin. Configure
-the consent audience to include the intended users. See
+the [consent audience](https://console.cloud.google.com/auth/audience) to include
+the intended users. See
 [Google client configuration](https://better-auth.com/docs/authentication/google).
 
-Create a Microsoft Entra app registration supporting **Accounts in any
+Open [Microsoft Entra → App registrations](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade)
+in the owning directory and create a registration supporting **Accounts in any
 organizational directory and personal Microsoft accounts**. Add a **Web** redirect
 URI of `PLATFORM_URL/api/auth/callback/widefleet-microsoft`. Create a client secret
 and retain its **value**, rather than its identifier. Widefleet uses Microsoft's

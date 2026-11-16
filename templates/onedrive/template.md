@@ -44,12 +44,17 @@ to activate, then open the app URL and connect your Microsoft account.
 
 ### Use your own OAuth registration
 
-1. Register a Microsoft Entra application. Choose **Accounts in any organizational
+1. Open [Microsoft Entra app registrations](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade),
+   select the directory that will own the app and choose **New registration**.
+   Choose **Accounts in any organizational
    directory and personal Microsoft accounts** to support work, school and personal
    accounts.
-2. Add `https://YOUR-APP-URL/auth/callback/microsoft` as a **Web** redirect URI and
-   add the delegated Microsoft Graph permission `Files.Read`.
-3. Create a client secret. Set both `MICROSOFT_CLIENT_ID` and
+2. Under **Authentication → Add a platform → Web**, add
+   `https://YOUR-APP-URL/auth/callback/microsoft` as the redirect URI. Under
+   **API permissions → Add a permission → Microsoft Graph → Delegated permissions**,
+   add `Files.Read` and retain `User.Read`.
+3. Open **Certificates & secrets → Client secrets → New client secret**.
+   Set both `MICROSOFT_CLIENT_ID` and
    `MICROSOFT_CLIENT_SECRET` as app secrets. Use the application client ID and the
    client secret's **value**, not its ID.
 

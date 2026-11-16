@@ -47,12 +47,19 @@ The requested `gmail.readonly` scope permits reading mail.
 
 ### Use your own OAuth registration
 
-1. Create a Google Cloud project, enable the Gmail API and configure the OAuth
-   consent screen. For an external app in testing mode, add the Google accounts
-   that will connect as test users.
-2. Create an OAuth client with the **Web application** type. Register
+1. Select your project in Google Cloud and [enable the Gmail API](https://console.cloud.google.com/apis/library/gmail.googleapis.com).
+   Configure [Google Auth Platform branding](https://console.cloud.google.com/auth/branding)
+   and [data access](https://console.cloud.google.com/auth/scopes) for the requested
+   `gmail.readonly` scope. For an external app in testing mode, add the Google
+   accounts that will connect under [Audience → Test users](https://console.cloud.google.com/auth/audience).
+2. Open [OAuth clients](https://console.cloud.google.com/auth/clients), select
+   **Create client**, and choose **Web application**. Register
    `https://YOUR-APP-URL/auth/callback/google` as an authorized redirect URI.
 3. Set both `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` as app secrets.
+
+The console links use the currently selected project. Check that the API, consent
+settings and client all belong to the same project. Before making the app available
+beyond testing, review [Google's Gmail scope verification requirements](https://developers.google.com/workspace/gmail/api/auth/scopes).
 
 Your own credentials take precedence over managed OAuth. Provide both values;
 setting only one produces a setup error. Removing both switches back to managed

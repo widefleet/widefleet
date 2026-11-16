@@ -1,7 +1,7 @@
 ---
 title: Gmail app example
 description: Copy an app that links personal Google accounts with Better Auth and D1.
-lastModified: 2026-10-29
+lastModified: 2026-11-16
 ---
 
 Deploy the [Gmail example](https://github.com/widefleet/widefleet/tree/v0.5.0/examples/apps/gmail)
@@ -34,9 +34,12 @@ pnpm typecheck
 pnpm test
 ```
 
-In Google Cloud, enable **Gmail API**, configure the OAuth consent screen and create
-a **Web application** OAuth client. For an external application in Testing mode,
-add your intended Google accounts as test users. Set `GOOGLE_CLIENT_ID` in
+In the same Google Cloud project, [enable Gmail API](https://console.cloud.google.com/apis/library/gmail.googleapis.com),
+configure [OAuth branding](https://console.cloud.google.com/auth/branding) and create
+a **Web application** client under [OAuth clients](https://console.cloud.google.com/auth/clients).
+For an external application in Testing mode, add your intended Google accounts
+under [Audience → Test users](https://console.cloud.google.com/auth/audience).
+Set `GOOGLE_CLIENT_ID` in
 `wrangler.jsonc` to that client's ID, then deploy:
 
 ```sh

@@ -47,9 +47,16 @@ for the OAuth app before their repositories become available.
 
 ### Use your own OAuth registration
 
-1. Register a GitHub OAuth app. Set its authorization callback URL to
+1. Open [New OAuth App](https://github.com/settings/applications/new) to register an
+   app under your personal account. For an organization-owned app, open the
+   organization's **Settings → Developer settings → OAuth apps → New OAuth App**
+   instead. Set its homepage URL to your app's HTTPS URL and its authorization callback URL to
    `https://YOUR-APP-URL/auth/callback/github`.
-2. Set both `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` as app secrets.
+2. On the registered app's settings page, copy the **Client ID** and choose
+   **Generate a new client secret**. Set both `GITHUB_CLIENT_ID` and
+   `GITHUB_CLIENT_SECRET` as app secrets. You can return through
+   [OAuth apps](https://github.com/settings/developers) for a personal registration
+   or the organization's OAuth app settings.
 
 Your own credentials take precedence over managed OAuth. Provide both values;
 setting only one produces a setup error. Removing both switches back to managed
