@@ -2,6 +2,11 @@ name: Check suites
 
 on:
   workflow_call:
+    inputs:
+      full-checks:
+        description: Run service suites in addition to the native CLI packages
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -14,6 +19,7 @@ jobs:
       canary: true
 
   checks:
+    if: inputs.full-checks
     name: ${{ matrix.suite }}
     runs-on: ubuntu-24.04
     strategy:

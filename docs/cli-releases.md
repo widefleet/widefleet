@@ -1,6 +1,6 @@
 # CLI release publishing
 
-Publish the CLI, platform images and app runtime from a checked commit on `main`. Pushing a stable `vVERSION` tag starts [Publish Widefleet](../.github/workflows/publish-cli.yaml), which publishes to npm and Docker Hub before making the completed GitHub Release public. Configure the npm and GitHub destinations below and [Docker Hub publishing](container-releases.md#configure-docker-hub-publishing) first. App creators use the [installation guide](https://widefleet.com/docs/getting-started/installation).
+Publish the CLI, platform images and app runtime from a checked commit on `main`. Pushing a stable `vVERSION` tag starts [Check and publish Widefleet](../.github/workflows/publish-cli.yaml), which publishes to npm and Docker Hub before making the completed GitHub Release public. Configure the npm and GitHub destinations below and [Docker Hub publishing](container-releases.md#configure-docker-hub-publishing) first. App creators use the [installation guide](https://widefleet.com/docs/getting-started/installation).
 
 ## Configure npm publishing
 
@@ -41,7 +41,7 @@ Enable **Settings → General → Releases → Enable release immutability**. Al
    git push origin refs/tags/vVERSION
    ```
 
-3. Wait for **Publish Widefleet** to succeed. It creates a draft with generated release notes, or preserves an existing draft and its notes. All four native CLI targets, the Linux deployment tests and packaged image tests must pass before either registry publication starts. The GitHub Release becomes public only after both registry publications and every attachment verification succeed; do not publish the draft manually.
+3. Wait for **Check and publish Widefleet** to succeed. It creates a draft with generated release notes, or preserves an existing draft and its notes. All four native CLI targets, the Linux deployment tests and packaged image tests must pass before either registry publication starts. The GitHub Release becomes public only after both registry publications and every attachment verification succeed; do not publish the draft manually.
 4. Verify `pnpm add --global widefleet@VERSION` and `widefleet --version` on a supported host. pnpm installs the matching exact-version optional native package, including with install scripts disabled. The completed GitHub Release contains five npm archives, four standalone CLI archives, the image digest manifest, the app runtime `release.json` and their checksums. The runtime download must match the package in both the tested runtime and control-plane images; it is attached before the release becomes public.
 
 Pushes to `main` publish CLI canaries as described below. GitHub Release events do not publish packages. Tags outside the `vMAJOR.MINOR.PATCH` format are rejected. Both project versions must match the tag, and its commit must be reachable from `main`. An existing published release is rejected during preparation.
@@ -50,9 +50,11 @@ Native packages must be available before the shared launcher, because it selects
 
 ## Use automatic CLI canaries
 
-Pushes to `main`, including merged pull requests, start a CLI-only publication in **Publish Widefleet** when they change CLI package inputs or its build and publication tooling. These include the CLI and shared Rust core, bundled starters and launcher, and the installation guide copied into the package README. Shared lockfiles and build configuration conservatively trigger publication too. The workflow's `paths` list defines the inputs; keep it aligned when adding packaging inputs or local CLI dependencies.
+Pushes to `main`, including merged pull requests, start a CLI-only publication in **Check and publish Widefleet** when they change CLI package inputs or its build and publication tooling. These include the CLI and shared Rust core, bundled starters and launcher, and the installation guide copied into the package README. Shared lockfiles and build configuration conservatively trigger publication too. The [CLI input list](../.github/cli-inputs.json) defines the inputs; keep it aligned when adding packaging inputs or local CLI dependencies.
 
-Control-plane, runtime, website and test-only changes outside those inputs do not publish a canary. The **Check** workflow still runs CLI compatibility tests for service changes. Stable version-tag releases are unaffected by the path filter. All four native targets are built and tested before canary publication. The existing npm trusted publisher configuration above also authorizes this path; no additional token or workflow registration is needed.
+Control-plane, runtime, website and test-only changes outside those inputs do not publish a canary. PRs run **Check**; main pushes run the same CLI compatibility tests and service suites in **Check and publish Widefleet**. Stable version tags continue to run the full release pipeline. All four native targets are built and tested before canary publication. The existing npm trusted publisher configuration above also authorizes this path; no additional token or workflow registration is needed.
+
+On `main`, the native CLI matrix runs once. Publication downloads its tested artifacts from the same workflow run and waits for every selected check to succeed. Service changes run compatibility tests without publishing a canary. Packaged Markdown changes run the native matrix without the service suites; unrelated documentation needs only the lightweight selection and status jobs. Missing comparison history conservatively selects all checks and publication. Main checks now share publication's non-cancelling queue; PR checks still cancel superseded runs.
 
 Each build uses `BASE-canary.RUN.gSHA`, where `BASE` is the product version, `RUN` is the workflow run number and `SHA` is the first twelve commit characters. The version is stamped only in the build checkout. The binary, launcher and native packages use the same version, without committing a version bump to `main`.
 
