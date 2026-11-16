@@ -169,6 +169,18 @@ impl Types {
             } else {
                 &[]
             };
+            // Apparent primitive types and inherited members include standard-library
+            // properties. Exclude those before collecting types or member comments.
+            let properties = properties
+                .iter()
+                .filter_map(|&property| {
+                    let node = property
+                        .value_declaration()
+                        .or_else(|| property.declarations().first().copied())?;
+                    let file = ast::get_source_file_of_node(node)?;
+                    (!tsrs_vfs::bundled::is_bundled(file.file_name())).then_some((property, node))
+                })
+                .collect::<Vec<_>>();
             if value
                 .flags()
                 .intersects(TypeFlags::Object | TypeFlags::UnionOrIntersection)
@@ -187,14 +199,9 @@ impl Types {
                     }
                 }
             }
-            for &property in properties {
-                if let Some(node) = property
-                    .value_declaration()
-                    .or_else(|| property.declarations().first().copied())
-                {
-                    self.pending
-                        .extend(checker.get_type_of_symbol_at_location(property, Some(node)));
-                }
+            for &(property, node) in &properties {
+                self.pending
+                    .extend(checker.get_type_of_symbol_at_location(property, Some(node)));
             }
             if let Some(node) = declaration.filter(|node| {
                 matches!(
@@ -210,19 +217,14 @@ impl Types {
                 if verbosity.truncated.get() {
                     return None;
                 }
-                for &property in properties {
-                    if let Some(node) = property
-                        .value_declaration()
-                        .or_else(|| property.declarations().first().copied())
-                    {
-                        let comment = documentation(node).comment;
-                        if !comment.summary.is_empty() {
-                            definition.push_str(&format!(
-                                "\n/** {}: {} */",
-                                property.name(),
-                                comment.summary.replace("*/", "* /")
-                            ));
-                        }
+                for &(property, node) in &properties {
+                    let comment = documentation(node).comment;
+                    if !comment.summary.is_empty() {
+                        definition.push_str(&format!(
+                            "\n/** {}: {} */",
+                            property.name(),
+                            comment.summary.replace("*/", "* /")
+                        ));
                     }
                 }
                 let mut entry = serde_json::to_value(documentation(node).comment).ok()?;

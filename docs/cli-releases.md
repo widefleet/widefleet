@@ -44,9 +44,32 @@ Enable **Settings → General → Releases → Enable release immutability**. Al
 3. Wait for **Publish Widefleet** to succeed. It creates a draft with generated release notes, or preserves an existing draft and its notes. All four native CLI targets, the Linux deployment tests and packaged image tests must pass before either registry publication starts. The GitHub Release becomes public only after both registry publications and every attachment verification succeed; do not publish the draft manually.
 4. Verify `pnpm add --global widefleet@VERSION` and `widefleet --version` on a supported host. pnpm installs the matching exact-version optional native package, including with install scripts disabled. The completed GitHub Release contains five npm archives, four standalone CLI archives, the image digest manifest, the app runtime `release.json` and their checksums. The runtime download must match the package in both the tested runtime and control-plane images; it is attached before the release becomes public.
 
-Ordinary pushes to `main` and GitHub Release events do not publish packages. Tags outside the `vMAJOR.MINOR.PATCH` format are rejected. Both project versions must match the tag, and its commit must be reachable from `main`. An existing published release is rejected during preparation.
+Pushes to `main` publish CLI canaries as described below. GitHub Release events do not publish packages. Tags outside the `vMAJOR.MINOR.PATCH` format are rejected. Both project versions must match the tag, and its commit must be reachable from `main`. An existing published release is rejected during preparation.
 
 Native packages must be available before the shared launcher, because it selects an exact-version optional dependency. The publisher waits for npm metadata and tarball availability instead of treating upload acceptance as completed publication. Changing the [publication code](../tools/publish-cli.sh) must preserve that ordering and verify the tested bytes.
+
+## Use automatic CLI canaries
+
+Every push to `main`, including a merged pull request, starts a CLI-only publication in **Publish Widefleet**. All four native targets are built and tested before publication. The existing npm trusted publisher configuration above also authorizes this path; no additional token or workflow registration is needed.
+
+Each build uses `BASE-canary.RUN.gSHA`, where `BASE` is the product version, `RUN` is the workflow run number and `SHA` is the first twelve commit characters. The version is stamped only in the build checkout. The binary, launcher and native packages use the same version, without committing a version bump to `main`.
+
+Opt in to the newest successful main build:
+
+```sh
+npx widefleet@canary --version
+pnpm add --global widefleet@canary
+```
+
+For a reproducible installation, replace `canary` with the complete version shown by the workflow. Return to the stable channel with:
+
+```sh
+pnpm add --global widefleet@latest
+```
+
+Canary publication updates only the `canary` npm dist-tag on the five CLI packages. Normal installs and `@latest` continue selecting stable releases. Canary builds do not publish platform images, app runtimes or GitHub Releases.
+
+Main publication runs queue instead of canceling earlier pending builds. For a partial failure, use **Re-run failed jobs** on the original run to reuse its version and tested artifacts. A retry refuses to move `canary` behind an already published newer run; use the newer canary in that case. Check the workflow summary and `npx widefleet@canary --version` after publication succeeds.
 
 ## Retry a partial publication
 

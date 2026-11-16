@@ -625,9 +625,67 @@ native("collects alias, dictionary and callback types from declaration files", a
   ).toContain("id: string");
   expect(
     result.documentation.types.find((type) => type.name === 'import("./model").Choice')?.definition,
-  ).toContain('"one" | "two"');
+  ).toBe('"one" | "two"');
   expect(JSON.stringify(result.documentation)).not.toContain(root);
 });
+
+native(
+  "omits built-in member comments while retaining authored and inherited members",
+  async () => {
+    const root = await project(`import { WorkerEntrypoint } from "cloudflare:workers";
+    import type { Items, Label } from "./model";
+    export type Rank = 1 | 2;
+    export type Pair = [Label, Rank];
+    export type List = Label[];
+    export class Reader extends WorkerEntrypoint {
+      read(items: Items, pair: Pair, list: List) { return items; }
+    }`);
+
+    await writeFile(
+      join(root, "model.d.ts"),
+      `export interface Details {
+      /** Stable identifier. */
+      id: string;
+    }
+    export interface Named {
+      /** Display name. */
+      name: string;
+    }
+    export interface Items extends Array<Label>, Named {
+      /** Collection metadata. */ details: Details;
+    }
+    export type Label = string & {
+      /** Label brand. */
+      readonly brand: "label";
+    };`,
+    );
+
+    const result = await extractServiceDocumentation(root, await bundle(root), ["Reader"]);
+    expect(result.warnings).toEqual([]);
+
+    const definitions = new Map(
+      result.documentation.types.map((type) => [type.name, type.definition]),
+    );
+
+    expect(definitions.get('import("./app").Rank')).toBe("1 | 2");
+
+    for (const name of ['import("./app").Pair', 'import("./app").List']) {
+      expect(definitions.get(name)).toEqual(expect.any(String));
+      expect(definitions.get(name)).not.toContain("/**");
+    }
+
+    expect(definitions.get('import("./model").Items')).toContain(
+      "/** details: Collection metadata. */",
+    );
+    expect(definitions.get('import("./model").Items')).toContain("/** name: Display name. */");
+    expect(definitions.get('import("./model").Details')).toContain("/** id: Stable identifier. */");
+    expect(definitions.get('import("./model").Label')).toContain("/** brand: Label brand. */");
+
+    for (const definition of definitions.values()) {
+      expect(definition).not.toMatch(/\/\*\* (?:toString|charAt|toFixed|map|push|length):/);
+    }
+  },
+);
 
 it("renders replacement advice and examples on referenced types", () => {
   const docs = serviceDocumentation.parse({

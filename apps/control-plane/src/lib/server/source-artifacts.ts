@@ -40,7 +40,8 @@ export const createArtifactsSource = (binding: Artifacts): SourceBackend => {
     head: async (id, branch) => {
       using repo = await binding.get(name(id));
 
-      return (await repo.log({ ref: `refs/heads/${branch}`, limit: 1 }))[0]?.hash ?? null;
+      // Artifacts log resolves branch names, but not refs/heads/... refs.
+      return (await repo.log({ ref: branch, limit: 1 }))[0]?.hash ?? null;
     },
     hasCommit: async (id, commit) => {
       try {
