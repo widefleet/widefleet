@@ -85,6 +85,15 @@ struct Service {
     access_mode: AccessMode,
 }
 
+fn resolve_service<'a>(entries: &'a [Service], target: &str) -> Result<&'a Service> {
+    let by_id = Uuid::parse_str(target)
+        .ok()
+        .and_then(|id| entries.iter().find(|entry| entry.app_id == id));
+    by_id
+        .or_else(|| entries.iter().find(|entry| entry.slug == target))
+        .ok_or_else(|| Error::invalid("Target app has no available service API".into()))
+}
+
 pub async fn catalog(api: &Api, credentials: &auth::Credentials, options: Catalog) -> Result<()> {
     let token = auth::access_token(api, credentials).await?;
     if let Some(command) = options.command {
@@ -100,12 +109,7 @@ pub async fn catalog(api: &Api, credentials: &auth::Credentials, options: Catalo
                         .await?,
                 )
                 .await?;
-                let target = entries
-                    .iter()
-                    .find(|entry| entry.slug == app || entry.app_id.to_string() == app)
-                    .ok_or_else(|| {
-                        Error::invalid("Target app has no available service API".into())
-                    })?;
+                let target = resolve_service(&entries, &app)?;
                 api.authenticated(
                     Method::PUT,
                     &format!("/app-services/{}/access", target.app_id),
@@ -151,10 +155,7 @@ pub async fn connect(api: &Api, credentials: &auth::Credentials, options: Connec
             .await?,
     )
     .await?;
-    let target = entries
-        .iter()
-        .find(|app| app.slug == options.target || app.app_id.to_string() == options.target)
-        .ok_or_else(|| Error::invalid("Target app has no available service API".into()))?;
+    let target = resolve_service(&entries, &options.target)?;
     if options.request {
         app_bindings::segment(&options.binding)?;
         let app = options.source.resolve(api, credentials).await?;
