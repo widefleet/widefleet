@@ -182,7 +182,8 @@ After publishing the record, `POST /api/v1/settings/verify-domain` verifies owne
 `POST /api/v1/settings/activate-sso` separately makes company SSO required; it requires
 verified DNS but does not require a completed test login. These operations accept the
 same browser or CLI write credentials as settings changes and operate on the selected organization.
-See [activation](/guides/members#activate-company-sso).
+See [company sign-in setup](/guides/company-sign-in#verify-and-activate) and the
+[settings reference](/reference/company-sign-in) for CLI and API configuration.
 
 ## App source repositories
 
