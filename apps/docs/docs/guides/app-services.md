@@ -17,7 +17,7 @@ Organization administrators decide whether each API needs approval.
 
 In a Worker project, create `src/worker.ts`:
 
-```ts
+````ts
 import { WorkerEntrypoint } from "cloudflare:workers";
 
 type Environment = {
@@ -25,12 +25,21 @@ type Environment = {
 };
 
 export class Reader extends WorkerEntrypoint<Environment> {
+  /**
+   * Check whether this provider has an API token.
+   * @returns An object with `configured` set to true for a non-empty token.
+   * @throws If `API_TOKEN` has not been set.
+   * @example
+   * ```ts
+   * const status = await env.INVENTORY.status();
+   * ```
+   */
   async status() {
     const token = await this.env.WIDEFLEET_SECRETS.get("API_TOKEN");
     return { configured: token.length > 0 };
   }
 }
-```
+````
 
 Configure `wrangler.jsonc`:
 
@@ -62,6 +71,38 @@ link and returns `404` for browser requests. Named service entrypoints still sup
 RPC and `fetch()`. A default export or configured static assets enables the app URL;
 web apps can expose named service entrypoints alongside their browser UI.
 No Widefleet-specific properties belong in `wrangler.jsonc`.
+
+## Document service methods
+
+Add TSDoc comments to your exported `WorkerEntrypoint` classes and methods so
+callers and agents can understand how to use the API. Widefleet publishes the
+comments and TypeScript parameter and return types when you deploy the app.
+The `status()` example above includes a return description and a usage example.
+
+Start with a short description of what the method does. Add details as needed:
+
+| Tag                         | What to describe                                      |
+| --------------------------- | ----------------------------------------------------- |
+| `@param name - Description` | What an argument means and which values are accepted. |
+| `@returns`                  | What the caller receives.                             |
+| `@throws`                   | When the call can fail.                               |
+| `@example`                  | A call using the binding, in a fenced code block.     |
+| `@remarks`                  | Additional usage requirements.                        |
+| `@deprecated`               | What callers should use instead.                      |
+
+Keep types in TypeScript signatures. You can also document interfaces and their
+properties to explain the data your API accepts and returns.
+
+After deploying, open **App APIs**, then **View API documentation** on the
+provider app. To read the same information as JSON, run:
+
+```sh
+widefleet services describe inventory-api
+```
+
+The command accepts an app slug or UUID. The response includes methods, parameter
+and return types, descriptions and examples from the active deployment. Redeploy
+after editing comments; rolling back the app also restores its API documentation.
 
 ## Connect a caller
 
@@ -273,6 +314,18 @@ entrypoint or organization suspension. Confirm the target is deployed, the grant
 is active and the selected organization is correct. Hosted service calls use the
 operator's [`service` execution budget](/reference/configuration#dynamic-worker-execution-limits).
 
+### Missing API documentation
+
+Redeploy the app to publish its API documentation. If documentation is still
+missing, check the deploy command's warnings for missing source files or
+documentation that is too large to publish.
+
+For custom builds, enable source maps with embedded source content and keep each
+map at the location referenced by the generated Worker's `sourceMappingURL`.
+The supplied starters already preserve these maps. If parameter or return types
+are incomplete, check the project's TypeScript configuration and installed
+dependencies.
+
 ## API
 
 All routes use normal OAuth authentication and the selected organization.
@@ -280,6 +333,7 @@ All routes use normal OAuth authentication and the selected organization.
 | Action                                           | Route                                                                                                                                      |
 | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | Discover available apps and entrypoints          | `GET /api/v1/app-services`                                                                                                                 |
+| Read an active API description                   | `GET /api/v1/app-services/{slugOrAppId}`                                                                                                   |
 | Set API availability                             | `PUT /api/v1/app-services/{appId}/access` with `{ "accessMode": "organization" }` or `{ "accessMode": "approval_required" }`               |
 | Request a connection                             | `POST /api/v1/connection-requests` with `{ "appId": "CALLER_UUID", "app": "TARGET_UUID", "binding": "INVENTORY", "entrypoint": "Reader" }` |
 | List connection requests                         | `GET /api/v1/connection-requests`                                                                                                          |
