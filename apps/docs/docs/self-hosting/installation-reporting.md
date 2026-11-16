@@ -1,23 +1,29 @@
 ---
 title: Installation reporting
 description: Control usage reporting and understand the data sent to Widefleet.
-lastModified: 2026-10-12
+lastModified: 2026-11-16
 ---
 
 Widefleet shares product usage, configuration metadata and sanitized error reports with the Widefleet team through the existing `widefleet` PostHog project in the EU. Reporting is enabled initially and has two independent opt-outs. This is separate from [application runtime logs](/self-hosting/runtime-logs), which stay in the operator's infrastructure.
 
 ## Operator controls
 
-Administrators can disable **Share usage and configuration** and **Share error reports** under **Settings → Privacy**. The same section shows the random installation ID and a preview of the usage payload. The setup page explains reporting before the first account is created. Existing installations receive the same defaults when the migration runs.
-
-To disable reporting before starting the installation, set these variables in the deployment environment file:
+To disable usage and error reporting, set these variables in the deployment environment file:
 
 ```dotenv
 PLATFORM_USAGE_REPORTING=false
 PLATFORM_CRASH_REPORTING=false
 ```
 
-An explicitly configured `true` or `false` overrides the corresponding management setting. An unset or empty variable leaves that setting editable. The versioned Compose configuration forwards these variables to management and the agent. Recreate the affected services through the normal deployment process when changing environment variables. The local demo and CI disable reporting.
+An explicitly configured `true` or `false` overrides the corresponding saved installation preference. An unset or empty variable uses the saved preference, which defaults to enabled. Existing preferences are preserved across updates. The versioned Compose configuration forwards these variables to management and the agent. Recreate the affected services through the normal deployment process when changing environment variables. The local demo and CI disable reporting.
+
+Installation administrators can inspect and change reporting through the authenticated [API](/reference/api):
+
+| Endpoint                        | Purpose                                                                                                                  |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `GET /api/v1/reporting`         | Read the installation ID, saved preferences and effective settings.                                                      |
+| `GET /api/v1/reporting/preview` | Preview the usage payload.                                                                                               |
+| `PUT /api/v1/reporting`         | Update preferences with a JSON body such as `{"usage": false, "crashes": false}`. Environment overrides take precedence. |
 
 The CLI has its own local identity and preferences, independent of any login or installation:
 
