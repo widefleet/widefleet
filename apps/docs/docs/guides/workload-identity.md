@@ -1,14 +1,14 @@
 ---
 title: Authenticate apps to external APIs
 description: Use short-lived app identities to call APIs without storing an API key in each app.
-lastModified: 2026-11-15
+lastModified: 2026-11-16
 ---
 
 Widefleet apps can request a signed token identifying their organization and app.
 An external API verifies that token and decides which data the app may access.
 This works without a signed-in user and without an API key in the app.
 
-Upgrade the control plane, deployment agent and app runtime together before using
+Upgrade the control plane and app runtime before using
 the `WIDEFLEET_IDENTITY` binding. The receiving API must support EdDSA JWT
 verification and trust your installation's workload issuer.
 
@@ -62,20 +62,20 @@ app's outbound HTTP requests.
 
 ## Verify and authorize on the receiving API
 
-For a platform at `https://platform.example.com`, configure these trusted values:
+For an installation with app domain `apps.example.com`, configure these trusted values:
 
-| Setting                | Value                                                                        |
-| ---------------------- | ---------------------------------------------------------------------------- |
-| Issuer                 | `https://platform.example.com/api/workload`                                  |
-| Discovery document     | `https://platform.example.com/api/workload/.well-known/openid-configuration` |
-| JWKS URL               | `https://platform.example.com/api/auth/jwks`                                 |
-| Algorithm              | `EdDSA`                                                                      |
-| Maximum token lifetime | Five minutes                                                                 |
+| Setting                | Value                                                                     |
+| ---------------------- | ------------------------------------------------------------------------- |
+| Issuer                 | `https://auth.apps.example.com/workload`                                  |
+| Discovery document     | `https://auth.apps.example.com/workload/.well-known/openid-configuration` |
+| JWKS URL               | `https://auth.apps.example.com/workload/jwks`                             |
+| Algorithm              | `EdDSA`                                                                   |
+| Maximum token lifetime | Five minutes                                                              |
 
 Load issuer and key URLs from your API's configuration, never from an unverified
 token. Verify the signature, exact issuer, your expected audience and expiry before
-using any claims. Better Auth manages the signing keys and their public JWKS.
-User and CLI tokens have a different issuer even though they share the key set.
+using any claims. The trusted app runtime signs tokens and serves the public JWKS. Workload keys
+are separate from the keys used for user and CLI authentication.
 
 For a JavaScript API, install `jose` and use a verification function like this:
 
@@ -86,9 +86,9 @@ pnpm add jose
 ```ts
 import { createRemoteJWKSet, jwtVerify } from "jose";
 
-const issuer = "https://platform.example.com/api/workload";
+const issuer = "https://auth.apps.example.com/workload";
 const audience = "https://data.example.com";
-const keys = createRemoteJWKSet(new URL("https://platform.example.com/api/auth/jwks"));
+const keys = createRemoteJWKSet(new URL("https://auth.apps.example.com/workload/jwks"));
 
 // Configure this mapping on the receiving API using the organization's and
 // app's actual IDs. The value selects a data scope owned by this API.
@@ -143,38 +143,61 @@ access. Requesting your API's audience alone gives an app no data permissions.
 - Tokens contain no user identity or user permissions. They work in HTTP, service,
   cron, queue and Workflow code. User-specific access requires a separate check by
   the app or service.
-- Suspended organizations, unavailable organizations and deleting apps cannot
-  obtain new tokens. Already issued tokens remain valid until their five-minute
+- An app stops receiving tokens when its published route is removed or replaced.
+  Organization admission changes take effect when their updated configuration
+  reaches the runtime. Already issued tokens remain valid until their five-minute
   expiry unless the receiving API revokes its grant sooner.
 
-The runtime contacts the control plane for each issuance, so the control plane
-must be reachable. The trusted runtime uses its existing installation credential;
-neither that credential nor the JWT signing key is available to app code.
+The runtime issues tokens and serves discovery and JWKS without contacting the
+control plane or its database. This also works after runtime restarts. The existing
+runtime storage must remain available; the private signing keys are encrypted with
+the runtime's existing secret-encryption key and stay outside app code.
 
-Signing keys rotate after 30 days on the next signing request. Public keys remain
-available for a further 30 days. An upgrade enrolls existing keys in rotation with
-a 30-day transition period. Receivers should refresh JWKS when encountering an
-unknown key ID, as `createRemoteJWKSet` does.
+The control plane publishes a complete organization-admission snapshot at startup
+and every minute on native installations. Hosted installations use the reserved
+`0-59 * * * *` control-plane cron; custom extension schedules remain separate.
+Allow initial publication to complete after deploying the components. A runtime
+with no published configuration refuses issuance.
+
+Publication includes organization-access extensions and database suspension state.
+Subsequent changes normally arrive on the next reconciliation plus storage
+propagation. Publication failures are reported and retried on the next run. During
+a control-plane outage, the last published snapshot remains valid indefinitely:
+existing workloads continue issuing fresh tokens, but new admission changes cannot
+arrive. There is no hard upper bound on suspension delay during such an outage.
+Existing runtime suspension checks still apply as well.
+
+Each installation's runtime storage holds its workload key ring. Runtime replicas
+sharing that storage use the same ring. Conditional writes coordinate concurrent
+initialization and rotation. Back up that storage and the runtime's secret-encryption
+key together so restarts and recovery preserve the issuer's signing authority.
+
+The runtime prepares the next signing key in advance and includes its public key
+in JWKS immediately. It activates after 30 days; the next access prepares its
+successor. Rotation needs no control-plane job. Retired public keys remain available
+through the five-minute token lifetime plus a one-minute margin. Metadata responses
+can be cached for 60 seconds. Receivers should refresh JWKS on an unknown key ID,
+as `createRemoteJWKSet` does. User and CLI signing keys are unaffected.
 
 ## Troubleshooting
 
-| Symptom                         | Check                                                                                                                                                                     |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `WIDEFLEET_IDENTITY` is missing | Upgrade all platform components. Local standalone Wrangler development needs a test binding; it cannot mint deployed app identities.                                      |
-| Token issuance fails            | Check the app and organization are active, and that the runtime can reach the control plane. The standard deployment configures their shared credential and platform URL. |
-| Signature or issuer is rejected | Use the workload issuer and its advertised JWKS. The receiving library must support EdDSA.                                                                                |
-| Audience is rejected            | Match the API's configured audience exactly in `getToken`.                                                                                                                |
-| API returns forbidden           | Grant the executing app's ID access on the API; check whether the caller is a preview or a service app.                                                                   |
-| Outbound request is blocked     | Allow the API origin in the app's backend network permissions.                                                                                                            |
+| Symptom                         | Check                                                                                                                                 |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `WIDEFLEET_IDENTITY` is missing | Upgrade all platform components. Local standalone Wrangler development needs a test binding; it cannot mint deployed app identities.  |
+| Token issuance fails            | Check that the app is published, organization admission has been published, and runtime storage and its encryption key are available. |
+| Signature or issuer is rejected | Use the workload issuer and its advertised JWKS. The receiving library must support EdDSA.                                            |
+| Audience is rejected            | Match the API's configured audience exactly in `getToken`.                                                                            |
+| API returns forbidden           | Grant the executing app's ID access on the API; check whether the caller is a preview or a service app.                               |
+| Outbound request is blocked     | Allow the API origin in the app's backend network permissions.                                                                        |
 
-For self-hosted installations, `PLATFORM_RUNTIME_PLATFORM_URL` can override the
-control-plane address used by the native runtime and agent when the public
-`PLATFORM_URL` is unreachable internally. The signed issuer still uses the public
-`PLATFORM_URL`. Hosted deployment supplies the parent runtime's
-`WIDEFLEET_PLATFORM_URL` automatically.
+Discovery and JWKS are served directly by the parent runtime on the existing
+`auth.<app-domain>` host. Native installations with a custom app HTTPS port include
+that port in the issuer. The management hostname and internal control-plane
+address are not used for token issuance or verification.
 
-The discovery document describes these workload JWTs. The issuance endpoint is
-for trusted runtimes; it is not a public OAuth token exchange or client-credentials
-endpoint. A third-party federation service needs to support this issuer's signing
-algorithm and token contract. Use direct verification for APIs you control, then
-connect apps to a shared service when several apps need the same integration.
+The discovery document describes these workload JWTs. Tokens are issued only
+through the runtime binding; there is no public OAuth token-exchange or
+client-credentials endpoint. A third-party federation service needs to support this
+issuer's signing algorithm and token contract. Use direct verification for APIs
+you control, then connect apps to a shared service when several apps need the same
+integration.
