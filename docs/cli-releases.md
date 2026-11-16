@@ -50,7 +50,9 @@ Native packages must be available before the shared launcher, because it selects
 
 ## Use automatic CLI canaries
 
-Every push to `main`, including a merged pull request, starts a CLI-only publication in **Publish Widefleet**. All four native targets are built and tested before publication. The existing npm trusted publisher configuration above also authorizes this path; no additional token or workflow registration is needed.
+Pushes to `main`, including merged pull requests, start a CLI-only publication in **Publish Widefleet** when they change CLI package inputs or its build and publication tooling. These include the CLI and shared Rust core, bundled starters and launcher, and the installation guide copied into the package README. Shared lockfiles and build configuration conservatively trigger publication too. The workflow's `paths` list defines the inputs; keep it aligned when adding packaging inputs or local CLI dependencies.
+
+Control-plane, runtime, website and test-only changes outside those inputs do not publish a canary. The **Check** workflow still runs CLI compatibility tests for service changes. Stable version-tag releases are unaffected by the path filter. All four native targets are built and tested before canary publication. The existing npm trusted publisher configuration above also authorizes this path; no additional token or workflow registration is needed.
 
 Each build uses `BASE-canary.RUN.gSHA`, where `BASE` is the product version, `RUN` is the workflow run number and `SHA` is the first twelve commit characters. The version is stamped only in the build checkout. The binary, launcher and native packages use the same version, without committing a version bump to `main`.
 

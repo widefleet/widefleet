@@ -4,6 +4,46 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
+    # CLI package inputs, not every service exercised by its integration tests.
+    # Keep this list in sync with tools/package-cli.ts and the native build.
+    # Shared lockfiles/configuration stay conservative. Tag pushes bypass paths.
+    paths:
+      - ".github/workflows/publish-cli.yaml"
+      - ".github/workflows/cli-platforms.yaml"
+      - "crates/platform-cli/**"
+      - "crates/platform-core/**"
+      # Canary stamping reads all workspace package manifests, including the agent.
+      - "crates/platform-agent/Cargo.toml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".cargo/**"
+      - "package.json"
+      - "tsconfig.json"
+      - "tsconfig.base.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".npmrc"
+      - ".pnpmfile.cjs"
+      - "patches/**"
+      - "tools/cargo.sh"
+      - "tools/package-cli.ts"
+      - "tools/cli-launcher.ts"
+      - "tools/cli-platforms.ts"
+      - "tools/cli-tools.ts"
+      - "tools/prepare-cli-canary.py"
+      - "tools/publish-cli.sh"
+      - "tools/wait-for-npm-package.sh"
+      # Files copied into the native packages and launcher, including Markdown.
+      - "starters/sveltekit/**"
+      - "starters/tanstack-start/**"
+      - "tools/oxlint/**"
+      - ".gitattributes"
+      - ".gitignore"
+      - ".oxlintrc.json"
+      - ".oxfmtrc.json"
+      - "LICENSE"
+      - "apps/docs/docs/getting-started/installation.md"
 
 permissions:
   contents: read
