@@ -52,7 +52,13 @@ pub async fn secrets_key(store: &dyn ObjectStore, organization_id: &str) -> Resu
     Ok(value)
 }
 
-pub fn configuration(release: &RuntimeRelease, token: &str, secrets_key: &str) -> Result<Value> {
+pub fn configuration(
+    release: &RuntimeRelease,
+    token: &str,
+    secrets_key: &str,
+    app_domain: Option<&str>,
+    app_https_port: u16,
+) -> Result<Value> {
     if release.protocol != 3 || release.auth != 1 || release.celld != "0.6.2" {
         return Err(Error::invalid(
             "Unsupported runtime installation protocol or celld version".into(),
@@ -69,6 +75,15 @@ pub fn configuration(release: &RuntimeRelease, token: &str, secrets_key: &str) -
         "durable_objects": { "bindings": [
         ] },
     });
+    if let Some(domain) = app_domain {
+        let port = if app_https_port == 443 {
+            String::new()
+        } else {
+            format!(":{app_https_port}")
+        };
+        config["vars"]["WIDEFLEET_WORKLOAD_ISSUER"] =
+            json!(format!("https://auth.{domain}{port}/workload"));
+    }
     if release.workflows == Some(1) {
         config["services"] = json!([{ "binding": "WIDEFLEET_WORKFLOW_SESSIONS", "service": "widefleet", "entrypoint": "WorkflowSessions" }]);
         config["workflows"] = json!([{ "binding": "WIDEFLEET_WORKFLOWS", "name": "widefleet-apps", "class_name": "AppWorkflow" }]);
@@ -79,6 +94,41 @@ pub fn configuration(release: &RuntimeRelease, token: &str, secrets_key: &str) -
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn deployments_keep_the_configured_workload_issuer_and_custom_port() -> platform_core::Result<()>
+    {
+        let release = platform_core::model::RuntimeRelease {
+            auth: 1,
+            protocol: 3,
+            version: "1.0.0".into(),
+            celld: "0.6.2".into(),
+            workflows: None,
+            cloudflare: None,
+            main: "loader.js".into(),
+            modules: vec![],
+        };
+        for (port, issuer) in [
+            (443, "https://auth.apps.example.test/workload"),
+            (25453, "https://auth.apps.example.test:25453/workload"),
+        ] {
+            let configured = super::configuration(
+                &release,
+                "control",
+                "secrets",
+                Some("apps.example.test"),
+                port,
+            )?;
+            assert_eq!(configured["vars"]["WIDEFLEET_WORKLOAD_ISSUER"], issuer);
+        }
+        let unconfigured = super::configuration(&release, "control", "secrets", None, 443)?;
+        assert!(
+            unconfigured["vars"]
+                .get("WIDEFLEET_WORKLOAD_ISSUER")
+                .is_none()
+        );
+        Ok(())
+    }
+
     #[tokio::test]
     async fn concurrent_starts_reuse_one_independent_encryption_key() -> platform_core::Result<()> {
         let store = object_store::memory::InMemory::new();

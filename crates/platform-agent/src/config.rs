@@ -59,6 +59,8 @@ pub struct Configuration {
     /// App namespace used to request preview wildcard certificates.
     #[arg(long, env = "APP_DOMAIN", required_if_eq("tls_mode", "cloudflare"))]
     pub app_domain: Option<String>,
+    #[arg(long, env = "APP_HTTPS_PORT", default_value_t = 443)]
+    pub app_https_port: u16,
     #[arg(long, default_value_t = 3)]
     pub poll_seconds: u64,
     /// Handle at most one job, useful for a local integration test.

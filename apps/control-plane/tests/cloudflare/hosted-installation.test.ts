@@ -42,6 +42,18 @@ const configuration = {
 };
 
 describe("Hosted resource provisioning", () => {
+  it("configures the workload issuer on the runtime without adding a control-plane schedule", async () => {
+    const configs = await hostedConfigurations(installation, ids, "email", {
+      vars: { WIDEFLEET_WORKLOAD_ISSUER: "https://stale.example.test/workload" },
+    });
+
+    expect(configs.runtime.vars["WIDEFLEET_WORKLOAD_ISSUER"]).toBe(
+      "https://auth.apps.example.test/workload",
+    );
+    expect(configs.controlPlane.vars).not.toHaveProperty("WIDEFLEET_WORKLOAD_ISSUER");
+    expect(configs.controlPlane).not.toHaveProperty("triggers");
+  });
+
   it("validates and applies execution profiles only to the parent runtime", async () => {
     const executionLimits = {
       http: { cpuMs: 100, subRequests: 50 },
@@ -289,6 +301,7 @@ describe("Hosted resource provisioning", () => {
     expect(configs.runtime.vars).toEqual({
       WIDEFLEET_CONFIGURATION: JSON.stringify({ source: "r2" }),
       WIDEFLEET_LOGS: "cloudflare",
+      WIDEFLEET_WORKLOAD_ISSUER: "https://auth.apps.example.test/workload",
       OBSERVER_LABEL: "installation-fixture",
     });
     expect(configs.controlPlane.vars).not.toHaveProperty("OBSERVER_LABEL");
