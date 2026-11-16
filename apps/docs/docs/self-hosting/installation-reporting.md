@@ -8,11 +8,13 @@ Usage insights help us focus on the features you use and make Widefleet more rel
 
 ## What helps us improve Widefleet?
 
-- **Usage:** counts of apps, organizations, previews, agents and active management users; deployment outcomes and durations; CLI command categories, results and durations.
+- **Usage:** weekly app invocations and active apps, including previews; counts of apps, organizations, agents and active management users; deployment outcomes and durations; CLI command categories, results and durations.
 - **Configuration:** component versions, operating system and architecture, storage and authentication types, TLS and logging availability, and counts of configured network policies and app connections.
 - **Reliability:** error categories and sanitized locations in Widefleet code.
 
 Installations and agents report at startup and hourly. Operations, CLI commands and errors are reported as they occur.
+
+Weekly totals include HTTP, RPC, cron, queue and workflow execution. Weeks start on Monday at 00:00 UTC. App IDs stay in your installation; reports contain the weekly totals.
 
 Reports are limited to counts, technical metadata and sanitized code locations. App contents, log messages, credentials, command arguments and personal account details are excluded. [Application logs](/self-hosting/runtime-logs) stay in your infrastructure.
 
