@@ -260,6 +260,16 @@ async fn is_ancestor(project: &Path, ancestor: &str, descendant: &str) -> Result
     }
 }
 
+fn copy_index(source: &Path, destination: &Path) -> std::io::Result<()> {
+    let mut source = std::fs::File::open(source)?;
+    let metadata = source.metadata()?;
+    let mut destination = std::fs::File::create(destination)?;
+    std::io::copy(&mut source, &mut destination)?;
+    // Git uses the index mtime to detect same-size edits with matching cached timestamps.
+    destination.set_modified(metadata.modified()?)?;
+    destination.set_permissions(metadata.permissions())
+}
+
 // An alternate index checks all files Git would add, without changing the user's staging area.
 async fn tree(project: &Path) -> Result<String> {
     let temporary = tempfile::tempdir()?;
@@ -267,8 +277,10 @@ async fn tree(project: &Path) -> Result<String> {
     let local_index =
         output(git(project).args(["rev-parse", "--path-format=absolute", "--git-path", "index"]))
             .await?;
-    if Path::new(&local_index).exists() {
-        std::fs::copy(local_index, &index)?;
+    match copy_index(Path::new(&local_index), &index) {
+        Ok(()) => (),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+        Err(error) => return Err(error.into()),
     }
     output(
         git(project)
@@ -325,8 +337,8 @@ async fn commit_all(project: &Path, branch: &str) -> Result<String> {
     let lock = tempfile::TempPath::try_from_path(lock_path)?;
     let temporary = tempfile::tempdir()?;
     let pending = temporary.path().join("index");
-    match std::fs::copy(&index, &pending) {
-        Ok(_) => (),
+    match copy_index(Path::new(&index), &pending) {
+        Ok(()) => (),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
         Err(error) => return Err(error.into()),
     }
@@ -360,7 +372,7 @@ async fn commit_all(project: &Path, branch: &str) -> Result<String> {
         &format!("Save source for {branch}"),
     ]))
     .await?;
-    std::fs::copy(&pending, &lock)?;
+    copy_index(&pending, &lock)?;
     lock.persist(&index).map_err(std::io::Error::from)?;
     revision(project, "HEAD")
         .await?
@@ -938,6 +950,46 @@ mod tests {
         let clone = fixture.clone("next-session").await?;
         assert_eq!(std::fs::read_to_string(clone.join("app.ts"))?, "second");
         assert!(!clone.join("skip.local").exists());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn detects_same_size_edits_when_index_and_file_timestamps_match() -> Result<()> {
+        let fixture = Fixture::new().await?;
+        root(&fixture.project).await?;
+        // Model edits within one filesystem timestamp tick, without ctime distinguishing them.
+        output(git(&fixture.project).args(["config", "core.trustctime", "false"])).await?;
+        let modified = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let file = fixture.project.join("app.ts");
+        std::fs::write(&file, "before")?;
+        std::fs::File::options()
+            .write(true)
+            .open(&file)?
+            .set_modified(modified)?;
+        let first = fixture.save("main").await?;
+        let index = fixture.project.join(".git/index");
+        std::fs::File::options()
+            .write(true)
+            .open(&index)?
+            .set_modified(modified)?;
+        let staging = std::fs::read(&index)?;
+        std::fs::write(&file, "after!")?;
+        std::fs::File::options()
+            .write(true)
+            .open(&file)?
+            .set_modified(modified)?;
+
+        let before = snapshot(&fixture.project).await?;
+        let previous = output(git(&fixture.project).args(["rev-parse", "HEAD^{tree}"])).await?;
+        assert_ne!(before, previous);
+        assert_eq!(std::fs::read(&index)?, staging);
+        let saved =
+            save_repository(&fixture.project, fixture.repository("main"), "", &before).await?;
+        assert_ne!(saved.commit, first.commit);
+        assert_eq!(
+            output(git(&fixture.remote).args(["show", "main:app.ts"])).await?,
+            "after!"
+        );
         Ok(())
     }
 
