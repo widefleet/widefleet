@@ -2,6 +2,7 @@
   import type { app as appContract, appResource, capabilityState } from "@platform/contracts";
   import type { z } from "zod";
   import { getAppConnections } from "#lib/connections.remote";
+  import { connectApp, disconnectApp } from "#lib/services.remote";
   import { Button } from "#shadcn/components/ui/button/index.js";
   import { Badge } from "#shadcn/components/ui/badge/index.js";
   import * as Accordion from "#shadcn/components/ui/accordion/index.js";
@@ -180,7 +181,13 @@
             <div class="divide-y px-4">
               {#each names as name (name)}
                 {@const item = binding(name)}
-                <details class="group">
+                <details
+                  class="group"
+                  open={Boolean(
+                    disconnectApp.for(name).fields.allIssues()?.length ||
+                    connectApp.for(`retry-${name}`).fields.allIssues()?.length,
+                  )}
+                >
                   <summary class="flex cursor-pointer items-center gap-2 py-4">
                     <span class="min-w-0 flex-1"
                       ><code class="block text-xs wrap-anywhere">{name}</code><span

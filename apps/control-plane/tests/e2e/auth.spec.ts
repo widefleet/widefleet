@@ -284,6 +284,20 @@ for (const javaScriptEnabled of [true, false]) {
         }
       }
 
+      await environment.database.db
+        .update(apps)
+        .set({ activeDeploymentId: null })
+        .where(eq(apps.id, target.id));
+      await page.getByRole("button", { name: "Retry connection ERP", exact: true }).click();
+      await expect(
+        page.getByRole("alert").filter({
+          hasText: "Deploy the target app's service entrypoint successfully before connecting it",
+        }),
+      ).toBeVisible();
+      await environment.database.db
+        .update(apps)
+        .set({ activeDeploymentId: deploymentId })
+        .where(eq(apps.id, target.id));
       await page.getByRole("button", { name: "Retry connection ERP", exact: true }).click();
       await expect(page).toHaveURL(new RegExp(`/apps/${source.id}/connections$`));
       await expect(page.getByText("ERP", { exact: true })).toBeVisible();
