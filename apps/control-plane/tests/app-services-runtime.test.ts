@@ -330,11 +330,11 @@ export default { async fetch(request, env, ctx) {
         .object({
           keys: z.array(
             z.strictObject({
-              kty: z.literal("OKP"),
-              crv: z.literal("Ed25519"),
-              x: z.string(),
+              kty: z.literal("RSA"),
+              n: z.string(),
+              e: z.string(),
               kid: z.string(),
-              alg: z.literal("EdDSA"),
+              alg: z.literal("RS256"),
               use: z.literal("sig"),
             }),
           ),
@@ -346,10 +346,19 @@ export default { async fetch(request, env, ctx) {
       const issuer = "https://auth.apps.example.test/workload";
       expect(
         await (await request("/workload/.well-known/openid-configuration")).json(),
-      ).toMatchObject({ issuer, jwks_uri: `${issuer}/jwks` });
+      ).toMatchObject({
+        issuer,
+        jwks_uri: `${issuer}/jwks`,
+        id_token_signing_alg_values_supported: ["RS256"],
+      });
 
       for (const result of results) {
-        const own = await jwtVerify(result.own.token, keys, { issuer, audience: "data-api" });
+        const own = await jwtVerify(result.own.token, keys, {
+          issuer,
+          audience: "data-api",
+          algorithms: ["RS256"],
+        });
+
         expect(own.payload).toMatchObject({
           app_id: sourceId,
           organization_id: "widefleet",
@@ -359,7 +368,13 @@ export default { async fetch(request, env, ctx) {
         });
         expect(own.payload.exp! - own.payload.iat!).toBe(300);
         expect(
-          (await jwtVerify(result.target.token, keys, { issuer, audience: "other-api" })).payload,
+          (
+            await jwtVerify(result.target.token, keys, {
+              issuer,
+              audience: "other-api",
+              algorithms: ["RS256"],
+            })
+          ).payload,
         ).toMatchObject({ app_id: targetId, organization_id: "widefleet" });
         await expect(
           jwtVerify(result.own.token, keys, { issuer, audience: "wrong-api" }),

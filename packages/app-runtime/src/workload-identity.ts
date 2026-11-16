@@ -26,7 +26,7 @@ export const workloadDiscovery = async (request: Request, environment: ParentEnv
     : {
         issuer,
         jwks_uri: `${issuer}/jwks`,
-        id_token_signing_alg_values_supported: ["EdDSA"],
+        id_token_signing_alg_values_supported: ["RS256"],
         subject_types_supported: ["public"],
         response_types_supported: [],
       };
