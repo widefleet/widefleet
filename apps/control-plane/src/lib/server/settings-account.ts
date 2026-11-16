@@ -43,6 +43,5 @@ export const readSettingsAccount = async (
   view: await runtime.settings.read(principal),
   ...(await readCompanyAccount(runtime, principal, session)),
   emailSignIn: runtime.emailSignIn,
-  reporting: principal.admin ? await runtime.reporting.read(principal) : null,
   platformUrl: runtime.configuration.PLATFORM_URL,
 });

@@ -44,7 +44,7 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
         ...environment.environment,
         LOGIN_CODE_DELIVERY: "console",
         WIDEFLEET_TEST_DNS_FILE: dnsFile,
-        // Exercise editable preferences while keeping all reporting disabled.
+        // Keep the saved usage opt-out effective without an environment override.
         PLATFORM_USAGE_REPORTING: undefined,
         NODE_ENV: "production",
         HOST: "127.0.0.1",
@@ -101,21 +101,18 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
     await page.goto("/welcome");
     await expect(page.getByRole("heading", { name: "Publish your first app" })).toBeVisible();
     await page.getByRole("link", { name: "Organization settings", exact: true }).click();
-    await page.getByRole("link", { name: "Privacy", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Improve Widefleet" })).toBeVisible();
-    await expect(page.getByLabel("Share usage and configuration")).toBeEnabled();
-    await expect(page.getByLabel("Share usage and configuration")).not.toBeChecked();
-    await expect(page.getByLabel("Share error reports")).not.toBeChecked();
-    await expect(page.getByLabel("Share error reports")).toBeDisabled();
-    await page.getByRole("button", { name: "Save telemetry settings" }).click();
-    await expect(page.getByText("Telemetry settings saved.", { exact: true })).toBeVisible();
-    await page.reload();
-    await expect(page.getByLabel("Share usage and configuration")).not.toBeChecked();
-    await page.getByRole("button", { name: "View usage report" }).click();
-    await expect(page.getByRole("textbox", { name: "Usage report preview" })).toHaveValue(
-      /installation_snapshot/,
+    await expect(page.getByRole("link", { name: "Privacy", exact: true })).toHaveCount(0);
+    await page.goto("/settings?section=reporting");
+    await expect(page.getByRole("link", { name: "Company sign-in", exact: true })).toHaveAttribute(
+      "aria-current",
+      "page",
     );
-    await page.getByRole("link", { name: "Company sign-in", exact: true }).click();
+    const reporting = await page.request.get("/api/v1/reporting");
+    expect(reporting.ok()).toBe(true);
+    expect(await reporting.json()).toMatchObject({
+      preferences: { usage: false },
+      effective: { usage: false, crashes: false },
+    });
     await page.getByRole("button", { name: "Configure company SSO", exact: true }).click();
     await page.getByLabel("Company email domain").fill("example.test");
     await page

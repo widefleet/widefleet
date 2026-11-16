@@ -83,16 +83,4 @@
       >{busy ? "Creating account …" : "Create account and continue"}<ArrowRight /></Button
     >
   </form>
-  <details class="text-muted-foreground mt-6 border-t pt-4 text-xs leading-6">
-    <summary>Privacy during setup</summary>
-    <p class="mt-3">
-      By default, Widefleet shares usage counts, technical configuration and sanitized error reports
-      with the Widefleet team through PostHog. You can disable each category independently in
-      Settings → Privacy, or before starting with <code class="wrap-anywhere"
-        >PLATFORM_USAGE_REPORTING=false</code
-      >
-      and <code class="wrap-anywhere">PLATFORM_CRASH_REPORTING=false</code>. App content, names and
-      personal identifiers are never sent.
-    </p>
-  </details>
 </AuthLayout>
