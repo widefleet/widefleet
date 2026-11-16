@@ -1,7 +1,7 @@
 ---
 title: Use an app template
 description: Find a ready-made app and set it up with your agent or the CLI.
-lastModified: 2026-11-10
+lastModified: 2026-11-16
 ---
 
 App templates give you source code and instructions for a working app. Deploy a
@@ -35,7 +35,9 @@ widefleet catalog templates show gmail
 
 The commands return JSON. A template includes its source URL and the Markdown
 instructions from its `template.md` file. Follow those instructions to copy,
-deploy and configure the app. Keep the copied source for future changes.
+deploy and configure the app. Keep the copied source for future changes. See
+[saving and recovering source code](/guides/source-code) to continue working
+from another session or machine.
 
 Use `--organization ID` when you work across organizations. See
 [organization selection](/reference/cli-configuration#select-an-organization).

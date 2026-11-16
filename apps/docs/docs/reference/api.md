@@ -1,7 +1,7 @@
 ---
 title: API and uploads
 description: Authentication, app publication and the Worker upload contract.
-lastModified: 2026-11-10
+lastModified: 2026-11-16
 ---
 
 Authenticated clients can fetch `/api/v1/openapi.json`. The document covers management operations, agent jobs, binary assets and multipart Workers.
@@ -182,7 +182,107 @@ After publishing the record, `POST /api/v1/settings/verify-domain` verifies owne
 `POST /api/v1/settings/activate-sso` separately makes company SSO required; it requires
 verified DNS but does not require a completed test login. These operations accept the
 same browser or CLI write credentials as settings changes and operate on the selected organization.
-See [activation](/guides/members#activate-company-sso).
+See [company sign-in setup](/guides/company-sign-in#verify-and-activate) and the
+[settings reference](/reference/company-sign-in) for CLI and API configuration.
+
+## App source repositories
+
+Use these endpoints to find an app's saved code, prepare a repository for a push
+and authenticate Git requests. They use the selected organization and require
+management access to the app. Token clients need `platform:read` for status and
+read credentials, or `platform:write` for preparation and write credentials.
+Requests that change state from a browser must come from the same origin.
+
+| Endpoint                                            | Response and purpose                                                                                       |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `GET /api/v1/apps/{appId}/source`                   | Get the repository, latest saved commit and deployed commit.                                               |
+| `POST /api/v1/apps/{appId}/source/prepare`          | Create the repository if needed and return its URL and branch. Body: `{}`.                                 |
+| `POST /api/v1/apps/source-target`                   | Check the destination branch before deploying. Body: `{ appId }` or `{ slug }`. Requires `platform:write`. |
+| `POST /api/v1/apps/{appId}/source/read-credential`  | Get credentials for cloning and fetching. Body: `{}`.                                                      |
+| `POST /api/v1/apps/{appId}/source/write-credential` | Get credentials that also allow pushing. Body: `{}`.                                                       |
+
+Preparation returns `{ organizationId, repository, preview }`. `repository`
+contains `{ url, branch, commit }`, or is null when source storage is unavailable
+on the installation. `preview` is true for a preview app.
+
+The source-target response is `{ supported, branch, preview }`. It checks the
+app without creating an app or repository. A new app selected by `slug` uses
+`main`, as do existing main apps. A preview keeps its assigned branch.
+
+### Find saved and deployed code
+
+App lists and reads by ID or name include a `source` summary:
+
+```json
+{
+  "supported": true,
+  "branch": "main",
+  "deployed": {
+    "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "branch": "main",
+    "directory": "apps/inventory"
+  }
+}
+```
+
+`branch` is null for a preview created without a Git branch. `deployed` is null
+when the active deployment has no saved source reference; it does not indicate
+whether someone has pushed code separately.
+
+To get the latest saved commit as well, use `GET /api/v1/apps/{appId}/source`:
+
+```json
+{
+  "supported": true,
+  "available": true,
+  "repository": {
+    "url": "https://git.example.com/apps/app-id.git",
+    "branch": "main",
+    "commit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "deployed": {
+    "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "branch": "main",
+    "directory": "apps/inventory"
+  }
+}
+```
+
+`supported` indicates whether the installation provides repositories. `available`
+means the app's branch has a commit. `repository` is null if no repository has
+been created; a branch with no commits has `commit: null`. `deployed` identifies
+the running app's source. Pushing without deploying updates `repository.commit`
+but leaves `deployed` unchanged.
+
+If Git is temporarily unavailable, source status returns `200` with an `error`
+message, `available: false` and `repository: null`. Check `error` before treating
+the source as empty. The known `deployed` value remains available. Ordinary app
+reads return the stored summary without waiting for Git.
+
+### Preview branches
+
+Branches use Git branch-name rules and are limited to 200 characters. Main apps
+use `main`. Create a Git preview with `POST /api/v1/apps`, including
+`parentId` and `previewBranch`. Its hostname uses a URL-safe name derived from that
+branch; if `previewName` is also supplied, it must match the derived name.
+The preview shares its parent's repository and keeps the assigned branch.
+Neither preparation nor deployment can change it. A preview created without
+`previewBranch` cannot save source to Widefleet Git.
+
+### Git credentials and errors
+
+Credential responses contain `{ url, username, password, expiresAt }` and use
+`Cache-Control: no-store`. Use the returned username and password for Git HTTPS
+Basic authentication. Cloud credentials expire after five minutes; existing
+credentials remain usable until expiry if management access is revoked. Each
+new credential request checks current app access. The CLI handles this exchange
+through its Git credential helper.
+
+Missing or inaccessible apps return `404`. Credential requests without source
+storage return `409`, as does preparing a preview created without a Git branch.
+Preparation and credential requests also return `409` while the app is being
+deleted. Git failures during preparation or credential requests return `503`.
+See [source code](/guides/source-code) for cloning and deletion behavior.
 
 ## Publish an app
 
@@ -199,6 +299,13 @@ for naming and version requirements. Occupied complete hostnames return `409 CON
 invalid or overlong hostnames return `400 BAD_REQUEST` before app creation.
 
 Upload sessions expire after one hour. Repeating an identical publish within its valid session returns the original deployment. A session's Worker content is immutable. Asset hashes follow Wrangler's BLAKE3 algorithm over base64 content plus the case-sensitive file extension; modules use SHA-256. Preview apps have separate identities and artifact prefixes.
+
+Clients that save source before publishing can include
+`source: { commit, branch, directory }` in the Worker metadata. The commit must
+already exist in the app's managed repository; otherwise the upload returns
+`400`. The directory is relative to the repository root (`.` for a root project).
+After a rollback, the app's source status identifies the commit used by the
+restored version.
 
 Rollback queues a retained code artifact from the same app while preserving its current database and files. Deletion marks the app unwritable and queues teardown after earlier jobs; management records and artifacts are removed after the agent confirms teardown.
 

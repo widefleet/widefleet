@@ -8,9 +8,14 @@ Widefleet apps can request a signed token identifying their organization and app
 An external API verifies that token and decides which data the app may access.
 This works without a signed-in user and without an API key in the app.
 
-Upgrade the installation's deployment tools, native agent and app runtime before using
-the `WIDEFLEET_IDENTITY` binding. The receiving API must support EdDSA JWT
-verification and trust your installation's workload issuer.
+Use matching Widefleet **0.7.1 or newer** releases for the platform, deployment
+tools, native agent and app runtime. For an existing installation,
+[update the installation components](/self-hosting/installation#versions-and-updates)
+and [activate the matching app runtime](/reference/runtime#versions-and-updates).
+Run `widefleet runtime status` to check the selected and active versions.
+
+The receiving API must support EdDSA JWT verification and trust your installation's
+workload issuer.
 
 ## Call an API from an app
 
