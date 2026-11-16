@@ -196,20 +196,23 @@ for (const javaScriptEnabled of [true, false]) {
       await expect(page.getByText("No connection requests yet.")).toBeVisible();
       await page.goto("/services");
       await expect(page.getByText("Manage availability", { exact: true })).toHaveCount(0);
-      await page.getByLabel("Connect to your app").selectOption(source.id);
-      await page.getByRole("button", { name: "Select app", exact: true }).click();
-      await expect(page).toHaveURL(new RegExp(`app=${source.id}`));
-
-      const row = page
-        .locator("div.space-y-2.p-4")
-        .filter({ has: page.getByRole("heading", { name: target.displayName, exact: true }) });
-
-      await row.getByText("Request connection", { exact: true }).focus();
+      await expect(page.getByLabel("Binding name in your code")).toHaveCount(0);
+      await page.getByRole("link", { name: `Set up connection to ${target.displayName}` }).focus();
       await page.keyboard.press("Enter");
-      await row.getByLabel("Binding name in your code").fill("ERP");
-      await row.getByRole("button", { name: "Submit request" }).click();
-      await expect(page).toHaveURL(/services\/requests$/);
-      await expect(page.getByText("Awaiting approval", { exact: true })).toBeVisible();
+      await expect(page.getByLabel("Binding name in your code")).toHaveCount(0);
+      await page.getByLabel("Your app", { exact: true }).selectOption(source.id);
+      await page.getByRole("button", { name: "Continue", exact: true }).click();
+      await expect(page).toHaveURL(new RegExp(`/services/${target.id}/connect\\?app=${source.id}`));
+      await expect(
+        page.getByRole("heading", { name: "Request a connection", exact: true }),
+      ).toBeVisible();
+      await page.getByRole("link", { name: "Back to app selection" }).click();
+      await expect(page.getByLabel("Your app", { exact: true })).toBeVisible();
+      await page.getByLabel("Your app", { exact: true }).selectOption(source.id);
+      await page.getByRole("button", { name: "Continue", exact: true }).click();
+      await page.getByLabel("Binding name in your code").fill("ERP");
+      await page.getByRole("button", { name: "Submit request" }).click();
+      await expect(page.getByRole("heading", { name: "Request submitted" })).toBeVisible();
       await expect(page.getByRole("button", { name: "Approve and connect" })).toHaveCount(0);
       const requests = await memberContext.request.get("/api/v1/connection-requests");
 
@@ -256,14 +259,15 @@ for (const javaScriptEnabled of [true, false]) {
       await review.getByRole("button", { name: "Approve and connect" }).click();
       await expect(review).toHaveCount(0);
       await page.reload();
-      await expect(page.getByText("Approved", { exact: true })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Request approved" })).toBeVisible();
       await page.getByRole("link", { name: "View app connections" }).click();
       await expect(page.getByText("ERP", { exact: true })).toBeVisible();
       await environment.database.db
         .update(apps)
         .set({ capabilityError: "Synthetic activation failure" })
         .where(eq(apps.id, source.id));
-      await page.goto(`/services?app=${source.id}`);
+      await page.goto(`/apps/${source.id}/connections`);
+      await page.locator("summary").filter({ hasText: "ERP" }).click();
 
       for (const width of [1280, 390]) {
         await page.setViewportSize({ width, height: 900 });
@@ -284,19 +288,15 @@ for (const javaScriptEnabled of [true, false]) {
       await expect(page).toHaveURL(new RegExp(`/apps/${source.id}/connections$`));
       await expect(page.getByText("ERP", { exact: true })).toBeVisible();
       await expect(page.getByText("Synthetic activation failure", { exact: false })).toHaveCount(0);
-      await adminPage.goto("/services");
-
-      const settings = adminPage
-        .locator("div.space-y-2.p-4")
-        .filter({ has: adminPage.getByRole("heading", { name: target.displayName, exact: true }) });
-
-      await settings.getByText("Manage availability", { exact: true }).click();
-      await settings.getByLabel("Who can connect this API?").selectOption("organization");
-      await settings.getByRole("button", { name: "Save availability" }).click();
-      await expect(settings.getByText("Available to everyone in this organization")).toBeVisible();
+      await adminPage.goto(`/services/${target.id}`);
+      await adminPage.getByRole("link", { name: "Manage availability", exact: true }).click();
+      await adminPage.getByLabel("Who can connect this API?").selectOption("organization");
+      await adminPage.getByRole("button", { name: "Save availability" }).click();
+      await expect(adminPage.getByText("Availability saved.", { exact: true })).toBeVisible();
       await page.goto(`/services?app=${source.id}`);
-      await row.getByText("Connect API", { exact: true }).click();
-      await row.getByLabel("Binding name in your code").fill("FREE");
+      await page.getByRole("link", { name: `Set up connection to ${target.displayName}` }).click();
+      await expect(page.getByLabel("Your app", { exact: true })).toHaveCount(0);
+      await page.getByLabel("Binding name in your code").fill("FREE");
 
       for (const width of [1280, 390]) {
         await page.setViewportSize({ width, height: 900 });
@@ -313,27 +313,45 @@ for (const javaScriptEnabled of [true, false]) {
         }
       }
 
-      await row.getByRole("button", { name: "Connect", exact: true }).click();
+      await page.getByRole("button", { name: "Connect API", exact: true }).click();
+      await expect(
+        page.getByRole("heading", { name: "Connection saved", exact: true }),
+      ).toBeVisible();
+      await expect(page.getByText("env.FREE", { exact: true })).toBeVisible();
+      await page.getByRole("link", { name: "View app connections" }).click();
       await expect(page).toHaveURL(new RegExp(`/apps/${source.id}/connections$`));
       await expect(page.getByText("FREE", { exact: true })).toBeVisible();
-      await adminPage.goto("/services");
-      await settings.getByText("Manage availability", { exact: true }).click();
-      await settings.getByLabel("Who can connect this API?").selectOption("approval_required");
-      await settings.getByRole("button", { name: "Save availability" }).click();
-      await page.goto(`/services?app=${source.id}`);
-      await row.getByText("Request connection", { exact: true }).click();
-      await row.getByLabel("Binding name in your code").fill("ERP");
-      await row.getByRole("button", { name: "Submit request" }).click();
-      await expect(row.getByRole("alert")).toContainText("Choose an unused binding name");
-      await expect(row.getByLabel("Binding name in your code")).toHaveValue("ERP");
-      await row.getByLabel("Binding name in your code").fill("REJECTED");
-      await row.getByRole("button", { name: "Submit request" }).click();
-      await expect(page).toHaveURL(/services\/requests$/);
+      await adminPage.getByLabel("Who can connect this API?").selectOption("approval_required");
+      await adminPage.getByRole("button", { name: "Save availability" }).click();
+      await expect(adminPage.getByText("Availability saved.", { exact: true })).toBeVisible();
+      await page.goto(`/services/${target.id}/connect?app=${source.id}`);
+      await page.getByLabel("Binding name in your code").fill("ERP");
+      await page.getByRole("button", { name: "Submit request" }).click();
+      await expect(page.getByRole("alert")).toContainText("Choose an unused binding name");
+      await expect(page.getByLabel("Binding name in your code")).toHaveValue("ERP");
+      await page.getByLabel("Binding name in your code").fill("REJECTED");
+      await page.getByRole("button", { name: "Submit request" }).click();
+      await expect(page.getByRole("heading", { name: "Request submitted" })).toBeVisible();
       await adminPage.goto("/services/requests");
       await review.getByRole("button", { name: "Reject", exact: true }).click();
       await expect(review).toHaveCount(0);
       await page.reload();
-      await expect(page.getByText("Rejected", { exact: true })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Request rejected" })).toBeVisible();
+      await page.goto(`/apps/${source.id}/connections`);
+
+      const freeConnection = page
+        .locator("details")
+        .filter({ has: page.locator("summary").filter({ hasText: "FREE" }) });
+
+      await freeConnection.locator("summary").click();
+      await freeConnection.getByRole("button", { name: "Disconnect", exact: true }).click();
+      await expect(page.getByText("FREE", { exact: true })).toHaveCount(0);
+      await expect(page.getByText("ERP", { exact: true })).toBeVisible();
+      const forbiddenAvailability = await page.goto(`/services/${target.id}/availability`);
+      expect(forbiddenAvailability?.status()).toBe(403);
+      const forbiddenApp = await page.goto(`/services/${target.id}/connect?app=${target.id}`);
+      expect(forbiddenApp?.status()).toBe(404);
+      await page.goto("/services/requests");
       await page.screenshot({ path: testInfo.outputPath("request-statuses.png"), fullPage: true });
     } finally {
       await Promise.all(contexts.map((context) => context.close()));

@@ -7,12 +7,14 @@
   import * as Accordion from "#shadcn/components/ui/accordion/index.js";
   import Globe from "@lucide/svelte/icons/globe";
   import Box from "@lucide/svelte/icons/box";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import Plug from "@lucide/svelte/icons/plug";
   import Database from "@lucide/svelte/icons/database";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
   import ArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
   import AppStatus from "./AppStatus.svelte";
   import Feedback from "./Feedback.svelte";
+  import AppConnectionActions from "./AppConnectionActions.svelte";
 
   let { app }: { app: z.infer<typeof appContract> } = $props();
 
@@ -175,11 +177,11 @@
               </p>
             </div>
           {:else}
-            <Accordion.Root type="multiple" class="px-4">
+            <div class="divide-y px-4">
               {#each names as name (name)}
                 {@const item = binding(name)}
-                <Accordion.Item value={name}>
-                  <Accordion.Trigger class="items-center gap-2 py-4 hover:no-underline">
+                <details class="group">
+                  <summary class="flex cursor-pointer items-center gap-2 py-4">
                     <span class="min-w-0 flex-1"
                       ><code class="block text-xs wrap-anywhere">{name}</code><span
                         class="text-muted-foreground mt-1 block text-xs font-normal wrap-anywhere"
@@ -187,8 +189,11 @@
                       ></span
                     >
                     {@render status(item.state, !item.desired)}
-                  </Accordion.Trigger>
-                  <Accordion.Content>
+                    <ChevronDown
+                      class="text-muted-foreground size-4 shrink-0 group-open:rotate-180"
+                    />
+                  </summary>
+                  <div class="pb-4">
                     <dl class="space-y-2 text-xs">
                       {#if item.desired}<div class="flex justify-between gap-3">
                           <dt class="text-muted-foreground">Entrypoint</dt>
@@ -207,10 +212,17 @@
                           </dd>
                         </div>{/if}
                     </dl>
-                  </Accordion.Content>
-                </Accordion.Item>
+                    <AppConnectionActions
+                      appId={app.id}
+                      binding={name}
+                      grant={item.desired}
+                      failed={connections.connections.state === "failed"}
+                      pending={connections.connections.state === "pending"}
+                    />
+                  </div>
+                </details>
               {/each}
-            </Accordion.Root>
+            </div>
           {/if}
         </div>
 

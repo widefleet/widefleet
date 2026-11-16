@@ -44,7 +44,7 @@ export const setServiceAccess = form(
     const { runtime, principal } = await remoteContext({ organizationId });
     formValue(await runtime.connections.setAccess(principal, appId, accessMode));
     await getAppServices().refresh();
-    redirect(303, "/services");
+    redirect(303, `/services/${appId}/availability?saved=1`);
   },
 );
 
@@ -57,11 +57,13 @@ export const requestAppConnection = form(
   }),
   async ({ organizationId, targetApp, appId, binding, entrypoint }) => {
     const { runtime, principal } = await remoteContext({ organizationId });
-    formValue(
+
+    const request = formValue(
       await runtime.connections.request(principal, { appId, binding, entrypoint, app: targetApp }),
     );
+
     await getConnectionRequests().refresh();
-    redirect(303, "/services/requests");
+    redirect(303, `/services/requests/${request.id}`);
   },
 );
 
@@ -83,15 +85,22 @@ export const connectApp = form(
   contract.capabilityPath.extend({
     ...contract.organizationSelection.shape,
     id: z.string().max(160).optional(),
+    guided: z.literal("true").optional(),
     targetApp: contract.identifier,
     entrypoint: contract.capabilityGrant.shape.entrypoint,
   }),
-  async ({ appId, targetApp, binding, entrypoint, organizationId }) => {
+  async ({ appId, targetApp, binding, entrypoint, organizationId, guided }) => {
     const { runtime, principal } = await remoteContext({ organizationId });
     formValue(
       await runtime.connections.bind(principal, appId, binding, { app: targetApp, entrypoint }),
     );
     await getAppConnections({ appId }).refresh();
+
+    if (guided)
+      redirect(
+        303,
+        `/services/${targetApp}/connect/result?${new URLSearchParams({ app: appId, binding })}`,
+      );
     redirect(303, `/apps/${appId}/connections`);
   },
 );
