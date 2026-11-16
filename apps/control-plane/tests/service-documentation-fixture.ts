@@ -48,6 +48,10 @@ const server = createServer((request, response) => {
           createdAt: "2026-10-01T00:00:00Z",
         }),
       );
+    } else if (request.method === "POST" && request.url === "/api/v1/apps/source-target") {
+      response.end(JSON.stringify({ supported: false, branch: "main", preview: false }));
+    } else if (request.method === "POST" && request.url === `/api/v1/apps/${id}/source/prepare`) {
+      response.end(JSON.stringify({ organizationId: id, repository: null }));
     } else if (request.url === `/api/v1/apps/${id}/assets-upload-session`) {
       response.end(
         JSON.stringify({

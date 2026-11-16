@@ -18,6 +18,39 @@ pub struct App {
     pub created_at: String,
     pub state: String,
     pub active_deployment_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<AppSourceSummary>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SourceRevision {
+    pub branch: String,
+    pub commit: String,
+    pub directory: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SourceRepository {
+    pub url: String,
+    pub branch: String,
+    pub commit: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AppSourceSummary {
+    pub supported: bool,
+    pub branch: Option<String>,
+    pub deployed: Option<SourceRevision>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AppSource {
+    pub supported: bool,
+    pub available: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub repository: Option<SourceRepository>,
+    pub deployed: Option<SourceRevision>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -133,6 +166,8 @@ pub struct WorkerMetadata {
     pub entrypoints: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service_documentation: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<SourceRevision>,
     #[serde(flatten)]
     pub worker: WorkerConfiguration,
     #[serde(default)]

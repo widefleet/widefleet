@@ -1,3 +1,4 @@
+import { createAppSource } from "../src/lib/server/app-source.ts";
 import { organizationSettings } from "../src/lib/server/schema.ts";
 import { createAuthenticationAdmission } from "../src/lib/server/auth-admission.ts";
 import { discoverPlatform } from "../src/lib/server/platform-discovery.ts";
@@ -211,6 +212,7 @@ export const createTestEnvironment = async (
   await database.db.update(organizationSettings).set({ ssoRequired: true });
 
   return {
+    source: createAppSource(database.db),
     configuration,
     application: {
       organizationId: "widefleet",

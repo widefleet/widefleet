@@ -101,7 +101,7 @@ describe("App removal trees", () => {
     (await service.remove(creator, app.id)).unwrap();
     await db.transaction(async (transaction) => {
       (await managedApp(transaction, creator, app.id)).unwrap();
-      await finishAppRemoval(transaction, app.id);
+      await finishAppRemoval(transaction, app);
     });
 
     expect(await db.select().from(apps)).toEqual([
@@ -150,7 +150,7 @@ describe("App removal trees", () => {
     (await service.remove(creator, preview.id)).unwrap();
     await environment.database.db.transaction(async (transaction) => {
       (await managedApp(transaction, creator, preview.id)).unwrap();
-      await finishAppRemoval(transaction, preview.id);
+      await finishAppRemoval(transaction, preview);
     });
     (await service.remove(creator, parent.id)).unwrap();
     expect((await environment.database.db.select().from(jobs)).map((job) => job.appId)).toEqual([

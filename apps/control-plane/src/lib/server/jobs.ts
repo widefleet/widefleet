@@ -9,7 +9,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { Database } from "./database.ts";
 import { enqueueAppRemoval } from "./apps.ts";
-import { InvalidOperation } from "./errors.ts";
+import { InvalidOperation, StorageUnavailable } from "./errors.ts";
 import {
   agents,
   apps,
@@ -24,6 +24,7 @@ import { ensureOrganizationRuntime, loadRuntime, runtimeReference } from "./runt
 import { decryptSecret } from "./secret-encryption.ts";
 import { lockOrganizationRuntime } from "./organization-runtime.ts";
 import type { ArtifactStorage } from "./storage.ts";
+import type { SourceBackend } from "./source-backend.ts";
 import { transact, type Transaction } from "./transactions.ts";
 
 const leasedJob = async (
@@ -60,6 +61,7 @@ export const createJobService = (
   encryptionKey: string,
   report: (event: z.infer<typeof contract.reportingOperation>) => void = () => {},
   appHttpsPort = 443,
+  source?: SourceBackend,
 ) => ({
   authenticate: (token: string) =>
     transact(database, async (transaction) => {
@@ -525,7 +527,13 @@ export const createJobService = (
               target: jobReceipts.jobId,
               set: { agentId, leaseToken: result.leaseToken },
             });
-          await finishAppRemoval(transaction, app.id);
+
+          try {
+            await finishAppRemoval(transaction, app, source);
+          } catch (cause) {
+            if (cause instanceof StorageUnavailable) return yield* cause;
+            throw cause;
+          }
 
           return Result.ok({ accepted: true });
         }
