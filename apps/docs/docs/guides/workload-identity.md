@@ -8,14 +8,19 @@ Widefleet apps can request a signed token identifying their organization and app
 An external API verifies that token and decides which data the app may access.
 This works without a signed-in user and without an API key in the app.
 
-Use matching Widefleet **0.7.1 or newer** releases for the platform, deployment
+Use matching Widefleet **0.7.2 or newer** releases for the platform, deployment
 tools, native agent and app runtime. For an existing installation,
 [update the installation components](/self-hosting/installation#versions-and-updates)
 and [activate the matching app runtime](/reference/runtime#versions-and-updates).
 Run `widefleet runtime status` to check the selected and active versions.
 
-The receiving API must support EdDSA JWT verification and trust your installation's
+The receiving API must support RS256 JWT verification and trust your installation's
 workload issuer.
+
+When upgrading from an EdDSA runtime, update the receiving API and runtime together.
+The RS256 runtime publishes a separate RSA key set; previously issued EdDSA tokens
+are no longer verifiable through its JWKS. Obtain fresh tokens after the upgrade
+and allow receiving APIs to refresh cached keys. Roll back both sides together if needed.
 
 ## Call an API from an app
 
@@ -74,7 +79,7 @@ For an installation with app domain `apps.example.com`, configure these trusted 
 | Issuer                 | `https://auth.apps.example.com/workload`                                  |
 | Discovery document     | `https://auth.apps.example.com/workload/.well-known/openid-configuration` |
 | JWKS URL               | `https://auth.apps.example.com/workload/jwks`                             |
-| Algorithm              | `EdDSA`                                                                   |
+| Algorithm              | `RS256`                                                                   |
 | Maximum token lifetime | Five minutes                                                              |
 
 Load issuer and key URLs from your API's configuration, never from an unverified
@@ -109,7 +114,7 @@ export async function authorizeWorkload(token: string) {
   const { payload } = await jwtVerify(token, keys, {
     issuer,
     audience,
-    algorithms: ["EdDSA"],
+    algorithms: ["RS256"],
     requiredClaims: ["sub", "exp", "iat", "jti"],
     maxTokenAge: "5m",
   });
@@ -172,12 +177,12 @@ preserve runtime storage and its encryption key together; see
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | `WIDEFLEET_IDENTITY` is missing | Upgrade all platform components. Local standalone Wrangler development needs a test binding; it cannot mint deployed app identities. |
 | Token issuance fails            | Check the configured issuer, published app identity, runtime suspension state, and availability of storage and its encryption key.   |
-| Signature or issuer is rejected | Use the workload issuer and its advertised JWKS. The receiving library must support EdDSA.                                           |
+| Signature or issuer is rejected | Use the workload issuer and its advertised JWKS. The receiving library must support RS256.                                           |
 | Audience is rejected            | Match the API's configured audience exactly in `getToken`.                                                                           |
 | API returns forbidden           | Grant the executing app's ID access on the API; check whether the caller is a preview or a service app.                              |
 | Outbound request is blocked     | Allow the API origin in the app's backend network permissions.                                                                       |
 
 For a third-party federation service, check that it accepts your workload issuer,
-EdDSA signatures and the app identity claims. Use direct verification for APIs you
+RS256 signatures and the app identity claims. Use direct verification for APIs you
 control, then connect apps to a shared service when several apps need the same
 integration.
