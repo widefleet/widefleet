@@ -7,6 +7,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import {
   createRuntimeReleaseService,
   ensureOrganizationRuntime,
+  loadRuntime,
 } from "../../src/lib/server/runtime-releases.ts";
 import { organizationRuntimes, jobs, runtimeReleases } from "../../src/lib/server/schema.ts";
 import { transact } from "../../src/lib/server/transactions.ts";
@@ -21,10 +22,10 @@ describe("Runtime installation with PostgreSQL and Azure Blob Storage", () => {
   const source = "export default {};";
 
   const release = contract.runtimeRelease.parse({
-    protocol: 2,
+    protocol: 3,
     auth: 1,
     version: "99.0.0",
-    celld: "0.6.2",
+    celld: "0.6.3-widefleet.1",
     main: "loader.js",
     modules: [
       { name: "loader.js", source, sha256: createHash("sha256").update(source).digest("hex") },
@@ -92,6 +93,42 @@ describe("Runtime installation with PostgreSQL and Azure Blob Storage", () => {
     expect(await environment.database.db.select().from(jobs)).toMatchObject([
       { kind: "runtime", runtime: { version: release.version, checksum }, state: "queued" },
     ]);
+  });
+
+  it("loads and selects saved 0.6.2 runtime packages without rewriting their metadata", async () => {
+    const legacy = { ...release, version: "98.0.0", celld: "0.6.2" };
+    const savedBytes = Buffer.from(JSON.stringify(legacy));
+
+    const reference = {
+      version: legacy.version,
+      checksum: createHash("sha256").update(savedBytes).digest("hex"),
+    };
+
+    const savedKey = `packages/sha256/${reference.checksum}.json`;
+
+    // Seed the exact bytes and references left by the previous control plane.
+    fixture.objects.set(savedKey, savedBytes);
+    await environment.database.db.insert(runtimeReleases).values(reference);
+    await environment.database.db.update(organizationRuntimes).set({
+      runtime: reference,
+      appliedRuntime: reference,
+    });
+
+    expect(await loadRuntime(fixture.storage, reference)).toEqual({ runtime: legacy });
+    expect(
+      (await releases.rollback(principal(), { version: legacy.version })).unwrap(),
+    ).toMatchObject({
+      desiredVersion: legacy.version,
+      activeVersion: legacy.version,
+      state: "queued",
+    });
+    expect(await environment.database.db.select().from(jobs)).toMatchObject([
+      { kind: "runtime", runtime: reference, rollback: true, state: "queued" },
+    ]);
+    expect(fixture.objects.get(savedKey)).toEqual(savedBytes);
+    expect(fixture.requests.every(({ method }) => method === "HEAD" || method === "GET")).toBe(
+      true,
+    );
   });
 
   it("accepts repeated and concurrent installs without replacing immutable package bytes", async () => {

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from "$app/state";
-  import AuthLayout from "#shadcn/components/AuthLayout.svelte";
-  import { Button } from "#shadcn/components/ui/button/index.js";
+  import AuthLayout from "@platform/ui/auth-layout";
+  import { Button } from "@platform/ui/button";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
 </script>

@@ -1,12 +1,13 @@
-import { appAccessSnapshot } from "@platform/contracts";
+import { appAccessSnapshot, appCaller, hasAppAccess } from "@platform/contracts";
 import { z } from "zod";
-import { createAuthentication, cookiePrefix } from "./authentication.ts";
+import { companyCookie, createAuthentication, cookiePrefix } from "./authentication.ts";
 import { authConfiguration, type AuthConfiguration } from "./configuration.ts";
-import { proxyIdentity } from "./identity.ts";
+import { issuer, proxyIdentity } from "./identity.ts";
+import { authorization } from "./renewal.ts";
 
 interface Apps {
   resolve: (hostname: string) => Promise<z.infer<typeof appAccessSnapshot> | null>;
-  fetch: (request: Request) => Promise<Response>;
+  fetch: (request: Request, caller: z.infer<typeof appCaller>) => Promise<Response>;
 }
 
 const response = (status: number, message: string) =>
@@ -153,16 +154,55 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
 
       const auth = await createAuthentication(configuration, false);
       const session = await auth.api.getSession({ headers: request.headers });
-      const user = proxyIdentity.safeParse(session?.user.appIdentity);
+      const verified = authorization.safeParse(session?.user.appAuthorization);
 
-      if (!user.success) {
-        return request.headers.get("accept")?.includes("text/html")
-          ? redirect(loginUrl(url))
-          : response(401, "Sign in to access this app.");
+      let user = verified.success
+        ? proxyIdentity.safeParse(verified.data.identity)
+        : proxyIdentity.safeParse(null);
+
+      let renewed: Response | undefined;
+
+      const finish = (result: Response) => {
+        for (const cookie of renewed?.headers.getSetCookie() ?? [])
+          result.headers.append("set-cookie", cookie);
+
+        return result;
+      };
+
+      if (verified.success && verified.data.expiresAt <= Date.now()) {
+        try {
+          const refreshing = await createAuthentication(configuration, true);
+          renewed = await refreshing.api.renewAppSession({
+            headers: request.headers,
+            asResponse: true,
+          });
+
+          if (renewed.status === 401) user = proxyIdentity.safeParse(null);
+          else if (renewed.status === 403)
+            return finish(response(403, "You do not have access to this app."));
+          else if (!renewed.ok) {
+            const unavailable = response(503, "Company sign-in is temporarily unavailable.");
+            const retryAfter = renewed.headers.get("retry-after");
+
+            if (retryAfter) unavailable.headers.set("retry-after", retryAfter);
+
+            return finish(unavailable);
+          } else user = proxyIdentity.safeParse(await renewed.json());
+        } catch {
+          return finish(response(503, "Company sign-in is temporarily unavailable."));
+        }
       }
 
-      if (access.groups.length && !access.groups.some((group) => user.data.groups.includes(group)))
-        return response(403, "You do not have access to this app.");
+      if (!user.success) {
+        return finish(
+          request.headers.get("accept")?.includes("text/html")
+            ? redirect(loginUrl(url))
+            : response(401, "Sign in to access this app."),
+        );
+      }
+
+      if (!hasAppAccess(access.groups, user.data.groups))
+        return finish(response(403, "You do not have access to this app."));
 
       const headers = new Headers(request.headers);
 
@@ -179,12 +219,46 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
       headers.set("x-auth-request-preferred-username", user.data.name);
       headers.set("x-auth-request-email", user.data.email);
       headers.set("x-auth-request-groups", user.data.groups.join(","));
-      const result = await apps.fetch(new Request(request, { headers }));
+
+      const caller = appCaller.parse({
+        issuer: issuer(configuration.provider),
+        subject: user.data.id,
+        name: user.data.name,
+      });
+
+      const cookies = (request.headers.get("cookie") ?? "")
+        .split(";")
+        .filter((value) => !companyCookie(value.trim().split("=")[0] ?? ""));
+
+      if (cookies.some((value) => value.trim())) headers.set("cookie", cookies.join(";"));
+
+      const result = await apps
+        .fetch(new Request(request, { headers, redirect: "manual" }), caller)
+        .catch((cause: unknown) => {
+          if (!renewed?.headers.getSetCookie().length) throw cause;
+
+          return response(502, "The app is temporarily unavailable.");
+        });
+
       const outgoing = new Response(result.body, result);
 
       outgoing.headers.delete("set-cookie");
 
-      return outgoing;
+      // App OAuth cookies stay on the app host. No app can read or overwrite
+      // the proxy's company sign-in cookies, including another organization's.
+      for (const cookie of result.headers.getSetCookie())
+        if (!companyCookie(cookie.split("=")[0]?.trim() ?? "")) {
+          const attributes = cookie.split(";");
+          const value = attributes.shift();
+
+          if (value)
+            outgoing.headers.append(
+              "set-cookie",
+              [value, ...attributes.filter((part) => !/^\s*domain\s*=/i.test(part))].join(";"),
+            );
+        }
+
+      return finish(outgoing);
     },
   };
 };

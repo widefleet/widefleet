@@ -309,7 +309,8 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
         capabilities: {
           UPSTREAM: {
             organizationId: crypto.randomUUID(),
-            connector: "cancellation",
+            app: "00000000-0000-4000-8000-000000000099",
+            hostname: "service.apps.example.test",
             entrypoint: "default",
           },
         },
@@ -353,7 +354,7 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
           }
         }
         export * from './runtime.js';
-        export class ConnectorGateway extends WorkerEntrypoint {
+        export class AppService extends WorkerEntrypoint {
           fetch(request) {
             return nativeFetch(${JSON.stringify(cancellationOrigin)} + new URL(request.url).search, { signal: request.signal });
           }
@@ -987,7 +988,10 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
       }
     });
 
-    it("delivers native cron and queue events, preserves waitUntil and retry decisions", async () => {
+    it("delivers native cron and queue events, preserves waitUntil and retry decisions", async ({
+      onTestFailed,
+    }) => {
+      onTestFailed(() => console.error("Native queue runtime logs:\n", runtimeLogs));
       await call("enqueue");
       await expect
         .poll(() => call("queue-result"), { timeout: 20000 })

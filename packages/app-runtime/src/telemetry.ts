@@ -1,6 +1,5 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { z } from "zod";
-import { cloudflareLogRecords } from "./cloudflare-logs.ts";
 
 const level = new Map([
   ["debug", 5],
@@ -46,10 +45,7 @@ const sendTelemetry = async (
 // Tail props are created by the trusted loader, never by the application.
 export class Telemetry extends WorkerEntrypoint<
   {},
-  { url: string; token: string } & (
-    | { deploymentId: string; buildId: string | null }
-    | { organizationId: string; connector: string; connectorVersion: string }
-  )
+  { url: string; token: string; deploymentId: string; buildId: string | null }
 > {
   private body(
     message: string,
@@ -75,34 +71,6 @@ export class Telemetry extends WorkerEntrypoint<
 
   override async tail(events: TraceItem[]) {
     const props = this.ctx.props;
-
-    if ("connector" in props) {
-      const records = events.flatMap((event) => cloudflareLogRecords(event, props));
-
-      await sendTelemetry(
-        props,
-        records.map(({ eventTime, severity, record }) => ({
-          timeUnixNano: String(BigInt(Math.trunc(eventTime)) * 1_000_000n),
-          severityNumber: severity,
-          severityText: record.level.toUpperCase(),
-          traceId: record.traceId ?? undefined,
-          spanId: z
-            .string()
-            .regex(/^[a-f0-9]{16}$/)
-            .safeParse(record.spanId).data,
-          body: {
-            stringValue: JSON.stringify({
-              ...record,
-              widefleet: 1,
-              source: "server",
-              kind: record.kind === "span_error" ? "error" : record.kind,
-            }),
-          },
-        })),
-      );
-
-      return;
-    }
 
     const identity = { deploymentId: props.deploymentId, buildId: props.buildId };
 

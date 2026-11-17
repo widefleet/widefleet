@@ -2,7 +2,8 @@ import type { CloudflareWorkersModule } from "@cloudflare/workers-types";
 import * as contract from "@platform/contracts";
 import { and, eq, gt, isNull } from "drizzle-orm";
 import { z } from "zod";
-import type { CloudflareBindings } from "./cloudflare-config.ts";
+import { readCloudflareConfiguration, type CloudflareBindings } from "./cloudflare-config.ts";
+import { createRuntimeExtension } from "#runtime-extension";
 import { withCloudflareDatabase } from "./cloudflare-database.ts";
 import { registerCloudflareRemoval } from "./cloudflare-removal-admission.ts";
 import { cloudflareRemovalCommand, removalTarget } from "./cloudflare-removal-command.ts";
@@ -16,7 +17,11 @@ import { finishAppRemoval } from "./app-removal.ts";
 import { InvalidOperation } from "./errors.ts";
 import { removeAuthRoute } from "./cloudflare-auth-proxy.ts";
 
-export const createCloudflareRemover = (bindings: CloudflareBindings, transport = fetch) => {
+export const createCloudflareRemover = (
+  bindings: CloudflareBindings,
+  transport = fetch,
+  createExtension = createRuntimeExtension,
+) => {
   const configuration = z
     .object({
       CLOUDFLARE_ACCOUNT_ID: z.string().regex(/^[a-f0-9]{32}$/),
@@ -186,7 +191,14 @@ export const createCloudflareRemover = (bindings: CloudflareBindings, transport 
             .limit(1);
 
           if (child) throw new Error("App previews have not finished removal");
-          await finishAppRemoval(transaction, appId);
+
+          const extension = createExtension({
+            database: db,
+            configuration: readCloudflareConfiguration(bindings),
+            binding: (name, schema) => schema.parse(bindings[name]),
+          });
+
+          await finishAppRemoval(transaction, app, extension.source);
         }),
       ),
     fail: (id: string, message: string) =>
@@ -254,6 +266,7 @@ export const executeCloudflareRemoval = async (
 
       for (const prefix of [
         `apps/${target.id}/`,
+        `app-secrets/${target.id}/`,
         `versions/${target.id}/`,
         `workflow-versions/${target.id}/`,
       ])

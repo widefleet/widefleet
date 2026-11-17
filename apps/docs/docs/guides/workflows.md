@@ -168,11 +168,11 @@ If the target is missing, the request fails without resetting the instance. Chec
 
 ## Persistence and permissions
 
-A trusted native Workflow drives the app coroutine through a scoped RPC session. App code and callbacks execute inside a separate Dynamic Worker with the existing storage facades, connector grants, telemetry and egress policy. celld owns retries, durable step results, event buffering and timers.
+A trusted native Workflow drives the app coroutine through a scoped RPC session. App code and callbacks execute inside a separate Dynamic Worker with the existing storage facades, app connection grants, telemetry and egress policy. celld owns retries, durable step results, event buffering and timers.
 
 Native checkpoints record command identities, their batch order and which parallel result was delivered next. Replay matches each step by its name, type and occurrence count, holding early commands until their recorded turn. Committed callback results reconstruct the app coroutine without re-executing committed callbacks. Step names and occurrence counts exposed to app callbacks retain their original values. Parallel branches whose registration order can vary must use distinct step names; repeated uses of the same name and type must retain their order across replay. Side effects outside steps can repeat during replay; side effects inside an uncommitted or retried step must also tolerate repetition.
 
-Each instance pins its immutable app version. Redeployment and rollback affect new instances. Existing instances keep their code and declared storage resources, even if a later deployment removes the Workflow or storage declaration. The current network policy and still-granted connector bindings are selected when a Workflow session is reconstructed.
+Each instance pins its immutable app version. Redeployment and rollback affect new instances. Existing instances keep their code and declared storage resources, even if a later deployment removes the Workflow or storage declaration. The current network policy and still-granted app connections are selected when a Workflow session is reconstructed.
 
 The agent retains resource declarations from Workflow-bearing app versions until the app is deleted. App deletion gates new creation, deletes the app's native Workflow instances, and then removes published files and resources through the existing removal process. Instance metadata can outlive the native engine's result retention and appear as `expired` in listings. Deleting an expired instance removes its catalog entry and releases its ID for reuse. Runtime limits, including native value-size bounds, still apply; internal checkpoint and start envelopes consume part of those bounds.
 
@@ -182,7 +182,7 @@ Management request IDs have durable receipts. A retry returns the recorded resul
 
 Supported operations are `step.do`, `step.sleep`, `step.sleepUntil` and `step.waitForEvent`, including parallel branches, repeated step names, native static-delay retry policies, callback attempt context and `NonRetryableError`. `sleepUntil` requires a future deadline when scheduled, as in celld. Do not nest step calls inside a `step.do` callback.
 
-Short global `setTimeout` waits and `fetch` calls (including response body methods such as `json()` and `text()`) can run between steps while another branch waits for an event. They repeat on replay. Command delivery has a 60-second timeout; use durable steps for longer work. Put other asynchronous I/O, such as direct connector calls, Node APIs and manual stream reads, inside `step.do`, and use `step.sleep` for durable delays.
+Short global `setTimeout` waits and `fetch` calls (including response body methods such as `json()` and `text()`) can run between steps while another branch waits for an event. They repeat on replay. Command delivery has a 60-second timeout; use durable steps for longer work. Put other asynchronous I/O, such as direct app service calls, Node APIs and manual stream reads, inside `step.do`, and use `step.sleep` for durable delays.
 
 Function-valued retry delays, step rollback handlers and rollback-on-termination are not supported. Unsupported options are rejected. Workflow scheduling/facets and cross-app bindings are not part of this interface.
 

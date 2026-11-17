@@ -324,13 +324,17 @@ pub async fn check_candidate(
 }
 
 pub async fn route(configuration: &Configuration, job: &Job) -> Result<()> {
-    tokio::fs::create_dir_all(&configuration.routing_directory).await?;
     let name = format!("platform-app-{}", job.app_id()?);
-    let tls = route_tls(configuration, job.hostname()?)?;
+    route_host(configuration, &name, job.hostname()?).await
+}
+
+async fn route_host(configuration: &Configuration, name: &str, hostname: &str) -> Result<()> {
+    tokio::fs::create_dir_all(&configuration.routing_directory).await?;
+    let tls = route_tls(configuration, hostname)?;
     let upstream = format!("http://{}:8080", configuration.runtime_container);
     let route = value!({ "http": {
-        "routers": { &name: { "rule": format!("Host(`{}`) && !PathPrefix(`/.well-known/widefleet/`) && !HeaderRegexp(`X-Widefleet-Candidate`, `.*`)", job.hostname()?), "entryPoints": ["websecure"], "tls": tls, "service": &name } },
-        "services": { &name: { "loadBalancer": { "servers": [{ "url": upstream }] } } },
+        "routers": { name: { "rule": format!("Host(`{hostname}`) && !PathPrefix(`/.well-known/widefleet/`) && !HeaderRegexp(`X-Widefleet-Candidate`, `.*`)") , "entryPoints": ["websecure"], "tls": tls, "service": &name } },
+        "services": { name: { "loadBalancer": { "servers": [{ "url": upstream }] } } },
     } });
     let temporary = configuration.routing_directory.join(format!(".{name}.tmp"));
     // JSON is valid YAML; Traefik's file provider discovers .yaml, not .json.
@@ -379,10 +383,11 @@ pub async fn remove(configuration: &Configuration, job: &Job) -> Result<()> {
     }
 }
 
-pub async fn connector_request(
+pub async fn runtime_request(
     docker: &Docker,
     container: &str,
     token: &str,
+    path: &str,
     request: &Value,
 ) -> Result<Value> {
     let bytes = execute_with_environment(
@@ -401,18 +406,17 @@ pub async fn connector_request(
             "Content-Type: application/json".into(),
             "--data-binary".into(),
             "@-".into(),
-            "http://127.0.0.1:8080/.well-known/widefleet/connectors".into(),
+            format!("http://127.0.0.1:8080/.well-known/widefleet/{path}"),
         ],
         Vec::new(),
         Some(serde_json::to_vec(request)?),
     )
     .await?;
     let response: Value = serde_json::from_slice(&bytes)?;
-    let mut result = response
+    let result = response
         .get("result")
         .cloned()
-        .ok_or_else(|| Error::invalid("Connector runtime returned no result".into()))?;
-    result["action"] = value!("activate");
+        .ok_or_else(|| Error::invalid("App runtime returned no result".into()))?;
     Ok(result)
 }
 
@@ -457,7 +461,6 @@ pub async fn workflow_request(
 mod tests {
     use super::*;
     use clap::Parser;
-
     #[test]
     fn requests_one_wildcard_per_parent_and_reuses_the_app_certificate() -> Result<()> {
         let mut configuration = Configuration::try_parse_from([

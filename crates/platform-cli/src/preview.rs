@@ -1,4 +1,4 @@
-use crate::{apps, auth, deploy};
+use crate::{apps, auth, deploy, source};
 use clap::Args;
 use platform_core::{
     Error, Result,
@@ -15,7 +15,7 @@ pub struct Options {
     /// Parent app name or ID; otherwise use the current project's name.
     #[arg(long)]
     app: Option<String>,
-    /// Preview name; otherwise use the current Git branch.
+    /// Name for a preview without source storage; Git previews use their branch name.
     #[arg(long)]
     name: Option<String>,
     #[command(flatten)]
@@ -27,6 +27,7 @@ pub struct Target {
     slug: String,
     display_name: String,
     name: String,
+    pub(crate) source_branch: Option<String>,
     hostname: String,
     flat_hostname: String,
 }
@@ -74,10 +75,11 @@ fn branch_name(branch: &str) -> String {
     }
 }
 
-pub async fn run(api: &Api, credentials: &auth::Credentials, options: Options) -> Result<()> {
-    let name = match options.name {
-        Some(name) => name,
-        None => {
+pub async fn run(api: &Api, credentials: &auth::Credentials, mut options: Options) -> Result<()> {
+    let name = match (options.name, options.deployment.source_branch.as_deref()) {
+        (Some(name), _) => name,
+        (None, Some(branch)) => branch_name(branch),
+        (None, None) => {
             let config = options.deployment.config.canonicalize()?;
             let project = config
                 .parent()
@@ -90,7 +92,7 @@ pub async fn run(api: &Api, credentials: &auth::Credentials, options: Options) -
             let branch = output.ok().filter(|output| output.status.success())
                 .and_then(|output| String::from_utf8(output.stdout).ok())
                 .filter(|branch| !branch.trim().is_empty())
-                .ok_or_else(|| Error::invalid("Choose --name NAME when Git is unavailable, outside a Git repository, or on a detached HEAD".into()))?;
+                .ok_or_else(|| Error::invalid("Choose --source-branch BRANCH for a detached Git checkout, or --name NAME for a preview without source storage".into()))?;
             branch_name(branch.trim())
         }
     };
@@ -122,6 +124,39 @@ pub async fn run(api: &Api, credentials: &auth::Credentials, options: Options) -
                 .into(),
         ));
     }
+    if options.deployment.source_branch.is_some()
+        && !parent
+            .source
+            .as_ref()
+            .is_some_and(|source| source.supported)
+    {
+        return Err(Error::invalid(
+            "This installation does not provide Git repositories".into(),
+        ));
+    }
+    let mut source_branch = None;
+    if !options.deployment.no_source
+        && parent
+            .source
+            .as_ref()
+            .is_some_and(|source| source.supported)
+    {
+        let config = options.deployment.config.canonicalize()?;
+        let project = config
+            .parent()
+            .ok_or_else(|| Error::invalid("Configuration has no parent directory".into()))?;
+        let branch =
+            source::require_preview_branch(project, options.deployment.source_branch.as_deref())
+                .await?;
+        let expected_name = branch_name(&branch);
+        if name != expected_name {
+            return Err(Error::invalid(format!(
+                "Git previews use the branch-derived name {expected_name}. Omit --name"
+            )));
+        }
+        options.deployment.source_branch = Some(branch.clone());
+        source_branch = Some(branch);
+    }
     let slug = shorten_slug(&format!("{}-{name}", parent.slug));
     eprintln!(
         "Preview: {name} of {} on {}",
@@ -138,6 +173,7 @@ pub async fn run(api: &Api, credentials: &auth::Credentials, options: Options) -
             hostname: format!("{name}.{}", parent.hostname),
             flat_hostname: format!("{name}-{}", parent.hostname),
             name,
+            source_branch,
         }),
         options.deployment,
     )
@@ -152,14 +188,18 @@ impl Target {
         let response = api.authenticated(Method::GET, &path, &token).send().await?;
         let app: App = if response.status() == StatusCode::NOT_FOUND {
             let token = auth::access_token(api, credentials).await?;
+            let mut input = value!({
+                "slug": self.slug,
+                "displayName": self.display_name,
+                "parentId": self.parent,
+                "previewName": self.name,
+            });
+            if let Some(branch) = &self.source_branch {
+                input["previewBranch"] = value!(branch);
+            }
             let response = api
                 .authenticated(Method::POST, "/apps", &token)
-                .json(&value!({
-                    "slug": self.slug,
-                    "displayName": self.display_name,
-                    "parentId": self.parent,
-                    "previewName": self.name,
-                }))
+                .json(&input)
                 .send()
                 .await?;
             if response.status() == StatusCode::CONFLICT {

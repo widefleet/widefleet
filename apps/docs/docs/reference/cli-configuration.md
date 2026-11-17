@@ -32,7 +32,7 @@ widefleet --organization ORGANIZATION_ID apps
 ```
 
 `whoami` includes the selected organization under `application.organizationId`.
-`application.admin` grants application and connector administration within that scope;
+`application.admin` grants app connection administration within that scope;
 the top-level `admin` field represents installation administration.
 
 For several commands in the same Bash session, set `PLATFORM_ORGANIZATION` to the

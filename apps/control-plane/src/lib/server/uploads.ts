@@ -3,7 +3,7 @@ import { Result } from "better-result";
 import { and, eq, gt, sql } from "drizzle-orm";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
-import { checkCapabilityNames } from "./connectors.ts";
+import { checkCapabilityNames } from "./capability-changes.ts";
 import { appUrl, enqueueDeployment, managedApp } from "./apps.ts";
 import { hashAsset } from "./asset-hash.ts";
 import type { Configuration } from "./config.ts";
@@ -12,6 +12,7 @@ import { InvalidOperation } from "./errors.ts";
 import type { Principal } from "./identity.ts";
 import type { HostedExecution } from "./deployment-execution.ts";
 import { artifacts, deployments, uploadSessions } from "./schema.ts";
+import { sourceOperation, type SourceBackend } from "./source-backend.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import { transact, type Transaction } from "./transactions.ts";
 import { prepareModules, storeModules, type WorkerModule } from "./worker-modules.ts";
@@ -47,6 +48,7 @@ export const createUploadService = (
   storage: ArtifactStorage,
   configuration: Configuration,
   execution?: HostedExecution,
+  source?: SourceBackend,
 ) => ({
   start: (principal: Principal, appId: string, manifest: z.infer<typeof contract.assetManifest>) =>
     transact(database, (transaction) =>
@@ -132,7 +134,42 @@ export const createUploadService = (
 
         if (record.state === "deleting")
           return yield* new InvalidOperation({ code: "CONFLICT", message: "App is being deleted" });
+
+        if (
+          metadata.source &&
+          contract.sourceRevision.parse(metadata.source).branch !==
+            (record.parentId ? record.sourceBranch : "main")
+        )
+          return yield* new InvalidOperation({
+            code: "BAD_REQUEST",
+            message: "The deployment source branch does not match this app",
+          });
+
+        if (
+          metadata.source &&
+          (!source ||
+            !(await sourceOperation(() =>
+              source.hasCommit(
+                record.parentId ?? record.id,
+                contract.sourceRevision.parse(metadata.source).commit,
+              ),
+            )))
+        )
+          return yield* new InvalidOperation({
+            code: "BAD_REQUEST",
+            message: "The deployment source commit is not stored in this app's repository",
+          });
         checkCapabilityNames(metadata, contract.capabilityGrants.parse(record.capabilities));
+
+        if (
+          Object.keys(z.record(z.string(), z.string()).parse(record.secrets)).length +
+            metadata.bindings.filter((binding) => binding.type === "plain_text").length >
+          contract.appEnvironmentMaxBindings
+        )
+          return yield* new InvalidOperation({
+            code: "BAD_REQUEST",
+            message: "App variables and secrets exceed the binding limit",
+          });
 
         const session = yield* Result.await(
           getSession(transaction, principal, appId, metadata.assets.upload_session),

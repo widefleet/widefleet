@@ -4,11 +4,11 @@ description: Runtime versions, activation, recovery, storage and supported app A
 lastModified: 2026-10-23
 ---
 
-The installation's celld runtime runs apps and previews as separate Dynamic Workers. The installer manages one node. Starting with platform 0.4.0, apps, connectors and agents belong directly to an organization with one execution configuration. Registering, disabling or replacing an agent does not change that ownership. A replacement agent reuses the same Docker host, persistent node state, routing directory and runtime storage.
+The installation's celld runtime runs apps and previews as separate Dynamic Workers. The installer manages one node. Starting with platform 0.4.0, apps and agents belong directly to an organization with one execution configuration. Registering, disabling or replacing an agent does not change that ownership. A replacement agent reuses the same Docker host, persistent node state, routing directory and runtime storage.
 
 ## Versions and updates
 
-Use platform and CLI **0.4.2 or newer**. The app runtime shares the Widefleet version. `widefleet runtime update VERSION` downloads the runtime package from the matching `vVERSION` GitHub release, verifies its checksum and activates it through the management API. Use the Widefleet release version for `VERSION`; runtime activation remains independent of container updates.
+Use platform, CLI and runtime **0.5.0 or newer** for app services. The app runtime shares the Widefleet version. `widefleet runtime update VERSION` downloads the runtime package from the matching `vVERSION` GitHub release, verifies its checksum and activates it through the management API. Use the Widefleet release version for `VERSION`; runtime activation remains independent of container updates.
 
 ```sh
 widefleet login
@@ -51,7 +51,7 @@ The [celld/Cloudflare comparison](/reference/runtime-compatibility) separates na
 | Dynamic capacity | celld 0.6.1 has a native limit of 256 loaded dynamic instances per process, with at most 255 from one loader generation. The limit counts loaded instances; unreferenced instances are eligible for collection.                                |
 | Scaling          | One managed node initially; no automatic node provisioning or load balancing. A node failure affects all apps on it.                                                                                                                           |
 
-[App Workflows](/guides/workflows) require a compatible agent and runtime with Workflow support. Native Durable Object namespaces inside dynamic apps are not part of this app contract. [IT connectors](/guides/connectors) run as Dynamic Workers and can declare their own Durable Object classes. The trusted loader enforces [backend network permissions and browser CSP](/guides/network).
+[App Workflows](/guides/workflows) require a compatible agent and runtime with Workflow support. Native Durable Object namespaces inside dynamic apps are not part of this app contract. [App services](/guides/app-services) use the same app runtime and resource declarations. The trusted loader enforces [backend network permissions and browser CSP](/guides/network).
 
 ## App removal
 

@@ -6,8 +6,16 @@ import { installationOrganizationId } from "../organization.ts";
 
 export interface AppSignIn {
   callbackUrl: string;
-  publish(identity: z.infer<typeof companyIdentity>, clientSecret: string): Promise<string>;
-  revision(identity: z.infer<typeof companyIdentity>, clientSecret: string): Promise<string>;
+  publish(
+    identity: z.infer<typeof companyIdentity>,
+    clientSecret: string,
+    organizationName?: string,
+  ): Promise<string>;
+  revision(
+    identity: z.infer<typeof companyIdentity>,
+    clientSecret: string,
+    organizationName?: string,
+  ): Promise<string>;
   status(expectedRevision: string): Promise<z.infer<typeof activationStatus>>;
   plan(identity: z.infer<typeof companyIdentity> | null): Promise<z.infer<typeof settingsPlan>>;
 }

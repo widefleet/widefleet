@@ -44,7 +44,7 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
         ...environment.environment,
         LOGIN_CODE_DELIVERY: "console",
         WIDEFLEET_TEST_DNS_FILE: dnsFile,
-        // Exercise editable preferences while keeping all reporting disabled.
+        // Keep the saved usage opt-out effective without an environment override.
         PLATFORM_USAGE_REPORTING: undefined,
         NODE_ENV: "production",
         HOST: "127.0.0.1",
@@ -88,11 +88,11 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
     await page.getByRole("button", { name: "Create account and continue" }).click();
     await expect(page).toHaveURL(/\/sign-in\?/);
     await expect(page.getByLabel("Email", { exact: true })).toHaveValue("sso@example.test");
-    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.getByRole("button", { name: "Continue with email", exact: true }).click();
     await expect.poll(() => logs.match(/code is (\d{6})/)?.[1]).toBeTruthy();
     const otp = z.string().parse(logs.match(/code is (\d{6})/)?.[1]);
     await page.getByLabel("Sign-in code", { exact: true }).fill(otp);
-    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    await page.getByRole("button", { name: "Verify and sign in", exact: true }).click();
     await expect(page).toHaveURL(/\/settings$/);
     await expect(page.getByRole("button", { name: "Activate Widefleet sign-in" })).toBeVisible();
     environment.authControl.available(true);
@@ -101,21 +101,18 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
     await page.goto("/welcome");
     await expect(page.getByRole("heading", { name: "Publish your first app" })).toBeVisible();
     await page.getByRole("link", { name: "Organization settings", exact: true }).click();
-    await page.getByRole("link", { name: "Privacy", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Improve Widefleet" })).toBeVisible();
-    await expect(page.getByLabel("Share usage and configuration")).toBeEnabled();
-    await expect(page.getByLabel("Share usage and configuration")).not.toBeChecked();
-    await expect(page.getByLabel("Share error reports")).not.toBeChecked();
-    await expect(page.getByLabel("Share error reports")).toBeDisabled();
-    await page.getByRole("button", { name: "Save telemetry settings" }).click();
-    await expect(page.getByText("Telemetry settings saved.", { exact: true })).toBeVisible();
-    await page.reload();
-    await expect(page.getByLabel("Share usage and configuration")).not.toBeChecked();
-    await page.getByRole("button", { name: "View usage report" }).click();
-    await expect(page.getByRole("textbox", { name: "Usage report preview" })).toHaveValue(
-      /installation_snapshot/,
+    await expect(page.getByRole("link", { name: "Privacy", exact: true })).toHaveCount(0);
+    await page.goto("/settings?section=reporting");
+    await expect(page.getByRole("link", { name: "Company sign-in", exact: true })).toHaveAttribute(
+      "aria-current",
+      "page",
     );
-    await page.getByRole("link", { name: "Company sign-in", exact: true }).click();
+    const reporting = await page.request.get("/api/v1/reporting");
+    expect(reporting.ok()).toBe(true);
+    expect(await reporting.json()).toMatchObject({
+      preferences: { usage: false },
+      effective: { usage: false, crashes: false },
+    });
     await page.getByRole("button", { name: "Configure company SSO", exact: true }).click();
     await page.getByLabel("Company email domain").fill("example.test");
     await page
@@ -123,7 +120,7 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
       .fill(
         `${environment.environment.ENTRA_AUTHORITY}/${environment.environment.ENTRA_TENANT_ID}/v2.0`,
       );
-    await page.getByLabel("App identity claims").selectOption("entra");
+    await page.getByLabel("App identity provider").selectOption("entra");
     await expect(
       page.getByText("http://localhost:25430/api/auth/sso/callback/company-widefleet", {
         exact: true,

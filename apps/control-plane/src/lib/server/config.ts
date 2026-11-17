@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { analyticsEnvironmentSchema } from "../analytics-config.ts";
 import { artifactStorageSchema } from "./storage/config.ts";
+import { socialSignInConfiguration } from "./social-sign-in.ts";
 
 const telemetryUrl = z.url().refine((value) => {
   const url = new URL(value);
@@ -16,6 +17,7 @@ const telemetryUrl = z.url().refine((value) => {
 }, "Expected an HTTP(S) origin without credentials, path, query or fragment");
 
 export const runtimeConfigurationSchema = z.object({
+  ...socialSignInConfiguration.shape,
   ...analyticsEnvironmentSchema.shape,
   DATABASE_URL: z.url(),
   PLATFORM_USAGE_REPORTING: z
@@ -57,6 +59,7 @@ export const runtimeConfigurationSchema = z.object({
   APP_DOMAIN: z.string().regex(/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/),
   APP_HTTPS_PORT: z.coerce.number().int().min(1).max(65535).default(443),
   BETTER_AUTH_SECRET: z.string().min(32).optional(),
+  GITHUB_TOKEN: z.string().trim().optional(),
   PLATFORM_STATE_DIRECTORY: z.string().min(1).default("/var/lib/widefleet"),
   PLATFORM_APP_RUNTIME_URL: telemetryUrl.default("http://runtime:8080"),
   PLATFORM_RUNTIME_DIRECTORY: z.string().min(1).default("/var/lib/widefleet/runtime"),

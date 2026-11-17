@@ -1,4 +1,5 @@
 import type {
+  Artifacts,
   SendEmail,
   Fetcher,
   Hyperdrive,
@@ -10,12 +11,13 @@ import type {
 import { z } from "zod";
 import { runtimeConfigurationSchema } from "./config.ts";
 import type { cloudflareAppOperation } from "./cloudflare-app-operation-command.ts";
-import type { deploymentWorkflowCommand } from "./cloudflare-connector-command.ts";
+import type { deploymentWorkflowCommand } from "./deployment-workflow-command.ts";
 import type { CloudflareAuthRateLimitBindings } from "./auth-rate-limit-cloudflare.ts";
 
 export interface CloudflareBindings extends CloudflareAuthRateLimitBindings {
   [binding: string]:
     | string
+    | Artifacts
     | Fetcher
     | Hyperdrive
     | R2Bucket
@@ -33,6 +35,7 @@ export interface CloudflareBindings extends CloudflareAuthRateLimitBindings {
   LOGIN_CODE_DELIVERY?: string;
   APP_DOMAIN: string;
   BETTER_AUTH_SECRET: string;
+  GITHUB_TOKEN?: string;
   PLATFORM_ENCRYPTION_KEY: string;
   DEPLOYMENTS?: Workflow<z.infer<typeof deploymentWorkflowCommand>>;
   APP_OPERATIONS?: Workflow<z.infer<typeof cloudflareAppOperation>>;

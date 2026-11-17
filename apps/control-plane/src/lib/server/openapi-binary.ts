@@ -1,27 +1,14 @@
 import { toOpenAPISchema, type OpenAPIGenerator } from "@orpc/openapi";
 import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
-import {
-  deployment,
-  workerMetadata,
-  connectorUploadMetadata,
-  connectorStatus,
-  appSlug,
-} from "@platform/contracts";
+import { deployment, workerMetadata } from "@platform/contracts";
 
 const converter = new ZodToJsonSchemaConverter();
 
 export const binarySchemas = {
-  ConnectorName: toOpenAPISchema(converter.convert(appSlug, { strategy: "input" })[1]),
   WorkerUploadMetadata: toOpenAPISchema(
     converter.convert(workerMetadata, { strategy: "input" })[1],
   ),
   QueuedDeployment: toOpenAPISchema(converter.convert(deployment, { strategy: "output" })[1]),
-  ConnectorUploadMetadata: toOpenAPISchema(
-    converter.convert(connectorUploadMetadata, { strategy: "input" })[1],
-  ),
-  ConnectorDeploymentStatus: toOpenAPISchema(
-    converter.convert(connectorStatus, { strategy: "output" })[1],
-  ),
 };
 
 const workerRequestBody = (metadata: string) => ({
@@ -43,35 +30,25 @@ const workerUploadDescription =
   "Use one metadata field containing JSON and one file part per module, named after that module. Source maps are private artifacts referenced by metadata.debug.source_maps, never public assets or runtime modules. Up to 32 runtime modules and 500 source maps, 20 MiB per file, 64 KiB of UTF-8 metadata and 100 MiB per request.";
 
 export const binaryPaths = {
-  "/connectors/{name}": {
-    put: {
-      operationId: "connectorDeploy",
-      summary: "Upload connector modules and queue activation",
-      description: `${workerUploadDescription} Supported MIME types: application/javascript+module, application/wasm, text/plain, application/octet-stream, application/source-map+json. Requires platform:write scope and administrator access. The connector name comes from the path. Repeating the same Idempotency-Key and content returns the original deployment; changed content conflicts. Use a new key to retry a failed deployment.`,
+  "/apps/{appId}/icon": {
+    get: {
+      operationId: "getAppIcon",
+      summary: "Read the managed app's favicon from its active deployment",
+      description:
+        "Returns a conventional SVG, ICO or PNG favicon from uploaded assets, up to 256 KiB. Requires app management access. Missing icons return 404.",
       parameters: [
-        {
-          name: "name",
-          in: "path",
-          required: true,
-          schema: { $ref: "#/components/schemas/ConnectorName" },
-        },
-        {
-          name: "Idempotency-Key",
-          in: "header",
-          required: true,
-          schema: { type: "string", format: "uuid" },
-        },
+        { name: "appId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
       ],
-      requestBody: workerRequestBody("ConnectorUploadMetadata"),
       responses: {
         "200": {
-          description: "Connector deployment accepted",
+          description: "App icon",
           content: {
-            "application/json": {
-              schema: { $ref: "#/components/schemas/ConnectorDeploymentStatus" },
-            },
+            "image/svg+xml": { schema: { type: "string", format: "binary" } },
+            "image/x-icon": { schema: { type: "string", format: "binary" } },
+            "image/png": { schema: { type: "string", format: "binary" } },
           },
         },
+        "404": { description: "No accessible active app icon" },
       },
     },
   },
@@ -181,13 +158,6 @@ export const binaryPaths = {
       operationId: "downloadModule",
       summary: "Download a module belonging to the job's artifact with an active agent lease",
       parameters: [
-        {
-          name: "connector",
-          in: "query",
-          required: false,
-          schema: { $ref: "#/components/schemas/ConnectorName" },
-          description: "Select a connector manifest pinned to this job; omit for the app artifact.",
-        },
         { name: "jobId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
         {
           name: "sha256",

@@ -1,4 +1,4 @@
-use crate::{apps, auth, connector};
+use crate::{app_bindings, apps, auth};
 use clap::Args;
 use platform_core::{
     Result,
@@ -35,8 +35,8 @@ struct Resource {
 struct Connections {
     deployment_id: Option<Uuid>,
     resources: Vec<Resource>,
-    connectors: connector::Bindings,
-    active_connectors: Option<BTreeMap<String, CapabilityGrant>>,
+    connections: app_bindings::Bindings,
+    active_connections: Option<BTreeMap<String, CapabilityGrant>>,
 }
 
 pub async fn run(api: &Api, credentials: &auth::Credentials, options: Options) -> Result<()> {
@@ -51,12 +51,12 @@ pub async fn run(api: &Api, credentials: &auth::Credentials, options: Options) -
     if options.json || !std::io::stdout().is_terminal() {
         return crate::print_json(&connections);
     }
-    connector::show_bindings(&connections.connectors, false)?;
-    println!("Active connector bindings:");
-    match &connections.active_connectors {
+    app_bindings::show_bindings(&connections.connections, false)?;
+    println!("Active connections:");
+    match &connections.active_connections {
         Some(grants) => {
             for (binding, grant) in grants {
-                println!("  {binding} → {} ({})", grant.connector, grant.entrypoint);
+                println!("  {binding} → {} ({})", grant.app, grant.entrypoint);
             }
             if grants.is_empty() {
                 println!("  None");

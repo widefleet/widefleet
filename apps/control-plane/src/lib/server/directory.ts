@@ -33,6 +33,12 @@ const createCompanyDirectory = (
   let pendingToken: Promise<string> | undefined;
 
   const credentials = () => {
+    if (identity?.provider.type === "google")
+      throw new DirectoryUnavailable({
+        message:
+          "For Google Workspace, enter the group's email address directly in the app's allowed groups.",
+      });
+
     if (!identity || identity.provider.type !== "entra" || !identity.directory)
       throw new DirectoryUnavailable({
         message:

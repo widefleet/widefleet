@@ -2,9 +2,8 @@ import { createCloudflareRemoval } from "./cloudflare-removal-admission.ts";
 import { validateAppQueues } from "./cloudflare-app-package.ts";
 import { createCloudflareRuntimeReleases } from "./cloudflare-runtime-releases.ts";
 import { resolveCloudflareCapabilities } from "./cloudflare-capabilities.ts";
-import { createCloudflareConnectors } from "./cloudflare-connectors.ts";
-import { validateCapabilityChange } from "./connector-changes.ts";
-import { deploymentWorkflowCommand } from "./cloudflare-connector-command.ts";
+import { validateCapabilityChange } from "./capability-changes.ts";
+import { deploymentWorkflowCommand } from "./deployment-workflow-command.ts";
 import { acceptCloudflareWorkflow } from "./cloudflare-admission.ts";
 import { createCloudflareAppOperations } from "./cloudflare-app-operations.ts";
 import * as contract from "@platform/contracts";
@@ -67,18 +66,29 @@ export const createCloudflareExecution = (
   return {
     runtime: createCloudflareRuntimeReleases(bindings, database, storage),
     remove: createCloudflareRemoval(bindings, database),
-    connectors: {
-      ...createCloudflareConnectors(bindings, database, storage),
-      bind: async (actor, appId, name, grant) => {
+    connections: {
+      bind: async (actor, appId, name, grant, requestId) => {
         const valid = await transact(database, (transaction) =>
-          validateCapabilityChange(transaction, actor, appId, name, grant, false),
+          validateCapabilityChange(
+            transaction,
+            actor,
+            appId,
+            name,
+            grant,
+            false,
+            requestId ? { requestId } : undefined,
+          ),
         );
 
         if (valid.isErr()) return valid;
 
         const accepted = await admit({
           kind: "capabilities",
+          // A pending request may have an earlier rejected or stopped attempt. Give
+          // each approval attempt its own workflow; the request is consumed atomically
+          // with the binding, so only one accepted attempt can change it.
           id: crypto.randomUUID(),
+          connectionRequestId: requestId,
           appId,
           name,
           grant,
@@ -123,7 +133,7 @@ export const createCloudflareExecution = (
         catch: (cause) =>
           new StorageUnavailable({ message: "Cloudflare deployment status is unavailable", cause }),
       }),
-    deploy: async (deployment, requestId, rollback = false, actor) => {
+    deploy: async (deployment, requestId, rollback = false, actor, options) => {
       const valid = await transact(database, async (transaction) => {
         const [artifact] = await transaction
           .select()
@@ -170,6 +180,8 @@ export const createCloudflareExecution = (
         requestId,
         rollback,
       };
+
+      if (options?.refreshSecrets) input.refreshSecrets = true;
 
       if (actor)
         input.attribution = { userId: actor.id, organizationId: actor.application.organizationId };

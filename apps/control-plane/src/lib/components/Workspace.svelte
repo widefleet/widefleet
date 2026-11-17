@@ -19,9 +19,9 @@
   import { resetClientContext } from "#lib/analytics-client";
   import { authClient } from "#lib/auth-client";
   import { setWorkspaceContext } from "#lib/workspace-context";
-  import { Button } from "#shadcn/components/ui/button/index.js";
-  import * as DropdownMenu from "#shadcn/components/ui/dropdown-menu/index.js";
-  import Brand from "./Brand.svelte";
+  import { Button } from "@platform/ui/button";
+  import * as DropdownMenu from "@platform/ui/dropdown-menu";
+  import Brand from "@platform/ui/brand";
   import Feedback from "./Feedback.svelte";
 
   let {
@@ -60,7 +60,7 @@
   const navigation = [
     { href: "/", label: "All apps", icon: Layers2 },
     { href: "/catalog", label: "App catalog", icon: LayoutGrid },
-    { href: "/connectors", label: "Connectors", icon: Plug },
+    { href: "/services", label: "App APIs", icon: Plug },
     { href: "/members", label: "Members", icon: Users },
     { href: "/agents", label: "Deployment agents", icon: Server },
     { href: "/settings", label: "Settings", icon: Settings2 },
@@ -199,7 +199,6 @@
           >{section}</span
         >
       </div>
-      <span class="text-muted-foreground hidden text-xs md:block">Widefleet</span>
       <details bind:open={mobileOpen} class="group relative md:hidden">
         <summary
           bind:this={mobileTrigger}

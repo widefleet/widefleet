@@ -8,7 +8,9 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { bootstrapConfiguration, runtimeRelease } from "@platform/contracts";
 import { getPlatformProxy } from "wrangler";
 import { z } from "zod";
+import { managedOAuthConfiguration } from "@platform/app-runtime/oauth";
 import { cloudflareConfigurationSchema } from "../src/lib/server/cloudflare-config.ts";
+import { socialSignInConfiguration } from "../src/lib/server/social-sign-in.ts";
 import type { CloudflareBindings } from "../src/lib/server/cloudflare-config.ts";
 import { createCloudflareProvisioner } from "../src/lib/server/cloudflare-provisioning.ts";
 import {
@@ -48,6 +50,21 @@ const installation = await readHostedInstallation(z.string().parse(positionals[0
 
 const names = hostedResourceNames(installation);
 
+const socialCredentials = socialSignInConfiguration.parse(process.env);
+
+const managedOAuth = process.env["WIDEFLEET_OAUTH"]
+  ? managedOAuthConfiguration.parse(JSON.parse(process.env["WIDEFLEET_OAUTH"]))
+  : null;
+
+if (managedOAuth) {
+  const url = new URL(managedOAuth.origin);
+  const suffix = `.${installation.appDomain}`;
+  const label = url.hostname.slice(0, -suffix.length);
+
+  if (!url.hostname.endsWith(suffix) || !/^[a-z0-9-]+$/.test(label) || url.port)
+    throw new Error("Managed OAuth origin must be a single subdomain of the runtime app domain");
+}
+
 const secrets = z
   .object({
     CLOUDFLARE_ACCOUNT_ID: hostedResourceIds.shape.account,
@@ -59,7 +76,7 @@ const secrets = z
     BETTER_AUTH_SECRET: z.string().min(32),
     PLATFORM_ENCRYPTION_KEY: z.string().min(32),
     WIDEFLEET_CONTROL_TOKEN: z.string().min(32),
-    WIDEFLEET_CONNECTOR_KEY: z.string().regex(/^[a-f0-9]{64}$/),
+    WIDEFLEET_SECRETS_KEY: z.string().regex(/^[a-f0-9]{64}$/),
     APP_COOKIE_SECRET: z.string().min(32),
     PLATFORM_BOOTSTRAP: z
       .string()
@@ -96,7 +113,8 @@ const controlSecretOverrides = z
   );
 
 for (const name of Object.keys(controlSecretOverrides))
-  if (name in secrets) throw new Error(`Additional control-plane secrets cannot replace ${name}`);
+  if (name in secrets || name in socialSignInConfiguration.shape)
+    throw new Error(`Additional control-plane secrets cannot replace ${name}`);
 
 const bootstrap = secrets.PLATFORM_BOOTSTRAP
   ? bootstrapConfiguration.parse(JSON.parse(secrets.PLATFORM_BOOTSTRAP))
@@ -104,6 +122,7 @@ const bootstrap = secrets.PLATFORM_BOOTSTRAP
 
 const configuration = cloudflareConfigurationSchema.parse({
   ...secrets,
+  ...socialCredentials,
   PLATFORM_URL: installation.platformUrl,
   APP_DOMAIN: installation.appDomain,
   LOGIN_CODE_DELIVERY: process.env["LOGIN_CODE_DELIVERY"],
@@ -146,6 +165,7 @@ const password = decodeURIComponent(new URL(secrets.DATABASE_URL).password);
 
 const sensitive = [
   ...Object.values(secrets),
+  ...Object.values(socialCredentials),
   ...Object.values(controlSecretOverrides),
   password,
 ].flatMap((value) => (value ? [value, JSON.stringify(value).slice(1, -1)] : []));
@@ -239,7 +259,9 @@ try {
     "runtime-secrets.json",
     JSON.stringify({
       WIDEFLEET_CONTROL_TOKEN: secrets.WIDEFLEET_CONTROL_TOKEN,
-      WIDEFLEET_CONNECTOR_KEY: secrets.WIDEFLEET_CONNECTOR_KEY,
+      WIDEFLEET_SECRETS_KEY: secrets.WIDEFLEET_SECRETS_KEY,
+      // Empty explicitly disables the provider configuration on a subsequent deployment.
+      WIDEFLEET_OAUTH: managedOAuth ? JSON.stringify(managedOAuth) : "",
     }),
   );
 
@@ -247,6 +269,7 @@ try {
     "control-secrets.json",
     JSON.stringify({
       ...controlSecretOverrides,
+      ...socialCredentials,
       BETTER_AUTH_SECRET: secrets.BETTER_AUTH_SECRET,
       PLATFORM_ENCRYPTION_KEY: secrets.PLATFORM_ENCRYPTION_KEY,
       APP_COOKIE_SECRET: secrets.APP_COOKIE_SECRET,

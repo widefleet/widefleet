@@ -55,20 +55,6 @@ export const cloudflareRuntimeBindings = pgTable("cloudflare_runtime_bindings", 
   pending: jsonb(),
 });
 
-export const connectors = pgTable(
-  "connector",
-  {
-    organizationId: text("organization_id")
-      .notNull()
-      .references(() => organization.id),
-    name: text().notNull(),
-    package: jsonb().notNull(),
-    appliedPackage: jsonb("applied_package"),
-    jobId: uuid("job_id").notNull(),
-  },
-  (table) => [primaryKey({ columns: [table.organizationId, table.name] })],
-);
-
 export const agents = pgTable("agent", {
   id: uuid().primaryKey(),
   organizationId: text("organization_id")
@@ -87,6 +73,9 @@ export const apps = pgTable(
     id: uuid().primaryKey(),
     slug: text().notNull(),
     displayName: text("display_name").notNull(),
+    serviceAccessMode: text("service_access_mode", { enum: ["approval_required", "organization"] })
+      .notNull()
+      .default("approval_required"),
     catalogListed: boolean("catalog_listed").notNull().default(false),
     parentId: uuid("parent_id"),
     organizationId: text("organization_id")
@@ -98,6 +87,12 @@ export const apps = pgTable(
       .notNull()
       .default("created"),
     activeDeploymentId: uuid("active_deployment_id"),
+    sourceBranch: text("source_branch"),
+    webEnabled: boolean("web_enabled").notNull().default(true),
+    secrets: jsonb().notNull().default({}),
+    secretRevision: integer("secret_revision").notNull().default(0),
+    appliedSecretRevision: integer("applied_secret_revision"),
+    secretDeploymentId: uuid("secret_deployment_id"),
     accessGroups: jsonb("access_groups").notNull().default([]),
     accessRevision: integer("access_revision").notNull().default(0),
     appliedAccessRevision: integer("applied_access_revision"),
@@ -115,6 +110,10 @@ export const apps = pgTable(
     removedAt: timestamp("removed_at", { withTimezone: true }),
   },
   (table) => [
+    check(
+      "app_service_access_mode_check",
+      sql`${table.serviceAccessMode} IN ('approval_required', 'organization')`,
+    ),
     index("app_parent_idx").on(table.parentId),
     uniqueIndex("app_organization_slug_unique")
       .on(table.organizationId, table.slug)
@@ -136,6 +135,41 @@ export const appGrants = pgTable(
       .references(() => user.id, { onDelete: "cascade" }),
   },
   (table) => [primaryKey({ columns: [table.appId, table.userId] })],
+);
+
+export const connectionRequests = pgTable(
+  "connection_request",
+  {
+    id: uuid().primaryKey(),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organization.id),
+    appId: uuid("app_id")
+      .notNull()
+      .references(() => apps.id, { onDelete: "cascade" }),
+    serviceId: uuid("service_id")
+      .notNull()
+      .references(() => apps.id, { onDelete: "cascade" }),
+    binding: text().notNull(),
+    entrypoint: text().notNull(),
+    requesterId: text("requester_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    status: text({ enum: ["pending", "approved", "rejected"] })
+      .notNull()
+      .default("pending"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "connection_request_status_check",
+      sql`${table.status} IN ('pending', 'approved', 'rejected')`,
+    ),
+    index("connection_request_organization_idx").on(table.organizationId),
+    uniqueIndex("connection_request_pending_binding_idx")
+      .on(table.appId, table.binding)
+      .where(sql`${table.status} = 'pending'`),
+  ],
 );
 
 export const uploadSessions = pgTable(
@@ -197,7 +231,7 @@ export const jobs = pgTable(
     agentId: uuid("agent_id").references(() => agents.id),
     deploymentId: uuid("deployment_id").references(() => deployments.id),
     kind: text({
-      enum: ["deploy", "runtime", "connector", "delete", "configure", "migrations", "workflows"],
+      enum: ["deploy", "runtime", "delete", "configure", "migrations", "workflows"],
     }).notNull(),
     migration: jsonb(),
     workflow: jsonb(),
@@ -205,8 +239,7 @@ export const jobs = pgTable(
     access: jsonb(),
     network: jsonb(),
     capabilities: jsonb(),
-    connector: jsonb(),
-    connectors: jsonb().notNull().default([]),
+    appSecrets: jsonb("app_secrets"),
     runtime: jsonb(),
     state: text({ enum: ["queued", "running", "succeeded", "failed"] })
       .notNull()

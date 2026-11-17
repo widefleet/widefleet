@@ -4,7 +4,6 @@ import type { Metadata } from "./types.ts";
 declare const WIDEFLEET_CONFIGURATION: {
   metadata: Pick<Metadata, "bindings">;
   capabilities?: string[];
-  objects?: { name: string; class_name: string; scope: string }[];
 };
 
 export const config = WIDEFLEET_CONFIGURATION;

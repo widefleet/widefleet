@@ -6,6 +6,7 @@ import type { OrganizationAccess } from "./application-context.ts";
 import type { Configuration } from "./config.ts";
 import type { Database } from "./database.ts";
 import type { SendEmail } from "./email.ts";
+import type { SourceBackend } from "./source-backend.ts";
 import type { CreateOrganization } from "./onboarding.ts";
 
 export interface AuthenticationExtension {
@@ -16,6 +17,7 @@ export interface AuthenticationExtension {
 }
 
 export interface RuntimeExtension {
+  source?: SourceBackend;
   authentication?: AuthenticationExtension;
   organizationAccess?: OrganizationAccess;
   sendEmail?: SendEmail;

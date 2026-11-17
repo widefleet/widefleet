@@ -2,6 +2,11 @@ name: Check suites
 
 on:
   workflow_call:
+    inputs:
+      full-checks:
+        description: Run service suites in addition to the native CLI packages
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -10,8 +15,11 @@ permissions:
 jobs:
   cli-platforms:
     uses: ./.github/workflows/cli-platforms.yaml
+    with:
+      canary: true
 
   checks:
+    if: inputs.full-checks
     name: ${{ matrix.suite }}
     runs-on: ubuntu-24.04
     strategy:
@@ -82,9 +90,9 @@ jobs:
       - name: Test dynamic app isolation and native capabilities
         if: matrix.suite == 'integration'
         run: RUN_DYNAMIC_TESTS=1 pnpm exec vitest run apps/control-plane/tests/runtime/dynamic.test.ts apps/control-plane/tests/runtime/workflows.test.ts apps/control-plane/tests/runtime/workflow-adapter.test.ts
-      - name: Test dynamic connector publication and state in both runtimes
+      - name: Test app services and private secrets in both runtimes
         if: matrix.suite == 'integration'
-        run: RUN_CONNECTOR_TESTS=1 pnpm exec vitest run apps/control-plane/tests/dynamic-connectors.test.ts
+        run: RUN_SERVICE_TESTS=1 pnpm exec vitest run apps/control-plane/tests/app-services-runtime.test.ts
       - name: Test services and identity boundaries
         if: matrix.suite == 'integration'
         run: pnpm exec vitest run
@@ -97,6 +105,20 @@ jobs:
       - name: Test browser login and management
         if: matrix.suite == 'integration'
         run: pnpm --filter @platform/control-plane test:e2e --grep-invert cli-login.spec.ts
+      - name: Test source storage in the browser
+        if: matrix.suite == 'integration'
+        run: |
+          WIDEFLEET_RUNTIME_EXTENSION="$GITHUB_WORKSPACE/apps/control-plane/tests/e2e/source-extension.ts" pnpm --filter @platform/control-plane build
+          RUN_SOURCE_TESTS=1 pnpm --filter @platform/control-plane test:e2e source.spec.ts
+      - name: Save source UI review images
+        if: always() && matrix.suite == 'integration'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: source-ui-review
+          path: .local/playwright/source-*/
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: ignore
       - name: Build the control-plane image
         if: matrix.suite == 'packaged-runtime'
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -151,7 +173,7 @@ jobs:
           cargo clippy --workspace --all-targets -- -D warnings
           cargo test --workspace
           cargo build --workspace
-          RUN_CLI_TESTS=1 pnpm exec vitest run apps/control-plane/tests/cli.test.ts apps/control-plane/tests/network-cli.test.ts apps/control-plane/tests/access-cli.test.ts apps/control-plane/tests/connector-cli.test.ts apps/control-plane/tests/connector-scope.integration.test.ts apps/control-plane/tests/workflows-cli.test.ts apps/control-plane/tests/auth-cli.test.ts apps/control-plane/tests/configuration-cli.test.ts apps/control-plane/tests/discovery-cli.test.ts apps/control-plane/tests/auth-cli.integration.test.ts apps/control-plane/tests/organization-selection.integration.test.ts apps/control-plane/tests/organization-login.integration.test.ts apps/control-plane/tests/reporting-cli.test.ts
+          RUN_CLI_TESTS=1 pnpm exec vitest run apps/control-plane/tests/cli.test.ts apps/control-plane/tests/network-cli.test.ts apps/control-plane/tests/access-cli.test.ts apps/control-plane/tests/app-services-cli.test.ts apps/control-plane/tests/service-documentation.test.ts apps/control-plane/tests/app-services.integration.test.ts apps/control-plane/tests/workflows-cli.test.ts apps/control-plane/tests/auth-cli.test.ts apps/control-plane/tests/configuration-cli.test.ts apps/control-plane/tests/discovery-cli.test.ts apps/control-plane/tests/auth-cli.integration.test.ts apps/control-plane/tests/organization-selection.integration.test.ts apps/control-plane/tests/organization-login.integration.test.ts apps/control-plane/tests/reporting-cli.test.ts
       - name: Test CLI login through the browser
         if: matrix.suite == 'rust-runtime'
         run: pnpm --filter @platform/control-plane test:e2e cli-login.spec.ts

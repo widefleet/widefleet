@@ -1,12 +1,28 @@
 ---
 title: Installation
 description: Set up the Widefleet CLI and create an app for an existing installation.
-lastModified: 2026-10-23
+lastModified: 2026-10-29
 ---
 
 Use the Widefleet CLI to create and deploy apps from your own machine. You need
 access to a Widefleet installation; if you do not have one yet, start with the
 [local quickstart](/getting-started/quickstart).
+
+## Create or join an organization
+
+Open your installation's sign-in page and follow your invitation or company
+sign-in. If **Create an account** is available, enter your name and email and
+confirm the six-digit code sent to your inbox.
+
+Choose an organization or select **Create organization** when offered. Enter a
+name and a URL name using lowercase letters, numbers and hyphens; the URL name
+appears in app addresses. **Publish your first app** then shows the connection
+and deployment commands for your workspace. If setup asks you to retry, repeat
+the action to finish preparing that organization.
+
+Installing Widefleet yourself? Start with
+[first setup](/self-hosting/installation#infrastructure-and-first-start), then
+invite colleagues or configure company sign-in.
 
 ## Install the CLI
 

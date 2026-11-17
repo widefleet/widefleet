@@ -1,3 +1,5 @@
+import { requireAvailableHostname } from "./hostnames.ts";
+import { checkServiceConsumers } from "./app-services.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
 import { and, desc, eq, exists, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
@@ -89,6 +91,8 @@ export const enqueueAppRemoval = async (
 
   if (pending.length === 0) return;
 
+  for (const app of pending) await checkServiceConsumers(transaction, app, []);
+
   await transaction
     .update(apps)
     .set({ state: "deleting" })
@@ -122,6 +126,7 @@ export const presentApp = (record: typeof apps.$inferSelect, configuration: Conf
     slug: record.slug,
     displayName: record.displayName,
     catalogListed: record.catalogListed,
+    web: record.webEnabled,
     parentId: record.parentId,
     organizationId: record.organizationId,
     hostname: record.hostname,
@@ -129,6 +134,17 @@ export const presentApp = (record: typeof apps.$inferSelect, configuration: Conf
     state: record.state,
     activeDeploymentId: record.activeDeploymentId,
     createdAt: record.createdAt.toISOString(),
+  });
+
+const presentAppSource = (
+  app: Pick<typeof apps.$inferSelect, "parentId" | "sourceBranch">,
+  deployed: z.infer<typeof contract.sourceRevision> | null,
+  supported: boolean,
+) =>
+  contract.appSourceSummary.parse({
+    supported,
+    branch: app.parentId ? app.sourceBranch : "main",
+    deployed,
   });
 
 export const presentDeployment = (record: typeof deployments.$inferSelect) =>
@@ -166,6 +182,19 @@ export const enqueueDeployment = async (
 
     return Result.ok(presentDeployment(existing));
   }
+
+  const [artifact] = await transaction
+    .select({ metadata: artifacts.metadata })
+    .from(artifacts)
+    .where(and(eq(artifacts.id, artifactId), eq(artifacts.appId, record.id)));
+
+  if (!artifact)
+    throw new InvalidOperation({ code: "NOT_FOUND", message: "App artifact not found" });
+  await checkServiceConsumers(
+    transaction,
+    record,
+    contract.workerMetadata.parse(artifact.metadata).entrypoints ?? [],
+  );
 
   const deploymentId = hosted ? operationId(record.id, requestId) : crypto.randomUUID();
 
@@ -261,13 +290,26 @@ const provisionApp = async (
     );
 
     const hostnameFor = (slug: string) =>
-      `${slug}${execution.appHostnameSuffix === null ? "" : `-${execution.appHostnameSuffix}`}.${configuration.APP_DOMAIN}`;
+      contract.workerHostname(slug, execution.appHostnameSuffix, configuration.APP_DOMAIN);
 
     let hostname = hostnameFor(input.slug);
     let accessGroups: string[] = [];
     let accessRevision = 0;
 
-    if (input.previewName !== undefined && input.parentId === null)
+    const previewName =
+      input.previewBranch === undefined
+        ? input.previewName
+        : await contract.previewNameFromBranch(input.previewBranch);
+
+    if (input.previewName !== undefined && input.previewName !== previewName)
+      return Result.err(
+        new InvalidOperation({
+          code: "BAD_REQUEST",
+          message: "A Git preview's name must be derived from its branch",
+        }),
+      );
+
+    if (previewName !== undefined && input.parentId === null)
       return Result.err(
         new InvalidOperation({
           code: "BAD_REQUEST",
@@ -295,7 +337,15 @@ const provisionApp = async (
       accessGroups = contract.appAccessGroups.parse(parent.value.accessGroups);
       accessRevision = parent.value.accessRevision;
 
-      if (input.previewName !== undefined) {
+      if (input.previewBranch === "main")
+        return Result.err(
+          new InvalidOperation({
+            code: "BAD_REQUEST",
+            message: "A preview must use a different source branch from the main app",
+          }),
+        );
+
+      if (previewName !== undefined) {
         if (
           parent.value.parentId !== null ||
           parent.value.hostname !== hostnameFor(parent.value.slug)
@@ -308,17 +358,11 @@ const provisionApp = async (
           );
 
         // A suffixed execution shares one wildcard domain for apps and named previews.
-        hostname = `${input.previewName}${execution.appHostnameSuffix === null ? "." : "-"}${parent.value.hostname}`;
+        hostname = `${previewName}${execution.appHostnameSuffix === null ? "." : "-"}${parent.value.hostname}`;
       }
     }
 
-    if (!z.hostname().safeParse(hostname).success || !URL.canParse(`https://${hostname}`))
-      return Result.err(
-        new InvalidOperation({
-          code: "BAD_REQUEST",
-          message: "The app hostname is invalid or exceeds DNS length limits",
-        }),
-      );
+    await requireAvailableHostname(transaction, hostname, configuration.APP_DOMAIN);
 
     const [record] = await transaction
       .insert(apps)
@@ -327,6 +371,7 @@ const provisionApp = async (
         slug: input.slug,
         displayName: input.displayName,
         parentId: input.parentId,
+        sourceBranch: input.previewBranch ?? null,
         accessGroups,
         accessRevision,
         organizationId: execution.organizationId,
@@ -366,6 +411,7 @@ export const createAppService = (
   configuration: Configuration,
   execution?: HostedExecution,
   observation?: Observation,
+  sourceSupported = false,
 ) => ({
   catalog: (principal: Principal) =>
     transact(database, async (transaction) => {
@@ -377,6 +423,7 @@ export const createAppService = (
             isNull(apps.removedAt),
             eq(apps.organizationId, principal.application.organizationId),
             eq(apps.catalogListed, true),
+            eq(apps.webEnabled, true),
             isNull(apps.parentId),
             eq(apps.state, "active"),
             isNotNull(apps.activeDeploymentId),
@@ -424,12 +471,23 @@ export const createAppService = (
   list: (principal: Principal) =>
     transact(database, async (transaction) => {
       const records = await transaction
-        .select()
+        .select({ app: apps, metadata: artifacts.metadata })
         .from(apps)
+        .leftJoin(deployments, eq(deployments.id, apps.activeDeploymentId))
+        .leftJoin(artifacts, eq(artifacts.id, deployments.artifactId))
         .where(appVisibility(transaction, principal))
         .orderBy(apps.slug);
 
-      return Result.ok(records.map((record) => presentApp(record, configuration)));
+      return Result.ok(
+        records.map(({ app, metadata }) => ({
+          ...presentApp(app, configuration),
+          source: presentAppSource(
+            app,
+            metadata ? (contract.workerMetadata.parse(metadata).source ?? null) : null,
+            sourceSupported,
+          ),
+        })),
+      );
     }),
   get: (principal: Principal, appId: string) =>
     transact(database, async (transaction) => {
@@ -437,7 +495,22 @@ export const createAppService = (
 
       if (record.isErr()) return record;
 
-      return Result.ok(presentApp(record.value, configuration));
+      const [active] = record.value.activeDeploymentId
+        ? await transaction
+            .select({ metadata: artifacts.metadata })
+            .from(deployments)
+            .innerJoin(artifacts, eq(artifacts.id, deployments.artifactId))
+            .where(eq(deployments.id, record.value.activeDeploymentId))
+        : [];
+
+      return Result.ok({
+        ...presentApp(record.value, configuration),
+        source: presentAppSource(
+          record.value,
+          active ? (contract.workerMetadata.parse(active.metadata).source ?? null) : null,
+          sourceSupported,
+        ),
+      });
     }),
   create: (principal: Principal, input: z.infer<typeof contract.createAppInput>) =>
     provisionApp(database, configuration, principal, input, "create", observation),

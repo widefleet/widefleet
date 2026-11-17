@@ -134,8 +134,8 @@ describe("Invited organization members with Widefleet OIDC", () => {
         createInstalledAppSignIn(
           environment.configuration,
           Buffer.alloc(32, 3).toString("base64url"),
-          async (method, body) => {
-            if (method === "PUT")
+          async (path, method, body) => {
+            if (method === "PUT" && path !== "/mcp/login")
               published.set(
                 organizationId,
                 authConfiguration.parse(JSON.parse(z.string().parse(body))),
@@ -301,8 +301,12 @@ describe("Invited organization members with Widefleet OIDC", () => {
       })
     ).unwrap();
 
-    expect((await runtime.apps.list(alpha.principal)).unwrap()).toEqual([first]);
-    expect((await runtime.apps.list(beta.principal)).unwrap()).toEqual([second]);
+    expect((await runtime.apps.list(alpha.principal)).unwrap()).toEqual([
+      { ...first, source: { supported: false, branch: "main", deployed: null } },
+    ]);
+    expect((await runtime.apps.list(beta.principal)).unwrap()).toEqual([
+      { ...second, source: { supported: false, branch: "main", deployed: null } },
+    ]);
     const logged = await login(alpha);
     expect(logged.completed.headers.get("location"), await logged.completed.clone().text()).toBe(
       logged.app,
@@ -711,7 +715,7 @@ describe("Invited organization members with Widefleet OIDC", () => {
     expect(
       (await authRequest("/sign-in/email-otp", { email: "uninvited@example.test", otp: "123456" }))
         .status,
-    ).toBe(401);
+    ).toBe(400);
   });
   it.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     "manages invitations and roles through the real CLI and shared API",

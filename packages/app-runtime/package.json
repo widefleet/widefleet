@@ -9,24 +9,42 @@
   ],
   "type": "module",
   "imports": {
-    "#runtime-extension": "./src/runtime-extension.ts"
+    "#runtime-extension": "./src/runtime-extension.ts",
+    "#mcp-ui": {
+      "types": "./src/ui/render.ts",
+      "default": "./dist/mcp-ui/index.js"
+    }
   },
   "exports": {
     "./release": "./dist/release.json",
     "./network": "./src/network.ts",
     "./logs": "./src/cloudflare-logs.ts",
+    "./execution-limits": "./src/execution-limits.ts",
+    "./oauth": "./src/oauth-protocol.ts",
+    "./workload": "./src/workload-protocol.ts",
     "./runtime-extension": "./src/runtime-extension.ts"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && svelte-check --tsconfig ./tsconfig.ui.json",
     "build": "node build.ts"
   },
   "dependencies": {
+    "@cloudflare/workers-oauth-provider": "1.2.4",
+    "@modelcontextprotocol/server": "2.4.0",
+    "@opencode/codemode": "2.3.0",
     "@platform/auth-proxy": "workspace:*",
     "@platform/contracts": "workspace:*",
+    "@platform/ui": "workspace:*",
+    "effect": "4.1.0",
+    "jose": "6.2.10",
     "zod": "4.6.5"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "5.20261003.1"
+    "@cloudflare/workers-types": "5.20261003.1",
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
+    "@tailwindcss/vite": "4.3.3",
+    "svelte": "5.57.1",
+    "svelte-check": "4.7.6",
+    "vite": "8.3.2"
   }
 }

@@ -78,6 +78,22 @@ const matrix = ["local", "external"].flatMap((database) =>
 describe.runIf(process.env["RUN_INSTALLATION_TESTS"] === "1")(
   "supported Compose installations",
   () => {
+    it("shares the workload issuer's domain and HTTPS port between bootstrap and agent deployments", async () => {
+      for (const port of ["443", "25453"]) {
+        const { services } = await render(["compose.base", "compose.azure"], {
+          ...installationSettings,
+          APP_HTTPS_PORT: port,
+        });
+
+        for (const name of ["control-plane", "runtime", "agent"]) {
+          expect(services[name]?.environment["APP_DOMAIN"]).toBe(
+            installationSettings["APP_DOMAIN"],
+          );
+          expect(services[name]?.environment["APP_HTTPS_PORT"]).toBe(port);
+        }
+      }
+    });
+
     it("starts without identity settings and separates shared proxy state from the database", async () => {
       const { services } = await render(["compose.base", "compose.azure"]);
       const control = serviceSchema.parse(services["control-plane"]);
@@ -91,6 +107,21 @@ describe.runIf(process.env["RUN_INSTALLATION_TESTS"] === "1")(
       ).toBe(runtime.volumes.find((mount) => mount.target === "/runtime-config")?.source);
       expect(control.volumes.some((mount) => mount.target.includes("docker.sock"))).toBe(false);
       expect(services).not.toHaveProperty("configure-edge");
+    });
+
+    it("keeps the catalog token in the control-plane environment", async () => {
+      const { services } = await render(["compose.base", "compose.azure"], {
+        ...installationSettings,
+        GITHUB_TOKEN: "fixture-catalog-token",
+      });
+
+      const control = serviceSchema.parse(services["control-plane"]);
+      expect(configurationSchema.parse(control.environment).GITHUB_TOKEN).toBe(
+        "fixture-catalog-token",
+      );
+
+      for (const name of ["runtime", "agent", "proxy"])
+        expect(services[name]?.environment).not.toHaveProperty("GITHUB_TOKEN");
     });
 
     it.each(matrix)(

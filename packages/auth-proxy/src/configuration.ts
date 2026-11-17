@@ -1,4 +1,4 @@
-import { companyProvider, organizationIdentifier } from "@platform/contracts";
+import { companyProvider, googleGroupsScope, organizationIdentifier } from "@platform/contracts";
 import { base64url } from "jose";
 import { z } from "zod";
 
@@ -7,6 +7,7 @@ const hostname = z.string().regex(/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{
 export const authConfiguration = z
   .strictObject({
     organizationId: organizationIdentifier,
+    organizationName: z.string().min(1).max(256).optional(),
     provider: companyProvider,
     scopes: z.array(z.string()).optional(),
     clientId: z.string().min(1).max(512),
@@ -48,11 +49,16 @@ export const sessionVersion = async (configuration: AuthConfiguration) => {
   // Changing the identity source must invalidate identities issued by the old
   // provider. Rotating only its client secret does not change existing users.
   const source = JSON.stringify({
+    sessionFormat: 2,
     organizationId: configuration.organizationId,
     provider: configuration.provider,
     clientId: configuration.clientId,
     redirectUrl: configuration.redirectUrl,
     domain: configuration.domain,
+    googleGroups:
+      configuration.provider.type === "google"
+        ? (configuration.scopes?.includes(googleGroupsScope) ?? false)
+        : undefined,
   });
 
   return base64url.encode(

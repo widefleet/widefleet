@@ -194,7 +194,8 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
         capabilities: {
           OBSERVE: {
             organizationId: crypto.randomUUID(),
-            connector: "observe",
+            app: "00000000-0000-4000-8000-000000000099",
+            hostname: "service.apps.example.test",
             entrypoint: "default",
           },
         },
@@ -223,7 +224,7 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
             } }), { headers: { 'content-type': 'application/json' } });
           }
         }
-        export class ConnectorGateway extends WorkerEntrypoint {
+        export class AppService extends WorkerEntrypoint {
           async invoke(method, [id, label]) { return (await fetch(${JSON.stringify(observeOrigin)} + '/record?' + new URLSearchParams({ id, label }))).json(); }
         }
         export default { async fetch(request, env, ctx) {
@@ -248,7 +249,7 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
             const source = ${JSON.stringify(applicationSource)}.replace('(a + next.payload.add) * 2', '(a + next.payload.add) * 3');
             const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(source))), byte => byte.toString(16).padStart(2, '0')).join('');
             next.modules = [{ ...next.modules[0], sha256: hash, size: new TextEncoder().encode(source).length }];
-            if (new URL(request.url).searchParams.has('keepConnector')) next.capabilities = previous.capabilities;
+            if (new URL(request.url).searchParams.has('keepService')) next.capabilities = previous.capabilities;
             await env.WIDEFLEET_PACKAGES.put('apps/${appId}/modules/' + hash, source);
             await env.WIDEFLEET_PACKAGES.put('versions/${appId}/' + next.version + '.json', JSON.stringify(next));
             await env.WIDEFLEET_PACKAGES.put('hosts/fixture.apps.example.test.json', JSON.stringify(next));
@@ -789,7 +790,7 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
     it("pins code versions while new instances use the newly published code", async () => {
       const old = await create("sequential");
       await status(old, "waiting");
-      expect((await fetch(`${origin}/fixture/deploy?keepConnector=1`)).ok).toBe(true);
+      expect((await fetch(`${origin}/fixture/deploy?keepService=1`)).ok).toBe(true);
       const next = await create("sequential");
       await status(next, "waiting");
       await stop(true);
@@ -801,7 +802,7 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
       expect((await fetch(`${origin}/fixture/init`)).ok).toBe(true);
     });
 
-    it("applies connector revocation when a pinned Workflow resumes", async () => {
+    it("applies app connection revocation when a pinned Workflow resumes", async () => {
       const id = await create("permissions");
       await status(id, "waiting");
       expect((await fetch(`${origin}/fixture/deploy`)).ok).toBe(true);
@@ -809,7 +810,7 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
       await start();
       await call("continue", id);
       expect(await status(id, "complete")).toMatchObject({
-        output: { connector: false, secret: null },
+        output: { connected: false, secret: null },
       });
       expect((await fetch(`${origin}/fixture/init`)).ok).toBe(true);
     });

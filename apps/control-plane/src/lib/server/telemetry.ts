@@ -9,8 +9,7 @@ import type { Configuration } from "./config.ts";
 import type { Database } from "./database.ts";
 import { InvalidOperation, TelemetryNotConfigured, TelemetryUnavailable } from "./errors.ts";
 import type { Principal } from "./identity.ts";
-import { apps, artifacts, connectors, deployments, organizationRuntimes } from "./schema.ts";
-import { connectorAdministrator } from "./connector-changes.ts";
+import { apps, artifacts, deployments } from "./schema.ts";
 import { createSymbolicator } from "./source-maps.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import { readBody } from "./upload-body.ts";
@@ -36,7 +35,6 @@ const storedLog = z.object({
   stack: z.string(),
   buildId: z.string(),
   deploymentId: z.string(),
-  connectorVersion: z.string(),
   requestId: z.string(),
   traceId: z.string(),
   spanId: z.string(),
@@ -49,18 +47,7 @@ const badRequest = (message: string) => new InvalidOperation({ code: "BAD_REQUES
 
 const nullable = (value: string) => value || null;
 
-const connectorTarget = z.object({
-  organizationId: contract.organizationIdentifier,
-  name: contract.appSlug,
-});
-
-export const connectorLogService = (target: z.infer<typeof connectorTarget>) =>
-  `connector:${target.organizationId}:${target.name}`;
-
-export const runtimeLogQuery = z.union([
-  contract.logQuery,
-  contract.connectorLogQuery.extend({ organizationId: contract.organizationIdentifier }),
-]);
+export const runtimeLogQuery = contract.logQuery;
 
 const maxRange = 30 * 86_400_000;
 
@@ -155,10 +142,10 @@ export const createTelemetry = (
 
   const ingest = async (
     request: Request,
-    target: z.infer<typeof contract.appPath> | z.infer<typeof connectorTarget>,
+    target: z.infer<typeof contract.appPath>,
     signal: "logs" | "traces",
   ) => {
-    const service = "appId" in target ? target.appId : connectorLogService(target);
+    const service = target.appId;
     const expected = credentials(service)?.token;
     const supplied = request.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
 
@@ -177,23 +164,11 @@ export const createTelemetry = (
     inflight++;
 
     try {
-      const [source] =
-        "appId" in target
-          ? await database
-              .select({ id: apps.id })
-              .from(apps)
-              .where(and(eq(apps.id, target.appId), ne(apps.state, "deleting")))
-              .limit(1)
-          : await database
-              .select({ id: connectors.name })
-              .from(connectors)
-              .where(
-                and(
-                  eq(connectors.organizationId, target.organizationId),
-                  eq(connectors.name, target.name),
-                ),
-              )
-              .limit(1);
+      const [source] = await database
+        .select({ id: apps.id })
+        .from(apps)
+        .where(and(eq(apps.id, target.appId), ne(apps.state, "deleting")))
+        .limit(1);
 
       if (!source) return new Response("Telemetry source is unavailable", { status: 403 });
 
@@ -219,9 +194,7 @@ export const createTelemetry = (
           headers: {
             "content-type": contentType,
             "x-widefleet-service-id": service,
-            "x-widefleet-app-id": "appId" in target ? target.appId : "",
-            "x-widefleet-organization-id": "appId" in target ? "" : target.organizationId,
-            "x-widefleet-connector": "appId" in target ? "" : target.name,
+            "x-widefleet-app-id": target.appId,
           },
           signal: AbortSignal.timeout(8000),
         },
@@ -250,34 +223,13 @@ export const createTelemetry = (
   const query = (principal: Principal, input: z.infer<typeof runtimeLogQuery>) =>
     Result.tryPromise({
       try: async () => {
-        if ("appId" in input) {
-          const [app] = await database
-            .select({ id: apps.id })
-            .from(apps)
-            .where(and(eq(apps.id, input.appId), appVisibility(database, principal)))
-            .limit(1);
+        const [app] = await database
+          .select({ id: apps.id })
+          .from(apps)
+          .where(and(eq(apps.id, input.appId), appVisibility(database, principal)))
+          .limit(1);
 
-          if (!app) throw new InvalidOperation({ code: "NOT_FOUND", message: "App not found" });
-        } else {
-          connectorAdministrator(principal);
-
-          if (input.organizationId !== principal.application.organizationId)
-            throw new InvalidOperation({ code: "NOT_FOUND", message: "Connector not found" });
-
-          const [connector] = await database
-            .select({ name: connectors.name })
-            .from(connectors)
-            .where(
-              and(
-                eq(connectors.organizationId, input.organizationId),
-                eq(connectors.name, input.name),
-              ),
-            )
-            .limit(1);
-
-          if (!connector)
-            throw new InvalidOperation({ code: "NOT_FOUND", message: "Connector not found" });
-        }
+        if (!app) throw new InvalidOperation({ code: "NOT_FOUND", message: "App not found" });
 
         const symbolicate = createSymbolicator(database, storage, input);
 
@@ -313,7 +265,7 @@ export const createTelemetry = (
 
         let deploymentBuild = "";
 
-        if ("appId" in input && input.deploymentId) {
+        if (input.deploymentId) {
           const [deployment] = await database
             .select({ metadata: artifacts.metadata })
             .from(deployments)
@@ -374,7 +326,7 @@ export const createTelemetry = (
         if (!through) throw new Error("Missing ClickHouse watermark");
 
         const parameters = new Map([
-          ["app", "appId" in input ? input.appId : connectorLogService(input)],
+          ["app", input.appId],
           ["since", since],
           ["until", until],
           ["through", through],
@@ -418,12 +370,7 @@ export const createTelemetry = (
           conditions.push("l.TraceId = {trace:String}");
         }
 
-        if (!("appId" in input) && input.version) {
-          parameters.set("version", input.version);
-          conditions.push("JSONExtractString(l.Body, 'connectorVersion') = {version:String}");
-        }
-
-        if ("appId" in input && input.deploymentId) {
+        if (input.deploymentId) {
           parameters.set("deployment", input.deploymentId);
           parameters.set("deploymentBuild", deploymentBuild);
           conditions.push(
@@ -448,7 +395,6 @@ export const createTelemetry = (
         toString(toUnixTimestamp64Micro(l.ReceivedAt)) AS receivedAt,
         l.SeverityNumber AS severity, l.Source AS source, l.Kind AS kind,
         l.Message AS message, l.Stack AS stack,
-        JSONExtractString(l.Body, 'connectorVersion') AS connectorVersion,
         if(l.Source = 'browser' OR l.BuildId != '', l.BuildId, c.build) AS buildId,
         if(l.Source = 'browser' OR l.DeploymentId != '', l.DeploymentId, c.deployment) AS deploymentId,
         if(l.RequestId != '', l.RequestId, c.request) AS requestId,
@@ -491,7 +437,6 @@ export const createTelemetry = (
               stack: nullable(row.stack) ?? (/\n\s*at\s/.test(row.message) ? row.message : null),
               buildId: nullable(row.buildId),
               deploymentId: contract.identifier.safeParse(row.deploymentId).data ?? null,
-              connectorVersion: contract.identifier.safeParse(row.connectorVersion).data ?? null,
               requestId: nullable(row.requestId),
               traceId: nullable(row.traceId),
               spanId: nullable(row.spanId),
@@ -529,39 +474,5 @@ export const createTelemetry = (
             }),
     });
 
-  const queryConnector = async (
-    principal: Principal,
-    input: z.infer<typeof contract.connectorLogQuery>,
-  ) => {
-    const target = await Result.tryPromise({
-      try: async () => {
-        connectorAdministrator(principal);
-
-        const [execution] = await database
-          .select({ organizationId: organizationRuntimes.organizationId })
-          .from(organizationRuntimes)
-          .where(eq(organizationRuntimes.organizationId, principal.application.organizationId))
-          .limit(1);
-
-        if (!execution)
-          throw new InvalidOperation({
-            code: "NOT_FOUND",
-            message: "Organization runtime not found",
-          });
-
-        return { ...input, organizationId: execution.organizationId };
-      },
-      catch: (cause) =>
-        cause instanceof InvalidOperation
-          ? cause
-          : new TelemetryUnavailable({
-              message: "Runtime logs are temporarily unavailable. Please try again later.",
-              cause,
-            }),
-    });
-
-    return target.isErr() ? target : query(principal, target.value);
-  };
-
-  return { credentials, ingest, query, queryConnector };
+  return { credentials, ingest, query };
 };

@@ -1,7 +1,8 @@
-name: Publish Widefleet
+name: Check and publish Widefleet
 
 on:
   push:
+    branches: [main]
     tags: ["v*"]
 
 permissions:
@@ -12,6 +13,7 @@ cache-mode: none
 concurrency:
   group: publish-widefleet-${{ github.ref }}
   cancel-in-progress: false
+  queue: max
 
 defaults:
   run:
@@ -25,7 +27,7 @@ env:
 
 jobs:
   prepare:
-    if: github.repository == 'widefleet/widefleet'
+    if: github.repository == 'widefleet/widefleet' && startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
     runs-on: ubuntu-24.04
@@ -269,3 +271,81 @@ jobs:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: bash tools/sync-dockerhub-overviews.sh
+
+  main-changes:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    outputs:
+      checks: ${{ steps.changes.outputs.checks }}
+      canary: ${{ steps.changes.outputs.canary }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select checks and publication from the complete push
+        id: changes
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: python3 tools/check-main-changes.py
+
+  main-checks:
+    needs: main-changes
+    if: needs.main-changes.outputs.checks == 'true' || needs.main-changes.outputs.canary == 'true'
+    cache-mode: write
+    uses: ./.github/workflows/check-suites.yaml
+    with:
+      full-checks: ${{ needs.main-changes.outputs.checks == 'true' }}
+
+  source-and-integration:
+    name: Main source and integration
+    needs: [main-changes, main-checks]
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every selected check to pass
+        env:
+          CHANGES_RESULT: ${{ needs.main-changes.result }}
+          CHECKS_RESULT: ${{ needs.main-checks.result }}
+          RUN_CHECKS: ${{ needs.main-changes.outputs.checks }}
+          CANARY: ${{ needs.main-changes.outputs.canary }}
+        run: |
+          [[ "$CHANGES_RESULT" == success ]]
+          case "$RUN_CHECKS:$CANARY:$CHECKS_RESULT" in
+            true:true:success|true:false:success|false:true:success|false:false:skipped) ;;
+            *) exit 1 ;;
+          esac
+
+  publish-canary:
+    name: Publish CLI to npm canary
+    needs: [main-changes, main-checks, source-and-integration]
+    if: github.repository == 'widefleet/widefleet' && github.ref == 'refs/heads/main' && needs.main-changes.outputs.canary == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 26.8.2
+          package-manager-cache: false
+      - name: Resolve the tested canary version
+        run: |
+          python3 tools/prepare-cli-canary.py
+          echo "CLI_RELEASE_DIRECTORY=$RUNNER_TEMP/cli" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: cli-*
+          merge-multiple: true
+          path: ${{ env.CLI_RELEASE_DIRECTORY }}
+      - name: Publish the tested packages exclusively to canary
+        env:
+          NPM_DIST_TAG: canary
+        run: |
+          npm install --global pnpm@12.4.2
+          bash tools/publish-cli.sh

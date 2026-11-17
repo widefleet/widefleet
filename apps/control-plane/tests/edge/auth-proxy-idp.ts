@@ -11,6 +11,7 @@ const authorization = z.object({
   nonce: z.string().min(1).optional(),
   code_challenge: z.string().min(1),
   code_challenge_method: z.literal("S256"),
+  access_type: z.string().optional(),
 });
 
 export const tenantId = "00000000-0000-4000-8000-000000000001";
@@ -20,30 +21,51 @@ export const objectId = "00000000-0000-4000-8000-000000000002";
 export const createIdentityProvider = async (
   redirectUrl: string | string[] = "https://auth.apps.example.test/oauth2/widefleet/callback",
   requireNonce = true,
+  browser?: { hostname: string },
 ) => {
   const keys = await generateKeyPair("RS256", { extractable: true });
   const wrongKeys = await generateKeyPair("RS256");
   const publicKey = { ...(await exportJWK(keys.publicKey)), kid: "test", alg: "RS256", use: "sig" };
-  const codes = new Map<string, z.infer<typeof authorization>>();
+  const codes = new Map<string, z.infer<typeof authorization> & { person?: "Alice" | "Bob" }>();
+  const refreshes = new Map<string, z.infer<typeof authorization> & { person?: "Alice" | "Bob" }>();
+  const replays = new Map<string, { response: string; expiresAt: number }>();
+  let queue = Promise.resolve();
 
   const settings = {
     available: true,
     failure: "",
     entra: false,
+    entraAuthority: "",
+    google: false,
+    workspaceDomain: "example.test",
     groups: ["accounting"],
     name: "Example User",
+    subject: "pairwise-subject",
     email: "user@example.test",
     graphFailure: "",
     issuerSuffix: "",
+    refreshFailure: "",
+    rotateRefreshTokens: false,
+    refreshReplaySeconds: 30,
+    issueRefreshToken: true,
+    omitRefreshIdToken: false,
+    grantedScopes: "",
+    omitRefreshScopes: false,
   };
 
   const graphRequests: string[] = [];
   const tokenOrigins: (string | undefined)[] = [];
+  const refreshRequests: string[] = [];
 
   const server = createServer((request, response) => {
     const handle = async () => {
       const url = new URL(request.url ?? "/", origin);
-      const issuer = settings.entra ? `${origin}/${tenantId}/v2.0` : origin + settings.issuerSuffix;
+
+      const issuer = settings.google
+        ? "https://accounts.google.com"
+        : settings.entra
+          ? `${settings.entraAuthority || origin}/${tenantId}/v2.0`
+          : origin + settings.issuerSuffix;
 
       response.setHeader("content-type", "application/json");
 
@@ -57,7 +79,7 @@ export const createIdentityProvider = async (
         response.end(
           JSON.stringify({
             issuer,
-            authorization_endpoint: `${origin}/authorize`,
+            authorization_endpoint: `${browser ? origin.replace("127.0.0.1", browser.hostname) : origin}/authorize`,
             token_endpoint: `${origin}/token`,
             jwks_uri: `${origin}/jwks`,
             response_types_supported: ["code"],
@@ -72,6 +94,26 @@ export const createIdentityProvider = async (
       } else if (url.pathname === "/authorize") {
         const parameters = authorization.parse(Object.fromEntries(url.searchParams));
 
+        if (browser && request.method === "GET") {
+          response.setHeader("content-type", "text/html; charset=utf-8");
+          response.end(
+            `<!doctype html><html lang="de"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Firmenanmeldung</title><style>body{font:17px system-ui;max-width:600px;margin:80px auto;padding:24px}button{font:inherit;padding:12px 18px;margin:8px;cursor:pointer}</style><h1>Firmenanmeldung</h1><p>Lokaler OIDC-Testanbieter für Widefleet. Wähle eine Testidentität:</p><form method="post"><button name="person" value="Alice">Als Alice anmelden</button><button name="person" value="Bob">Als Bob anmelden</button></form></html>`,
+          );
+
+          return;
+        }
+
+        let person: "Alice" | "Bob" | undefined;
+
+        if (browser) {
+          const chunks: Buffer[] = [];
+
+          for await (const chunk of request) chunks.push(z.instanceof(Buffer).parse(chunk));
+          person = z
+            .enum(["Alice", "Bob"])
+            .parse(new URLSearchParams(Buffer.concat(chunks).toString()).get("person"));
+        }
+
         if (requireNonce && !parameters.nonce) throw new Error("Missing OIDC nonce");
 
         if (
@@ -82,7 +124,7 @@ export const createIdentityProvider = async (
           throw new Error("Unexpected callback URL");
         const code = randomUUID();
 
-        codes.set(code, parameters);
+        codes.set(code, person ? { ...parameters, person } : parameters);
         const target = new URL(parameters.redirect_uri);
 
         target.searchParams.set("state", parameters.state);
@@ -102,7 +144,43 @@ export const createIdentityProvider = async (
 
         for await (const chunk of request) chunks.push(z.instanceof(Buffer).parse(chunk));
         const fields = new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
-        const parameters = codes.get(fields.get("code") ?? "");
+        const refreshing = fields.get("grant_type") === "refresh_token";
+        const credential = fields.get("refresh_token") ?? "";
+
+        const parameters = refreshing
+          ? refreshes.get(credential)
+          : codes.get(fields.get("code") ?? "");
+
+        if (refreshing) {
+          refreshRequests.push(credential);
+
+          const replay = settings.rotateRefreshTokens ? replays.get(credential) : undefined;
+
+          if (
+            replay &&
+            fields.get("client_id") === "app-login" &&
+            fields.get("client_secret") === "synthetic-client-secret"
+          ) {
+            if (replay.expiresAt > Date.now()) response.end(replay.response);
+            else response.writeHead(400).end(JSON.stringify({ error: "invalid_grant" }));
+
+            return;
+          }
+
+          if (settings.refreshFailure) {
+            response
+              .writeHead(
+                settings.refreshFailure === "invalid_grant"
+                  ? 400
+                  : settings.refreshFailure === "access_denied"
+                    ? 403
+                    : 503,
+              )
+              .end(JSON.stringify({ error: settings.refreshFailure }));
+
+            return;
+          }
+        }
 
         codes.delete(fields.get("code") ?? "");
 
@@ -110,10 +188,11 @@ export const createIdentityProvider = async (
           !parameters ||
           fields.get("client_id") !== "app-login" ||
           fields.get("client_secret") !== "synthetic-client-secret" ||
-          fields.get("redirect_uri") !== parameters.redirect_uri ||
-          createHash("sha256")
-            .update(fields.get("code_verifier") ?? "")
-            .digest("base64url") !== parameters.code_challenge
+          (!refreshing &&
+            (fields.get("redirect_uri") !== parameters.redirect_uri ||
+              createHash("sha256")
+                .update(fields.get("code_verifier") ?? "")
+                .digest("base64url") !== parameters.code_challenge))
         ) {
           response.writeHead(400).end(JSON.stringify({ error: "invalid_grant" }));
 
@@ -123,6 +202,7 @@ export const createIdentityProvider = async (
         const claims = new SignJWT({
           nonce: settings.failure === "nonce" ? "wrong-nonce" : parameters.nonce,
           email_verified: settings.failure !== "email",
+          hd: settings.google ? settings.workspaceDomain : undefined,
           ...(settings.entra
             ? {
                 oid: objectId,
@@ -133,9 +213,9 @@ export const createIdentityProvider = async (
                 _claim_sources: { src1: { endpoint: "https://untrusted.example.test/groups" } },
               }
             : {
-                display_name: settings.name,
+                display_name: parameters.person ?? settings.name,
                 mail: settings.email,
-                name: settings.name,
+                name: parameters.person ?? settings.name,
                 email: settings.email,
                 roles: settings.groups,
               }),
@@ -151,7 +231,7 @@ export const createIdentityProvider = async (
                 : issuer,
           )
           .setAudience(settings.failure === "audience" ? "other-app" : "app-login")
-          .setSubject("pairwise-subject");
+          .setSubject(parameters.person?.toLowerCase() ?? settings.subject);
 
         if (settings.failure !== "missing-issued-at") claims.setIssuedAt();
 
@@ -162,17 +242,44 @@ export const createIdentityProvider = async (
           settings.failure === "signature" ? wrongKeys.privateKey : keys.privateKey,
         );
 
-        response.end(
-          JSON.stringify({
-            access_token: "fixture-access-token",
-            refresh_token: "fixture-refresh-token",
-            token_type: "Bearer",
-            expires_in: 3600,
-            id_token: settings.failure === "missing-token" ? undefined : token,
-          }),
-        );
+        const refreshToken = randomUUID();
+        refreshes.set(refreshToken, parameters);
+
+        const result = JSON.stringify({
+          access_token: "fixture-access-token",
+          refresh_token:
+            settings.issueRefreshToken && (!settings.google || parameters.access_type === "offline")
+              ? refreshToken
+              : undefined,
+          token_type: "Bearer",
+          scope:
+            refreshing && settings.omitRefreshScopes
+              ? undefined
+              : settings.grantedScopes || undefined,
+          expires_in: 3600,
+          id_token:
+            settings.failure === "missing-token" || (refreshing && settings.omitRefreshIdToken)
+              ? undefined
+              : token,
+        });
+
+        if (refreshing && settings.rotateRefreshTokens) {
+          refreshes.delete(credential);
+          replays.set(credential, {
+            response: result,
+            expiresAt: Date.now() + settings.refreshReplaySeconds * 1000,
+          });
+        }
+
+        response.end(result);
       } else if (url.pathname === "/v1.0/me/transitiveMemberOf") {
         graphRequests.push(url.href);
+
+        if (settings.graphFailure === "throttled") {
+          response.writeHead(429, { "Retry-After": "5" }).end();
+
+          return;
+        }
 
         if (
           request.headers.authorization !== "Bearer fixture-access-token" ||
@@ -199,10 +306,12 @@ export const createIdentityProvider = async (
       } else response.writeHead(404).end();
     };
 
-    void handle().catch(() => response.writeHead(500).end());
+    queue = queue.then(handle).catch(() => {
+      response.writeHead(500).end();
+    });
   });
 
-  server.listen(0, "127.0.0.1");
+  server.listen(0, browser?.hostname ?? "127.0.0.1");
   await once(server, "listening");
   const origin = `http://127.0.0.1:${z.object({ port: z.number() }).parse(server.address()).port}`;
 
@@ -211,6 +320,7 @@ export const createIdentityProvider = async (
     settings,
     graphRequests,
     tokenOrigins,
+    refreshRequests,
     stop: () =>
       new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve())),

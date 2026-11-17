@@ -53,6 +53,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
   let state: string;
   let accessToken: string;
   let managementHeaders: Headers;
+  let managementUserId: string;
   let agentToken: string;
   let organizationId: string;
   let dockerHost: string;
@@ -72,6 +73,8 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
 
   const clientEnvironment = {
     ...process.env,
+    // CPU-heavy documentation must not starve the CLI's HTTP connection tasks.
+    TOKIO_WORKER_THREADS: "1",
     PATH: (process.env["PATH"] ?? "")
       .split(delimiter)
       .filter((entry) => !entry.startsWith(root))
@@ -171,6 +174,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       email: "runtime@example.test",
     });
 
+    managementUserId = person.id;
     await environment.users.saveUser(person);
     await environment.linkMicrosoftUser(person.id, z.uuid().parse(environment.ownerSubject));
     managementHeaders = new Headers((await environment.users.login({ userId: person.id })).headers);
@@ -709,7 +713,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     const pointer = await before.Body?.transformToString();
     await manageRuntime("/runtime", runtime);
     await expect(agent(undefined, undefined, binary)).rejects.toThrow(
-      "Publisher binary requires celld 0.6.2",
+      "Publisher binary requires celld 0.6.3-widefleet.1",
     );
 
     const after = await s3.send(
@@ -843,374 +847,6 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     await agent();
   }, 120000);
 
-  it("deploys an independent dynamic connector with RPC, durable state and safe revocation", async () => {
-    const project = join(state, "independent connector");
-    await mkdir(project);
-
-    // These private identifiers collided with the former appended platform helper.
-    const source = `import { WorkerEntrypoint as WIDEFLEET_SecretEntrypoint, DurableObject } from 'cloudflare:workers';
-      export class ErpConnection extends DurableObject {
-        async next() { const value = (await this.ctx.storage.get('sequence') ?? 0) + 1; await this.ctx.storage.put('sequence', value); return value; }
-      }
-      class WIDEFLEET_Secrets extends WIDEFLEET_SecretEntrypoint {
-        async listCustomers() { return { customers: ['fixture'], sequence: await this.env.STATE.getByName('connection').next(), rootBinding: 'WIDEFLEET_PACKAGES' in this.env }; }
-        async secretProbe() { try { return { value: await this.env.WIDEFLEET_SECRETS.get('API_KEY') }; } catch (error) { return { error: error.message }; } }
-        async storageProbe() {
-          await this.env.DB.exec('CREATE TABLE IF NOT EXISTS connector_marker (id INTEGER PRIMARY KEY, value TEXT)');
-          await this.env.DB.prepare('INSERT OR REPLACE INTO connector_marker VALUES (1, ?)').bind('connector').run();
-          await this.env.KV.put('marker', 'connector');
-          await this.env.FILES.put('marker', 'connector');
-          return { db: await this.env.DB.prepare('SELECT value FROM connector_marker').first('value'), kv: await this.env.KV.get('marker'), file: await (await this.env.FILES.get('marker')).text() };
-        }
-      }
-      export { WIDEFLEET_Secrets as ERP };
-      export default WIDEFLEET_Secrets;`;
-
-    await writeFile(join(project, "worker.ts"), source);
-    const config = join(project, "wrangler.jsonc");
-    await writeFile(
-      config,
-      JSON.stringify({
-        name: "erp-fixture",
-        main: "worker.ts",
-        compatibility_date: "2026-10-01",
-        vars: { API_KEY: "ordinary-variable-is-not-a-secret" },
-        d1_databases: [{ binding: "DB", database_name: "notes", database_id: "local" }],
-        kv_namespaces: [{ binding: "KV", id: "fixture" }],
-        r2_buckets: [{ binding: "FILES", bucket_name: "files" }],
-        durable_objects: { bindings: [{ name: "STATE", class_name: "ErpConnection" }] },
-        migrations: [{ tag: "v1", new_sqlite_classes: ["ErpConnection"] }],
-      }),
-    );
-    const deploy = () => cli("connector", "deploy", "--config", config, "--no-wait");
-    expect(JSON.parse((await deploy()).stdout)).toMatchObject({
-      name: "erp-fixture",
-      state: "queued",
-      entrypoints: ["ERP", "default"],
-    });
-    await agent();
-    expect(JSON.parse((await cli("connector", "show", "erp-fixture")).stdout)).toMatchObject({
-      state: "succeeded",
-    });
-    const app = await createApp("connector-consumer");
-    await publish(
-      app.id,
-      "before",
-      `export default { async fetch(request, env) {
-        if (new URL(request.url).pathname === '/secret') return Response.json({ connector: await env.ERP.secretProbe(), exposed: 'WIDEFLEET_SECRETS' in env });
-        if (new URL(request.url).pathname === '/storage') {
-          await env.DB.exec('CREATE TABLE IF NOT EXISTS connector_marker (id INTEGER PRIMARY KEY, value TEXT)');
-          await env.DB.prepare('INSERT OR REPLACE INTO connector_marker VALUES (1, ?)').bind('app').run();
-          await env.KV.put('marker', 'app');
-          await env.FILES.put('marker', 'app');
-          const connector = await env.ERP.storageProbe();
-          return Response.json({ connector, app: { db: await env.DB.prepare('SELECT value FROM connector_marker').first('value'), kv: await env.KV.get('marker'), file: await (await env.FILES.get('marker')).text() } });
-        }
-        return Response.json(env.ERP ? await env.ERP.listCustomers() : { missing: true });
-      } }`,
-      [
-        { type: "d1", name: "DB", database_name: "notes" },
-        { type: "kv_namespace", name: "KV", id: "fixture" },
-        { type: "r2_bucket", name: "FILES", bucket_name: "files" },
-      ],
-    );
-    await agent();
-    expect(JSON.parse((await appRequest(app.id)).stdout)).toEqual({ missing: true });
-    expect(
-      JSON.parse((await cli("connector", "unbind", "ERP", "--app", app.slug)).stdout),
-    ).toMatchObject({
-      state: "active",
-      revision: 0,
-      appliedRevision: 0,
-      grants: {},
-    });
-    const container = `platform-execution-${organizationId}`;
-
-    const previous = (await execute("docker", ["inspect", "--format", "{{.Id}}", container]))
-      .stdout;
-
-    await cli("connector", "bind", "erp-fixture", "--as", "ERP", "--app", app.slug, "--no-wait");
-    await agent();
-    expect(JSON.parse((await appRequest(app.id)).stdout)).toEqual({
-      customers: ["fixture"],
-      sequence: 1,
-      rootBinding: false,
-    });
-    expect(
-      JSON.parse((await cli("connector", "bindings", "--app", app.slug)).stdout),
-    ).toMatchObject({
-      state: "active",
-      grants: { ERP: { connector: "erp-fixture", entrypoint: "default" } },
-    });
-
-    expect(JSON.parse((await appRequest(app.id, "GET", "/storage")).stdout)).toEqual({
-      connector: { db: "connector", kv: "connector", file: "connector" },
-      app: { db: "app", kv: "app", file: "app" },
-    });
-
-    const secretFile = join(project, "secret.txt");
-
-    const setSecret = async (value: string) => {
-      await writeFile(secretFile, value);
-      await cli(
-        "connector",
-        "secret",
-        "put",
-        "erp-fixture",
-        "API_KEY",
-        "--file",
-        secretFile,
-        "--no-wait",
-      );
-      await agent();
-    };
-
-    const secretProbe = async () =>
-      z
-        .object({
-          connector: z.union([z.object({ value: z.string() }), z.object({ error: z.string() })]),
-          exposed: z.boolean(),
-        })
-        .parse(JSON.parse((await appRequest(app.id, "GET", "/secret")).stdout));
-
-    expect(await secretProbe()).toEqual({
-      connector: { error: "Connector secret API_KEY is not configured" },
-      exposed: false,
-    });
-    await setSecret("synthetic-first-key");
-    expect(await secretProbe()).toEqual({
-      connector: { value: "synthetic-first-key" },
-      exposed: false,
-    });
-    const failedPublisher = join(state, "failed-secret-publisher");
-    await writeFile(
-      failedPublisher,
-      '#!/bin/sh\nif [ "$1" = "--version" ]; then printf "celld 0.6.2\\n"; exit 0; fi\nprintf "Synthetic secret publication failure\\n" >&2\nexit 1\n',
-      { mode: 0o755 },
-    );
-    await writeFile(secretFile, "synthetic-rejected-key");
-    await cli(
-      "connector",
-      "secret",
-      "put",
-      "erp-fixture",
-      "API_KEY",
-      "--file",
-      secretFile,
-      "--no-wait",
-    );
-    // Secret-only updates must never invoke the native publisher.
-    await agent(undefined, undefined, failedPublisher);
-    expect(await secretProbe()).toEqual({
-      connector: { value: "synthetic-rejected-key" },
-      exposed: false,
-    });
-    expect(JSON.parse((await cli("connector", "show", "erp-fixture")).stdout)).toMatchObject({
-      state: "succeeded",
-      secretRevision: 2,
-      appliedSecretRevision: 2,
-    });
-    await setSecret("synthetic-rotated-key");
-    expect(await secretProbe()).toEqual({
-      connector: { value: "synthetic-rotated-key" },
-      exposed: false,
-    });
-    await cli("connector", "secret", "delete", "erp-fixture", "API_KEY", "--no-wait");
-    await agent();
-    expect(await secretProbe()).toEqual({
-      connector: { error: "Connector secret API_KEY is not configured" },
-      exposed: false,
-    });
-    await setSecret("synthetic-current-key");
-
-    const updated = source.replace("['fixture']", "['updated']");
-    await writeFile(join(project, "worker.ts"), updated);
-    await deploy();
-    await agent();
-    expect((await execute("docker", ["inspect", "--format", "{{.Id}}", container])).stdout).toBe(
-      previous,
-    );
-    expect(JSON.parse((await appRequest(app.id)).stdout)).toEqual({
-      customers: ["updated"],
-      sequence: 2,
-      rootBinding: false,
-    });
-    expect(await secretProbe()).toEqual({
-      connector: { value: "synthetic-current-key" },
-      exposed: false,
-    });
-    await stopServer();
-    await execute("docker", ["restart", container]);
-    await vi.waitFor(
-      async () =>
-        expect(JSON.parse((await appRequest(app.id)).stdout)).toMatchObject({
-          customers: ["updated"],
-          rootBinding: false,
-        }),
-      { timeout: 45000 },
-    );
-    expect(await secretProbe()).toEqual({
-      connector: { value: "synthetic-current-key" },
-      exposed: false,
-    });
-    await startServer();
-
-    await cli(
-      "connector",
-      "bind",
-      "erp-fixture",
-      "--entrypoint",
-      "ERP",
-      "--as",
-      "ERP",
-      "--app",
-      app.slug,
-      "--no-wait",
-    );
-    await agent();
-
-    // A saved revocation is not yet permission to remove a still-serving entrypoint.
-    await cli("connector", "unbind", "ERP", "--app", app.slug, "--no-wait");
-
-    const credentials = {
-      authorization: `Bearer ${agentToken}`,
-      "content-type": "application/json",
-    };
-
-    const revocation = contract.job.parse(
-      await (
-        await fetch(`${environment.configuration.PLATFORM_URL}/api/v1/agent/jobs/claim`, {
-          method: "POST",
-          headers: credentials,
-          body: "{}",
-        })
-      ).json(),
-    );
-
-    expect(revocation.appId).toBe(app.id);
-    expect(
-      (
-        await fetch(
-          `${environment.configuration.PLATFORM_URL}/api/v1/agent/jobs/${revocation.id}/complete`,
-          {
-            method: "POST",
-            headers: credentials,
-            body: JSON.stringify({
-              leaseToken: revocation.leaseToken,
-              outcome: "failed",
-              message: "Synthetic revocation failure",
-            }),
-          },
-        )
-      ).status,
-    ).toBe(200);
-    await writeFile(join(project, "worker.ts"), updated.replace("as ERP", "as Replacement"));
-    await deploy();
-    await expect(agent()).rejects.toThrow("Activate binding revocations");
-    expect(JSON.parse((await appRequest(app.id)).stdout)).toMatchObject({ customers: ["updated"] });
-    expect(JSON.parse((await cli("connector", "show", "erp-fixture")).stdout)).toMatchObject({
-      state: "failed",
-    });
-    await cli("connector", "unbind", "ERP", "--app", app.slug, "--no-wait");
-    await agent();
-    expect(JSON.parse((await appRequest(app.id)).stdout)).toEqual({ missing: true });
-    expect(
-      JSON.parse((await cli("connector", "unbind", "ERP", "--app", app.slug)).stdout),
-    ).toMatchObject({
-      state: "active",
-      revision: 3,
-      appliedRevision: 3,
-      grants: {},
-    });
-    await deploy();
-    await agent();
-    await cli(
-      "connector",
-      "bind",
-      "erp-fixture",
-      "--entrypoint",
-      "Replacement",
-      "--as",
-      "ERP",
-      "--app",
-      app.slug,
-      "--no-wait",
-    );
-    await agent();
-    expect(JSON.parse((await appRequest(app.id)).stdout)).toMatchObject({ customers: ["updated"] });
-    await request(`/apps/${app.id}`, "DELETE");
-    await agent();
-  }, 180000);
-
-  it("isolates same-named secrets between connectors and preserves the other connector during rotation", async () => {
-    const app = await createApp("connector-secret-isolation");
-    const secretFile = join(state, "isolation-secret.txt");
-
-    const setSecret = async (connector: string, name: string, value: string) => {
-      await writeFile(secretFile, value);
-      await cli("connector", "secret", "put", connector, name, "--file", secretFile, "--no-wait");
-      await agent();
-    };
-
-    for (const [connector, binding, value] of [
-      ["secret-left", "LEFT", "synthetic-left-key"],
-      ["secret-right", "RIGHT", "synthetic-right-key"],
-    ] as const) {
-      const project = join(state, connector);
-      await mkdir(project);
-      await writeFile(
-        join(project, "worker.ts"),
-        `import { WorkerEntrypoint } from 'cloudflare:workers';
-        export default class Connector extends WorkerEntrypoint {
-          async read(name) {
-            try { return { value: await this.env.WIDEFLEET_SECRETS.get(name) }; }
-            catch (error) { return { error: error.message }; }
-          }
-        }`,
-      );
-      const config = join(project, "wrangler.jsonc");
-      await writeFile(
-        config,
-        JSON.stringify({ name: connector, main: "worker.ts", compatibility_date: "2026-10-01" }),
-      );
-      await cli("connector", "deploy", "--config", config, "--no-wait");
-      await agent();
-      await setSecret(connector, "SHARED_NAME", value);
-      await cli("connector", "bind", connector, "--as", binding, "--app", app.slug);
-      await agent();
-    }
-
-    await setSecret("secret-left", "LEFT_ONLY", "synthetic-left-only-key");
-    await publish(
-      app.id,
-      "secrets",
-      `export default { async fetch(request, env) {
-      const name = new URL(request.url).searchParams.get('name') ?? 'SHARED_NAME';
-      return Response.json({ left: await env.LEFT.read(name), right: await env.RIGHT.read(name), exposed: 'WIDEFLEET_SECRETS' in env });
-    } }`,
-      [],
-    );
-    await agent();
-    expect(JSON.parse((await appRequest(app.id)).stdout)).toEqual({
-      left: { value: "synthetic-left-key" },
-      right: { value: "synthetic-right-key" },
-      exposed: false,
-    });
-    expect(JSON.parse((await appRequest(app.id, "GET", "/?name=LEFT_ONLY")).stdout)).toEqual({
-      left: { value: "synthetic-left-only-key" },
-      right: { error: "Connector secret LEFT_ONLY is not configured" },
-      exposed: false,
-    });
-    await setSecret("secret-left", "SHARED_NAME", "synthetic-left-rotated-key");
-    expect(JSON.parse((await appRequest(app.id)).stdout)).toEqual({
-      left: { value: "synthetic-left-rotated-key" },
-      right: { value: "synthetic-right-key" },
-      exposed: false,
-    });
-    await request(`/apps/${app.id}`, "DELETE");
-    await agent();
-  }, 180000);
-
   it("installs a release outside the workspace, initializes an independent app, deploys it and saves a note and photo", async () => {
     appDirectory = join(state, "independent app");
     // The installed command must initialize offline, without a platform URL or token.
@@ -1234,7 +870,21 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       maxBuffer: 8 * 1024 * 1024,
     });
 
-    await cli("deploy", "--no-wait");
+    // Exercise connection closure during type analysis without racing the
+    // one-second status polling used by other deployment and migration commands.
+    const keepAliveTimeout = proxy.keepAliveTimeout;
+    const keepAliveTimeoutBuffer = proxy.keepAliveTimeoutBuffer;
+    proxy.keepAliveTimeout = 1000;
+    proxy.keepAliveTimeoutBuffer = 0;
+
+    try {
+      await cli("deploy", "--no-wait");
+    } finally {
+      proxy.keepAliveTimeout = keepAliveTimeout;
+      proxy.keepAliveTimeoutBuffer = keepAliveTimeoutBuffer;
+      proxy.closeIdleConnections();
+    }
+
     const apps = z.array(contract.app).parse(JSON.parse((await cli("apps")).stdout));
     expect(apps).toHaveLength(1);
     const app = contract.app.parse(apps[0]);
@@ -1343,7 +993,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     expect(z.array(contract.app).parse(JSON.parse((await cli("apps")).stdout))).toHaveLength(1);
 
     const previewResult = contract.deployment
-      .extend({ url: z.url() })
+      .extend({ url: z.url(), source: contract.sourceRevision.nullable() })
       .parse(
         JSON.parse(
           (await cli("preview", "--name", "review", "--skip-build", "--no-wait", "--json")).stdout,
@@ -1359,6 +1009,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     expect(preview.parentId).toBe(app.id);
     expect(preview.hostname).toBe(`review.${app.hostname}`);
     expect(previewResult.url).toBe(preview.url);
+    expect(previewResult.source).toBeNull();
     await agent();
 
     const previewPage = await execute("docker", [
@@ -1854,8 +1505,8 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       "consumer",
     );
 
-    // A connector DO keeps the cell runtime alive after the last app cron is
-    // removed. Its old cron cell must still be startable to retire the alarm;
+    // The old cron cell must still be startable after its subscription is
+    // removed so it can retire the alarm;
     // celld otherwise retries restoration until local storage fills up.
     const retired = await execute("docker", [
       "exec",
@@ -2915,11 +2566,22 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     const browser = await chromium.launch();
 
     try {
-      const page = await browser.newPage({
-        extraHTTPHeaders: Object.fromEntries(managementHeaders),
-      });
+      const page = await browser.newPage();
+      const login = await environment.users.login({ userId: managementUserId });
 
-      await page.goto(`${environment.configuration.PLATFORM_URL}/apps/${app.id}`);
+      await page.context().addCookies(
+        login.cookies.map((cookie) => ({
+          ...cookie,
+          domain: "localhost",
+          sameSite: "Lax",
+          secure: false,
+        })),
+      );
+
+      const appUrl = `${environment.configuration.PLATFORM_URL}/apps/${app.id}`;
+      const response = await page.goto(appUrl);
+      expect(response?.status()).toBe(200);
+      expect(page.url()).toBe(appUrl);
       await page.getByRole("link", { name: "Workflows", exact: true }).click();
       await page.getByRole("heading", { name: "Workflows", exact: true }).waitFor();
       await page.getByLabel("Action", { exact: true }).selectOption("create");

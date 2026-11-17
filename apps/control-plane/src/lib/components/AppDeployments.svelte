@@ -1,8 +1,8 @@
 <script lang="ts">
   import OrganizationField from "#shadcn/OrganizationField.svelte";
   import { getAppDetails, rollbackApp } from "#lib/apps.remote";
-  import { Button } from "#shadcn/components/ui/button/index.js";
-  import { Badge } from "#shadcn/components/ui/badge/index.js";
+  import { Button } from "@platform/ui/button";
+  import { Badge } from "@platform/ui/badge";
   import History from "@lucide/svelte/icons/history";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import FormIssues from "#shadcn/FormIssues.svelte";

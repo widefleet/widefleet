@@ -5,13 +5,13 @@ import { isDeepStrictEqual } from "node:util";
 import type { z } from "zod";
 import { acceptCloudflareWorkflow } from "./cloudflare-admission.ts";
 import type { CloudflareBindings } from "./cloudflare-config.ts";
-import { deploymentWorkflowCommand } from "./cloudflare-connector-command.ts";
+import { deploymentWorkflowCommand } from "./deployment-workflow-command.ts";
 import { cloudflareRuntimeCommand } from "./cloudflare-runtime-command.ts";
 import {
   readCloudflareRuntimeVersion,
   validateCloudflareRuntime,
 } from "./cloudflare-runtime-package.ts";
-import { administrator } from "./connector-changes.ts";
+import { administrator } from "./capability-changes.ts";
 import type { Database } from "./database.ts";
 import type { HostedExecution } from "./deployment-execution.ts";
 import { DatabaseUnavailable, InvalidOperation, StorageUnavailable } from "./errors.ts";

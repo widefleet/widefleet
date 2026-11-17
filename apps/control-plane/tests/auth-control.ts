@@ -5,11 +5,13 @@ import { join } from "node:path";
 import { z } from "zod";
 import { authConfiguration, type AuthConfiguration } from "@platform/auth-proxy";
 import { authControlPath, configurationRevision } from "@platform/auth-proxy/publication";
+import { mcpLoginConfiguration } from "@platform/auth-proxy/mcp-login";
 
 // Settings/API/browser fixtures exercise HTTP publication. Packaged tests use the real worker.
 export const createAuthControl = async (directory: string) => {
   const key = "local-auth-control-key-never-deploy";
   const configurations = new Map<string, { configuration: AuthConfiguration; revision: string }>();
+  let mcpLogin: z.infer<typeof mcpLoginConfiguration> | null = null;
   let available = true;
   let publications = 0;
 
@@ -28,6 +30,16 @@ export const createAuthControl = async (directory: string) => {
 
     if (!available) {
       response.writeHead(503).end();
+
+      return;
+    }
+
+    if (request.url === `${authControlPath}/mcp/login` && request.method === "PUT") {
+      const chunks: Buffer[] = [];
+
+      for await (const chunk of request) chunks.push(z.instanceof(Buffer).parse(chunk));
+      mcpLogin = mcpLoginConfiguration.parse(JSON.parse(Buffer.concat(chunks).toString()));
+      response.writeHead(204).end();
 
       return;
     }
@@ -84,9 +96,13 @@ export const createAuthControl = async (directory: string) => {
       configuration: configurations.get(organizationId)?.configuration ?? null,
       revision: configurations.get(organizationId)?.revision ?? "",
       publications,
+      mcpLogin,
     }),
     available: (value: boolean) => {
       available = value;
+    },
+    clearMcp: () => {
+      mcpLogin = null;
     },
     close: () =>
       new Promise<void>((resolve, reject) =>

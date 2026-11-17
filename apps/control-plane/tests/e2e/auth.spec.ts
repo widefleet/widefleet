@@ -4,8 +4,8 @@ import { createServer, request as httpRequest } from "node:http";
 import { EventEmitter, once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
-import { app, artifact } from "@platform/contracts";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import { app, artifact, workerMetadata } from "@platform/contracts";
 import {
   account,
   member,
@@ -18,14 +18,11 @@ import {
   appGrants,
   apps,
   artifacts,
-  connectors,
   deployments,
-  organizationRuntimes,
   jobs,
 } from "../../src/lib/server/schema.ts";
 import { apiResource, cliClientId } from "../../src/lib/server/auth-options.ts";
 import { createTestEnvironment } from "../environment.ts";
-import { connectorReference } from "../../src/lib/server/connector-package.ts";
 import { authConfiguration, createAuthProxy } from "@platform/auth-proxy";
 import { registerAppLogin, readAppLogin } from "../../src/lib/server/app-login-client.ts";
 
@@ -59,21 +56,29 @@ test.beforeAll(async () => {
   environment = await createTestEnvironment();
   edge.listen(25430);
   await once(edge, "listening");
-  server = spawn(process.execPath, ["build"], {
-    cwd: fileURLToPath(new URL("../../", import.meta.url)),
-    env: {
-      ...process.env,
-      ...environment.environment,
-      LOGIN_CODE_DELIVERY: "console",
-      NODE_ENV: "production",
-      HOST: "127.0.0.1",
-      PORT: "25431",
-      PROTOCOL_HEADER: "x-forwarded-proto",
-      SHUTDOWN_TIMEOUT: "1",
-      BODY_SIZE_LIMIT: "32M",
+  server = spawn(
+    process.execPath,
+    ["--import", fileURLToPath(new URL("./templates.fixture.ts", import.meta.url)), "build"],
+    {
+      cwd: fileURLToPath(new URL("../../", import.meta.url)),
+      env: {
+        ...process.env,
+        ...environment.environment,
+        LOGIN_CODE_DELIVERY: "console",
+        GOOGLE_CLIENT_ID: "synthetic-google-client",
+        GOOGLE_CLIENT_SECRET: "synthetic-google-secret",
+        MICROSOFT_CLIENT_ID: "synthetic-microsoft-client",
+        MICROSOFT_CLIENT_SECRET: "synthetic-microsoft-secret",
+        NODE_ENV: "production",
+        HOST: "127.0.0.1",
+        PORT: "25431",
+        PROTOCOL_HEADER: "x-forwarded-proto",
+        SHUTDOWN_TIMEOUT: "1",
+        BODY_SIZE_LIMIT: "32M",
+      },
+      stdio: ["ignore", "pipe", "pipe"],
     },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  );
   server.stdout?.setEncoding("utf8").on("data", (chunk: string) => {
     logs += chunk;
   });
@@ -95,6 +100,501 @@ test.beforeAll(async () => {
       { timeout: 15_000 },
     )
     .toBe(true);
+});
+
+for (const javaScriptEnabled of [true, false]) {
+  test(`connects open APIs and requests restricted APIs with JavaScript ${javaScriptEnabled}`, async ({
+    browser,
+  }, testInfo) => {
+    const creator = environment.users.createUser({
+      name: "Connection creator",
+      email: `connections-${javaScriptEnabled}@example.test`,
+    });
+
+    await environment.users.saveUser(creator);
+    await environment.linkMicrosoftUser(creator.id);
+
+    const contexts = await Promise.all(
+      [creator.id, environment.ownerId].map(async (userId) => {
+        const context = await browser.newContext({
+          javaScriptEnabled,
+          baseURL: environment.configuration.PLATFORM_URL,
+          extraHTTPHeaders: { "x-forwarded-proto": "http" },
+        });
+
+        const login = await environment.users.login({ userId });
+        await context.addCookies(
+          login.cookies.map((cookie) => ({
+            ...cookie,
+            domain: "localhost",
+            sameSite: "Lax" as const,
+            secure: false,
+          })),
+        );
+
+        return context;
+      }),
+    );
+
+    const [memberContext, adminContext] = contexts;
+
+    if (!memberContext || !adminContext) throw new Error("Missing test context");
+    const createdAppIds: string[] = [];
+
+    try {
+      const page = await memberContext.newPage();
+      const adminPage = await adminContext.newPage();
+
+      const create = async (context: typeof memberContext, slug: string, displayName: string) => {
+        const response = await context.request.post("/api/v1/apps", {
+          headers: { origin: environment.configuration.PLATFORM_URL },
+          data: { slug, displayName },
+        });
+
+        expect(response.ok()).toBe(true);
+
+        const created = app.parse(await response.json());
+        createdAppIds.push(created.id);
+
+        return created;
+      };
+
+      const source = await create(
+        memberContext,
+        `requester-${javaScriptEnabled}`,
+        `Warehouse application with a longer name ${javaScriptEnabled ? "A" : "B"}`,
+      );
+
+      const target = {
+        // A colliding UUID must also satisfy the slug's leading-letter requirement.
+        id: `a${crypto.randomUUID().slice(1)}`,
+        slug: `request-api-${javaScriptEnabled}`,
+        displayName: `Inventory and fulfillment service ${javaScriptEnabled ? "A" : "B"}`,
+      };
+
+      await environment.database.db.insert(apps).values({
+        ...target,
+        organizationId: "widefleet",
+        ownerId: environment.ownerId,
+        hostname: `${target.slug}.${environment.configuration.APP_DOMAIN}`,
+      });
+      createdAppIds.push(target.id);
+
+      const collision = await create(adminContext, target.id, "UUID-shaped slug API");
+      const deploymentId = crypto.randomUUID();
+
+      for (const provider of [target, collision]) {
+        const artifactId = crypto.randomUUID();
+        const id = provider.id === target.id ? deploymentId : crypto.randomUUID();
+        await environment.database.db.insert(artifacts).values({
+          id: artifactId,
+          appId: provider.id,
+          manifest: {},
+          modules: [],
+          metadata: workerMetadata.parse({
+            main_module: "worker.js",
+            compatibility_date: "2026-10-01",
+            entrypoints: ["Reader"],
+            assets: { upload_session: artifactId },
+          }),
+        });
+        await environment.database.db.insert(deployments).values({
+          id,
+          appId: provider.id,
+          artifactId,
+          status: "succeeded",
+          requestId: crypto.randomUUID(),
+        });
+        await environment.database.db
+          .update(apps)
+          .set({ activeDeploymentId: id })
+          .where(eq(apps.id, provider.id));
+      }
+
+      for (const service of [target.id, target.slug]) {
+        await adminPage.goto(`/services/${service}/availability`);
+        await expect(
+          adminPage.getByText(`Choose who can connect ${target.displayName} to their apps.`, {
+            exact: true,
+          }),
+        ).toBeVisible();
+        await page.goto(`/services/${service}/connect`);
+        await expect(
+          page.getByRole("heading", { name: `Connect ${target.displayName}`, exact: true }),
+        ).toBeVisible();
+      }
+
+      await page.goto("/services/requests");
+      await expect(page.getByText("No connection requests yet.")).toBeVisible();
+      await page.goto("/services");
+      await expect(page.getByText("Manage availability", { exact: true })).toHaveCount(0);
+      await expect(page.getByLabel("Binding name in your code")).toHaveCount(0);
+      await page.getByRole("link", { name: `Set up connection to ${target.displayName}` }).focus();
+      await page.keyboard.press("Enter");
+      await expect(page.getByLabel("Binding name in your code")).toHaveCount(0);
+      await page.getByLabel("Your app", { exact: true }).selectOption(source.id);
+      await page.getByRole("button", { name: "Continue", exact: true }).click();
+      await expect(page).toHaveURL(new RegExp(`/services/${target.id}/connect\\?app=${source.id}`));
+      await expect(
+        page.getByRole("heading", { name: "Request a connection", exact: true }),
+      ).toBeVisible();
+      await page.getByRole("link", { name: "Back to app selection" }).click();
+      await expect(page.getByLabel("Your app", { exact: true })).toBeVisible();
+      await page.getByLabel("Your app", { exact: true }).selectOption(source.id);
+      await page.getByRole("button", { name: "Continue", exact: true }).click();
+      await page.getByLabel("Binding name in your code").fill("ERP");
+      await page.getByRole("button", { name: "Submit request" }).click();
+      await expect(page.getByRole("heading", { name: "Request submitted" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Approve and connect" })).toHaveCount(0);
+      const requests = await memberContext.request.get("/api/v1/connection-requests");
+
+      const entries = z
+        .array(z.object({ id: z.string(), status: z.string(), serviceId: z.string() }))
+        .parse(await requests.json());
+
+      expect(entries[0]?.serviceId).toBe(target.id);
+      const id = entries[0]?.id;
+
+      if (!id) throw new Error("Missing request");
+
+      const denied = await memberContext.request.post(`/api/v1/connection-requests/${id}/approve`, {
+        headers: { origin: environment.configuration.PLATFORM_URL },
+        data: {},
+      });
+
+      expect(denied.status()).toBe(403);
+      await adminPage.goto("/services/requests");
+
+      const review = adminPage
+        .getByRole("region", {
+          name: `${source.displayName} to ${target.displayName}`,
+          exact: true,
+        })
+        .filter({ hasText: "Awaiting approval" });
+
+      for (const width of [1280, 390]) {
+        await adminPage.setViewportSize({ width, height: 900 });
+
+        for (const colorScheme of ["light", "dark"] as const) {
+          await adminPage.emulateMedia({ colorScheme });
+          await adminPage.screenshot({
+            path: testInfo.outputPath(`review-${width}-${colorScheme}.png`),
+            fullPage: true,
+          });
+          expect(
+            await adminPage.evaluate(
+              () => document.documentElement.scrollWidth <= window.innerWidth,
+            ),
+          ).toBe(true);
+        }
+      }
+
+      await review.getByRole("button", { name: "Approve and connect" }).click();
+      await expect(review).toHaveCount(0);
+      await page.reload();
+      await expect(page.getByRole("heading", { name: "Request approved" })).toBeVisible();
+      await page.getByRole("link", { name: "View app connections" }).click();
+      await expect(page.getByText("ERP", { exact: true })).toBeVisible();
+      await environment.database.db
+        .update(apps)
+        .set({ capabilityError: "Synthetic activation failure" })
+        .where(eq(apps.id, source.id));
+      await page.goto(`/apps/${source.id}/connections`);
+      await page.locator("summary").filter({ hasText: "ERP" }).click();
+
+      for (const width of [1280, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+
+        for (const colorScheme of ["light", "dark"] as const) {
+          await page.emulateMedia({ colorScheme });
+          await page.screenshot({
+            path: testInfo.outputPath(`retry-${width}-${colorScheme}.png`),
+            fullPage: true,
+          });
+          expect(
+            await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+          ).toBe(true);
+        }
+      }
+
+      await environment.database.db
+        .update(apps)
+        .set({ activeDeploymentId: null })
+        .where(eq(apps.id, target.id));
+      await page.getByRole("button", { name: "Retry connection ERP", exact: true }).click();
+      await expect(
+        page.getByRole("alert").filter({
+          hasText: "Deploy the target app's service entrypoint successfully before connecting it",
+        }),
+      ).toBeVisible();
+      await environment.database.db
+        .update(apps)
+        .set({ activeDeploymentId: deploymentId })
+        .where(eq(apps.id, target.id));
+      await page.getByRole("button", { name: "Retry connection ERP", exact: true }).click();
+      await expect(page).toHaveURL(new RegExp(`/apps/${source.id}/connections$`));
+      await expect(page.getByText("ERP", { exact: true })).toBeVisible();
+      await expect(page.getByText("Synthetic activation failure", { exact: false })).toHaveCount(0);
+      await adminPage.goto(`/services/${target.id}`);
+      await adminPage.getByRole("link", { name: "Manage availability", exact: true }).click();
+      await adminPage.getByLabel("Who can connect this API?").selectOption("organization");
+      await adminPage.getByRole("button", { name: "Save availability" }).click();
+      await expect(adminPage.getByText("Availability saved.", { exact: true })).toBeVisible();
+
+      const availability = await environment.database.db
+        .select({ id: apps.id, accessMode: apps.serviceAccessMode })
+        .from(apps)
+        .where(inArray(apps.id, [target.id, collision.id]));
+
+      expect(availability).toEqual(
+        expect.arrayContaining([
+          { id: target.id, accessMode: "organization" },
+          { id: collision.id, accessMode: "approval_required" },
+        ]),
+      );
+      await page.goto(`/services?app=${source.id}`);
+      await page.getByRole("link", { name: `Set up connection to ${target.displayName}` }).click();
+      await expect(page.getByLabel("Your app", { exact: true })).toHaveCount(0);
+      await page.getByLabel("Binding name in your code").fill("FREE");
+
+      for (const width of [1280, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+
+        for (const colorScheme of ["light", "dark"] as const) {
+          await page.emulateMedia({ colorScheme });
+          await page.screenshot({
+            path: testInfo.outputPath(`services-${width}-${colorScheme}.png`),
+            fullPage: true,
+          });
+          expect(
+            await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+          ).toBe(true);
+        }
+      }
+
+      await page.getByRole("button", { name: "Connect API", exact: true }).click();
+      await expect(
+        page.getByRole("heading", { name: "Connection saved", exact: true }),
+      ).toBeVisible();
+      await expect(page.getByText("env.FREE", { exact: true })).toBeVisible();
+      await page.getByRole("link", { name: "View app connections" }).click();
+      await expect(page).toHaveURL(new RegExp(`/apps/${source.id}/connections$`));
+      await expect(page.getByText("FREE", { exact: true })).toBeVisible();
+      await adminPage.getByLabel("Who can connect this API?").selectOption("approval_required");
+      await adminPage.getByRole("button", { name: "Save availability" }).click();
+      await expect(adminPage.getByText("Availability saved.", { exact: true })).toBeVisible();
+      await page.goto(`/services/${target.id}/connect?app=${source.id}`);
+      await page.getByLabel("Binding name in your code").fill("ERP");
+      await page.getByRole("button", { name: "Submit request" }).click();
+      await expect(page.getByRole("alert")).toContainText("Choose an unused binding name");
+      await expect(page.getByLabel("Binding name in your code")).toHaveValue("ERP");
+      await page.getByLabel("Binding name in your code").fill("REJECTED");
+      await page.getByRole("button", { name: "Submit request" }).click();
+      await expect(page.getByRole("heading", { name: "Request submitted" })).toBeVisible();
+      await adminPage.goto("/services/requests");
+      await review.getByRole("button", { name: "Reject", exact: true }).click();
+      await expect(review).toHaveCount(0);
+      await page.reload();
+      await expect(page.getByRole("heading", { name: "Request rejected" })).toBeVisible();
+      await page.goto(`/apps/${source.id}/connections`);
+
+      const freeConnection = page
+        .locator("details")
+        .filter({ has: page.locator("summary").filter({ hasText: "FREE" }) });
+
+      await freeConnection.locator("summary").click();
+      await freeConnection.getByRole("button", { name: "Disconnect", exact: true }).click();
+      await expect(page.getByText("FREE", { exact: true })).toHaveCount(0);
+      await expect(page.getByText("ERP", { exact: true })).toBeVisible();
+      const forbiddenAvailability = await page.goto(`/services/${target.id}/availability`);
+      expect(forbiddenAvailability?.status()).toBe(403);
+      const forbiddenApp = await page.goto(`/services/${target.id}/connect?app=${target.id}`);
+      expect(forbiddenApp?.status()).toBe(404);
+      await page.goto("/services/requests");
+      await page.screenshot({ path: testInfo.outputPath("request-statuses.png"), fullPage: true });
+    } finally {
+      await Promise.all(contexts.map((context) => context.close()));
+      await environment.database.db.delete(apps).where(inArray(apps.id, createdAppIds));
+      await environment.database.db.delete(user).where(eq(user.id, creator.id));
+    }
+  });
+}
+
+test("shows versioned service documentation through authenticated API and accessible pages", async ({
+  page,
+  context,
+  browser,
+}, testInfo) => {
+  const session = await environment.users.login({ userId: environment.owner.id });
+
+  const cookies = session.cookies.map((cookie) => ({
+    ...cookie,
+    domain: "localhost",
+    sameSite: "Lax" as const,
+    secure: false,
+  }));
+
+  await context.addCookies(cookies);
+
+  const created = await context.request.post("/api/v1/apps", {
+    headers: { origin: environment.configuration.PLATFORM_URL },
+    data: { slug: "documented-service", displayName: "Inventory service" },
+  });
+
+  expect(created.ok()).toBe(true);
+  const record = app.parse(await created.json());
+  const artifactId = crypto.randomUUID();
+  const deploymentId = crypto.randomUUID();
+
+  const metadata = workerMetadata.parse({
+    main_module: "worker.js",
+    compatibility_date: "2026-10-01",
+    entrypoints: ["Reader"],
+    assets: { upload_session: artifactId },
+    service_documentation: {
+      format: 1,
+      types: [
+        {
+          name: "InventoryItem",
+          definition: "type InventoryItem = { id: string; displayName: string };",
+          summary: "An inventory item.",
+          remarks: "",
+          deprecated: "Use CatalogItem when migrating callers.",
+          examples: [
+            '```ts\nconst item: InventoryItem = { id: "one", displayName: "Spare part" };\n```',
+          ],
+        },
+      ],
+      entrypoints: [
+        {
+          name: "Reader",
+          summary: "Read inventory available to the signed-in user.",
+          remarks: "",
+          examples: [],
+          http: false,
+          methods: [
+            {
+              name: "findItems",
+              summary: "Find matching items.",
+              remarks: "Results are paginated. Continue with the returned cursor.",
+              examples: [
+                '```ts\nconst result = await env.INVENTORY.findItems("spare parts");\n```',
+              ],
+              throws: [],
+              signatures: [
+                {
+                  parameters: [
+                    {
+                      name: "query",
+                      type: "string",
+                      description: "Words to search for.",
+                      optional: false,
+                      rest: false,
+                    },
+                  ],
+                  returns: {
+                    type: "Promise<Array<InventoryItem>>",
+                    description: "Matching inventory items.",
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  });
+
+  await environment.database.db
+    .insert(artifacts)
+    .values({ id: artifactId, appId: record.id, metadata, manifest: {}, modules: [] });
+  await environment.database.db.insert(deployments).values({
+    id: deploymentId,
+    appId: record.id,
+    artifactId,
+    status: "succeeded",
+    requestId: crypto.randomUUID(),
+  });
+  await environment.database.db
+    .update(apps)
+    .set({ activeDeploymentId: deploymentId })
+    .where(eq(apps.id, record.id));
+  const description = await context.request.get(`/api/v1/app-services/${record.slug}`);
+  expect(description.ok()).toBe(true);
+  expect(await description.json()).toMatchObject({
+    deploymentId,
+    documentation: metadata.service_documentation,
+  });
+  await page.goto("/services");
+  await page.getByRole("link", { name: "View API documentation", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Inventory service API", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "findItems", exact: true })).toBeVisible();
+  await expect(page.getByText("Words to search for.", { exact: false })).toBeVisible();
+  await expect(page.getByText("Deprecated: Use CatalogItem when migrating callers.")).toBeVisible();
+  await expect(
+    page.getByText('const item: InventoryItem = { id: "one", displayName: "Spare part" };'),
+  ).toBeVisible();
+
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+
+    for (const colorScheme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme });
+      await page.screenshot({
+        path: testInfo.outputPath(`api-${width}-${colorScheme}.png`),
+        fullPage: true,
+      });
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+    }
+  }
+
+  await page.getByRole("link", { name: "Back to app APIs" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/services$/);
+
+  const noScript = await browser.newContext({
+    javaScriptEnabled: false,
+    baseURL: environment.configuration.PLATFORM_URL,
+    extraHTTPHeaders: { "x-forwarded-proto": "http" },
+  });
+
+  try {
+    await noScript.addCookies(cookies);
+    const staticPage = await noScript.newPage();
+    await staticPage.goto(`/services/${record.id}`);
+    await expect(staticPage.getByRole("heading", { name: "findItems", exact: true })).toBeVisible();
+  } finally {
+    await noScript.close();
+  }
+
+  metadata.service_documentation = { format: 1, entrypoints: [], types: [] };
+  await environment.database.db
+    .update(artifacts)
+    .set({ metadata })
+    .where(eq(artifacts.id, artifactId));
+  await page.goto(`/services/${record.id}`);
+  await expect(
+    page.getByText("No API documentation was generated.", { exact: false }),
+  ).toBeVisible();
+  delete metadata.service_documentation;
+  await environment.database.db
+    .update(artifacts)
+    .set({ metadata })
+    .where(eq(artifacts.id, artifactId));
+  await page.reload();
+  await expect(
+    page.getByText("This deployment has no API documentation.", { exact: false }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: testInfo.outputPath("api-legacy-mobile-dark.png"),
+    fullPage: true,
+  });
+  const missing = await page.goto(`/services/${crypto.randomUUID()}`);
+  expect(missing?.status()).toBe(404);
 });
 
 test("completes app OAuth through the built server after signing in", async ({ page }) => {
@@ -151,12 +651,12 @@ test("completes app OAuth through the built server after signing in", async ({ p
   await page.goto(z.url().parse(started.headers.get("location")));
   await expect(page).toHaveURL(/\/sign-in\?/);
   await page.getByLabel("Email", { exact: true }).fill("owner@example.test");
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("button", { name: "Continue with email", exact: true }).click();
   await expect.poll(() => logs.match(/code is (\d{6})/)?.[1]).toBeTruthy();
   await page
     .getByLabel("Sign-in code", { exact: true })
     .fill(z.string().parse(logs.match(/code is (\d{6})/)?.[1]));
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByRole("button", { name: "Verify and sign in", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`${configuration.redirectUrl}\\?`));
 
   const cookies = (response: Response) =>
@@ -337,6 +837,18 @@ test("selects an organization, repairs stale selection and explains removed acce
     .update(authSession)
     .set({ activeOrganizationId: "unavailable" })
     .where(eq(authSession.userId, person.id));
+
+  // Page queries may run alongside the layout. Its organization-selection
+  // redirect must still reach the client when those queries reject access.
+  for (const path of ["/", "/catalog", "/catalog/templates", "/catalog/templates/gmail"]) {
+    const response = await context.request.get(`${path.replace(/\/$/, "")}/__data.json`);
+    expect(await response.json()).toEqual({
+      type: "redirect",
+      status: 303,
+      location: `/organizations?${new URLSearchParams({ next: path })}`,
+    });
+  }
+
   await page.goto("/");
   await expect(page).toHaveURL("http://localhost:25430/organizations?next=%2F");
   await page.getByRole("button", { name: "Widefleet Member" }).click();
@@ -348,264 +860,6 @@ test("selects an organization, repairs stale selection and explains removed acce
   ).toBeVisible();
   await page.getByRole("button", { name: "Sign out" }).click();
   await expect(page).toHaveURL("http://localhost:25430/sign-in");
-});
-
-test("restricts connector logs to administrators and explains missing telemetry", async ({
-  page,
-  context,
-}) => {
-  const [execution] = await environment.database.db
-    .select()
-    .from(organizationRuntimes)
-    .where(eq(organizationRuntimes.organizationId, "widefleet"));
-
-  if (!execution) throw new Error("Missing fixture execution");
-
-  const reference = connectorReference.parse({
-    name: "logging-fixture",
-    checksum: "b".repeat(64),
-    entrypoints: ["default"],
-    classes: [],
-  });
-
-  await environment.database.db.insert(connectors).values({
-    organizationId: execution.organizationId,
-    name: reference.name,
-    package: reference,
-    appliedPackage: reference,
-    jobId: crypto.randomUUID(),
-  });
-
-  try {
-    const person = environment.users.createUser({
-      name: "Log Reader",
-      email: "log-reader@example.test",
-    });
-
-    await environment.users.saveUser(person);
-    await environment.linkMicrosoftUser(person.id);
-    const session = await environment.users.login({ userId: person.id });
-    await context.addCookies(
-      session.cookies.map((cookie) => ({
-        ...cookie,
-        domain: "localhost",
-        sameSite: "Lax",
-        secure: false,
-      })),
-    );
-    const path = `/connectors/${reference.name}/logs`;
-    expect((await page.goto(path))?.status()).toBe(403);
-    await environment.database.db
-      .update(member)
-      .set({ role: "admin" })
-      .where(eq(member.userId, person.id));
-    await page.goto("/connectors");
-    await page.getByRole("button", { name: /logging-fixture/ }).click();
-    await page.getByRole("link", { name: "View logs" }).click();
-    await expect(page).toHaveURL(new RegExp(`${path}$`));
-    await expect(page.getByRole("heading", { name: "logging-fixture logs" })).toBeVisible();
-    await expect(page.getByText("Runtime logging is not enabled", { exact: false })).toBeVisible();
-    await page.getByLabel("Since", { exact: true }).fill("invalid");
-    await page.getByRole("button", { name: "Apply filters" }).click();
-    await expect(page.getByText("Invalid input", { exact: false })).toBeVisible();
-  } finally {
-    await environment.database.db
-      .delete(connectors)
-      .where(
-        and(
-          eq(connectors.organizationId, execution.organizationId),
-          eq(connectors.name, reference.name),
-        ),
-      );
-  }
-});
-
-test("shows connector discovery and serving app connections to a member", async ({
-  page,
-  context,
-  request,
-}) => {
-  expect((await request.get("/api/v1/connector-catalog")).status()).toBe(401);
-  await page.goto("/connectors");
-  await expect(page).toHaveURL(/\/sign-in\?next=/);
-
-  const person = environment.users.createUser({
-    name: "App Creator",
-    email: "connections@example.test",
-  });
-
-  await environment.users.saveUser(person);
-  await environment.linkMicrosoftUser(person.id);
-  const session = await environment.users.login({ userId: person.id });
-  await context.addCookies(
-    session.cookies.map((cookie) => ({
-      ...cookie,
-      domain: "localhost",
-      sameSite: "Lax",
-      secure: false,
-    })),
-  );
-
-  const created = await context.request.post("/api/v1/apps", {
-    headers: { origin: environment.configuration.PLATFORM_URL },
-    data: { slug: "inventory-connections", displayName: "Inventory" },
-  });
-
-  expect(created.ok()).toBe(true);
-  const record = app.parse(await created.json());
-  const path = `/apps/${record.id}/connections`;
-  await page.goto(path);
-  await expect(page.getByText("No connectors connected", { exact: true })).toBeVisible();
-  await expect(
-    page.getByText("Resources appear after the first successful deployment."),
-  ).toBeVisible();
-  await page.getByRole("link", { name: "Browse connectors" }).click();
-  await expect(page.getByRole("heading", { name: "No connectors yet" })).toBeVisible();
-
-  const reference = connectorReference.parse({
-    name: "erp",
-    checksum: "a".repeat(64),
-    entrypoints: ["default", "CustomerReader"],
-    classes: [],
-    secrets: { API_KEY: "synthetic-ciphertext" },
-  });
-
-  await environment.database.db.insert(connectors).values([
-    {
-      name: "erp",
-      organizationId: record.organizationId,
-      jobId: crypto.randomUUID(),
-      package: reference,
-      appliedPackage: reference,
-    },
-    {
-      name: "warehouse",
-      organizationId: record.organizationId,
-      jobId: crypto.randomUUID(),
-      package: { ...reference, name: "warehouse" },
-    },
-  ]);
-  const grants = { ERP: { connector: "erp", entrypoint: "CustomerReader" } };
-  await environment.database.db
-    .update(apps)
-    .set({ capabilities: grants, capabilityRevision: 1 })
-    .where(eq(apps.id, record.id));
-  await page.goto(path);
-  await expect(page.getByRole("button", { name: "ERP erp Saved" })).toBeVisible();
-  await expect(page.getByText("Connector bindings are saved.", { exact: false })).toBeVisible();
-
-  const artifactId = crypto.randomUUID();
-  const deploymentId = crypto.randomUUID();
-  await environment.database.db.insert(artifacts).values(
-    artifact.parse({
-      id: artifactId,
-      appId: record.id,
-      metadata: {
-        main_module: "worker.js",
-        compatibility_date: "2026-10-01",
-        assets: { upload_session: crypto.randomUUID() },
-        bindings: [
-          { type: "d1", name: "DB", database_name: "inventory", database_id: "inventory-v2" },
-          { type: "r2_bucket", name: "FILES", bucket_name: "uploads" },
-          { type: "plain_text", name: "INTERNAL_VALUE", text: "synthetic-value-not-for-display" },
-        ],
-      },
-      manifest: {},
-      modules: [{ name: "worker.js", type: "esm", sha256: "0".repeat(64), size: 0 }],
-    }),
-  );
-  await environment.database.db.insert(deployments).values({
-    id: deploymentId,
-    appId: record.id,
-    artifactId,
-    requestId: crypto.randomUUID(),
-    status: "succeeded",
-    finishedAt: new Date(),
-  });
-  await environment.database.db.insert(jobs).values({
-    id: crypto.randomUUID(),
-    appId: record.id,
-    organizationId: record.organizationId,
-    deploymentId,
-    kind: "deploy",
-    state: "succeeded",
-    capabilities: { revision: 1, grants },
-  });
-  await environment.database.db
-    .update(apps)
-    .set({ activeDeploymentId: deploymentId, state: "active", appliedCapabilityRevision: 1 })
-    .where(eq(apps.id, record.id));
-  await page.goto(path);
-  await page.getByRole("button", { name: "ERP erp Active" }).click();
-  await expect(page.getByText("CustomerReader", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Database DB Active" }).click();
-  await expect(page.getByText("env.DB", { exact: true })).toBeVisible();
-  await expect(page.getByText("inventory", { exact: true })).toBeVisible();
-  await expect(page.getByText("Database ID", { exact: true })).toBeVisible();
-  await expect(page.getByText("inventory-v2", { exact: true })).toBeVisible();
-  await expect(page.getByText("synthetic-value-not-for-display")).toHaveCount(0);
-  await page.setViewportSize({ width: 1440, height: 1100 });
-  await page.screenshot({
-    path: "../../.local/connections-desktop.png",
-    fullPage: true,
-    animations: "disabled",
-  });
-  await page.setViewportSize({ width: 390, height: 844 });
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
-    true,
-  );
-  await page.screenshot({
-    path: "../../.local/connections-mobile.png",
-    fullPage: true,
-    animations: "disabled",
-  });
-  await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.getByRole("link", { name: "Browse connectors" }).click();
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Connectors");
-  await expect(page.getByRole("button", { name: "erp Connected Available" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "warehouse Not ready" })).toBeVisible();
-  await page.getByRole("button", { name: "erp Connected Available" }).click();
-  await expect(page.getByText("CustomerReader", { exact: true })).toBeVisible();
-  await expect(page.getByText("API_KEY", { exact: true })).toHaveCount(0);
-  await page.screenshot({
-    path: "../../.local/connector-catalog.png",
-    fullPage: true,
-    animations: "disabled",
-  });
-  await page.getByRole("textbox", { name: "Search connectors" }).fill("missing");
-  await expect(page.getByText("No connectors match your search.")).toBeVisible();
-  await page.getByRole("textbox", { name: "Search connectors" }).fill("erp");
-  await expect(page.getByRole("button", { name: "warehouse Not ready" })).toHaveCount(0);
-
-  await environment.database.db
-    .update(apps)
-    .set({
-      capabilities: {},
-      capabilityRevision: 2,
-      capabilityError: "Synthetic activation failure",
-    })
-    .where(eq(apps.id, record.id));
-  await page.goto(path);
-  await page.getByRole("button", { name: "ERP erp Removal failed" }).click();
-  await expect(page.getByText("Currently active", { exact: true })).toBeVisible();
-  await expect(page.getByText("erp · CustomerReader", { exact: true })).toBeVisible();
-  await expect(page.getByRole("alert")).toContainText("Synthetic activation failure");
-  await environment.database.db.delete(jobs).where(eq(jobs.appId, record.id));
-  await page.goto(path);
-  await expect(page.getByText("No saved connector bindings", { exact: true })).toBeVisible();
-  await expect(
-    page.getByText("The active connector bindings could not be confirmed.", { exact: false }),
-  ).toBeVisible();
-  expect((await context.request.get("/api/v1/connectors")).status()).toBe(403);
-  expect(
-    (
-      await context.request.put(`/api/v1/apps/${record.id}/bindings/OTHER`, {
-        headers: { origin: environment.configuration.PLATFORM_URL },
-        data: { connector: "erp" },
-      })
-    ).status(),
-  ).toBe(403);
-  await environment.database.db.delete(connectors);
 });
 
 test("preserves SvelteKit form protection and accepts the CLI with an explicit Origin", async ({
@@ -647,13 +901,130 @@ test("preserves SvelteKit form protection and accepts the CLI with an explicit O
   expect(foreignOrigin.status()).toBe(403);
 });
 
-test("redirects anonymous device requests to login and preserves the code", async ({ page }) => {
+test("renews the browser session cookie while rendering a protected page", async ({
+  page,
+  context,
+}) => {
+  const login = await environment.users.login({ userId: environment.owner.id });
+  const current = await environment.auth.api.getSession({ headers: login.headers });
+
+  if (!current) throw new Error("Expected owner session");
+  await context.addCookies(
+    login.cookies.map((cookie) => ({
+      ...cookie,
+      domain: "localhost",
+      sameSite: "Lax",
+      secure: false,
+    })),
+  );
+  await environment.database.db
+    .update(authSession)
+    .set({
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    })
+    .where(eq(authSession.id, current.session.id));
+
+  const response = await page.goto("/");
+  expect(response?.status()).toBe(200);
+  expect(await response?.headerValue("set-cookie")).toMatch(/Max-Age=604800/i);
+  const cookie = (await context.cookies()).find((entry) => entry.name.endsWith("session_token"));
+  expect(cookie?.expires).toBeGreaterThan(Date.now() / 1000 + 6 * 24 * 60 * 60);
+});
+
+test("returns 503 from the session hook when the session store is unavailable", async ({
+  context,
+}) => {
+  const login = await environment.users.login({ userId: environment.owner.id });
+  await context.addCookies(
+    login.cookies.map((cookie) => ({
+      ...cookie,
+      domain: "localhost",
+      sameSite: "Lax",
+      secure: false,
+    })),
+  );
+
+  // Fail the actual Better Auth adapter in this test's disposable database,
+  // including its APIError wrapping, before either page loader can run.
+  await environment.database.db.execute(sql`ALTER TABLE "session" RENAME TO "unavailable_session"`);
+
+  try {
+    for (const path of ["/organizations", "/organizations/__data.json"]) {
+      const response = await context.request.get(path, { maxRedirects: 0 });
+      expect(response.status()).toBe(503);
+      expect(await response.text()).toContain("Sign-in is temporarily unavailable.");
+      expect(response.headers()["location"]).toBeUndefined();
+    }
+  } finally {
+    await environment.database.db.execute(
+      sql`ALTER TABLE "unavailable_session" RENAME TO "session"`,
+    );
+  }
+
+  expect((await context.request.get("/organizations")).status()).toBe(200);
+});
+
+test("protects auth-group documents and data requests even when every layout is reused", async ({
+  request,
+}) => {
+  for (const path of [
+    "/",
+    "/account",
+    "/agents",
+    "/apps/new",
+    "/apps/fixture/connections",
+    "/catalog",
+    "/catalog/templates?q=mail",
+    "/catalog/templates/gmail",
+    "/members?q=reader&page=2",
+    "/services",
+    "/settings",
+    "/welcome",
+    "/organizations",
+    "/device?user_code=ABCD1234",
+  ]) {
+    const location = `/sign-in?${new URLSearchParams({ next: path })}`;
+    const document = await request.get(path, { maxRedirects: 0 });
+    expect(document.status(), path).toBe(303);
+    expect(document.headers()["location"], path).toBe(location);
+
+    const data = new URL(path, environment.configuration.PLATFORM_URL);
+    data.pathname = `${data.pathname.replace(/\/$/, "")}/__data.json`;
+    data.searchParams.set("x-sveltekit-invalidated", "00000");
+    const response = await request.get(data.href, { maxRedirects: 0 });
+    expect(response.status(), path).toBe(200);
+    expect(await response.json(), path).toEqual({ type: "redirect", status: 303, location });
+  }
+});
+
+test("keeps public pages, service health and API authentication outside page login redirects", async ({
+  request,
+}) => {
+  for (const path of ["/sign-in", "/recover", "/healthz"]) {
+    const response = await request.get(path, { maxRedirects: 0 });
+    expect(response.status(), path).toBe(200);
+  }
+
+  const api = await request.get("/api/v1/apps", { maxRedirects: 0 });
+  expect(api.status()).toBe(401);
+  expect(api.headers()["location"]).toBeUndefined();
+  expect((await request.get("/nonexistent", { maxRedirects: 0 })).status()).toBe(404);
+});
+
+test("redirects anonymous device requests to login and preserves the code and email", async ({
+  page,
+}) => {
   await environment.database.db.update(ssoProvider).set({ domainVerified: true });
-  await page.goto("/device?user_code=ABCD1234");
+  await page.goto("/device?user_code=ABCD1234&email=device%40example.test");
   await expect(page).toHaveURL(/\/sign-in\?next=/);
   await expect(page.getByLabel("Email", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Continue", exact: true })).toBeVisible();
-  expect(new URL(page.url()).searchParams.get("next")).toBe("/device?user_code=ABCD1234");
+  await expect(
+    page.getByRole("button", { name: "Continue with email", exact: true }),
+  ).toBeVisible();
+  expect(new URL(page.url()).searchParams.get("next")).toBe(
+    "/device?user_code=ABCD1234&email=device%40example.test",
+  );
+  await expect(page.getByLabel("Email", { exact: true })).toHaveValue("device@example.test");
 });
 
 test("starts Entra login with a host-only HttpOnly state cookie", async ({ request }) => {
@@ -745,9 +1116,9 @@ test("completes Microsoft login against emulate through the built SvelteKit serv
   await expect(page.getByLabel("Organization slug")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Sign in with Microsoft" })).toHaveCount(0);
   await page.getByLabel("Email", { exact: true }).fill("sso@EXAMPLE.TEST");
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("button", { name: "Continue with email", exact: true }).click();
   await page.getByRole("button", { name: /sso@example.test/ }).click();
-  await expect(page.getByRole("heading", { name: "Your apps", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
   await expect(page.getByText("SSO Test User", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: /^Account:/ }).click();
   await page.getByRole("menuitem", { name: "Sign out" }).click();
@@ -765,11 +1136,148 @@ test("keeps an SSO error on the email step without requesting an email code", as
   );
   await page.goto("/sign-in");
   await page.getByLabel("Email", { exact: true }).fill("sso@example.test");
-  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await page.getByRole("button", { name: "Continue with email", exact: true }).click();
   await expect(page.getByText("Could not start sign-in. Please try again.")).toBeVisible();
   await expect(page.getByLabel("Email", { exact: true })).toBeEnabled();
   await expect(page.getByLabel("Sign-in code", { exact: true })).toHaveCount(0);
   expect(codeRequests).toBe(0);
+});
+
+test("offers Google and Microsoft alongside email and highlights the last successful method", async ({
+  page,
+  context,
+}) => {
+  await context.addCookies([
+    {
+      name: "platform.last_used_login_method",
+      value: "google",
+      url: environment.configuration.PLATFORM_URL,
+    },
+  ]);
+  await page.goto("/sign-in?next=%2Fdevice%3Fuser_code%3DSYNTHETIC");
+  await expect(
+    page.getByRole("button", { name: /^Continue with Google/ }),
+  ).toHaveAccessibleDescription("Last used");
+  await expect(page.getByRole("button", { name: /^Continue with Microsoft/ })).toBeVisible();
+  await expect(page.getByLabel("Email", { exact: true })).toBeVisible();
+
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+
+    for (const width of [390, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+        true,
+      );
+      expect(
+        await page
+          .locator("img")
+          .evaluateAll((images) =>
+            images.every(
+              (image) =>
+                image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0,
+            ),
+          ),
+      ).toBe(true);
+      await page.screenshot({
+        path: fileURLToPath(
+          new URL(
+            `../../../../.local/playwright/shared-sign-in-${colorScheme}-${width}.png`,
+            import.meta.url,
+          ),
+        ),
+        fullPage: true,
+      });
+    }
+  }
+
+  await page.route("**/api/auth/sign-in/social", async (route) => {
+    expect(route.request().postDataJSON()).toMatchObject({
+      provider: "widefleet-microsoft",
+      callbackURL: "/device?user_code=SYNTHETIC",
+      errorCallbackURL:
+        "/sign-in/connect?provider=microsoft&next=%2Fdevice%3Fuser_code%3DSYNTHETIC",
+    });
+    await route.fulfill({ status: 503, json: { message: "Synthetic provider failure" } });
+  });
+  await page.getByRole("button", { name: /^Continue with Microsoft/ }).click();
+  await expect(page.getByRole("alert")).toContainText("Could not start sign-in");
+  await expect(page.getByRole("button", { name: /^Continue with Google/ })).toBeEnabled();
+});
+
+test("shows email confirmation only for missing provider proof and handles cancellation", async ({
+  page,
+}) => {
+  await page.goto("/sign-in/connect?provider=microsoft&next=%2Fapps&error=account_not_linked");
+  await expect(page.getByRole("heading", { name: "Connect Microsoft" })).toBeVisible();
+  await expect(page.getByText("Confirm your Widefleet email once", { exact: false })).toBeVisible();
+  await expect(page.getByLabel("Email", { exact: true })).toBeVisible();
+  await page.goto("/sign-in/connect?provider=google&next=%2Fapps&error=access_denied");
+  await expect(page.getByRole("alert")).toContainText("Sign-in was cancelled");
+  await expect(page.getByLabel("Email", { exact: true })).toHaveCount(0);
+  await page.getByRole("link", { name: "Back to sign-in" }).click();
+  await expect(page).toHaveURL(/\/sign-in\?next=%2Fapps$/);
+});
+
+test("offers configured social providers when email delivery is unavailable", async ({ page }) => {
+  const origin = "http://localhost:25435";
+  let output = "";
+
+  const socialOnly = spawn(process.execPath, ["build"], {
+    cwd: fileURLToPath(new URL("../../", import.meta.url)),
+    env: {
+      ...process.env,
+      ...environment.environment,
+      PLATFORM_URL: origin,
+      LOGIN_CODE_DELIVERY: "email",
+      GOOGLE_CLIENT_ID: "synthetic-google-client",
+      GOOGLE_CLIENT_SECRET: "synthetic-google-secret",
+      MICROSOFT_CLIENT_ID: "synthetic-microsoft-client",
+      MICROSOFT_CLIENT_SECRET: "synthetic-microsoft-secret",
+      NODE_ENV: "production",
+      HOST: "127.0.0.1",
+      PORT: "25435",
+      PROTOCOL_HEADER: "x-forwarded-proto",
+      SHUTDOWN_TIMEOUT: "1",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  socialOnly.stdout?.setEncoding("utf8").on("data", (chunk: string) => {
+    output += chunk;
+  });
+  socialOnly.stderr?.setEncoding("utf8").on("data", (chunk: string) => {
+    output += chunk;
+  });
+
+  try {
+    await expect
+      .poll(
+        async () => {
+          if (socialOnly.exitCode !== null) throw new Error(output);
+
+          try {
+            return (await fetch(`${origin}/healthz`)).ok;
+          } catch {
+            return false;
+          }
+        },
+        { timeout: 15_000 },
+      )
+      .toBe(true);
+    await page.goto(`${origin}/sign-in`);
+    await expect(page.getByRole("button", { name: /^Continue with Google/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Continue with Microsoft/ })).toBeVisible();
+    await expect(page.getByLabel("Email", { exact: true })).toHaveCount(0);
+    await expect(page.getByText("or continue with email", { exact: true })).toHaveCount(0);
+    await page.goto(`${origin}/sign-in/connect?provider=microsoft&error=account_not_linked`);
+    await expect(page.getByRole("alert")).toContainText("Email confirmation is unavailable");
+  } finally {
+    if (socialOnly.exitCode === null) {
+      socialOnly.kill("SIGTERM");
+      await once(socialOnly, "exit");
+    }
+  }
 });
 
 test("requires code confirmation in the browser, grants the CLI, then signs out", async ({
@@ -835,7 +1343,7 @@ test("requires code confirmation in the browser, grants the CLI, then signs out"
 
   expect(token.status()).toBe(200);
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Your apps", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
   await expect(page.getByText("Example User", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: /^Account:/ }).click();
   await page.getByRole("menuitem", { name: "Sign out" }).click();
@@ -900,7 +1408,7 @@ test("registers an agent, creates an app and an isolated preview, then requests 
   await page.getByText("Permanently delete app", { exact: true }).click();
   await page.getByRole("checkbox").check();
   await page.getByRole("button", { name: "Delete app", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Your apps" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Apps" })).toBeVisible();
   await expect(page.getByRole("listitem").filter({ hasText: "Notes Preview" })).toContainText(
     "Deleting",
   );
@@ -1375,10 +1883,16 @@ test("validates remote forms and creates apps without JavaScript", async ({ brow
     expect(response?.headers()["cache-control"]).toBe("private, no-store");
     await page.getByRole("link", { name: "Create app", exact: true }).click();
     await page.getByLabel("App name", { exact: true }).fill("Native Form App");
-    await page.getByLabel("URL slug").fill("auth");
-    await page.getByRole("button", { name: "Create app" }).click();
-    await expect(page.getByRole("alert")).toContainText("The auth hostname is reserved for SSO");
-    await expect(page.getByLabel("App name", { exact: true })).toHaveValue("Native Form App");
+
+    for (const slug of ["auth", "mcp"]) {
+      await page.getByLabel("URL slug").fill(slug);
+      await page.getByRole("button", { name: "Create app" }).click();
+      await expect(page.getByRole("alert")).toContainText(
+        "The auth and mcp hostnames are reserved for platform services",
+      );
+      await expect(page.getByLabel("App name", { exact: true })).toHaveValue("Native Form App");
+    }
+
     await page.getByLabel("URL slug").fill("native-form-app");
     await page.getByRole("button", { name: "Create app" }).click();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Native Form App");
@@ -1749,6 +2263,19 @@ test("remote endpoints recheck sessions, roles, input and request origin", async
   const anonymous = await request.get(queryUrl);
   expect(anonymous.headers()["cache-control"]).toBe("private, no-store");
   expect(await anonymous.json()).toMatchObject({ type: "error", error: { status: 401 } });
+
+  // Remote callers control their page-context headers. Neither an auth-group
+  // page nor a public page may replace the remote function's own authorization.
+  for (const pathname of ["/agents", "/sign-in"]) {
+    const response = await request.get(queryUrl, {
+      headers: { "x-sveltekit-pathname": pathname },
+      maxRedirects: 0,
+    });
+
+    expect(response.headers()["location"]).toBeUndefined();
+    expect(await response.json()).toMatchObject({ type: "error", error: { status: 401 } });
+  }
+
   const authenticated = await context.request.get(queryUrl);
   expect(await authenticated.json()).toMatchObject({ type: "result" });
   expect(await authenticated.text()).toContain("remote-private-app");
@@ -2029,6 +2556,68 @@ test.describe("workspace experience", () => {
         secure: false,
       })),
     );
+  });
+
+  test("shows app favicons with stable fallbacks on desktop and mobile", async ({
+    page,
+    context,
+  }) => {
+    const cases = ["valid", "missing", "broken", "service", "unpublished"];
+    const iconRequests: string[] = [];
+
+    for (const kind of cases) {
+      const response = await context.request.post("/api/v1/apps", {
+        headers: { origin: environment.configuration.PLATFORM_URL },
+        data: { slug: `icon-${kind}`, displayName: `Icon ${kind}` },
+      });
+
+      expect(response.ok()).toBe(true);
+      const record = app.parse(await response.json());
+
+      if (kind !== "unpublished")
+        await environment.database.db
+          .update(apps)
+          .set({
+            state: "active",
+            activeDeploymentId: crypto.randomUUID(),
+            webEnabled: kind !== "service",
+          })
+          .where(eq(apps.id, record.id));
+      await page.route(`**/api/v1/apps/${record.id}/icon?*`, (route) => {
+        iconRequests.push(kind);
+
+        return route.fulfill({
+          status: kind === "missing" ? 404 : 200,
+          contentType: "image/svg+xml",
+          body:
+            kind === "valid"
+              ? '<svg xmlns="http://www.w3.org/2000/svg" width="48" height="24"><rect width="48" height="24" fill="red"/></svg>'
+              : "not an image",
+        });
+      });
+    }
+
+    await page.goto("/?q=Icon");
+    await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
+    await expect(page.locator("header").getByText("Widefleet", { exact: true })).toHaveCount(1);
+    const rows = page.getByRole("list", { name: "Apps" }).getByRole("listitem");
+    const valid = rows.filter({ hasText: "Icon valid" }).locator("img");
+    await expect(valid).toBeVisible();
+    await expect(valid).toHaveCSS("width", "24px");
+    await expect(valid).toHaveCSS("height", "24px");
+    await expect(valid).toHaveCSS("object-fit", "contain");
+
+    for (const kind of cases.filter((value) => value !== "valid")) {
+      const row = rows.filter({ hasText: `Icon ${kind}` });
+      await expect(row.locator("svg.lucide-layers-2")).toBeVisible();
+      await expect(row.locator("img")).toBeHidden();
+    }
+
+    expect(iconRequests.sort()).toEqual(["broken", "missing", "valid"]);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(valid).toBeVisible();
+    await rows.filter({ hasText: "Icon valid" }).getByRole("link").click();
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Icon valid");
   });
 
   test("searches apps, preserves filters in URLs, and returns to an app's access section", async ({
@@ -2335,3 +2924,243 @@ test.describe("workspace experience", () => {
     }
   });
 });
+
+test("focuses code entry and returns to the same email without another send", async ({ page }) => {
+  let sent = 0;
+  await page.route("**/api/auth/email-otp/send-verification-otp", async (route) => {
+    sent += 1;
+    expect(route.request().postDataJSON()).toMatchObject({ email: "reader@example.test" });
+    await route.fulfill({ json: { success: true } });
+  });
+  await page.route("**/api/auth/sign-in/email-otp", async (route) => {
+    expect(route.request().postDataJSON()).toMatchObject({
+      email: "reader@example.test",
+      otp: "123456",
+    });
+    await route.fulfill({ status: 401, json: { message: "Invalid code" } });
+  });
+  await page.goto("/sign-in?next=%2Fdevice%3Fuser_code%3DSYNTHETIC");
+  await expect(
+    page.getByText("Sign in to review the request from your terminal", { exact: false }),
+  ).toBeVisible();
+  await page.getByLabel("Email", { exact: true }).fill("Reader@EXAMPLE.TEST");
+  await page.getByLabel("Email", { exact: true }).press("Enter");
+  await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible();
+  await expect(page.getByLabel("Email", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Continue with Google/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Continue with Microsoft/ })).toHaveCount(0);
+  await expect(page.getByText("reader@example.test", { exact: true })).toBeVisible();
+  const code = page.getByLabel("Sign-in code", { exact: true });
+  await expect(code).toBeFocused();
+  await expect(page.getByRole("button", { name: "Verify and sign in" })).toBeDisabled();
+  await code.fill("123456");
+  await code.press("Enter");
+  await expect(page.getByRole("alert")).toContainText("Invalid or expired code");
+  await expect(code).toHaveValue("123456");
+  await expect(code).toBeFocused();
+  await page.getByRole("button", { name: "Change", exact: true }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByLabel("Email", { exact: true })).toBeFocused();
+  await expect(page.getByLabel("Email", { exact: true })).toHaveValue("reader@example.test");
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /^Continue with Google/ })).toBeVisible();
+  expect(sent).toBe(1);
+  expect(new URL(page.url()).searchParams.get("next")).toBe("/device?user_code=SYNTHETIC");
+});
+
+test("resends a code in place and retains the current code when resend fails", async ({ page }) => {
+  await page.clock.install();
+  let sent = 0;
+  await page.route("**/api/auth/email-otp/send-verification-otp", async (route) => {
+    sent += 1;
+    expect(route.request().postDataJSON()).toMatchObject({ email: "reader@example.test" });
+    await route.fulfill(
+      sent === 2
+        ? { status: 503, json: { message: "Temporarily unavailable" } }
+        : { json: { success: true } },
+    );
+  });
+  await page.goto("/sign-in");
+  await page.getByLabel("Email", { exact: true }).fill("reader@example.test");
+  await page.getByRole("button", { name: "Continue with email", exact: true }).click();
+  const code = page.getByLabel("Sign-in code", { exact: true });
+  await expect(code).toBeVisible();
+  await code.fill("123456");
+  await expect(page.getByRole("button", { name: /^Resend in/ })).toBeDisabled();
+  await page.clock.runFor(31_000);
+  await page.getByRole("button", { name: "Resend code", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Could not send a sign-in code");
+  await expect(code).toHaveValue("123456");
+  await expect(code).toBeFocused();
+  await page.getByRole("button", { name: "Resend code", exact: true }).click();
+  await expect(page.getByRole("status")).toContainText("A new code has been requested.");
+  await expect(code).toHaveValue("");
+  await expect(code).toBeFocused();
+  await expect(page.getByRole("button", { name: /^Resend in/ })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Verify and sign in" })).toBeDisabled();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  expect(sent).toBe(3);
+});
+
+test("keeps the email step usable after a failed send and clears feedback on back", async ({
+  page,
+}) => {
+  let sent = 0;
+  await page.route("**/api/auth/email-otp/send-verification-otp", async (route) => {
+    sent += 1;
+    await route.fulfill(
+      sent === 1
+        ? { status: 503, json: { message: "Temporarily unavailable" } }
+        : { json: { success: true } },
+    );
+  });
+  await page.goto("/sign-in");
+  await page.getByLabel("Email", { exact: true }).fill("reader@example.test");
+  await page.getByRole("button", { name: "Continue with email", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Could not send a sign-in code");
+  await expect(page.getByLabel("Email", { exact: true })).toBeEnabled();
+  await expect(page.getByLabel("Email", { exact: true })).toHaveValue("reader@example.test");
+  await expect(page.getByRole("heading", { name: "Check your email" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Continue with email", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await page.getByRole("button", { name: "Back to sign in", exact: true }).click();
+  await expect(page.getByLabel("Email", { exact: true })).toBeFocused();
+  expect(sent).toBe(2);
+});
+
+for (const javaScriptEnabled of [true, false]) {
+  test.describe(`app templates with JavaScript ${javaScriptEnabled ? "enabled" : "disabled"}`, () => {
+    test.use({ javaScriptEnabled });
+
+    test("lets a member find a template and copy its setup prompt", async ({
+      page,
+      context,
+      request,
+    }, testInfo) => {
+      await page.goto("/catalog/templates/gmail");
+      await expect(page).toHaveURL(/\/sign-in\?next=/);
+      expect(new URL(page.url()).searchParams.get("next")).toBe("/catalog/templates/gmail");
+      expect((await request.get("/api/v1/catalog/templates")).status()).toBe(401);
+
+      const person = environment.users.createUser({
+        name: "Template Reader",
+        email: `template-reader-${javaScriptEnabled}@example.test`,
+      });
+
+      await environment.users.saveUser(person);
+      await environment.linkMicrosoftUser(person.id);
+      const session = await environment.users.login({ userId: person.id });
+      await context.addCookies(
+        session.cookies.map((cookie) => ({
+          ...cookie,
+          domain: "localhost",
+          sameSite: "Lax",
+          secure: false,
+        })),
+      );
+      const before = await environment.database.db.select({ id: apps.id }).from(apps);
+      const catalog = await context.request.get("/api/v1/catalog/templates");
+      expect(catalog.status()).toBe(200);
+
+      await page.goto("/catalog");
+      await page.getByRole("link", { name: "Templates", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Start from a template" })).toBeVisible();
+
+      if (javaScriptEnabled) {
+        for (const width of [1280, 390]) {
+          await page.setViewportSize({ width, height: 900 });
+
+          for (const colorScheme of ["light", "dark"] as const) {
+            await page.emulateMedia({ colorScheme });
+            await expect(page.locator("html")).toHaveClass(colorScheme === "dark" ? /dark/ : "");
+            expect(
+              await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+            ).toBe(true);
+            await page.screenshot({
+              path: testInfo.outputPath(`templates-${width}-${colorScheme}.png`),
+              fullPage: true,
+            });
+          }
+        }
+      }
+
+      await page.getByRole("searchbox", { name: "Search templates", exact: true }).fill("PRIVATE");
+      await page.getByRole("searchbox", { name: "Search templates", exact: true }).press("Enter");
+      await expect(page.getByRole("heading", { name: "GitHub", exact: true })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Gmail", exact: true })).toHaveCount(0);
+      await page.getByRole("searchbox", { name: "Search templates", exact: true }).fill("unknown");
+      await page.getByRole("button", { name: "Search", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "No matching templates" })).toBeVisible();
+      await page.getByText("App not here? Create one with your agent", { exact: true }).click();
+      await expect(
+        page.getByText("Help me create an app on Widefleet.", { exact: false }),
+      ).toBeVisible();
+      await page.getByRole("link", { name: "Reset search" }).click();
+      await page.getByRole("link", { name: /^Gmail/ }).focus();
+      await page.keyboard.press("Enter");
+      await expect(page.getByRole("heading", { name: "Gmail", exact: true })).toBeVisible();
+      const response = await context.request.get("/api/v1/catalog/templates/gmail");
+      const detail = z.object({ prompt: z.string() }).parse(await response.json());
+      await expect(page.locator("code").first()).toHaveText(detail.prompt);
+      expect(detail.prompt).toContain("--organization 'widefleet'");
+      expect(detail.prompt).toContain(`--url '${environment.configuration.PLATFORM_URL}'`);
+
+      if (javaScriptEnabled) {
+        await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+        await page.getByRole("button", { name: "Copy setup prompt" }).click();
+        await expect(page.getByRole("button", { name: "Copied", exact: true })).toBeVisible();
+        expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(detail.prompt);
+
+        for (const width of [1280, 390]) {
+          await page.setViewportSize({ width, height: 900 });
+
+          for (const colorScheme of ["light", "dark"] as const) {
+            await page.emulateMedia({ colorScheme });
+            await expect(page.locator("html")).toHaveClass(colorScheme === "dark" ? /dark/ : "");
+            expect(
+              await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+            ).toBe(true);
+            await page.screenshot({
+              path: testInfo.outputPath(`template-${width}-${colorScheme}.png`),
+              fullPage: true,
+            });
+          }
+        }
+
+        await page.evaluate(() =>
+          Object.defineProperty(navigator, "clipboard", {
+            value: { writeText: () => Promise.reject(new Error("Synthetic clipboard failure")) },
+            configurable: true,
+          }),
+        );
+        await page.getByRole("button", { name: /Copy setup prompt|Copied/ }).click();
+        await expect(page.getByRole("alert")).toHaveText(
+          "Copying is not available here. Select the text and copy it manually.",
+        );
+      }
+
+      await expect(
+        page.getByRole("heading", { name: "Configure Google", exact: true }),
+      ).toBeVisible();
+      await expect(page.locator(".markdown")).toContainText("GOOGLE_CLIENT_ID");
+      const missing = await page.goto("/catalog/templates/missing");
+      expect(missing?.status()).toBe(404);
+      const unavailable = await page.goto("/catalog/templates/unavailable");
+      expect(unavailable?.status()).toBe(503);
+      await expect(page.getByRole("heading", { name: "Something went wrong." })).toBeVisible();
+      expect(await environment.database.db.select({ id: apps.id }).from(apps)).toEqual(before);
+
+      await page.goto("/catalog/templates");
+      await expect(page.getByRole("heading", { name: "Start from a template" })).toBeVisible();
+      await environment.database.db
+        .update(authSession)
+        .set({ expiresAt: new Date(Date.now() - 1000) })
+        .where(eq(authSession.userId, person.id));
+      await page.getByRole("link", { name: /^Gmail/ }).click();
+      await expect(page).toHaveURL(/\/sign-in\?next=/);
+      expect(new URL(page.url()).searchParams.get("next")).toBe("/catalog/templates/gmail");
+      expect((await context.request.get("/api/v1/catalog/templates")).status()).toBe(401);
+    });
+  });
+}

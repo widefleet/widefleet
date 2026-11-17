@@ -17,7 +17,7 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")("Installed auth p
       expect(login.location).toBe("https://notes.apps.example.test/");
       const app = await fixture.app(login.cookie);
       expect(app.status).toBe(200);
-      expect(app.cookies).toEqual([]);
+      expect(app.cookies).toEqual(["app-cookie=oauth; Path=/; Secure; HttpOnly"]);
 
       const echoed = z
         .object({

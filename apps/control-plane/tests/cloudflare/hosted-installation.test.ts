@@ -42,6 +42,45 @@ const configuration = {
 };
 
 describe("Hosted resource provisioning", () => {
+  it("configures the workload issuer on the runtime without adding a control-plane schedule", async () => {
+    const configs = await hostedConfigurations(installation, ids, "email", {
+      vars: { WIDEFLEET_WORKLOAD_ISSUER: "https://stale.example.test/workload" },
+    });
+
+    expect(configs.runtime.vars["WIDEFLEET_WORKLOAD_ISSUER"]).toBe(
+      "https://auth.apps.example.test/workload",
+    );
+    expect(configs.controlPlane.vars).not.toHaveProperty("WIDEFLEET_WORKLOAD_ISSUER");
+    expect(configs.controlPlane).not.toHaveProperty("triggers");
+  });
+
+  it("validates and applies execution profiles only to the parent runtime", async () => {
+    const executionLimits = {
+      http: { cpuMs: 100, subRequests: 50 },
+      service: { cpuMs: 250, subRequests: 50 },
+      cron: { cpuMs: 1000, subRequests: 200 },
+      workflow: { cpuMs: 5000, subRequests: 500 },
+      readiness: { cpuMs: 100, subRequests: 10 },
+    };
+
+    const configured = hostedInstallation.parse({ ...installation, executionLimits });
+
+    const configs = await hostedConfigurations(configured, ids, "email", {
+      vars: { OBSERVER_LABEL: "fixture", WIDEFLEET_EXECUTION_LIMITS: "stale-policy" },
+    });
+
+    expect(configs.runtime.vars["WIDEFLEET_EXECUTION_LIMITS"]).toBe(
+      JSON.stringify(executionLimits),
+    );
+    expect(configs.runtime.vars["OBSERVER_LABEL"]).toBe("fixture");
+    expect(configs.controlPlane.vars).not.toHaveProperty("WIDEFLEET_EXECUTION_LIMITS");
+    expect(configs.initialize.vars).not.toHaveProperty("WIDEFLEET_EXECUTION_LIMITS");
+    expect((await hostedConfigurations(installation, ids)).runtime.vars).not.toHaveProperty(
+      "WIDEFLEET_EXECUTION_LIMITS",
+    );
+    expect(() => hostedInstallation.parse({ ...installation, executionLimits: {} })).toThrow();
+  });
+
   it("configures Queue deployment admission without removing existing runtime bindings", async () => {
     expect(installation.queues).toBe(true);
 
@@ -262,6 +301,8 @@ describe("Hosted resource provisioning", () => {
     expect(configs.runtime.vars).toEqual({
       WIDEFLEET_CONFIGURATION: JSON.stringify({ source: "r2" }),
       WIDEFLEET_LOGS: "cloudflare",
+      WIDEFLEET_MCP_ORIGIN: "https://mcp.apps.example.test",
+      WIDEFLEET_WORKLOAD_ISSUER: "https://auth.apps.example.test/workload",
       OBSERVER_LABEL: "installation-fixture",
     });
     expect(configs.controlPlane.vars).not.toHaveProperty("OBSERVER_LABEL");
@@ -382,11 +423,11 @@ describe("Hosted infrastructure deployment coordination", () => {
   const source = "export default { fetch() { return new Response('fixture'); } }";
 
   const release = runtimeRelease.parse({
-    protocol: 2,
+    protocol: 3,
     auth: 1,
     workflows: 1,
     cloudflare: 1,
-    celld: "0.6.2",
+    celld: "0.6.3-widefleet.1",
     version: "99.0.0",
     main: "loader.js",
     modules: [

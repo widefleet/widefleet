@@ -1,18 +1,21 @@
 <script lang="ts">
   import type { app as appContract, appResource, capabilityState } from "@platform/contracts";
   import type { z } from "zod";
-  import { getAppConnections } from "#lib/connectors.remote";
-  import { Button } from "#shadcn/components/ui/button/index.js";
-  import { Badge } from "#shadcn/components/ui/badge/index.js";
-  import * as Accordion from "#shadcn/components/ui/accordion/index.js";
+  import { getAppConnections } from "#lib/connections.remote";
+  import { connectApp, disconnectApp } from "#lib/services.remote";
+  import { Button } from "@platform/ui/button";
+  import { Badge } from "@platform/ui/badge";
+  import * as Accordion from "@platform/ui/accordion";
   import Globe from "@lucide/svelte/icons/globe";
   import Box from "@lucide/svelte/icons/box";
+  import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import Plug from "@lucide/svelte/icons/plug";
   import Database from "@lucide/svelte/icons/database";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
   import ArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
   import AppStatus from "./AppStatus.svelte";
   import Feedback from "./Feedback.svelte";
+  import AppConnectionActions from "./AppConnectionActions.svelte";
 
   let { app }: { app: z.infer<typeof appContract> } = $props();
 
@@ -28,8 +31,8 @@
   const names = $derived(
     [
       ...new Set([
-        ...Object.keys(connections.connectors.grants),
-        ...Object.keys(connections.activeConnectors ?? {}),
+        ...Object.keys(connections.connections.grants),
+        ...Object.keys(connections.activeConnections ?? {}),
       ]),
     ].sort(),
   );
@@ -51,21 +54,18 @@
   } satisfies Record<z.infer<typeof appResource>["type"], string>;
 
   const binding = (name: string) => {
-    const desired = connections.connectors.grants[name];
-    const active = connections.activeConnectors?.[name];
+    const desired = connections.connections.grants[name];
+    const active = connections.activeConnections?.[name];
 
     const unchanged = Boolean(
-      desired &&
-      active &&
-      desired.connector === active.connector &&
-      desired.entrypoint === active.entrypoint,
+      desired && active && desired.app === active.app && desired.entrypoint === active.entrypoint,
     );
 
     return {
       desired,
       active,
       unchanged,
-      state: unchanged ? ("active" as const) : connections.connectors.state,
+      state: unchanged ? ("active" as const) : connections.connections.state,
     };
   };
 </script>
@@ -85,28 +85,28 @@
     <div>
       <h2 id="connections-heading" class="text-base font-semibold">Connections</h2>
       <p class="text-muted-foreground mt-1 text-sm">
-        The connectors and resources used by this app.
+        The app connections and resources used by this app.
       </p>
     </div>
-    <Button variant="outline" size="sm" href={`/connectors?app=${app.id}`}
-      ><Plug />Browse connectors</Button
+    <Button variant="outline" size="sm" href={`/services?app=${app.id}`}
+      ><Plug />Browse app APIs</Button
     >
   </div>
   {#if request.error}<Feedback kind="error"
       >Could not refresh connections. The last loaded data remains visible. Choose Refresh app to
       try again.</Feedback
     >{/if}
-  {#if connections.connectors.error}<Feedback kind="error"
-      >Connector changes could not be activated: {connections.connectors.error} Previously active connections
+  {#if connections.connections.error}<Feedback kind="error"
+      >Connection changes could not be activated: {connections.connections.error} Previously active connections
       remain in use.</Feedback
     >{/if}
-  {#if connections.connectors.state === "saved" && names.length}<Feedback
-      >Connector bindings are saved. They become active with the app’s first successful deployment.</Feedback
-    >{:else if connections.connectors.state === "pending"}<Feedback
-      >Connector changes are pending. Active connections remain in use until activation succeeds.</Feedback
+  {#if connections.connections.state === "saved" && names.length}<Feedback
+      >Connections are saved. They become active with the app’s first successful deployment.</Feedback
+    >{:else if connections.connections.state === "pending"}<Feedback
+      >Connection changes are pending. Active connections remain in use until activation succeeds.</Feedback
     >{/if}
-  {#if connections.activeConnectors === null}<Feedback
-      >The active connector bindings could not be confirmed. Saved bindings are shown below.</Feedback
+  {#if connections.activeConnections === null}<Feedback
+      >The active connections could not be confirmed. Saved bindings are shown below.</Feedback
     >{/if}
 
   <div class="bg-muted/20 rounded-xl border p-4 sm:p-6">
@@ -118,7 +118,8 @@
           <div class="mb-3 flex items-center gap-2 text-sm font-medium">
             <Globe class="text-muted-foreground size-4" />Domain
           </div>
-          {#if app.activeDeploymentId}
+          {#if !app.web}<p class="text-muted-foreground text-xs">Service only · no web access</p>
+          {:else if app.activeDeploymentId}
             <a
               class="text-muted-foreground hover:text-foreground flex items-start gap-2 text-xs"
               href={app.url}
@@ -160,7 +161,7 @@
       <div class="min-w-0 space-y-4">
         <div class="bg-background rounded-lg border shadow-xs">
           <div class="flex items-center gap-2 border-b px-4 py-4 text-sm font-medium">
-            <Plug class="text-muted-foreground size-4" />Connectors<Badge
+            <Plug class="text-muted-foreground size-4" />App connections<Badge
               variant="secondary"
               class="ml-auto font-normal">{names.length}</Badge
             >
@@ -168,29 +169,38 @@
           {#if names.length === 0}
             <div class="px-4 py-6">
               <p class="text-sm">
-                {connections.activeConnectors === null
-                  ? "No saved connector bindings"
-                  : "No connectors connected"}
+                {connections.activeConnections === null
+                  ? "No saved connections"
+                  : "No apps connected"}
               </p>
               <p class="text-muted-foreground mt-2 text-xs leading-5">
-                Browse the catalog and ask an administrator to connect an integration.
+                Browse app APIs to connect an integration or request administrator approval.
               </p>
             </div>
           {:else}
-            <Accordion.Root type="multiple" class="px-4">
+            <div class="divide-y px-4">
               {#each names as name (name)}
                 {@const item = binding(name)}
-                <Accordion.Item value={name}>
-                  <Accordion.Trigger class="items-center gap-2 py-4 hover:no-underline">
+                <details
+                  class="group"
+                  open={Boolean(
+                    disconnectApp.for(name).fields.allIssues()?.length ||
+                    connectApp.for(`retry-${name}`).fields.allIssues()?.length,
+                  )}
+                >
+                  <summary class="flex cursor-pointer items-center gap-2 py-4">
                     <span class="min-w-0 flex-1"
                       ><code class="block text-xs wrap-anywhere">{name}</code><span
                         class="text-muted-foreground mt-1 block text-xs font-normal wrap-anywhere"
-                        >{item.desired?.connector ?? item.active?.connector}</span
+                        >{item.desired?.app ?? item.active?.app}</span
                       ></span
                     >
                     {@render status(item.state, !item.desired)}
-                  </Accordion.Trigger>
-                  <Accordion.Content>
+                    <ChevronDown
+                      class="text-muted-foreground size-4 shrink-0 group-open:rotate-180"
+                    />
+                  </summary>
+                  <div class="pb-4">
                     <dl class="space-y-2 text-xs">
                       {#if item.desired}<div class="flex justify-between gap-3">
                           <dt class="text-muted-foreground">Entrypoint</dt>
@@ -205,14 +215,21 @@
                       {#if item.active && !item.unchanged}<div class="border-t pt-3">
                           <dt class="text-muted-foreground mb-1">Currently active</dt>
                           <dd class="wrap-anywhere">
-                            {item.active.connector} · {item.active.entrypoint}
+                            {item.active.app} · {item.active.entrypoint}
                           </dd>
                         </div>{/if}
                     </dl>
-                  </Accordion.Content>
-                </Accordion.Item>
+                    <AppConnectionActions
+                      appId={app.id}
+                      binding={name}
+                      grant={item.desired}
+                      failed={connections.connections.state === "failed"}
+                      pending={connections.connections.state === "pending"}
+                    />
+                  </div>
+                </details>
               {/each}
-            </Accordion.Root>
+            </div>
           {/if}
         </div>
 

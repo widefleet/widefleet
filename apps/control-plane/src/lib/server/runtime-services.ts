@@ -1,4 +1,8 @@
+import { createAppSource } from "./app-source.ts";
+import type { SourceBackend } from "./source-backend.ts";
 import type { AuthenticationExtension } from "./runtime-extension.ts";
+import { createConnectionService } from "./connections.ts";
+import { createAppSecrets } from "./app-secrets.ts";
 import type { OrganizationAccess } from "./application-context.ts";
 import type { BetterAuthOptions } from "better-auth";
 import type { sveltekitCookies } from "better-auth/svelte-kit";
@@ -9,7 +13,6 @@ import { createIdentityService } from "./identity.ts";
 import { createAppService } from "./apps.ts";
 import { createAgentService } from "./agents.ts";
 import { createRuntimeReleaseService } from "./runtime-releases.ts";
-import { createConnectorService } from "./connectors.ts";
 import { createAppAccessService } from "./app-access.ts";
 import { createNetworkService } from "./network.ts";
 import { createWorkflowService } from "./workflows.ts";
@@ -49,6 +52,7 @@ export const createRuntime = ({
   authCookies,
   createOrganization,
   authentication,
+  source,
   discoveryTransport = "node",
 }: {
   configuration: Configuration & { BETTER_AUTH_SECRET: string };
@@ -63,6 +67,7 @@ export const createRuntime = ({
   sendEmail?: SendEmail;
   createOrganization?: CreateOrganization;
   authentication?: AuthenticationExtension;
+  source?: SourceBackend;
   authRateLimit?: BetterAuthOptions["rateLimit"];
   authIpAddressHeaders?: string[];
   authCookies?: ReturnType<typeof sveltekitCookies>;
@@ -70,6 +75,11 @@ export const createRuntime = ({
   discoveryTransport?: "node" | "cloudflare";
 }) => {
   const publicSignup = Boolean(createOrganization);
+
+  const reportException = (error: Error) => {
+    reporting.exception(error);
+    runExtensionEffect(() => observation?.exception?.(error));
+  };
 
   const organizationAccess =
     extensionOrganizationAccess ??
@@ -82,6 +92,7 @@ export const createRuntime = ({
   const authOptions: NonNullable<Parameters<typeof createAuthentication>[2]> = {
     encryptionKey,
     publicSignup,
+    reportException,
   };
 
   if (observation) authOptions.observation = observation;
@@ -118,11 +129,7 @@ export const createRuntime = ({
     settings,
     reporting: {
       ...reporting,
-      exception: (error: Error) => {
-        reporting.exception(error);
-
-        runExtensionEffect(() => observation?.exception?.(error));
-      },
+      exception: reportException,
     },
     storage,
     invitations: createInvitationService(database.db, configuration, sendEmail, organizationAccess),
@@ -130,16 +137,25 @@ export const createRuntime = ({
     signInProvider: createAuthenticationAdmission(database.db, organizationAccess).signInProvider,
     discoverPlatform: (domain: string) => discoverPlatform(domain, discoveryTransport),
     cliLogin: createCliLogin(database.db, configuration),
-    apps: createAppService(database.db, configuration, execution, observation),
+    source: createAppSource(database.db, source),
+    apps: createAppService(database.db, configuration, execution, observation, Boolean(source)),
     agents: createAgentService(database.db),
-    jobs: createJobService(database.db, storage, encryptionKey, reporting.operation),
+    jobs: createJobService(
+      database.db,
+      storage,
+      encryptionKey,
+      reporting.operation,
+      configuration.APP_HTTPS_PORT,
+      source,
+    ),
     network: createNetworkService(database.db, execution),
     appAccess: createAppAccessService(database.db, execution),
     workflows: createWorkflowService(database.db, execution),
     migrations: createMigrationService(database.db, storage, execution),
-    connectors: createConnectorService(database.db, storage, encryptionKey, execution),
+    connections: createConnectionService(database.db, execution),
+    appSecrets: createAppSecrets(database.db, encryptionKey, execution),
     releases: createRuntimeReleaseService(database.db, storage, execution),
-    uploads: createUploadService(database.db, storage, configuration, execution),
+    uploads: createUploadService(database.db, storage, configuration, execution, source),
     telemetry: createTelemetry(database.db, storage, configuration, hostedLogs),
   };
 

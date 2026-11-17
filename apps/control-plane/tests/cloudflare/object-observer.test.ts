@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
+import { isDeepStrictEqual } from "node:util";
 
 const observation = z.strictObject({
   identity: z.json(),
@@ -30,7 +31,7 @@ const observation = z.strictObject({
 });
 
 describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("R2 observer in workerd", () => {
-  it("preserves native app and connector behavior with a pending, then failing collector", async () => {
+  it("preserves native app and service behavior with a pending, then failing collector", async () => {
     const directory = await mkdtemp(join(tmpdir(), "widefleet-objects-"));
     const observations: z.infer<typeof observation>[] = [];
     const errors: Error[] = [];
@@ -118,7 +119,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("R2 observer in work
             r2_buckets: [
               { binding: "WIDEFLEET_PACKAGES", bucket_name: "objects-packages" },
               { binding: "APP_OBJECTS", bucket_name: "app-objects" },
-              { binding: "CONNECTOR_OBJECTS", bucket_name: "connector-objects" },
+              { binding: "SERVICE_OBJECTS", bucket_name: "service-objects" },
             ],
             vars: {
               OBSERVER_ORIGIN: `http://127.0.0.1:${port}`,
@@ -142,14 +143,14 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("R2 observer in work
           },
         });
 
-        for (const path of ["/app", "/connector"]) {
+        for (const path of ["/app", "/service"]) {
           const resumed = await worker.fetch(`http://fixture${path}/resume`);
           expect(await resumed.json()).toEqual({ handle: true });
         }
 
         expect(observations).toEqual([]);
 
-        for (const path of ["/app", "/connector"]) {
+        for (const path of ["/app", "/service"]) {
           const response = await worker.fetch(`http://fixture${path}`);
           expect(response.status, await response.clone().text()).toBe(200);
           const result = await response.json();
@@ -199,12 +200,13 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("R2 observer in work
             },
             {
               organizationId: "objects-fixture",
-              connector: "fixture",
-              connectorVersion: "a0000000-0000-4000-8000-000000000003",
+              appId: "a0000000-0000-4000-8000-000000000004",
+              buildId: null,
+              deploymentId: "a0000000-0000-4000-8000-000000000003",
             },
           ]) {
             const events = observations.flatMap((item) =>
-              JSON.stringify(item.identity) === JSON.stringify(identity) ? [item.event] : [],
+              isDeepStrictEqual(item.identity, identity) ? [item.event] : [],
             );
 
             expect(events).toHaveLength(30);
@@ -247,7 +249,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("R2 observer in work
           for (const response of pending) response.writeHead(503).end();
           pending.length = 0;
 
-          for (const path of ["/app", "/connector"]) {
+          for (const path of ["/app", "/service"]) {
             const response = await worker.fetch(`http://fixture${path}/stream`);
             expect(response.status).toBe(200);
             expect(await response.text()).toBe("private-body");

@@ -6,9 +6,11 @@ x-control-plane: &control-plane
     DATABASE_URL: ${DATABASE_URL:-}
     PLATFORM_URL: ${PLATFORM_URL:?Set PLATFORM_URL}
     LOGIN_CODE_DELIVERY: ${LOGIN_CODE_DELIVERY:-email}
+    GITHUB_TOKEN: ${GITHUB_TOKEN:-}
     PLATFORM_USAGE_REPORTING: ${PLATFORM_USAGE_REPORTING:-}
     PLATFORM_CRASH_REPORTING: ${PLATFORM_CRASH_REPORTING:-}
     APP_DOMAIN: ${APP_DOMAIN:?Set APP_DOMAIN}
+    APP_HTTPS_PORT: ${APP_HTTPS_PORT:-443}
     PLATFORM_CONFIG_DIRECTORY: /var/lib/widefleet/edge
     PLATFORM_RUNTIME_DIRECTORY: /var/lib/widefleet/runtime
     PLATFORM_ENCRYPTION_KEY: ${PLATFORM_ENCRYPTION_KEY:-}
@@ -44,6 +46,9 @@ services:
     container_name: app-platform-runtime
     image: ${PLATFORM_RUNTIME_IMAGE:?Load the release images environment file}
     restart: unless-stopped
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?Set APP_DOMAIN}
+      APP_HTTPS_PORT: ${APP_HTTPS_PORT:-443}
     depends_on:
       initialize: { condition: service_completed_successfully }
     volumes:
@@ -92,6 +97,7 @@ services:
       PLATFORM_AGENT_STATE: /state
       PLATFORM_ROUTING_DIRECTORY: /config/routes
       APP_DOMAIN: ${APP_DOMAIN:?Set APP_DOMAIN}
+      APP_HTTPS_PORT: ${APP_HTTPS_PORT:-443}
       CELLD_BINARY: /usr/local/bin/celld
       PLATFORM_RUNTIME_CONTAINER: app-platform-runtime
     volumes:

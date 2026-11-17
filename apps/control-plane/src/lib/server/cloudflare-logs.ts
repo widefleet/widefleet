@@ -21,6 +21,21 @@ const numeric = (key: string, operation: "eq" | "gte" | "lte" | "lt", value: num
   type: "number" as const,
 });
 
+// Workers Logs omits null-valued fields in query responses. Restore them at this boundary.
+const queriedLog = cloudflareLog.extend({
+  appId: cloudflareLog.shape.appId.default(null),
+  record: cloudflareLog.shape.record.extend({
+    stack: contract.runtimeLog.shape.stack.default(null),
+    buildId: contract.runtimeLog.shape.buildId.default(null),
+    deploymentId: contract.runtimeLog.shape.deploymentId.default(null),
+    requestId: contract.runtimeLog.shape.requestId.default(null),
+    traceId: contract.runtimeLog.shape.traceId.default(null),
+    spanId: contract.runtimeLog.shape.spanId.default(null),
+    route: contract.runtimeLog.shape.route.default(null),
+    status: contract.runtimeLog.shape.status.default(null),
+  }),
+});
+
 const responseSchema = z.object({
   success: z.literal(true),
   result: z.object({
@@ -29,7 +44,7 @@ const responseSchema = z.object({
         z.object({
           $metadata: z.object({ id: z.string().min(1).max(256) }),
           $workers: z.object({ scriptName: z.string() }),
-          source: cloudflareLog,
+          source: queriedLog,
         }),
       ),
     }),
@@ -66,13 +81,7 @@ export const createCloudflareLogs =
     const filters = [
       leaf("$workers.scriptName", "eq", bindings.APP_RUNTIME_NAME),
       numeric("widefleetLog", "eq", 1),
-      ...("appId" in input
-        ? [leaf("appId", "eq", input.appId)]
-        : [
-            leaf("organizationId", "eq", input.organizationId),
-            leaf("connector", "eq", input.name),
-            ...(input.version ? [leaf("record.connectorVersion", "eq", input.version)] : []),
-          ]),
+      leaf("appId", "eq", input.appId),
       numeric(
         "eventTime",
         "gte",
@@ -100,30 +109,29 @@ export const createCloudflareLogs =
         leaf("record.body", "regex", `(?i)${input.query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
       );
 
-    const deploymentFilter =
-      "appId" in input && input.deploymentId
-        ? [
-            {
-              kind: "group" as const,
-              filterCombination: "or" as const,
-              filters: [
-                leaf("record.deploymentId", "eq", input.deploymentId),
-                ...(window.buildId
-                  ? [
-                      {
-                        kind: "group" as const,
-                        filterCombination: "and" as const,
-                        filters: [
-                          leaf("record.source", "eq", "browser"),
-                          leaf("record.buildId", "eq", window.buildId),
-                        ],
-                      },
-                    ]
-                  : []),
-              ],
-            },
-          ]
-        : [];
+    const deploymentFilter = input.deploymentId
+      ? [
+          {
+            kind: "group" as const,
+            filterCombination: "or" as const,
+            filters: [
+              leaf("record.deploymentId", "eq", input.deploymentId),
+              ...(window.buildId
+                ? [
+                    {
+                      kind: "group" as const,
+                      filterCombination: "and" as const,
+                      filters: [
+                        leaf("record.source", "eq", "browser"),
+                        leaf("record.buildId", "eq", window.buildId),
+                      ],
+                    },
+                  ]
+                : []),
+            ],
+          },
+        ]
+      : [];
 
     const accountId = bindings.CLOUDFLARE_ACCOUNT_ID;
     const client = createCloudflareClient(bindings.CLOUDFLARE_API_TOKEN, transport);
@@ -155,11 +163,7 @@ export const createCloudflareLogs =
 
     for (const event of events)
       if (
-        ("appId" in input
-          ? event.source.appId !== input.appId
-          : event.source.appId !== null ||
-            event.source.organizationId !== input.organizationId ||
-            event.source.connector !== input.name) ||
+        event.source.appId !== input.appId ||
         event.$workers.scriptName !== bindings.APP_RUNTIME_NAME
       )
         throw new Error("Cloudflare returned logs outside the authorized source");

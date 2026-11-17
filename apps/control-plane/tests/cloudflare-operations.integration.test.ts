@@ -1,7 +1,7 @@
+import { createConnectionService } from "../src/lib/server/connections.ts";
+import { connectionRequests } from "../src/lib/server/schema.ts";
+import { checkServiceConsumers } from "../src/lib/server/app-services.ts";
 import { Result } from "better-result";
-import { connectorFixture, connectorFiles } from "./cloudflare-connector.fixture.ts";
-import { prepareConnector } from "../src/lib/server/connector-changes.ts";
-import { connectorReference } from "../src/lib/server/connector-package.ts";
 import { transact } from "../src/lib/server/transactions.ts";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
@@ -14,7 +14,6 @@ import { initializeCloudflareRuntime } from "../src/lib/server/organization-runt
 import {
   apps,
   agents,
-  connectors,
   cloudflareOperations,
   deployments,
   organizationRuntimes,
@@ -74,6 +73,91 @@ describe("Cloudflare operation history", () => {
     expect(await environment.database.db.select().from(jobs)).toHaveLength(0);
   });
 
+  it("approves a connection in the same transaction as its hosted command and replays it only once", async () => {
+    const principal = {
+      id: environment.ownerId,
+      name: "Owner",
+      email: "owner@example.test",
+      role: "owner" as const,
+      admin: true,
+      creator: true,
+      application: { organizationId: "widefleet", admin: true },
+    };
+
+    const source = await seedDeployment(environment.database.db);
+    const target = await seedDeployment(environment.database.db, { entrypoints: ["Reader"] });
+
+    for (const entry of [source, target]) {
+      (await registerCloudflareOperation(environment.database.db, storage, entry.command)).unwrap();
+      await environment.database.db
+        .update(apps)
+        .set({ ownerId: principal.id, activeDeploymentId: entry.command.id })
+        .where(eq(apps.id, entry.appId));
+      await environment.database.db
+        .update(deployments)
+        .set({ status: "succeeded" })
+        .where(eq(deployments.id, entry.command.id));
+    }
+
+    const services = createConnectionService(environment.database.db);
+
+    const request = (
+      await services.request(
+        { ...principal, application: { ...principal.application, admin: false } },
+        {
+          appId: source.appId,
+          app: target.appId,
+          binding: "ERP",
+          entrypoint: "Reader",
+        },
+      )
+    ).unwrap();
+
+    const command = deploymentCommand.parse({
+      kind: "capabilities",
+      id: request.id,
+      appId: source.appId,
+      name: request.binding,
+      grant: { app: target.appId, entrypoint: "Reader" },
+      actor: principal,
+      connectionRequestId: request.id,
+      createdAt: new Date().toISOString(),
+    });
+
+    const rejectedActor = deploymentCommand.parse({
+      ...command,
+      actor: { ...principal, application: { ...principal.application, admin: false } },
+    });
+
+    expect(
+      (await registerCloudflareOperation(environment.database.db, storage, rejectedActor)).isErr(),
+    ).toBe(true);
+
+    const [pending] = await environment.database.db
+      .select()
+      .from(connectionRequests)
+      .where(eq(connectionRequests.id, request.id));
+
+    expect(pending?.status).toBe("pending");
+
+    const first = (
+      await registerCloudflareOperation(environment.database.db, storage, command)
+    ).unwrap();
+
+    expect(first.result).toMatchObject({
+      revision: 1,
+      grants: { ERP: { app: target.appId, entrypoint: "Reader" } },
+    });
+    expect(
+      (await registerCloudflareOperation(environment.database.db, storage, command)).unwrap(),
+    ).toEqual(first);
+    expect((await services.requests(principal)).unwrap()).toContainEqual({
+      ...request,
+      status: "approved",
+    });
+    expect(await environment.database.db.select().from(jobs)).toHaveLength(0);
+  });
+
   it("records independent commands without claiming or blocking another operation", async () => {
     const first = await seedDeployment(environment.database.db);
     const second = await seedDeployment(environment.database.db);
@@ -82,6 +166,39 @@ describe("Cloudflare operation history", () => {
       (await registerCloudflareOperation(environment.database.db, storage, entry.command)).unwrap();
     expect(await environment.database.db.select().from(cloudflareOperations)).toHaveLength(2);
     expect(await environment.database.db.select().from(jobs)).toHaveLength(0);
+  });
+
+  it("refreshes secrets using the newest admitted code and persists that choice across retries", async () => {
+    const first = await seedDeployment(environment.database.db);
+    const second = await seedDeployment(environment.database.db, { appId: first.appId });
+    (await registerCloudflareOperation(environment.database.db, storage, first.command)).unwrap();
+    (await registerCloudflareOperation(environment.database.db, storage, second.command)).unwrap();
+
+    const refresh = deploymentCommand.parse({
+      ...first.command,
+      id: crypto.randomUUID(),
+      requestId: crypto.randomUUID(),
+      refreshSecrets: true,
+    });
+
+    const accepted = (
+      await registerCloudflareOperation(environment.database.db, storage, refresh)
+    ).unwrap();
+
+    expect(accepted.command).toMatchObject({ artifactId: second.artifact.id });
+    const third = await seedDeployment(environment.database.db, { appId: first.appId });
+    (await registerCloudflareOperation(environment.database.db, storage, third.command)).unwrap();
+    expect(
+      (await registerCloudflareOperation(environment.database.db, storage, refresh)).unwrap()
+        .command,
+    ).toEqual(accepted.command);
+
+    const [deployment] = await environment.database.db
+      .select()
+      .from(deployments)
+      .where(eq(deployments.id, refresh.id));
+
+    expect(deployment?.artifactId).toBe(second.artifact.id);
   });
 
   it("applies access inheritance once and keeps settings saved before the first deployment", async () => {
@@ -181,20 +298,22 @@ describe("Cloudflare operation history", () => {
   it("protects a published grant whose SQL activation receipt was lost", async () => {
     const entry = await seedDeployment(environment.database.db);
 
-    const reference = connectorReference.parse({
-      name: "receipt-connector",
-      checksum: "b".repeat(64),
+    const target = await seedDeployment(environment.database.db, {
+      web: false,
       entrypoints: ["default", "Reader"],
-      classes: [],
     });
 
-    await environment.database.db.insert(connectors).values({
-      organizationId: entry.organizationId,
-      name: reference.name,
-      package: reference,
-      appliedPackage: reference,
-      jobId: crypto.randomUUID(),
+    await environment.database.db.insert(deployments).values({
+      id: target.deploymentId,
+      appId: target.appId,
+      artifactId: target.artifact.id,
+      requestId: crypto.randomUUID(),
+      status: "succeeded",
     });
+    await environment.database.db
+      .update(apps)
+      .set({ state: "active", activeDeploymentId: target.deploymentId })
+      .where(eq(apps.id, target.appId));
 
     const command = deploymentCommand.parse({
       kind: "capabilities",
@@ -206,7 +325,7 @@ describe("Cloudflare operation history", () => {
         application: { ...environment.application, admin: true },
       },
       name: "ERP",
-      grant: { connector: reference.name, entrypoint: "Reader" },
+      grant: { app: target.appId, entrypoint: "Reader" },
       createdAt: new Date().toISOString(),
     });
 
@@ -215,34 +334,23 @@ describe("Cloudflare operation history", () => {
       .update(apps)
       .set({ capabilities: {}, capabilityRevision: 2 })
       .where(eq(apps.id, entry.appId));
-    const replacement = connectorFixture(reference.name);
-    replacement.metadata.entrypoints = ["default"];
 
     const prepare = () =>
       transact(environment.database.db, async (transaction) => {
-        const [execution] = await transaction
-          .select()
-          .from(organizationRuntimes)
-          .where(eq(organizationRuntimes.organizationId, entry.organizationId));
-
-        if (!execution) throw new Error("Missing fixture execution");
-
-        return Result.ok(
-          await prepareConnector(
-            transaction,
-            storage,
-            execution,
-            replacement,
-            connectorFiles(replacement),
-          ),
+        await checkServiceConsumers(
+          transaction,
+          { id: target.appId, organizationId: target.organizationId },
+          ["default"],
         );
+
+        return Result.ok(true);
       });
 
     const blocked = await prepare();
     expect(blocked.isErr()).toBe(true);
 
     if (blocked.isErr())
-      expect(blocked.error.message).toContain("Confirm pending app binding changes");
+      expect(blocked.error.message).toContain("Disconnect active and pending app connections");
     await environment.database.db
       .update(apps)
       .set({ appliedCapabilityRevision: 2, appliedCapabilities: { revision: 2, grants: {} } })

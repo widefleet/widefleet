@@ -391,7 +391,7 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
       ).toBe(404);
     });
 
-    it("completes PKCE/nonce login and issues encrypted, one-hour Better Auth cookies", async () => {
+    it("completes PKCE/nonce login and issues encrypted Better Auth cookies", async () => {
       const result = await login();
       const cookies = result.headers.getSetCookie();
 
@@ -401,7 +401,7 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
       expect(session.length).toBeGreaterThanOrEqual(2);
 
       for (const value of session) {
-        expect(value).toContain("Max-Age=3600");
+        expect(value).toContain("Max-Age=604800");
         expect(value).toContain("Domain=apps.example.test");
         expect(value).toContain("HttpOnly");
         expect(value).toContain("Secure");
@@ -410,7 +410,7 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
         expect(value).not.toContain("fixture-access-token");
       }
 
-      expect(cookies.some((value) => value.includes("account_data"))).toBe(false);
+      expect(cookies.some((value) => value.includes("account_data"))).toBe(true);
       expect(
         (
           await request("https://ledger.apps.example.test", {
@@ -455,7 +455,7 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
       },
     );
 
-    it("keeps only verified identity headers and strips all app cookies and tokens", async () => {
+    it("keeps verified identity headers and app cookies while stripping company credentials", async () => {
       const result = await request(
         "https://ledger.apps.example.test/report?allowed_groups=anyone",
         {
@@ -484,8 +484,9 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
       expect(forwarded.headers["x-auth-request-email"]).toBe("user@example.test");
       expect(forwarded.headers["x-auth-request-groups"]).toBe("accounting");
 
+      expect(forwarded.headers["cookie"]?.trim()).toBe("unrelated=private");
+
       for (const key of [
-        "cookie",
         "authorization",
         "proxy-authorization",
         "x-auth-request-access-token",
@@ -494,7 +495,9 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
         "forwarded",
       ])
         expect(forwarded.headers[key]).toBeUndefined();
-      expect(result.headers.getSetCookie()).toEqual([]);
+      expect(result.headers.getSetCookie()).toEqual([
+        "app_cookie=oauth; Path=/; Secure; HttpOnly; SameSite=Lax",
+      ]);
     });
 
     it("uses the installed rules for flat and nested previews without query/header bypasses", async () => {
@@ -668,7 +671,9 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
       });
 
       expect(result.status, await result.clone().text()).toBe(200);
-      expect(result.headers.getSetCookie()).toEqual([]);
+      expect(result.headers.getSetCookie()).toEqual([
+        "app_cookie=oauth; Path=/; Secure; HttpOnly; SameSite=Lax",
+      ]);
     }, 30_000);
 
     it("accepts the same sessions on the other runtime and completes a login started before restart", async () => {
@@ -741,9 +746,10 @@ describe.runIf(process.env["RUN_EDGE_TESTS"] === "1").each(["cloudflare", "celld
         expect(
           issued.every((value) => value.httpOnly && value.secure && value.sameSite === "Lax"),
         ).toBe(true);
-        expect(
-          issued.some((value) => value.name.includes("oauth_state") || value.name === "app_cookie"),
-        ).toBe(false);
+        expect(issued.some((value) => value.name.includes("oauth_state"))).toBe(false);
+        expect(issued.find((value) => value.name === "app_cookie")?.domain).toBe(
+          "ledger.apps.example.test",
+        );
         expect((await page.goto("https://ledger-pr42.apps.example.test"))?.status()).toBe(200);
         expect((await page.goto("https://preview.ledger.apps.example.test"))?.status()).toBe(403);
         await page.goto("https://auth.apps.example.test/oauth2/widefleet/error");

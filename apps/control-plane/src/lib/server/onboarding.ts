@@ -19,7 +19,9 @@ export const createOnboardingService = (
   createOrganization?: CreateOrganization,
   observation?: Observation,
 ) => {
-  const verifiedUser = async (person: AuthenticatedUser) => {
+  const verifiedUser = async (
+    person: Pick<AuthenticatedUser, "userId" | "identityOrganizationId">,
+  ) => {
     if (person.identityOrganizationId !== null) return false;
     const [current] = await database.select().from(user).where(eq(user.id, person.userId));
 
@@ -27,7 +29,7 @@ export const createOnboardingService = (
   };
 
   return {
-    available: async (person: AuthenticatedUser) => {
+    available: async (person: Pick<AuthenticatedUser, "userId" | "identityOrganizationId">) => {
       if (!createOrganization || !(await verifiedUser(person))) return false;
 
       const [owned] = await database
@@ -38,7 +40,10 @@ export const createOnboardingService = (
 
       return !owned;
     },
-    create: async (person: AuthenticatedUser, input: z.infer<typeof createOrganizationInput>) => {
+    create: async (
+      person: Pick<AuthenticatedUser, "userId" | "identityOrganizationId">,
+      input: z.infer<typeof createOrganizationInput>,
+    ) => {
       if (!createOrganization)
         throw new InvalidOperation({
           code: "FORBIDDEN",

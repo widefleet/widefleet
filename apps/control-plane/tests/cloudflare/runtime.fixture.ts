@@ -1,3 +1,5 @@
+import { executionRecorder } from "./execution-limits.fixture.ts";
+
 export const appSource = `
 import { env as importedEnv, WorkflowEntrypoint } from 'cloudflare:workers';
 import { connect } from 'cloudflare:sockets';
@@ -18,7 +20,7 @@ export class ExampleWorkflow extends WorkflowEntrypoint {
         console.info('worker-cache:' + event.instanceId);
         return {
           handler: 'example', instanceId: event.instanceId, value: event.payload.value,
-          workflowName: event.workflowName, connector: !!this.env.CONNECTOR,
+          workflowName: event.workflowName, connected: !!this.env.SERVICE,
           network: (await fetch('https://allowed.example.test/ok')).status,
         };
       });
@@ -54,14 +56,21 @@ export class ExampleWorkflow extends WorkflowEntrypoint {
     }
     if (mode === 'sleep') {
       await step.sleep('nap', 1);
-      const deadline = await step.do('deadline', async () => new Date(Date.now() + 20));
+      // Persisting the deadline and crossing Worker RPC boundaries must leave
+      // time for native sleepUntil to receive a future timestamp on busy runners.
+      const deadline = await step.do('deadline', async () => new Date(Date.now() + 1000));
       await step.sleepUntil('until', deadline);
       return step.do('awake', context => record('awake', context));
     }
     if (mode === 'nested') return step.do('outer', () => step.do('inner', async () => 'invalid'));
     if (mode === 'permissions') {
       await step.waitForEvent('continue', { type: 'continue', timeout: '5 minutes' });
-      return step.do('inspect', async () => ({ connector: !!this.env.CONNECTOR, secret: this.env.PRIVATE_ROOT_SECRET ?? null }));
+      return step.do('inspect', async () => ({ connected: !!this.env.SERVICE, secret: this.env.PRIVATE_ROOT_SECRET ?? null }));
+    }
+    if (mode === 'secrets') {
+      await step.do('started', context => record('started', context));
+      await step.waitForEvent('continue', { type: 'continue', timeout: '5 minutes' });
+      return step.do('inspect', async () => ({ secret: await this.env.WIDEFLEET_SECRETS.get('TOKEN').catch(() => null) }));
     }
     if (mode === 'restart') {
       await step.do('first', context => record('first', context));
@@ -70,7 +79,7 @@ export class ExampleWorkflow extends WorkflowEntrypoint {
     const value = await step.do('prepare', async () => {
       await this.env.DB.exec('CREATE TABLE IF NOT EXISTS workflow_steps (id TEXT PRIMARY KEY)');
       await this.env.DB.prepare('INSERT INTO workflow_steps VALUES (?)').bind(event.instanceId).run();
-      return this.env.CONNECTOR.add(event.payload.value, 1);
+      return this.env.SERVICE.add(event.payload.value, 1);
     });
     const next = await step.waitForEvent('continue', { type: 'continue', timeout: '5 minutes' });
     return step.do('finish', () => value + next.payload.add);
@@ -91,7 +100,7 @@ export default {
     }
     if (url.pathname === '/env') return Response.json({ keys: Object.keys(env), imported: Object.keys(importedEnv) });
     if (url.pathname === '/throw') throw new Error('fixture application failure');
-    if (url.pathname === '/connector') return Response.json(await env.CONNECTOR.add(20, 22));
+    if (url.pathname === '/service') return Response.json(await env.SERVICE.add(20, 22));
     if (url.pathname === '/resources') {
       await env.DB.exec('CREATE TABLE IF NOT EXISTS records (value TEXT)');
       if (request.method === 'PUT') {
@@ -162,10 +171,14 @@ export default {
 `;
 
 export const parentSource = `
-import runtime, { CloudflareWorkflowCatalog as RuntimeWorkflowCatalog, CloudflareAppWorkflow as RuntimeAppWorkflow } from './runtime.js';
+import runtime, { RuntimeManagement as BaseManagement, CloudflareWorkflowCatalog as RuntimeWorkflowCatalog, CloudflareAppWorkflow as RuntimeAppWorkflow, WorkflowSessions as RuntimeWorkflowSessions } from './runtime.js';
 import { WorkerEntrypoint, WorkflowEntrypoint } from 'cloudflare:workers';
 import { connect } from 'cloudflare:sockets';
 export * from './runtime.js';
+${executionRecorder}
+export class RuntimeManagement extends BaseManagement {
+  constructor(ctx, env) { super(ctx, recordExecution(env)); }
+}
 const logRecords = [];
 const workflowWorkers = [];
 const collectorRequests = [];
@@ -177,7 +190,7 @@ for (const level of ['log', 'debug', 'info', 'warn', 'error']) {
   };
 }
 
-export class ConnectorGateway extends WorkerEntrypoint {
+export class AppService extends WorkerEntrypoint {
   invoke(method, [a, b]) { return a + b; }
 }
 
@@ -185,7 +198,7 @@ export class CloudflareAppWorkflow extends RuntimeAppWorkflow {
   run(event, step) {
     const record = { instanceId: event.payload.id, key: null, loads: 0 };
     workflowWorkers.push(record);
-    const loader = this.env.WIDEFLEET_LOADER;
+    const loader = recordExecution(this.env).WIDEFLEET_LOADER;
     return new RuntimeAppWorkflow(this.ctx, {
       ...this.env,
       WIDEFLEET_LOADER: {
@@ -303,6 +316,9 @@ globalThis.fetch = async (input, init) => {
 export default {
   ...runtime,
   async fetch(request, env, ctx) {
+    env = recordExecution(env);
+    const executionPolicy = request.headers.get('x-fixture-execution-policy');
+    if (executionPolicy !== null) env.WIDEFLEET_EXECUTION_LIMITS = executionPolicy;
     const url = new URL(request.url);
     url.protocol = "https:";
     url.port = "";
@@ -312,8 +328,25 @@ export default {
       return env.RUNTIME_MANAGEMENT.fetch(request);
     }
     if (url.pathname === '/fixture/logs') return Response.json(logRecords);
+    if (url.pathname === '/fixture/executions') return Response.json(executions.splice(0));
     if (url.pathname === '/fixture/workflow-workers') return Response.json(workflowWorkers);
     if (url.pathname === '/fixture/collector-requests') return Response.json(collectorRequests);
+    if (url.pathname === '/fixture/workflow-session') {
+      let loads = 0;
+      const loader = env.WIDEFLEET_LOADER;
+      const sessions = new RuntimeWorkflowSessions(ctx, {
+        ...env,
+        WIDEFLEET_LOADER: {
+          ...loader,
+          load(code) { loads++; return loader.load(code); },
+        },
+      });
+      try {
+        const session = await sessions.open(await request.json());
+        session.close();
+        return Response.json({ loads });
+      } catch (error) { return Response.json({ loads, error: error.message }); }
+    }
     if (url.pathname === '/fixture/workflow-binding') {
       const { scope, method, id, options, action } = await request.json();
       try {

@@ -4,7 +4,7 @@ import {
   type OAuthClaimExtensionInput,
 } from "@better-auth/oauth-provider";
 import type { BetterAuthOptions } from "better-auth";
-import { emailOTP, jwt, organization, oneTimeToken } from "better-auth/plugins";
+import { emailOTP, jwt, organization, oneTimeToken, lastLoginMethod } from "better-auth/plugins";
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { z } from "zod";
 import type { Configuration } from "./config.ts";
@@ -13,6 +13,7 @@ import { createSignInEmail, sendOrganizationInvitation, type SendEmail } from ".
 import { hashAppClientSecret } from "./app-login-client.ts";
 import { authenticationReference } from "./authentication-context.ts";
 import { organizationAccess, organizationRoles } from "../organization.ts";
+import { personalSocialAccounts, socialProviders, validateSocialUser } from "./social-sign-in.ts";
 
 export const cliClientId = "platform-cli";
 
@@ -58,6 +59,7 @@ export const authenticationOptions = (
   } = {},
 ) => {
   const sendSignInEmail = createSignInEmail(configuration, sendEmail);
+  const providers = socialProviders(configuration);
 
   if (publicSignup && (!sendEmail || configuration.LOGIN_CODE_DELIVERY !== "email"))
     throw new Error("Public signup requires email delivery");
@@ -67,6 +69,10 @@ export const authenticationOptions = (
     baseURL: configuration.PLATFORM_URL,
     secret: configuration.BETTER_AUTH_SECRET,
     trustedOrigins: [configuration.PLATFORM_URL],
+    socialProviders: providers,
+    user: Object.keys(providers).length
+      ? { validateUserInfo: validateSocialUser(allowEmail, allowUser) }
+      : undefined,
     // Membership mutations use the shared organization services for UI, API and CLI.
     disabledPaths: [
       "/sign-up/email",
@@ -125,6 +131,19 @@ export const authenticationOptions = (
         if (current && allowUser && !(await allowUser(current.user.id)))
           throw new APIError("FORBIDDEN", { message: "This account is unavailable" });
 
+        if (
+          context.path === "/link-social" &&
+          ["widefleet-google", "widefleet-microsoft"].includes(
+            z.object({ provider: z.string() }).parse(context.body).provider,
+          ) &&
+          (!current?.user.emailVerified ||
+            current.session["recovery"] === true ||
+            Date.now() - current.session.createdAt.getTime() >= 10 * 60 * 1000)
+        )
+          throw new APIError("FORBIDDEN", {
+            message: "Confirm your email before linking this account",
+          });
+
         const identityOrganizationId = z
           .string()
           .nullable()
@@ -174,7 +193,11 @@ export const authenticationOptions = (
           if (!(await allowEmail(input.email.toLowerCase()))) {
             if (context.path === "/email-otp/send-verification-otp")
               return context.json({ success: true });
-            throw new APIError("UNAUTHORIZED", { message: "Invalid or expired sign-in code" });
+
+            const plugin = context.context.getPlugin("email-otp");
+
+            if (!plugin) throw new Error("Email OTP plugin is not configured");
+            throw APIError.from("BAD_REQUEST", plugin.$ERROR_CODES.INVALID_OTP);
           }
         }
 
@@ -228,6 +251,28 @@ export const authenticationOptions = (
     },
     rateLimit: rateLimit ?? { storage: "memory" },
     plugins: [
+      personalSocialAccounts,
+      lastLoginMethod({
+        cookieName: "platform.last_used_login_method",
+        beforeStoreCookie: (context) => Boolean(context.context.newSession),
+        customResolveMethod: (context) => {
+          if (context.path.startsWith("/sso/callback/")) return "sso";
+
+          if (
+            context.path.startsWith("/callback/") &&
+            context.params?.["id"] === "widefleet-google"
+          )
+            return "google";
+
+          if (
+            context.path.startsWith("/callback/") &&
+            context.params?.["id"] === "widefleet-microsoft"
+          )
+            return "microsoft";
+
+          return null;
+        },
+      }),
       emailOTP({
         storeOTP: "hashed",
         expiresIn: 300,
@@ -297,6 +342,8 @@ export const authenticationOptions = (
         resourcePrivileges: () => false,
         accessTokenExpiresIn: 300,
         refreshTokenExpiresIn: 60 * 60 * 24 * 30,
+        // Browser app requests may refresh the same cookie concurrently.
+        refreshTokenReuseInterval: 30,
       }),
       oauthDeviceAuthorization({ verificationUri: `${configuration.PLATFORM_URL}/device` }),
     ],

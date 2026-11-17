@@ -3,7 +3,7 @@
   import { getAppDetails, removeApp } from "#lib/apps.remote";
   import { setCatalogListing } from "#lib/catalog.remote";
   import FormIssues from "#shadcn/FormIssues.svelte";
-  import { Button } from "#shadcn/components/ui/button/index.js";
+  import { Button } from "@platform/ui/button";
   import CopyValue from "./CopyValue.svelte";
   import Trash2 from "@lucide/svelte/icons/trash-2";
 
@@ -65,6 +65,13 @@
     <p class="text-muted-foreground mt-2 text-sm leading-6">
       This app, all its previews and their published versions will be removed.
     </p>
+    {#if data.source.supported && data.source.branch}
+      <p class="text-muted-foreground mt-2 text-sm leading-6">
+        {app.parentId
+          ? "Its source branch remains in the main app’s Git repository."
+          : "Any associated Widefleet Git repository and its branches will also be permanently deleted."}
+      </p>
+    {/if}
     <p class="text-muted-foreground mt-2 text-xs leading-6">This action cannot be undone.</p>
     <details class="mt-5">
       <summary class="text-sm font-medium">Permanently delete app</summary>
@@ -77,7 +84,10 @@
             {...removeApp.fields.confirmed.as("checkbox")}
             required
             class="accent-destructive mt-1 size-4 shrink-0"
-          />I want to permanently delete this app and all its previews.</label
+          />I want to permanently delete this app and all its previews{!app.parentId &&
+          data.source.supported
+            ? ", including its Widefleet Git repository"
+            : ""}.</label
         ><Button type="submit" variant="destructive" disabled={removeApp.pending > 0}
           ><Trash2 />{removeApp.pending ? "Requesting deletion …" : "Delete app"}</Button
         >

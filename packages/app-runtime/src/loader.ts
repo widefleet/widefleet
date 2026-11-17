@@ -1,3 +1,22 @@
+import { workloadDiscovery } from "./workload-identity.ts";
+import { mcpRequest } from "./mcp.ts";
+import { mcpLoginRequest } from "./mcp-login.ts";
+
+import { prepareAppSecrets } from "./app-secrets.ts";
+import { oauthAppAvailable } from "./app-oauth.ts";
+import { managedOAuth } from "./oauth.ts";
+
+export { WorkloadIdentity } from "./workload-identity.ts";
+
+export { AppOAuth } from "./app-oauth.ts";
+
+import { signAppCaller } from "./app-caller.ts";
+import type { appCaller } from "@platform/contracts";
+
+export { AppSecrets } from "./app-secrets.ts";
+
+export { AppService } from "./app-service.ts";
+
 import { createAuthHandler, manageAuthConfiguration } from "@platform/auth-proxy";
 import { authControlPath, authRoute, authRouteKey } from "@platform/auth-proxy/publication";
 import { WorkerEntrypoint } from "cloudflare:workers";
@@ -7,21 +26,15 @@ import { z } from "zod";
 import { workflowJson } from "./workflow-json.ts";
 import { workflowCatalog } from "./workflow-catalog.ts";
 import { workflowRequest } from "@platform/contracts";
-import { workerCode } from "./worker.ts";
+import { appWorker, workerCode } from "./worker.ts";
 import { browserPolicy } from "./csp.ts";
 import { serveAsset } from "./assets.ts";
-import { appKey, readApp } from "./catalog.ts";
+import { readApp } from "./catalog.ts";
 import type { WorkflowRunner } from "./workflow-runner.ts";
 import type { Events } from "./events.ts";
 import type { ParentEnvironment, PublishedApp, Json } from "./types.ts";
-import { manageConnector } from "./connector-catalog.ts";
 import { readOrganizationAvailability } from "./availability.ts";
-
-export { ConnectorCatalog, ConnectorGateway } from "./connector-catalog.ts";
-
-export { ConnectorSecrets } from "./connector-code.ts";
-
-export { ConnectorState, ConnectorSupervisor } from "./connector-state.ts";
+import { executionOptions } from "./execution-limits.ts";
 
 export { Database, KeyValue, Producer } from "./storage.ts";
 
@@ -62,16 +75,13 @@ const eventConfiguration = async (environment: ParentEnvironment) => {
   };
 };
 
-const load = (app: PublishedApp, environment: ParentEnvironment, context: ExecutionContext) =>
-  environment.WIDEFLEET_LOADER.get(appKey(app), () => workerCode(app, environment, context));
-
 const run = async <T>(
   app: PublishedApp,
   environment: ParentEnvironment,
   context: ExecutionContext,
   operation: (worker: WorkerStub) => Promise<T>,
 ) => {
-  const worker = load(app, environment, context);
+  const worker = await appWorker(app, environment, context);
 
   try {
     return await operation(worker);
@@ -109,7 +119,11 @@ const dispatchApp = async (
   request: Request,
   environment: ParentEnvironment,
   context: ExecutionContext,
-  authenticated: { appId: string; organizationId: string } | null,
+  authenticated: {
+    appId: string;
+    organizationId: string;
+    caller: z.infer<typeof appCaller>;
+  } | null,
 ) => {
   const url = new URL(request.url);
   const candidate = request.headers.get("x-widefleet-candidate");
@@ -135,12 +149,21 @@ const dispatchApp = async (
 
   if (!app) return new Response("App is not published", { status: 404 });
 
-  if (authenticated !== null && authenticated.appId !== app.appId)
+  if (
+    authenticated !== null &&
+    (authenticated.appId !== app.appId ||
+      (app.organizationId !== undefined && authenticated.organizationId !== app.organizationId))
+  )
     return new Response("App authorization is being updated", { status: 503 });
 
   if (url.pathname === "/.well-known/widefleet/ready") {
     await run(app, environment, context, (worker) =>
-      worker.getEntrypoint<Events>("Events").ready(),
+      worker
+        .getEntrypoint<Events>(
+          "Events",
+          executionOptions(environment.WIDEFLEET_EXECUTION_LIMITS, "readiness"),
+        )
+        .ready(),
     );
 
     for (const binding of app.metadata.bindings) {
@@ -151,7 +174,12 @@ const dispatchApp = async (
       );
 
       try {
-        await worker.getEntrypoint<WorkflowRunner>("WorkflowRunner").ready();
+        await worker
+          .getEntrypoint<WorkflowRunner>(
+            "WorkflowRunner",
+            executionOptions(environment.WIDEFLEET_EXECUTION_LIMITS, "readiness"),
+          )
+          .ready();
       } finally {
         worker.dispose?.();
       }
@@ -163,6 +191,7 @@ const dispatchApp = async (
       capabilityRevision: app.capabilityRevision,
       version: app.version,
       runtimeVersion: WIDEFLEET_RUNTIME_VERSION,
+      services: 1,
     });
   }
 
@@ -180,17 +209,33 @@ const dispatchApp = async (
       headers: { "cache-control": "no-store" },
     });
 
+  if (app.metadata.web === false) return new Response(null, { status: 404 });
+
   if (request.method === "GET" || request.method === "HEAD") {
     const asset = await serveAsset(request, environment, app);
 
     if (asset.status !== 404) return browserPolicy(asset, app.network.policy.browser);
   }
 
+  const proof = authenticated
+    ? await signAppCaller(
+        environment.WIDEFLEET_CONTROL_TOKEN,
+        app.appId,
+        authenticated.organizationId,
+        authenticated.caller,
+      )
+    : undefined;
+
   return browserPolicy(
     // celld forwards incoming request cancellation only when the signal is
     // explicitly supplied to the subrequest.
     await run(app, environment, context, (worker) =>
-      worker.getEntrypoint().fetch(request, { signal: request.signal }),
+      worker
+        .getEntrypoint(undefined, {
+          ...executionOptions(environment.WIDEFLEET_EXECUTION_LIMITS, "http"),
+          props: { caller: authenticated?.caller ?? null, appCaller: proof },
+        })
+        .fetch(request, { signal: request.signal }),
     ),
     app.network.policy.browser,
   );
@@ -211,8 +256,8 @@ const manageRuntime = async (
     return Response.json({ runtimeVersion: WIDEFLEET_RUNTIME_VERSION });
   }
 
-  if (url.pathname === "/.well-known/widefleet/connectors")
-    return manageConnector(request, environment);
+  if (url.pathname === "/.well-known/widefleet/app-secrets")
+    return prepareAppSecrets(request, environment);
 
   if (url.pathname === "/.well-known/widefleet/workflows") {
     if (request.method !== "POST") return new Response(null, { status: 403 });
@@ -265,6 +310,22 @@ export class RuntimeManagement extends WorkerEntrypoint<ParentEnvironment> {
 
 export default {
   async fetch(request: Request, environment: ParentEnvironment, context: ExecutionContext) {
+    const login = await mcpLoginRequest(request, environment, context);
+
+    if (login) return login;
+    const mcp = await mcpRequest(request, environment, context);
+
+    if (mcp) return mcp;
+    const discovery = await workloadDiscovery(request, environment);
+
+    if (discovery) return discovery;
+
+    const oauthResponse = await managedOAuth(environment).callback(request, (identity) =>
+      oauthAppAvailable(environment, identity),
+    );
+
+    if (oauthResponse) return oauthResponse;
+
     if (isManagementRequest(request)) {
       // Only the private native listener accepts token-authenticated HTTP management.
       // Hosted management is available exclusively through RuntimeManagement.
@@ -276,8 +337,8 @@ export default {
       return manageRuntime(request, environment, context);
     }
 
-    return createAuthHandler(environment, (authenticated, appId, organizationId) =>
-      dispatchApp(authenticated, environment, context, { appId, organizationId }),
+    return createAuthHandler(environment, (authenticated, appId, organizationId, caller) =>
+      dispatchApp(authenticated, environment, context, { appId, organizationId, caller }),
     ).fetch(request);
   },
   async scheduled(
@@ -303,7 +364,10 @@ export default {
 
           const result = await run(app, environment, context, (worker) =>
             worker
-              .getEntrypoint<Events>("Events")
+              .getEntrypoint<Events>(
+                "Events",
+                executionOptions(environment.WIDEFLEET_EXECUTION_LIMITS, "cron"),
+              )
               .runScheduled({ cron: controller.cron, scheduledTime: controller.scheduledTime }),
           );
 

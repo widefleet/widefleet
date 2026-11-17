@@ -14,7 +14,7 @@ const script = fileURLToPath(new URL("../../../../tools/publish-cli.sh", import.
 
 const packages = [...cliPlatforms.map((platform) => `widefleet-${platform.name}`), "widefleet"];
 
-const fixture = async (registry = "https://registry.npmjs.org") => {
+const fixture = async (registry = "https://registry.npmjs.org", version = "0.3.0") => {
   const directory = await mkdtemp(join(tmpdir(), "widefleet-npm-publication-"));
   await mkdir(join(directory, "package"));
 
@@ -23,9 +23,13 @@ const fixture = async (registry = "https://registry.npmjs.org") => {
 
     const manifest = {
       name,
-      version: "0.3.0",
+      version,
       repository: { url: "git+https://github.com/widefleet/widefleet.git" },
-      publishConfig: { registry, access: "public" },
+      publishConfig: {
+        registry,
+        access: "public",
+        tag: version.includes("-canary.") ? "canary" : "latest",
+      },
       ...(platform && {
         os: [platform.os],
         cpu: [platform.cpu],
@@ -35,13 +39,13 @@ const fixture = async (registry = "https://registry.npmjs.org") => {
       ...(name === "widefleet" && {
         bin: { widefleet: "./bin/widefleet.mjs" },
         optionalDependencies: Object.fromEntries(
-          cliPlatforms.map((platform) => [`widefleet-${platform.name}`, "0.3.0"]),
+          cliPlatforms.map((platform) => [`widefleet-${platform.name}`, version]),
         ),
       }),
     };
 
     await writeFile(join(directory, "package/package.json"), JSON.stringify(manifest));
-    const archive = `${name}-0.3.0.tgz`;
+    const archive = `${name}-${version}.tgz`;
     await execute("tar", ["-czf", archive, "package"], { cwd: directory });
     const bytes = await readFile(join(directory, archive));
     await writeFile(
@@ -54,7 +58,7 @@ const fixture = async (registry = "https://registry.npmjs.org") => {
         ...manifest,
         dist: {
           integrity: `sha512-${createHash("sha512").update(bytes).digest("base64")}`,
-          tarball: `https://registry.npmjs.org/${name}/-/${name}-0.3.0.tgz`,
+          tarball: `https://registry.npmjs.org/${name}/-/${name}-${version}.tgz`,
         },
       }),
     );
@@ -72,13 +76,21 @@ while [[ $# -gt 0 ]]; do
   if [[ "$1" == --header ]]; then accept=$2; fi
   shift
 done
-if [[ "$url" == */0.3.0 ]]; then
+if [[ "$url" == */canary ]]; then
+  if [[ -n "\${CURRENT_CANARY:-}" ]]; then
+    printf '{"version":"%s"}' "$CURRENT_CANARY" > "$output"
+    printf 200
+  else
+    printf '%s' "\${CANARY_STATUS:-404}"
+  fi
+  exit
+elif [[ "$url" == */${version} ]]; then
   name=\${url%/*}
   name=\${name##*/}
   kind=version
 elif [[ "$url" == */-/*.tgz ]]; then
   name=\${url##*/}
-  name=\${name%-0.3.0.tgz}
+  name=\${name%-${version}.tgz}
   kind=tarball
 else
   name=\${url##*/}
@@ -138,7 +150,7 @@ fi
 if [[ "$kind" == tarball ]]; then
   printf 'available %s\\n' "$name" >> "$FIXTURE/events.log"
 else
-  jq '{versions: {"0.3.0": .}}' "$output" > "$output.tmp"
+  jq '{versions: {"${version}": .}}' "$output" > "$output.tmp"
   mv "$output.tmp" "$output"
 fi
 printf 200
@@ -149,7 +161,7 @@ printf '%s\\n' "$*" >> "$FIXTURE/npm.log"
 case "$1" in
   publish)
     name=\${2##*/}
-    name=\${name%-0.3.0.tgz}
+    name=\${name%-${version}.tgz}
     printf 'publish %s\\n' "$name" >> "$FIXTURE/events.log"
     test "\${PUBLISH_FAIL:-false}" != true
     test "\${PUBLISH_FAIL_PACKAGE:-}" != "$name"
@@ -162,7 +174,7 @@ esac
       widefleet: `#!/bin/bash
 set -euo pipefail
 if [[ "$1" == --version ]]; then
-  echo 'widefleet 0.3.0'
+  echo 'widefleet ${version}'
 else
   mkdir -p "$2"
   touch "$2/.gitignore" "$2/pnpm-lock.yaml"
@@ -180,7 +192,7 @@ fi
         FIXTURE: directory,
         CLI_RELEASE_DIRECTORY: directory,
         GITHUB_STEP_SUMMARY: join(directory, "summary"),
-        VERSION: "0.3.0",
+        VERSION: version,
         HTTP_STATUS: "404",
         NPM_PROPAGATION_TIMEOUT_SECONDS: "2",
         ...environment,
@@ -204,7 +216,7 @@ it("publishes and checks native packages concurrently before the launcher with p
       packages
         .map(
           (name) =>
-            `publish ${directory}/${name}-0.3.0.tgz --registry=https://registry.npmjs.org --access=public --provenance --ignore-scripts`,
+            `publish ${directory}/${name}-0.3.0.tgz --registry=https://registry.npmjs.org --access=public --provenance --ignore-scripts --tag=latest`,
         )
         .toSorted(),
     );
@@ -433,3 +445,72 @@ it.each(packages.slice(0, -1))(
     }
   },
 );
+
+it.each([undefined, "0.3.0-canary.41.g0123456789ab"])(
+  "publishes all prerelease packages only to canary (previous: %s)",
+  async (current) => {
+    const version = "0.3.0-canary.42.gabcdef012345";
+    const { directory, run } = await fixture(undefined, version);
+
+    try {
+      await run({ NPM_DIST_TAG: "canary", ...(current && { CURRENT_CANARY: current }) });
+      const publications = (await readFile(join(directory, "npm.log"), "utf8")).trim().split("\n");
+      expect(publications).toHaveLength(packages.length);
+      expect(publications.every((line) => line.endsWith("--tag=canary"))).toBe(true);
+      expect(publications.at(-1)).toContain(`/widefleet-${version}.tgz `);
+      expect(await readFile(join(directory, "summary"), "utf8")).toContain(`widefleet@${version}`);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+it.each([
+  { version: "0.3.0-canary.42.gabcdef012345", tag: "latest" },
+  { version: "0.3.0", tag: "canary" },
+  { version: "0.3.0-canary.42.gabcdef012345", tag: "next" },
+])("rejects $version on $tag before any upload", async ({ version, tag }) => {
+  const { directory, run } = await fixture(undefined, version);
+
+  try {
+    await expect(run({ NPM_DIST_TAG: tag })).rejects.toThrow();
+    await expect(readFile(join(directory, "npm.log"))).rejects.toThrow();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("rejects a stale canary retry and a failed channel lookup before any upload", async () => {
+  const { directory, run } = await fixture(undefined, "0.3.0-canary.42.gabcdef012345");
+
+  try {
+    await expect(
+      run({ NPM_DIST_TAG: "canary", CURRENT_CANARY: "0.4.0-canary.43.g0123456789ab" }),
+    ).rejects.toThrow("Refusing to move");
+    await expect(run({ NPM_DIST_TAG: "canary", CANARY_STATUS: "503" })).rejects.toThrow(
+      "npm canary lookup failed",
+    );
+    await expect(readFile(join(directory, "npm.log"))).rejects.toThrow();
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it("resumes a partially published canary without uploading existing packages", async () => {
+  const version = "0.3.0-canary.42.gabcdef012345";
+  const { directory, run } = await fixture(undefined, version);
+
+  try {
+    await run({
+      NPM_DIST_TAG: "canary",
+      CURRENT_CANARY: version,
+      EXISTING_PACKAGES: packages.slice(0, -1).join(" "),
+    });
+    const publications = (await readFile(join(directory, "npm.log"), "utf8")).trim().split("\n");
+    expect(publications).toHaveLength(1);
+    expect(publications[0]).toContain(`/widefleet-${version}.tgz `);
+    expect(publications[0]).toContain("--tag=canary");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

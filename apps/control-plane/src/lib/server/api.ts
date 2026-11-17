@@ -12,9 +12,8 @@ import { binaryPaths, binarySchemas } from "./openapi-binary.ts";
 import { DirectoryUnavailable } from "./directory.ts";
 import { InvalidOperation, TelemetryNotConfigured, TelemetryUnavailable } from "./errors.ts";
 import { readInstallation } from "./installation-store.ts";
-import { uploadedConnector } from "./connector-package.ts";
-import { connectorAdministrator } from "./connector-changes.ts";
-import { connectorLogService } from "./telemetry.ts";
+import { templateCatalog, readTemplate } from "./app-templates.ts";
+import { readAppIcon } from "./app-icons.ts";
 
 import { changeMemberRole, listMembers, removeMember } from "./members.ts";
 import { readCompanyAccount } from "./settings-account.ts";
@@ -30,6 +29,7 @@ const apiOperation = async <T>(operation: () => Promise<T>) => {
       throw new ORPCError("AUTH_OPERATION_FAILED", {
         status: cause.statusCode,
         message: cause.message,
+        cause,
       });
     throw cause;
   }
@@ -39,8 +39,15 @@ const unwrap = <T, E extends { message: string }>(result: Result<T, E>) => {
   if (result.isOk()) return result.value;
   const error = result.error;
 
+  if (error instanceof APIError)
+    throw new ORPCError("AUTH_OPERATION_FAILED", {
+      status: error.statusCode,
+      message: error.message,
+      cause: error,
+    });
+
   if (error instanceof DirectoryUnavailable)
-    throw new ORPCError("SERVICE_UNAVAILABLE", { message: error.message });
+    throw new ORPCError("SERVICE_UNAVAILABLE", { message: error.message, cause: error });
 
   if (error instanceof TelemetryNotConfigured)
     throw new ORPCError("TELEMETRY_NOT_CONFIGURED", { status: 503, message: error.message });
@@ -145,8 +152,13 @@ export const createApi = (runtime: Runtime) => {
     account: read
       .route({ method: "GET", path: "/account" })
       .output(contract.companyAccount)
-      .handler(({ context }) =>
-        readCompanyAccount(runtime, context.principal, context.request.headers),
+      .handler(async ({ context }) =>
+        readCompanyAccount(
+          runtime,
+          context.principal,
+          (await runtime.auth.api.getSession({ headers: context.request.headers }))?.session ??
+            null,
+        ),
       ),
     organizations: base
       .route({ method: "GET", path: "/organizations" })
@@ -306,90 +318,120 @@ export const createApi = (runtime: Runtime) => {
 
         return { accepted: true };
       }),
-    connectorCatalog: read
-      .route({ method: "GET", path: "/connector-catalog" })
-      .output(z.array(contract.connectorCatalogEntry))
-      .handler(async ({ context }) => unwrap(await runtime.connectors.catalog(context.principal))),
+    appSecrets: read
+      .route({ method: "GET", path: "/apps/{appId}/secrets" })
+      .input(contract.appPath)
+      .output(contract.appSecretStatus)
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.appSecrets.read(context.principal, input.appId)),
+      ),
+    appSecretPut: write
+      .route({ method: "PUT", path: "/apps/{appId}/secrets/{secret}" })
+      .input(
+        contract.appPath.extend({
+          secret: contract.appSecretName,
+          value: contract.appSecretValue,
+        }),
+      )
+      .output(contract.appSecretStatus)
+      .handler(async ({ context, input }) =>
+        unwrap(
+          await runtime.appSecrets.set(context.principal, input.appId, input.secret, input.value),
+        ),
+      ),
+    appSecretDelete: write
+      .route({ method: "DELETE", path: "/apps/{appId}/secrets/{secret}" })
+      .input(contract.appPath.extend({ secret: contract.appSecretName }))
+      .output(contract.appSecretStatus)
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.appSecrets.set(context.principal, input.appId, input.secret, null)),
+      ),
+    serviceCatalog: read
+      .route({ method: "GET", path: "/app-services" })
+      .output(z.array(contract.serviceCatalogEntry))
+      .handler(async ({ context }) =>
+        unwrap(await runtime.connections.services(context.principal)),
+      ),
+    serviceDescription: read
+      .route({ method: "GET", path: "/app-services/{service}" })
+      .input(contract.servicePath)
+      .output(contract.serviceDescription)
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.connections.describe(context.principal, input.service)),
+      ),
+    serviceAccess: write
+      .route({ method: "PUT", path: "/app-services/{appId}/access" })
+      .input(contract.appPath.extend(contract.serviceAccessChange.shape))
+      .output(contract.serviceAccessChange)
+      .handler(async ({ context, input }) =>
+        unwrap(
+          await runtime.connections.setAccess(context.principal, input.appId, input.accessMode),
+        ),
+      ),
+    connectionRequests: read
+      .route({ method: "GET", path: "/connection-requests" })
+      .output(z.array(contract.connectionRequest))
+      .handler(async ({ context }) =>
+        unwrap(await runtime.connections.requests(context.principal)),
+      ),
+    connectionRequest: write
+      .route({ method: "POST", path: "/connection-requests" })
+      .input(contract.connectionRequestInput)
+      .output(contract.connectionRequest)
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.connections.request(context.principal, input)),
+      ),
+    connectionRequestApprove: write
+      .route({ method: "POST", path: "/connection-requests/{requestId}/approve" })
+      .input(contract.connectionRequestPath)
+      .output(contract.connectionRequest)
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.connections.approve(context.principal, input.requestId)),
+      ),
+    connectionRequestReject: write
+      .route({ method: "POST", path: "/connection-requests/{requestId}/reject" })
+      .input(contract.connectionRequestPath)
+      .output(contract.connectionRequest)
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.connections.reject(context.principal, input.requestId)),
+      ),
     appConnections: read
       .route({ method: "GET", path: "/apps/{appId}/connections" })
       .input(contract.appPath)
       .output(contract.appConnections)
       .handler(async ({ context, input }) =>
-        unwrap(await runtime.connectors.connections(context.principal, input.appId)),
+        unwrap(await runtime.connections.connections(context.principal, input.appId)),
       ),
-    connectors: read
-      .route({ method: "GET", path: "/connectors" })
-      .output(z.array(contract.connectorStatus))
-      .handler(async ({ context }) => unwrap(await runtime.connectors.list(context.principal))),
-    connectorStatus: read
-      .route({ method: "GET", path: "/connectors/{name}" })
-      .input(z.strictObject({ name: contract.appSlug }))
-      .output(contract.connectorStatus)
-      .handler(async ({ context, input }) =>
-        unwrap(await runtime.connectors.read(context.principal, input.name)),
-      ),
-    connectorLogs: read
-      .route({ method: "GET", path: "/connectors/{name}/logs" })
-      .input(contract.connectorLogQuery)
-      .output(contract.logPage)
-      .handler(async ({ context, input }) =>
-        unwrap(await runtime.telemetry.queryConnector(context.principal, input)),
-      ),
-    connectorSecrets: read
-      .route({ method: "GET", path: "/connectors/{name}/secrets" })
-      .input(z.strictObject({ name: contract.appSlug }))
-      .output(contract.connectorStatus)
-      .handler(async ({ context, input }) =>
-        unwrap(await runtime.connectors.read(context.principal, input.name)),
-      ),
-    connectorSecretPut: write
-      .route({ method: "PUT", path: "/connectors/{name}/secrets/{secret}" })
-      .input(contract.connectorSecretPath.extend({ value: contract.connectorSecretValue }))
-      .output(contract.connectorStatus)
-      .handler(async ({ context, input }) =>
-        unwrap(
-          await runtime.connectors.setSecret(
-            context.principal,
-            input.name,
-            input.secret,
-            input.value,
-          ),
-        ),
-      ),
-    connectorSecretDelete: write
-      .route({ method: "DELETE", path: "/connectors/{name}/secrets/{secret}" })
-      .input(contract.connectorSecretPath)
-      .output(contract.connectorStatus)
-      .handler(async ({ context, input }) =>
-        unwrap(
-          await runtime.connectors.setSecret(context.principal, input.name, input.secret, null),
-        ),
-      ),
-    connectorBindings: read
+    appBindings: read
       .route({ method: "GET", path: "/apps/{appId}/bindings" })
       .input(contract.appPath)
       .output(contract.capabilityState)
       .handler(async ({ context, input }) =>
-        unwrap(await runtime.connectors.bindings(context.principal, input.appId)),
+        unwrap(await runtime.connections.bindings(context.principal, input.appId)),
       ),
-    connectorBind: write
+    appBind: write
       .route({ method: "PUT", path: "/apps/{appId}/bindings/{binding}" })
       .input(contract.capabilityPath.extend(contract.capabilityGrant.shape))
       .output(contract.capabilityState)
       .handler(async ({ context, input }) =>
         unwrap(
-          await runtime.connectors.bind(context.principal, input.appId, input.binding, {
-            connector: input.connector,
-            entrypoint: input.entrypoint,
-          }),
+          await runtime.connections.bind(
+            context.principal,
+            input.appId,
+            input.binding,
+            contract.capabilityGrant.parse({
+              app: input.app,
+              entrypoint: input.entrypoint,
+            }),
+          ),
         ),
       ),
-    connectorUnbind: write
+    appUnbind: write
       .route({ method: "DELETE", path: "/apps/{appId}/bindings/{binding}" })
       .input(contract.capabilityPath)
       .output(contract.capabilityState)
       .handler(async ({ context, input }) =>
-        unwrap(await runtime.connectors.bind(context.principal, input.appId, input.binding, null)),
+        unwrap(await runtime.connections.bind(context.principal, input.appId, input.binding, null)),
       ),
     workflowDefinitions: read
       .route({ method: "GET", path: "/apps/{appId}/workflows" })
@@ -467,9 +509,11 @@ export const createApi = (runtime: Runtime) => {
       .route({ method: "PATCH", path: "/apps/{appId}/network" })
       .input(contract.appPath.extend(contract.networkChange.shape))
       .output(contract.networkState)
-      .handler(async ({ context, input }) =>
-        unwrap(await runtime.network.change(context.principal, input.appId, input)),
-      ),
+      .handler(async ({ context, input }) => {
+        const { appId, ...change } = input;
+
+        return unwrap(await runtime.network.change(context.principal, appId, change));
+      }),
     setupStatus: base
       .route({ method: "GET", path: "/setup" })
       .output(z.object({ required: z.boolean() }))
@@ -561,12 +605,62 @@ export const createApi = (runtime: Runtime) => {
       .route({ method: "GET", path: "/catalog" })
       .output(z.array(contract.catalogEntry))
       .handler(async ({ context }) => unwrap(await runtime.apps.catalog(context.principal))),
+    listTemplates: read
+      .route({ method: "GET", path: "/catalog/templates" })
+      .input(contract.templateSearch)
+      .output(contract.appTemplateCatalog)
+      .handler(async ({ context, input }) =>
+        unwrap(await templateCatalog(context.principal, runtime.configuration, input.search)),
+      ),
+    getTemplate: read
+      .route({ method: "GET", path: "/catalog/templates/{templateId}" })
+      .input(contract.templatePath)
+      .output(contract.appTemplate)
+      .handler(async ({ context, input }) =>
+        unwrap(await readTemplate(context.principal, runtime.configuration, input.templateId)),
+      ),
     setCatalogListing: write
       .route({ method: "PUT", path: "/apps/{appId}/catalog" })
       .input(contract.catalogListingInput)
       .output(contract.catalogListing)
       .handler(async ({ context, input }) =>
         unwrap(await runtime.apps.setCatalogListing(context.principal, input.appId, input.listed)),
+      ),
+    sourceDeployTarget: write
+      // Deployment tokens need this read-only check without platform:read scope.
+      .route({ method: "POST", path: "/apps/source-target" })
+      .input(contract.sourceDeployTargetInput)
+      .output(contract.sourceDeployTarget)
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.source.deploymentTarget(context.principal, input)),
+      ),
+    appSource: read
+      .route({ method: "GET", path: "/apps/{appId}/source" })
+      .input(contract.appPath)
+      .output(contract.appSource)
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.source.read(context.principal, input.appId)),
+      ),
+    prepareSource: write
+      .route({ method: "POST", path: "/apps/{appId}/source/prepare" })
+      .input(contract.appPath.strict())
+      .output(contract.sourcePreparation)
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.source.prepare(context.principal, input.appId)),
+      ),
+    sourceReadCredential: read
+      .route({ method: "POST", path: "/apps/{appId}/source/read-credential" })
+      .input(contract.appPath)
+      .output(contract.sourceCredential)
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.source.credential(context.principal, input.appId, "read")),
+      ),
+    sourceWriteCredential: write
+      .route({ method: "POST", path: "/apps/{appId}/source/write-credential" })
+      .input(contract.appPath)
+      .output(contract.sourceCredential)
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.source.credential(context.principal, input.appId, "write")),
       ),
     listApps: read
       .route({ method: "GET", path: "/apps" })
@@ -634,9 +728,11 @@ export const createApi = (runtime: Runtime) => {
       .route({ method: "PATCH", path: "/apps/{appId}/access" })
       .input(contract.appPath.extend(contract.appAccessChange.shape))
       .output(contract.appAccessState)
-      .handler(async ({ context, input }) =>
-        unwrap(await runtime.appAccess.change(context.principal, input.appId, input)),
-      ),
+      .handler(async ({ context, input }) => {
+        const { appId, ...change } = input;
+
+        return unwrap(await runtime.appAccess.change(context.principal, appId, change));
+      }),
     grant: write
       .route({ method: "PUT", path: "/apps/{appId}/creators/{userId}" })
       .input(contract.appPath.extend({ userId: z.string().min(1).max(128) }))
@@ -777,22 +873,6 @@ export const createApi = (runtime: Runtime) => {
 
         return runtime.telemetry.credentials(artifact.appId);
       }),
-    connectorTelemetryCredentials: agent
-      .route({ method: "GET", path: "/agent/jobs/{jobId}/connector-telemetry" })
-      .input(leaseInput)
-      .output(z.record(contract.appSlug, contract.telemetryCredentials))
-      .handler(async ({ context, input }) => {
-        const targets = unwrap(
-          await runtime.jobs.connectorTelemetry(context.agent.id, input.jobId, input.leaseToken),
-        );
-
-        return Object.fromEntries(
-          targets.map((target) => [
-            target.name,
-            runtime.telemetry.credentials(connectorLogService(target)),
-          ]),
-        );
-      }),
   };
 
   const handler = new OpenAPIHandler(router);
@@ -801,18 +881,6 @@ export const createApi = (runtime: Runtime) => {
   const dispatch = async (request: Request) => {
     const url = new URL(request.url);
 
-    const connectorTelemetry =
-      /^\/api\/v1\/telemetry\/connectors\/([^/]+)\/([^/]+)\/v1\/logs$/.exec(url.pathname);
-
-    if (connectorTelemetry && request.method === "POST")
-      return runtime.telemetry.ingest(
-        request,
-        {
-          organizationId: contract.organizationIdentifier.parse(connectorTelemetry[1]),
-          name: contract.appSlug.parse(connectorTelemetry[2]),
-        },
-        "logs",
-      );
     const telemetry = /^\/api\/v1\/telemetry\/([^/]+)\/v1\/(logs|traces)$/.exec(url.pathname);
 
     if (telemetry && request.method === "POST")
@@ -856,25 +924,23 @@ export const createApi = (runtime: Runtime) => {
       });
     }
 
-    const connectorUpload = /^\/api\/v1\/connectors\/([^/]+)$/.exec(url.pathname);
+    const icon = /^\/api\/v1\/apps\/([^/]+)\/icon$/.exec(url.pathname);
 
-    if (connectorUpload && request.method === "PUT") {
-      const principal = await authenticateWrite(request);
-      const name = contract.appSlug.parse(connectorUpload[1]);
+    if (icon && request.method === "GET") {
+      const principal = unwrap(await runtime.identity.authenticate(request, "platform:read"));
+      const appId = contract.identifier.parse(icon[1]);
 
-      return apiOperation(async () => {
-        connectorAdministrator(principal);
-        const key = idempotencyKey(request);
+      const result = unwrap(
+        await readAppIcon(runtime.database.db, runtime.storage, principal, appId),
+      );
 
-        const { metadata, modules } = unwrap(
-          await parseWorkerUpload(request, contract.connectorUploadMetadata),
-        );
-
-        const release = unwrap(uploadedConnector(name, metadata, modules));
-
-        return Response.json(
-          unwrap(await runtime.connectors.deploy(principal, release, modules, key)),
-        );
+      return new Response(Buffer.from(result.bytes), {
+        headers: {
+          "content-type": result.contentType,
+          "x-content-type-options": "nosniff",
+          "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+          "cross-origin-resource-policy": "same-origin",
+        },
       });
     }
 
@@ -935,15 +1001,12 @@ export const createApi = (runtime: Runtime) => {
       }
 
       if (download[2] === "modules") {
-        const name = url.searchParams.get("connector");
-
         const bytes = unwrap(
           await runtime.jobs.module(
             agent.id,
             jobId,
             leaseToken,
             contract.checksum.parse(download[3]),
-            name === null ? null : contract.appSlug.parse(name),
           ),
         );
 
@@ -992,11 +1055,15 @@ export const createApi = (runtime: Runtime) => {
 
       return response;
     } catch (cause) {
-      if (cause instanceof ORPCError)
+      if (cause instanceof ORPCError) {
+        if (cause.status >= 500 && cause.code !== "TELEMETRY_NOT_CONFIGURED")
+          runtime.reporting.exception(cause.cause instanceof Error ? cause.cause : cause);
+
         return Response.json(
           { code: z.string().parse(cause.code), message: cause.message },
           { status: cause.status },
         );
+      }
 
       if (cause instanceof z.ZodError)
         return Response.json(

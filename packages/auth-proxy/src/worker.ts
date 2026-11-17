@@ -1,5 +1,6 @@
 import type { KVNamespace } from "@cloudflare/workers-types";
-import { organizationIdentifier } from "@platform/contracts";
+import { organizationIdentifier, type appCaller } from "@platform/contracts";
+import type { z } from "zod";
 import { authConfiguration } from "./configuration.ts";
 import {
   authControlPath,
@@ -10,6 +11,13 @@ import {
   encodeConfiguration,
 } from "./publication.ts";
 import { createAuthProxy } from "./proxy.ts";
+import {
+  encodeMcpLogin,
+  decodeMcpLogin,
+  mcpLoginConfiguration,
+  mcpLoginKey,
+  mcpOrganizationKey,
+} from "./mcp-login.ts";
 
 export interface AuthEnvironment {
   AUTH_CONFIG: KVNamespace;
@@ -22,7 +30,10 @@ const reply = (status: number, message: string) =>
     headers: { "cache-control": "no-store" },
   });
 
-const configuration = async (environment: AuthEnvironment, organizationId: string) => {
+export const readAuthConfiguration = async (
+  environment: AuthEnvironment,
+  organizationId: string,
+) => {
   const value = await environment.AUTH_CONFIG.get(authConfigurationKey(organizationId));
 
   if (!value) return null;
@@ -37,13 +48,33 @@ const configuration = async (environment: AuthEnvironment, organizationId: strin
 const control = async (request: Request, environment: AuthEnvironment) => {
   const path = new URL(request.url).pathname.slice(authControlPath.length);
 
+  if (path === "/mcp/login" && request.method === "PUT") {
+    const input = mcpLoginConfiguration.parse(await request.json());
+    const stored = await environment.AUTH_CONFIG.get(mcpLoginKey);
+
+    // Every organization publication includes this installation-wide registration.
+    // Avoid spending the shared KV key's write quota on unchanged credentials.
+    if (stored) {
+      const current = await decodeMcpLogin(environment.WIDEFLEET_CONTROL_TOKEN, stored);
+
+      if (JSON.stringify(current) === JSON.stringify(input)) return reply(204, "");
+    }
+
+    await environment.AUTH_CONFIG.put(
+      mcpLoginKey,
+      await encodeMcpLogin(environment.WIDEFLEET_CONTROL_TOKEN, input),
+    );
+
+    return reply(204, "");
+  }
+
   const match = /^\/organizations\/([A-Za-z0-9_-]+)\/configuration$/.exec(path);
 
   if (match) {
     const organizationId = organizationIdentifier.parse(match[1]);
 
     if (request.method === "GET") {
-      const current = await configuration(environment, organizationId);
+      const current = await readAuthConfiguration(environment, organizationId);
 
       return Response.json(
         current
@@ -67,10 +98,18 @@ const control = async (request: Request, environment: AuthEnvironment) => {
 
       if (input.organizationId !== organizationId)
         return reply(400, "Organization does not match configuration");
+      const previous = await readAuthConfiguration(environment, organizationId);
       await environment.AUTH_CONFIG.put(
         authConfigurationKey(organizationId),
         await encodeConfiguration(environment.WIDEFLEET_CONTROL_TOKEN, input),
       );
+      const currentKey = mcpOrganizationKey(input);
+      const previousKey = previous ? mcpOrganizationKey(previous.configuration) : null;
+
+      if (currentKey) await environment.AUTH_CONFIG.put(currentKey, organizationId);
+
+      if (previousKey && previousKey !== currentKey)
+        await environment.AUTH_CONFIG.delete(previousKey);
 
       return reply(204, "");
     }
@@ -112,7 +151,12 @@ export const manageAuthConfiguration = async (request: Request, environment: Aut
 
 export const createAuthHandler = (
   environment: AuthEnvironment,
-  runApp: (request: Request, appId: string, organizationId: string) => Promise<Response>,
+  runApp: (
+    request: Request,
+    appId: string,
+    organizationId: string,
+    caller: z.infer<typeof appCaller>,
+  ) => Promise<Response>,
 ) => ({
   async fetch(request: Request) {
     const url = new URL(request.url);
@@ -158,7 +202,7 @@ export const createAuthHandler = (
 
       if (!organizationId) return reply(404, "Not found");
       phase = "configuration";
-      const installed = await configuration(environment, organizationId);
+      const installed = await readAuthConfiguration(environment, organizationId);
 
       if (!installed)
         return route
@@ -172,13 +216,13 @@ export const createAuthHandler = (
 
           return route?.organizationId === organizationId ? route.access : null;
         },
-        fetch: async (forwarded) => {
+        fetch: async (forwarded, caller) => {
           const route = await resolve(new URL(forwarded.url).hostname);
 
           if (!route || route.organizationId !== organizationId) return reply(404, "Not found");
           phase = "app-runtime";
 
-          return runApp(forwarded, route.appId, route.organizationId);
+          return runApp(forwarded, route.appId, route.organizationId, caller);
         },
       });
 

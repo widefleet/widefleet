@@ -82,6 +82,7 @@ export const createIdentityService = (
     identityOrganizationId: string | null,
   ) =>
     Result.gen(async function* () {
+      organizationId ??= access.defaultOrganizationId ?? null;
       const records = yield* Result.await(memberships(userId, identityOrganizationId));
 
       const matching =
@@ -250,13 +251,9 @@ export const createIdentityService = (
       return Result.ok(principal);
     });
 
-  const organizations = (request: Request) =>
+  const listOrganizations = (userId: string, identityOrganizationId: string | null) =>
     Result.gen(async function* () {
-      const verified = yield* Result.await(verify(request, "platform:read"));
-
-      const records = yield* Result.await(
-        memberships(verified.userId, verified.identityOrganizationId),
-      );
+      const records = yield* Result.await(memberships(userId, identityOrganizationId));
 
       return Result.ok(
         records.map((record) => ({
@@ -265,9 +262,17 @@ export const createIdentityService = (
           slug: record.organizationSlug,
           role: record.role,
           ssoRequired:
-            record.ssoRequired === true &&
-            verified.identityOrganizationId !== record.organizationId,
+            record.ssoRequired === true && identityOrganizationId !== record.organizationId,
         })),
+      );
+    });
+
+  const organizations = (request: Request) =>
+    Result.gen(async function* () {
+      const verified = yield* Result.await(verify(request, "platform:read"));
+
+      return Result.ok(
+        yield* Result.await(listOrganizations(verified.userId, verified.identityOrganizationId)),
       );
     });
 
@@ -305,7 +310,14 @@ export const createIdentityService = (
       return Result.ok(principal);
     });
 
-  return { authenticate, organizations, selectOrganization, authenticateUser: verify };
+  return {
+    authenticate,
+    organizations,
+    selectOrganization,
+    authenticateUser: verify,
+    principal: resolveUser,
+    listOrganizations,
+  };
 };
 
 export type IdentityService = ReturnType<typeof createIdentityService>;

@@ -1,9 +1,5 @@
-import { editableSettings } from "./settings-input.ts";
-import {
-  connectorUploadForm,
-  connectorModule,
-  connectorFixture,
-} from "./cloudflare-connector.fixture.ts";
+import { createConnectionService } from "../src/lib/server/connections.ts";
+import { createAppSecrets } from "../src/lib/server/app-secrets.ts";
 import { createWorkflowService } from "../src/lib/server/workflows.ts";
 import { createMigrationService } from "../src/lib/server/migrations.ts";
 import { createHash } from "node:crypto";
@@ -29,10 +25,10 @@ import { z } from "zod";
 import { createAgentService } from "../src/lib/server/agents.ts";
 import { createApi } from "../src/lib/server/api.ts";
 import { apiResource } from "../src/lib/server/auth-options.ts";
-import { createConnectorService } from "../src/lib/server/connectors.ts";
 import { createAppAccessService } from "../src/lib/server/app-access.ts";
 import { createNetworkService } from "../src/lib/server/network.ts";
 import { createAppService } from "../src/lib/server/apps.ts";
+import { organization } from "../src/lib/server/auth-schema.ts";
 import { hashAsset } from "../src/lib/server/asset-hash.ts";
 import { createIdentityService } from "../src/lib/server/identity.ts";
 import { createJobService } from "../src/lib/server/jobs.ts";
@@ -40,18 +36,15 @@ import {
   agents,
   apps,
   artifacts,
-  deployments,
   organizationRuntimes,
   jobs,
   runtimeReleases,
-  connectors,
-  organizationSettings,
 } from "../src/lib/server/schema.ts";
 import { InvalidOperation, StorageUnavailable } from "../src/lib/server/errors.ts";
 import { transact } from "../src/lib/server/transactions.ts";
 import { createStorage } from "../src/lib/server/storage.ts";
 import { createUploadService } from "../src/lib/server/uploads.ts";
-import { createTestEnvironment, organizationCredential } from "./environment.ts";
+import { createTestEnvironment } from "./environment.ts";
 import { createTelemetry } from "../src/lib/server/telemetry.ts";
 
 describe("Platform API with PostgreSQL and RustFS", () => {
@@ -116,10 +109,10 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       appAccess: createAppAccessService(environment.database.db),
       workflows: createWorkflowService(environment.database.db),
       migrations: createMigrationService(environment.database.db, storage),
-      connectors: createConnectorService(
+      connections: createConnectionService(environment.database.db),
+      appSecrets: createAppSecrets(
         environment.database.db,
-        storage,
-        "local-integration-test-encryption-key-only",
+        environment.environment.PLATFORM_ENCRYPTION_KEY,
       ),
       agents: createAgentService(environment.database.db),
       jobs: createJobService(
@@ -181,26 +174,6 @@ describe("Platform API with PostgreSQL and RustFS", () => {
 
     await environment?.close();
   });
-
-  const uploadConnector = (
-    path: string,
-    release: z.infer<typeof contract.connectorPackage>,
-    credentials = adminHeaders,
-    requestId = crypto.randomUUID(),
-  ) => {
-    const headers = new Headers(credentials);
-    headers.set("idempotency-key", requestId);
-    headers.set("origin", environment.configuration.PLATFORM_URL);
-    headers.delete("content-type");
-
-    return api(
-      new Request(`${environment.configuration.PLATFORM_URL}/api/v1${path}`, {
-        method: "PUT",
-        headers,
-        body: connectorUploadForm(release),
-      }),
-    );
-  };
 
   const json = <T>(
     path: string,
@@ -578,7 +551,10 @@ describe("Platform API with PostgreSQL and RustFS", () => {
 
     expect((await createApp("same-execution")).organizationId).toBe(organizationId);
     await json(`/agents/${registration.agent.id}`, "DELETE");
-    expect(contract.app.parse(await (await json(`/apps/${app.id}`, "GET")).json())).toEqual(app);
+    expect(contract.app.parse(await (await json(`/apps/${app.id}`, "GET")).json())).toEqual({
+      ...app,
+      source: { supported: false, branch: "main", deployed: null },
+    });
   });
 
   it("allows members to create apps while no executor is connected", async () => {
@@ -669,6 +645,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
         compatibility_date: "2026-10-01",
         assets: { upload_session: sessionId },
         bindings,
+        service_documentation: { format: 1, entrypoints: [], types: [] },
       }),
     );
     form.set("worker.js", new Blob([code], { type: "application/javascript+module" }), "worker.js");
@@ -1024,7 +1001,34 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     );
 
     expect(artifact.status).toBe(200);
-    expect(contract.artifact.parse(await artifact.json()).id).toBe(first.artifactId);
+    const executionArtifact = contract.artifact.parse(await artifact.json());
+    expect(executionArtifact.id).toBe(first.artifactId);
+    expect(executionArtifact.metadata).not.toHaveProperty("service_documentation");
+
+    const packages = contract.runtimePackages.parse(
+      await (
+        await json(
+          `/agent/jobs/${retry.id}/packages?leaseToken=${retry.leaseToken}`,
+          "GET",
+          undefined,
+          agentHeaders,
+        )
+      ).json(),
+    );
+
+    expect(packages.serviceDocumentation).toEqual({
+      artifactId: first.artifactId,
+      documentation: { format: 1, entrypoints: [], types: [] },
+    });
+
+    const [storedArtifact] = await environment.database.db
+      .select()
+      .from(artifacts)
+      .where(eq(artifacts.id, first.artifactId));
+
+    expect(
+      contract.workerMetadata.parse(storedArtifact?.metadata).service_documentation,
+    ).toMatchObject({ format: 1 });
     expect(
       (
         await json(
@@ -1302,6 +1306,9 @@ describe("Platform API with PostgreSQL and RustFS", () => {
 
     const credentials = new Headers({ authorization: `Bearer ${token}` });
     expect((await json(`/apps/${app.id}`, "GET", undefined, credentials)).status).toBe(403);
+    const target = await json("/apps/source-target", "POST", { appId: app.id }, credentials);
+    expect(target.status).toBe(200);
+    expect(await target.json()).toEqual({ supported: false, branch: "main", preview: false });
     const directoryCalls = directoryRequests.length;
     expect((await json("/groups?query=Einkauf", "GET", undefined, credentials)).status).toBe(403);
     expect(directoryRequests).toHaveLength(directoryCalls);
@@ -1324,6 +1331,9 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     });
 
     const denied = await createApp("write-only-denied");
+    expect(
+      (await json("/apps/source-target", "POST", { appId: denied.id }, credentials)).status,
+    ).toBe(404);
     expect(
       (
         await json(
@@ -1348,15 +1358,10 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     expect(spec.paths["/agent/jobs/{jobId}/complete"]).toBeDefined();
     expect(spec.paths["/apps/{appId}/worker"]).toBeDefined();
 
-    const connector = z
-      .object({
-        get: z.json(),
-        put: z.object({ requestBody: z.object({ content: z.record(z.string(), z.json()) }) }),
-      })
-      .parse(spec.paths["/connectors/{name}"]);
-
-    expect(connector.get).toBeDefined();
-    expect(Object.keys(connector.put.requestBody.content)).toEqual(["multipart/form-data"]);
+    expect(spec.paths["/connectors/{name}"]).toBeUndefined();
+    expect(spec.paths["/connector-catalog"]).toBeUndefined();
+    expect(spec.paths["/apps/{appId}/secrets"]).toBeDefined();
+    expect(spec.paths["/app-services"]).toBeDefined();
     expect(spec.paths["/apps/{appId}/assets/{sessionId}/{hash}"]).toBeDefined();
     expect(spec.paths["/agent/jobs/{jobId}/migrations/{sha256}"]).toBeDefined();
 
@@ -1994,556 +1999,6 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     expect(retry.error).toBeNull();
     expect(retry.state).toBe("saved");
   });
-  it("deploys connectors with ordinary admin credentials and changes individual app bindings atomically", async () => {
-    // Complete earlier API-only fixtures before checking this execution's job order.
-    while (true) {
-      const pending = contract.job
-        .nullable()
-        .parse(await (await json("/agent/jobs/claim", "POST", {}, agentHeaders)).json());
-
-      if (!pending) break;
-      expect(
-        (
-          await json(
-            `/agent/jobs/${pending.id}/complete`,
-            "POST",
-            { leaseToken: pending.leaseToken, outcome: "succeeded", message: "Fixture completed" },
-            agentHeaders,
-          )
-        ).status,
-      ).toBe(200);
-    }
-
-    const source =
-      "import { WorkerEntrypoint } from 'cloudflare:workers'; export class Customers extends WorkerEntrypoint { listCustomers() { return []; } } export default Customers;";
-
-    const release = contract.connectorPackage.parse({
-      protocol: 1,
-      name: "erp-api",
-      modules: [
-        connectorModule("worker.js", "esm", source),
-        connectorModule("payload.bin", "data", new Uint8Array([0, 255, 128, 1])),
-      ].sort((a, b) => a.name.localeCompare(b.name)),
-      metadata: {
-        main_module: "worker.js",
-        entrypoints: ["Customers", "default"],
-        compatibility_date: "2026-10-01",
-        bindings: [{ type: "d1", name: "DB", database_name: "customers", database_id: "local" }],
-      },
-    });
-
-    const path = "/connectors/erp-api";
-    expect((await json(path, "PUT", release)).status).toBe(400);
-    expect((await json(path, "PUT", {}, new Headers())).status).toBe(401);
-    expect((await json(path, "PUT", {}, outsiderHeaders)).status).toBe(403);
-
-    const rejectsUpload = async (form: FormData) => {
-      const headers = new Headers(adminHeaders);
-      headers.set("origin", environment.configuration.PLATFORM_URL);
-      headers.delete("content-type");
-      headers.set("idempotency-key", crypto.randomUUID());
-
-      const response = await api(
-        new Request(`${environment.configuration.PLATFORM_URL}/api/v1${path}`, {
-          method: "PUT",
-          headers,
-          body: form,
-        }),
-      );
-
-      expect(response.status, await response.text()).toBe(400);
-    };
-
-    const duplicate = connectorUploadForm(release);
-    duplicate.append(
-      "worker.js",
-      new Blob([source], { type: "application/javascript+module" }),
-      "worker.js",
-    );
-    await rejectsUpload(duplicate);
-    const binary = connectorUploadForm(release);
-    binary.set(
-      "worker.js",
-      new Blob([new Uint8Array([0, 97, 115, 109])], { type: "application/wasm" }),
-      "worker.js",
-    );
-    await rejectsUpload(binary);
-    const invalidMime = connectorUploadForm(release);
-    invalidMime.set(
-      "worker.js",
-      new Blob([new Uint8Array([0xff])], { type: "image/png" }),
-      "worker.js",
-    );
-    await rejectsUpload(invalidMime);
-    const wrongName = connectorUploadForm(release);
-    wrongName.set(
-      "metadata",
-      JSON.stringify({
-        ...release.metadata,
-        name: "other-connector",
-      }),
-    );
-    await rejectsUpload(wrongName);
-    expect((await uploadConnector(path, release, outsiderHeaders)).status).toBe(403);
-    expect(
-      (
-        await uploadConnector(path, {
-          ...release,
-          metadata: { ...release.metadata, main_module: "missing.js" },
-        })
-      ).status,
-    ).toBe(400);
-
-    const connectorRequest = crypto.randomUUID();
-
-    const submitted = contract.connectorStatus.parse(
-      await (await uploadConnector(path, release, adminHeaders, connectorRequest)).json(),
-    );
-
-    expect(
-      await (await json("/connector-catalog", "GET", undefined, outsiderHeaders)).json(),
-    ).toContainEqual({ name: release.name, entrypoints: [] });
-
-    expect(
-      (
-        await uploadConnector(path, {
-          ...release,
-          metadata: {
-            ...release.metadata,
-            bindings: [{ type: "plain_text", name: "WIDEFLEET_SECRET_API_KEY", text: "reserved" }],
-          },
-        })
-      ).status,
-    ).toBe(400);
-    expect(
-      (
-        await uploadConnector(path, {
-          ...release,
-          metadata: { ...release.metadata, entrypoints: ["default", "WIDEFLEET_Secrets"] },
-        })
-      ).status,
-    ).toBe(400);
-
-    const repeated = contract.connectorStatus.parse(
-      await (await uploadConnector(path, release, adminHeaders, connectorRequest)).json(),
-    );
-
-    expect(repeated.jobId).toBe(submitted.jobId);
-    expect(
-      (
-        await uploadConnector(
-          path,
-          { ...release, metadata: { ...release.metadata, compatibility_date: "2026-10-02" } },
-          adminHeaders,
-          connectorRequest,
-        )
-      ).status,
-    ).toBe(409);
-
-    const app = await createApp("connector-api");
-    const bindingPath = `/apps/${app.id}/bindings`;
-    expect(
-      (await json(`/apps/${app.id}/connections`, "GET", undefined, outsiderHeaders)).status,
-    ).toBe(404);
-    expect(await (await json(`/apps/${app.id}/connections`, "GET")).json()).toMatchObject({
-      deploymentId: null,
-      resources: [],
-      activeConnectors: {},
-    });
-    expect((await json(`${bindingPath}/ERP`, "PUT", { connector: release.name })).status).toBe(409);
-
-    expect(
-      (
-        await json(`${bindingPath}/SECRET_READER`, "PUT", {
-          connector: release.name,
-          entrypoint: "WIDEFLEET_Secrets",
-        })
-      ).status,
-    ).toBe(409);
-
-    const pending = contract.job.parse(
-      await (await json("/agent/jobs/claim", "POST", {}, agentHeaders)).json(),
-    );
-
-    expect(pending).toMatchObject({ kind: "connector", appId: null });
-
-    const packages = contract.runtimePackages.parse(
-      await (
-        await json(
-          `/agent/jobs/${pending.id}/packages?leaseToken=${pending.leaseToken}`,
-          "GET",
-          undefined,
-          agentHeaders,
-        )
-      ).json(),
-    );
-
-    expect(packages.connectors).toEqual([release]);
-    const payload = release.modules.find((module) => module.name === "payload.bin");
-
-    if (!payload) throw new Error("Missing binary fixture");
-
-    const download = (connector: string, checksum = payload.sha256, lease = pending.leaseToken) =>
-      json(
-        `/agent/jobs/${pending.id}/modules/${checksum}?leaseToken=${lease}&connector=${connector}`,
-        "GET",
-        undefined,
-        agentHeaders,
-      );
-
-    const binaryModule = await download(release.name);
-    expect(binaryModule.status).toBe(200);
-    expect(new Uint8Array(await binaryModule.arrayBuffer())).toEqual(
-      new Uint8Array([0, 255, 128, 1]),
-    );
-    expect((await download("another-connector")).status).toBe(404);
-    expect((await download(release.name, "f".repeat(64))).status).toBe(404);
-    expect((await download(release.name, payload.sha256, crypto.randomUUID())).status).toBe(409);
-
-    expect(
-      (
-        await json(
-          `/agent/jobs/${pending.id}/complete`,
-          "POST",
-          { leaseToken: pending.leaseToken, outcome: "succeeded", message: "Installed" },
-          agentHeaders,
-        )
-      ).status,
-    ).toBe(200);
-    expect(await (await json(path, "GET")).json()).toMatchObject({
-      state: "succeeded",
-      appliedChecksum: submitted.checksum,
-    });
-    expect(
-      await (await json("/connector-catalog", "GET", undefined, outsiderHeaders)).json(),
-    ).toContainEqual({ name: release.name, entrypoints: ["Customers", "default"] });
-    expect(
-      (await json(`${bindingPath}/ERP`, "PUT", { connector: release.name }, outsiderHeaders))
-        .status,
-    ).toBe(403);
-    expect(
-      (await json(`${bindingPath}/WIDEFLEET_LOADER`, "PUT", { connector: release.name })).status,
-    ).toBe(400);
-
-    const queuedApp = await createApp("connector-collision");
-    const session = await start(queuedApp.id);
-
-    const queued = contract.deployment.parse(
-      await (
-        await publish(
-          queuedApp.id,
-          session.id,
-          crypto.randomUUID(),
-          "export default { fetch() { return new Response('ok'); } }",
-          adminHeaders,
-          [{ type: "kv_namespace", name: "ERP", id: "local-erp" }],
-        )
-      ).json(),
-    );
-
-    for (const status of ["queued", "running"] as const) {
-      await environment.database.db
-        .update(deployments)
-        .set({ status })
-        .where(eq(deployments.id, queued.id));
-      expect(
-        (await json(`/apps/${queuedApp.id}/bindings/ERP`, "PUT", { connector: release.name }))
-          .status,
-      ).toBe(409);
-      expect(await (await json(`/apps/${queuedApp.id}/bindings`, "GET")).json()).toMatchObject({
-        revision: 0,
-        grants: {},
-      });
-    }
-
-    await environment.database.db
-      .update(deployments)
-      .set({ status: "failed" })
-      .where(eq(deployments.id, queued.id));
-    await environment.database.db
-      .update(jobs)
-      .set({ state: "failed" })
-      .where(eq(jobs.deploymentId, queued.id));
-    expect(
-      (await json(`/apps/${queuedApp.id}/bindings/ERP`, "PUT", { connector: release.name })).status,
-    ).toBe(200);
-
-    const responses = await Promise.all(
-      ["ERP", "SALES"].map((binding) =>
-        json(`${bindingPath}/${binding}`, "PUT", { connector: release.name }),
-      ),
-    );
-
-    expect(responses.every((response) => response.status === 200)).toBe(true);
-    const bindings = contract.capabilityState.parse(await (await json(bindingPath, "GET")).json());
-    expect(bindings).toMatchObject({
-      state: "saved",
-      revision: 2,
-      grants: {
-        ERP: { connector: release.name, entrypoint: "default" },
-        SALES: { connector: release.name, entrypoint: "default" },
-      },
-    });
-    expect(
-      await (await json(`${bindingPath}/ERP`, "PUT", { connector: release.name })).json(),
-    ).toMatchObject({ revision: bindings.revision });
-    expect(
-      (
-        await json(`${bindingPath}/ERP`, "PUT", {
-          connector: release.name,
-          entrypoint: "Customers",
-        })
-      ).status,
-    ).toBe(200);
-    expect(
-      (
-        await uploadConnector(path, {
-          ...release,
-          metadata: { ...release.metadata, entrypoints: ["Replacement", "default"] },
-        })
-      ).status,
-    ).toBe(409);
-    await json(`${bindingPath}/ERP`, "DELETE");
-    const removed = contract.capabilityState.parse(await (await json(bindingPath, "GET")).json());
-    expect(Object.keys(removed.grants)).toEqual(["SALES"]);
-    expect(await (await json(`${bindingPath}/ERP`, "DELETE")).json()).toMatchObject({
-      revision: removed.revision,
-    });
-    expect((await json("/connectors", "GET", undefined, outsiderHeaders)).status).toBe(403);
-    expect(
-      z.array(contract.connectorStatus).parse(await (await json("/connectors", "GET")).json()),
-    ).toHaveLength(1);
-  });
-  it("preserves encrypted connector snapshots across login settings updates and failed activation", async () => {
-    const path = "/connectors/erp-api";
-    const secretPath = `${path}/secrets/API_KEY`;
-    const firstValue = "é".repeat(2500);
-    const secondValue = "x".repeat(5000);
-
-    const claim = async () =>
-      contract.job.parse(await (await json("/agent/jobs/claim", "POST", {}, agentHeaders)).json());
-
-    const packages = async (job: z.infer<typeof contract.job>) =>
-      contract.runtimePackages.parse(
-        await (
-          await json(
-            `/agent/jobs/${job.id}/packages?leaseToken=${job.leaseToken}`,
-            "GET",
-            undefined,
-            agentHeaders,
-          )
-        ).json(),
-      );
-
-    const complete = async (job: z.infer<typeof contract.job>, outcome: "succeeded" | "failed") => {
-      expect(
-        (
-          await json(
-            `/agent/jobs/${job.id}/complete`,
-            "POST",
-            {
-              leaseToken: job.leaseToken,
-              outcome,
-              message: "Synthetic secret activation",
-            },
-            agentHeaders,
-          )
-        ).status,
-      ).toBe(200);
-    };
-
-    while (true) {
-      const pending = contract.job
-        .nullable()
-        .parse(await (await json("/agent/jobs/claim", "POST", {}, agentHeaders)).json());
-
-      if (!pending) break;
-      await complete(pending, "succeeded");
-    }
-
-    expect((await json(secretPath, "PUT", { value: firstValue }, outsiderHeaders)).status).toBe(
-      403,
-    );
-    expect((await json(`${path}/secrets`, "GET", undefined, outsiderHeaders)).status).toBe(403);
-    expect((await json(secretPath, "DELETE", undefined, outsiderHeaders)).status).toBe(403);
-    expect(
-      (await json(`${path}/secrets/WIDEFLEET_RESERVED`, "PUT", { value: firstValue })).status,
-    ).toBe(400);
-    expect((await json(secretPath, "PUT", { value: "" })).status).toBe(400);
-    expect((await json(`${path}/secrets/__proto__`, "PUT", { value: firstValue })).status).toBe(
-      400,
-    );
-    expect((await json(secretPath, "PUT", { value: "é".repeat(2501) })).status).toBe(400);
-    expect((await json(secretPath, "PUT", { value: "x".repeat(5001) })).status).toBe(400);
-
-    const loginSecrets = await environment.database.db.select().from(organizationSettings);
-
-    const first = contract.connectorStatus.parse(
-      await (await json(secretPath, "PUT", { value: firstValue })).json(),
-    );
-
-    expect(first).toMatchObject({
-      secrets: ["API_KEY"],
-      secretRevision: 1,
-      appliedSecretRevision: 0,
-      state: "queued",
-    });
-    expect(JSON.stringify(first)).not.toContain(firstValue);
-    const leased = await claim();
-    expect(leased.id).toBe(first.jobId);
-
-    const second = contract.connectorStatus.parse(
-      await (await json(secretPath, "PUT", { value: secondValue })).json(),
-    );
-
-    expect(second.secretRevision).toBe(2);
-    expect(await environment.database.db.select().from(organizationSettings)).toEqual(loginSecrets);
-
-    // Updating login settings must leave connector snapshots decryptable.
-    const owner = {
-      ...environment.owner,
-      application: { ...environment.application, admin: true },
-      role: "owner" as const,
-      admin: true,
-      creator: true,
-    };
-
-    const settings = editableSettings(await environment.settings.read(owner));
-
-    await environment.settings.update(
-      owner,
-      { ...settings, acknowledgeRestart: false },
-      true,
-      await organizationCredential(environment, owner),
-    );
-    const snapshot = await packages(leased);
-    expect(snapshot.connectorSecrets["erp-api"]).toEqual({ API_KEY: firstValue });
-    expect(JSON.stringify(snapshot.connectors)).not.toContain(firstValue);
-    expect(
-      (
-        await json(
-          `/agent/jobs/${leased.id}/packages?leaseToken=${crypto.randomUUID()}`,
-          "GET",
-          undefined,
-          agentHeaders,
-        )
-      ).status,
-    ).toBe(409);
-    expect(
-      (await json(`/agent/jobs/${leased.id}/packages?leaseToken=${leased.leaseToken}`, "GET"))
-        .status,
-    ).not.toBe(200);
-
-    const persisted = JSON.stringify([
-      await environment.database.db.select().from(organizationSettings),
-      await environment.database.db.select().from(connectors),
-      await environment.database.db.select().from(jobs),
-    ]);
-
-    expect(persisted).not.toContain(firstValue);
-    expect(persisted).not.toContain(secondValue);
-    await complete(leased, "succeeded");
-    expect(await (await json(path, "GET")).json()).toMatchObject({
-      secretRevision: 2,
-      appliedSecretRevision: 1,
-    });
-    const failed = await claim();
-    expect((await packages(failed)).connectorSecrets["erp-api"]).toEqual({ API_KEY: secondValue });
-    await complete(failed, "failed");
-    expect(await (await json(`${path}/secrets`, "GET")).json()).toMatchObject({
-      secretRevision: 2,
-      appliedSecretRevision: 1,
-      state: "failed",
-    });
-    // Re-uploading previous code retries with the latest desired secrets, never artifact-time values.
-    const release = snapshot.connectors.find((connector) => connector.name === "erp-api");
-
-    if (!release) throw new Error("Missing fixture connector");
-    await uploadConnector(path, release);
-    const retry = await claim();
-    expect((await packages(retry)).connectorSecrets["erp-api"]).toEqual({ API_KEY: secondValue });
-    await complete(retry, "succeeded");
-    await json(secretPath, "DELETE");
-    const removal = await claim();
-    expect((await packages(removal)).connectorSecrets["erp-api"]).toEqual({});
-    await complete(removal, "succeeded");
-    expect(await (await json(`${path}/secrets`, "GET")).json()).toMatchObject({
-      secrets: [],
-      secretRevision: 3,
-      appliedSecretRevision: 3,
-    });
-    expect(JSON.stringify(await (await json("/connectors", "GET")).json())).not.toContain(
-      secondValue,
-    );
-  });
-  it("scopes Durable Object class names to their connector across failed replacements", async () => {
-    const source = "export default { fetch() { return new Response('fixture'); } }";
-
-    const release = contract.connectorPackage.parse({
-      protocol: 1,
-      name: "class-owner",
-      modules: [connectorModule("worker.js", "esm", source)],
-      metadata: {
-        main_module: "worker.js",
-        entrypoints: ["default"],
-        compatibility_date: "2026-10-01",
-        durable_objects: [{ name: "STATE", class_name: "SharedSession" }],
-      },
-    });
-
-    const finish = async (id: string, outcome: "succeeded" | "failed") => {
-      while (true) {
-        const job = contract.job
-          .nullable()
-          .parse(await (await json("/agent/jobs/claim", "POST", {}, agentHeaders)).json());
-
-        if (!job) throw new Error("Expected the connector job to be claimable");
-        expect(
-          (
-            await json(
-              `/agent/jobs/${job.id}/complete`,
-              "POST",
-              {
-                leaseToken: job.leaseToken,
-                outcome: job.id === id ? outcome : "succeeded",
-                message: "Fixture completion",
-              },
-              agentHeaders,
-            )
-          ).status,
-        ).toBe(200);
-
-        if (job.id === id) return;
-      }
-    };
-
-    const first = contract.connectorStatus.parse(
-      await (await uploadConnector("/connectors/class-owner", release)).json(),
-    );
-
-    await finish(first.jobId, "succeeded");
-
-    const replacement = {
-      ...release,
-      metadata: { ...release.metadata, durable_objects: [] },
-    };
-
-    const pending = contract.connectorStatus.parse(
-      await (await uploadConnector("/connectors/class-owner", replacement)).json(),
-    );
-
-    const contender = { ...release, name: "class-contender" };
-    expect((await uploadConnector("/connectors/class-contender", contender)).status).toBe(200);
-    await finish(pending.jobId, "failed");
-    expect((await uploadConnector("/connectors/class-contender", contender)).status).toBe(200);
-
-    const retry = contract.connectorStatus.parse(
-      await (await uploadConnector("/connectors/class-owner", replacement)).json(),
-    );
-
-    await finish(retry.jobId, "succeeded");
-    expect((await uploadConnector("/connectors/class-contender", contender)).status).toBe(200);
-  });
   it("creates named previews below their parent hostname while preserving legacy preview URLs", async () => {
     const parent = await createApp("preview-parent");
 
@@ -2892,139 +2347,74 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     expect(await (await json(path, "PUT", { listed: false })).json()).toEqual({ listed: false });
     expect(await (await json("/catalog", "GET", undefined, outsiderHeaders)).json()).toEqual([]);
   });
-  it("enforces shared variable sizes and the combined secret limit before creating agent jobs", async () => {
-    const source = "export default { fetch() { return new Response('fixture'); } }";
-    const vars = Object.fromEntries(Array.from({ length: 31 }, (_, i) => [`VAR_${i}`, ""]));
-    vars["VAR_0"] = "é".repeat(2500);
 
-    const release = contract.connectorPackage.parse({
-      protocol: 1,
-      name: "environment-limits",
-      modules: [connectorModule("worker.js", "esm", source)],
-      metadata: {
-        main_module: "worker.js",
-        entrypoints: ["default"],
-        compatibility_date: "2026-10-01",
-        bindings: Object.entries(vars).map(([name, text]) => ({ type: "plain_text", name, text })),
-      },
-    });
+  it("serves only accessible active app icons and isolates SVG responses", async () => {
+    const app = await createApp("app-icon");
+    const path = `/apps/${app.id}/icon`;
 
-    const path = `/connectors/${release.name}`;
-    const before = await environment.database.db.select().from(jobs);
+    const bytes = new TextEncoder().encode(
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M0 0h24v24H0z"/></svg>',
+    );
 
-    for (const value of ["x".repeat(16_385), "é".repeat(16_385)])
-      expect(
-        (
-          await uploadConnector(path, {
-            ...release,
-            metadata: {
-              ...release.metadata,
-              bindings: [{ type: "plain_text", name: "LABEL", text: value }],
-            },
-          })
-        ).status,
-      ).toBe(400);
+    const hash = hashAsset("/favicon.svg", bytes);
+    const session = await start(app.id, { "/favicon.svg": { hash, size: bytes.length } });
     expect(
       (
-        await uploadConnector(path, {
-          ...release,
-          metadata: {
-            ...release.metadata,
-            bindings: [
-              ...release.metadata.bindings,
-              { type: "plain_text", name: "EXTRA", text: "" },
-              { type: "plain_text", name: "OVERFLOW", text: "" },
-            ],
-          },
-        })
-      ).status,
-    ).toBe(400);
-    expect(await environment.database.db.select().from(jobs)).toHaveLength(before.length);
-    expect((await uploadConnector(path, release)).status).toBe(200);
+        await storage.put(`apps/${app.id}/assets/${hash}`, bytes, "application/octet-stream")
+      ).isOk(),
+    ).toBe(true);
+    const deployment = contract.deployment.parse(await (await publish(app.id, session.id)).json());
 
-    for (let i = 0; i < 96; i++)
-      expect(
-        (await json(`${path}/secrets/SEEDED_${i}`, "PUT", { value: "synthetic" })).status,
-      ).toBe(200);
-
-    const attempts = await Promise.all(
-      ["FIRST", "SECOND"].map((name) =>
-        json(`${path}/secrets/${name}`, "PUT", { value: "synthetic" }),
-      ),
-    );
-
-    expect(attempts.map((response) => response.status).sort((left, right) => left - right)).toEqual(
-      [200, 400],
-    );
-    const accepted = attempts.find((response) => response.status === 200);
-    const secret = contract.connectorStatus.parse(await accepted?.json()).secrets[0];
-
-    if (!secret) throw new Error("Missing accepted secret");
-    const secretPath = `${path}/secrets/${secret}`;
-
-    const rotated = contract.connectorStatus.parse(
-      await (await json(secretPath, "PUT", { value: "rotated" })).json(),
-    );
-
-    const maximum = {
-      ...release,
-      metadata: {
-        ...release.metadata,
-        bindings: [
-          ...release.metadata.bindings,
-          { type: "plain_text" as const, name: "EXTRA", text: "x".repeat(5000) },
-        ],
-      },
-    };
-
-    const previous = await environment.database.db.select().from(jobs);
-    expect((await uploadConnector(path, maximum)).status).toBe(400);
-    expect((await json(`${path}/secrets/OVERFLOW`, "PUT", { value: "synthetic" })).status).toBe(
-      400,
-    );
-    expect(await environment.database.db.select().from(jobs)).toHaveLength(previous.length);
-    expect(await (await json(path, "GET")).json()).toMatchObject({ jobId: rotated.jobId });
-    expect((await json(secretPath, "DELETE")).status).toBe(200);
-    expect((await uploadConnector(path, maximum)).status).toBe(200);
-    expect((await json(secretPath, "PUT", { value: "synthetic" })).status).toBe(400);
-  });
-  it("replays connector uploads without changing a newer desired version", async () => {
-    const initial = connectorFixture("upload-retries");
-    const path = `/connectors/${initial.name}`;
-    const requestId = crypto.randomUUID();
-
-    const first = contract.connectorStatus.parse(
-      await (await uploadConnector(path, initial, adminHeaders, requestId)).json(),
-    );
-
-    // A failed activation can be resubmitted with a new request, just like an app upload.
+    expect((await json(path, "GET")).status).toBe(404);
     await environment.database.db
-      .update(jobs)
-      .set({ state: "failed" })
-      .where(eq(jobs.id, first.jobId));
-    expect(
-      await (await uploadConnector(path, initial, adminHeaders, requestId)).json(),
-    ).toMatchObject({ jobId: first.jobId, state: "failed" });
+      .update(apps)
+      .set({ state: "active", activeDeploymentId: deployment.id })
+      .where(eq(apps.id, app.id));
+    expect((await json(path, "GET", undefined, new Headers())).status).toBe(401);
+    expect((await json(path, "GET", undefined, outsiderHeaders)).status).toBe(404);
+    const response = await json(path, "GET");
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("image/svg+xml");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("content-security-policy")).toContain("sandbox");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("cross-origin-resource-policy")).toBe("same-origin");
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
 
-    const second = contract.connectorStatus.parse(
-      await (await uploadConnector(path, initial)).json(),
-    );
+    const foreignOrganizationId = crypto.randomUUID();
+    await environment.database.db.insert(organization).values({
+      id: foreignOrganizationId,
+      name: "Other tenant",
+      slug: foreignOrganizationId,
+      createdAt: new Date(),
+    });
+    await environment.database.db
+      .update(apps)
+      .set({ organizationId: foreignOrganizationId })
+      .where(eq(apps.id, app.id));
+    expect((await json(path, "GET")).status).toBe(404);
+    await environment.database.db
+      .update(apps)
+      .set({ organizationId: app.organizationId })
+      .where(eq(apps.id, app.id));
 
-    expect(second.jobId).not.toBe(first.jobId);
-    expect(
-      await (await uploadConnector(path, initial, adminHeaders, requestId)).json(),
-    ).toMatchObject({ jobId: first.jobId, state: "failed" });
-    expect(await (await json(path, "GET")).json()).toMatchObject({ jobId: second.jobId });
-    expect(
-      (
-        await uploadConnector(
-          path,
-          { ...initial, metadata: { ...initial.metadata, compatibility_date: "2026-10-02" } },
-          adminHeaders,
-          requestId,
-        )
-      ).status,
-    ).toBe(409);
-    expect(await (await json(path, "GET")).json()).toMatchObject({ jobId: second.jobId });
+    const replacement = await start(app.id);
+    const next = contract.deployment.parse(await (await publish(app.id, replacement.id)).json());
+    expect((await json(path, "GET")).status).toBe(200);
+    await environment.database.db
+      .update(apps)
+      .set({ activeDeploymentId: next.id })
+      .where(eq(apps.id, app.id));
+    expect((await json(path, "GET")).status).toBe(404);
+    await environment.database.db
+      .update(apps)
+      .set({ activeDeploymentId: deployment.id, webEnabled: false })
+      .where(eq(apps.id, app.id));
+    expect((await json(path, "GET")).status).toBe(404);
+    await environment.database.db
+      .update(apps)
+      .set({ webEnabled: true, state: "deleting" })
+      .where(eq(apps.id, app.id));
+    expect((await json(path, "GET")).status).toBe(404);
   });
 });

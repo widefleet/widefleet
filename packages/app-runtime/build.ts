@@ -3,6 +3,9 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
+import { buildMcpUi } from "./build-ui.ts";
+
+await buildMcpUi();
 
 const license = [
   await readFile(new URL("../../LICENSE", import.meta.url), "utf8"),
@@ -32,6 +35,7 @@ const compile = async (entry: string, define: Record<string, string>) => {
     bundle: true,
     format: "esm",
     platform: "neutral",
+    mainFields: ["module", "main"],
     target: "es2023",
     external: [
       "cloudflare:workers",
@@ -73,10 +77,10 @@ await writeFile(new URL("loader.js", directory), source);
 await writeFile(
   new URL("release.json", directory),
   JSON.stringify({
-    protocol: 2,
+    protocol: 3,
     auth: 1,
     version,
-    celld: "0.6.2",
+    celld: "0.6.3-widefleet.1",
     workflows: 1,
     cloudflare: 1,
     main: "loader.js",
