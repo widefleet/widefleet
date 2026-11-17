@@ -1,49 +1,9 @@
-name: Publish Widefleet
+name: Check and publish Widefleet
 
 on:
   push:
     branches: [main]
     tags: ["v*"]
-    # CLI package inputs, not every service exercised by its integration tests.
-    # Keep this list in sync with tools/package-cli.ts and the native build.
-    # Shared lockfiles/configuration stay conservative. Tag pushes bypass paths.
-    paths:
-      - ".github/workflows/publish-cli.yaml"
-      - ".github/workflows/cli-platforms.yaml"
-      - "crates/platform-cli/**"
-      - "crates/platform-core/**"
-      # Canary stamping reads all workspace package manifests, including the agent.
-      - "crates/platform-agent/Cargo.toml"
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "rust-toolchain.toml"
-      - ".cargo/**"
-      - "package.json"
-      - "tsconfig.json"
-      - "tsconfig.base.json"
-      - "pnpm-lock.yaml"
-      - "pnpm-workspace.yaml"
-      - ".npmrc"
-      - ".pnpmfile.cjs"
-      - "patches/**"
-      - "tools/cargo.sh"
-      - "tools/package-cli.ts"
-      - "tools/cli-launcher.ts"
-      - "tools/cli-platforms.ts"
-      - "tools/cli-tools.ts"
-      - "tools/prepare-cli-canary.py"
-      - "tools/publish-cli.sh"
-      - "tools/wait-for-npm-package.sh"
-      # Files copied into the native packages and launcher, including Markdown.
-      - "starters/sveltekit/**"
-      - "starters/tanstack-start/**"
-      - "tools/oxlint/**"
-      - ".gitattributes"
-      - ".gitignore"
-      - ".oxlintrc.json"
-      - ".oxfmtrc.json"
-      - "LICENSE"
-      - "apps/docs/docs/getting-started/installation.md"
 
 permissions:
   contents: read
@@ -312,18 +272,55 @@ jobs:
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: bash tools/sync-dockerhub-overviews.sh
 
-  build-canary:
-    name: Build and test canary CLI
-    if: github.repository == 'widefleet/widefleet' && github.ref == 'refs/heads/main'
+  main-changes:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    outputs:
+      checks: ${{ steps.changes.outputs.checks }}
+      canary: ${{ steps.changes.outputs.canary }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select checks and publication from the complete push
+        id: changes
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: python3 tools/check-main-changes.py
+
+  main-checks:
+    needs: main-changes
+    if: needs.main-changes.outputs.checks == 'true' || needs.main-changes.outputs.canary == 'true'
     cache-mode: write
-    uses: ./.github/workflows/cli-platforms.yaml
+    uses: ./.github/workflows/check-suites.yaml
     with:
-      ref: ${{ github.sha }}
-      canary: true
+      full-checks: ${{ needs.main-changes.outputs.checks == 'true' }}
+
+  source-and-integration:
+    name: Main source and integration
+    needs: [main-changes, main-checks]
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every selected check to pass
+        env:
+          CHANGES_RESULT: ${{ needs.main-changes.result }}
+          CHECKS_RESULT: ${{ needs.main-checks.result }}
+          RUN_CHECKS: ${{ needs.main-changes.outputs.checks }}
+          CANARY: ${{ needs.main-changes.outputs.canary }}
+        run: |
+          [[ "$CHANGES_RESULT" == success ]]
+          case "$RUN_CHECKS:$CANARY:$CHECKS_RESULT" in
+            true:true:success|true:false:success|false:true:success|false:false:skipped) ;;
+            *) exit 1 ;;
+          esac
 
   publish-canary:
     name: Publish CLI to npm canary
-    needs: build-canary
+    needs: [main-changes, main-checks, source-and-integration]
+    if: github.repository == 'widefleet/widefleet' && github.ref == 'refs/heads/main' && needs.main-changes.outputs.canary == 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
