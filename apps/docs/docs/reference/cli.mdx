@@ -1,7 +1,7 @@
 ---
 title: CLI
 description: Common Widefleet commands, app selection, authentication and deployment output.
-lastModified: 2026-11-16
+lastModified: 2026-11-17
 ---
 
 For installation and your first deployment, start with [CLI setup](/getting-started/installation).
@@ -56,6 +56,12 @@ unavailable, ask an administrator for an invitation. See the
 [API reference](/reference/api#organization-creation) for permissions and errors.
 
 ## App commands
+
+For your own connector accounts, use `widefleet accounts list`,
+`widefleet accounts connect APP_UUID` and `widefleet accounts disconnect APP_UUID`.
+These commands respect the selected organization and the app's access rules;
+they do not require app management permission. `connect` prints an expiring URL
+to open in your browser. See [personal connections](/guides/personal-connections).
 
 Platform and CLI 0.4.0 or newer also provide `widefleet account`,
 `widefleet members` and `widefleet invitations`. See [member management](/guides/members)

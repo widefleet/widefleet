@@ -1,7 +1,7 @@
 ---
 title: API and uploads
 description: Authentication, app publication and the Worker upload contract.
-lastModified: 2026-11-16
+lastModified: 2026-11-17
 ---
 
 Authenticated clients can fetch `/api/v1/openapi.json`. The document covers management operations, agent jobs, binary assets and multipart Workers.
@@ -80,6 +80,32 @@ Use [CLI organization selection](/reference/cli-configuration#select-an-organiza
 for equivalent CLI commands. If a browser selection becomes unavailable, the
 workspace returns to organization selection. With no available memberships, ask
 an administrator to grant access.
+
+## Personal connector accounts
+
+These operations act on the authenticated member's own accounts in the selected
+organization. Reads require `platform:read`; writes require `platform:write`.
+Browser sessions use the usual same-origin protection. App management permission
+is not required; the runtime checks the member's current app access.
+
+| Endpoint                                        | Result                                                            |
+| ----------------------------------------------- | ----------------------------------------------------------------- |
+| `GET /api/v1/user-connections`                  | Array of `{ appId, displayName, hostname, status, unavailable }`. |
+| `POST /api/v1/user-connections/{appId}/connect` | `{ url, expiresAt }` for a short-lived authorization launch.      |
+| `DELETE /api/v1/user-connections/{appId}`       | `{ disconnected: true }`.                                         |
+
+The connect body is `{}` or `{ "onboarding": true }`; `onboarding` preserves the
+onboarding view on return. Caller identity and completion URL are set by the
+server and cannot be supplied by clients. Open the returned URL in a browser
+signed in as the same user. The connector consumes it once, before its expiry.
+
+`status` contains `{ setup, connection, account }`, as defined in
+[personal connections](/guides/personal-connections#add-support-to-your-own-connector).
+An inaccessible connector is omitted from the list. An unavailable connector
+has `status: null` and `unavailable: true`; do not interpret that as disconnected.
+Mutations return `404` for unavailable or inaccessible targets, `503` for an
+unreachable runtime or connector, and `401` when company sign-in must be renewed.
+Organization membership failures use the normal `403` response.
 
 ## App templates
 

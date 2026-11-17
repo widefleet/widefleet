@@ -1,7 +1,7 @@
 ---
 title: Company sign-in settings
 description: Configure company sign-in through the CLI or API, manage credentials and check OpenID Connect requirements.
-lastModified: 2026-11-15
+lastModified: 2026-11-17
 ---
 
 For setup through the browser, follow [Set up company sign-in](/guides/company-sign-in).
@@ -74,6 +74,13 @@ organization does not extend that login's authority; an organization with a
 different company provider requires its own company sign-in.
 
 ## Provider values
+
+Workspace company sign-in requests the same identity scopes as app sign-in:
+`openid`, `profile`, `email`, your configured scopes, `offline_access` for
+non-Google providers, and `User.Read` for Entra. Personal connector controls
+verify the existing SSO account and current group membership through this
+configuration. If that account can no longer be refreshed, the member is asked
+to sign in again; the connector's stored provider account remains intact.
 
 | `appIdentityType` | `issuer`                                           | App group membership                                                  |
 | ----------------- | -------------------------------------------------- | --------------------------------------------------------------------- |
