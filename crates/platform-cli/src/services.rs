@@ -127,14 +127,14 @@ pub async fn catalog(api: &Api, credentials: &auth::Credentials, options: Catalo
                 api.authenticated(Method::GET, "/connection-requests", &token)
             }
             CatalogCommand::UserAccess { app, file } => {
-                let entries: Vec<Service> = json(
-                    api.authenticated(Method::GET, "/app-services", &token)
-                        .send()
-                        .await?,
+                let target = apps::resolve(
+                    api,
+                    credentials,
+                    Some(&app),
+                    std::path::Path::new("wrangler.jsonc"),
                 )
                 .await?;
-                let target = resolve_service(&entries, &app)?;
-                let path = format!("/app-services/{}/user-access", target.app_id);
+                let path = format!("/app-services/{target}/user-access");
                 match file {
                     Some(file) => {
                         let input: serde_json::Value =

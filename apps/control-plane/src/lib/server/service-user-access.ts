@@ -10,6 +10,8 @@ import type { Principal } from "./identity.ts";
 import { lockOrganizationRuntime } from "./organization-runtime.ts";
 import { apps, jobs } from "./schema.ts";
 import type { Transaction } from "./transactions.ts";
+import type { ArtifactStorage } from "./storage.ts";
+import { ensureOrganizationRuntime, loadRuntime, runtimeReference } from "./runtime-releases.ts";
 
 export const serviceAccessState = (app: typeof apps.$inferSelect) =>
   contract.serviceGrantsState.parse({
@@ -58,8 +60,23 @@ export const validateServiceAccessChange = async (
   principal: Pick<Principal, "id" | "admin" | "application">,
   appId: string,
   input: z.infer<typeof contract.serviceAccessUpdate>,
+  storage: ArtifactStorage,
 ) => {
   const app = await serviceAccessApp(transaction, principal, appId);
+  const execution = await lockOrganizationRuntime(transaction, app.organizationId);
+
+  const reference = execution.appliedRuntime
+    ? runtimeReference.parse(execution.appliedRuntime)
+    : await ensureOrganizationRuntime(transaction, storage, app.organizationId);
+
+  const { runtime } = await loadRuntime(storage, reference);
+
+  if (runtime.serviceAccess !== 1)
+    throw new InvalidOperation({
+      code: "CONFLICT",
+      message:
+        "Update the app runtime to support user and group service access before changing these permissions",
+    });
 
   if (input.revision !== undefined && input.revision !== app.serviceAccessRevision)
     throw new InvalidOperation({
@@ -104,9 +121,10 @@ export const applyServiceAccessChange = async (
   principal: Pick<Principal, "id" | "admin" | "application">,
   appId: string,
   input: z.infer<typeof contract.serviceAccessUpdate>,
+  storage: ArtifactStorage,
   enqueue = true,
 ) => {
-  const valid = await validateServiceAccessChange(transaction, principal, appId, input);
+  const valid = await validateServiceAccessChange(transaction, principal, appId, input, storage);
 
   if (valid.isErr()) return valid;
   const app = valid.value;

@@ -12,9 +12,14 @@ import type { Database } from "./database.ts";
 import type { HostedExecution } from "./deployment-execution.ts";
 import type { Principal } from "./identity.ts";
 import { InvalidOperation } from "./errors.ts";
+import type { ArtifactStorage } from "./storage.ts";
 
-export const createConnectionService = (database: Database, execution?: HostedExecution) => ({
-  ...createServiceAccess(database, execution),
+export const createConnectionService = (
+  database: Database,
+  storage: ArtifactStorage,
+  execution?: HostedExecution,
+) => ({
+  ...createServiceAccess(database, storage, execution),
   describe: (principal: Principal, service: string) =>
     transact(database, async (transaction) => {
       const byId = contract.identifier.safeParse(service).success

@@ -108,6 +108,7 @@ mod tests {
             version: "1.0.0".into(),
             celld: "0.6.3-widefleet.1".into(),
             workflows: None,
+            service_access: None,
             cloudflare: None,
             main: "loader.js".into(),
             modules: vec![],

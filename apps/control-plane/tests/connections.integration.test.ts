@@ -1,3 +1,5 @@
+import { createArtifactStorage } from "../src/lib/server/artifact-storage.ts";
+import { memoryStorage } from "./memory-storage.fixture.ts";
 import * as contract from "@platform/contracts";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -8,6 +10,7 @@ import { apps, artifacts, deployments, jobs } from "../src/lib/server/schema.ts"
 import { createTestEnvironment } from "./environment.ts";
 
 describe("App connections", () => {
+  const storage = createArtifactStorage(memoryStorage());
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
   let service: ReturnType<typeof createConnectionService>;
   let appService: ReturnType<typeof createAppService>;
@@ -31,7 +34,7 @@ describe("App connections", () => {
 
   beforeAll(async () => {
     environment = await createTestEnvironment();
-    service = createConnectionService(environment.database.db);
+    service = createConnectionService(environment.database.db, storage);
     appService = createAppService(environment.database.db, environment.configuration);
     creator = await person("connection-creator");
     colleague = await person("connection-reader");

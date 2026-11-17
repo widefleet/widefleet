@@ -1,3 +1,4 @@
+import { loadRuntime } from "./runtime-releases.ts";
 import { appUrl } from "./apps.ts";
 import { decryptSecret } from "./secret-encryption.ts";
 import { migrateAppServices } from "./app-services-migration.ts";
@@ -379,11 +380,15 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
             // Runtime upgrades are independent of app deployments. A successful code
             // replacement can precede its SQL confirmation, so check the serving release.
             const [installed] = await transaction
-              .select({ version: runtimeReleases.version })
+              .select({ version: runtimeReleases.version, checksum: runtimeReleases.checksum })
               .from(runtimeReleases)
               .where(eq(runtimeReleases.version, ready.runtimeVersion));
 
             if (!installed) throw new Error("The active runtime release is not installed");
+            const { runtime: servingRuntime } = await loadRuntime(storage, installed);
+
+            if (app.serviceAccessRevision > 0 && servingRuntime.serviceAccess !== 1)
+              throw new Error("Update the app runtime to support the saved service access rules");
 
             const hasEvents =
               command.kind === "deploy" &&
@@ -422,11 +427,14 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               organizationId: app.organizationId,
               appId: app.id,
               access,
-              serviceAccess: contract.serviceAccessSnapshot.parse({
-                revision: app.serviceAccessRevision,
-                mode: app.serviceAccessMode,
-                grants: app.serviceGrants,
-              }),
+              serviceAccess:
+                servingRuntime.serviceAccess === 1
+                  ? contract.serviceAccessSnapshot.parse({
+                      revision: app.serviceAccessRevision,
+                      mode: app.serviceAccessMode,
+                      grants: app.serviceGrants,
+                    })
+                  : undefined,
             });
 
             if (currentBody !== body) {
@@ -483,7 +491,8 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
                 appliedNetworkRevision: network.revision,
                 networkError: null,
                 appliedAccessRevision: access.revision,
-                appliedServiceAccessRevision: app.serviceAccessRevision,
+                appliedServiceAccessRevision:
+                  servingRuntime.serviceAccess === 1 ? app.serviceAccessRevision : null,
                 serviceAccessError: null,
                 accessError: null,
                 appliedCapabilities: capabilities,

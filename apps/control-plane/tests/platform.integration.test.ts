@@ -50,6 +50,7 @@ import { createTelemetry } from "../src/lib/server/telemetry.ts";
 describe("Platform API with PostgreSQL and RustFS", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
   let api: ReturnType<typeof createApi>;
+  let connections: ReturnType<typeof createConnectionService>;
   let storage: ReturnType<typeof createStorage>;
   let s3: S3Client;
   let adminHeaders: Headers;
@@ -77,6 +78,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     });
     await s3.send(new CreateBucketCommand({ Bucket: configuration.S3_BUCKET }));
     storage = createStorage(configuration);
+    connections = createConnectionService(environment.database.db, storage);
     api = createApi({
       directory: createDirectory(
         async () => ({ ...configuration.IDENTITY, directory: configuration.IDENTITY.management }),
@@ -109,7 +111,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       appAccess: createAppAccessService(environment.database.db),
       workflows: createWorkflowService(environment.database.db),
       migrations: createMigrationService(environment.database.db, storage),
-      connections: createConnectionService(environment.database.db),
+      connections,
       appSecrets: createAppSecrets(
         environment.database.db,
         environment.environment.PLATFORM_ENCRYPTION_KEY,
@@ -197,6 +199,41 @@ describe("Platform API with PostgreSQL and RustFS", () => {
 
     return api(new Request(`${environment.configuration.PLATFORM_URL}/api/v1${path}`, options));
   };
+
+  it("passes only the grant body to the hosted-compatible service update boundary", async () => {
+    const target = { id: crypto.randomUUID() };
+
+    const update = vi
+      .spyOn(connections, "setUserAccess")
+      .mockImplementation(async (_principal, _appId, input) => {
+        contract.serviceAccessUpdate.parse(input);
+
+        return Result.ok(
+          contract.serviceGrantsState.parse({
+            ...input,
+            mode: "approval_required",
+            appliedRevision: null,
+            state: "saved",
+            error: null,
+          }),
+        );
+      });
+
+    try {
+      const response = await json(`/app-services/${target.id}/user-access`, "PUT", {
+        revision: 0,
+        grants: [],
+      });
+
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(update).toHaveBeenCalledWith(expect.anything(), target.id, {
+        revision: 0,
+        grants: [],
+      });
+    } finally {
+      update.mockRestore();
+    }
+  });
 
   const createApp = async (slug: string) => {
     const response = await json("/apps", "POST", {

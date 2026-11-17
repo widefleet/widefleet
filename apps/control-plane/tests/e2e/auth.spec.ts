@@ -1,11 +1,18 @@
 import { expect, test } from "@playwright/test";
 import { spawn } from "node:child_process";
+import {
+  CreateBucketCommand,
+  DeleteBucketCommand,
+  DeleteObjectsCommand,
+  ListObjectsV2Command,
+} from "@aws-sdk/client-s3";
+import { createS3Client } from "../../src/lib/server/storage/s3.ts";
 import { createServer, request as httpRequest } from "node:http";
 import { EventEmitter, once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { app, artifact, workerMetadata } from "@platform/contracts";
+import { app, artifact, workerMetadata, serviceGrantsState } from "@platform/contracts";
 import {
   account,
   member,
@@ -32,6 +39,8 @@ let server: ReturnType<typeof spawn>;
 
 let logs = "";
 
+let storage: ReturnType<typeof createS3Client>;
+
 // Model the trusted reverse proxy for browser and OAuth back-channel requests.
 const edge = createServer((request, response) => {
   const upstream = httpRequest(
@@ -54,6 +63,10 @@ const edge = createServer((request, response) => {
 
 test.beforeAll(async () => {
   environment = await createTestEnvironment();
+  environment.environment.S3_BUCKET = `test-${crypto.randomUUID()}`;
+  environment.configuration.S3_BUCKET = environment.environment.S3_BUCKET;
+  storage = createS3Client(environment.configuration);
+  await storage.send(new CreateBucketCommand({ Bucket: environment.environment.S3_BUCKET }));
   edge.listen(25430);
   await once(edge, "listening");
   server = spawn(
@@ -355,6 +368,123 @@ for (const javaScriptEnabled of [true, false]) {
           { id: collision.id, accessMode: "approval_required" },
         ]),
       );
+
+      const groupForm = adminPage
+        .locator("details")
+        .filter({ has: adminPage.getByText("Add group", { exact: true }) });
+
+      await groupForm.locator("summary").click();
+      await groupForm.getByLabel("Company group ID").fill("finance,administrators");
+      await groupForm.getByRole("button", { name: "Grant access", exact: true }).click();
+      await expect(
+        adminPage.getByText("Use a group ID without commas or control characters", { exact: true }),
+      ).toBeVisible();
+
+      const userForm = adminPage
+        .locator("details")
+        .filter({ has: adminPage.getByText("Add user", { exact: true }) });
+
+      await userForm.locator("summary").click();
+      await userForm.getByLabel("Identity provider URL").fill("not-a-url");
+      await userForm.getByLabel("User ID", { exact: true }).fill("alice");
+      await userForm.locator("form").evaluate((form) => {
+        form.setAttribute("novalidate", "");
+      });
+      await userForm.getByRole("button", { name: "Grant access", exact: true }).click();
+      await expect(adminPage.getByText("Invalid URL", { exact: true })).toBeVisible();
+      await userForm.getByLabel("Identity provider URL").fill("https://identity.example.test");
+      await userForm.getByLabel("User ID", { exact: true }).fill("a".repeat(513));
+      await userForm.getByRole("button", { name: "Grant access", exact: true }).click();
+      await expect(adminPage.getByText(/512/)).toBeVisible();
+
+      const accessPath = `/api/v1/app-services/${target.id}/user-access`;
+
+      const savedAccess = serviceGrantsState.parse(
+        await (await adminContext.request.get(accessPath)).json(),
+      );
+
+      const recipient = { issuer: "https://identity.example.test", subject: "alice" };
+      const label = "alice (https://identity.example.test)";
+
+      const updateAccess = (users: (typeof recipient)[]) =>
+        adminContext.request.put(accessPath, {
+          headers: { origin: environment.configuration.PLATFORM_URL },
+          data: {
+            revision: savedAccess.revision,
+            grants: [{ entrypoint: "Reader", users, groups: [label] }],
+          },
+        });
+
+      expect((await updateAccess([recipient, recipient])).status()).toBe(400);
+      const granted = await updateAccess([recipient]);
+      expect(granted.ok(), await granted.text()).toBe(true);
+      await adminPage.goto(`/services/${target.id}/availability`);
+      await expect(adminPage.getByText(`User: ${label}`, { exact: true })).toBeVisible();
+      await expect(adminPage.getByText(`Group: ${label}`, { exact: true })).toBeVisible();
+
+      for (const width of [1280, 390]) {
+        await adminPage.setViewportSize({ width, height: 900 });
+
+        for (const colorScheme of ["light", "dark"] as const) {
+          await adminPage.emulateMedia({ colorScheme });
+          await adminPage.screenshot({
+            path: testInfo.outputPath(`service-grants-${width}-${colorScheme}.png`),
+            fullPage: true,
+          });
+          expect(
+            await adminPage.evaluate(
+              () => document.documentElement.scrollWidth <= window.innerWidth,
+            ),
+          ).toBe(true);
+        }
+      }
+
+      const userRow = adminPage
+        .locator("form")
+        .filter({ has: adminPage.getByText(`User: ${label}`, { exact: true }) });
+
+      await userRow.getByRole("button", { name: "Remove", exact: true }).press("Enter");
+      await expect(adminPage.getByText(`User: ${label}`, { exact: true })).toHaveCount(0);
+      await expect(adminPage.getByText(`Group: ${label}`, { exact: true })).toBeVisible();
+
+      const [activeArtifact] = await environment.database.db
+        .select({ id: artifacts.id, metadata: artifacts.metadata })
+        .from(artifacts)
+        .innerJoin(deployments, eq(deployments.artifactId, artifacts.id))
+        .where(eq(deployments.id, deploymentId));
+
+      if (!activeArtifact) throw new Error("Missing service artifact");
+
+      try {
+        await environment.database.db
+          .update(artifacts)
+          .set({ metadata: { ...workerMetadata.parse(activeArtifact.metadata), entrypoints: [] } })
+          .where(eq(artifacts.id, activeArtifact.id));
+
+        for (const identifier of [target.id, target.slug]) {
+          await adminPage.goto(`/services/${identifier}/availability`);
+          await expect(
+            adminPage.getByText(
+              "This app no longer publishes API entrypoints. Saved access can still be removed.",
+              { exact: true },
+            ),
+          ).toBeVisible();
+          await expect(adminPage.getByText(`Group: ${label}`, { exact: true })).toBeVisible();
+        }
+
+        await adminPage.getByRole("button", { name: "Remove", exact: true }).click();
+        await expect(
+          adminPage.getByText("No individual users or groups have been granted access.", {
+            exact: true,
+          }),
+        ).toBeVisible();
+      } finally {
+        await environment.database.db
+          .update(artifacts)
+          .set({ metadata: activeArtifact.metadata })
+          .where(eq(artifacts.id, activeArtifact.id));
+      }
+
       await page.goto(`/services?app=${source.id}`);
       await page.getByRole("link", { name: `Set up connection to ${target.displayName}` }).click();
       await expect(page.getByLabel("Your app", { exact: true })).toHaveCount(0);
@@ -693,6 +823,21 @@ test.afterAll(async () => {
     server.kill("SIGTERM");
     await exited;
     clearTimeout(timeout);
+  }
+
+  if (storage) {
+    const Bucket = environment.environment.S3_BUCKET;
+    const contents = await storage.send(new ListObjectsV2Command({ Bucket }));
+
+    if (contents.Contents?.length)
+      await storage.send(
+        new DeleteObjectsCommand({
+          Bucket,
+          Delete: { Objects: contents.Contents.map(({ Key }) => ({ Key: Key ?? "" })) },
+        }),
+      );
+    await storage.send(new DeleteBucketCommand({ Bucket }));
+    storage.destroy();
   }
 
   await environment?.close();

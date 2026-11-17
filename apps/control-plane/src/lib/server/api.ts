@@ -370,8 +370,8 @@ export const createApi = (runtime: Runtime) => {
       .route({ method: "PUT", path: "/app-services/{appId}/user-access" })
       .input(contract.appPath.extend(contract.serviceGrantsChange.shape))
       .output(contract.serviceGrantsState)
-      .handler(async ({ context, input }) =>
-        unwrap(await runtime.connections.setUserAccess(context.principal, input.appId, input)),
+      .handler(async ({ context, input: { appId, ...change } }) =>
+        unwrap(await runtime.connections.setUserAccess(context.principal, appId, change)),
       ),
     serviceAccess: write
       .route({ method: "PUT", path: "/app-services/{appId}/access" })

@@ -222,7 +222,7 @@ export const createCloudflareExecution = (
     },
     serviceAccess: async (actor, appId, input) => {
       const allowed = await transact(database, (transaction) =>
-        validateServiceAccessChange(transaction, actor, appId, input),
+        validateServiceAccessChange(transaction, actor, appId, input, storage),
       );
 
       if (allowed.isErr()) return allowed;

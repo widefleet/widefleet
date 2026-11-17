@@ -18,6 +18,7 @@ import {
 import { lockOrganizationRuntime } from "./organization-runtime.ts";
 import { InvalidOperation } from "./errors.ts";
 import type { Database } from "./database.ts";
+import type { ArtifactStorage } from "./storage.ts";
 import type { HostedExecution } from "./deployment-execution.ts";
 import type { Principal } from "./identity.ts";
 import { transact, type Transaction } from "./transactions.ts";
@@ -60,7 +61,11 @@ const readRequests = async (transaction: Transaction, principal: Principal, requ
   );
 };
 
-export const createServiceAccess = (database: Database, execution?: HostedExecution) => ({
+export const createServiceAccess = (
+  database: Database,
+  storage: ArtifactStorage,
+  execution?: HostedExecution,
+) => ({
   userAccess: (principal: Principal, appId: string) =>
     transact(database, async (transaction) =>
       Result.ok(serviceAccessState(await serviceAccessApp(transaction, principal, appId))),
@@ -73,7 +78,7 @@ export const createServiceAccess = (database: Database, execution?: HostedExecut
     execution
       ? execution.serviceAccess(principal, appId, input)
       : transact(database, (transaction) =>
-          applyServiceAccessChange(transaction, principal, appId, input),
+          applyServiceAccessChange(transaction, principal, appId, input, storage),
         ),
   setAccess: async (
     principal: Principal,
@@ -83,7 +88,7 @@ export const createServiceAccess = (database: Database, execution?: HostedExecut
     const result = execution
       ? await execution.serviceAccess(principal, appId, { mode: accessMode })
       : await transact(database, (transaction) =>
-          applyServiceAccessChange(transaction, principal, appId, { mode: accessMode }),
+          applyServiceAccessChange(transaction, principal, appId, { mode: accessMode }, storage),
         );
 
     if (result.isErr()) return result;

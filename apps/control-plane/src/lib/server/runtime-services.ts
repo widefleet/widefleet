@@ -152,7 +152,7 @@ export const createRuntime = ({
     appAccess: createAppAccessService(database.db, execution),
     workflows: createWorkflowService(database.db, execution),
     migrations: createMigrationService(database.db, storage, execution),
-    connections: createConnectionService(database.db, execution),
+    connections: createConnectionService(database.db, storage, execution),
     appSecrets: createAppSecrets(database.db, encryptionKey, execution),
     releases: createRuntimeReleaseService(database.db, storage, execution),
     uploads: createUploadService(database.db, storage, configuration, execution, source),

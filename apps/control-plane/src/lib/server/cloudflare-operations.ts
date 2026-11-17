@@ -173,7 +173,14 @@ export const registerCloudflareOperation = (
         );
       } else if (command.kind === "service-access") {
         result = yield* Result.await(
-          applyServiceAccessChange(transaction, command.actor, app.id, command.input, false),
+          applyServiceAccessChange(
+            transaction,
+            command.actor,
+            app.id,
+            command.input,
+            storage,
+            false,
+          ),
         );
       } else {
         const access = yield* Result.await(

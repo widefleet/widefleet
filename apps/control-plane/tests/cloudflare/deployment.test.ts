@@ -1,3 +1,5 @@
+import { createArtifactStorage } from "../../src/lib/server/artifact-storage.ts";
+import { memoryStorage } from "../memory-storage.fixture.ts";
 import { createGunzip } from "node:zlib";
 import { encryptSecret } from "../../src/lib/server/secret-encryption.ts";
 import { companyIdentity } from "../../src/lib/server/company-identity.ts";
@@ -587,7 +589,11 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       const response = await worker.fetch(`http://fixture/host?hostname=${hostname}`);
 
       return z
-        .object({ body: z.unknown(), access: z.string().nullable() })
+        .object({
+          body: z.unknown(),
+          access: z.string().nullable(),
+          serviceAccess: contract.serviceAccessSnapshot.nullable(),
+        })
         .nullable()
         .parse(await response.json());
     };
@@ -866,9 +872,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           };
           const result = await withCloudflareDatabase(env, async ({ db }) => {
             const executor = createCloudflareExecution({ ...env, DEPLOYMENTS: deploymentBinding, WIDEFLEET_QUEUES: url.searchParams.get('mode') === 'queues-disabled' ? 'false' : 'true' }, db, createArtifactStorage(createR2Storage(env.ARTIFACTS)));
-            if (command.kind === 'capabilities') return command.connectionRequestId ? createConnectionService(db, executor).approve(command.actor, command.connectionRequestId) : executor.connections.bind(command.actor, command.appId, command.name, command.grant);
+            if (command.kind === 'capabilities') return command.connectionRequestId ? createConnectionService(db, createArtifactStorage(createR2Storage(env.ARTIFACTS)), executor).approve(command.actor, command.connectionRequestId) : executor.connections.bind(command.actor, command.appId, command.name, command.grant);
             if (command.kind === 'access') return executor.access(command.actor, command.appId, command.input);
             if (command.kind === 'network') return executor.network(command.actor, command.appId, command.input);
+            if (command.kind === 'service-access') return executor.serviceAccess(command.actor, command.appId, command.input);
             return executor.deploy({ id: command.id, appId: command.appId, artifactId: command.artifactId, createdAt: command.createdAt,
               status: 'queued', finishedAt: null, message: null }, command.requestId, command.rollback,
               command.attribution ? {id: command.attribution.userId, application: {organizationId: command.attribution.organizationId}} : undefined,
@@ -972,13 +979,13 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           return Response.json(result.unwrap());
         }
         if (url.hostname === 'fixture' && url.pathname === '/connections') {
-          const result = await withCloudflareDatabase(env, async ({db}) => createConnectionService(db).connections({id:'fixture-owner', admin:true, application: {...${JSON.stringify(environment.application)}, admin:true}}, url.searchParams.get('appId')));
+          const result = await withCloudflareDatabase(env, async ({db}) => createConnectionService(db, createArtifactStorage(createR2Storage(env.ARTIFACTS))).connections({id:'fixture-owner', admin:true, application: {...${JSON.stringify(environment.application)}, admin:true}}, url.searchParams.get('appId')));
           return Response.json(result.unwrap());
         }
         if (url.hostname === 'fixture' && url.pathname === '/host') {
           const obj = await env.ARTIFACTS.get('hosts/' + url.searchParams.get('hostname') + '.json');
           const route = await env.AUTH_CONFIG.get('apps/' + url.searchParams.get('hostname'), 'json');
-          return Response.json(obj ? { body: await obj.json(), access: route ? JSON.stringify(route.access) : null } : null);
+          return Response.json(obj ? { body: await obj.json(), access: route ? JSON.stringify(route.access) : null, serviceAccess: route?.serviceAccess ?? null } : null);
         }
         if (url.hostname === 'fixture' && url.pathname === '/workflow') {
           const instance = await (url.searchParams.has('app-operation') ? env.APP_OPERATIONS : env.DEPLOYMENTS).get(url.searchParams.get('id'));
@@ -2564,7 +2571,11 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         await seed(source);
         await dispatch(source);
         await completed(source.command.id);
-        const services = createConnectionService(environment.database.db);
+
+        const services = createConnectionService(
+          environment.database.db,
+          createArtifactStorage(memoryStorage()),
+        );
 
         const request = (
           await services.request(principal, {
@@ -3192,6 +3203,74 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
 
     const runtimeStatus = async () =>
       contract.runtimeStatus.parse(await (await worker.fetch("http://fixture/runtime")).json());
+
+    it("keeps hosted app updates compatible with older runtimes and rejects unsupported service grants", async () => {
+      const legacy = contract.runtimeRelease.parse({
+        ...runtimeRelease("99.0.1"),
+        celld: "0.6.2",
+        serviceAccess: undefined,
+      });
+
+      await selectRuntime(legacy);
+      await expect
+        .poll(runtimeStatus, { timeout: 15000 })
+        .toMatchObject({ activeVersion: legacy.version, state: "succeeded" });
+
+      try {
+        const entry = await seedDeployment(environment.database.db, {
+          bindings: [],
+          entrypoints: ["Reader"],
+          source:
+            "import { WorkerEntrypoint } from 'cloudflare:workers'; export class Reader extends WorkerEntrypoint { read() { return 42; } } export default { fetch() { return new Response('compatible'); } };",
+        });
+
+        await seed(entry);
+        await dispatch(entry);
+        await completed(entry.command.id);
+        expect((await host(entry.hostname))?.serviceAccess).toBeNull();
+        expect(await (await authenticatedFetch(`https://${entry.hostname}/`)).text()).toBe(
+          "compatible",
+        );
+
+        const response = await worker.fetch("http://fixture/start", {
+          method: "POST",
+          body: JSON.stringify({
+            kind: "service-access",
+            appId: entry.appId,
+            actor: {
+              id: "fixture-owner",
+              admin: true,
+              application: { ...environment.application, admin: true },
+            },
+            input: {
+              revision: 0,
+              grants: [{ entrypoint: "Reader", users: [], groups: ["engineering"] }],
+            },
+          }),
+        });
+
+        expect(response.status).toBe(400);
+        expect(z.object({ error: z.string() }).parse(await response.json()).error).toContain(
+          "Update the app runtime",
+        );
+
+        const [saved] = await environment.database.db
+          .select()
+          .from(apps)
+          .where(eq(apps.id, entry.appId));
+
+        expect(saved).toMatchObject({
+          serviceGrants: [],
+          serviceAccessRevision: 0,
+          appliedServiceAccessRevision: null,
+        });
+      } finally {
+        await selectRuntime(contract.runtimeRelease.parse(release));
+        await expect
+          .poll(runtimeStatus, { timeout: 15000 })
+          .toMatchObject({ activeVersion: release.version, state: "succeeded" });
+      }
+    }, 60000);
 
     it("updates and rolls back runtime code without rewriting app bindings or subscriptions", async () => {
       await selectRuntime(contract.runtimeRelease.parse(release));

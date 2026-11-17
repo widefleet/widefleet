@@ -368,6 +368,12 @@ pub struct RuntimeRelease {
     pub celld: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workflows: Option<u32>,
+    #[serde(
+        rename = "serviceAccess",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub service_access: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cloudflare: Option<u32>,
     pub main: String,

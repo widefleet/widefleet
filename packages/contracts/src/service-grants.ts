@@ -12,7 +12,15 @@ export const serviceGrant = z.strictObject({
     .string()
     .regex(/^[A-Za-z_$][A-Za-z0-9_$]*$/)
     .max(128),
-  users: z.array(serviceUser).max(100),
+  users: z
+    .array(serviceUser)
+    .max(100)
+    .refine(
+      (users) =>
+        new Set(users.map((user) => JSON.stringify([user.issuer, user.subject]))).size ===
+        users.length,
+      "User identities must be unique",
+    ),
   groups: appAccessGroups,
 });
 

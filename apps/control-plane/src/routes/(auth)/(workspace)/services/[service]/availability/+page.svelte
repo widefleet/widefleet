@@ -71,9 +71,16 @@
     {#each access.grants as grant (grant.entrypoint)}
       <div class="space-y-2">
         <h3 class="font-mono text-sm font-medium">{grant.entrypoint}</h3>
-        {#each [...grant.users.map( (user) => ({ kind: "user" as const, issuer: user.issuer, subject: user.subject, group: "", label: `${user.subject} (${user.issuer})` }) ), ...grant.groups.map( (group) => ({ kind: "group" as const, issuer: "", subject: "", group, label: group }) )] as recipient (recipient.label)}
+        {#each [...grant.users.map( (user) => ({ kind: "user" as const, issuer: user.issuer, subject: user.subject, group: "", label: `${user.subject} (${user.issuer})` }) ), ...grant.groups.map( (group) => ({ kind: "group" as const, issuer: "", subject: "", group, label: group }) )] as recipient (JSON.stringify( [recipient.kind, recipient.issuer, recipient.subject, recipient.group] ))}
           {@const remove = changeServiceUserAccess.for(
-            `${access.revision}-${grant.entrypoint}-${recipient.kind}-${recipient.label}`,
+            JSON.stringify([
+              access.revision,
+              grant.entrypoint,
+              recipient.kind,
+              recipient.issuer,
+              recipient.subject,
+              recipient.group,
+            ]),
           )}
           <form {...remove} class="flex flex-wrap items-center justify-between gap-3 border-b py-2">
             <OrganizationField field={remove.fields.organizationId} />
@@ -98,53 +105,59 @@
     {:else}<p class="text-muted-foreground text-sm">
         No individual users or groups have been granted access.
       </p>{/each}
-    {#each ["user", "group"] as kind (kind)}
-      {@const add = changeServiceUserAccess.for(`${kind}-${access.revision}`)}
-      <details class="rounded-lg border p-4">
-        <summary class="cursor-pointer text-sm font-medium">Add {kind}</summary>
-        <form {...add} class="mt-4 space-y-4">
-          <OrganizationField field={add.fields.organizationId} /><input
-            {...add.fields.appId.as("hidden", data.service.appId)}
-          /><input {...add.fields.revision.as("hidden", access.revision)} /><input
-            {...add.fields.kind.as("hidden", kind)}
-          /><input {...add.fields.action.as("hidden", "add")} />
-          <div class="space-y-2">
-            <Label for={`entrypoint-${kind}`}>Entrypoint</Label><NativeSelect
-              id={`entrypoint-${kind}`}
-              {...add.fields.entrypoint.as("select", data.service.entrypoints[0] ?? "")}
-              class="w-full"
-              >{#each data.service.entrypoints as entrypoint (entrypoint)}<option value={entrypoint}
-                  >{entrypoint}</option
-                >{/each}</NativeSelect
-            >
-          </div>
-          {#if kind === "user"}<div class="space-y-2">
-              <Label for="identity-issuer">Identity provider URL</Label><Input
-                id="identity-issuer"
-                {...add.fields.issuer.as("url", data.identityIssuer)}
-                required
-              />
-            </div>
+    {#if data.service.entrypoints.length === 0}
+      <p class="text-muted-foreground text-sm">
+        This app no longer publishes API entrypoints. Saved access can still be removed.
+      </p>
+    {:else}
+      {#each ["user", "group"] as kind (kind)}
+        {@const add = changeServiceUserAccess.for(`${kind}-${access.revision}`)}
+        <details open={Boolean(add.fields.allIssues()?.length)} class="rounded-lg border p-4">
+          <summary class="cursor-pointer text-sm font-medium">Add {kind}</summary>
+          <form {...add} class="mt-4 space-y-4">
+            <OrganizationField field={add.fields.organizationId} /><input
+              {...add.fields.appId.as("hidden", data.service.appId)}
+            /><input {...add.fields.revision.as("hidden", access.revision)} /><input
+              {...add.fields.kind.as("hidden", kind)}
+            /><input {...add.fields.action.as("hidden", "add")} />
             <div class="space-y-2">
-              <Label for="identity-subject">User ID</Label><Input
-                id="identity-subject"
-                {...add.fields.subject.as("text")}
-                required
-              />
+              <Label for={`entrypoint-${kind}`}>Entrypoint</Label><NativeSelect
+                id={`entrypoint-${kind}`}
+                {...add.fields.entrypoint.as("select", data.service.entrypoints[0] ?? "")}
+                class="w-full"
+                >{#each data.service.entrypoints as entrypoint (entrypoint)}<option
+                    value={entrypoint}>{entrypoint}</option
+                  >{/each}</NativeSelect
+              >
             </div>
-          {:else}<div class="space-y-2">
-              <Label for="identity-group">Company group ID</Label><Input
-                id="identity-group"
-                {...add.fields.group.as("text")}
-                required
-              />
-            </div>{/if}
-          <FormIssues issues={add.fields.allIssues()} /><Button
-            type="submit"
-            disabled={add.pending > 0}>Grant access</Button
-          >
-        </form>
-      </details>
-    {/each}
+            {#if kind === "user"}<div class="space-y-2">
+                <Label for="identity-issuer">Identity provider URL</Label><Input
+                  id="identity-issuer"
+                  {...add.fields.issuer.as("url", data.identityIssuer)}
+                  required
+                />
+              </div>
+              <div class="space-y-2">
+                <Label for="identity-subject">User ID</Label><Input
+                  id="identity-subject"
+                  {...add.fields.subject.as("text")}
+                  required
+                />
+              </div>
+            {:else}<div class="space-y-2">
+                <Label for="identity-group">Company group ID</Label><Input
+                  id="identity-group"
+                  {...add.fields.group.as("text")}
+                  required
+                />
+              </div>{/if}
+            <FormIssues issues={add.fields.allIssues()} /><Button
+              type="submit"
+              disabled={add.pending > 0}>Grant access</Button
+            >
+          </form>
+        </details>
+      {/each}
+    {/if}
   </section>
 </div>

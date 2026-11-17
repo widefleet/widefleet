@@ -77,7 +77,9 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
       response.setHeader("content-type", "application/json");
 
       if (request.url === "/api/v1/apps/by-name/inventory") response.end(JSON.stringify(app));
-      else if (request.url === "/api/v1/app-services") {
+      else if (request.url === "/api/v1/apps/by-name/erp-app") {
+        response.end(JSON.stringify({ ...app, id: service.appId, slug: service.slug }));
+      } else if (request.url === "/api/v1/app-services") {
         response.end(JSON.stringify(catalog));
       } else if (request.url === "/api/v1/app-services/erp-app") {
         response.end(
@@ -256,6 +258,28 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
       env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: "normal-credential" },
     });
 
+  it("reads and revokes retained grants by name and UUID after the last entrypoint is removed", async () => {
+    catalog = [];
+    await writeFile(
+      join(directory, "revoke-grants.json"),
+      JSON.stringify({ revision: 2, grants: [] }),
+    );
+
+    for (const target of [service.appId, service.slug]) {
+      expect(JSON.parse((await command("services", "user-access", target)).stdout)).toEqual({
+        revision: 2,
+        grants: [],
+      });
+      expect(
+        JSON.parse(
+          (await command("services", "user-access", target, "--file", "revoke-grants.json")).stdout,
+        ),
+      ).toEqual({ revision: 2, grants: [] });
+    }
+
+    expect(requests.some((request) => request.path === "/api/v1/app-services")).toBe(false);
+  });
+
   it("manages versioned user and group access through the API", async () => {
     const grants = {
       revision: 2,
@@ -280,9 +304,9 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
       ),
     ).toEqual(grants);
     expect(requests.map(({ path, method }) => `${method} ${path}`)).toEqual([
-      "GET /api/v1/app-services",
+      "GET /api/v1/apps/by-name/erp-app",
       `GET /api/v1/app-services/${service.appId}/user-access`,
-      "GET /api/v1/app-services",
+      "GET /api/v1/apps/by-name/erp-app",
       `PUT /api/v1/app-services/${service.appId}/user-access`,
     ]);
     expect(JSON.parse(requests.at(-1)?.body ?? "")).toEqual(grants);

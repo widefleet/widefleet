@@ -22,17 +22,31 @@ export const getServiceUserAccess = query(contract.appPath, async ({ appId }) =>
 });
 
 export const changeServiceUserAccess = form(
-  contract.appPath.extend({
-    ...contract.organizationSelection.shape,
-    revision: z.number().int().nonnegative(),
-    entrypoint: contract.serviceGrant.shape.entrypoint,
-    kind: z.enum(["user", "group"]),
-    action: z.enum(["add", "remove"]),
-    issuer: z.string().default(""),
-    subject: z.string().default(""),
-    group: z.string().default(""),
-    id: z.string().optional(),
-  }),
+  contract.appPath
+    .extend({
+      ...contract.organizationSelection.shape,
+      revision: z.number().int().nonnegative(),
+      entrypoint: contract.serviceGrant.shape.entrypoint,
+      kind: z.enum(["user", "group"]),
+      action: z.enum(["add", "remove"]),
+      issuer: z.string().default(""),
+      subject: z.string().default(""),
+      group: z.string().default(""),
+      id: z.string().optional(),
+    })
+    .superRefine((input, context) => {
+      const recipient =
+        input.kind === "user"
+          ? contract.serviceUser.safeParse({ issuer: input.issuer, subject: input.subject })
+          : contract.appAccessGroup.safeParse(input.group);
+
+      if (!recipient.success)
+        for (const issue of recipient.error.issues)
+          context.addIssue({
+            ...issue,
+            path: input.kind === "group" ? ["group", ...issue.path] : issue.path,
+          });
+    }),
   async ({ organizationId, appId, revision, entrypoint, kind, action, issuer, subject, group }) => {
     const { runtime, principal } = await remoteContext({ organizationId });
     const state = queryValue(await runtime.connections.userAccess(principal, appId));

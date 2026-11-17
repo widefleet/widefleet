@@ -1,3 +1,10 @@
+import bundled from "@platform/app-runtime/release" with { type: "json" };
+import { saveRuntime } from "../src/lib/server/runtime-releases.ts";
+import { createJobService } from "../src/lib/server/jobs.ts";
+import { createAgentService } from "../src/lib/server/agents.ts";
+import { organizationRuntimes } from "../src/lib/server/schema.ts";
+import { createArtifactStorage } from "../src/lib/server/artifact-storage.ts";
+import { memoryStorage } from "./memory-storage.fixture.ts";
 import { jobs } from "../src/lib/server/schema.ts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
@@ -18,6 +25,7 @@ import { decryptSecret } from "../src/lib/server/secret-encryption.ts";
 import type { Principal } from "../src/lib/server/identity.ts";
 
 describe("App service connections", () => {
+  const storage = createArtifactStorage(memoryStorage());
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
   let principal: Principal;
   beforeAll(async () => {
@@ -36,7 +44,7 @@ describe("App service connections", () => {
     await environment.close();
   });
 
-  const services = () => createConnectionService(environment.database.db);
+  const services = () => createConnectionService(environment.database.db, storage);
 
   const applications = () => createAppService(environment.database.db, environment.configuration);
 
@@ -210,6 +218,91 @@ describe("App service connections", () => {
         await services().setUserAccess(principal, target.id, { revision: 3, grants: [writer] })
       ).unwrap().grants,
     ).toEqual([writer]);
+  });
+
+  it("keeps ordinary app publications compatible and requires runtime support before accepting service grants", async () => {
+    const [previous] = await environment.database.db
+      .select()
+      .from(organizationRuntimes)
+      .where(eq(organizationRuntimes.organizationId, "widefleet"));
+
+    if (!previous) throw new Error("Missing fixture execution");
+
+    const legacy = contract.runtimeRelease.parse({
+      ...bundled,
+      version: "99.0.1",
+      celld: "0.6.2",
+      serviceAccess: undefined,
+    });
+
+    const oldRuntime = await environment.database.db.transaction((transaction) =>
+      saveRuntime(transaction, storage, legacy),
+    );
+
+    const currentRuntime = await environment.database.db.transaction((transaction) =>
+      saveRuntime(transaction, storage, contract.runtimeRelease.parse(bundled)),
+    );
+
+    const target = await app(["Reader"]);
+
+    const agent = (
+      await createAgentService(environment.database.db).create(principal, { name: "compatibility" })
+    ).unwrap();
+
+    const executor = createJobService(
+      environment.database.db,
+      storage,
+      environment.environment.PLATFORM_ENCRYPTION_KEY,
+    );
+
+    const grants = [
+      {
+        entrypoint: "Reader",
+        users: [{ issuer: "https://identity.example.test", subject: "alice" }],
+        groups: [],
+      },
+    ];
+
+    await environment.database.db.delete(jobs);
+
+    try {
+      await environment.database.db
+        .update(organizationRuntimes)
+        .set({ appliedRuntime: oldRuntime })
+        .where(eq(organizationRuntimes.organizationId, "widefleet"));
+      expect(
+        await services().setUserAccess(principal, target.id, { revision: 0, grants }),
+      ).toMatchObject({ error: { code: "CONFLICT" } });
+      expect((await services().userAccess(principal, target.id)).unwrap().revision).toBe(0);
+      await environment.database.db.insert(jobs).values({
+        id: crypto.randomUUID(),
+        organizationId: "widefleet",
+        appId: target.id,
+        kind: "configure",
+      });
+      expect((await executor.claim(agent.agent.id, true, true)).unwrap()).toMatchObject({
+        appId: target.id,
+        serviceAccess: null,
+      });
+      await environment.database.db.delete(jobs).where(eq(jobs.appId, target.id));
+      await environment.database.db
+        .update(organizationRuntimes)
+        .set({ appliedRuntime: currentRuntime })
+        .where(eq(organizationRuntimes.organizationId, "widefleet"));
+      expect(
+        (await services().setUserAccess(principal, target.id, { revision: 0, grants })).unwrap()
+          .revision,
+      ).toBe(1);
+      expect((await executor.claim(agent.agent.id, true, true)).unwrap()).toMatchObject({
+        serviceAccess: { revision: 1, grants },
+      });
+    } finally {
+      await environment.database.db.delete(jobs).where(eq(jobs.appId, target.id));
+      await environment.database.db
+        .update(organizationRuntimes)
+        .set({ runtime: previous.runtime, appliedRuntime: previous.appliedRuntime })
+        .where(eq(organizationRuntimes.organizationId, "widefleet"));
+    }
   });
 
   it("publishes app APIs and restricts grants to administrators in the owning organization", async () => {

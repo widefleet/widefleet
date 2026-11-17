@@ -340,6 +340,7 @@ export const runtimeRelease = z.strictObject({
   version: z.string().regex(/^[0-9]+\.[0-9]+\.[0-9]+$/),
   celld: z.enum(["0.6.2", "0.6.3-widefleet.1"]),
   workflows: z.literal(1).optional(),
+  serviceAccess: z.literal(1).optional(),
   cloudflare: z.literal(1).optional(),
   main: z.literal("loader.js"),
   modules: z

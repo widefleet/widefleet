@@ -99,7 +99,7 @@ describe("Cloudflare operation history", () => {
         .where(eq(deployments.id, entry.command.id));
     }
 
-    const services = createConnectionService(environment.database.db);
+    const services = createConnectionService(environment.database.db, storage);
 
     const request = (
       await services.request(

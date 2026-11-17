@@ -189,8 +189,33 @@ export const createJobService = (
           })
         : null;
 
+      const selectedRuntime =
+        candidate.job.kind === "runtime"
+          ? runtimeReference.parse(candidate.job.runtime)
+          : execution.appliedRuntime
+            ? runtimeReference.parse(execution.appliedRuntime)
+            : await ensureOrganizationRuntime(transaction, storage, execution.organizationId);
+
+      const supportsServiceAccess =
+        app &&
+        serviceAccessRules &&
+        candidate.job.kind !== "delete" &&
+        (await loadRuntime(storage, selectedRuntime)).runtime.serviceAccess === 1;
+
+      if (
+        app &&
+        app.serviceAccessRevision > 0 &&
+        !supportsServiceAccess &&
+        candidate.job.kind !== "delete"
+      )
+        throw new InvalidOperation({
+          code: "CONFLICT",
+          message:
+            "Update the app runtime to support the saved service access rules before claiming this job",
+        });
+
       const serviceAccess =
-        app && serviceAccessRules
+        app && serviceAccessRules && supportsServiceAccess
           ? contract.serviceAccessSnapshot.parse({
               revision: app.serviceAccessRevision,
               mode: app.serviceAccessMode,
@@ -211,13 +236,6 @@ export const createJobService = (
             grants: app.capabilities,
           })
         : null;
-
-      const selectedRuntime =
-        candidate.job.kind === "runtime"
-          ? runtimeReference.parse(candidate.job.runtime)
-          : execution.appliedRuntime
-            ? runtimeReference.parse(execution.appliedRuntime)
-            : await ensureOrganizationRuntime(transaction, storage, execution.organizationId);
 
       const [claimed] = await transaction
         .update(jobs)

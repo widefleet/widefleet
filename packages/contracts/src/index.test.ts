@@ -1,3 +1,4 @@
+import { serviceGrantsChange } from "./service-grants.ts";
 import { describe, expect, it } from "vitest";
 import {
   assetManifest,
@@ -124,6 +125,29 @@ it("requires an app target and rejects legacy connector grants", () => {
     capabilityGrant.safeParse({
       app: "93d8fffd-d0ed-48cf-8fb7-570219c62a70",
       entrypoint: "default",
+    }).success,
+  ).toBe(true);
+});
+
+it("rejects duplicate service users while retaining distinct issuers and recipient kinds", () => {
+  const alice = { issuer: "https://identity.example.test", subject: "alice" };
+
+  const change = {
+    revision: 0,
+    grants: [{ entrypoint: "Reader", users: [alice, alice], groups: [] }],
+  };
+
+  expect(serviceGrantsChange.safeParse(change).success).toBe(false);
+  expect(
+    serviceGrantsChange.safeParse({
+      revision: 0,
+      grants: [
+        {
+          entrypoint: "Reader",
+          users: [alice, { ...alice, issuer: "https://other.example.test" }],
+          groups: ["alice (https://identity.example.test)"],
+        },
+      ],
     }).success,
   ).toBe(true);
 });
