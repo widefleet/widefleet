@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { publishedApp } from "@platform/contracts";
-import { workerTails } from "../src/worker-definition.ts";
+import { workerDefinition, workerTails } from "../src/worker-definition.ts";
+import { readApp } from "../src/catalog.ts";
+import { readOrganizationAvailability } from "../src/availability.ts";
 import { workerCode } from "../src/worker.ts";
 import { digest } from "./digest.ts";
 import type { ParentEnvironment } from "../src/types.ts";
@@ -40,6 +42,53 @@ export default {
     const scope = path.startsWith("/service") ? "service" : "app";
     const identity = scope === "app" ? app : service;
     const keyValue = path.endsWith("/kv");
+
+    if (path.startsWith("/platform-error/")) {
+      try {
+        if (path.endsWith("/catalog")) {
+          await env.WIDEFLEET_PACKAGES.put("invalid.json", "invalid-json");
+          await readApp(env, "invalid.json");
+        } else if (path.endsWith("/availability")) {
+          await readOrganizationAvailability(
+            { ...env, WIDEFLEET_HTTP_AVAILABILITY: "kv" },
+            "observer-fixture",
+          );
+        } else {
+          await workerDefinition(
+            {
+              scope: "fixture",
+              identity: service,
+              metadata: {
+                main_module: "child.js",
+                compatibility_date: "2026-10-01",
+                compatibility_flags: [],
+                bindings: [{ type: "kv_namespace", name: "MISSING", id: "fixture" }],
+              },
+              modules: [],
+              nativeBindings: {},
+            },
+            env,
+            ctx,
+          );
+        }
+
+        return new Response("availability unavailable", { status: 503 });
+      } catch (cause) {
+        return new Response(cause instanceof Error ? cause.message : String(cause), {
+          status: 500,
+        });
+      }
+    }
+
+    if (path === "/customer-error") {
+      const worker = env.WIDEFLEET_LOADER.get("customer-error", () => ({
+        mainModule: "child.js",
+        compatibilityDate: "2026-10-01",
+        modules: { "child.js": "export default {fetch(){throw new Error('customer exception')}}" },
+      }));
+
+      return worker.getEntrypoint().fetch(request);
+    }
 
     if (path.endsWith("/production-kv")) {
       const source = `export default {

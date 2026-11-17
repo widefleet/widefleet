@@ -7,6 +7,18 @@ const createCollector = (): RuntimeExtension => {
   z.object({ OBSERVER_LABEL: z.literal("parent-only-fixture") }).parse(env);
 
   return {
+    async exception(error, context, binding) {
+      const origin = binding("OBSERVER_ORIGIN", z.url());
+
+      const response = await fetch(`${origin}/exception`, {
+        method: "POST",
+        body: JSON.stringify({ message: error.message, context }),
+      });
+
+      await response.body?.cancel();
+
+      if (!response.ok) throw new Error("Exception observer fixture rejected");
+    },
     async keyValue(event, identity, binding) {
       const origin = binding("OBSERVER_ORIGIN", z.url());
 

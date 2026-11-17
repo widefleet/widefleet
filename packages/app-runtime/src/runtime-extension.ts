@@ -77,6 +77,11 @@ export type DatabaseObservation = {
 };
 
 export interface RuntimeExtension {
+  exception?: (
+    error: Error,
+    context: Partial<WorkerIdentity> & { operation: string },
+    binding: <Value>(name: string, schema: z.ZodType<Value>) => Value,
+  ) => Promise<void>;
   // Cloudflare parent contexts only. No sleeps/event waits, rollback handlers,
   // engine CPU or persisted-state bytes. Explicit restarts can execute do steps
   // again. Delivery runs as background work and does not gate native execution.

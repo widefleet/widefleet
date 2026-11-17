@@ -45,6 +45,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Runtime observer in
     const errors: Error[] = [];
     const keyValues: z.infer<typeof keyValueObservation>[] = [];
     const pending: ServerResponse[] = [];
+    const exceptions: { message: string; context: z.infer<ReturnType<typeof z.json>> }[] = [];
 
     const collector = createServer((request, response) => {
       const handle = async () => {
@@ -53,7 +54,13 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Runtime observer in
         for await (const chunk of request) chunks.push(z.instanceof(Uint8Array).parse(chunk));
         const body = z.json().parse(JSON.parse(Buffer.concat(chunks).toString()));
 
-        if (request.url === "/key-value") {
+        if (request.url === "/exception") {
+          exceptions.push(z.object({ message: z.string(), context: z.json() }).parse(body));
+          // Reporting failure must not change the platform failure or fallback response.
+          response.writeHead(503).end();
+
+          return;
+        } else if (request.url === "/key-value") {
           keyValues.push(keyValueObservation.parse(body));
           pending.push(response);
 
@@ -287,6 +294,31 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Runtime observer in
       for (const response of pending) response.writeHead(503).end();
       pending.length = 0;
       expect(errors).toEqual([]);
+
+      const preparation = await worker.fetch("http://fixture/platform-error/preparation");
+      expect(preparation.status).toBe(500);
+      expect(await preparation.text()).toBe("Worker resource is not installed");
+      expect((await worker.fetch("http://fixture/platform-error/catalog")).status).toBe(500);
+      expect((await worker.fetch("http://fixture/platform-error/availability")).status).toBe(503);
+      await expect.poll(() => exceptions.length, { timeout: 8_000 }).toBe(3);
+      expect(exceptions[0]).toEqual({
+        message: "Worker resource is not installed",
+        context: {
+          operation: "prepare_worker",
+          organizationId: "observer-fixture",
+          appId: "a0000000-0000-4000-8000-000000000004",
+          deploymentId: "a0000000-0000-4000-8000-000000000003",
+          buildId: null,
+        },
+      });
+      expect(exceptions.map(({ context }) => context)).toEqual(
+        expect.arrayContaining([
+          { operation: "read_app" },
+          { operation: "read_availability", organizationId: "observer-fixture" },
+        ]),
+      );
+      expect((await worker.fetch("http://fixture/customer-error")).status).toBe(500);
+      expect(exceptions).toHaveLength(3);
     } finally {
       for (const response of pending) response.writeHead(503).end();
       await worker?.stop();
