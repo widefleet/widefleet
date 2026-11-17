@@ -178,12 +178,27 @@ fn events(
         let mut properties = diagnostic.clone();
         properties["command"] = json!(command);
         properties["elapsed_ms"] = json!(elapsed.as_millis().min(u128::from(u64::MAX)) as u64);
-        properties["outcome"] = json!(if succeeded { "succeeded" } else { "failed" });
+        properties["outcome"] = json!(if succeeded {
+            "succeeded"
+        } else if failure
+            .as_ref()
+            .is_some_and(|failure| failure.category == FailureCategory::Cancelled)
+        {
+            "cancelled"
+        } else {
+            "failed"
+        });
         events.push(envelope(configuration, "cli_command_completed", properties));
     }
+    // Known usage failures stay measurable above without creating issues.
+    // Unknown causes remain reportable; broad error kinds and HTTP statuses
+    // alone cannot establish that an operation failed as expected.
     if preferences.crashes
         && let Some(failure) = failure
-        && failure.category != FailureCategory::Cancelled
+        && matches!(
+            failure.category,
+            FailureCategory::Technical | FailureCategory::Unknown
+        )
     {
         let handled = failure.code != "panic";
         let title = format!("{command}: {}", failure.summary);
@@ -204,11 +219,7 @@ fn events(
         properties["command"] = json!(command);
         properties["$issue_name"] = json!(title);
         properties["$exception_fingerprint"] = json!(fingerprint);
-        properties["$exception_level"] = json!(if failure.category == FailureCategory::Usage {
-            "warning"
-        } else {
-            "error"
-        });
+        properties["$exception_level"] = json!("error");
         properties["$exception_list"] = json!([{
             "type": failure.report.kind,
             "value": title,

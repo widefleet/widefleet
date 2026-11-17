@@ -59,7 +59,7 @@ fn broad_error_kinds_never_suppress_unknown_failures() {
 }
 
 #[test]
-fn only_explicit_cancellation_is_usage_only() {
+fn explicit_cancellation_is_counted_separately_from_failures() {
     let message = "Stopped waiting; the queued deployment continues on the agent";
     let error = Error::invalid(message.into()).with_reason(FailureReason::DeploymentWaitCancelled);
     let events = capture(Failure::error(&error), Preferences::default());
@@ -69,6 +69,7 @@ fn only_explicit_cancellation_is_usage_only() {
         "deployment_wait_cancelled"
     );
     assert_eq!(events[0]["properties"]["error_category"], "cancelled");
+    assert_eq!(events[0]["properties"]["outcome"], "cancelled");
     assert!(
         capture(
             Failure::error(&error),
@@ -91,26 +92,56 @@ fn only_explicit_cancellation_is_usage_only() {
 }
 
 #[test]
-fn actionable_usage_failures_stay_visible_with_crashes_only() {
+fn known_usage_failures_remain_metrics_without_exception_issues() {
     for reason in [
         FailureReason::LoginDenied,
         FailureReason::LoginExpired,
         FailureReason::LoginRequired,
         FailureReason::InvalidLoginScope,
+        FailureReason::PlatformNotConfigured,
+        FailureReason::SessionPermissions,
     ] {
         let error = Error::invalid("private".into()).with_reason(reason);
         for usage in [true, false] {
             for crashes in [true, false] {
                 let events = capture(Failure::error(&error), Preferences { usage, crashes });
-                assert_eq!(events.len(), usize::from(usage) + usize::from(crashes));
+                assert_eq!(events.len(), usize::from(usage));
                 for event in events {
+                    assert_eq!(event["event"], "cli_command_completed");
+                    assert_eq!(event["properties"]["outcome"], "failed");
+                    assert_eq!(event["properties"]["command"], "deploy");
                     assert_eq!(event["properties"]["error_category"], "usage");
                     assert_eq!(event["properties"]["error_code"], reason.diagnostic().0);
-                    if event["event"] == "$exception" {
-                        assert_eq!(event["properties"]["$exception_level"], "warning");
-                    }
                     assert!(!event.to_string().contains("private"));
                 }
+            }
+        }
+    }
+}
+
+#[test]
+fn successful_commands_supply_the_denominator_without_error_fields() {
+    for usage in [true, false] {
+        for crashes in [true, false] {
+            let preferences = Preferences { usage, crashes };
+            let events = events(
+                &Configuration {
+                    id: Uuid::nil(),
+                    preferences,
+                },
+                preferences,
+                "deploy",
+                Duration::from_millis(10),
+                true,
+                None,
+            );
+            assert_eq!(events.len(), usize::from(usage));
+            for event in events {
+                assert_eq!(event["event"], "cli_command_completed");
+                assert_eq!(event["properties"]["outcome"], "succeeded");
+                assert_eq!(event["properties"]["command"], "deploy");
+                assert!(event["properties"].get("error_category").is_none());
+                assert!(event["properties"].get("error_code").is_none());
             }
         }
     }

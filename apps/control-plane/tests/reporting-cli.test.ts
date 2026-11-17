@@ -88,8 +88,8 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
 
         expect(failure?.code).toBe(1);
         expect(failure?.stderr).toContain('"event":"cli_command_completed"');
-        expect(failure?.stderr).toContain('"event":"$exception"');
-        expect(failure?.stderr).toContain('"$exception_level":"warning"');
+        expect(failure?.stderr).not.toContain('"event":"$exception"');
+        expect(failure?.stderr).toContain('"outcome":"failed"');
         expect(failure?.stderr).toContain('"error_category":"usage"');
         expect(failure?.stderr).not.toContain('"message":');
         const diagnostic = failure?.stderr.split("[widefleet telemetry]")[0];

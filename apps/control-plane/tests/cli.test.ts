@@ -1045,6 +1045,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
           expect(settled.value.stderr).toContain("Stopped waiting");
           expect(settled.value.stderr).toContain('"error_code":"deployment_wait_cancelled"');
           expect(settled.value.stderr).toContain('"error_category":"cancelled"');
+          expect(settled.value.stderr).toContain('"outcome":"cancelled"');
           expect(settled.value.stderr).not.toContain('"event":"$exception"');
         } finally {
           deployment.child.kill("SIGKILL");

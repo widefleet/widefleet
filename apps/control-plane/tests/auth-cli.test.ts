@@ -267,7 +267,8 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1" && process.platform !== "win
         .filter((line) => line.startsWith("[widefleet telemetry] "))
         .join("\n");
 
-      expect(telemetry).toContain('"event":"$exception"');
+      expect(telemetry).toContain('"event":"cli_command_completed"');
+      expect(telemetry).toContain('"outcome":"failed"');
 
       for (const privateValue of [
         origin,
@@ -283,22 +284,22 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1" && process.platform !== "win
     };
 
     it.each([
-      { response: "access_denied", code: "login_denied", category: "usage", level: "warning" },
-      { response: "expired_token", code: "login_expired", category: "usage", level: "warning" },
+      { response: "access_denied", code: "login_denied", category: "usage", issue: false },
+      { response: "expired_token", code: "login_expired", category: "usage", issue: false },
       {
         response: "private-error-never-log",
         code: "invalid_login_response",
         category: "technical",
-        level: "error",
+        issue: true,
       },
     ])(
       "keeps OAuth $response visible with its concrete cause",
-      async ({ response, code, category, level }) => {
+      async ({ response, code, category, issue }) => {
         tokenError = response;
         const telemetry = await reportFailure("login");
         expect(telemetry).toContain(`"error_code":"${code}"`);
         expect(telemetry).toContain(`"error_category":"${category}"`);
-        expect(telemetry).toContain(`"$exception_level":"${level}"`);
+        expect(telemetry.includes('"event":"$exception"')).toBe(issue);
       },
     );
 
@@ -307,6 +308,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1" && process.platform !== "win
       const telemetry = await reportFailure("login");
       expect(telemetry).toContain('"error_code":"incomplete_credentials"');
       expect(telemetry).toContain('"error_category":"technical"');
+      expect(telemetry).toContain('"event":"$exception"');
       await expect(readFile(sessionFile)).rejects.toMatchObject({ code: "ENOENT" });
     });
 
@@ -314,14 +316,17 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1" && process.platform !== "win
       const missing = await reportFailure("whoami");
       expect(missing).toContain('"error_code":"login_required"');
       expect(missing).toContain('"error_category":"usage"');
+      expect(missing).not.toContain('"event":"$exception"');
       await writeFile(sessionFile, "private-error-never-log", { mode: 0o600 });
       const corrupt = await reportFailure("whoami");
       expect(corrupt).toContain('"error_code":"session_corrupt"');
       expect(corrupt).toContain('"error_category":"technical"');
+      expect(corrupt).toContain('"event":"$exception"');
       await chmod(sessionFile, 0o644);
       const unsafe = await reportFailure("whoami");
       expect(unsafe).toContain('"error_code":"session_permissions"');
       expect(unsafe).toContain('"error_category":"usage"');
+      expect(unsafe).not.toContain('"event":"$exception"');
       expect(requests).toEqual([]);
     });
 
