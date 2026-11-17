@@ -4,7 +4,7 @@ import {
   settingsUpdate,
   setupOwner,
 } from "@platform/contracts";
-import { eq, sql } from "drizzle-orm";
+import { eq, isNotNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { OrganizationCredential } from "./organization-operations.ts";
 import { appCallbackUrl, type AppSignIn } from "./app-sign-in.ts";
@@ -22,6 +22,17 @@ import { readSsoConfiguration, ssoRuntimeIdentity, saveSsoProvider } from "./sso
 import { appLoginClientId, readAppLogin, registerAppLogin } from "./app-login-client.ts";
 import { organizationSettings } from "./schema.ts";
 import type { Observation } from "./observation.ts";
+
+export const configuredAppSignInOrganizations = (database: Database) =>
+  database
+    .select({ organizationId: organizationSettings.organizationId })
+    .from(organizationSettings)
+    .where(
+      or(
+        isNotNull(organizationSettings.appClientSecret),
+        eq(organizationSettings.ssoRequired, true),
+      ),
+    );
 
 const requireAdmin = (principal: Principal, organizationId: string) => {
   if (!principal.application.admin || principal.application.organizationId !== organizationId)
@@ -453,6 +464,13 @@ export const createSettingsService = (
       return owner;
     },
     publish: (organizationId = installationOrganizationId) => scoped(organizationId).inspect(true),
+    republish: async () => {
+      for (const { organizationId } of await configuredAppSignInOrganizations(database)) {
+        const result = await scoped(organizationId).inspect(true);
+
+        if (result.error) throw new Error(result.error);
+      }
+    },
     initialize: (
       input: z.infer<typeof settingsInput>,
       organizationId = installationOrganizationId,

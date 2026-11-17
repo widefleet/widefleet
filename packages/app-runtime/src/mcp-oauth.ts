@@ -1,5 +1,9 @@
 import { OAuthAuthorizationServer, OAuthError } from "@cloudflare/workers-oauth-provider";
-import { companyCredential, companyOAuth } from "@platform/auth-proxy/company-oauth";
+import {
+  companyCredential,
+  companyOAuth,
+  CompanyRefreshFailure,
+} from "@platform/auth-proxy/company-oauth";
 import { sessionVersion } from "@platform/auth-proxy/configuration";
 import { issuer } from "@platform/auth-proxy/identity";
 import { readAuthConfiguration } from "@platform/auth-proxy/worker";
@@ -153,13 +157,20 @@ export const mcpAuthorizationServer = (environment: ParentEnvironment) => {
         try {
           credential = await (await companyOAuth(configuration)).refresh(credential);
         } catch (cause) {
-          const details = failure.safeParse(cause);
-          throw new OAuthError(
-            details.success && details.data.error === "invalid_grant"
-              ? "invalid_grant"
-              : "temporarily_unavailable",
-            { description: "Company sign-in could not be refreshed" },
+          const details = failure.safeParse(
+            cause instanceof CompanyRefreshFailure ? cause.cause : cause,
           );
+
+          const terminal = details.success && details.data.error === "invalid_grant";
+
+          throw new OAuthError(terminal ? "invalid_grant" : "temporarily_unavailable", {
+            description: "Company sign-in could not be refreshed",
+            statusCode: terminal ? 400 : 503,
+            retryProps:
+              !terminal && cause instanceof CompanyRefreshFailure
+                ? { ...grant, credential: cause.credential }
+                : undefined,
+          });
         }
       }
 

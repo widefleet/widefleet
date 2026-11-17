@@ -165,6 +165,7 @@ settings:
 patchedDependencies:
   '@better-auth/core@1.7.12': f34d12debadb6c2cd6877fa45dbd214cd6d3a053917954e1d24d79ee03b70bd7
   '@better-auth/oauth-provider@1.7.12': ced50d8b6168855d56716f1f9fdae99d515b7d1b859db90623bb66cc34ac9685
+  '@cloudflare/workers-oauth-provider@1.2.4': 2cc9999db5f9280ac5414cc2a05a7f3b99f5acc5365298f41dc328e859420864
   better-auth@1.7.12: 59cc85d92370b210ec1e241d7f02cff726ee2f33b968ea405e3e826d753217d9
   blume@2.1.1: 2c0ac8744c28a89c517113155d46a029e40470a816a9d26331d8ea4e056e49f2
   miniflare@5.20261001.0-alpha: 14a20cb93d5b33de95aab0b33f8ba5c91a75a9c1eb4438753b017be53fb04f73
@@ -363,7 +364,7 @@ importers:
     dependencies:
       '@cloudflare/workers-oauth-provider':
         specifier: 1.2.4
-        version: 1.2.4
+        version: 1.2.4(patch_hash=2cc9999db5f9280ac5414cc2a05a7f3b99f5acc5365298f41dc328e859420864)
       '@platform/auth-proxy':
         specifier: workspace:*
         version: link:../auth-proxy
@@ -7916,7 +7917,7 @@ snapshots:
   '@cloudflare/workerd-windows-64@1.20261001.1':
     optional: true
 
-  '@cloudflare/workers-oauth-provider@1.2.4': {}
+  '@cloudflare/workers-oauth-provider@1.2.4(patch_hash=2cc9999db5f9280ac5414cc2a05a7f3b99f5acc5365298f41dc328e859420864)': {}
 
   '@cloudflare/workers-types@5.20261003.1': {}
 

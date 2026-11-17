@@ -126,6 +126,8 @@ export const initializeRuntime = async (
           bootstrap,
         );
       }
+    } else {
+      await settings.republish();
     }
 
     await registerCli(database.db, configuration);

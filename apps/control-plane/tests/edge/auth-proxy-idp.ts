@@ -45,6 +45,7 @@ export const createIdentityProvider = async (
     issuerSuffix: "",
     refreshFailure: "",
     rotateRefreshTokens: false,
+    refreshReplaySeconds: 30,
     issueRefreshToken: true,
     omitRefreshIdToken: false,
     grantedScopes: "",
@@ -260,7 +261,10 @@ export const createIdentityProvider = async (
 
         if (refreshing && settings.rotateRefreshTokens) {
           refreshes.delete(credential);
-          replays.set(credential, { response: result, expiresAt: Date.now() + 30_000 });
+          replays.set(credential, {
+            response: result,
+            expiresAt: Date.now() + settings.refreshReplaySeconds * 1000,
+          });
         }
 
         response.end(result);

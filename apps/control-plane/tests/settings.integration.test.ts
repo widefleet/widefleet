@@ -576,18 +576,24 @@ describe("Platform setup and managed settings", () => {
       expect(state.ownerId).not.toBeNull();
       expect(state.bootstrapPending).toBe(false);
       await initialized.settings.setExternalManagement(principal(), true);
+      await initialized.database.db.update(ssoProvider).set({ domainVerified: true });
+      await initialized.settings.activateSso(principal());
     } finally {
       await initialized.database.close();
     }
 
     // A stale or removed bootstrap source must not overwrite live settings or block startup.
     await writeFile(bootstrap, "not JSON anymore");
+    const previous = environment.authControl.read().publications;
+    environment.authControl.clearMcp();
     const restarted = await initializeRuntime(configuration, migrations);
 
     try {
       expect(
         (await readOrganizationSettings(restarted.database.db, "widefleet")).externallyManaged,
       ).toBe(true);
+      expect(environment.authControl.read().publications).toBeGreaterThan(previous);
+      expect(environment.authControl.read().mcpLogin?.platformUrl).toBe(configuration.PLATFORM_URL);
     } finally {
       await restarted.database.close();
     }

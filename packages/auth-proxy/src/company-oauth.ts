@@ -28,6 +28,15 @@ export class CompanySignInRequired extends Error {
   readonly error = "invalid_grant";
 }
 
+export class CompanyRefreshFailure extends Error {
+  constructor(
+    readonly credential: z.infer<typeof companyCredential>,
+    cause: unknown,
+  ) {
+    super("Company identity could not be refreshed", { cause });
+  }
+}
+
 export const companySession = async (configuration: AuthConfiguration, headers: Headers) => {
   const auth = await createAuthentication(configuration, false);
   const session = await auth.api.getSession({ headers });
@@ -109,13 +118,27 @@ export const companyOAuth = async (configuration: AuthConfiguration) => {
       if (!provider.refreshAccessToken) throw new Error("Company sign-in cannot be refreshed");
       const tokens = await provider.refreshAccessToken(previous.refreshToken);
 
-      return identify(
-        {
-          ...tokens,
-          scopes: tokens.scopes?.length ? tokens.scopes : previous.scopes,
-        },
-        previous,
-      );
+      try {
+        return await identify(
+          {
+            ...tokens,
+            scopes: tokens.scopes?.length ? tokens.scopes : previous.scopes,
+          },
+          previous,
+        );
+      } catch (cause) {
+        // Keep the replacement credential when a directory or key lookup fails.
+        // The old verified identity and its deadline remain unchanged.
+        throw new CompanyRefreshFailure(
+          companyCredential.parse({
+            ...previous,
+            refreshToken: tokens.refreshToken ?? previous.refreshToken,
+            refreshExpiresAt: tokens.refreshTokenExpiresAt?.getTime() ?? previous.refreshExpiresAt,
+            scopes: tokens.scopes?.length ? tokens.scopes : previous.scopes,
+          }),
+          cause,
+        );
+      }
     },
   };
 };

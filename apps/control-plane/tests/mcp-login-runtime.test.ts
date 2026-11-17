@@ -21,6 +21,9 @@ describe("MCP OAuth in the data plane", () => {
   let runtime: Miniflare;
   let idp: Awaited<ReturnType<typeof createIdentityProvider>>;
   const directoryRequests: string[] = [];
+  let directoryGroups = ["accounting@example.test"];
+  let directoryAvailable = true;
+  const logs: string[] = [];
   const cookies = new Map<string, string>();
 
   const send = async (
@@ -96,6 +99,22 @@ describe("MCP OAuth in the data plane", () => {
         export default {async fetch(request,env,ctx){
           const url=new URL(request.url);
           if(url.pathname.startsWith('/fixture/')) {
+            if(url.pathname==='/fixture/form-limit') {
+              let reads=0;
+              let cancelled=false;
+              const body=new ReadableStream({
+                pull(controller) {
+                  reads++;
+                  if(reads>2) throw new Error('Read beyond the form limit');
+                  controller.enqueue(new TextEncoder().encode('ü'.repeat(3000)));
+                },
+                cancel() {cancelled=true;}
+              },{highWaterMark:0});
+              const result=await mcpLoginRequest(new Request(new URL(url.searchParams.get('route'),url),{
+                method:'POST',headers:{origin:url.origin,'content-type':'application/x-www-form-urlencoded'},body
+              }),env,ctx);
+              return Response.json({status:result.status,reads,cancelled});
+            }
             if(url.pathname==='/fixture/identity') {
               try{return Response.json(await verifyMcpToken(env,request.headers.get('authorization')?.slice(7)??''));}
               catch{return new Response('Unauthorized',{status:401});}
@@ -116,6 +135,7 @@ describe("MCP OAuth in the data plane", () => {
     });
 
     runtime = new Miniflare({
+      handleStructuredLogs: (log) => logs.push(JSON.stringify(log)),
       telemetry: { enabled: false },
       workers: [
         {
@@ -148,8 +168,10 @@ describe("MCP OAuth in the data plane", () => {
                 if (url.origin === "https://cloudidentity.googleapis.com") {
                   directoryRequests.push(url.pathname);
 
+                  if (!directoryAvailable) return new WorkerResponse(null, { status: 503 });
+
                   return WorkerResponse.json({
-                    memberships: [{ groupKey: { id: "accounting@example.test" } }],
+                    memberships: directoryGroups.map((id) => ({ groupKey: { id } })),
                   });
                 }
 
@@ -244,7 +266,7 @@ describe("MCP OAuth in the data plane", () => {
     expect(html).toContain("client.example.test");
     const handle = z.string().parse(/name="handle" value="([^"]+)"/.exec(html)?.[1]);
 
-    return { client: client.client_id, verifier, handle };
+    return { client: client.client_id, verifier, handle, url: `/authorize?${parameters}` };
   };
 
   const continueWith = (handle: string, provider = "google", withCookies = true) =>
@@ -432,6 +454,7 @@ describe("MCP OAuth in the data plane", () => {
   });
 
   it("requests directory access only after discovering an organization that uses Google groups", async () => {
+    directoryGroups = Array.from({ length: 205 }, (_, index) => `group${index}@example.test`);
     await publish("company", "example.test", [googleGroupsScope]);
     const auth = await authorize();
     const start = await continueWith(auth.handle);
@@ -458,10 +481,11 @@ describe("MCP OAuth in the data plane", () => {
     });
 
     expect(await identity.json()).toMatchObject({
-      mcp: { identity: { groups: ["accounting@example.test"] } },
+      mcp: { identity: { groups: directoryGroups } },
     });
     expect(directoryRequests).toHaveLength(1);
     idp.settings.grantedScopes = "";
+    directoryGroups = ["accounting@example.test"];
     await publish();
     expect(
       (
@@ -470,6 +494,121 @@ describe("MCP OAuth in the data plane", () => {
         })
       ).status,
     ).toBe(401);
+  });
+
+  it("retains a rotated provider credential after directory failure without issuing or extending access", async () => {
+    await publish("company", "example.test", [googleGroupsScope]);
+    idp.settings.grantedScopes = `openid email profile ${googleGroupsScope}`;
+    idp.settings.rotateRefreshTokens = true;
+    idp.settings.refreshReplaySeconds = 0;
+
+    try {
+      const auth = await authorize();
+      const signIn = await continueWith(auth.handle);
+      const callback = await login(z.string().parse(signIn.headers.get("location")));
+
+      const response = await exchange(
+        z.string().parse(callback.headers.get("location")),
+        auth.client,
+        auth.verifier,
+      );
+
+      expect(response.status, await response.clone().text()).toBe(200);
+
+      const grant = z
+        .object({ access_token: z.string(), refresh_token: z.string() })
+        .parse(await response.json());
+
+      const storage = await runtime.getKVNamespace("AUTH_CONFIG");
+      const key = `grant:${grant.refresh_token.split(":").slice(0, 2).join(":")}`;
+      const stored = z.object({ expiresAt: z.number(), encryptedProps: z.string() });
+      const before = stored.parse(await storage.get(key, "json"));
+      const tokens = await storage.list({ prefix: "token:" });
+
+      const refresh = (token = grant.refresh_token) =>
+        send("/oauth/token", {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            grant_type: "refresh_token",
+            client_id: auth.client,
+            refresh_token: token,
+            resource: `${origin}/mcp`,
+          }).toString(),
+        });
+
+      directoryAvailable = false;
+      const failed = await refresh();
+      expect(failed.status, await failed.clone().text()).toBe(503);
+      expect(await failed.json()).toEqual({
+        error: "temporarily_unavailable",
+        error_description: "Company sign-in could not be refreshed",
+      });
+      const consumed = idp.refreshRequests.at(-1);
+      const after = stored.parse(await storage.get(key, "json"));
+      expect(after.expiresAt).toBe(before.expiresAt);
+      expect(after.encryptedProps).not.toBe(before.encryptedProps);
+      expect(await storage.list({ prefix: "token:" })).toEqual(tokens);
+
+      directoryAvailable = true;
+      directoryGroups = ["changed@example.test"];
+      const retry = await refresh();
+      expect(retry.status, await retry.clone().text()).toBe(200);
+      expect(idp.refreshRequests.at(-1)).not.toBe(consumed);
+
+      const next = z
+        .object({ access_token: z.string(), refresh_token: z.string() })
+        .parse(await retry.json());
+
+      expect(
+        await (
+          await send("/fixture/identity", {
+            headers: { authorization: `Bearer ${next.access_token}` },
+          })
+        ).json(),
+      ).toMatchObject({ mcp: { identity: { groups: directoryGroups } } });
+      // A late retry may present the previous downstream token. Its rotated
+      // upstream credential must also remain decryptable after an error.
+      directoryAvailable = false;
+      expect((await refresh()).status).toBe(503);
+      directoryAvailable = true;
+      expect((await refresh()).status).toBe(200);
+    } finally {
+      directoryAvailable = true;
+      directoryGroups = ["accounting@example.test"];
+      idp.settings.rotateRefreshTokens = false;
+      idp.settings.refreshReplaySeconds = 30;
+      idp.settings.grantedScopes = "";
+      await publish();
+    }
+  });
+
+  it.each(["/oauth/continue", "/oauth/select"])(
+    "stops reading oversized %s forms at the byte limit",
+    async (route) => {
+      const response = await send(`/fixture/form-limit?${new URLSearchParams({ route })}`);
+      expect(await response.json()).toEqual({ status: 400, reads: 2, cancelled: true });
+    },
+  );
+
+  it("logs unavailable login configuration while returning a safe error page", async () => {
+    const auth = await authorize();
+    const storage = await runtime.getKVNamespace("AUTH_CONFIG");
+    const saved = z.string().parse(await storage.get(mcpLoginKey));
+    await storage.delete(mcpLoginKey);
+    const first = logs.length;
+
+    try {
+      const response = await send(auth.url);
+      expect(response.status).toBe(400);
+      expect(await response.text()).not.toContain("MCP sign-in is not configured");
+      await expect
+        .poll(() => logs.slice(first).join("\n"))
+        .toContain("MCP sign-in is not configured");
+      expect(logs.slice(first).join("\n")).not.toContain(auth.handle);
+    } finally {
+      await storage.put(mcpLoginKey, saved);
+    }
   });
 
   it("shows only organizations matching the verified account and binds the choice to the browser", async () => {

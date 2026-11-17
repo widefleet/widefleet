@@ -66,4 +66,31 @@ describe("Form origin checks with OAuth back-channel exchange", () => {
     ).toBeNull();
     expect(checkFormOrigin(new Request(url))).toBeNull();
   });
+
+  it.each(["POST", "PUT", "PATCH", "DELETE"])(
+    "allows a bodyless Bearer API %s without exempting browser forms",
+    (method) => {
+      const url = "https://platform.example.test/api/v1/apps/app-id";
+      const headers = { authorization: "Bearer synthetic-api-token" };
+      expect(checkFormOrigin(new Request(url, { method, headers }))).toBeNull();
+      expect(
+        checkFormOrigin(
+          new Request(url, { method, headers: { ...headers, cookie: "session=browser" } }),
+        ),
+      ).toBeNull();
+
+      for (const options of [
+        { headers: { cookie: "session=browser" } },
+        { headers: { ...headers, "content-type": "text/plain" }, body: "form" },
+        { headers: {}, body: new Uint8Array([1]) },
+      ])
+        expect(checkFormOrigin(new Request(url, { method, ...options }))?.status).toBe(403);
+
+      expect(
+        checkFormOrigin(
+          new Request("https://platform.example.test/api/auth/sign-out", { method, headers }),
+        )?.status,
+      ).toBe(403);
+    },
+  );
 });

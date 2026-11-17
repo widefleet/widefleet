@@ -101,6 +101,9 @@ export const createAuthControl = async (directory: string) => {
     available: (value: boolean) => {
       available = value;
     },
+    clearMcp: () => {
+      mcpLogin = null;
+    },
     close: () =>
       new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve())),

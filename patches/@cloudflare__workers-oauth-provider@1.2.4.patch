@@ -1,0 +1,46 @@
+diff --git a/dist/oauth-provider.d.ts b/dist/oauth-provider.d.ts
+index 26fea07ff2cba75cf4c1d93e57f0cec518a4a680..e57164d3b7639fb3eb1a64bda1a31f8edd7c2d46 100644
+--- a/dist/oauth-provider.d.ts
++++ b/dist/oauth-provider.d.ts
+@@ -29,6 +29,12 @@ interface OAuthErrorInternal {
+  * Options accepted by the {@link OAuthError} constructor.
+  */
+ interface OAuthErrorOptions {
++  /**
++   * Grant props to retain after a temporarily_unavailable refresh callback.
++   * Preserves an upstream rotation without issuing tokens or extending the grant.
++   * Never returned in the OAuth error response. Ignored for all other errors and grants.
++   */
++  retryProps?: unknown;
+   /**
+    * Human-readable text returned in the `error_description` field.
+    */
+diff --git a/dist/oauth-provider.js b/dist/oauth-provider.js
+index aaf2a96399dde60629487889449d2364f2ac74ab..81957b76ae34519e594b803d64f4beeab12a9b56 100644
+--- a/dist/oauth-provider.js
++++ b/dist/oauth-provider.js
+@@ -3735,7 +3735,23 @@ var OAuthProviderImpl = class {
+ 				resource: audience,
+ 				props: decryptedProps
+ 			};
+-			const callbackResult = await this.callTokenExchangeCallback(callbackOptions, env);
++			let callbackResult;
++			try {
++				callbackResult = await this.callTokenExchangeCallback(callbackOptions, env);
++			} catch (error) {
++				if (error instanceof OAuthError && error.code === "temporarily_unavailable" && error.options.retryProps !== void 0) {
++					const result = await encryptProps(error.options.retryProps);
++					grantData.encryptedProps = result.encryptedData;
++					// The client retains the token it just presented. Wrap the new encryption
++					// key for that token, including when it retried the previous token.
++					grantData.refreshTokenId = providedTokenHash;
++					grantData.refreshTokenWrappedKey = await wrapKeyWithToken(refreshToken, result.key);
++					delete grantData.previousRefreshTokenId;
++					delete grantData.previousRefreshTokenWrappedKey;
++					await this.saveGrantWithTTL(env, grantKey, grantData, Math.floor(Date.now() / 1e3));
++				}
++				throw error;
++			}
+ 			if (callbackResult) {
+ 				if (callbackResult.newProps) {
+ 					grantProps = callbackResult.newProps;

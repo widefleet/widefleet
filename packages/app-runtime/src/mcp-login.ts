@@ -97,10 +97,31 @@ const form = async (request: Request) => {
     request.headers.get("content-type")?.split(";")[0] !== "application/x-www-form-urlencoded"
   )
     throw new SignInFailure("Restart the connection from your app.");
-  const body = await request.text();
+  const reader = request.body?.getReader();
+  const body = new Uint8Array(8192);
+  let size = 0;
 
-  if (body.length > 8192) throw new SignInFailure("Invalid sign-in request.");
-  const parameters = new URLSearchParams(body);
+  if (reader)
+    try {
+      while (true) {
+        const chunk = await reader.read();
+
+        if (chunk.done) break;
+        const value = z.instanceof(Uint8Array).parse(chunk.value);
+
+        if (size + value.byteLength > body.byteLength) {
+          await reader.cancel();
+          throw new SignInFailure("Invalid sign-in request.");
+        }
+
+        body.set(value, size);
+        size += value.byteLength;
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+  const parameters = new URLSearchParams(new TextDecoder().decode(body.subarray(0, size)));
 
   if ([...parameters.keys()].some((key) => parameters.getAll(key).length !== 1))
     throw new SignInFailure("Invalid sign-in request.");
@@ -480,6 +501,22 @@ export const mcpLoginRequest = async (
     return server.fetch(request, storage, context);
   } catch (cause) {
     if (cause instanceof AuthorizationError && cause.redirectTo) return redirect(cause.redirectTo);
+
+    if (!(cause instanceof SignInFailure) && !(cause instanceof AuthorizationError))
+      console.error("MCP sign-in failed", {
+        path: url.pathname,
+        error: cause instanceof Error ? cause.name : "UnknownError",
+        message:
+          cause instanceof z.ZodError
+            ? "Invalid sign-in data"
+            : cause instanceof Error
+              ? cause.message
+              : "Unexpected sign-in failure",
+        issues:
+          cause instanceof z.ZodError
+            ? cause.issues.map(({ code, path }) => ({ code, path }))
+            : undefined,
+      });
 
     const message =
       cause instanceof SignInFailure

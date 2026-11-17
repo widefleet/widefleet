@@ -5,6 +5,16 @@ export const checkFormOrigin = (request: Request) => {
   if (!["POST", "PUT", "PATCH", "DELETE"].includes(request.method)) return null;
   const type = request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
 
+  // The API verifies Bearer credentials before considering browser cookies.
+  // Bodyless token requests therefore belong to that authentication path.
+  if (
+    !type &&
+    request.body === null &&
+    request.headers.get("authorization")?.startsWith("Bearer ") &&
+    new URL(request.url).pathname.startsWith("/api/v1/")
+  )
+    return null;
+
   if (
     type &&
     !["application/x-www-form-urlencoded", "multipart/form-data", "text/plain"].includes(type)
