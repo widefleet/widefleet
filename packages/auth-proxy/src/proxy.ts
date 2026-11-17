@@ -1,4 +1,4 @@
-import { appAccessSnapshot, appCaller } from "@platform/contracts";
+import { appAccessSnapshot, appCaller, hasAppAccess } from "@platform/contracts";
 import { z } from "zod";
 import { companyCookie, createAuthentication, cookiePrefix } from "./authentication.ts";
 import { authConfiguration, type AuthConfiguration } from "./configuration.ts";
@@ -201,7 +201,7 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
         );
       }
 
-      if (access.groups.length && !access.groups.some((group) => user.data.groups.includes(group)))
+      if (!hasAppAccess(access.groups, user.data.groups))
         return finish(response(403, "You do not have access to this app."));
 
       const headers = new Headers(request.headers);

@@ -347,6 +347,13 @@ pub struct RuntimeRelease {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishedServiceDocumentation {
+    pub artifact_id: Uuid,
+    pub documentation: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RuntimePackages {
     #[serde(
         default,
@@ -354,5 +361,11 @@ pub struct RuntimePackages {
         skip_serializing_if = "Option::is_none"
     )]
     pub app_secrets: Option<serde_json::Value>,
+    #[serde(
+        default,
+        rename = "serviceDocumentation",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub service_documentation: Option<PublishedServiceDocumentation>,
     pub runtime: RuntimeRelease,
 }

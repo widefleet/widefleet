@@ -1,3 +1,4 @@
+import { authRoute, authRouteKey } from "@platform/auth-proxy/publication";
 import { sessionVersion } from "@platform/auth-proxy/configuration";
 import { mcpClaims } from "@platform/contracts";
 import type { ParentEnvironment } from "./types.ts";
@@ -25,4 +26,10 @@ export const verifyMcpToken = async (environment: ParentEnvironment, token: stri
     exp: Math.min(verified.expiresAt, Math.floor(access.expiresAt / 1000)),
     mcp: { organizationId: access.organizationId, identity: access.identity },
   });
+};
+
+export const serviceRoute = async (environment: ParentEnvironment, hostname: string) => {
+  const stored = await environment.AUTH_CONFIG.get(authRouteKey(hostname));
+
+  return stored ? authRoute.parse(JSON.parse(stored)) : null;
 };

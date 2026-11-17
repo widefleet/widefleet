@@ -10,7 +10,12 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { build } from "esbuild";
-import { publishedApp, appSecretPreparation } from "@platform/contracts";
+import {
+  publishedApp,
+  appSecretPreparation,
+  appAccessSnapshot,
+  serviceDocumentation,
+} from "@platform/contracts";
 import { encodeConfiguration } from "@platform/auth-proxy/publication";
 import { runtimeIdentity } from "./runtime-identity.ts";
 import { hashAsset } from "../src/lib/server/asset-hash.ts";
@@ -132,7 +137,10 @@ describe.runIf(process.env["RUN_SERVICE_TESTS"] === "1").each(["workerd", "celld
         | z.infer<typeof appSecretPreparation>
         | { key: string }
         | { identity: { appId: string; organizationId: string; hostname: string } }
-        | { availability: "blocked" | "clear" | "unavailable" },
+        | { availability: "blocked" | "clear" | "unavailable" }
+        | { hostname: string; appId: string; access: z.infer<typeof appAccessSnapshot> }
+        | { subject: string; groups: string[] }
+        | { token: string },
       headers: Record<string, string> = {},
     ) =>
       (harness ? harness.fetch : fetch)(
@@ -176,10 +184,21 @@ describe.runIf(process.env["RUN_SERVICE_TESTS"] === "1").each(["workerd", "celld
         join(directory, "runtime.js"),
         await readFile(join(root, "packages/app-runtime/dist/loader.js")),
       );
+      await build({
+        entryPoints: [join(root, "packages/app-runtime/fixtures/mcp-oauth.ts")],
+        outfile: join(directory, "mcp-fixture.js"),
+        bundle: true,
+        format: "esm",
+        platform: "neutral",
+        mainFields: ["module", "main"],
+        external: ["cloudflare:*", "node:*"],
+        logLevel: "silent",
+      });
       await writeFile(
         join(directory, "fixture.js"),
         `
 import * as workers from 'cloudflare:workers';
+import {mcpFixture} from './mcp-fixture.js';
 import runtime, {AppService as Service, WorkloadIdentity as Identity} from './runtime.js'; export * from './runtime.js';
 ${executionRecorder}
 export class AppService extends Service { constructor(ctx, env) { super(ctx, recordExecution(env)); } }
@@ -187,6 +206,11 @@ export class UnconfiguredIdentity extends Identity { constructor(ctx, env) { sup
 export default { async fetch(request, env, ctx) {
   const url = new URL(request.url);
   try {
+    const fixture = await mcpFixture(request,env,ctx); if(fixture) return fixture;
+    if(url.pathname === '/mcp' || url.pathname === '/.well-known/oauth-protected-resource/mcp') {
+      const loader={get:env.WIDEFLEET_LOADER.get.bind(env.WIDEFLEET_LOADER),load(){throw new Error('MCP must not create a dynamic worker for scripts');}};
+      return runtime.fetch(new Request('https://mcp.apps.example.test'+url.pathname,request),{...env,WIDEFLEET_LOADER:loader},ctx);
+    }
     if(url.pathname === '/workload-proof' || url.pathname === '/unconfigured-identity') {
       const {identity}=await request.json();
       const binding=url.pathname === '/workload-proof' ? ctx.exports.WorkloadIdentity : ctx.exports.UnconfiguredIdentity;
@@ -198,6 +222,8 @@ export default { async fetch(request, env, ctx) {
       const {app,source,assets} = await request.json();
       await env.WIDEFLEET_PACKAGES.put('apps/'+app.appId+'/modules/'+app.modules[0].sha256,source);
       for(const [path,content] of Object.entries(assets)) await env.WIDEFLEET_PACKAGES.put('apps/'+app.appId+'/assets/'+app.manifest[path].hash,content);
+      if(app.metadata.service_documentation) await env.WIDEFLEET_PACKAGES.put('apps/'+app.appId+'/service-documentation/'+app.id+'.json',JSON.stringify(app.metadata.service_documentation));
+      delete app.metadata.service_documentation;
       await env.WIDEFLEET_PACKAGES.put('hosts/'+app.hostname+'.json',JSON.stringify(app));
       await env.AUTH_CONFIG.put('organizations/widefleet/configuration',${JSON.stringify(encrypted)});
       await env.AUTH_CONFIG.put('apps/'+app.hostname, JSON.stringify({organizationId:'widefleet',appId:app.appId,access:{revision:1,groups:[]}}));
@@ -246,6 +272,7 @@ export default { async fetch(request, env, ctx) {
             WIDEFLEET_CONTROL_TOKEN: token,
             WIDEFLEET_SECRETS_KEY: "ab".repeat(32),
             WIDEFLEET_WORKLOAD_ISSUER: "https://auth.apps.example.test/workload",
+            WIDEFLEET_MCP_ORIGIN: "https://mcp.apps.example.test",
             WIDEFLEET_CONFIGURATION: '{"crons":{},"queues":{}}',
           },
           worker_loaders: [{ binding: "WIDEFLEET_LOADER" }],
@@ -272,7 +299,7 @@ export default { async fetch(request, env, ctx) {
           reservation.close((error) => (error ? reject(error) : resolve())),
         );
         native = spawn(
-          join(root, ".tools/celld"),
+          process.env["CELLD_BINARY"] ?? join(root, ".tools/celld"),
           ["dev", directory, "--port", String(port), "--no-watch"],
           { stdio: ["ignore", "pipe", "pipe"] },
         );
@@ -310,6 +337,337 @@ export default { async fetch(request, env, ctx) {
 
       if (directory) await rm(directory, { recursive: true, force: true });
     });
+
+    it("renders the shared Svelte sign-in with bundled styles and images without a control plane", async () => {
+      const response = await request("/mcp-sign-in");
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(response.headers.get("content-type")).toContain("text/html");
+      expect(response.headers.get("content-security-policy")).toContain("form-action 'self'");
+      expect(response.headers.get("set-cookie")).toContain("__Host-");
+      const html = await response.text();
+      expect(html).toContain("Connect to Widefleet");
+      expect(html).toContain("Local test client");
+      expect(html).toContain('action="/oauth/continue"');
+      expect(html).toContain('name="handle"');
+      expect(html).toContain("data:image/svg+xml");
+      expect(html).toContain("prefers-color-scheme:dark");
+      expect(html).not.toContain("<script");
+      expect(html).not.toContain('src="/');
+      expect(html).not.toContain('<link rel="stylesheet"');
+    });
+
+    it("serves MCP and interpreted code without a control plane, using app groups and revocation", async () => {
+      const access = appAccessSnapshot.parse({ revision: 1, groups: ["readers"] });
+
+      const setup = () =>
+        request("/mcp-setup", {
+          hostname: `${targetId}.apps.example.test`,
+          appId: targetId,
+          access,
+        });
+
+      const issue = async (
+        subject = "alice",
+        groups: string[] = subject === "alice" ? ["readers"] : [],
+      ) => {
+        const response = await request("/mcp-issue", { subject, groups });
+        expect(response.status, await response.clone().text()).toBe(200);
+
+        return z.object({ access_token: z.string() }).parse(await response.json()).access_token;
+      };
+
+      await setup();
+      const accessToken = await issue();
+
+      const rpc = async (
+        name: string,
+        args: z.infer<ReturnType<typeof z.json>>,
+        bearer = accessToken,
+      ) => {
+        const response = await (harness ? harness.fetch : fetch)(`${origin}/mcp`, {
+          method: "POST",
+          headers: {
+            authorization: `bEaReR ${bearer}`,
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+            "mcp-protocol-version": "2025-06-18",
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: { name, arguments: args },
+          }),
+        });
+
+        expect(response.status, await response.clone().text()).toBe(200);
+        const body = await response.text();
+
+        const payload = response.headers.get("content-type")?.includes("text/event-stream")
+          ? body
+              .split("\n")
+              .find((line) => line.startsWith("data: "))
+              ?.slice(6)
+          : body;
+
+        return z
+          .object({
+            result: z.object({
+              isError: z.boolean().optional(),
+              content: z.array(z.object({ text: z.string() })),
+            }),
+          })
+          .parse(JSON.parse(payload ?? "null")).result;
+      };
+
+      expect((await request("/mcp")).status).toBe(401);
+      expect(
+        await (await request("/.well-known/oauth-protected-resource/mcp")).json(),
+      ).toMatchObject({
+        resource: "https://mcp.apps.example.test/mcp",
+        authorization_servers: ["https://mcp.apps.example.test"],
+      });
+
+      const service = {
+        hostname: `${targetId}.apps.example.test`,
+        entrypoint: "Reader",
+        method: "read",
+        arguments: [],
+      };
+
+      const docs = serviceDocumentation.parse({
+        format: 1,
+        entrypoints: [
+          {
+            name: "Reader",
+            summary: "Read inventory records",
+            remarks: "",
+            examples: [],
+            http: true,
+            methods: [
+              {
+                name: "read",
+                summary: "Read one record",
+                remarks: "",
+                examples: [],
+                throws: [],
+                signatures: [
+                  {
+                    parameters: [
+                      {
+                        name: "limit",
+                        type: "number",
+                        description: "Result limit",
+                        optional: true,
+                        rest: false,
+                      },
+                    ],
+                    returns: { type: "InventoryRecord", description: "The record" },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        types: [
+          {
+            name: "InventoryRecord",
+            definition: "{ version: string; secret: string }",
+            summary: "A record",
+            remarks: "",
+            examples: [],
+          },
+        ],
+      });
+
+      const described = async () => {
+        const response = await rpc("describe", {
+          hostname: service.hostname,
+          entrypoint: service.entrypoint,
+        });
+
+        expect(response.isError, response.content[0]?.text).not.toBe(true);
+
+        return z.json().parse(JSON.parse(response.content[0]?.text ?? "null"));
+      };
+
+      expect(await described()).toMatchObject({ documentation: null, types: [] });
+
+      const documented = await publish(targetId, target("v1"), "v1", {
+        metadata: {
+          ...snapshot(targetId, target("v1")).metadata,
+          service_documentation: docs,
+        },
+      });
+
+      await setup();
+      expect(await described()).toMatchObject({
+        documentation: docs.entrypoints[0],
+        types: docs.types,
+      });
+      const search = await rpc("search", { query: "inventory records" });
+      expect(JSON.parse(search.content[0]?.text ?? "null")).toMatchObject({
+        services: [{ hostname: service.hostname, summary: "Read inventory records" }],
+      });
+
+      const denied = await rpc(
+        "describe",
+        { hostname: service.hostname, entrypoint: service.entrypoint },
+        await issue("bob"),
+      );
+
+      expect(denied.isError).toBe(true);
+      const hidden = await rpc("search", { query: service.hostname }, await issue("bob"));
+      expect(JSON.parse(hidden.content[0]?.text ?? "null")).toMatchObject({ services: [] });
+      expect(
+        (
+          await rpc(
+            "execute",
+            {
+              code: `return await tools.call(${JSON.stringify(service)});`,
+            },
+            await issue("bob"),
+          )
+        ).isError,
+      ).toBe(true);
+
+      const nextDocs = {
+        ...docs,
+        entrypoints: docs.entrypoints.map((entry) => ({ ...entry, summary: "New inventory API" })),
+      };
+
+      await publish(targetId, target("v1"), "v1", {
+        metadata: { ...documented.metadata, service_documentation: nextDocs },
+      });
+      await setup();
+      expect(await described()).toMatchObject({ documentation: { summary: "New inventory API" } });
+      await request("/seed", { app: documented, source: target("v1"), assets: {} });
+      await setup();
+      expect(await described()).toMatchObject({
+        documentation: docs.entrypoints[0],
+        types: docs.types,
+      });
+
+      const called = await rpc("call", service);
+      expect(called.isError).not.toBe(true);
+      expect(JSON.parse(called.content[0]?.text ?? "null")).toMatchObject({ version: "v1" });
+
+      const executed = await rpc("execute", {
+        code: `const first = await tools.call(${JSON.stringify(service)}); return {version:first.version, credentials:typeof process};`,
+      });
+
+      expect(executed.isError, executed.content[0]?.text).not.toBe(true);
+      expect(JSON.parse(executed.content[0]?.text ?? "null")).toEqual({
+        version: "v1",
+        credentials: "undefined",
+      });
+
+      const outbound = await rpc("execute", {
+        code: "return (await fetch('https://example.invalid/')).status;",
+      });
+
+      expect(outbound.isError || outbound.content[0]?.text === "403").toBe(true);
+
+      const quota = await rpc("execute", {
+        code: `for(let i=0;i<33;i++) await tools.call(${JSON.stringify(service)}); return true;`,
+      });
+
+      expect(quota.isError).toBe(true);
+      expect((await rpc("execute", { code: 'return "x".repeat(1024 * 1024);' })).isError).toBe(
+        true,
+      );
+      expect((await rpc("call", service, await issue("bob"))).isError).toBe(true);
+      expect((await rpc("call", { ...service, method: "constructor" })).isError).toBe(true);
+      access.groups = ["warehouse-readers"];
+      await setup();
+      expect(
+        (await rpc("call", service, await issue("bob", ["warehouse-readers"]))).isError,
+      ).not.toBe(true);
+      expect((await rpc("call", service, await issue("bob", ["warehouse-writers"]))).isError).toBe(
+        true,
+      );
+      access.groups = ["nobody"];
+      await setup();
+      expect((await rpc("call", service)).isError).toBe(true);
+
+      access.groups = [];
+      await setup();
+      expect((await rpc("call", service, await issue("bob"))).isError).not.toBe(true);
+
+      const entrypoints = Array.from({ length: 32 }, (_, index) => `Service${index}`);
+
+      const largeDocs = serviceDocumentation.parse({
+        format: 1,
+        entrypoints: entrypoints.map((name) => ({
+          name,
+          summary: "x".repeat(7000) + "search-pagination-marker",
+          remarks: "",
+          examples: [],
+          http: false,
+          methods: [],
+        })),
+        types: [],
+      });
+
+      for (let index = 0; index < 12; index++) {
+        const id = crypto.randomUUID();
+        await publish(id, target("v1"), "v1", {
+          metadata: {
+            ...snapshot(id, target("v1")).metadata,
+            entrypoints,
+            service_documentation: largeDocs,
+          },
+        });
+      }
+
+      const searchPage = z.object({
+        services: z.array(
+          z.object({ hostname: z.string(), entrypoint: z.string(), summary: z.string() }),
+        ),
+        cursor: z.string().nullable(),
+      });
+
+      const found = new Set<string>();
+      let cursor: string | null = null;
+      let pages = 0;
+
+      do {
+        const query = "search-pagination-marker";
+
+        const pageResult = await (cursor
+          ? rpc("search", { query, cursor })
+          : rpc("search", { query }));
+
+        expect(pageResult.isError, pageResult.content[0]?.text).not.toBe(true);
+        const page = searchPage.parse(JSON.parse(pageResult.content[0]?.text ?? "null"));
+
+        for (const entry of page.services) {
+          expect(entry.summary).toHaveLength(256);
+          found.add(`${entry.hostname}/${entry.entrypoint}`);
+        }
+
+        cursor = page.cursor;
+        expect(++pages).toBeLessThan(10);
+      } while (cursor);
+
+      expect(found.size).toBe(12 * 32);
+      expect(pages).toBeGreaterThan(1);
+
+      const started = Date.now();
+
+      const expired = await rpc("execute", {
+        code: "while (true) {}",
+      });
+
+      expect(expired.isError, expired.content[0]?.text).toBe(true);
+      expect(expired.content[0]?.text).toContain("TimeoutExceeded");
+      expect(Date.now() - started).toBeLessThan(40_000);
+
+      await request("/mcp-revoke", { token: accessToken });
+      expect(
+        (await request("/mcp", undefined, { authorization: `Bearer ${accessToken}` })).status,
+      ).toBe(401);
+    }, 60000);
 
     it("issues app and service tokens with public verification and no control plane, including concurrent cold calls", async () => {
       const results = await Promise.all(
@@ -421,11 +779,17 @@ export default { async fetch(request, env, ctx) {
     });
 
     it("admits concurrent cold service calls and streams fetch responses", async () => {
-      const responses = await Promise.all(Array.from({ length: 8 }, () => request("/read")));
+      const responses = await Promise.all(
+        Array.from({ length: 8 }, async () => {
+          const response = await request("/read");
+
+          return { status: response.status, body: await response.text() };
+        }),
+      );
 
       for (const response of responses) {
-        expect(response.status, await response.clone().text()).toBe(200);
-        expect(await response.json()).toEqual({ version: "v1", secret: "synthetic-one" });
+        expect(response.status, response.body).toBe(200);
+        expect(JSON.parse(response.body)).toEqual({ version: "v1", secret: "synthetic-one" });
       }
 
       expect(await (await request("/fetch")).text()).toBe("v1");

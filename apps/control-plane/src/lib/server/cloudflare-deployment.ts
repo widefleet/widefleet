@@ -339,6 +339,11 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               ),
             };
 
+            if (metadata.service_documentation)
+              await immutable(
+                `apps/${app.id}/service-documentation/${record.id}.json`,
+                JSON.stringify(metadata.service_documentation),
+              );
             await immutable(`versions/${app.id}/${version}.json`, body, customMetadata);
 
             const response = await runtime.fetch(

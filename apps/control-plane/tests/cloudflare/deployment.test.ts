@@ -1170,6 +1170,14 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
       expect(
         contract.publishedApp.parse((await host(first.hostname))?.body).metadata,
       ).not.toHaveProperty("service_documentation");
+
+      const documentation = await worker.fetch(
+        `http://fixture/storage?key=apps/${first.appId}/service-documentation/${first.artifact.id}.json`,
+      );
+
+      expect(await documentation.json()).toMatchObject({
+        body: { format: 1, entrypoints: [], types: [] },
+      });
       expect((await host(preview.hostname))?.access).toBe(
         JSON.stringify({ revision: 1, groups: largeGroups }),
       );

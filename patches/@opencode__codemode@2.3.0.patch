@@ -1,0 +1,40 @@
+diff --git a/dist/vm.js b/dist/vm.js
+--- a/dist/vm.js
++++ b/dist/vm.js
+@@ -224,10 +224,10 @@
+                 // that's a slice point as well, or a loop of such calls would refill forever without yielding.
+                 if (this.fuel <= 0) {
+                     this.fuel = this.tripEvery || INITIAL_FUEL;
+-                    if (this.tripEvery > 0 || performance.now() - this.sliceStart >= SLICE_MS) {
+-                        this.sliced = true;
+-                        continue;
+-                    }
++                    // Worker clocks can remain frozen until the next I/O turn.
++                    // Yield on fuel exhaustion so timers and cancellation can run.
++                    this.sliced = true;
++                    continue;
+                 }
+                 let signal = EXEC_DONE;
+                 try {
+@@ -241,9 +241,7 @@
+                 }
+                 if (signal === EXEC_FUEL) {
+                     this.fuel = this.tripEvery || INITIAL_FUEL;
+-                    if (this.tripEvery > 0 || performance.now() - this.sliceStart >= SLICE_MS) {
+-                        this.sliced = true;
+-                    }
++                    this.sliced = true;
+                 }
+                 continue;
+             }
+@@ -254,9 +252,7 @@
+                 sched.beginJob(job);
+                 if (--this.fuel <= 0) {
+                     this.fuel = this.tripEvery || INITIAL_FUEL;
+-                    if (this.tripEvery > 0 || performance.now() - this.sliceStart >= SLICE_MS) {
+-                        this.sliced = true;
+-                    }
++                    this.sliced = true;
+                 }
+                 continue;
+             }
