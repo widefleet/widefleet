@@ -1,7 +1,7 @@
 ---
 title: Authenticate apps to external APIs
 description: Use short-lived app identities to call APIs without storing an API key in each app.
-lastModified: 2026-11-16
+lastModified: 2026-11-17
 ---
 
 Widefleet apps can request a signed token identifying their organization and app.
@@ -16,11 +16,6 @@ Run `widefleet runtime status` to check the selected and active versions.
 
 The receiving API must support RS256 JWT verification and trust your installation's
 workload issuer.
-
-When upgrading from an EdDSA runtime, update the receiving API and runtime together.
-The RS256 runtime publishes a separate RSA key set; previously issued EdDSA tokens
-are no longer verifiable through its JWKS. Obtain fresh tokens after the upgrade
-and allow receiving APIs to refresh cached keys. Roll back both sides together if needed.
 
 ## Call an API from an app
 
