@@ -74,7 +74,11 @@ const authenticationOptions = async (configuration: AuthConfiguration) =>
     },
   }) satisfies BetterAuthOptions;
 
-export const createAuthentication = async (configuration: AuthConfiguration, login: boolean) => {
+export const createAuthentication = async (
+  configuration: AuthConfiguration,
+  login: boolean,
+  onVerified?: (value: z.infer<typeof authorization>) => void,
+) => {
   const options = await authenticationOptions(configuration);
   let verified: z.infer<typeof authorization> | undefined;
 
@@ -148,6 +152,7 @@ export const createAuthentication = async (configuration: AuthConfiguration, log
                       nonce: result.claims["nonce"],
                       expiresAt,
                     });
+                    onVerified?.(verified);
 
                     return {
                       ...result.claims,

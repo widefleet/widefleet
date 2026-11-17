@@ -134,8 +134,8 @@ describe("Invited organization members with Widefleet OIDC", () => {
         createInstalledAppSignIn(
           environment.configuration,
           Buffer.alloc(32, 3).toString("base64url"),
-          async (method, body) => {
-            if (method === "PUT")
+          async (path, method, body) => {
+            if (method === "PUT" && path !== "/mcp/login")
               published.set(
                 organizationId,
                 authConfiguration.parse(JSON.parse(z.string().parse(body))),

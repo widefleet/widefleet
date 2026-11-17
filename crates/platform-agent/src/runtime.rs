@@ -88,6 +88,7 @@ pub fn configuration(
         };
         config["vars"]["WIDEFLEET_WORKLOAD_ISSUER"] =
             json!(format!("https://auth.{domain}{port}/workload"));
+        config["vars"]["WIDEFLEET_MCP_ORIGIN"] = json!(format!("https://mcp.{domain}{port}"));
     }
     if release.workflows == Some(1) {
         config["services"] = json!([{ "binding": "WIDEFLEET_WORKFLOW_SESSIONS", "service": "widefleet", "entrypoint": "WorkflowSessions" }]);

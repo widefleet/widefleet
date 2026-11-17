@@ -1,0 +1,16 @@
+/* Only scan UI sources; fixtures and build output differ between release builds. */
+@import "@platform/ui/styles.css" source(none);
+@source "./";
+
+/* These server-rendered forms follow the device theme without client JavaScript. */
+@custom-variant dark (@media (prefers-color-scheme: dark));
+
+:root {
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    @apply theme-dark;
+  }
+}

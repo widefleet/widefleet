@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { authControlPath } from "@platform/auth-proxy/publication";
 import { appLoginClientId, readAppLogin } from "../../src/lib/server/app-login-client.ts";
 import { account, oauthClient, oauthResource, user } from "../../src/lib/server/auth-schema.ts";
@@ -124,7 +124,12 @@ describe("Hosted installation initialization", () => {
       { id: installed.ownerId, email: "owner@example.test" },
     ]);
     expect(await database.db.select().from(oauthClient)).toHaveLength(1);
-    expect(await database.db.select().from(oauthResource)).toMatchObject([
+    expect(
+      await database.db
+        .select()
+        .from(oauthResource)
+        .where(eq(oauthResource.identifier, `${environment.PLATFORM_URL}/api/v1`)),
+    ).toMatchObject([
       {
         identifier: `${environment.PLATFORM_URL}/api/v1`,
         allowedScopes: cliScopes,
@@ -299,9 +304,12 @@ describe("Hosted installation initialization", () => {
       await database.db.update(oauthClient).set({ scopes: ["platform:read"] });
 
       expect((await initialize()).stdout).toContain("Hosted installation initialized");
-      expect(await database.db.select().from(oauthResource)).toMatchObject([
-        { allowedScopes: cliScopes, accessTokenTtl: 300 },
-      ]);
+      expect(
+        await database.db
+          .select()
+          .from(oauthResource)
+          .where(eq(oauthResource.identifier, `${environment.PLATFORM_URL}/api/v1`)),
+      ).toMatchObject([{ allowedScopes: cliScopes, accessTokenTtl: 300 }]);
       expect(await database.db.select().from(oauthClient)).toMatchObject([{ scopes: cliScopes }]);
     });
 
@@ -326,9 +334,12 @@ describe("Hosted installation initialization", () => {
       }
 
       expect((await initialize()).stdout).toContain("Hosted installation initialized");
-      expect(await database.db.select().from(oauthResource)).toMatchObject([
-        { accessTokenTtl: 300 },
-      ]);
+      expect(
+        await database.db
+          .select()
+          .from(oauthResource)
+          .where(eq(oauthResource.identifier, `${environment.PLATFORM_URL}/api/v1`)),
+      ).toMatchObject([{ accessTokenTtl: 300 }]);
     }, 30_000);
   });
 });

@@ -1883,10 +1883,16 @@ test("validates remote forms and creates apps without JavaScript", async ({ brow
     expect(response?.headers()["cache-control"]).toBe("private, no-store");
     await page.getByRole("link", { name: "Create app", exact: true }).click();
     await page.getByLabel("App name", { exact: true }).fill("Native Form App");
-    await page.getByLabel("URL slug").fill("auth");
-    await page.getByRole("button", { name: "Create app" }).click();
-    await expect(page.getByRole("alert")).toContainText("The auth hostname is reserved for SSO");
-    await expect(page.getByLabel("App name", { exact: true })).toHaveValue("Native Form App");
+
+    for (const slug of ["auth", "mcp"]) {
+      await page.getByLabel("URL slug").fill(slug);
+      await page.getByRole("button", { name: "Create app" }).click();
+      await expect(page.getByRole("alert")).toContainText(
+        "The auth and mcp hostnames are reserved for platform services",
+      );
+      await expect(page.getByLabel("App name", { exact: true })).toHaveValue("Native Form App");
+    }
+
     await page.getByLabel("URL slug").fill("native-form-app");
     await page.getByRole("button", { name: "Create app" }).click();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Native Form App");

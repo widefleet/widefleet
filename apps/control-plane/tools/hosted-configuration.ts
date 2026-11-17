@@ -145,6 +145,7 @@ export const hostedConfigurations = async (
   const executionVariables: Record<string, string> = {};
   executionVariables["WIDEFLEET_WORKLOAD_ISSUER"] =
     `https://auth.${installation.appDomain}/workload`;
+  executionVariables["WIDEFLEET_MCP_ORIGIN"] = `https://mcp.${installation.appDomain}`;
 
   if (installation.executionLimits)
     executionVariables["WIDEFLEET_EXECUTION_LIMITS"] = JSON.stringify(installation.executionLimits);

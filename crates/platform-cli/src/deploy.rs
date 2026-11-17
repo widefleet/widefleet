@@ -296,14 +296,14 @@ async fn publish(
         let name = configuration.name.as_deref().unwrap_or_default();
         if name.is_empty()
             || name.len() > 48
-            || name == "auth"
+            || matches!(name, "auth" | "mcp")
             || !name.starts_with(|character: char| character.is_ascii_lowercase())
             || !name.ends_with(|character: char| character.is_ascii_alphanumeric())
             || !name.chars().all(|character| {
                 character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
             })
         {
-            return Err(Error::invalid("Set a valid name in the Wrangler configuration: 1-48 lowercase letters, digits or hyphens, starting with a letter and ending with a letter or digit; auth is reserved".into()));
+            return Err(Error::invalid("Set a valid name in the Wrangler configuration: 1-48 lowercase letters, digits or hyphens, starting with a letter and ending with a letter or digit; auth and mcp are reserved".into()));
         }
         eprintln!("Target: {} on {}", name, api.origin_text());
     }

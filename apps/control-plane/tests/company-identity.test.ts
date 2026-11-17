@@ -28,9 +28,11 @@ describe("company identity settings", () => {
           S3_BUCKET: "artifacts",
         }),
         Buffer.from(new Uint8Array(32).fill(1)).toString("base64url"),
-        async (method, body) => {
+        async (path, method, body) => {
           expect(method).toBe("PUT");
-          published = authConfiguration.parse(JSON.parse(z.string().parse(body)));
+
+          if (path !== "/mcp/login")
+            published = authConfiguration.parse(JSON.parse(z.string().parse(body)));
 
           return { text: async () => "" };
         },

@@ -129,6 +129,10 @@ describe("Platform setup and managed settings", () => {
     expect(environment.authControl.read().configuration?.clientId).toBe(
       current.sso?.oidcConfig.clientId,
     );
+    expect(environment.authControl.read().mcpLogin).toMatchObject({
+      origin: "https://mcp.apps.localhost",
+      platformUrl: "http://localhost:25430",
+    });
     const [saved] = await environment.database.db.select().from(organizationSettings);
     expect(saved?.settings).not.toHaveProperty("identity");
     expect(saved?.settings).not.toHaveProperty("sso");
@@ -403,7 +407,7 @@ describe("Platform setup and managed settings", () => {
     const service = createInstalledAppSignIn(
       environment.configuration,
       Buffer.alloc(32, 1).toString("base64url"),
-      (method) => {
+      (_path, method) => {
         expect(method).toBe("GET");
 
         return Promise.resolve(

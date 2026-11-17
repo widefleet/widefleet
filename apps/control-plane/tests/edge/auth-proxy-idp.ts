@@ -34,6 +34,7 @@ export const createIdentityProvider = async (
     available: true,
     failure: "",
     entra: false,
+    entraAuthority: "",
     google: false,
     workspaceDomain: "example.test",
     groups: ["accounting"],
@@ -61,7 +62,7 @@ export const createIdentityProvider = async (
       const issuer = settings.google
         ? "https://accounts.google.com"
         : settings.entra
-          ? `${origin}/${tenantId}/v2.0`
+          ? `${settings.entraAuthority || origin}/${tenantId}/v2.0`
           : origin + settings.issuerSuffix;
 
       response.setHeader("content-type", "application/json");

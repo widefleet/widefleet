@@ -17,7 +17,7 @@ import { InvalidOperation } from "./errors.ts";
 import { decryptSecret, encryptSecret } from "./secret-encryption.ts";
 import { installationOrganizationId } from "../organization.ts";
 import { readOrganizationSettings, createInstallationOwner } from "./installation-store.ts";
-import { oauthClient } from "./auth-schema.ts";
+import { oauthClient, organization } from "./auth-schema.ts";
 import { readSsoConfiguration, ssoRuntimeIdentity, saveSsoProvider } from "./sso-settings.ts";
 import { appLoginClientId, readAppLogin, registerAppLogin } from "./app-login-client.ts";
 import { organizationSettings } from "./schema.ts";
@@ -124,9 +124,15 @@ const createOrganizationSettingsService = (
         if (identity && appSignIn) {
           try {
             const secret = identity.management.clientSecret;
-            expectedRevision = await appSignIn.revision(identity, secret);
 
-            if (publish) await appSignIn.publish(identity, secret);
+            const [company] = await transaction
+              .select({ name: organization.name })
+              .from(organization)
+              .where(eq(organization.id, organizationId));
+
+            expectedRevision = await appSignIn.revision(identity, secret, company?.name);
+
+            if (publish) await appSignIn.publish(identity, secret, company?.name);
           } catch (cause) {
             current.errors.push(
               cause instanceof InvalidOperation

@@ -129,6 +129,25 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")(
           { timeout: 10_000 },
         );
 
+        const metadata = await request(
+          "mcp.apps.example.test",
+          {},
+          "/.well-known/oauth-protected-resource/mcp",
+        );
+
+        expect(metadata.status).toBe(200);
+        expect(JSON.parse(metadata.body)).toMatchObject({
+          resource: "https://mcp.apps.example.test/mcp",
+          authorization_servers: ["https://mcp.apps.example.test"],
+        });
+        const challenge = await request("mcp.apps.example.test", {}, "/mcp");
+        expect(challenge.status).toBe(401);
+        expect(challenge.headers["www-authenticate"]).toContain(
+          "https://mcp.apps.example.test/.well-known/oauth-protected-resource/mcp",
+        );
+        expect(challenge.headers.location).toBeUndefined();
+        expect((await request("auth.apps.example.test", {}, "/mcp")).status).toBe(404);
+
         const anonymous = await request("notes.apps.example.test", {
           accept: "text/html",
           "x-auth-request-user": "forged",
@@ -183,7 +202,11 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")(
         expect(management.headers["set-cookie"]).toEqual(["management-cookie=preserved"]);
         const token = (await readFile(join(fixture.directory, "control-token"), "utf8")).trim();
 
-        for (const hostname of ["auth.apps.example.test", "notes.apps.example.test"]) {
+        for (const hostname of [
+          "auth.apps.example.test",
+          "mcp.apps.example.test",
+          "notes.apps.example.test",
+        ]) {
           for (const path of [
             "/.well-known/widefleet/auth/organizations/widefleet/configuration",
             "/.well-known/widefleet/runtime",

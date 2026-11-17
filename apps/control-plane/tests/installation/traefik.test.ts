@@ -147,7 +147,7 @@ describe.runIf(process.env["RUN_INSTALLATION_TESTS"] === "1")(
                   "--eval",
                   `import { connect } from "node:tls";
            import { readFileSync } from "node:fs";
-           for (const servername of ["platform.example.test", "notes.apps.example.test", "auth.apps.example.test", "review.notes.apps.example.test", "another.notes.apps.example.test"]) {
+           for (const servername of ["platform.example.test", "notes.apps.example.test", "auth.apps.example.test", "mcp.apps.example.test", "review.notes.apps.example.test", "another.notes.apps.example.test"]) {
              await new Promise((resolve, reject) => {
                const socket = connect({ host: "127.0.0.1", port: 8443, servername, ca: readFileSync("/fixtures/ca.pem") }, () => { socket.end(); resolve(); });
                socket.setTimeout(3000, () => socket.destroy(new Error("TLS handshake timed out")));

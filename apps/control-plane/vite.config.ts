@@ -40,6 +40,9 @@ export const controlPlaneConfig = (target: "node" | "cloudflare") =>
         files: {
           hooks: { server: target === "cloudflare" ? "src/hooks.cloudflare" : "src/hooks.server" },
         },
+        // Shared hooks enforce form origins and admit cookie-free OAuth token POSTs.
+        // SvelteKit continues to enforce remote-function origins independently.
+        csrf: { trustedOrigins: ["*"] },
         experimental: { remoteFunctions: true },
         compilerOptions: { experimental: { async: true } },
       }),

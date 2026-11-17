@@ -361,12 +361,18 @@ importers:
 
   packages/app-runtime:
     dependencies:
+      '@cloudflare/workers-oauth-provider':
+        specifier: 1.2.4
+        version: 1.2.4
       '@platform/auth-proxy':
         specifier: workspace:*
         version: link:../auth-proxy
       '@platform/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@platform/ui':
+        specifier: workspace:*
+        version: link:../ui
       jose:
         specifier: 6.2.10
         version: 6.2.10
@@ -377,6 +383,21 @@ importers:
       '@cloudflare/workers-types':
         specifier: 5.20261003.1
         version: 5.20261003.1
+      '@sveltejs/vite-plugin-svelte':
+        specifier: 7.3.1
+        version: 7.3.1(svelte@5.57.1)(vite@8.3.2(@types/node@26.6.4)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
+      '@tailwindcss/vite':
+        specifier: 4.3.3
+        version: 4.3.3(vite@8.3.2(@types/node@26.6.4)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1))
+      svelte:
+        specifier: 5.57.1
+        version: 5.57.1
+      svelte-check:
+        specifier: 4.7.6
+        version: 4.7.6(picomatch@4.0.7)(svelte@5.57.1)(typescript@6.0.3)
+      vite:
+        specifier: 8.3.2
+        version: 8.3.2(@types/node@26.6.4)(esbuild@0.28.2)(jiti@2.7.0)(yaml@2.9.1)
 
   packages/auth-proxy:
     dependencies:
@@ -1302,6 +1323,9 @@ packages:
     engines: {node: '>=16'}
     cpu: [x64]
     os: [win32]
+
+  '@cloudflare/workers-oauth-provider@1.2.4':
+    resolution: {integrity: sha512-ayo6Z8DBHdAxwDpplFU8BrEoxoSn6wNo+E7ypTENRHUOc8R89A8/+nZ+a8pMZjjXzF0JXfpYXhw/7qqG+DC18Q==}
 
   '@cloudflare/workers-types@5.20261003.1':
     resolution: {integrity: sha512-Uii0J5qUd/R6lIDK/u0Sw8dEi7oI3ljXw7EDybuPntoXg2Yy5Y9H9UeNQ5R87oQ/Q4jq6uEJmYOOFQ3Z7C94lA==}
@@ -7891,6 +7915,8 @@ snapshots:
 
   '@cloudflare/workerd-windows-64@1.20261001.1':
     optional: true
+
+  '@cloudflare/workers-oauth-provider@1.2.4': {}
 
   '@cloudflare/workers-types@5.20261003.1': {}
 
