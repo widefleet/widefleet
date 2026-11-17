@@ -1,7 +1,7 @@
 ---
 title: Workflows
 description: Declare durable background work and manage Workflow instances.
-lastModified: 2026-10-12
+lastModified: 2026-11-17
 ---
 
 ## Declare and export a Workflow
@@ -186,4 +186,4 @@ Short global `setTimeout` waits and `fetch` calls (including response body metho
 
 Function-valued retry delays, step rollback handlers and rollback-on-termination are not supported. Unsupported options are rejected. Workflow scheduling/facets and cross-app bindings are not part of this interface.
 
-Cloudflare's `@cloudflare/dynamic-workflows` helper cannot directly supply this transport on celld 0.6.2: dynamic Workflow entrypoint lookup and native step-object transport are unavailable. The platform preserves the supported app API with its own transport, without patching or forking celld.
+Cloudflare's `@cloudflare/dynamic-workflows` helper cannot directly supply this transport on celld 0.6.2: dynamic Workflow entrypoint lookup and native step-object transport are unavailable. The platform preserves the supported app API with its own transport.
