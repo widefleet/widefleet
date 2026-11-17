@@ -22,8 +22,9 @@
         "apps/control-plane/src/routes/**/*.svelte",
         "apps/control-plane/src/lib/*.svelte",
         "apps/control-plane/src/lib/components/*.svelte",
-        "apps/control-plane/src/lib/components/ui/button/button.svelte",
-        "apps/control-plane/src/lib/components/ui/native-select/native-select.svelte"
+        "packages/ui/src/*.svelte",
+        "packages/ui/src/components/ui/button/*.svelte",
+        "packages/ui/src/components/ui/native-select/native-select.svelte"
       ],
       "options": {
         "svelte": true

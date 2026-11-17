@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { getAppContext } from "#lib/app-context";
-  import { Button } from "#shadcn/components/ui/button/index.js";
+  import { Button } from "@platform/ui/button";
   import CopyValue from "#shadcn/components/CopyValue.svelte";
   import DeploymentStatus from "#shadcn/components/DeploymentStatus.svelte";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";

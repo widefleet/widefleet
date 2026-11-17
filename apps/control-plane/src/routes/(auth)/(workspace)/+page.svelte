@@ -1,8 +1,8 @@
 <script lang="ts">
   import { getApps } from "#lib/apps.remote";
-  import { Button } from "#shadcn/components/ui/button/index.js";
-  import { Input } from "#shadcn/components/ui/input/index.js";
-  import { Badge } from "#shadcn/components/ui/badge/index.js";
+  import { Button } from "@platform/ui/button";
+  import { Input } from "@platform/ui/input";
+  import { Badge } from "@platform/ui/badge";
   import Plus from "@lucide/svelte/icons/plus";
   import Search from "@lucide/svelte/icons/search";
   import Layers2 from "@lucide/svelte/icons/layers-2";

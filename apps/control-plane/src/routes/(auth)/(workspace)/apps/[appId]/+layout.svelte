@@ -3,7 +3,7 @@
   import { getAppDetails, getAppSource } from "#lib/apps.remote";
   import { getAppConnections } from "#lib/connections.remote";
   import type { manageWorkflow } from "#lib/workflows.remote";
-  import { Button } from "#shadcn/components/ui/button/index.js";
+  import { Button } from "@platform/ui/button";
   import ArrowLeft from "@lucide/svelte/icons/arrow-left";
   import ArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";

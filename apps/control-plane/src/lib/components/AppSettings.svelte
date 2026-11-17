@@ -3,7 +3,7 @@
   import { getAppDetails, removeApp } from "#lib/apps.remote";
   import { setCatalogListing } from "#lib/catalog.remote";
   import FormIssues from "#shadcn/FormIssues.svelte";
-  import { Button } from "#shadcn/components/ui/button/index.js";
+  import { Button } from "@platform/ui/button";
   import CopyValue from "./CopyValue.svelte";
   import Trash2 from "@lucide/svelte/icons/trash-2";
 

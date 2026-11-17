@@ -1,7 +1,7 @@
 <script lang="ts">
   import Markdown from "#shadcn/components/Markdown.svelte";
   import { getAppServices, getServiceDescription } from "#lib/services.remote";
-  import { Button } from "#shadcn/components/ui/button/index.js";
+  import { Button } from "@platform/ui/button";
   import type { PageData } from "./$types";
 
   let { data }: { data: PageData } = $props();

@@ -3,12 +3,12 @@
   import { untrack } from "svelte";
   import { page } from "$app/state";
   import CopyValue from "#shadcn/components/CopyValue.svelte";
-  import AuthLayout from "#shadcn/components/AuthLayout.svelte";
+  import AuthLayout from "@platform/ui/auth-layout";
   import Feedback from "#shadcn/components/Feedback.svelte";
-  import { Button } from "#shadcn/components/ui/button/index.js";
-  import { Input } from "#shadcn/components/ui/input/index.js";
-  import { Label } from "#shadcn/components/ui/label/index.js";
-  import { Checkbox } from "#shadcn/components/ui/checkbox/index.js";
+  import { Button } from "@platform/ui/button";
+  import { Input } from "@platform/ui/input";
+  import { Label } from "@platform/ui/label";
+  import { Checkbox } from "@platform/ui/checkbox";
   import Terminal from "@lucide/svelte/icons/terminal";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
   import type { PageData } from "./$types";

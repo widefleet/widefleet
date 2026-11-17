@@ -1,6 +1,6 @@
 <script lang="ts">
-  import AuthLayout from "#shadcn/components/AuthLayout.svelte";
-  import { Button } from "#shadcn/components/ui/button/index.js";
+  import AuthLayout from "@platform/ui/auth-layout";
+  import { Button } from "@platform/ui/button";
   import { goto } from "$app/navigation";
   import { onMount } from "svelte";
   import { authClient } from "#lib/auth-client";

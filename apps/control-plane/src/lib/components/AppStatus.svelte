@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Badge } from "#shadcn/components/ui/badge/index.js";
+  import { Badge } from "@platform/ui/badge";
   import type { app } from "@platform/contracts";
   import type { z } from "zod";
 
