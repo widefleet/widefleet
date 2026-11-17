@@ -1,7 +1,9 @@
 import { workloadToken } from "@platform/app-runtime/workload";
+import { chromium } from "@playwright/test";
 import { createLocalJWKSet, jwtVerify } from "jose";
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
+import { createServer as createHttpServer } from "node:http";
 import { once } from "node:events";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -207,7 +209,7 @@ export default { async fetch(request, env, ctx) {
   const url = new URL(request.url);
   try {
     const fixture = await mcpFixture(request,env,ctx); if(fixture) return fixture;
-    if(url.pathname === '/mcp' || url.pathname === '/.well-known/oauth-protected-resource/mcp') {
+    if(url.pathname === '/mcp' || url.pathname.startsWith('/oauth/') || url.pathname === '/.well-known/oauth-protected-resource/mcp') {
       const loader={get:env.WIDEFLEET_LOADER.get.bind(env.WIDEFLEET_LOADER),load(){throw new Error('MCP must not create a dynamic worker for scripts');}};
       return runtime.fetch(new Request('https://mcp.apps.example.test'+url.pathname,request),{...env,WIDEFLEET_LOADER:loader},ctx);
     }
@@ -342,7 +344,7 @@ export default { async fetch(request, env, ctx) {
       const response = await request("/mcp-sign-in");
       expect(response.status, await response.clone().text()).toBe(200);
       expect(response.headers.get("content-type")).toContain("text/html");
-      expect(response.headers.get("content-security-policy")).toContain("form-action 'self'");
+      expect(response.headers.get("content-security-policy")).toContain("default-src 'none'");
       expect(response.headers.get("set-cookie")).toContain("__Host-");
       const html = await response.text();
       expect(html).toContain("Connect to Widefleet");
@@ -355,6 +357,82 @@ export default { async fetch(request, env, ctx) {
       expect(html).not.toContain('src="/');
       expect(html).not.toContain('<link rel="stylesheet"');
     });
+
+    it.each([
+      ["Continue with Google", "https://accounts.google.com"],
+      ["Continue with Microsoft", "https://login.microsoftonline.com"],
+      ["Continue with Widefleet", "https://platform.example.test"],
+      ["Cancel", "https://client.example.test"],
+    ])(
+      "submits %s in the browser and follows its OAuth redirect",
+      async (button, destination) => {
+        const browser = await chromium.launch();
+        const destinationReferrers: (string | undefined)[] = [];
+
+        const destinationServer = createHttpServer((request, response) => {
+          destinationReferrers.push(request.headers.referer);
+          response.setHeader("content-type", "text/html");
+          response.end("OAuth destination reached");
+        });
+
+        destinationServer.listen(0, "127.0.0.1");
+        await once(destinationServer, "listening");
+        const { port } = z.object({ port: z.number() }).parse(destinationServer.address());
+        const callback = `http://127.0.0.1:${port}/callback`;
+
+        try {
+          const page = await browser.newPage();
+          page.setDefaultTimeout(5000);
+          const submittedOrigins: (string | undefined)[] = [];
+          const redirects: string[] = [];
+
+          await page.route("https://mcp.apps.example.test/**", async (route) => {
+            const submitted = route.request();
+            const path = new URL(submitted.url()).pathname;
+
+            if (submitted.method() === "POST") submittedOrigins.push(submitted.headers()["origin"]);
+
+            const response =
+              path === "/authorize"
+                ? await request("/mcp-sign-in")
+                : await (harness ? harness.fetch : fetch)(`${origin}${path}`, {
+                    method: submitted.method(),
+                    headers: submitted.headers(),
+                    body: submitted.postData(),
+                    redirect: "manual",
+                  });
+
+            const headers = new Headers(Object.fromEntries(response.headers));
+            const location = headers.get("location");
+
+            if (location) {
+              redirects.push(new URL(location).origin);
+              // Keep redirects real browser navigations, but never contact an external provider.
+              headers.set("location", callback);
+            }
+
+            await route.fulfill({
+              status: response.status,
+              headers: Object.fromEntries(headers),
+              body: await response.text(),
+            });
+          });
+          await page.goto("https://mcp.apps.example.test/authorize");
+          await page.getByRole("button", { name: button, exact: true }).click();
+          await page.waitForURL(callback);
+          expect(await page.locator("body").innerText()).toBe("OAuth destination reached");
+          expect(submittedOrigins).toEqual(["https://mcp.apps.example.test"]);
+          expect(redirects).toEqual([destination]);
+          expect(destinationReferrers).toEqual([undefined]);
+        } finally {
+          await browser.close();
+          await new Promise<void>((resolve, reject) =>
+            destinationServer.close((error) => (error ? reject(error) : resolve())),
+          );
+        }
+      },
+      20000,
+    );
 
     it("serves MCP and interpreted code without a control plane, using app groups and revocation", async () => {
       const access = appAccessSnapshot.parse({ revision: 1, groups: ["readers"] });
