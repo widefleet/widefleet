@@ -3,7 +3,7 @@ import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { delimiter, join, resolve } from "node:path";
+import { basename, delimiter, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -169,7 +169,18 @@ describe.runIf(process.env["RUN_CLI_PACKAGE_TESTS"] === "1")(
     }, 60_000);
 
     it("installs only the matching native package without scripts and builds an independent starter", async () => {
-      await runPnpm(
+      // Keep subprocess progress visible even when the outer test times out.
+      // Otherwise a stalled install, check or build only reports this test's name.
+      const runPackageCommand = (args: string[], cwd = directory, env = environment) => {
+        console.info(`[cli-package] ${basename(cwd)}: pnpm ${args.join(" ")}`);
+        const command = runPnpm(args, cwd, env);
+        command.child.stdout?.pipe(process.stdout);
+        command.child.stderr?.pipe(process.stderr);
+
+        return command;
+      };
+
+      await runPackageCommand(
         [
           `--config.global-dir=${join(directory, "global packages")}`,
           "add",
@@ -188,8 +199,7 @@ describe.runIf(process.env["RUN_CLI_PACKAGE_TESTS"] === "1")(
         [`widefleet-${version}.tgz`, `widefleet-${platform.name}-${version}.tgz`].sort(),
       );
 
-      const run = (...args: string[]) =>
-        runPnpm(["exec", "widefleet", ...args], directory, environment);
+      const run = (...args: string[]) => runPackageCommand(["exec", "widefleet", ...args]);
 
       expect((await run("--version")).stdout.trim()).toBe(`widefleet ${version}`);
 
@@ -208,13 +218,13 @@ describe.runIf(process.env["RUN_CLI_PACKAGE_TESTS"] === "1")(
             .object({ packageManager: z.string().startsWith("pnpm@") })
             .parse(JSON.parse(await readFile(join(project, "package.json"), "utf8")));
 
-          expect((await runPnpm(["--version"], project, environment)).stdout.trim()).toBe(
+          expect((await runPackageCommand(["--version"], project)).stdout.trim()).toBe(
             packageManager.slice("pnpm@".length),
           );
-          await runPnpm(["install", "--frozen-lockfile"], project, environment);
-          await runPnpm(["check"], project, environment);
-          await runPnpm(["build"], project, environment);
-          await runPnpm(["typecheck"], project, environment);
+          await runPackageCommand(["install", "--frozen-lockfile"], project);
+          await runPackageCommand(["check"], project);
+          await runPackageCommand(["build"], project);
+          await runPackageCommand(["typecheck"], project);
           expect(
             await readFile(
               join(project, template === "sveltekit" ? "build/worker.js" : "build/server/index.js"),
@@ -222,7 +232,7 @@ describe.runIf(process.env["RUN_CLI_PACKAGE_TESTS"] === "1")(
             ),
           ).toBeTruthy();
 
-          const deployment = await runPnpm(
+          const deployment = await runPackageCommand(
             ["exec", "widefleet", "deploy", appId, "--skip-build", "--no-wait", "--json"],
             project,
             {
