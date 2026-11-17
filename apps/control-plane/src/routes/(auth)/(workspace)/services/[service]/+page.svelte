@@ -106,7 +106,7 @@
                 >fetch()</span
               >{/if}
           </div>
-          {#if entry.description}<div class="text-muted-foreground">
+          {#if entry.description}<div class="text-muted-foreground mt-3">
               <Markdown html={entry.description} />
             </div>{/if}
           {#each entry.methods as method (method.name)}
@@ -116,7 +116,7 @@
             >
               <h3 class="font-mono text-sm font-semibold">{method.name}</h3>
               {#if method.summary}<Markdown html={method.summary} />{/if}
-              {#each method.signatures as signature (signature.code)}
+              {#each method.signatures as signature, index (index)}
                 {@render code(signature.code)}
                 {#if signature.parameters.length || signature.returns.description}
                   <dl
@@ -129,8 +129,8 @@
                           >{parameter.type}</span
                         >
                       </dt>
-                      <dd class="text-muted-foreground leading-6">
-                        {#if parameter.description}{@html parameter.description}{/if}
+                      <dd class="text-muted-foreground min-w-0">
+                        {#if parameter.description}<Markdown html={parameter.description} />{/if}
                       </dd>
                     {/each}
                     {#if signature.returns.description}
@@ -140,8 +140,8 @@
                           >{signature.returns.type}</span
                         >
                       </dt>
-                      <dd class="text-muted-foreground leading-6">
-                        {@html signature.returns.description}
+                      <dd class="text-muted-foreground min-w-0">
+                        <Markdown html={signature.returns.description} />
                       </dd>
                     {/if}
                   </dl>
@@ -150,8 +150,8 @@
               {#if method.remarks}<div class="text-muted-foreground">
                   <Markdown html={method.remarks} />
                 </div>{/if}
-              {#each method.throws as error (error)}
-                <p class="text-muted-foreground text-sm">Throws: {@html error}</p>
+              {#each method.throws as error, index (index)}
+                <div class="text-muted-foreground"><Markdown html={error} /></div>
               {/each}
               {#if method.examples}<div>
                   <p class="text-muted-foreground mb-2 text-xs font-medium">Example</p>

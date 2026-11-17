@@ -696,7 +696,7 @@ it("renders replacement advice, examples and short names on referenced types", (
     types: [
       {
         name: 'import("./src/query").Query',
-        definition: 'type Query = { id: import("./src/item").ItemId };',
+        definition: 'type Query = { id: string; next?: import("./src/query").Query };',
         summary: "Select one item.",
         remarks: "Identifiers are case-sensitive.",
         deprecated: "Use ItemQuery for new integrations.",
@@ -707,9 +707,87 @@ it("renders replacement advice, examples and short names on referenced types", (
 
   const [type] = presentServiceDocumentation(docs).types;
   expect(type?.name).toBe("Query");
-  expect(type?.definition).toBe("type Query = { id: ItemId };");
+  expect(type?.definition).toBe("type Query = { id: string; next?: Query };");
   expect(type?.description).toContain("Deprecated: Use ItemQuery for new integrations.");
   expect(type?.examples).toContain("const query: Query = { id: &quot;one&quot; };");
+});
+
+it("shortens only unambiguous documented type references", () => {
+  const docs = serviceDocumentation.parse({
+    format: 1,
+    entrypoints: [
+      {
+        name: "Reader",
+        summary: "",
+        remarks: "",
+        examples: [],
+        http: false,
+        methods: [
+          {
+            name: "read",
+            summary: "",
+            remarks: "",
+            examples: [],
+            throws: ["Missing items.", "Missing items."],
+            signatures: [
+              {
+                typeParameters: [
+                  'T extends import("./app/query").Query = import("./app/query").Query',
+                ],
+                parameters: [
+                  {
+                    name: "query",
+                    type: 'T | `import("./app/query").Query:${import("./app/query").Query}`',
+                    description: "Filters:\n\n- by item\n- by owner",
+                    optional: false,
+                    rest: false,
+                  },
+                ],
+                returns: {
+                  type: 'Promise<[import("./app/model").Item, import("./shared/model").Item]>',
+                  description: "Matching items.\n\n```ts\nconst [item] = result;\n```",
+                },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+    types: [
+      {
+        name: 'import("./app/query").Query',
+        definition:
+          '{ /** Use "import(\\"./x\\").Y" literally. */ id: "import(\\"./app/query\\").Query" }',
+        summary: "",
+        remarks: "",
+        examples: [],
+      },
+      ...["app", "shared"].map((folder) => ({
+        name: `import("./${folder}/model").Item`,
+        definition: "{ id: string }",
+        summary: "",
+        remarks: "",
+        examples: [],
+      })),
+    ],
+  });
+
+  const reference = presentServiceDocumentation(docs);
+  const [signature] = reference.entrypoints[0]?.methods[0]?.signatures ?? [];
+
+  expect(reference.types.map((type) => type.name)).toEqual([
+    "Query",
+    'import("./app/model").Item',
+    'import("./shared/model").Item',
+  ]);
+  expect(signature?.code).toBe(
+    'read<T extends Query = Query>(query: T | `import("./app/query").Query:${Query}`): ' +
+      'Promise<[import("./app/model").Item, import("./shared/model").Item]>',
+  );
+  expect(reference.types[0]?.definition).toBe(docs.types[0]?.definition);
+  expect(signature?.parameters[0]?.description).toContain("<li>by owner</li>");
+  expect(signature?.returns.description).toContain("<pre><code");
+  expect(reference.entrypoints[0]?.methods[0]?.throws).toHaveLength(2);
 });
 
 it("rejects oversized and mismatched artifact documentation and renders authored HTML as text", () => {

@@ -13,6 +13,12 @@
     font-weight: 600;
     margin-block: 1.5rem 0.75rem;
   }
+  .markdown > :global(:first-child) {
+    margin-top: 0;
+  }
+  .markdown > :global(:last-child) {
+    margin-bottom: 0;
+  }
   .markdown :global(h3),
   .markdown :global(h4) {
     font-weight: 600;
