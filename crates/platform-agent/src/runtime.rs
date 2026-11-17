@@ -59,7 +59,7 @@ pub fn configuration(
     app_domain: Option<&str>,
     app_https_port: u16,
 ) -> Result<Value> {
-    if release.protocol != 3 || release.auth != 1 || release.celld != "0.6.2" {
+    if release.protocol != 3 || release.auth != 1 || release.celld != "0.6.3-widefleet.1" {
         return Err(Error::invalid(
             "Unsupported runtime installation protocol or celld version".into(),
         ));
@@ -101,7 +101,7 @@ mod tests {
             auth: 1,
             protocol: 3,
             version: "1.0.0".into(),
-            celld: "0.6.2".into(),
+            celld: "0.6.3-widefleet.1".into(),
             workflows: None,
             cloudflare: None,
             main: "loader.js".into(),

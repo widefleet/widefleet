@@ -426,7 +426,7 @@ describe("Hosted infrastructure deployment coordination", () => {
     auth: 1,
     workflows: 1,
     cloudflare: 1,
-    celld: "0.6.2",
+    celld: "0.6.3-widefleet.1",
     version: "99.0.0",
     main: "loader.js",
     modules: [

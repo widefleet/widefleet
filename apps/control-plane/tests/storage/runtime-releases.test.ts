@@ -24,7 +24,7 @@ describe("Runtime installation with PostgreSQL and Azure Blob Storage", () => {
     protocol: 3,
     auth: 1,
     version: "99.0.0",
-    celld: "0.6.2",
+    celld: "0.6.3-widefleet.1",
     main: "loader.js",
     modules: [
       { name: "loader.js", source, sha256: createHash("sha256").update(source).digest("hex") },
