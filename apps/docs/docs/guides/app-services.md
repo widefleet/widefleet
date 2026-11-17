@@ -13,8 +13,9 @@ creation or collaboration permissions. To connect a caller, you must
 manage that app. The provider and caller must belong to the same organization.
 Organization administrators decide whether each API needs approval.
 
-For AI clients, see [MCP clients and service grants](/guides/mcp).
-MCP uses these published entrypoints with user and group permissions.
+For AI clients, see [MCP clients](/guides/mcp).
+MCP uses these published entrypoints with the same group rules as browser access
+to the app.
 
 ## Publish a service
 

@@ -1,17 +1,16 @@
 ---
 title: Connect AI clients with MCP
-description: Discover and call app services from an AI client using your existing service permissions.
+description: Discover and call app services from an AI client using your existing app access rules.
 lastModified: 2026-11-17
 ---
 
 Connect an MCP client to Widefleet to discover and call the app services available
 to your account. The gateway uses the services' existing entrypoints and method
-documentation, with user and company-group grants.
+documentation and the same company-group rules as browser access to each app.
 
 Use matching control-plane, app-runtime, agent and CLI releases. Native
 installations require the packaged celld `0.6.3-widefleet.1` runtime. Your client
-must support remote HTTP MCP and OAuth authorization with PKCE. Local workerd
-development processes do not enforce the CPU budget used by code mode.
+must support remote HTTP MCP and OAuth authorization with PKCE.
 
 ## Connect
 
@@ -35,8 +34,8 @@ OAuth grant for the MCP client rather than reusing the app's refresh token.
 
 After sign-in, the client exchanges its authorization code and can discover your
 services. The `mcp:services` scope covers service discovery and calls. The account's
-current service grants determine which entrypoints are available; administrator
-status alone does not grant access to a restricted service.
+app access rules determine which services are available; administrator status
+alone does not bypass an app's group restriction.
 
 The gateway exposes app services. Use Widefleet's UI, API or CLI for platform
 administration.
@@ -63,7 +62,7 @@ https://mcp.apps.example.com/oauth/callback/microsoft
 ```
 
 Google sign-in accepts configured Google Workspace identities. If an organization
-uses group grants, its login requests the Cloud Identity groups permission after
+uses Google groups for app access, its login requests the Cloud Identity groups permission after
 identifying the organization. The OAuth registration and company policy must
 permit that access.
 
@@ -78,69 +77,45 @@ registered `https://auth.APP_DOMAIN/oauth2/ORGANIZATION/callback` address. After
 changing login credentials, publish the app sign-in configuration again through
 the normal settings flow. [Sign-in configuration](/reference/social-sign-in) describes provider setup.
 
-## Grant service access
+## Choose who can use an app's services
 
-An administrator opens **App APIs**, selects a service, and opens its availability
-settings. **Everyone in this organization** makes its published entrypoints
-available to organization members, including through MCP. This requires an
-authenticated organization identity; it does not make the service public.
+Open the app in management and choose **Access → App access**. These are the
+same rules used when someone opens the app in a browser:
 
-With **Administrator approval required**, add individual users or company groups
-under **Users and groups**, selecting the entrypoint for each grant. Use the exact
-identity-provider URL and user subject, or the exact company group ID. Personal
-Widefleet accounts use the platform's `/api/auth` issuer and their Widefleet user
-ID. Company accounts use the configured provider's issuer and subject. The same
-service can grant `Reader` and `Writer` to different people.
+- An empty group list allows everyone admitted by the organization's sign-in.
+- A group list requires membership in at least one listed company group.
 
-The page distinguishes saved permissions from the revision active in the runtime.
-Pending changes need the normal deployment agent or hosted activation process to
-finish. Existing app-to-app grants remain separate from these user and group
-grants. [App services](/guides/app-services) explains publishing entrypoints,
-caller identity and private provider secrets.
+App owners and organization administrators can edit these rules. They apply to
+all published service entrypoints and methods, including methods that write data.
+There is no separate MCP permission list or per-entrypoint grant. Restrict app
+access before exposing services that should only be available to a specific group.
 
-To inspect user and group grants from the CLI:
+Use the existing CLI to inspect or replace the rules:
 
 ```sh
-widefleet services user-access inventory-api
+widefleet access show --app inventory
+widefleet access set --app inventory --group warehouse-readers
 ```
 
-To replace them, save the current revision and desired complete grant list in
-`service-access.json`. For example, when the current revision is `2`:
-
-```json
-{
-  "revision": 2,
-  "grants": [
-    {
-      "entrypoint": "Reader",
-      "users": [],
-      "groups": ["warehouse-readers"]
-    }
-  ]
-}
-```
-
-```sh
-widefleet services user-access inventory-api --file service-access.json
-```
-
-Use your provider's real group ID. A revision conflict means another change was
-saved; read the current grants and reconcile your changes before submitting again.
-The response includes the saved revision, applied revision and activation state.
+[App access](/reference/app-access) covers group IDs, activation, previews and the
+API. App-to-app connections continue to use their existing service approvals;
+those approvals do not determine a person's MCP access.
 
 ## Discover and call services
 
 The gateway exposes four tools:
 
-| Tool       | Purpose                                                 |
-| ---------- | ------------------------------------------------------- |
-| `search`   | Find service entrypoints available to your account.     |
-| `describe` | Read an entrypoint's published method documentation.    |
-| `call`     | Invoke a documented service method.                     |
-| `execute`  | Combine service calls in an isolated JavaScript worker. |
+| Tool       | Purpose                                                     |
+| ---------- | ----------------------------------------------------------- |
+| `search`   | Find service entrypoints available to your account.         |
+| `describe` | Read an entrypoint's published method documentation.        |
+| `call`     | Invoke a documented service method.                         |
+| `execute`  | Combine service calls in a confined JavaScript interpreter. |
 
 Use `search` with an optional `query`, following its `cursor` until it is `null`.
-Pass a returned `hostname` and `entrypoint` to `describe`. Descriptions come from
+Search results include short documentation excerpts; the query searches the full
+summary. Pass a returned `hostname` and `entrypoint` to `describe` for full
+signatures and documentation. Descriptions come from
 the active deployment; service authors do not need a separate MCP declaration.
 
 For a service exposing `Reader.status()`, the `call` arguments are:
@@ -175,14 +150,21 @@ const status = await tools.call({
 return { configured: status.configured };
 ```
 
-The worker exposes `tools.call` for service methods. Each subcall checks the token
-and current published service permissions. The script cannot access
+The interpreter exposes `tools.call` for service methods. Each subcall checks the
+token and the target app's current published group rules. The script cannot access
 platform credentials or the host environment, and direct network access is
-blocked. A called service retains its own configured external-network permissions.
+unavailable. A called service retains its own configured external-network permissions.
 
-A script is limited to 32 service calls, one second of CPU, 30 seconds elapsed
-execution and a 1 MiB JSON result. The code itself is limited to 32,768 characters.
-MCP request bodies and individual code-mode call bodies are limited to 1 MiB.
+Code mode supports a JavaScript subset, including async calls, loops and data
+transformations. It does not expose arbitrary imports, Node APIs, timers or
+`fetch`. Unsupported syntax returns an execution error. Scripts run inside the
+existing gateway; they do not create a Dynamic Worker for each execution. Normal
+runtime execution charges and the services' existing workers still apply.
+
+A script is limited to 32 service calls, 30 seconds elapsed execution and a 1 MiB
+JSON result. The interpreter has no separate per-script CPU or memory isolation;
+the gateway's runtime limits also apply. The code itself is limited to 32,768 characters.
+MCP request bodies and individual interpreted service-call inputs are limited to 1 MiB.
 Completed calls are not rolled back after a later failure or cancellation. Inspect
 any completed effects before retrying; Widefleet does not replay a failed script.
 
@@ -192,7 +174,7 @@ The data plane owns MCP authorization codes, client registrations, grants and
 tokens in its KV store. It verifies service permissions and executes calls there.
 Access tokens last at most five minutes and never outlive the verified company
 identity. Refreshing a token refreshes the upstream authorization and identity,
-including the company groups used for grants. If the provider no longer permits
+including the company groups used for app access. If the provider no longer permits
 renewal, reconnect from your MCP client.
 
 The configured common Google and Microsoft buttons and a valid app-session hint
@@ -210,28 +192,18 @@ Clients can use the OAuth revocation endpoint advertised in the authorization
 server metadata. Whether a client's disconnect button actually revokes a grant
 depends on that client. KV-backed revocation and permission changes take effect as
 they propagate; they are not guaranteed to become visible everywhere immediately.
-Removing the account's service grants prevents further service access once the
-updated configuration is active.
+Changing an app's groups restricts both browser and MCP access once the updated
+configuration is active.
 
-If a service is missing, check the connected organization, user or group grant and
+If a service is missing, check the connected organization, app group rules and
 active deployment. If `describe` has no method signatures for an existing service,
 redeploy it with the current CLI, management and agent releases. Deployment publishes
 the documentation alongside that service artifact; MCP reads the documentation for
-the active artifact, including after a rollback. For pending permissions, check the deployment agent and the
-activation error on the availability page. If saving permissions asks for a
-runtime update, install the matching app-runtime release: updating management and
-the agent does not replace an already active runtime. If sign-in fails, verify the
-registered callback addresses, published login configuration and provider permissions.
+the active artifact, including after a rollback. For pending access changes, check
+the deployment agent and the activation error under **Access → App access**.
+If sign-in fails, verify the registered callback addresses, published login
+configuration and provider permissions. A temporary publication failure during
+native startup is logged and leaves management available; save the sign-in
+settings again after restoring the runtime connection.
 
-## Service-grant administration API
-
-These routes use normal platform API credentials and organization selection.
-MCP resource tokens cannot be used as platform API tokens.
-
-| Method and path under `/api/v1`         | Purpose                                                   |
-| --------------------------------------- | --------------------------------------------------------- |
-| `GET /app-services/{appId}/user-access` | Inspect user and group grants as an administrator.        |
-| `PUT /app-services/{appId}/user-access` | Submit the current `revision` and complete `grants` list. |
-
-Use the installation's [OpenAPI document](/reference/api) for the current schemas.
 Discover a service and call a documented method to verify the complete connection.
