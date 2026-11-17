@@ -1,7 +1,6 @@
 import { authRoute, authRouteKey } from "@platform/auth-proxy/publication";
 import { sessionVersion } from "@platform/auth-proxy/configuration";
-import { mcpClaims, type serviceAccessSnapshot } from "@platform/contracts";
-import type { z } from "zod";
+import { mcpClaims } from "@platform/contracts";
 import type { ParentEnvironment } from "./types.ts";
 import { mcpAccess, mcpAuthorizationServer, readMcpCompanyConfiguration } from "./mcp-oauth.ts";
 
@@ -27,26 +26,6 @@ export const verifyMcpToken = async (environment: ParentEnvironment, token: stri
     exp: Math.min(verified.expiresAt, Math.floor(access.expiresAt / 1000)),
     mcp: { organizationId: access.organizationId, identity: access.identity },
   });
-};
-
-export const mayUseService = (
-  claims: z.infer<typeof mcpClaims>,
-  entrypoint: string,
-  access: z.infer<typeof serviceAccessSnapshot> | undefined,
-) => {
-  if (!claims.scope.split(" ").includes("mcp:services") || !access) return false;
-
-  if (access.mode === "organization") return true;
-  const grant = access.grants.find((candidate) => candidate.entrypoint === entrypoint);
-  const { identity } = claims.mcp;
-
-  return Boolean(
-    grant &&
-    (grant.users.some(
-      (user) => user.issuer === identity.issuer && user.subject === identity.subject,
-    ) ||
-      grant.groups.some((group) => identity.groups.includes(group))),
-  );
 };
 
 export const serviceRoute = async (environment: ParentEnvironment, hostname: string) => {

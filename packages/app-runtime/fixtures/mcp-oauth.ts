@@ -2,7 +2,7 @@ import { base64url } from "jose";
 import { z } from "zod";
 import { sessionVersion } from "@platform/auth-proxy/configuration";
 import { encodeMcpLogin, mcpLoginKey } from "@platform/auth-proxy/mcp-login";
-import { serviceAccessSnapshot } from "@platform/contracts";
+import { appAccessSnapshot } from "@platform/contracts";
 import { mcpAuthorizationServer, readMcpOrganization } from "../src/mcp-oauth.ts";
 import { mcpLoginRequest } from "../src/mcp-login.ts";
 import type { ParentEnvironment } from "../src/types.ts";
@@ -17,7 +17,7 @@ export const mcpFixture = async (
 
   if (path === "/mcp-setup") {
     const input = z
-      .object({ hostname: z.string(), appId: z.uuid(), access: serviceAccessSnapshot })
+      .object({ hostname: z.string(), appId: z.uuid(), access: appAccessSnapshot })
       .parse(await request.json());
 
     await environment.AUTH_CONFIG.put(
@@ -25,8 +25,7 @@ export const mcpFixture = async (
       JSON.stringify({
         organizationId: "widefleet",
         appId: input.appId,
-        access: { revision: 1, groups: [] },
-        serviceAccess: input.access,
+        access: input.access,
       }),
     );
 

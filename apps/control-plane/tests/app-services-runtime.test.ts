@@ -13,7 +13,7 @@ import { build } from "esbuild";
 import {
   publishedApp,
   appSecretPreparation,
-  serviceAccessSnapshot,
+  appAccessSnapshot,
   serviceDocumentation,
 } from "@platform/contracts";
 import { encodeConfiguration } from "@platform/auth-proxy/publication";
@@ -138,7 +138,7 @@ describe.runIf(process.env["RUN_SERVICE_TESTS"] === "1").each(["workerd", "celld
         | { key: string }
         | { identity: { appId: string; organizationId: string; hostname: string } }
         | { availability: "blocked" | "clear" | "unavailable" }
-        | { hostname: string; appId: string; access: z.infer<typeof serviceAccessSnapshot> }
+        | { hostname: string; appId: string; access: z.infer<typeof appAccessSnapshot> }
         | { subject: string; groups: string[] }
         | { token: string },
       headers: Record<string, string> = {},
@@ -207,7 +207,10 @@ export default { async fetch(request, env, ctx) {
   const url = new URL(request.url);
   try {
     const fixture = await mcpFixture(request,env,ctx); if(fixture) return fixture;
-    if(url.pathname === '/mcp' || url.pathname === '/.well-known/oauth-protected-resource/mcp') return runtime.fetch(new Request('https://mcp.apps.example.test'+url.pathname,request),env,ctx);
+    if(url.pathname === '/mcp' || url.pathname === '/.well-known/oauth-protected-resource/mcp') {
+      const loader={get:env.WIDEFLEET_LOADER.get.bind(env.WIDEFLEET_LOADER),load(){throw new Error('MCP must not create a dynamic worker for scripts');}};
+      return runtime.fetch(new Request('https://mcp.apps.example.test'+url.pathname,request),{...env,WIDEFLEET_LOADER:loader},ctx);
+    }
     if(url.pathname === '/workload-proof' || url.pathname === '/unconfigured-identity') {
       const {identity}=await request.json();
       const binding=url.pathname === '/workload-proof' ? ctx.exports.WorkloadIdentity : ctx.exports.UnconfiguredIdentity;
@@ -353,18 +356,8 @@ export default { async fetch(request, env, ctx) {
       expect(html).not.toContain('<link rel="stylesheet"');
     });
 
-    it("serves MCP and isolated code without a control plane, with user grants and revocation", async () => {
-      const access = serviceAccessSnapshot.parse({
-        revision: 1,
-        mode: "approval_required",
-        grants: [
-          {
-            entrypoint: "Reader",
-            users: [{ issuer: identityIssuer, subject: "alice" }],
-            groups: [],
-          },
-        ],
-      });
+    it("serves MCP and interpreted code without a control plane, using app groups and revocation", async () => {
+      const access = appAccessSnapshot.parse({ revision: 1, groups: ["readers"] });
 
       const setup = () =>
         request("/mcp-setup", {
@@ -373,7 +366,10 @@ export default { async fetch(request, env, ctx) {
           access,
         });
 
-      const issue = async (subject = "alice", groups: string[] = []) => {
+      const issue = async (
+        subject = "alice",
+        groups: string[] = subject === "alice" ? ["readers"] : [],
+      ) => {
         const response = await request("/mcp-issue", { subject, groups });
         expect(response.status, await response.clone().text()).toBe(200);
 
@@ -391,7 +387,7 @@ export default { async fetch(request, env, ctx) {
         const response = await (harness ? harness.fetch : fetch)(`${origin}/mcp`, {
           method: "POST",
           headers: {
-            authorization: `Bearer ${bearer}`,
+            authorization: `bEaReR ${bearer}`,
             "content-type": "application/json",
             accept: "application/json, text/event-stream",
             "mcp-protocol-version": "2025-06-18",
@@ -521,6 +517,19 @@ export default { async fetch(request, env, ctx) {
       );
 
       expect(denied.isError).toBe(true);
+      const hidden = await rpc("search", { query: service.hostname }, await issue("bob"));
+      expect(JSON.parse(hidden.content[0]?.text ?? "null")).toMatchObject({ services: [] });
+      expect(
+        (
+          await rpc(
+            "execute",
+            {
+              code: `return await tools.call(${JSON.stringify(service)});`,
+            },
+            await issue("bob"),
+          )
+        ).isError,
+      ).toBe(true);
 
       const nextDocs = {
         ...docs,
@@ -544,7 +553,7 @@ export default { async fetch(request, env, ctx) {
       expect(JSON.parse(called.content[0]?.text ?? "null")).toMatchObject({ version: "v1" });
 
       const executed = await rpc("execute", {
-        code: `const first = await tools.call(${JSON.stringify(service)}); return {version:first.version, credentials:typeof process.env.WIDEFLEET_CONTROL_TOKEN};`,
+        code: `const first = await tools.call(${JSON.stringify(service)}); return {version:first.version, credentials:typeof process};`,
       });
 
       expect(executed.isError, executed.content[0]?.text).not.toBe(true);
@@ -569,7 +578,7 @@ export default { async fetch(request, env, ctx) {
       );
       expect((await rpc("call", service, await issue("bob"))).isError).toBe(true);
       expect((await rpc("call", { ...service, method: "constructor" })).isError).toBe(true);
-      access.grants = [{ entrypoint: "Reader", users: [], groups: ["warehouse-readers"] }];
+      access.groups = ["warehouse-readers"];
       await setup();
       expect(
         (await rpc("call", service, await issue("bob", ["warehouse-readers"]))).isError,
@@ -577,37 +586,81 @@ export default { async fetch(request, env, ctx) {
       expect((await rpc("call", service, await issue("bob", ["warehouse-writers"]))).isError).toBe(
         true,
       );
-      access.grants = [];
+      access.groups = ["nobody"];
       await setup();
       expect((await rpc("call", service)).isError).toBe(true);
 
-      // Miniflare/workerd does not enforce CPU limits; the shipped native runtime does.
-      if (backend === "celld") {
-        expect((await rpc("execute", { code: "while (true) {}" })).isError).toBe(true);
-      }
-
-      access.mode = "organization";
+      access.groups = [];
       await setup();
       expect((await rpc("call", service, await issue("bob"))).isError).not.toBe(true);
 
-      // The trusted runtime must bound authorized calls even if the helper is bypassed.
-      if (backend === "celld") {
-        expect(
-          (
-            await rpc("execute", {
-              code: `for(let i=0;i<33;i++){ calls = 0; await tools.call(${JSON.stringify(service)}); } return true;`,
-            })
-          ).isError,
-        ).toBe(true);
+      const entrypoints = Array.from({ length: 32 }, (_, index) => `Service${index}`);
+
+      const largeDocs = serviceDocumentation.parse({
+        format: 1,
+        entrypoints: entrypoints.map((name) => ({
+          name,
+          summary: "x".repeat(7000) + "search-pagination-marker",
+          remarks: "",
+          examples: [],
+          http: false,
+          methods: [],
+        })),
+        types: [],
+      });
+
+      for (let index = 0; index < 12; index++) {
+        const id = crypto.randomUUID();
+        await publish(id, target("v1"), "v1", {
+          metadata: {
+            ...snapshot(id, target("v1")).metadata,
+            entrypoints,
+            service_documentation: largeDocs,
+          },
+        });
       }
+
+      const searchPage = z.object({
+        services: z.array(
+          z.object({ hostname: z.string(), entrypoint: z.string(), summary: z.string() }),
+        ),
+        cursor: z.string().nullable(),
+      });
+
+      const found = new Set<string>();
+      let cursor: string | null = null;
+      let pages = 0;
+
+      do {
+        const query = "search-pagination-marker";
+
+        const pageResult = await (cursor
+          ? rpc("search", { query, cursor })
+          : rpc("search", { query }));
+
+        expect(pageResult.isError, pageResult.content[0]?.text).not.toBe(true);
+        const page = searchPage.parse(JSON.parse(pageResult.content[0]?.text ?? "null"));
+
+        for (const entry of page.services) {
+          expect(entry.summary).toHaveLength(256);
+          found.add(`${entry.hostname}/${entry.entrypoint}`);
+        }
+
+        cursor = page.cursor;
+        expect(++pages).toBeLessThan(10);
+      } while (cursor);
+
+      expect(found.size).toBe(12 * 32);
+      expect(pages).toBeGreaterThan(1);
 
       const started = Date.now();
 
       const expired = await rpc("execute", {
-        code: "await new Promise(resolve => setTimeout(resolve, 60000)); return 'ran past deadline';",
+        code: "while (true) {}",
       });
 
       expect(expired.isError, expired.content[0]?.text).toBe(true);
+      expect(expired.content[0]?.text).toContain("TimeoutExceeded");
       expect(Date.now() - started).toBeLessThan(40_000);
 
       await request("/mcp-revoke", { token: accessToken });
@@ -726,11 +779,17 @@ export default { async fetch(request, env, ctx) {
     });
 
     it("admits concurrent cold service calls and streams fetch responses", async () => {
-      const responses = await Promise.all(Array.from({ length: 8 }, () => request("/read")));
+      const responses = await Promise.all(
+        Array.from({ length: 8 }, async () => {
+          const response = await request("/read");
+
+          return { status: response.status, body: await response.text() };
+        }),
+      );
 
       for (const response of responses) {
-        expect(response.status, await response.clone().text()).toBe(200);
-        expect(await response.json()).toEqual({ version: "v1", secret: "synthetic-one" });
+        expect(response.status, response.body).toBe(200);
+        expect(JSON.parse(response.body)).toEqual({ version: "v1", secret: "synthetic-one" });
       }
 
       expect(await (await request("/fetch")).text()).toBe("v1");

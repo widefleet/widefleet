@@ -1,7 +1,7 @@
-import { mcpServiceCall, type mcpClaims } from "@platform/contracts";
+import { mcpServiceCall, hasAppAccess, type mcpClaims } from "@platform/contracts";
 import type { z } from "zod";
 import { readApp, readServiceDocumentation } from "./catalog.ts";
-import { mayUseService, serviceRoute, verifyMcpToken } from "./mcp-authorization.ts";
+import { serviceRoute, verifyMcpToken } from "./mcp-authorization.ts";
 import { appWorker } from "./worker.ts";
 import { invokeApp } from "./app-rpc.ts";
 import { signAppCaller } from "./app-caller.ts";
@@ -19,7 +19,7 @@ const target = async (
   if (
     !route ||
     route.organizationId !== claims.mcp.organizationId ||
-    !mayUseService(claims, entrypoint, route.serviceAccess)
+    !hasAppAccess(route.access.groups, claims.mcp.identity.groups)
   )
     throw new Error("Service is unavailable or not permitted");
   const app = await readApp(environment, `hosts/${hostname}.json`);
@@ -41,7 +41,9 @@ export const searchMcpServices = async (
   query: string,
   cursor?: string,
 ) => {
-  const options: KVNamespaceListOptions = { prefix: "apps/", limit: 50 };
+  // At most 10 apps × 32 entrypoints with short excerpts fits the 1 MiB response
+  // limit even with JSON escaping. Search the full text; describe returns it.
+  const options: KVNamespaceListOptions = { prefix: "apps/", limit: 10 };
 
   if (cursor) options.cursor = cursor;
   const page = await environment.AUTH_CONFIG.list(options);
@@ -51,15 +53,18 @@ export const searchMcpServices = async (
       const hostname = name.slice("apps/".length);
       const route = await serviceRoute(environment, hostname);
 
-      if (!route || route.organizationId !== claims.mcp.organizationId) return [];
+      if (
+        !route ||
+        route.organizationId !== claims.mcp.organizationId ||
+        !hasAppAccess(route.access.groups, claims.mcp.identity.groups)
+      )
+        return [];
       const app = await readApp(environment, `hosts/${hostname}.json`);
 
       if (!app || app.appId !== route.appId || app.organizationId !== route.organizationId)
         return [];
 
-      const entrypoints = (app.metadata.entrypoints ?? []).filter((entrypoint) =>
-        mayUseService(claims, entrypoint, route.serviceAccess),
-      );
+      const entrypoints = app.metadata.entrypoints ?? [];
 
       if (!entrypoints.length) return [];
       const docs = await readServiceDocumentation(environment, app);
@@ -72,7 +77,7 @@ export const searchMcpServices = async (
         if (![hostname, entrypoint, summary].join(" ").toLowerCase().includes(query.toLowerCase()))
           return [];
 
-        return [{ appId: app.appId, hostname, entrypoint, summary }];
+        return [{ appId: app.appId, hostname, entrypoint, summary: summary.slice(0, 256) }];
       });
     }),
   );

@@ -44,3 +44,6 @@ export const appAccessState = appAccessStatus.extend({
   canManage: z.boolean(),
   previews: z.array(appAccessStatus.extend({ appId: z.uuid(), hostname: z.string() })),
 });
+
+export const hasAppAccess = (allowedGroups: readonly string[], userGroups: readonly string[]) =>
+  allowedGroups.length === 0 || allowedGroups.some((group) => userGroups.includes(group));

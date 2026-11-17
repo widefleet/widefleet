@@ -42,7 +42,7 @@ export const mcpRequest = async (
     );
   }
 
-  const token = request.headers.get("authorization")?.match(/^Bearer ([^\s]+)$/)?.[1] ?? "";
+  const token = request.headers.get("authorization")?.match(/^Bearer ([^\s]+)$/i)?.[1] ?? "";
   let claims;
 
   try {
@@ -104,7 +104,7 @@ export const mcpRequest = async (
         "execute",
         {
           description:
-            "Run JavaScript in an isolated worker. Use await tools.call({hostname,entrypoint,method,arguments}) and return JSON. No network or credentials. Limits: 32 calls, 1 second CPU, 30 seconds elapsed, 1 MiB result. Completed calls survive errors; never replay blindly.",
+            "Run a supported JavaScript subset in a confined interpreter. Use await tools.call({hostname,entrypoint,method,arguments}) and return JSON. No network or credentials. Limits: 32 calls, 30 seconds elapsed, 1 MiB result. Completed calls survive errors; never replay blindly.",
           inputSchema: { code: z.string().min(1).max(32768) },
         },
         async ({ code }) =>

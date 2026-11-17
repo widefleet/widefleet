@@ -31,9 +31,11 @@
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "1.2.4",
     "@modelcontextprotocol/server": "2.4.0",
+    "@opencode/codemode": "2.3.0",
     "@platform/auth-proxy": "workspace:*",
     "@platform/contracts": "workspace:*",
     "@platform/ui": "workspace:*",
+    "effect": "4.1.0",
     "jose": "6.2.10",
     "zod": "4.6.5"
   },
