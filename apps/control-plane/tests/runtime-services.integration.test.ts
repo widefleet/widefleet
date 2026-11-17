@@ -90,7 +90,11 @@ describe("Operator configuration and organization settings", () => {
       return new URL(z.object({ url: z.url() }).parse(await response.json()).url);
     };
 
-    expect((await startSignIn()).searchParams.get("client_id")).toBe(input.sso.oidcConfig.clientId);
+    const signIn = await startSignIn();
+    expect(signIn.searchParams.get("client_id")).toBe(input.sso.oidcConfig.clientId);
+    expect(signIn.searchParams.get("scope")?.split(" ")).toEqual(
+      expect.arrayContaining(["offline_access", "User.Read"]),
+    );
     input.sso.oidcConfig.clientId = "updated-organization-client";
     await environment.settings.initialize(
       input,

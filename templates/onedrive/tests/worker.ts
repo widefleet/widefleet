@@ -1,6 +1,6 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { z } from "zod";
-import App from "../src/app.ts";
+import App, { UserConnection } from "../src/app.ts";
 import type { OAuthBinding } from "../src/oauth.ts";
 import type { Environment, Properties } from "../src/context.ts";
 
@@ -24,32 +24,38 @@ interface TestEnvironment extends Omit<Environment, "WIDEFLEET_SECRETS"> {
   MICROSOFT_CLIENT_SECRET: string;
 }
 
+const testEnvironment = (ctx: ExecutionContext<Properties>, env: TestEnvironment): Environment => ({
+  ...env,
+  WIDEFLEET_OAUTH: {
+    request: async (input) => {
+      if (!env.TEST_OAUTH) return null;
+
+      if (!ctx.props.caller) throw new Error("Caller required");
+
+      return env.TEST_OAUTH.request(ctx.props.caller, input);
+    },
+  },
+  WIDEFLEET_SECRETS: {
+    get: async (name) => {
+      const value =
+        env[z.enum(["AUTH_SECRET", "MICROSOFT_CLIENT_ID", "MICROSOFT_CLIENT_SECRET"]).parse(name)];
+
+      if (!value) throw new Error("App secret is not configured");
+
+      return value;
+    },
+  },
+});
+
 export class TestApp extends App {
   constructor(ctx: ExecutionContext<Properties>, env: TestEnvironment) {
-    super(ctx, {
-      ...env,
-      WIDEFLEET_OAUTH: {
-        request: async (input) => {
-          if (!env.TEST_OAUTH) return null;
+    super(ctx, testEnvironment(ctx, env));
+  }
+}
 
-          if (!ctx.props.caller) throw new Error("Caller required");
-
-          return env.TEST_OAUTH.request(ctx.props.caller, input);
-        },
-      },
-      WIDEFLEET_SECRETS: {
-        get: async (name) => {
-          const value =
-            env[
-              z.enum(["AUTH_SECRET", "MICROSOFT_CLIENT_ID", "MICROSOFT_CLIENT_SECRET"]).parse(name)
-            ];
-
-          if (!value) throw new Error("App secret is not configured");
-
-          return value;
-        },
-      },
-    });
+export class TestUserConnection extends UserConnection {
+  constructor(ctx: ExecutionContext<Properties>, env: TestEnvironment) {
+    super(ctx, testEnvironment(ctx, env));
   }
 }
 
@@ -58,7 +64,7 @@ export default class Host extends WorkerEntrypoint<TestEnvironment> {
   override async fetch(request: Request) {
     const subject = request.headers.get("test-subject");
 
-    const app = this.ctx.exports.TestApp({
+    const options = {
       props: {
         caller: subject
           ? {
@@ -68,9 +74,21 @@ export default class Host extends WorkerEntrypoint<TestEnvironment> {
             }
           : null,
       },
-    });
+    };
+
+    const app = this.ctx.exports.TestApp(options);
+    const connection = this.ctx.exports.TestUserConnection(options);
 
     const path = new URL(request.url).pathname;
+
+    if (path === "/rpc/personal/status") return Response.json(await connection.status());
+
+    if (path === "/rpc/personal/prepare")
+      return Response.json(
+        await connection.prepare(z.object({ completionUrl: z.url() }).parse(await request.json())),
+      );
+
+    if (path === "/rpc/personal/disconnect") return Response.json(await connection.disconnect());
 
     if (path === "/rpc/status") return Response.json(await app.connectionStatus());
 

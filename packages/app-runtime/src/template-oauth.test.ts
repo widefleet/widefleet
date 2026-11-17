@@ -158,7 +158,7 @@ for (const [template, kind, prefix, profile] of [
 
       return {
         identity,
-        async request(path: string, method = "GET") {
+        async request(path: string, method = "GET", body?: string) {
           const url = new URL(path, origin);
 
           const worker = await runtime.getWorker(
@@ -168,6 +168,7 @@ for (const [template, kind, prefix, profile] of [
           const response = await (url.origin === origin
             ? runtime.dispatchFetch(url.href, {
                 method,
+                body: body ?? null,
                 redirect: "manual",
                 headers: {
                   origin,
@@ -178,6 +179,7 @@ for (const [template, kind, prefix, profile] of [
               })
             : worker.fetch(url.href, {
                 method,
+                body: body ?? null,
                 redirect: "manual",
                 headers: {
                   "test-subject": identity.subject,
@@ -223,6 +225,131 @@ for (const [template, kind, prefix, profile] of [
         .bind(Date.now() - 60000)
         .run();
     };
+
+    it.each(["none", "complete"] as const)(
+      "starts personal authorization directly and returns to Widefleet (%s credentials)",
+      async (custom) => {
+        await runtime.setOptions(configuration(custom));
+        const alice = browser("alice");
+        const completionUrl = "https://widefleet.example.test/connections?onboarding=1";
+        expect(await (await alice.request("/rpc/personal/status")).json()).toEqual({
+          setup: "ready",
+          connection: "disconnected",
+          account: null,
+        });
+
+        const prepared = await alice.request(
+          "/rpc/personal/prepare",
+          "POST",
+          JSON.stringify({ completionUrl }),
+        );
+
+        const launch = z
+          .object({ url: z.url(), expiresAt: z.iso.datetime() })
+          .parse(await prepared.json());
+
+        expect(Date.parse(launch.expiresAt)).toBeGreaterThan(Date.now());
+        expect((await browser("bob").request(launch.url)).status).toBe(410);
+        const opening = await alice.request(launch.url);
+        const html = await opening.text();
+        expect(opening.status, html).toBe(200);
+
+        const destination = z
+          .string()
+          .parse(/<a href="([^"]+)">/.exec(html)?.[1])
+          .replace(/&#(\d+);/g, (_, code: string) => String.fromCharCode(Number(code)));
+
+        expect(new URL(destination).searchParams.get("redirect_uri")).toBe(
+          custom === "complete"
+            ? `${origin}/auth/callback/${kind}`
+            : `https://oauth.example.test:25453/oauth/callback/${kind}`,
+        );
+        expect((await alice.request(launch.url)).status).toBe(410);
+        let callback = await alice.request(upstream.authorize(destination, "101"));
+        const relay = callback.headers.get("location");
+
+        if (relay?.includes("managed_state=")) callback = await alice.request(relay);
+        const returned = z.string().parse(callback.headers.get("location"));
+        expect(new URL(returned).pathname).toBe("/connect/complete");
+        expect((await browser("bob").request(returned)).status).toBe(410);
+        const returnedResponse = await alice.request(returned);
+        expect(returnedResponse.status, await returnedResponse.text()).toBe(303);
+        expect(returnedResponse.headers.get("location")).toBe(completionUrl);
+        expect((await alice.request(returned)).status).toBe(410);
+        expect(await (await alice.request("/rpc/personal/status")).json()).toMatchObject({
+          setup: "ready",
+          connection: "connected",
+          account: { id: "101" },
+        });
+        await runtime.setOptions(configuration("partial"));
+        expect(await (await alice.request("/rpc/personal/status")).json()).toMatchObject({
+          setup: "required",
+          connection: "connected",
+          account: { id: "101" },
+        });
+        await browser("bob").request("/rpc/personal/disconnect", "POST");
+        expect(await (await alice.request("/rpc/personal/status")).json()).toMatchObject({
+          connection: "connected",
+        });
+        await alice.request("/rpc/personal/disconnect", "POST");
+        expect(await (await alice.request("/rpc/personal/status")).json()).toMatchObject({
+          connection: "disconnected",
+          account: null,
+        });
+      },
+    );
+
+    it("rejects expired launch tickets and returns cancelled authorization to the original context", async () => {
+      const alice = browser("alice");
+      const completionUrl = "https://widefleet.example.test/connections?onboarding=1";
+
+      const prepare = async () =>
+        z
+          .object({ url: z.url() })
+          .parse(
+            await (
+              await alice.request(
+                "/rpc/personal/prepare",
+                "POST",
+                JSON.stringify({ completionUrl }),
+              )
+            ).json(),
+          ).url;
+
+      const expired = await prepare();
+      const db = await runtime.getD1Database("DB", "template");
+      await db
+        .prepare("UPDATE verification SET expiresAt = ? WHERE identifier LIKE 'widefleet:launch:%'")
+        .bind(new Date(Date.now() - 1).toISOString())
+        .run();
+      expect((await alice.request(expired)).status).toBe(410);
+      const opened = await alice.request(await prepare());
+      const html = await opened.text();
+
+      const destination = new URL(
+        z
+          .string()
+          .parse(/<a href="([^"]+)">/.exec(html)?.[1])
+          .replace(/&#(\d+);/g, (_, code: string) => String.fromCharCode(Number(code))),
+      );
+
+      const denied = new URL(z.string().parse(destination.searchParams.get("redirect_uri")));
+      denied.searchParams.set("state", z.string().parse(destination.searchParams.get("state")));
+      denied.searchParams.set("error", "access_denied");
+      let response = await alice.request(denied.href);
+
+      for (let redirects = 0; redirects < 4; redirects++) {
+        const location = response.headers.get("location");
+
+        if (!location || location.startsWith("https://widefleet.example.test/")) break;
+        response = await alice.request(location);
+      }
+
+      expect(response.headers.get("location")).toBe(`${completionUrl}&connectionError=1`);
+      expect(await (await alice.request("/rpc/personal/status")).json()).toMatchObject({
+        connection: "disconnected",
+      });
+    });
 
     it("uses the fixed callback, stores encrypted tokens locally and refreshes through the trusted binding", async () => {
       const alice = browser("alice");
@@ -346,6 +473,10 @@ for (const [template, kind, prefix, profile] of [
         for (const path of ["/rpc/status", "/rpc/list"])
           expect(await (await alice.request(path)).json()).toMatchObject({ status: "connected" });
         expect(await (await alice.request("/")).text()).toContain("connected</h1>");
+        expect(await (await alice.request("/rpc/personal/status")).json()).toMatchObject({
+          setup: "ready",
+          connection: "connected",
+        });
         expect(await db.prepare("SELECT * FROM account").first()).toEqual(saved);
         expect(
           await db

@@ -1,3 +1,5 @@
+import { createUserConnections } from "../src/lib/server/user-connections.ts";
+import { createAppUserIdentity } from "../src/lib/server/app-user-identity.ts";
 import { createAppSource } from "../src/lib/server/app-source.ts";
 import { organizationSettings } from "../src/lib/server/schema.ts";
 import { createAuthenticationAdmission } from "../src/lib/server/auth-admission.ts";
@@ -212,6 +214,16 @@ export const createTestEnvironment = async (
   await database.db.update(organizationSettings).set({ ssoRequired: true });
 
   return {
+    userConnections: createUserConnections(
+      database.db,
+      configuration,
+      createAppUserIdentity(
+        database.db,
+        configuration,
+        settings,
+        environment.PLATFORM_ENCRYPTION_KEY,
+      ),
+    ),
     source: createAppSource(database.db),
     configuration,
     application: {

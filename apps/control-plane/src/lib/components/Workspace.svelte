@@ -4,6 +4,7 @@
   import { afterNavigate } from "$app/navigation";
   import Layers2 from "@lucide/svelte/icons/layers-2";
   import LayoutGrid from "@lucide/svelte/icons/layout-grid";
+  import Link2 from "@lucide/svelte/icons/link-2";
   import Plug from "@lucide/svelte/icons/plug";
   import Users from "@lucide/svelte/icons/users";
   import Settings2 from "@lucide/svelte/icons/settings-2";
@@ -61,6 +62,7 @@
     { href: "/", label: "All apps", icon: Layers2 },
     { href: "/catalog", label: "App catalog", icon: LayoutGrid },
     { href: "/services", label: "App APIs", icon: Plug },
+    { href: "/connections", label: "My connections", icon: Link2 },
     { href: "/members", label: "Members", icon: Users },
     { href: "/agents", label: "Deployment agents", icon: Server },
     { href: "/settings", label: "Settings", icon: Settings2 },
@@ -114,8 +116,8 @@
 {#snippet navigationLinks()}
   <nav aria-label="Main navigation" class="space-y-1">
     {#each navigation as item, index (item.href)}
-      {#if index < 3 || (item.href === "/agents" ? principal.admin : principal.application.admin)}
-        {#if index === 3}<p
+      {#if index < 4 || (item.href === "/agents" ? principal.admin : principal.application.admin)}
+        {#if index === 4}<p
             class="text-muted-foreground px-3 pt-7 pb-2 text-[11px] font-medium tracking-wider uppercase"
           >
             Administration

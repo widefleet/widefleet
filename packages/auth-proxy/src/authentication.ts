@@ -3,7 +3,7 @@ import type { BetterAuthOptions } from "better-auth";
 import { betterAuth } from "better-auth/minimal";
 import { genericOAuth } from "better-auth/plugins/generic-oauth";
 import { z } from "zod";
-import { sessionVersion, type AuthConfiguration } from "./configuration.ts";
+import { sessionVersion, companyScopes, type AuthConfiguration } from "./configuration.ts";
 import { issuer, providerIdentity, proxyIdentity } from "./identity.ts";
 import { authorization, sessionRenewal } from "./renewal.ts";
 
@@ -115,19 +115,7 @@ export const createAuthentication = async (
                           hd: configuration.provider.domain,
                         }
                       : undefined,
-                  scopes: [
-                    ...new Set([
-                      "openid",
-                      "profile",
-                      "email",
-                      ...(configuration.provider.type === "google" ? [] : ["offline_access"]),
-                      ...(configuration.scopes ?? []).filter(
-                        (scope) =>
-                          configuration.provider.type !== "google" || scope !== "offline_access",
-                      ),
-                      ...(configuration.provider.type === "entra" ? ["User.Read"] : []),
-                    ]),
-                  ],
+                  scopes: companyScopes(configuration.provider, configuration.scopes),
                   getUserInfo: async (tokens) => {
                     if (!tokens.idToken) return null;
 

@@ -1,6 +1,4 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
-import { z } from "zod";
+import { runtimeManagementRequest } from "./runtime-management-node.ts";
 import { authControlPath } from "@platform/auth-proxy/publication";
 import { createInstalledAppSignIn } from "./app-sign-in-installed.ts";
 import type { Configuration } from "./config.ts";
@@ -15,27 +13,11 @@ export const createAppSignIn = (
     configuration,
     cookieSecret,
     async (path, method, body) => {
-      const key = z
-        .string()
-        .min(32)
-        .parse(
-          (
-            await readFile(join(configuration.PLATFORM_RUNTIME_DIRECTORY, "control-token"), "utf8")
-          ).trim(),
-        );
-
-      const options: RequestInit = {
+      const response = await runtimeManagementRequest(
+        configuration,
+        `${authControlPath}${path}`,
         method,
-        headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
-        redirect: "error",
-        signal: AbortSignal.timeout(15_000),
-      };
-
-      if (method === "PUT") options.body = body ?? null;
-
-      const response = await fetch(
-        new URL(`${authControlPath}${path}`, configuration.PLATFORM_APP_RUNTIME_URL),
-        options,
+        method === "PUT" ? body : undefined,
       );
 
       if (!response.ok) {

@@ -1,9 +1,14 @@
+import { sessionVersion } from "@platform/auth-proxy/configuration";
 import { build } from "esbuild";
 import { Miniflare, Request as WorkerRequest, Response as WorkerResponse } from "miniflare";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { publishedApp } from "@platform/contracts";
+import {
+  publishedApp,
+  userConnectionControlPath,
+  type userConnectionAction,
+} from "@platform/contracts";
 import { encodeConfiguration } from "@platform/auth-proxy/publication";
 import { expect, it } from "vitest";
 import { z } from "zod";
@@ -13,7 +18,7 @@ const root = new URL("../../../", import.meta.url);
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 
-it("connects through the real loader and refreshes OAuth through a consuming app's binding", async () => {
+const verifyRuntimeConnection = async (flow: "standalone" | "personal") => {
   const identity = await runtimeIdentity("apps.example.test", [], [], "bob");
   const controlToken = "synthetic-runtime-control-token-for-oauth-tests";
   const appId = crypto.randomUUID();
@@ -183,7 +188,7 @@ export default class Consumer extends WorkerEntrypoint {
           compatibility_date: "2026-10-01",
           compatibility_flags: ["nodejs_compat"],
           web: true,
-          entrypoints: ["default"],
+          entrypoints: id === appId ? ["default", "UserConnection"] : ["default"],
           assets: { binding: "ASSETS", upload_session: crypto.randomUUID() },
           bindings: id === appId ? [{ type: "d1", name: "DB", database_name: "github" }] : [],
         },
@@ -268,7 +273,72 @@ export default class Consumer extends WorkerEntrypoint {
     expect(await (await browser(consumerOrigin)).json()).toMatchObject({
       status: "connection_required",
     });
-    const started = await browser(`${origin}/connect`, "POST");
+
+    const invocation = {
+      organizationId: "widefleet",
+      appId,
+      hostname: new URL(origin).hostname,
+      identityVersion: await sessionVersion(identity.configuration),
+      identityExpiresAt: Date.now() + 300_000,
+      identity: {
+        issuer: z.object({ issuer: z.string() }).parse(identity.configuration.provider).issuer,
+        subject: "pairwise-subject",
+        name: "Example User",
+        groups: [],
+      },
+    };
+
+    const manage = (operation: z.infer<typeof userConnectionAction>, override = {}) =>
+      runtime.dispatchFetch(`${origin}${userConnectionControlPath}`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${controlToken}` },
+        body: JSON.stringify({ ...invocation, operation, ...override }),
+      });
+
+    expect(
+      (
+        await runtime.dispatchFetch(`${origin}${userConnectionControlPath}`, {
+          method: "POST",
+          body: JSON.stringify({ ...invocation, operation: { action: "status" } }),
+        })
+      ).status,
+    ).toBe(403);
+    expect((await manage({ action: "status" }, { identityVersion: "stale" })).status).toBe(409);
+    expect((await manage({ action: "status" }, { identityExpiresAt: Date.now() - 1 })).status).toBe(
+      401,
+    );
+    expect((await manage({ action: "status" }, { appId: consumerId })).status).toBe(404);
+    await auth.put(
+      `apps/${new URL(origin).hostname}`,
+      JSON.stringify({
+        organizationId: "widefleet",
+        appId,
+        access: { revision: 2, groups: ["restricted"] },
+      }),
+    );
+    expect((await manage({ action: "status" })).status).toBe(404);
+    await auth.put(
+      `apps/${new URL(origin).hostname}`,
+      JSON.stringify({ organizationId: "widefleet", appId, access: { revision: 3, groups: [] } }),
+    );
+    expect(await (await manage({ action: "status" })).json()).toEqual({
+      setup: "ready",
+      connection: "disconnected",
+      account: null,
+    });
+    let launch = `${origin}/connect`;
+
+    if (flow === "personal") {
+      const prepared = await manage({
+        action: "prepare",
+        completionUrl: "https://widefleet.example.test/connections?onboarding=1",
+      });
+
+      expect(prepared.status, await prepared.clone().text()).toBe(200);
+      launch = z.object({ url: z.url() }).parse(await prepared.json()).url;
+    }
+
+    const started = await browser(launch, flow === "personal" ? "GET" : "POST");
     const page = await started.text();
     expect(started.status, page).toBe(200);
 
@@ -293,7 +363,18 @@ export default class Consumer extends WorkerEntrypoint {
     const relayed = await browser(callback.href);
     expect(relayed.status).toBe(303);
     const returned = await browser(z.string().parse(relayed.headers.get("location")));
-    expect(returned.headers.get("location"), await returned.text()).toBe(`${origin}/`);
+    const completion = z.string().parse(returned.headers.get("location"));
+
+    if (flow === "personal")
+      expect((await browser(completion)).headers.get("location")).toBe(
+        "https://widefleet.example.test/connections?onboarding=1",
+      );
+    else expect(completion, await returned.text()).toBe(`${origin}/`);
+    expect(await (await manage({ action: "status" })).json()).toEqual({
+      setup: "ready",
+      connection: "connected",
+      account: { id: "101", label: "alice@example.test" },
+    });
     expect(await (await browser(consumerOrigin)).json()).toMatchObject({
       status: "connected",
       repositories: [],
@@ -326,8 +407,25 @@ export default class Consumer extends WorkerEntrypoint {
     });
 
     expect(anonymous.status).toBe(401);
+    await manage(
+      { action: "disconnect" },
+      { identity: { ...invocation.identity, subject: "bob" } },
+    );
+    expect(await (await manage({ action: "status" })).json()).toMatchObject({
+      connection: "connected",
+    });
+    expect(await (await manage({ action: "disconnect" })).json()).toEqual({ disconnected: true });
+    expect(await (await browser(consumerOrigin)).json()).toMatchObject({
+      status: "connection_required",
+    });
     expect(refreshes).toBe(2);
   } finally {
     await runtime.dispose();
   }
-}, 30000);
+};
+
+it.each(["standalone", "personal"] as const)(
+  "links and refreshes through the real loader (%s)",
+  verifyRuntimeConnection,
+  30000,
+);

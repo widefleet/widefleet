@@ -1,3 +1,4 @@
+import { mkdir } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 import { spawn } from "node:child_process";
 import { createServer, request as httpRequest } from "node:http";
@@ -20,6 +21,7 @@ import {
   artifacts,
   deployments,
   jobs,
+  organizationSettings,
 } from "../../src/lib/server/schema.ts";
 import { apiResource, cliClientId } from "../../src/lib/server/auth-options.ts";
 import { createTestEnvironment } from "../environment.ts";
@@ -3164,3 +3166,187 @@ for (const javaScriptEnabled of [true, false]) {
     });
   });
 }
+
+for (const javaScriptEnabled of [true, false])
+  test(`personal connections onboarding and account controls (javascript=${javaScriptEnabled})`, async ({
+    browser,
+  }) => {
+    const person = environment.users.createUser({
+      name: "Taylor Example",
+      email: `personal-${javaScriptEnabled}@example.test`,
+    });
+
+    await environment.users.saveUser(person);
+    await environment.linkMicrosoftUser(person.id);
+    await environment.database.db.update(organizationSettings).set({ ssoRequired: false });
+    await registerAppLogin(
+      environment.database.db,
+      environment.configuration,
+      environment.environment.PLATFORM_ENCRYPTION_KEY,
+      "widefleet",
+    );
+    const appIds: string[] = [];
+    const connected = new Set<string>();
+    let unavailable = false;
+
+    const context = await browser.newContext({
+      javaScriptEnabled,
+      baseURL: environment.configuration.PLATFORM_URL,
+      extraHTTPHeaders: { "x-forwarded-proto": "http" },
+    });
+
+    const login = await environment.users.login({ userId: person.id });
+    await context.addCookies(
+      login.cookies.map((cookie) => ({
+        ...cookie,
+        domain: "localhost",
+        secure: false,
+        sameSite: "Lax" as const,
+      })),
+    );
+
+    try {
+      for (const [slug, displayName] of [
+        ["personal-github", "GitHub"],
+        ["personal-files", "Microsoft OneDrive — Finance and Operations"],
+        ["personal-gmail", "Gmail"],
+      ] as const) {
+        const appId = crypto.randomUUID();
+        const artifactId = crypto.randomUUID();
+        const deploymentId = crypto.randomUUID();
+        appIds.push(appId);
+        await environment.database.db.insert(apps).values({
+          id: appId,
+          slug,
+          displayName,
+          hostname: `${slug}.apps.localhost`,
+          ownerId: environment.owner.id,
+          organizationId: "widefleet",
+          state: "active",
+          catalogListed: true,
+        });
+        await environment.database.db.insert(artifacts).values({
+          id: artifactId,
+          appId,
+          metadata: { entrypoints: ["default", "UserConnection"] },
+          modules: [],
+          manifest: {},
+        });
+        await environment.database.db.insert(deployments).values({
+          id: deploymentId,
+          appId,
+          artifactId,
+          status: "succeeded",
+          requestId: crypto.randomUUID(),
+        });
+        await environment.database.db
+          .update(apps)
+          .set({ activeDeploymentId: deploymentId })
+          .where(eq(apps.id, appId));
+      }
+
+      const github = z.string().parse(appIds[0]);
+      const files = z.string().parse(appIds[1]);
+      const gmail = z.string().parse(appIds[2]);
+      connected.add(files);
+      environment.authControl.userConnection((input) => {
+        expect(input.identity.subject).toBe(person.id);
+
+        if (unavailable && input.appId === files) return new Response(null, { status: 503 });
+
+        if (input.operation.action === "status")
+          return Response.json({
+            setup: input.appId === gmail ? "required" : "ready",
+            connection: connected.has(input.appId) ? "connected" : "disconnected",
+            account: connected.has(input.appId)
+              ? { id: "example-account", label: "taylor@example.test" }
+              : null,
+          });
+
+        if (input.operation.action === "disconnect") {
+          connected.delete(input.appId);
+
+          return Response.json({ disconnected: true });
+        }
+
+        connected.add(input.appId);
+
+        // Runtime and provider redirect correctness is covered with the real loader;
+        // the UI fixture completes the browser round trip at its approved return URL.
+        return Response.json({
+          url: input.operation.completionUrl,
+          expiresAt: new Date(Date.now() + 120_000).toISOString(),
+        });
+      });
+      const page = await context.newPage();
+      await page.goto("/");
+      await expect(page).toHaveURL(/\/connections\?onboarding=1$/);
+      await expect(page.getByRole("heading", { name: "Connect your accounts" })).toBeVisible();
+      await expect(
+        page.getByText("Your administrator needs to finish setting up this connector."),
+      ).toBeVisible();
+      await expect(page.getByText("Connected · taylor@example.test")).toBeVisible();
+
+      if (javaScriptEnabled) {
+        await mkdir("../../.local/personal-connections", { recursive: true });
+        await page.setViewportSize({ width: 1440, height: 1000 });
+        await page.screenshot({
+          path: "../../.local/personal-connections/desktop-light.png",
+          fullPage: true,
+        });
+        await page.emulateMedia({ colorScheme: "dark" });
+        await page.screenshot({
+          path: "../../.local/personal-connections/desktop-dark.png",
+          fullPage: true,
+        });
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.screenshot({
+          path: "../../.local/personal-connections/mobile-dark.png",
+          fullPage: true,
+        });
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+          true,
+        );
+        await page.emulateMedia({ colorScheme: "light" });
+        await page.screenshot({
+          path: "../../.local/personal-connections/mobile-light.png",
+          fullPage: true,
+        });
+      }
+
+      const githubRow = page
+        .locator("li")
+        .filter({ has: page.getByRole("heading", { name: "GitHub", exact: true }) });
+
+      await githubRow.getByRole("button", { name: "Connect GitHub" }).focus();
+      await page.keyboard.press("Enter");
+      await expect(githubRow.getByText("Connected · taylor@example.test")).toBeVisible();
+      expect(connected.has(github)).toBe(true);
+      await githubRow.getByRole("link", { name: "Disconnect GitHub" }).click();
+      await githubRow.getByRole("button", { name: "Disconnect account" }).click();
+      await expect(githubRow.getByRole("button", { name: "Connect GitHub" })).toBeVisible();
+      expect(connected.has(files)).toBe(true);
+      unavailable = true;
+      await page.getByRole("link", { name: "Refresh", exact: true }).click();
+      await expect(
+        page.getByText("Status unavailable. Try refreshing; your connection has not been removed."),
+      ).toBeVisible();
+      await page.getByRole("button", { name: "Continue to apps" }).click();
+      await expect(page).toHaveURL(/\/catalog$/);
+      await page.goto("/");
+      await expect(page).toHaveURL(environment.configuration.PLATFORM_URL + "/");
+      await page.goto("/connections?success=true");
+      await expect(githubRow.getByRole("button", { name: "Connect GitHub" })).toBeVisible();
+      await environment.database.db
+        .update(apps)
+        .set({ catalogListed: false })
+        .where(inArray(apps.id, appIds));
+      await page.reload();
+      await expect(page.getByText("No personal connections available")).toBeVisible();
+    } finally {
+      environment.authControl.userConnection(undefined);
+      await context.close();
+      await environment.database.db.delete(apps).where(inArray(apps.id, appIds));
+      await environment.database.db.update(organizationSettings).set({ ssoRequired: true });
+    }
+  });

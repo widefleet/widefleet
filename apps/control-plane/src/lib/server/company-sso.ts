@@ -1,3 +1,6 @@
+import type { BetterAuthPlugin } from "better-auth";
+import { createAuthMiddleware } from "better-auth/api";
+import { companyScopes } from "@platform/auth-proxy/configuration";
 import { sso } from "@better-auth/sso";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
@@ -117,5 +120,47 @@ export const companySsoPlugin = (
     };
   }
 
-  return plugin;
+  return {
+    ...plugin,
+    hooks: {
+      before: [
+        {
+          matcher: (context) => context.path === "/sign-in/sso",
+          handler: createAuthMiddleware(async (context) => {
+            const input = z
+              .looseObject({
+                providerId: z.string().optional(),
+                scopes: z.array(z.string()).optional(),
+              })
+              .parse(context.body);
+
+            if (!input.providerId) return;
+
+            const [provider] = await database
+              .select()
+              .from(ssoProvider)
+              .where(eq(ssoProvider.providerId, input.providerId));
+
+            if (!provider?.domainVerified || !provider.oidcConfig) return;
+
+            const config = oidcConfiguration.parse(
+              JSON.parse(await decryptSecret(encryptionKey, provider.oidcConfig)),
+            );
+
+            return {
+              context: {
+                body: {
+                  ...input,
+                  scopes: companyScopes(
+                    { type: z.enum(["entra", "google", "oidc"]).parse(provider.appIdentityType) },
+                    input.scopes ?? z.array(z.string()).optional().parse(config["scopes"]),
+                  ),
+                },
+              },
+            };
+          }),
+        },
+      ],
+    },
+  } satisfies BetterAuthPlugin;
 };

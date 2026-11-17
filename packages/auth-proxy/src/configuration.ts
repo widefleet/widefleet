@@ -45,7 +45,12 @@ export const authConfiguration = z
 
 export type AuthConfiguration = z.infer<typeof authConfiguration>;
 
-export const sessionVersion = async (configuration: AuthConfiguration) => {
+export const sessionVersion = async (
+  configuration: Pick<
+    AuthConfiguration,
+    "organizationId" | "provider" | "clientId" | "redirectUrl" | "domain" | "scopes"
+  >,
+) => {
   // Changing the identity source must invalidate identities issued by the old
   // provider. Rotating only its client secret does not change existing users.
   const source = JSON.stringify({
@@ -65,3 +70,18 @@ export const sessionVersion = async (configuration: AuthConfiguration) => {
     new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(source))),
   );
 };
+
+// Management sign-in and app sign-in must obtain the same identity evidence.
+export const companyScopes = (
+  provider: { type: z.infer<typeof companyProvider>["type"] },
+  scopes: string[] = [],
+) => [
+  ...new Set([
+    "openid",
+    "profile",
+    "email",
+    ...(provider.type === "google" ? [] : ["offline_access"]),
+    ...scopes.filter((scope) => provider.type !== "google" || scope !== "offline_access"),
+    ...(provider.type === "entra" ? ["User.Read"] : []),
+  ]),
+];

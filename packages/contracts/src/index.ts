@@ -11,6 +11,8 @@ import { serviceDocumentation } from "./service-documentation.ts";
 
 export * from "./mcp.ts";
 
+export * from "./user-connections.ts";
+
 import { organizationIdentifier } from "./organizations.ts";
 import { appAccessSnapshot } from "./app-access.ts";
 import { networkSnapshot } from "./network.ts";

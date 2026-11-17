@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { decodeJwt } from "jose";
 import { createAuthentication } from "./authentication.ts";
 import { type AuthConfiguration, sessionVersion } from "./configuration.ts";
 import { issuer } from "./identity.ts";
@@ -87,6 +88,70 @@ export const companyOAuth = async (configuration: AuthConfiguration) => {
   };
 
   return {
+    // The control plane owns its SSO account grant. Serialize this operation with
+    // account updates; persist rotation even when subsequent identity lookup fails.
+    account: async (
+      saved: z.infer<typeof companyTokens>,
+      subject: string,
+      persist: (tokens: z.infer<typeof companyTokens>) => Promise<void>,
+    ) => {
+      const claims = z
+        .object({
+          sub: z.string().min(1),
+          iss: z.string(),
+          exp: z.number(),
+          nonce: z.string().optional(),
+        })
+        .parse(decodeJwt(saved.idToken));
+
+      if (
+        claims.sub !== subject ||
+        claims.iss?.replace(/\/$/, "") !== issuer(configuration.provider)
+      )
+        throw new CompanySignInRequired("The company account no longer matches this sign-in");
+      let tokens = saved;
+
+      if (
+        Math.min(claims.exp * 1000, saved.accessTokenExpiresAt?.getTime() ?? Infinity) <=
+        Date.now() + 30_000
+      ) {
+        if (
+          !saved.refreshToken ||
+          !provider.refreshAccessToken ||
+          (saved.refreshTokenExpiresAt && saved.refreshTokenExpiresAt.getTime() <= Date.now())
+        )
+          throw new CompanySignInRequired("Sign in with your company account again");
+
+        const renewed = await provider
+          .refreshAccessToken(saved.refreshToken)
+          .catch((cause: unknown) => {
+            if (z.object({ error: z.literal("invalid_grant") }).safeParse(cause).success)
+              throw new CompanySignInRequired("Sign in with your company account again");
+            throw cause;
+          });
+
+        tokens = companyTokens.parse({
+          ...saved,
+          ...renewed,
+          idToken: renewed.idToken ?? saved.idToken,
+          refreshToken: renewed.refreshToken ?? saved.refreshToken,
+          refreshTokenExpiresAt: renewed.refreshTokenExpiresAt ?? saved.refreshTokenExpiresAt,
+          scopes: renewed.scopes?.length ? renewed.scopes : saved.scopes,
+        });
+        await persist(tokens);
+      }
+
+      const verified = await identify(tokens);
+
+      if (
+        verified.authorization.subject !== subject ||
+        (verified.authorization.nonce !== undefined &&
+          verified.authorization.nonce !== claims.nonce)
+      )
+        throw new CompanySignInRequired("The company account changed");
+
+      return verified;
+    },
     issuer: issuer(configuration.provider),
     version,
     identify: (tokens: z.infer<typeof companyTokens>, nonce: string) =>

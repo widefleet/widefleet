@@ -601,6 +601,28 @@ export const createApi = (runtime: Runtime) => {
       .route({ method: "GET", path: "/me" })
       .output(contract.currentUser)
       .handler(({ context }) => context.principal),
+    userConnections: read
+      .route({ method: "GET", path: "/user-connections" })
+      .output(z.array(contract.userConnectionEntry))
+      .handler(({ context }) =>
+        apiOperation(() => runtime.userConnections.list(context.principal)),
+      ),
+    prepareUserConnection: write
+      .route({ method: "POST", path: "/user-connections/{appId}/connect" })
+      .input(contract.userConnectionPrepareInput)
+      .output(contract.userConnectionLaunch)
+      .handler(({ context, input }) =>
+        apiOperation(() =>
+          runtime.userConnections.prepare(context.principal, input.appId, input.onboarding),
+        ),
+      ),
+    disconnectUserConnection: write
+      .route({ method: "DELETE", path: "/user-connections/{appId}" })
+      .input(contract.userConnectionInput)
+      .output(z.strictObject({ disconnected: z.literal(true) }))
+      .handler(({ context, input }) =>
+        apiOperation(() => runtime.userConnections.disconnect(context.principal, input.appId)),
+      ),
     catalog: read
       .route({ method: "GET", path: "/catalog" })
       .output(z.array(contract.catalogEntry))

@@ -22,6 +22,7 @@ mod services;
 mod settings;
 mod source;
 mod upload;
+mod user_connections;
 mod worker;
 mod workflows;
 
@@ -85,6 +86,8 @@ enum Command {
     Apps,
     /// Discover published apps and templates, or manage an app's catalog listing.
     Catalog(catalog::Options),
+    /// Manage your personal accounts for organization connectors.
+    Accounts(user_connections::Options),
     /// Search the connected company directory.
     Groups(groups::Options),
     /// Configure the selected organization (owner or administrator access required).
@@ -272,6 +275,7 @@ async fn run(args: Arguments) -> Result<()> {
         Command::Groups(options) => groups::run(&api, &token, options).await,
         Command::Members(options) => members::run(&api, &token, options).await,
         Command::Invitations(options) => members::invitations(&api, &token, options).await,
+        Command::Accounts(options) => user_connections::run(&api, &token, options).await,
         Command::Catalog(options) => catalog::run(&api, &token, options).await,
         Command::Whoami => print_json(
             &json::<Value>(api.authenticated(Method::GET, "/me", &token).send().await?).await?,
@@ -435,6 +439,7 @@ async fn main() {
         Command::Invitations(_) => "invitations",
         Command::Apps => "apps",
         Command::Catalog(_) => "catalog",
+        Command::Accounts(_) => "accounts",
         Command::Groups(_) => "groups",
         Command::Settings(_) => "settings",
         Command::Runtime(_) => "runtime",
