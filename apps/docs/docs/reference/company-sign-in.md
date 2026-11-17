@@ -176,9 +176,10 @@ when offboarding a person.
 
 ## OpenID Connect requirements
 
-App sign-in uses `openid profile email`. Entra and generic OIDC also request
-`offline_access`; Google uses `access_type=offline` with consent instead. Enable
-refresh tokens for the client. To keep users signed in while updating their
+Workspace and app sign-in use `openid profile email`. Providers other than Google
+also request `offline_access`. Google issuers, including generic OIDC configurations,
+use `access_type=offline` and `prompt=consent`. Enable refresh tokens for the client.
+To keep users signed in while updating their
 permissions, the provider must return a newly signed ID token with current
 identity and group claims on refresh. If it omits that token, users must sign
 in again.
