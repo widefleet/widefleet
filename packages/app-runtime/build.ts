@@ -76,7 +76,7 @@ await writeFile(
     protocol: 3,
     auth: 1,
     version,
-    celld: "0.6.2",
+    celld: "0.6.3-widefleet.1",
     workflows: 1,
     cloudflare: 1,
     main: "loader.js",

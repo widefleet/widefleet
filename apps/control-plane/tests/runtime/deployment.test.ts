@@ -713,7 +713,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     const pointer = await before.Body?.transformToString();
     await manageRuntime("/runtime", runtime);
     await expect(agent(undefined, undefined, binary)).rejects.toThrow(
-      "Publisher binary requires celld 0.6.2",
+      "Publisher binary requires celld 0.6.3-widefleet.1",
     );
 
     const after = await s3.send(
