@@ -1,22 +1,23 @@
 ---
 title: Connect apps
 description: Expose app APIs, connect callers and keep provider secrets private.
-lastModified: 2026-10-29
+lastModified: 2026-11-16
 ---
 
 An app can expose exported Worker entrypoints to other apps in its organization.
 It uses the same deployment, resources, networking and logs as any other app.
 Use a headless app when the service does not need browser access.
 
-Use Widefleet platform, CLI and runtime **0.5.0 or newer**. Publishing requires app
-creation or collaboration permissions; granting a connection requires organization
-administrator access. The provider and caller must belong to the same organization.
+Use Widefleet platform, CLI and runtime **0.7.1 or newer**. Publishing requires app
+creation or collaboration permissions. To connect a caller, you must
+manage that app. The provider and caller must belong to the same organization.
+Organization administrators decide whether each API needs approval.
 
 ## Publish a service
 
 In a Worker project, create `src/worker.ts`:
 
-```ts
+````ts
 import { WorkerEntrypoint } from "cloudflare:workers";
 
 type Environment = {
@@ -24,12 +25,21 @@ type Environment = {
 };
 
 export class Reader extends WorkerEntrypoint<Environment> {
+  /**
+   * Check whether this provider has an API token.
+   * @returns An object with `configured` set to true for a non-empty token.
+   * @throws If `API_TOKEN` has not been set.
+   * @example
+   * ```ts
+   * const status = await env.INVENTORY.status();
+   * ```
+   */
   async status() {
     const token = await this.env.WIDEFLEET_SECRETS.get("API_TOKEN");
     return { configured: token.length > 0 };
   }
 }
-```
+````
 
 Configure `wrangler.jsonc`:
 
@@ -62,9 +72,43 @@ RPC and `fetch()`. A default export or configured static assets enables the app 
 web apps can expose named service entrypoints alongside their browser UI.
 No Widefleet-specific properties belong in `wrangler.jsonc`.
 
+## Document service methods
+
+Add TSDoc comments to your exported `WorkerEntrypoint` classes and methods so
+callers and agents can understand how to use the API. Widefleet publishes the
+comments and TypeScript parameter and return types when you deploy the app.
+The `status()` example above includes a return description and a usage example.
+
+Start with a short description of what the method does. Add details as needed:
+
+| Tag                         | What to describe                                      |
+| --------------------------- | ----------------------------------------------------- |
+| `@param name - Description` | What an argument means and which values are accepted. |
+| `@returns`                  | What the caller receives.                             |
+| `@throws`                   | When the call can fail.                               |
+| `@example`                  | A call using the binding, in a fenced code block.     |
+| `@remarks`                  | Additional usage requirements.                        |
+| `@deprecated`               | What callers should use instead.                      |
+
+Keep types in TypeScript signatures. You can also document interfaces and their
+properties to explain the data your API accepts and returns.
+
+After deploying, open **App APIs**, then **View API documentation** on the
+provider app. To read the same information as JSON, run:
+
+```sh
+widefleet services describe inventory-api
+```
+
+The command accepts an app slug or UUID. The response includes methods, parameter
+and return types, descriptions and examples from the active deployment. Redeploy
+after editing comments; rolling back the app also restores its API documentation.
+
 ## Connect a caller
 
-From the caller's project, an organization administrator runs:
+For an API available to everyone in the organization, an app owner or collaborator
+runs the following from the caller's project. Organization administrators can
+also connect APIs that require approval:
 
 ```sh
 widefleet connect inventory-api --as INVENTORY --entrypoint Reader
@@ -75,8 +119,13 @@ Use `--app CALLER` to select a caller by slug or UUID outside its project. The
 target accepts a service catalog slug or UUID. Bindings default to the `default`
 entrypoint; the provider must export a default Worker handler or `WorkerEntrypoint` class.
 
-In the UI, browse **Services**, then open the caller app's **Connections** to
-select a service, entrypoint and binding name. The UI, CLI and API show the same
+In the UI, open **App APIs** and choose **Set up connection** for the provider.
+Choose an app you manage and continue to the connection settings. Select the API
+entrypoint, enter a binding name and choose **Connect API**. The result page shows
+whether the connection is saved, activating, active or needs attention.
+
+Starting from the caller app's **Connections → Browse app APIs** keeps that app
+selected and skips the app-selection step. The UI, CLI and API show the same
 desired and active grants.
 
 Call the binding from server-side app code:
@@ -136,8 +185,64 @@ but company sign-in cookies are filtered. App responses can set only host-scoped
 cookies and cannot overwrite company sign-in cookies. Keep OAuth state, callback
 user checks and CSRF protection in the app.
 
-The [Gmail app example](/guides/gmail-app) connects each user's personal Google
-account and shares that account across authorized calling apps.
+Find ready-made integrations in [App templates](/guides/app-templates), then
+connect the deployed app using the same flow.
+
+## API availability and connection requests
+
+APIs require administrator approval by default. An organization administrator can open the provider's
+**View API documentation → Manage availability** page and select **Everyone in
+this organization** to let app owners and collaborators connect their apps themselves.
+This setting covers connections to the provider's available entrypoints.
+Provider management permissions stay unchanged.
+
+The equivalent CLI commands are:
+
+```sh
+widefleet services access inventory-api --mode organization
+widefleet services access inventory-api --mode approval-required
+```
+
+Changing availability keeps existing connections. On the caller's **Connections**
+page, expand a binding and choose **Disconnect**, or use
+`widefleet disconnect INVENTORY --app CALLER` to remove a connection from a caller
+you manage.
+
+For a restricted API, choose **Set up connection** in the catalog and select the
+caller app. Choose the entrypoint and an unused binding name, then choose
+**Submit request**. The confirmation page shows the requested connection and
+explains that the app has no access until an administrator approves it. From the CLI:
+
+```sh
+widefleet connect inventory-api --app CALLER --as INVENTORY --entrypoint Reader --request
+widefleet services requests
+```
+
+Approval applies to the selected app, binding and entrypoint. Submitting the same
+pending request again returns the existing request. Each binding has at most one
+pending request.
+
+Open **App APIs → Connection requests** to see **Awaiting approval**, **Approved**
+or **Rejected**. Members see their own requests; organization administrators see
+all requests in the selected organization and can choose **Approve and connect**
+or **Reject**. CLI administrators use:
+
+```sh
+widefleet services requests
+widefleet services approve REQUEST_UUID
+widefleet services reject REQUEST_UUID
+```
+
+Approval rechecks the requester's current app permissions, the available API and
+the binding name before saving the connection. If these have changed, the request
+stays pending and the administrator sees an error. After restoring access or
+fixing the API, any organization administrator can retry approval. To change the
+requested settings, reject the stale request and submit a new one.
+
+**Approved** confirms the connection was saved. Wait for **Active** on the caller's
+**Connections** page or check `widefleet connections --app CALLER` before using the
+API. You can submit another request after a rejection. Personal OAuth sign-in to an
+external service remains separate from this approval.
 
 ## Activation and updates
 
@@ -145,6 +250,11 @@ Connections can be saved before the caller's first deployment. Otherwise the
 CLI waits for activation unless `--no-wait` is set. **Saved**, **pending**,
 **active** and **failed** describe grant activation independently of code updates.
 Retry a failed change by submitting it again and inspect `widefleet connections`.
+App owners and collaborators can retry an unchanged saved connection even when
+its provider requires approval. On the caller's **Connections** page, expand the
+binding and choose **Retry connection**, or repeat the original `widefleet connect`
+command. Changing its target or entrypoint still requires permission, and a
+removed connection cannot be restored using its old approval.
 
 Each new call resolves the provider's active app version. Calls already running
 retain their selected code and secret snapshot. A caller does not need to be
@@ -204,19 +314,37 @@ entrypoint or organization suspension. Confirm the target is deployed, the grant
 is active and the selected organization is correct. Hosted service calls use the
 operator's [`service` execution budget](/reference/configuration#dynamic-worker-execution-limits).
 
+### Missing API documentation
+
+Redeploy the app to publish its API documentation. If documentation is still
+missing, check the deploy command's warnings for missing source files or
+documentation that is too large to publish.
+
+For custom builds, enable source maps with embedded source content and keep each
+map at the location referenced by the generated Worker's `sourceMappingURL`.
+The supplied starters already preserve these maps. If parameter or return types
+are incomplete, check the project's TypeScript configuration and installed
+dependencies.
+
 ## API
 
 All routes use normal OAuth authentication and the selected organization.
 
-| Action                                           | Route                                                                                                 |
-| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
-| Discover available apps and entrypoints          | `GET /api/v1/app-services`                                                                            |
-| Inspect resources and active/desired connections | `GET /api/v1/apps/{appId}/connections`                                                                |
-| Inspect grants                                   | `GET /api/v1/apps/{appId}/bindings`                                                                   |
-| Grant one binding                                | `PUT /api/v1/apps/{appId}/bindings/{binding}` with `{ "app": "TARGET_UUID", "entrypoint": "Reader" }` |
-| Revoke one binding                               | `DELETE /api/v1/apps/{appId}/bindings/{binding}`                                                      |
-| List secret names and activation status          | `GET /api/v1/apps/{appId}/secrets`                                                                    |
-| Set a secret                                     | `PUT /api/v1/apps/{appId}/secrets/{secret}` with `{ "value": "..." }`                                 |
-| Delete a secret                                  | `DELETE /api/v1/apps/{appId}/secrets/{secret}`                                                        |
+| Action                                           | Route                                                                                                                                      |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Discover available apps and entrypoints          | `GET /api/v1/app-services`                                                                                                                 |
+| Read an active API description                   | `GET /api/v1/app-services/{slugOrAppId}`                                                                                                   |
+| Set API availability                             | `PUT /api/v1/app-services/{appId}/access` with `{ "accessMode": "organization" }` or `{ "accessMode": "approval_required" }`               |
+| Request a connection                             | `POST /api/v1/connection-requests` with `{ "appId": "CALLER_UUID", "app": "TARGET_UUID", "binding": "INVENTORY", "entrypoint": "Reader" }` |
+| List connection requests                         | `GET /api/v1/connection-requests`                                                                                                          |
+| Approve and connect                              | `POST /api/v1/connection-requests/{requestId}/approve`                                                                                     |
+| Reject a request                                 | `POST /api/v1/connection-requests/{requestId}/reject`                                                                                      |
+| Inspect resources and active/desired connections | `GET /api/v1/apps/{appId}/connections`                                                                                                     |
+| Inspect grants                                   | `GET /api/v1/apps/{appId}/bindings`                                                                                                        |
+| Grant one binding                                | `PUT /api/v1/apps/{appId}/bindings/{binding}` with `{ "app": "TARGET_UUID", "entrypoint": "Reader" }`                                      |
+| Revoke one binding                               | `DELETE /api/v1/apps/{appId}/bindings/{binding}`                                                                                           |
+| List secret names and activation status          | `GET /api/v1/apps/{appId}/secrets`                                                                                                         |
+| Set a secret                                     | `PUT /api/v1/apps/{appId}/secrets/{secret}` with `{ "value": "..." }`                                                                      |
+| Delete a secret                                  | `DELETE /api/v1/apps/{appId}/secrets/{secret}`                                                                                             |
 
 See the authenticated [OpenAPI document](/reference/api) for response schemas.

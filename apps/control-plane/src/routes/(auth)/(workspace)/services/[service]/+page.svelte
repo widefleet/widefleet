@@ -1,9 +1,12 @@
 <script lang="ts">
   import Markdown from "#shadcn/components/Markdown.svelte";
-  import { getServiceDescription } from "#lib/services.remote";
+  import { getAppServices, getServiceDescription } from "#lib/services.remote";
+  import { Button } from "#shadcn/components/ui/button/index.js";
   import type { PageData } from "./$types";
 
   let { data }: { data: PageData } = $props();
+
+  const catalog = $derived(await getAppServices());
 
   const service = $derived(await getServiceDescription({ service: data.service }));
 </script>
@@ -17,6 +20,12 @@
       Methods available in the app’s active deployment. Use the binding name configured in your
       app’s connections.
     </p>
+  </div>
+  <div class="flex flex-wrap gap-3">
+    <Button href={`/services/${service.appId}/connect`}>Set up connection</Button>
+    {#if catalog.admin}<Button variant="outline" href={`/services/${service.appId}/availability`}
+        >Manage availability</Button
+      >{/if}
   </div>
   {#if service.html}
     <article><Markdown html={service.html} /></article>

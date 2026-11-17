@@ -1,3 +1,5 @@
+import { workloadToken } from "@platform/app-runtime/workload";
+import { createLocalJWKSet, jwtVerify } from "jose";
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { once } from "node:events";
@@ -66,10 +68,12 @@ export default class Source extends WorkerEntrypoint {
   fetch(request) { return this.env.TARGET.fetch(request); }
   secret() { return this.env.WIDEFLEET_SECRETS.get('TOKEN'); }
   root() { return this.env.WIDEFLEET_SECRETS_KEY ?? null; }
+  async identity() { return {own: await this.env.WIDEFLEET_IDENTITY.getToken('data-api', {appId: '${targetId}', organizationId: 'forged'}), target: await this.env.TARGET.identity(), key: this.env.WIDEFLEET_CONTROL_TOKEN ?? null}; }
 }`;
 
 const target = (version: string) => `import {WorkerEntrypoint} from 'cloudflare:workers';
 export class Reader extends WorkerEntrypoint {
+  identity() { return this.env.WIDEFLEET_IDENTITY.getToken('other-api'); }
   async read() { return {version:${JSON.stringify(version)}, secret:await this.env.WIDEFLEET_SECRETS.get('TOKEN')}; }
   async slow() { await this.env.KV.put('started','yes'); while (!await this.env.KV.get('release')) await new Promise(resolve=>setTimeout(resolve,10)); return this.read(); }
   fetch() { return new Response(new ReadableStream({start(controller){controller.enqueue(new TextEncoder().encode(${JSON.stringify(version)}));controller.close();}})); }
@@ -127,6 +131,7 @@ describe.runIf(process.env["RUN_SERVICE_TESTS"] === "1").each(["workerd", "celld
         | { app: z.infer<typeof publishedApp>; source: string; assets: Record<string, string> }
         | z.infer<typeof appSecretPreparation>
         | { key: string }
+        | { identity: { appId: string; organizationId: string; hostname: string } }
         | { availability: "blocked" | "clear" | "unavailable" },
       headers: Record<string, string> = {},
     ) =>
@@ -175,12 +180,19 @@ describe.runIf(process.env["RUN_SERVICE_TESTS"] === "1").each(["workerd", "celld
         join(directory, "fixture.js"),
         `
 import * as workers from 'cloudflare:workers';
-import runtime, {AppService as Service} from './runtime.js'; export * from './runtime.js';
+import runtime, {AppService as Service, WorkloadIdentity as Identity} from './runtime.js'; export * from './runtime.js';
 ${executionRecorder}
 export class AppService extends Service { constructor(ctx, env) { super(ctx, recordExecution(env)); } }
+export class UnconfiguredIdentity extends Identity { constructor(ctx, env) { super(ctx, {...env,WIDEFLEET_WORKLOAD_ISSUER:undefined}); } }
 export default { async fetch(request, env, ctx) {
   const url = new URL(request.url);
   try {
+    if(url.pathname === '/workload-proof' || url.pathname === '/unconfigured-identity') {
+      const {identity}=await request.json();
+      const binding=url.pathname === '/workload-proof' ? ctx.exports.WorkloadIdentity : ctx.exports.UnconfiguredIdentity;
+      return Response.json(await binding({props:identity}).getToken('data-api'));
+    }
+    if(url.pathname.startsWith('/workload/')) return runtime.fetch(new Request((url.searchParams.get('origin') ?? 'https://auth.apps.example.test')+url.pathname),env,ctx);
     if(url.pathname === '/executions') return Response.json(executions);
     if(url.pathname === '/seed') {
       const {app,source,assets} = await request.json();
@@ -233,6 +245,7 @@ export default { async fetch(request, env, ctx) {
             WIDEFLEET_HTTP_AVAILABILITY: "kv",
             WIDEFLEET_CONTROL_TOKEN: token,
             WIDEFLEET_SECRETS_KEY: "ab".repeat(32),
+            WIDEFLEET_WORKLOAD_ISSUER: "https://auth.apps.example.test/workload",
             WIDEFLEET_CONFIGURATION: '{"crons":{},"queues":{}}',
           },
           worker_loaders: [{ binding: "WIDEFLEET_LOADER" }],
@@ -298,6 +311,115 @@ export default { async fetch(request, env, ctx) {
       if (directory) await rm(directory, { recursive: true, force: true });
     });
 
+    it("issues app and service tokens with public verification and no control plane, including concurrent cold calls", async () => {
+      const results = await Promise.all(
+        Array.from({ length: 4 }, async () => {
+          const response = await request("/identity");
+          expect(response.status, await response.clone().text()).toBe(200);
+
+          return z
+            .object({ own: workloadToken, target: workloadToken, key: z.null() })
+            .parse(await response.json());
+        }),
+      );
+
+      const response = await request("/workload/jwks");
+      expect(response.status).toBe(200);
+
+      const published = z
+        .object({
+          keys: z.array(
+            z.strictObject({
+              kty: z.literal("RSA"),
+              n: z.string(),
+              e: z.string(),
+              kid: z.string(),
+              alg: z.literal("RS256"),
+              use: z.literal("sig"),
+            }),
+          ),
+        })
+        .parse(await response.json());
+
+      expect(published.keys).toHaveLength(2);
+      const keys = createLocalJWKSet(published);
+      const issuer = "https://auth.apps.example.test/workload";
+      expect(
+        await (await request("/workload/.well-known/openid-configuration")).json(),
+      ).toMatchObject({
+        issuer,
+        jwks_uri: `${issuer}/jwks`,
+        id_token_signing_alg_values_supported: ["RS256"],
+      });
+
+      for (const result of results) {
+        const own = await jwtVerify(result.own.token, keys, {
+          issuer,
+          audience: "data-api",
+          algorithms: ["RS256"],
+        });
+
+        expect(own.payload).toMatchObject({
+          app_id: sourceId,
+          organization_id: "widefleet",
+          aud: "data-api",
+          sub: `organization:widefleet:app:${sourceId}`,
+          workload_type: "app",
+        });
+        expect(own.payload.exp! - own.payload.iat!).toBe(300);
+        expect(
+          (
+            await jwtVerify(result.target.token, keys, {
+              issuer,
+              audience: "other-api",
+              algorithms: ["RS256"],
+            })
+          ).payload,
+        ).toMatchObject({ app_id: targetId, organization_id: "widefleet" });
+        await expect(
+          jwtVerify(result.own.token, keys, { issuer, audience: "wrong-api" }),
+        ).rejects.toThrow();
+        await expect(
+          jwtVerify(result.own.token, keys, {
+            issuer: "https://platform.example.test/api/auth",
+            audience: "data-api",
+          }),
+        ).rejects.toThrow();
+        await expect(
+          jwtVerify(result.own.token, keys, {
+            issuer,
+            audience: "data-api",
+            currentDate: new Date((result.own.expiresAt + 1) * 1000),
+          }),
+        ).rejects.toThrow();
+      }
+    });
+
+    it("requires a configured issuer and the published app identity", async () => {
+      const identity = {
+        appId: sourceId,
+        organizationId: "widefleet",
+        hostname: `${sourceId}.apps.example.test`,
+      };
+
+      expect((await request("/workload-proof", { identity })).status).toBe(200);
+      expect((await request("/unconfigured-identity", { identity })).status).toBe(409);
+
+      for (const changes of [
+        { appId: targetId },
+        { organizationId: "other" },
+        { hostname: "unpublished.apps.example.test" },
+      ]) {
+        expect(
+          (await request("/workload-proof", { identity: { ...identity, ...changes } })).status,
+        ).toBe(409);
+      }
+
+      expect((await request("/workload/jwks?origin=https://unrelated.example.test")).status).toBe(
+        404,
+      );
+    });
+
     it("admits concurrent cold service calls and streams fetch responses", async () => {
       const responses = await Promise.all(Array.from({ length: 8 }, () => request("/read")));
 
@@ -352,6 +474,8 @@ export default { async fetch(request, env, ctx) {
         await request("/availability", { availability });
         expect((await request("/read")).status).toBe(409);
         expect((await request("/fetch")).status).toBe(409);
+        expect((await request("/identity")).status).toBe(409);
+        expect((await request("/workload/jwks")).status).toBe(200);
       }
 
       await request("/availability", { availability: "clear" });

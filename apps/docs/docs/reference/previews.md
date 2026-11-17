@@ -1,28 +1,38 @@
 ---
 title: Previews
 description: Preview names, flags, isolation, DNS and cleanup.
-lastModified: 2026-10-23
+lastModified: 2026-11-16
 ---
 
 Run these commands from an existing app project:
 
 ```sh
-# Use the current Git branch as the preview name.
+# Preview changes on a work branch.
+git switch -c review
 widefleet preview
 
-# Choose a stable name explicitly, including in CI with a detached HEAD.
+# Choose a name when source storage is disabled or unavailable.
 widefleet preview --name review
 ```
 
-On a standard installation, for an app at `notes.apps.example.com`, the second command deploys to `review.notes.apps.example.com`. The app is resolved from `name` in `wrangler.jsonc` and the selected platform URL. It must already be registered; a preview never creates or deploys the parent app. Use `--app NAME_OR_UUID` to choose another parent. Previews cannot themselves be preview parents.
+On a standard installation, a preview named `review` for `notes.apps.example.com` is available at `review.notes.apps.example.com`. The app is resolved from `name` in `wrangler.jsonc` and the selected platform URL. It must already be registered; a preview never creates or deploys the parent app. Use `--app NAME_OR_UUID` to choose another parent. Previews cannot themselves be preview parents.
 
 The command builds locally, creates or reuses the preview, uploads the build, waits for activation and prints the server-provided URL. Failed builds do not create previews. A name belonging to an unrelated app, a deleting app or a legacy preview at another hostname is rejected before uploading code.
 
 ## Names and repeated deployments
 
-Explicit names contain 1–48 lowercase letters, digits or internal hyphens. Git branch names are converted to lowercase DNS labels; changed names receive a hash suffix so branches such as `feature/login` and `feature-login` remain distinct. Without Git or on a detached HEAD, pass `--name` explicitly.
+Explicit names contain 1–48 lowercase letters, digits or internal hyphens. Git branch names are converted to lowercase DNS labels; changed names receive a hash suffix so branches such as `feature/login` and `feature-login` remain distinct. Without source storage, a detached checkout or a project without Git needs an explicit `--name`.
 
 Each preview has a stable app ID and an internal slug based on the parent slug and preview name. Long slugs are shortened with a hash suffix to fit the existing 48-character limit. This does not shorten the hostname. Deploying the same name again preserves its data and deployment history.
+
+When Widefleet saves source code, each preview uses its own work branch in the
+app's repository. The branch also determines the preview name; `--name` cannot
+override it. Use a branch other than `main`, which belongs to the main app.
+
+Switching branches selects that branch's preview. To update an existing preview
+with `widefleet deploy PREVIEW_ID`, check out its branch first. For a CI checkout
+without a local branch, pass `--source-branch BRANCH`.
+See [source code](/guides/source-code) for saving and recovering preview code.
 
 Manage access groups on the original app with `widefleet access set --group GROUP_ID`. Its previews inherit the rule and all later changes automatically. See [app access](/reference/app-access).
 
@@ -50,7 +60,7 @@ Use the URL returned by the server or CLI.
 `--config PATH`, `--skip-build`, `--no-wait` and `--json` have the same meaning as with `widefleet deploy`. JSON output includes the preview's `appId`, deployment status and URL. Build and progress logs go to stderr. With `--no-wait`, the result reports the queued deployment; activation follows asynchronously.
 
 ```sh
-widefleet preview --name review --json
+widefleet preview --json
 widefleet history PREVIEW_UUID
 widefleet delete PREVIEW_UUID --yes
 ```

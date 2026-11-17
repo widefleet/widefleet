@@ -1,6 +1,6 @@
 <script lang="ts">
   import { page } from "$app/state";
-  import { getAppDetails } from "#lib/apps.remote";
+  import { getAppDetails, getAppSource } from "#lib/apps.remote";
   import { getAppConnections } from "#lib/connections.remote";
   import type { manageWorkflow } from "#lib/workflows.remote";
   import { Button } from "#shadcn/components/ui/button/index.js";
@@ -45,22 +45,14 @@
 
   const refreshFailed = $derived(Boolean(details.error));
 
-  const tabs = [
-    { id: "overview", label: "Overview" },
-    { id: "deployments", label: "Deployments" },
-    { id: "connections", label: "Connections" },
-    { id: "workflows", label: "Workflows" },
-    { id: "secrets", label: "Secrets" },
-    { id: "access", label: "Access" },
-    { id: "settings", label: "App settings" },
-  ];
-
   const refresh = async () => {
     if (refreshing) return;
     refreshing = true;
 
     try {
       await details.refresh();
+
+      if (activeTab === "source") await getAppSource({ appId: route.appId }).refresh();
 
       if (activeTab === "connections") await getAppConnections({ appId: route.appId }).refresh();
     } catch {
@@ -105,6 +97,17 @@
       throw cause;
     }),
   );
+
+  const tabs = $derived([
+    { id: "overview", label: "Overview" },
+    { id: "deployments", label: "Deployments" },
+    ...(data.source.supported ? [{ id: "source", label: "Source" }] : []),
+    { id: "connections", label: "Connections" },
+    { id: "workflows", label: "Workflows" },
+    { id: "secrets", label: "Secrets" },
+    { id: "access", label: "Access" },
+    { id: "settings", label: "App settings" },
+  ]);
 </script>
 
 <svelte:head><title>{data.app.displayName} · Widefleet</title></svelte:head>

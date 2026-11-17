@@ -977,7 +977,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     expect(z.array(contract.app).parse(JSON.parse((await cli("apps")).stdout))).toHaveLength(1);
 
     const previewResult = contract.deployment
-      .extend({ url: z.url() })
+      .extend({ url: z.url(), source: contract.sourceRevision.nullable() })
       .parse(
         JSON.parse(
           (await cli("preview", "--name", "review", "--skip-build", "--no-wait", "--json")).stdout,
@@ -993,6 +993,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     expect(preview.parentId).toBe(app.id);
     expect(preview.hostname).toBe(`review.${app.hostname}`);
     expect(previewResult.url).toBe(preview.url);
+    expect(previewResult.source).toBeNull();
     await agent();
 
     const previewPage = await execute("docker", [

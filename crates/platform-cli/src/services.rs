@@ -1,5 +1,5 @@
 use crate::{app_bindings, apps, auth, deploy};
-use clap::{Args, Subcommand};
+use clap::{Args, Subcommand, ValueEnum};
 use platform_core::{
     Error, FailureReason, Result,
     http::{Api, json},
@@ -20,10 +20,36 @@ pub struct Catalog {
 enum CatalogCommand {
     /// Describe the methods and types in an app's active deployment.
     Describe { app: String },
+    /// Set who may connect to an API (organization administrators only).
+    Access {
+        app: String,
+        #[arg(long, value_enum)]
+        mode: AccessMode,
+    },
+    /// List your connection requests, or all requests as an administrator.
+    Requests,
+    /// Approve a request and submit its connection for activation.
+    Approve { request: Uuid },
+    /// Reject a pending connection request.
+    Reject { request: Uuid },
+}
+
+#[derive(Clone, Copy, ValueEnum, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum AccessMode {
+    ApprovalRequired,
+    Organization,
+}
+
+fn default_access_mode() -> AccessMode {
+    AccessMode::ApprovalRequired
 }
 
 #[derive(Args)]
 pub struct Connect {
+    /// Ask an administrator to approve this connection.
+    #[arg(long, conflicts_with = "no_wait")]
+    request: bool,
     target: String,
     #[arg(long = "as")]
     binding: String,
@@ -55,19 +81,62 @@ struct Service {
     slug: String,
     display_name: String,
     entrypoints: Vec<String>,
+    #[serde(default = "default_access_mode")]
+    access_mode: AccessMode,
+}
+
+fn resolve_service<'a>(entries: &'a [Service], target: &str) -> Result<&'a Service> {
+    let by_id = Uuid::parse_str(target)
+        .ok()
+        .and_then(|id| entries.iter().find(|entry| entry.app_id == id));
+    by_id
+        .or_else(|| entries.iter().find(|entry| entry.slug == target))
+        .ok_or_else(|| Error::invalid("Target app has no available service API".into()))
 }
 
 pub async fn catalog(api: &Api, credentials: &auth::Credentials, options: Catalog) -> Result<()> {
     let token = auth::access_token(api, credentials).await?;
-    if let Some(CatalogCommand::Describe { app }) = options.command {
-        let service = app_bindings::segment(&app)?;
-        let description: serde_json::Value = json(
-            api.authenticated(Method::GET, &format!("/app-services/{service}"), &token)
-                .send()
-                .await?,
-        )
-        .await?;
-        return crate::print_json(&description);
+    if let Some(command) = options.command {
+        let request = match command {
+            CatalogCommand::Describe { app } => {
+                let service = app_bindings::segment(&app)?;
+                api.authenticated(Method::GET, &format!("/app-services/{service}"), &token)
+            }
+            CatalogCommand::Access { app, mode } => {
+                let entries: Vec<Service> = json(
+                    api.authenticated(Method::GET, "/app-services", &token)
+                        .send()
+                        .await?,
+                )
+                .await?;
+                let target = resolve_service(&entries, &app)?;
+                api.authenticated(
+                    Method::PUT,
+                    &format!("/app-services/{}/access", target.app_id),
+                    &token,
+                )
+                .json(&serde_json::json!({ "accessMode": mode }))
+            }
+            CatalogCommand::Requests => {
+                api.authenticated(Method::GET, "/connection-requests", &token)
+            }
+            CatalogCommand::Approve { request } => api
+                .authenticated(
+                    Method::POST,
+                    &format!("/connection-requests/{request}/approve"),
+                    &token,
+                )
+                .json(&serde_json::json!({})),
+            CatalogCommand::Reject { request } => api
+                .authenticated(
+                    Method::POST,
+                    &format!("/connection-requests/{request}/reject"),
+                    &token,
+                )
+                .json(&serde_json::json!({})),
+        };
+        let result: serde_json::Value = json(request.send().await?).await?;
+        return crate::print_json(&result);
     }
     let entries: Vec<Service> = json(
         api.authenticated(Method::GET, "/app-services", &token)
@@ -86,10 +155,16 @@ pub async fn connect(api: &Api, credentials: &auth::Credentials, options: Connec
             .await?,
     )
     .await?;
-    let target = entries
-        .iter()
-        .find(|app| app.slug == options.target || app.app_id.to_string() == options.target)
-        .ok_or_else(|| Error::invalid("Target app has no available service API".into()))?;
+    let target = resolve_service(&entries, &options.target)?;
+    if options.request {
+        app_bindings::segment(&options.binding)?;
+        let app = options.source.resolve(api, credentials).await?;
+        let request: serde_json::Value = json(api.authenticated(Method::POST, "/connection-requests", &token)
+            .json(&serde_json::json!({
+                "appId": app, "app": target.app_id, "binding": options.binding, "entrypoint": options.entrypoint,
+            })).send().await?).await?;
+        return crate::print_json(&request);
+    }
     app_bindings::change_binding(
         api,
         credentials,

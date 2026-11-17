@@ -128,6 +128,6 @@ The starter checks authored TypeScript and Svelte sources. JavaScript checking i
 
 ## CI and releases
 
-The [check workflow](../.github/workflows/check.yaml) and its [reusable suites](../.github/workflows/check-suites.yaml) define required verification. PR jobs receive read-only cache access; only checks triggered by pushes to `main` can save caches. Test jobs use disposable services and synthetic fixtures.
+The [PR check workflow](../.github/workflows/check.yaml) and [main check/publication workflow](../.github/workflows/publish-cli.yaml) share the same [reusable suites](../.github/workflows/check-suites.yaml). Main publication reuses their tested native CLI artifacts, so the platform matrix runs once per push. PR jobs receive read-only cache access; only checks triggered by pushes to `main` can save caches. Test jobs use disposable services and synthetic fixtures.
 
 For publication and recovery, follow [CLI releases](cli-releases.md), [container releases](container-releases.md) or [runtime releases](runtime-releases.md). For website changes, use [documentation site maintenance](documentation-site.md).

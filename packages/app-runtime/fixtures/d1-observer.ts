@@ -11,6 +11,8 @@ export { Database } from "../src/storage.ts";
 
 export { AppSecrets } from "../src/app-secrets.ts";
 
+export { WorkloadIdentity } from "../src/workload-identity.ts";
+
 export { Assets } from "../src/assets.ts";
 
 export { Gateway } from "../src/egress.ts";
