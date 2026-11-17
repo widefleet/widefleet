@@ -1955,7 +1955,9 @@ test("refreshes queued rollbacks and distinguishes pending requests from accepte
     });
   }
 
-  await page.goto(`/apps/${record.id}/deployments`);
+  // This scenario asserts the enhanced form's pending state. Wait for the client
+  // scripts so a fast click cannot submit the server-rendered HTML fallback.
+  await page.goto(`/apps/${record.id}/deployments`, { waitUntil: "networkidle" });
   const rollback = page.getByRole("button", { name: "Restore version", exact: true });
   const requestId = await page.locator('input[name^="requestId/"]').first().inputValue();
   let release: (() => void) | undefined;
