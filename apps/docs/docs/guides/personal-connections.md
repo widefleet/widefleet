@@ -17,25 +17,26 @@ connections. The control plane and app runtime must both support the
 1. Select the organization you want to use and open **My connections**.
 2. Choose **Connect** beside a connector. Its provider opens in the same tab.
 3. Select your provider account and approve the requested access.
-4. When you return to Widefleet, check the account shown beside **Connected**.
+4. When you return to Widefleet, check the account name or email shown beneath the connector.
 
 Widefleet reads the status from the connector after you return. Closing or
 cancelling authorization does not create a connection. A connector can show
-**Status unavailable** when it cannot be reached; this does not mean your account
-was disconnected. Use **Refresh** to check again.
+**Could not check this account** when it cannot be reached; this does not mean your
+account was disconnected. Use **Try again** to check its status.
 
 Members enter this flow when opening the workspace, including after accepting
-an invitation, if accessible connectors are available and they have not completed
+an invitation, if accessible connectors are ready to connect and they have not completed
 this step in the current browser. Owners and administrators keep their normal
 workspace entry. Choose **Continue to apps** to skip any remaining accounts.
 This choice is remembered separately for each account and organization in browser
 cookies. Switching between them preserves each choice; another browser can show
 the step again. **My connections** remains available afterward.
 
-Choose **Reconnect** on a saved account to repeat authorization, for example to
-grant missing permissions. You do not need to delete the saved connection first.
+Open the **…** account options beside a saved account and choose **Reconnect** to
+repeat authorization, for example to grant missing permissions. You do not need
+to delete the saved connection first.
 
-To remove your account, choose **Disconnect**, then **Disconnect account**.
+To remove your account, open **…**, choose **Disconnect**, then **Disconnect account**.
 Apps that use this connector on your behalf lose access until you connect again.
 For the included templates, this removes credentials from the connector; you
 can separately revoke the application's approval in your provider settings.
@@ -52,8 +53,9 @@ and export `UserConnection`. Preview deployments do not appear. Its existing
 [app access rules](/reference/app-access) decide which members can use it.
 No separate template registration is needed.
 
-If provider credentials are unavailable, members see that administrator setup is
-required. The GitHub, Gmail and OneDrive templates support both operator-provided
+If provider credentials are unavailable, **My connections** shows **Awaiting
+administrator setup**. These connectors are omitted from onboarding until setup
+is ready. The GitHub, Gmail and OneDrive templates support both operator-provided
 OAuth credentials, where configured, and the connector's own credentials. This
 feature does not change provider verification or consent requirements.
 
@@ -137,13 +139,13 @@ The corresponding endpoints are `GET /api/v1/user-connections`,
 
 ## Recover a connection
 
-- **Administrator setup required:** ask the connector administrator to finish
+- **Awaiting administrator setup:** ask the connector administrator to finish
   provider configuration. A saved account is retained while setup is incomplete.
 - **Sign in with your company account again:** follow **Sign in**, then return
   to **My connections**. Widefleet needs a valid company identity to apply the
   same user mapping and access checks as ordinary app requests.
-- **Status unavailable:** refresh after the connector or company directory
-  becomes reachable. Do not disconnect an account to fix a temporary outage.
+- **Could not check this account:** choose **Try again** after the connector or
+  company directory becomes reachable. Do not disconnect an account to fix a temporary outage.
 - **Connection link expired or already used:** return to **My connections** and
   choose **Connect** again. A link cannot be shared with another member.
 
