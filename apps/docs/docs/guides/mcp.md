@@ -214,7 +214,10 @@ Removing the account's service grants prevents further service access once the
 updated configuration is active.
 
 If a service is missing, check the connected organization, user or group grant and
-active deployment. For pending permissions, check the deployment agent and the
+active deployment. If `describe` has no method signatures for an existing service,
+redeploy it with the current CLI, management and agent releases. Deployment publishes
+the documentation alongside that service artifact; MCP reads the documentation for
+the active artifact, including after a rollback. For pending permissions, check the deployment agent and the
 activation error on the availability page. If saving permissions asks for a
 runtime update, install the matching app-runtime release: updating management and
 the agent does not replace an already active runtime. If sign-in fails, verify the
