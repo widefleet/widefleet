@@ -76,6 +76,7 @@ export const mcpFixture = async (
         origin: issuer,
         platformUrl: "https://platform.example.test",
         google: { clientId: "local-client", clientSecret: "synthetic-client-secret" },
+        microsoft: { clientId: "local-client", clientSecret: "synthetic-client-secret" },
       }),
     );
 
