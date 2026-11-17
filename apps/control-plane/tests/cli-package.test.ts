@@ -168,43 +168,58 @@ describe.runIf(process.env["RUN_CLI_PACKAGE_TESTS"] === "1")(
       }
     }, 60_000);
 
-    it("installs only the matching native package without scripts and builds an independent starter", async () => {
-      // Keep subprocess progress visible even when the outer test times out.
-      // Otherwise a stalled install, check or build only reports this test's name.
-      const runPackageCommand = (args: string[], cwd = directory, env = environment) => {
-        console.info(`[cli-package] ${basename(cwd)}: pnpm ${args.join(" ")}`);
-        const command = runPnpm(args, cwd, env);
-        command.child.stdout?.pipe(process.stdout);
-        command.child.stderr?.pipe(process.stderr);
+    // Each starter performs its own install/check/build/deploy round trip. A shared
+    // timeout made two healthy runs fail together on slower native runners.
+    for (const template of ["sveltekit", "tanstack-start"])
+      it(`installs only the matching native package without scripts and builds an independent ${template} starter`, async ({
+        signal,
+      }) => {
+        // Keep subprocess progress visible even when the outer test times out.
+        // Otherwise a stalled install, check or build only reports this test's name.
+        const runPackageCommand = async (args: string[], cwd = directory, env = environment) => {
+          console.info(`[cli-package] ${basename(cwd)}: pnpm ${args.join(" ")}`);
+          const command = runPnpm(args, cwd, env, signal);
+          command.child.stdout?.pipe(process.stdout);
+          command.child.stderr?.pipe(process.stderr);
 
-        return command;
-      };
+          // An abort rejects before the process exits. Finish termination before
+          // the test removes files that its package command could still use.
+          const closed = new Promise<void>((resolve) => {
+            command.child.once("close", () => resolve());
+          });
 
-      await runPackageCommand(
-        [
-          `--config.global-dir=${join(directory, "global packages")}`,
-          "add",
-          "--registry",
-          registry.url,
-          "--global",
-          "--ignore-scripts",
-          "--store-dir",
-          join(directory, "store"),
-          `widefleet@${version}`,
-        ],
-        directory,
-        environment,
-      );
-      expect([...new Set(registry.downloads)].sort()).toEqual(
-        [`widefleet-${version}.tgz`, `widefleet-${platform.name}-${version}.tgz`].sort(),
-      );
+          try {
+            return await command;
+          } finally {
+            await closed;
+          }
+        };
 
-      const run = (...args: string[]) => runPackageCommand(["exec", "widefleet", ...args]);
+        await runPackageCommand(
+          [
+            `--config.global-dir=${join(directory, "global packages")}`,
+            "add",
+            "--registry",
+            registry.url,
+            "--global",
+            "--ignore-scripts",
+            "--store-dir",
+            join(directory, "store"),
+            `widefleet@${version}`,
+          ],
+          directory,
+          environment,
+        );
+        expect([...new Set(registry.downloads)].sort()).toEqual(
+          [`widefleet-${version}.tgz`, `widefleet-${platform.name}-${version}.tgz`].sort(),
+        );
 
-      expect((await run("--version")).stdout.trim()).toBe(`widefleet ${version}`);
+        const run = (...args: string[]) => runPackageCommand(["exec", "widefleet", ...args]);
 
-      for (const template of ["sveltekit", "tanstack-start"]) {
+        expect((await run("--version")).stdout.trim()).toBe(`widefleet ${version}`);
+
         const project = join(directory, `${template} app with spaces`);
+        const previousUploads = uploads;
 
         try {
           await run("init", project, ...(template === "sveltekit" ? [] : ["--template", template]));
@@ -247,17 +262,16 @@ describe.runIf(process.env["RUN_CLI_PACKAGE_TESTS"] === "1")(
             status: "queued",
             url: "https://fixture.example.test",
           });
-          expect(uploads).toBe(template === "sveltekit" ? 1 : 2);
+          expect(uploads).toBe(previousUploads + 1);
         } finally {
           // Remove each dependency tree here; deleting both can exceed the Windows hook timeout.
           await rm(project, { recursive: true, force: true });
         }
-      }
 
-      await expect(
-        run("init", join(directory, "invalid template"), "--template", "unknown"),
-      ).rejects.toThrow("invalid value");
-    }, 180_000);
+        await expect(
+          run("init", join(directory, "invalid template"), "--template", "unknown"),
+        ).rejects.toThrow("invalid value");
+      }, 180_000);
 
     // Node's signal API cannot emulate console Ctrl+C on Windows.
     it.skipIf(process.platform === "win32").each(["SIGINT", "SIGTERM"] as const)(
