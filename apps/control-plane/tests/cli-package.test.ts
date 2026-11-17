@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { basename, delimiter, join, resolve } from "node:path";
@@ -372,10 +372,11 @@ describe.runIf(process.env["RUN_CLI_PACKAGE_TESTS"] === "1")(
     it("explains missing optional dependencies without downloading binaries at launch", async () => {
       const source = resolve(process.env["CLI_PACKAGE_DIR"] ?? ".local/releases");
       const extracted = join(directory, "missing dependency");
+      const archive = `widefleet-${version}.tgz`;
       await mkdir(extracted);
-      await execute("tar", ["-xzf", `widefleet-${version}.tgz`, "-C", extracted], {
-        cwd: source,
-      });
+      // Windows runners may select MSYS tar, which cannot use native absolute paths.
+      await copyFile(join(source, archive), join(extracted, archive));
+      await execute("tar", ["-xzf", archive], { cwd: extracted });
 
       const failure = await execute(
         process.execPath,
