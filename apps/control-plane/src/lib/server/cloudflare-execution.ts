@@ -1,4 +1,4 @@
-import { validateServiceAccessChange } from "./service-user-access.ts";
+import { applyServiceAccessChange, validateServiceAccessChange } from "./service-user-access.ts";
 import { createCloudflareRemoval } from "./cloudflare-removal-admission.ts";
 import { validateAppQueues } from "./cloudflare-app-package.ts";
 import { createCloudflareRuntimeReleases } from "./cloudflare-runtime-releases.ts";
@@ -221,11 +221,22 @@ export const createCloudflareExecution = (
       return accepted.map((record) => contract.networkState.parse(record.result));
     },
     serviceAccess: async (actor, appId, input) => {
-      const allowed = await transact(database, (transaction) =>
-        validateServiceAccessChange(transaction, actor, appId, input, storage),
-      );
+      const allowed = await transact(database, async (transaction) => {
+        const valid = await validateServiceAccessChange(transaction, actor, appId, input, storage);
+
+        if (valid.isErr()) return valid;
+
+        // Existing app availability is enforced by the control plane. Older
+        // runtimes do not need a route update for a mode-only change.
+        if (!valid.value.supportsRuntimeAccess)
+          return applyServiceAccessChange(transaction, actor, appId, input, storage);
+
+        return Result.ok(null);
+      });
 
       if (allowed.isErr()) return allowed;
+
+      if (allowed.value) return Result.ok(allowed.value);
 
       const accepted = await admit({
         kind: "service-access",

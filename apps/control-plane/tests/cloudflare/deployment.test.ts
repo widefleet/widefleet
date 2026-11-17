@@ -3211,6 +3211,12 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         serviceAccess: undefined,
       });
 
+      // Model an installation that has not adopted the new route format yet.
+      await environment.database.db.update(organizationRuntimes).set({
+        runtime: null,
+        appliedRuntime: null,
+        runtimeJobId: null,
+      });
       await selectRuntime(legacy);
       await expect
         .poll(runtimeStatus, { timeout: 15000 })
@@ -3231,6 +3237,32 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         expect(await (await authenticatedFetch(`https://${entry.hostname}/`)).text()).toBe(
           "compatible",
         );
+
+        const route = await host(entry.hostname);
+        const operations = await environment.database.db.select().from(cloudflareOperations);
+
+        for (const mode of ["organization", "approval_required"] as const) {
+          const changed = await worker.fetch("http://fixture/start", {
+            method: "POST",
+            body: JSON.stringify({
+              kind: "service-access",
+              appId: entry.appId,
+              actor: {
+                id: "fixture-owner",
+                admin: true,
+                application: { ...environment.application, admin: true },
+              },
+              input: { mode },
+            }),
+          });
+
+          expect(changed.status).toBe(200);
+          expect(await changed.json()).toMatchObject({ mode, revision: 0, grants: [] });
+          expect(await host(entry.hostname)).toEqual(route);
+          expect(await environment.database.db.select().from(cloudflareOperations)).toEqual(
+            operations,
+          );
+        }
 
         const response = await worker.fetch("http://fixture/start", {
           method: "POST",
@@ -3271,6 +3303,25 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           .toMatchObject({ activeVersion: release.version, state: "succeeded" });
       }
     }, 60000);
+
+    it("rejects incompatible runtime rollbacks before admission or Worker replacement", async () => {
+      const before = await runtimeStatus();
+      const uploads = runtimeUploads;
+      const operations = await environment.database.db.select().from(cloudflareOperations);
+
+      const response = await worker.fetch("http://fixture/runtime", {
+        method: "POST",
+        body: JSON.stringify({ version: "99.0.1" }),
+      });
+
+      expect(response.status).toBe(400);
+      expect(z.object({ error: z.string() }).parse(await response.json()).error).toContain(
+        "cannot read the service access",
+      );
+      expect(await runtimeStatus()).toEqual(before);
+      expect(runtimeUploads).toBe(uploads);
+      expect(await environment.database.db.select().from(cloudflareOperations)).toEqual(operations);
+    });
 
     it("updates and rolls back runtime code without rewriting app bindings or subscriptions", async () => {
       await selectRuntime(contract.runtimeRelease.parse(release));

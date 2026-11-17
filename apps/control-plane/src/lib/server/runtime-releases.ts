@@ -66,6 +66,30 @@ export const loadRuntime = async (
   return { runtime };
 };
 
+export const requireRuntimeCompatibility = async (
+  storage: ArtifactStorage,
+  execution: typeof organizationRuntimes.$inferSelect,
+  runtime: z.infer<typeof contract.runtimeRelease>,
+) => {
+  if (runtime.serviceAccess === 1) return;
+
+  // Once selected, a runtime can publish the new route format through queued
+  // app jobs, even with no user grants. A rollback must still read those routes.
+  for (const saved of [execution.appliedRuntime, execution.runtime]) {
+    if (!saved) continue;
+    const previous = runtimeReference.parse(saved);
+
+    if (previous.version === runtime.version) continue;
+
+    if ((await loadRuntime(storage, previous)).runtime.serviceAccess === 1)
+      throw new InvalidOperation({
+        code: "CONFLICT",
+        message:
+          "This runtime cannot read the service access configuration used by this installation. Choose a runtime that supports user and group service access.",
+      });
+  }
+};
+
 export const ensureOrganizationRuntime = async (
   transaction: Transaction,
   storage: ArtifactStorage,
@@ -134,12 +158,14 @@ export const createRuntimeReleaseService = (
     transact(database, async (transaction) => {
       administrator(principal);
       const target = await installationRuntime(transaction);
-      await lockOrganizationRuntime(transaction, target.organizationId);
+      const current = await lockOrganizationRuntime(transaction, target.organizationId);
       await requireAgentExecution(transaction, target.organizationId, "Runtime updates");
       let reference;
+      let runtime;
 
       if ("modules" in input) {
         reference = await saveRuntime(transaction, storage, input);
+        runtime = input;
       } else {
         const [saved] = await transaction
           .select()
@@ -153,9 +179,10 @@ export const createRuntimeReleaseService = (
           });
         reference = runtimeReference.parse({ version: saved.version, checksum: saved.checksum });
         // A rollback must also have its artifact available and intact.
-        await loadRuntime(storage, reference);
+        runtime = (await loadRuntime(storage, reference)).runtime;
       }
 
+      await requireRuntimeCompatibility(storage, current, runtime);
       const id = crypto.randomUUID();
       await transaction.insert(jobs).values({
         id,

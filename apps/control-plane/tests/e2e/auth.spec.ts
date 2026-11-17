@@ -399,6 +399,62 @@ for (const javaScriptEnabled of [true, false]) {
 
       const accessPath = `/api/v1/app-services/${target.id}/user-access`;
 
+      const beforeLimits = serviceGrantsState.parse(
+        await (await adminContext.request.get(accessPath)).json(),
+      );
+
+      const full = await adminContext.request.put(accessPath, {
+        headers: { origin: environment.configuration.PLATFORM_URL },
+        data: {
+          revision: beforeLimits.revision,
+          grants: [
+            {
+              entrypoint: "Reader",
+              users: Array.from({ length: 100 }, (_, i) => ({
+                issuer: "https://identity.example.test",
+                subject: `user-${i}`,
+              })),
+              groups: Array.from({ length: 100 }, (_, i) => `group-${i}`),
+            },
+          ],
+        },
+      });
+
+      expect(full.ok(), await full.text()).toBe(true);
+      const fullAccess = serviceGrantsState.parse(await full.json());
+      await adminPage.goto(`/services/${target.id}/availability`, { waitUntil: "networkidle" });
+      await userForm.locator("summary").click();
+      await userForm.getByLabel("Identity provider URL").fill("https://identity.example.test");
+      await userForm.getByLabel("User ID", { exact: true }).fill("one-too-many");
+      await userForm.getByRole("button", { name: "Grant access", exact: true }).click();
+      await expect(
+        userForm.getByText("An entrypoint can have at most 100 users", { exact: true }),
+      ).toBeVisible();
+      await expect(userForm.getByLabel("User ID", { exact: true })).toHaveValue("one-too-many");
+      await userForm.screenshot({ path: testInfo.outputPath("service-user-limit.png") });
+      await adminPage.setViewportSize({ width: 390, height: 900 });
+      await adminPage.emulateMedia({ colorScheme: "dark" });
+      await groupForm.locator("summary").click();
+      await groupForm.getByLabel("Company group ID").fill("one-too-many");
+      await groupForm.getByRole("button", { name: "Grant access", exact: true }).click();
+      await expect(
+        groupForm.getByText("At most 100 groups can be granted access", { exact: true }),
+      ).toBeVisible();
+      await expect(groupForm.getByLabel("Company group ID")).toHaveValue("one-too-many");
+      await groupForm.screenshot({ path: testInfo.outputPath("service-group-limit-mobile.png") });
+      expect(
+        serviceGrantsState.parse(await (await adminContext.request.get(accessPath)).json()),
+      ).toEqual(fullAccess);
+
+      const cleared = await adminContext.request.put(accessPath, {
+        headers: { origin: environment.configuration.PLATFORM_URL },
+        data: { revision: fullAccess.revision, grants: [] },
+      });
+
+      expect(cleared.ok(), await cleared.text()).toBe(true);
+      await adminPage.setViewportSize({ width: 1280, height: 900 });
+      await adminPage.emulateMedia({ colorScheme: "light" });
+
       const savedAccess = serviceGrantsState.parse(
         await (await adminContext.request.get(accessPath)).json(),
       );

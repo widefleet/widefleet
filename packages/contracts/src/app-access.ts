@@ -20,7 +20,7 @@ export const appAccessGroup = z
 
 export const appAccessGroups = z
   .array(appAccessGroup)
-  .max(100)
+  .max(100, "At most 100 groups can be granted access")
   .refine((groups) => new Set(groups).size === groups.length, "Group IDs must be unique");
 
 export const appAccessSnapshot = z.strictObject({

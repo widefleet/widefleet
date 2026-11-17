@@ -16,7 +16,12 @@ import type { Database } from "./database.ts";
 import type { HostedExecution } from "./deployment-execution.ts";
 import { DatabaseUnavailable, InvalidOperation, StorageUnavailable } from "./errors.ts";
 import { installationRuntime, lockOrganizationRuntime } from "./organization-runtime.ts";
-import { loadRuntime, runtimeReference, saveRuntime } from "./runtime-releases.ts";
+import {
+  loadRuntime,
+  requireRuntimeCompatibility,
+  runtimeReference,
+  saveRuntime,
+} from "./runtime-releases.ts";
 import { cloudflareOperations, organizationRuntimes, runtimeReleases } from "./schema.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import { transact } from "./transactions.ts";
@@ -60,6 +65,7 @@ export const registerCloudflareRuntime = (
 
     const { runtime } = await loadRuntime(storage, command.runtime);
     validateCloudflareRuntime(runtime);
+    await requireRuntimeCompatibility(storage, execution, runtime);
     await saveRuntime(transaction, storage, runtime);
 
     const [record] = await transaction
@@ -189,10 +195,12 @@ export const createCloudflareRuntimeReleases = (
             );
 
             let reference;
+            let runtime;
 
             if ("modules" in input) {
               validateCloudflareRuntime(input);
               reference = await saveRuntime(transaction, storage, input);
+              runtime = input;
             } else {
               const [saved] = await transaction
                 .select()
@@ -208,8 +216,11 @@ export const createCloudflareRuntimeReleases = (
                 version: saved.version,
                 checksum: saved.checksum,
               });
-              validateCloudflareRuntime((await loadRuntime(storage, reference)).runtime);
+              runtime = (await loadRuntime(storage, reference)).runtime;
+              validateCloudflareRuntime(runtime);
             }
+
+            await requireRuntimeCompatibility(storage, execution, runtime);
 
             return Result.ok({
               organizationId: execution.organizationId,

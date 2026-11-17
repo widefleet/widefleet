@@ -1,5 +1,5 @@
 import { form, query } from "$app/server";
-import { redirect } from "@sveltejs/kit";
+import { invalid, redirect } from "@sveltejs/kit";
 import * as contract from "@platform/contracts";
 import { z } from "zod";
 import { remoteContext, queryValue, formValue } from "#server/remote-support";
@@ -73,7 +73,10 @@ export const changeServiceUserAccess = form(
     }
 
     if (current.users.length || current.groups.length) grants.push(current);
-    formValue(await runtime.connections.setUserAccess(principal, appId, { revision, grants }));
+    const change = contract.serviceGrantsChange.safeParse({ revision, grants });
+
+    if (!change.success) invalid(change.error.issues.map((issue) => issue.message).join(". "));
+    formValue(await runtime.connections.setUserAccess(principal, appId, change.data));
     await getServiceUserAccess({ appId }).refresh();
     redirect(303, `/services/${appId}/availability?saved=1`);
   },

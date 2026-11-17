@@ -14,7 +14,7 @@ export const serviceGrant = z.strictObject({
     .max(128),
   users: z
     .array(serviceUser)
-    .max(100)
+    .max(100, "An entrypoint can have at most 100 users")
     .refine(
       (users) =>
         new Set(users.map((user) => JSON.stringify([user.issuer, user.subject]))).size ===

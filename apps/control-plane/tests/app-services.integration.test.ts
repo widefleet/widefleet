@@ -270,6 +270,19 @@ describe("App service connections", () => {
         .update(organizationRuntimes)
         .set({ appliedRuntime: oldRuntime })
         .where(eq(organizationRuntimes.organizationId, "widefleet"));
+
+      for (const accessMode of ["organization", "approval_required"] as const) {
+        expect((await services().setAccess(principal, target.id, accessMode)).unwrap()).toEqual({
+          accessMode,
+        });
+        expect((await services().userAccess(principal, target.id)).unwrap()).toMatchObject({
+          mode: accessMode,
+          revision: 0,
+          grants: [],
+        });
+        expect(await environment.database.db.select().from(jobs)).toHaveLength(0);
+      }
+
       expect(
         await services().setUserAccess(principal, target.id, { revision: 0, grants }),
       ).toMatchObject({ error: { code: "CONFLICT" } });
@@ -302,6 +315,37 @@ describe("App service connections", () => {
         .update(organizationRuntimes)
         .set({ runtime: previous.runtime, appliedRuntime: previous.appliedRuntime })
         .where(eq(organizationRuntimes.organizationId, "widefleet"));
+    }
+  });
+
+  it("rejects recipient limits before changing saved grants or creating jobs", async () => {
+    const target = await app(["Reader"]);
+    const before = (await services().userAccess(principal, target.id)).unwrap();
+    const queued = await environment.database.db.select().from(jobs);
+
+    for (const grant of [
+      {
+        entrypoint: "Reader",
+        users: [],
+        groups: Array.from({ length: 101 }, (_, i) => `group-${i}`),
+      },
+      {
+        entrypoint: "Reader",
+        users: Array.from({ length: 101 }, (_, i) => ({
+          issuer: "https://identity.example.test",
+          subject: `user-${i}`,
+        })),
+        groups: [],
+      },
+    ]) {
+      expect(
+        await services().setUserAccess(principal, target.id, {
+          revision: before.revision,
+          grants: [grant],
+        }),
+      ).toMatchObject({ error: { code: "BAD_REQUEST" } });
+      expect((await services().userAccess(principal, target.id)).unwrap()).toEqual(before);
+      expect(await environment.database.db.select().from(jobs)).toEqual(queued);
     }
   });
 

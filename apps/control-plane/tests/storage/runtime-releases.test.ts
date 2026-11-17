@@ -154,6 +154,47 @@ describe("Runtime installation with PostgreSQL and Azure Blob Storage", () => {
     expect(execution?.runtime).toEqual({ version: release.version, checksum });
   });
 
+  it.each([false, true])(
+    "rejects incompatible rollbacks without changing the runtime or queuing jobs (upgrade applied: %s)",
+    async (applied) => {
+      (await releases.install(principal(), release)).unwrap();
+      const [legacy] = await environment.database.db.select().from(organizationRuntimes);
+
+      if (!legacy) throw new Error("Missing execution");
+      await environment.database.db.update(organizationRuntimes).set({
+        appliedRuntime: legacy.runtime,
+      });
+      const current = { ...release, version: "99.1.0", serviceAccess: 1 as const };
+      (await releases.install(principal(), current)).unwrap();
+
+      if (applied)
+        await environment.database.db.update(organizationRuntimes).set({
+          appliedRuntime: (await environment.database.db.select().from(organizationRuntimes))[0]
+            ?.runtime,
+        });
+
+      const before = await environment.database.db.select().from(organizationRuntimes);
+      const queued = await environment.database.db.select().from(jobs);
+
+      for (const result of [
+        await releases.rollback(principal(), { version: release.version }),
+        await releases.install(principal(), { ...release, version: "98.0.0" }),
+      ]) {
+        expect(result).toMatchObject({ error: { code: "CONFLICT" } });
+        expect(result.isErr() && result.error.message).toContain("cannot read the service access");
+      }
+
+      expect(await environment.database.db.select().from(organizationRuntimes)).toEqual(before);
+      expect(await environment.database.db.select().from(jobs)).toEqual(queued);
+      expect(
+        (await releases.rollback(principal(), { version: current.version })).unwrap(),
+      ).toMatchObject({
+        desiredVersion: current.version,
+        state: "queued",
+      });
+    },
+  );
+
   it("installs the bundled version explicitly with a single upload on an empty execution", async () => {
     const bundled = await bundledRelease();
     const submitted = (await releases.install(principal(), bundled)).unwrap();

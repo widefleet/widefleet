@@ -15,7 +15,7 @@ import {
 import { registerCloudflareRuntime } from "./cloudflare-runtime-releases.ts";
 import { InvalidOperation } from "./errors.ts";
 import { lockOrganizationRuntime } from "./organization-runtime.ts";
-import { loadRuntime } from "./runtime-releases.ts";
+import { loadRuntime, requireRuntimeCompatibility } from "./runtime-releases.ts";
 import { cloudflareOperations, organizationRuntimes } from "./schema.ts";
 import { createR2Storage } from "./storage/r2.ts";
 
@@ -99,6 +99,7 @@ export const executeCloudflareRuntime = async (
 
             if (active.isOk() && active.value === command.runtime.version) return;
             const { runtime } = await loadRuntime(storage, command.runtime);
+            await requireRuntimeCompatibility(storage, execution, runtime);
 
             // Cloudflare's content endpoint preserves settings and metadata, including
             // bindings added concurrently by app deployments and their confirmation tags.

@@ -63,6 +63,14 @@ export const validateServiceAccessChange = async (
   storage: ArtifactStorage,
 ) => {
   const app = await serviceAccessApp(transaction, principal, appId);
+  const parsed = contract.serviceAccessUpdate.safeParse(input);
+
+  if (!parsed.success)
+    throw new InvalidOperation({
+      code: "BAD_REQUEST",
+      message: parsed.error.issues.map((issue) => issue.message).join(". "),
+    });
+
   const execution = await lockOrganizationRuntime(transaction, app.organizationId);
 
   const reference = execution.appliedRuntime
@@ -71,7 +79,9 @@ export const validateServiceAccessChange = async (
 
   const { runtime } = await loadRuntime(storage, reference);
 
-  if (runtime.serviceAccess !== 1)
+  const supportsRuntimeAccess = runtime.serviceAccess === 1;
+
+  if (input.grants !== undefined && !supportsRuntimeAccess)
     throw new InvalidOperation({
       code: "CONFLICT",
       message:
@@ -113,7 +123,7 @@ export const validateServiceAccessChange = async (
       });
   }
 
-  return Result.ok(app);
+  return Result.ok({ app, supportsRuntimeAccess });
 };
 
 export const applyServiceAccessChange = async (
@@ -127,7 +137,7 @@ export const applyServiceAccessChange = async (
   const valid = await validateServiceAccessChange(transaction, principal, appId, input, storage);
 
   if (valid.isErr()) return valid;
-  const app = valid.value;
+  const { app, supportsRuntimeAccess } = valid.value;
   const grants = input.grants ?? contract.serviceGrants.parse(app.serviceGrants);
   const mode = input.mode ?? app.serviceAccessMode;
   const changed = mode !== app.serviceAccessMode || !isDeepStrictEqual(grants, app.serviceGrants);
@@ -137,7 +147,7 @@ export const applyServiceAccessChange = async (
     .set({
       serviceAccessMode: mode,
       serviceGrants: grants,
-      serviceAccessRevision: app.serviceAccessRevision + Number(changed),
+      serviceAccessRevision: app.serviceAccessRevision + Number(changed && supportsRuntimeAccess),
       serviceAccessError: null,
     })
     .where(eq(apps.id, appId))
@@ -145,7 +155,11 @@ export const applyServiceAccessChange = async (
 
   if (!updated) throw new Error("Service access update returned no app");
 
-  if (enqueue && updated.appliedServiceAccessRevision !== updated.serviceAccessRevision)
+  if (
+    enqueue &&
+    supportsRuntimeAccess &&
+    updated.appliedServiceAccessRevision !== updated.serviceAccessRevision
+  )
     await transaction.insert(jobs).values({
       id: crypto.randomUUID(),
       appId,
