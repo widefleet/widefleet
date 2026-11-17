@@ -744,7 +744,7 @@ it("shortens only unambiguous documented type references", () => {
                   },
                 ],
                 returns: {
-                  type: 'Promise<[import("./app/model").Item, import("./shared/model").Item]>',
+                  type: 'Promise<[import("./app/model").Item, import("./shared/model").Item, import("./app/page").Page<import("./app/query").Query>]>',
                   description: "Matching items.\n\n```ts\nconst [item] = result;\n```",
                 },
               },
@@ -758,6 +758,13 @@ it("shortens only unambiguous documented type references", () => {
         name: 'import("./app/query").Query',
         definition:
           '{ /** Use "import(\\"./x\\").Y" literally. */ id: "import(\\"./app/query\\").Query" }',
+        summary: "",
+        remarks: "",
+        examples: [],
+      },
+      {
+        name: 'import("./app/page").Page<import("./app/query").Query>',
+        definition: '{ items: import("./app/query").Query[] }',
         summary: "",
         remarks: "",
         examples: [],
@@ -777,12 +784,13 @@ it("shortens only unambiguous documented type references", () => {
 
   expect(reference.types.map((type) => type.name)).toEqual([
     "Query",
+    "Page<Query>",
     'import("./app/model").Item',
     'import("./shared/model").Item',
   ]);
   expect(signature?.code).toBe(
     'read<T extends Query = Query>(query: T | `import("./app/query").Query:${Query}`): ' +
-      'Promise<[import("./app/model").Item, import("./shared/model").Item]>',
+      'Promise<[import("./app/model").Item, import("./shared/model").Item, Page<Query>]>',
   );
   expect(reference.types[0]?.definition).toBe(docs.types[0]?.definition);
   expect(signature?.parameters[0]?.description).toContain("<li>by owner</li>");

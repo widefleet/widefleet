@@ -2,24 +2,35 @@ import MarkdownIt from "markdown-it";
 import type { serviceDocumentation } from "@platform/contracts";
 import type { z } from "zod";
 
-const qualifiedName = /^import\("(?:[^"\\]|\\.)*"\)\.(.+)$/;
-
 const typeReference = /import\("(?:[^"\\]|\\.)*"\)\.[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*/y;
 
+const leadingReference = new RegExp(
+  `^(?:${typeReference.source}|[A-Za-z_$][\\w$]*(?:\\.[A-Za-z_$][\\w$]*)*)`,
+);
+
+const modulePath = /^import\("(?:[^"\\]|\\.)*"\)\./;
+
 /**
- * Extracted declarations qualify types with module paths that callers never import. Show the
- * unqualified name when it is unambiguous among the documented types and keep the qualified name
- * otherwise, so sibling modules exporting the same name stay distinguishable.
+ * Extracted declarations qualify types with module paths that callers never import, and generic
+ * instantiations append type arguments to the name. Map each documented declaration reference to its
+ * unqualified name when that name is unambiguous among the documented declarations and keep the
+ * qualified name otherwise, so sibling modules exporting the same name stay distinguishable.
  */
 const displayNames = (names: readonly string[]) => {
-  const unqualified = (name: string) => qualifiedName.exec(name)?.[1] ?? name;
+  const references = new Set(names.flatMap((name) => leadingReference.exec(name)?.[0] ?? []));
+
+  const unqualified = (reference: string) => reference.replace(modulePath, "");
 
   const counts = new Map<string, number>();
 
-  for (const name of names) counts.set(unqualified(name), (counts.get(unqualified(name)) ?? 0) + 1);
+  for (const reference of references)
+    counts.set(unqualified(reference), (counts.get(unqualified(reference)) ?? 0) + 1);
 
   return new Map(
-    names.map((name) => [name, counts.get(unqualified(name)) === 1 ? unqualified(name) : name]),
+    [...references].map((reference) => [
+      reference,
+      counts.get(unqualified(reference)) === 1 ? unqualified(reference) : reference,
+    ]),
   );
 };
 
@@ -163,7 +174,7 @@ export function presentServiceDocumentation(documentation: z.infer<typeof servic
       })),
     })),
     types: documentation.types.map((type) => ({
-      name: names.get(type.name) ?? type.name,
+      name: typeText(type.name),
       description: render(
         type.summary,
         type.remarks,
