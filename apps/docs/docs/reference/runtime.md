@@ -1,7 +1,7 @@
 ---
 title: Application runtime
 description: Runtime versions, activation, recovery, storage and supported app APIs.
-lastModified: 2026-10-23
+lastModified: 2026-11-17
 ---
 
 The installation's celld runtime runs apps and previews as separate Dynamic Workers. The installer manages one node. Starting with platform 0.4.0, apps and agents belong directly to an organization with one execution configuration. Registering, disabling or replacing an agent does not change that ownership. A replacement agent reuses the same Docker host, persistent node state, routing directory and runtime storage.
@@ -24,6 +24,8 @@ The control plane keeps package bytes in Object Storage and only checksums/versi
 If an update returns `409: Runtime versions are immutable`, the installation already stores different bytes under that version. This can happen when a source checkout builds a modified runtime without changing its version, including changes to bundled license notices. Use a matching published platform build or a newly versioned runtime release; do not overwrite stored packages or edit their checksums. `runtime rollback` selects the installation's existing package, not the download from GitHub.
 
 Widefleet 0.4.2 includes app runtime 0.4.2 and celld 0.6.2. Use matching control-plane, agent and CLI releases. The platform checks runtime compatibility before activation.
+
+After selecting a runtime that supports user and group service access, updates and rollbacks must retain that support. App jobs can publish the new route format even without individual grants, so returning to a runtime that cannot read it is rejected before activation. Existing installations can keep their previous runtime and continue changing app-to-app availability; granting access to users or groups requires upgrading the runtime.
 
 Runtime 0.2.1 forwards incoming HTTP request cancellation explicitly to the loaded app. If the client disconnects before response headers, the app's `request.signal` is aborted. App code must pass that signal to any downstream requests it wants to cancel, for example `env.SERVICE.fetch(url, { signal: request.signal })`. A timeout after a fetch has returned still needs explicit cancellation of the response body.
 
