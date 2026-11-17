@@ -24,12 +24,16 @@ cancelling authorization does not create a connection. A connector can show
 **Status unavailable** when it cannot be reached; this does not mean your account
 was disconnected. Use **Refresh** to check again.
 
-Invited members enter this flow after accepting an invitation. Other members
-also see it when opening the workspace if connectors are available and they
-have not completed this step in the current browser. Choose **Continue to apps**
-to skip any remaining accounts. This choice is remembered in a browser cookie
-for the current account and organization; another browser or organization can
-show the step again. **My connections** remains available afterward.
+Members enter this flow when opening the workspace, including after accepting
+an invitation, if accessible connectors are available and they have not completed
+this step in the current browser. Owners and administrators keep their normal
+workspace entry. Choose **Continue to apps** to skip any remaining accounts.
+This choice is remembered separately for each account and organization in browser
+cookies. Switching between them preserves each choice; another browser can show
+the step again. **My connections** remains available afterward.
+
+Choose **Reconnect** on a saved account to repeat authorization, for example to
+grant missing permissions. You do not need to delete the saved connection first.
 
 To remove your account, choose **Disconnect**, then **Disconnect account**.
 Apps that use this connector on your behalf lose access until you connect again.
