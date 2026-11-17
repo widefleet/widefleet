@@ -8,9 +8,9 @@ import { createAuthentication } from "../src/lib/server/auth.ts";
 import { createApi } from "../src/lib/server/api.ts";
 import { AuthenticationFailed } from "../src/lib/server/identity.ts";
 import * as runtimeModule from "../src/lib/server/runtime.ts";
-import { pageFailure, pagePrincipal } from "../src/lib/server/page-auth.ts";
+import { pageFailure } from "../src/lib/server/page-auth.ts";
 import { organizationOperation } from "../src/lib/server/organization-operations.ts";
-import { remoteContext, remoteOperation } from "../src/lib/server/remote-support.ts";
+import { remoteOperation } from "../src/lib/server/remote-support.ts";
 import type { Observation } from "../src/lib/server/observation.ts";
 import {
   DatabaseUnavailable,
@@ -23,14 +23,6 @@ let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
 let runtime: Runtime;
 
 let requestLocals: App.Locals;
-
-vi.mock("$app/server", () => ({
-  getRequestEvent: () => ({
-    locals: requestLocals,
-    url: new URL("http://localhost/"),
-    request: new Request("http://localhost/"),
-  }),
-}));
 
 const reportRequestException = runtimeModule.reportRequestException;
 
@@ -259,22 +251,20 @@ it("does not retain a page identity after its session is gone", async () => {
   expect(exception).toHaveBeenCalledExactlyOnceWith(error, undefined, { $groups: undefined });
 });
 
-it.each(["page", "remote"])(
-  "uses the automatically selected organization for %s errors",
-  async (kind) => {
-    if (!requestLocals.session) throw new Error("Missing fixture session");
-    requestLocals.session.activeOrganizationId = null;
+it("uses an automatically selected organization when the session has no explicit selection", async () => {
+  if (!requestLocals.session || !requestLocals.user) throw new Error("Missing fixture session");
+  requestLocals.session.activeOrganizationId = null;
+  const principal = await runtime.identity.principal(requestLocals.user.id, null, null);
 
-    if (kind === "page") await pagePrincipal();
-    else await remoteContext();
-    const cause = new Error("Failure after organization selection");
-    await reportRequestException(cause, requestLocals);
-    expect(exception).toHaveBeenCalledExactlyOnceWith(cause, `user:${environment.owner.id}`, {
-      $groups: { organization: environment.application.organizationId },
-    });
-    expect(requestLocals.session.activeOrganizationId).toBeNull();
-  },
-);
+  if (principal.isErr()) throw principal.error;
+  requestLocals.principal = principal.value;
+  const cause = new Error("Failure after organization selection");
+  await reportRequestException(cause, requestLocals);
+  expect(exception).toHaveBeenCalledExactlyOnceWith(cause, `user:${environment.owner.id}`, {
+    $groups: { organization: environment.application.organizationId },
+  });
+  expect(requestLocals.session.activeOrganizationId).toBeNull();
+});
 
 it("reports server APIErrors in remote operations and skips expected client errors", async () => {
   const cause = new APIError("SERVICE_UNAVAILABLE", {
