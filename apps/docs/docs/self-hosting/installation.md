@@ -1,7 +1,7 @@
 ---
 title: Single-host installation
 description: Install, configure and recover a company installation.
-lastModified: 2026-11-16
+lastModified: 2026-11-17
 ---
 
 This guide installs Widefleet **0.7.1** using the reference Compose deployment. Use Linux x86-64, Docker Engine 29.8.1, Docker Compose 2.20.0 or newer (including v5), and a checkout of the matching release. Published images contain the required runtime and setup tools; the operator host needs no Node, pnpm or Rust installation. The operator owns DNS, certificates, identity-provider registrations, backups and upgrades. Commands below change the selected installation; choose its environment file deliberately.
@@ -206,7 +206,9 @@ The reference installation is designed for trusted company app creators. Its ins
 
 ## Versions and updates
 
-Use matching 0.7.1 control-plane, agent, CLI and app runtime releases. The native runtime is celld 0.6.2. Keep the matching source checkout and image manifest with every backup; restoring older images alone does not reverse database or storage changes.
+Use matching control-plane, agent, CLI and app-runtime releases. The 0.7.1 installation described above uses celld 0.6.2. Native [MCP service access](/guides/mcp) requires [celld 0.6.3-widefleet.1](https://github.com/widefleet/celld/releases/tag/v0.6.3-widefleet.1), the Widefleet fork with AES-KW support. When upgrading, use the matching agent and runtime images: the agent checks both its publisher binary and the running runtime container against this version.
+
+Existing app-runtime packages targeting celld 0.6.2 remain readable and can run on the pinned fork. Replacing the agent and container does not automatically change the selected app-runtime package. Keep the matching source checkout and image manifest with every backup; restoring older images alone does not reverse database or storage changes.
 
 Check the selected and active versions with `widefleet runtime status`. Use the [runtime commands](/reference/runtime#versions-and-updates) to update or roll back with an administrator login. Updating container images and activating a runtime remain separate actions.
 
