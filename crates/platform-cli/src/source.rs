@@ -260,6 +260,17 @@ async fn is_ancestor(project: &Path, ancestor: &str, descendant: &str) -> Result
     }
 }
 
+fn copy_index(source: &Path, destination: &Path) -> std::io::Result<()> {
+    // Git uses the index mtime to decide whether cached file stats are racy.
+    // Giving a copied index a newer timestamp can hide same-size source edits.
+    let modified = std::fs::metadata(source)?.modified()?;
+    std::fs::copy(source, destination)?;
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(destination)?
+        .set_times(std::fs::FileTimes::new().set_modified(modified))
+}
+
 // An alternate index checks all files Git would add, without changing the user's staging area.
 async fn tree(project: &Path) -> Result<String> {
     let temporary = tempfile::tempdir()?;
@@ -268,7 +279,7 @@ async fn tree(project: &Path) -> Result<String> {
         output(git(project).args(["rev-parse", "--path-format=absolute", "--git-path", "index"]))
             .await?;
     if Path::new(&local_index).exists() {
-        std::fs::copy(local_index, &index)?;
+        copy_index(Path::new(&local_index), &index)?;
     }
     output(
         git(project)
@@ -325,7 +336,7 @@ async fn commit_all(project: &Path, branch: &str) -> Result<String> {
     let lock = tempfile::TempPath::try_from_path(lock_path)?;
     let temporary = tempfile::tempdir()?;
     let pending = temporary.path().join("index");
-    match std::fs::copy(&index, &pending) {
+    match copy_index(Path::new(&index), &pending) {
         Ok(_) => (),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
         Err(error) => return Err(error.into()),
@@ -360,7 +371,7 @@ async fn commit_all(project: &Path, branch: &str) -> Result<String> {
         &format!("Save source for {branch}"),
     ]))
     .await?;
-    std::fs::copy(&pending, &lock)?;
+    copy_index(&pending, &lock)?;
     lock.persist(&index).map_err(std::io::Error::from)?;
     revision(project, "HEAD")
         .await?
@@ -938,6 +949,46 @@ mod tests {
         let clone = fixture.clone("next-session").await?;
         assert_eq!(std::fs::read_to_string(clone.join("app.ts"))?, "second");
         assert!(!clone.join("skip.local").exists());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn captures_same_size_edits_with_racy_index_timestamps() -> Result<()> {
+        let fixture = Fixture::new().await?;
+        let app = fixture.project.join("app.ts");
+        let timestamp = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000);
+        let times = std::fs::FileTimes::new().set_modified(timestamp);
+        std::fs::write(&app, "first!")?;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&app)?
+            .set_times(times)?;
+        fixture.save("main").await?;
+        output(git(&fixture.project).args(["config", "core.trustctime", "false"])).await?;
+        let before = snapshot(&fixture.project).await?;
+        let index = fixture.project.join(".git/index");
+        std::fs::write(&app, "second")?;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&app)?
+            .set_times(times)?;
+        // Simulate an edit within the index timestamp's resolution. Git must
+        // rehash the contents even though size and cached mtime still match.
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&index)?
+            .set_times(times)?;
+        let staging = std::fs::read(&index)?;
+        let after = snapshot(&fixture.project).await?;
+        assert_ne!(after, before);
+        assert_eq!(std::fs::read(&index)?, staging);
+        let saved =
+            save_repository(&fixture.project, fixture.repository("main"), "", &after).await?;
+        assert_eq!(
+            output(git(&fixture.project).args(["show", &format!("{}:app.ts", saved.commit)]))
+                .await?,
+            "second"
+        );
         Ok(())
     }
 
