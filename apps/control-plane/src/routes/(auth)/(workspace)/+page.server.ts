@@ -18,7 +18,11 @@ export const load: PageServerLoad = async ({ setHeaders, url, cookies }) => {
   ) {
     const result = await getUserConnections();
 
-    if (result.connections.some((connection) => !connection.unavailable))
+    if (
+      result.connections.some(
+        (connection) => !connection.unavailable && connection.status?.setup === "ready",
+      )
+    )
       redirect(303, "/connections?onboarding=1");
   }
 

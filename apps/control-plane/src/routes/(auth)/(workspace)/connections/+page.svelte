@@ -7,11 +7,16 @@
   import OrganizationField from "#shadcn/OrganizationField.svelte";
   import { Button } from "@platform/ui/button";
   import Link2 from "@lucide/svelte/icons/link-2";
-  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
 
   const result = $derived(await getUserConnections());
 
   const onboarding = $derived(page.url.searchParams.get("onboarding") === "1");
+
+  const connections = $derived(
+    result.connections.filter(
+      (connection) => !onboarding || connection.status?.setup !== "required",
+    ),
+  );
 
   const path = $derived(onboarding ? "/connections?onboarding=1" : "/connections");
 
@@ -41,19 +46,11 @@
 </script>
 
 <svelte:head><title>My connections · Widefleet</title></svelte:head>
-<div class="max-w-3xl space-y-6">
+<div class="max-w-2xl space-y-6">
   <PageHeading
     title={onboarding ? "Connect your accounts" : "My connections"}
-    description={onboarding
-      ? "Your organization has set up these connectors. Connect the accounts you want to use, or skip this step and come back later."
-      : "Your personal accounts for the connectors your organization has made available."}
-  >
-    <Button href={path} onclick={refresh} variant="outline" size="sm" disabled={refreshing}
-      ><RefreshCw class={refreshing ? "animate-spin motion-reduce:animate-none" : ""} />{refreshing
-        ? "Refreshing…"
-        : "Refresh"}</Button
-    >
-  </PageHeading>
+    description={onboarding ? "Connect the accounts you use. This step is optional." : ""}
+  />
   {#if page.url.searchParams.has("connectionError")}
     <p role="alert" class="text-destructive text-sm">
       Authorization was not completed. Check the status below and try again when you are ready.
@@ -70,25 +67,35 @@
     >
   {:else if result.error}
     <p role="alert" class="text-sm">
-      Connections are temporarily unavailable. Try refreshing. Your saved connections have not
-      changed.
+      Could not load your connections. Your saved accounts have not changed.
     </p>
-  {:else if result.connections.length === 0}
+  {:else if connections.length === 0}
     <EmptyState
-      title="No personal connections available"
-      description="Connectors will appear here after your administrator makes them available to you."
+      title={onboarding ? "No accounts to connect" : "No personal connections available"}
+      description={onboarding
+        ? "You can continue to your apps."
+        : "Connectors will appear here after your administrator makes them available to you."}
       >{#snippet icon()}<Link2 />{/snippet}</EmptyState
     >
   {:else}
-    <ul class="divide-y border-y">
-      {#each result.connections as connection (connection.appId)}
+    <ul class="divide-border/60 divide-y">
+      {#each connections as connection (connection.appId)}
         <UserConnectionRow
           {connection}
           {onboarding}
+          showHostname={connections.some(
+            (other) =>
+              other.appId !== connection.appId && other.displayName === connection.displayName,
+          )}
           confirmDisconnect={page.url.searchParams.get("disconnect") === connection.appId}
         />
       {/each}
     </ul>
+  {/if}
+  {#if refreshFailed || (result.error && result.error !== "sign_in") || connections.some((connection) => connection.unavailable)}
+    <Button href={path} onclick={refresh} variant="outline" size="sm" disabled={refreshing}>
+      {refreshing ? "Retrying…" : "Try again"}
+    </Button>
   {/if}
   {#if onboarding}
     <form {...finishConnectionOnboarding} class="flex flex-wrap items-center gap-4">
@@ -96,9 +103,6 @@
       <Button type="submit" disabled={finishConnectionOnboarding.pending > 0}
         >Continue to apps</Button
       >
-      <p class="text-muted-foreground text-sm">
-        You can manage these accounts later in My connections.
-      </p>
     </form>
   {/if}
 </div>
