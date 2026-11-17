@@ -30,6 +30,7 @@
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "1.2.4",
+    "@modelcontextprotocol/server": "2.4.0",
     "@platform/auth-proxy": "workspace:*",
     "@platform/contracts": "workspace:*",
     "@platform/ui": "workspace:*",

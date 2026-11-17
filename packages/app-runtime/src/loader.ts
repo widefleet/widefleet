@@ -1,5 +1,8 @@
 import { workloadDiscovery } from "./workload-identity.ts";
+import { mcpRequest } from "./mcp.ts";
 import { mcpLoginRequest } from "./mcp-login.ts";
+
+export { McpTools, McpOutbound } from "./mcp-code.ts";
 
 import { prepareAppSecrets } from "./app-secrets.ts";
 import { oauthAppAvailable } from "./app-oauth.ts";
@@ -312,6 +315,9 @@ export default {
     const login = await mcpLoginRequest(request, environment, context);
 
     if (login) return login;
+    const mcp = await mcpRequest(request, environment, context);
+
+    if (mcp) return mcp;
     const discovery = await workloadDiscovery(request, environment);
 
     if (discovery) return discovery;
