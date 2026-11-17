@@ -127,7 +127,11 @@ export const initializeRuntime = async (
         );
       }
     } else {
-      await settings.republish();
+      // Publication failures remain visible in settings and can be retried there.
+      // Keep the control plane available so an operator can perform that recovery.
+      await settings.republish().catch((cause: unknown) => {
+        console.error("App sign-in configuration could not be republished", cause);
+      });
     }
 
     await registerCli(database.db, configuration);

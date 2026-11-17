@@ -1,11 +1,11 @@
 import { z } from "zod";
 import { organizationIdentifier } from "./organizations.ts";
-import { serviceUser } from "./service-grants.ts";
+import { appCaller } from "./app-caller.ts";
 import { appAccessGroup } from "./app-access.ts";
 
 export const mcpScopes = ["mcp:services"];
 
-export const mcpIdentity = serviceUser.extend({
+export const mcpIdentity = appCaller.extend({
   name: z.string().max(4096),
   groups: z.array(appAccessGroup),
 });

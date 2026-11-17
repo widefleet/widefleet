@@ -355,11 +355,7 @@ export const runtimeRelease = z.strictObject({
     .min(1),
 });
 
-export const appCaller = z.strictObject({
-  issuer: z.url(),
-  subject: z.string().min(1),
-  name: z.string(),
-});
+export { appCaller } from "./app-caller.ts";
 
 const appSecretMaxBytes = 5_000;
 

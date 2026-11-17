@@ -572,7 +572,9 @@ describe("MCP OAuth in the data plane", () => {
       directoryAvailable = false;
       expect((await refresh()).status).toBe(503);
       directoryAvailable = true;
-      expect((await refresh()).status).toBe(200);
+      // The token issued by the successful refresh must survive the late retry.
+      const latest = await refresh(next.refresh_token);
+      expect(latest.status, await latest.clone().text()).toBe(200);
     } finally {
       directoryAvailable = true;
       directoryGroups = ["accounting@example.test"];

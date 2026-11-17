@@ -16,10 +16,9 @@ index 26fea07ff2cba75cf4c1d93e57f0cec518a4a680..e57164d3b7639fb3eb1a64bda1a31f8e
     * Human-readable text returned in the `error_description` field.
     */
 diff --git a/dist/oauth-provider.js b/dist/oauth-provider.js
-index aaf2a96399dde60629487889449d2364f2ac74ab..81957b76ae34519e594b803d64f4beeab12a9b56 100644
 --- a/dist/oauth-provider.js
 +++ b/dist/oauth-provider.js
-@@ -3735,7 +3735,23 @@ var OAuthProviderImpl = class {
+@@ -3735,7 +3735,19 @@
  				resource: audience,
  				props: decryptedProps
  			};
@@ -29,14 +28,10 @@ index aaf2a96399dde60629487889449d2364f2ac74ab..81957b76ae34519e594b803d64f4beea
 +				callbackResult = await this.callTokenExchangeCallback(callbackOptions, env);
 +			} catch (error) {
 +				if (error instanceof OAuthError && error.code === "temporarily_unavailable" && error.options.retryProps !== void 0) {
-+					const result = await encryptProps(error.options.retryProps);
++					// Retain both accepted refresh tokens. A retry with the previous token
++					// must not invalidate the current one or extend the grant's lifetime.
++					const result = await encryptProps(error.options.retryProps, encryptionKey);
 +					grantData.encryptedProps = result.encryptedData;
-+					// The client retains the token it just presented. Wrap the new encryption
-+					// key for that token, including when it retried the previous token.
-+					grantData.refreshTokenId = providedTokenHash;
-+					grantData.refreshTokenWrappedKey = await wrapKeyWithToken(refreshToken, result.key);
-+					delete grantData.previousRefreshTokenId;
-+					delete grantData.previousRefreshTokenWrappedKey;
 +					await this.saveGrantWithTTL(env, grantKey, grantData, Math.floor(Date.now() / 1e3));
 +				}
 +				throw error;
@@ -44,3 +39,38 @@ index aaf2a96399dde60629487889449d2364f2ac74ab..81957b76ae34519e594b803d64f4beea
  			if (callbackResult) {
  				if (callbackResult.newProps) {
  					grantProps = callbackResult.newProps;
+@@ -5410,16 +5422,18 @@
+ * @param data - The data to encrypt
+ * @returns An object containing the encrypted data and the generated key
+ */
+-async function encryptProps(data) {
+-	const key = await crypto.subtle.generateKey({
++async function encryptProps(data, existingKey) {
++	const key = existingKey ?? await crypto.subtle.generateKey({
+ 		name: "AES-GCM",
+ 		length: 256
+ 	}, true, ["encrypt", "decrypt"]);
+-	const iv = new Uint8Array(12);
++	// Reusing a grant key requires a fresh nonce. The prefix distinguishes this
++	// ciphertext from the provider's one-key-per-write, zero-IV format.
++	const iv = existingKey ? crypto.getRandomValues(new Uint8Array(12)) : new Uint8Array(12);
+ 	const jsonData = JSON.stringify(data);
+ 	const encodedData = new TextEncoder().encode(jsonData);
+ 	return {
+-		encryptedData: arrayBufferToBase64(await crypto.subtle.encrypt({
++		encryptedData: (existingKey ? arrayBufferToBase64(iv) + "." : "") + arrayBufferToBase64(await crypto.subtle.encrypt({
+ 			name: "AES-GCM",
+ 			iv
+ 		}, key, encodedData)),
+@@ -5433,8 +5447,9 @@
+ * @returns The decrypted data object
+ */
+ async function decryptProps(key, encryptedData) {
+-	const encryptedBuffer = base64ToArrayBuffer(encryptedData);
+-	const iv = new Uint8Array(12);
++	const separator = encryptedData.indexOf(".");
++	const encryptedBuffer = base64ToArrayBuffer(separator === -1 ? encryptedData : encryptedData.slice(separator + 1));
++	const iv = separator === -1 ? new Uint8Array(12) : new Uint8Array(base64ToArrayBuffer(encryptedData.slice(0, separator)));
+ 	const decryptedBuffer = await crypto.subtle.decrypt({
+ 		name: "AES-GCM",
+ 		iv

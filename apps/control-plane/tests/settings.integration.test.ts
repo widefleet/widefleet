@@ -541,6 +541,28 @@ describe("Platform setup and managed settings", () => {
       }),
     ).rejects.toMatchObject({ body: { code: "EMAIL_PASSWORD_DISABLED" } });
   });
+  it("keeps startup available when sign-in publication fails and permits a settings retry", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    environment.authControl.available(false);
+    const migrations = fileURLToPath(new URL("../migrations", import.meta.url));
+    const restarted = await initializeRuntime(environment.configuration, migrations);
+
+    try {
+      expect(log).toHaveBeenCalledWith(
+        "App sign-in configuration could not be republished",
+        expect.any(Error),
+      );
+      expect((await restarted.settings.inspect()).activation.state).toBe("failed");
+      environment.authControl.available(true);
+      expect((await restarted.settings.publish()).error).toBeNull();
+    } finally {
+      environment.authControl.available(true);
+      log.mockRestore();
+      await restarted.database.close();
+      await restarted.observation.close();
+    }
+  });
+
   it("imports bootstrap settings once and preserves later API changes across startup", async () => {
     const bootstrap = join(environment.configuration.PLATFORM_STATE_DIRECTORY, "bootstrap.json");
     await environment.database.db
