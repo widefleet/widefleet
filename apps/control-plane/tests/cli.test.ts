@@ -80,6 +80,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     let preparations = 0;
     let sourceTarget = { supported: false, branch: "main", preview: false };
     const checkedTargets: z.infer<typeof contract.sourceDeployTargetInput>[] = [];
+    let expireSourceLookup = false;
 
     const server = createServer((request, response) => {
       request.resume();
@@ -106,6 +107,13 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         });
         request.on("end", () => {
           checkedTargets.push(contract.sourceDeployTargetInput.parse(JSON.parse(body)));
+
+          if (expireSourceLookup) {
+            // Close the completed lookup before the next request, independently
+            // of compiler speed and the server's keep-alive timer.
+            response.once("finish", () => request.socket.end());
+          }
+
           response.end(JSON.stringify(sourceTarget));
         });
 
@@ -522,8 +530,6 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     it("deploys a large worker after the source lookup connection expires", async () => {
       const worker = join(state, "project with spaces", "worker.js");
       const original = await readFile(worker, "utf8");
-      const timeout = server.keepAliveTimeout;
-      const buffer = server.keepAliveTimeoutBuffer;
       let connections = 0;
 
       const connected = () => {
@@ -531,8 +537,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       };
 
       server.on("connection", connected);
-      server.keepAliveTimeout = 250;
-      server.keepAliveTimeoutBuffer = 0;
+      expireSourceLookup = true;
 
       try {
         await writeFile(
@@ -540,7 +545,6 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
           `const values = [${Array.from({ length: 250_000 }, (_, index) => index).join(",")}]; export default { fetch() { return Response.json(values); } };`,
         );
 
-        // A single executor thread makes blocking analysis stall connection cleanup.
         const result = await executeCli(
           join(state, "installation", executableName),
           ["deploy", "--skip-build", "--no-wait", "--json"],
@@ -561,8 +565,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         expect(connections).toBeGreaterThan(1);
       } finally {
         server.off("connection", connected);
-        server.keepAliveTimeout = timeout;
-        server.keepAliveTimeoutBuffer = buffer;
+        expireSourceLookup = false;
         await writeFile(worker, original);
       }
     });
