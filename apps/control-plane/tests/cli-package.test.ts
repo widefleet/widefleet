@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { once } from "node:events";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { basename, delimiter, join, resolve } from "node:path";
@@ -87,7 +87,8 @@ describe.runIf(process.env["RUN_CLI_PACKAGE_TESTS"] === "1")(
 
     beforeAll(async () => {
       platform = cliPlatform(process.platform, process.arch);
-      directory = await mkdtemp(join(tmpdir(), "widefleet package test "));
+      // pnpm compares its stored path literally; macOS aliases /var to /private/var.
+      directory = await realpath(await mkdtemp(join(tmpdir(), "widefleet package test ")));
       const source = resolve(process.env["CLI_PACKAGE_DIR"] ?? ".local/releases");
       version = z
         .object({ version: z.string() })
