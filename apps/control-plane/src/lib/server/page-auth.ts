@@ -58,7 +58,7 @@ export const invitationIdentity = async (invitationId: string) => {
 
 export const pagePrincipal = async () => {
   const { user, session } = getUserSession();
-  const { url } = getRequestEvent();
+  const { url, locals } = getRequestEvent();
   const runtime = await getRuntime();
 
   const result = await runtime.identity.principal(
@@ -68,6 +68,7 @@ export const pagePrincipal = async () => {
   );
 
   if (result.isOk()) {
+    locals.principal = result.value;
     runtime.reporting.active(result.value.id);
 
     return result.value;
