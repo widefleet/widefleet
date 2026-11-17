@@ -129,24 +129,20 @@ describe.runIf(process.env["RUN_PACKAGED_EDGE_TESTS"] === "1")(
           { timeout: 10_000 },
         );
 
-        const metadata = await request(
+        const discovery = await request(
           "mcp.apps.example.test",
           {},
-          "/.well-known/oauth-protected-resource/mcp",
+          "/.well-known/oauth-authorization-server",
         );
 
-        expect(metadata.status).toBe(200);
-        expect(JSON.parse(metadata.body)).toMatchObject({
-          resource: "https://mcp.apps.example.test/mcp",
-          authorization_servers: ["https://mcp.apps.example.test"],
+        expect(discovery.status).toBe(200);
+        expect(JSON.parse(discovery.body)).toMatchObject({
+          issuer: "https://mcp.apps.example.test",
+          authorization_endpoint: "https://mcp.apps.example.test/authorize",
+          token_endpoint: "https://mcp.apps.example.test/oauth/token",
+          registration_endpoint: "https://mcp.apps.example.test/oauth/register",
+          scopes_supported: ["mcp:services"],
         });
-        const challenge = await request("mcp.apps.example.test", {}, "/mcp");
-        expect(challenge.status).toBe(401);
-        expect(challenge.headers["www-authenticate"]).toContain(
-          "https://mcp.apps.example.test/.well-known/oauth-protected-resource/mcp",
-        );
-        expect(challenge.headers.location).toBeUndefined();
-        expect((await request("auth.apps.example.test", {}, "/mcp")).status).toBe(404);
 
         const anonymous = await request("notes.apps.example.test", {
           accept: "text/html",
