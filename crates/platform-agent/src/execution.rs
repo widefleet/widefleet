@@ -207,7 +207,7 @@ pub async fn prepare(
 ) -> Result<Prepared> {
     if packages.runtime.protocol != 3
         || packages.runtime.auth != 1
-        || packages.runtime.celld != crate::native::VERSION
+        || !platform_agent::runtime::supports_celld(&packages.runtime.celld)
     {
         return Err(Error::invalid(
             "Unsupported runtime installation protocol or celld version".into(),
