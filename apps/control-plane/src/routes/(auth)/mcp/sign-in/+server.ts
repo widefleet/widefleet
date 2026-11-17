@@ -20,5 +20,5 @@ export const GET: RequestHandler = async ({ url }) => {
   const target = new URL(`https://mcp.${configuration.APP_DOMAIN}${port}/oauth/organization`);
   target.searchParams.set("state", state.data);
   target.searchParams.set("organization", principal.application.organizationId);
-  redirect(303, target.href);
+  redirect(303, target.href, { external: [target.origin] });
 };

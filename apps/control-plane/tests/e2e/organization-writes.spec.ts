@@ -185,6 +185,33 @@ test("opens organization settings without installation reporting privileges", as
   }
 });
 
+test("returns MCP sign-in to the data plane with the selected organization", async ({
+  browser,
+}) => {
+  const { person, alpha, context } = await organizationSession(browser, false);
+
+  try {
+    await environment.database.db
+      .update(session)
+      .set({ activeOrganizationId: alpha })
+      .where(eq(session.userId, person.id));
+    const state = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
+
+    const response = await context.request.get(`/mcp/sign-in?${new URLSearchParams({ state })}`, {
+      maxRedirects: 0,
+    });
+
+    expect(response.status()).toBe(303);
+    const target = new URL(response.headers()["location"] ?? "invalid");
+
+    expect(target.origin).toBe("https://mcp.apps.localhost");
+    expect(target.pathname).toBe("/oauth/organization");
+    expect(Object.fromEntries(target.searchParams)).toEqual({ state, organization: alpha });
+  } finally {
+    await context.close();
+  }
+});
+
 for (const javaScriptEnabled of [true, false]) {
   test(`preserves multiline secrets and offers failed disconnection retries (JavaScript ${javaScriptEnabled})`, async ({
     browser,
