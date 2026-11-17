@@ -1,0 +1,29 @@
+# Keep unrelated workspace source out of this image's COPY/cache inputs.
+**
+!Cargo.toml
+!Cargo.lock
+!rust-toolchain.toml
+!.cargo/**
+!crates/**
+!LICENSE
+
+# Preserve the repository-wide exclusions after all inclusions.
+.git
+.local
+.tools
+node_modules
+**/node_modules
+**/.svelte-kit
+**/.blume
+**/.blume-verify
+**/.wrangler
+**/build
+**/dist
+target
+**/.platform
+**/tests
+**/*.test.ts
+**/.env
+**/.env.*
+**/test-results
+**/playwright-report
