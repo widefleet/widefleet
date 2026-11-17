@@ -1,4 +1,6 @@
 import { workloadDiscovery } from "./workload-identity.ts";
+import { mcpLoginRequest } from "./mcp-login.ts";
+
 import { prepareAppSecrets } from "./app-secrets.ts";
 import { oauthAppAvailable } from "./app-oauth.ts";
 import { managedOAuth } from "./oauth.ts";
@@ -307,6 +309,9 @@ export class RuntimeManagement extends WorkerEntrypoint<ParentEnvironment> {
 
 export default {
   async fetch(request: Request, environment: ParentEnvironment, context: ExecutionContext) {
+    const login = await mcpLoginRequest(request, environment, context);
+
+    if (login) return login;
     const discovery = await workloadDiscovery(request, environment);
 
     if (discovery) return discovery;

@@ -34,6 +34,7 @@ export const createIdentityProvider = async (
     available: true,
     failure: "",
     entra: false,
+    entraAuthority: "",
     google: false,
     workspaceDomain: "example.test",
     groups: ["accounting"],
@@ -44,6 +45,7 @@ export const createIdentityProvider = async (
     issuerSuffix: "",
     refreshFailure: "",
     rotateRefreshTokens: false,
+    refreshReplaySeconds: 30,
     issueRefreshToken: true,
     omitRefreshIdToken: false,
     grantedScopes: "",
@@ -61,7 +63,7 @@ export const createIdentityProvider = async (
       const issuer = settings.google
         ? "https://accounts.google.com"
         : settings.entra
-          ? `${origin}/${tenantId}/v2.0`
+          ? `${settings.entraAuthority || origin}/${tenantId}/v2.0`
           : origin + settings.issuerSuffix;
 
       response.setHeader("content-type", "application/json");
@@ -259,7 +261,10 @@ export const createIdentityProvider = async (
 
         if (refreshing && settings.rotateRefreshTokens) {
           refreshes.delete(credential);
-          replays.set(credential, { response: result, expiresAt: Date.now() + 30_000 });
+          replays.set(credential, {
+            response: result,
+            expiresAt: Date.now() + settings.refreshReplaySeconds * 1000,
+          });
         }
 
         response.end(result);

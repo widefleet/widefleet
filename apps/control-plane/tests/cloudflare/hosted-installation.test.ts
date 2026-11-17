@@ -301,6 +301,7 @@ describe("Hosted resource provisioning", () => {
     expect(configs.runtime.vars).toEqual({
       WIDEFLEET_CONFIGURATION: JSON.stringify({ source: "r2" }),
       WIDEFLEET_LOGS: "cloudflare",
+      WIDEFLEET_MCP_ORIGIN: "https://mcp.apps.example.test",
       WIDEFLEET_WORKLOAD_ISSUER: "https://auth.apps.example.test/workload",
       OBSERVER_LABEL: "installation-fixture",
     });

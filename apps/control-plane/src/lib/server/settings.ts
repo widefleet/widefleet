@@ -4,7 +4,7 @@ import {
   settingsUpdate,
   setupOwner,
 } from "@platform/contracts";
-import { eq, sql } from "drizzle-orm";
+import { eq, isNotNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { OrganizationCredential } from "./organization-operations.ts";
 import { appCallbackUrl, type AppSignIn } from "./app-sign-in.ts";
@@ -17,11 +17,22 @@ import { InvalidOperation } from "./errors.ts";
 import { decryptSecret, encryptSecret } from "./secret-encryption.ts";
 import { installationOrganizationId } from "../organization.ts";
 import { readOrganizationSettings, createInstallationOwner } from "./installation-store.ts";
-import { oauthClient } from "./auth-schema.ts";
+import { oauthClient, organization } from "./auth-schema.ts";
 import { readSsoConfiguration, ssoRuntimeIdentity, saveSsoProvider } from "./sso-settings.ts";
 import { appLoginClientId, readAppLogin, registerAppLogin } from "./app-login-client.ts";
 import { organizationSettings } from "./schema.ts";
 import type { Observation } from "./observation.ts";
+
+export const configuredAppSignInOrganizations = (database: Database) =>
+  database
+    .select({ organizationId: organizationSettings.organizationId })
+    .from(organizationSettings)
+    .where(
+      or(
+        isNotNull(organizationSettings.appClientSecret),
+        eq(organizationSettings.ssoRequired, true),
+      ),
+    );
 
 const requireAdmin = (principal: Principal, organizationId: string) => {
   if (!principal.application.admin || principal.application.organizationId !== organizationId)
@@ -124,9 +135,15 @@ const createOrganizationSettingsService = (
         if (identity && appSignIn) {
           try {
             const secret = identity.management.clientSecret;
-            expectedRevision = await appSignIn.revision(identity, secret);
 
-            if (publish) await appSignIn.publish(identity, secret);
+            const [company] = await transaction
+              .select({ name: organization.name })
+              .from(organization)
+              .where(eq(organization.id, organizationId));
+
+            expectedRevision = await appSignIn.revision(identity, secret, company?.name);
+
+            if (publish) await appSignIn.publish(identity, secret, company?.name);
           } catch (cause) {
             current.errors.push(
               cause instanceof InvalidOperation
@@ -447,6 +464,13 @@ export const createSettingsService = (
       return owner;
     },
     publish: (organizationId = installationOrganizationId) => scoped(organizationId).inspect(true),
+    republish: async () => {
+      for (const { organizationId } of await configuredAppSignInOrganizations(database)) {
+        const result = await scoped(organizationId).inspect(true);
+
+        if (result.error) throw new Error(result.error);
+      }
+    },
     initialize: (
       input: z.infer<typeof settingsInput>,
       organizationId = installationOrganizationId,

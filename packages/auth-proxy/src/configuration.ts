@@ -7,6 +7,7 @@ const hostname = z.string().regex(/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{
 export const authConfiguration = z
   .strictObject({
     organizationId: organizationIdentifier,
+    organizationName: z.string().min(1).max(256).optional(),
     provider: companyProvider,
     scopes: z.array(z.string()).optional(),
     clientId: z.string().min(1).max(512),

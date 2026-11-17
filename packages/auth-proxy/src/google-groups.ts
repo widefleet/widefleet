@@ -29,7 +29,7 @@ export const googleGroups = async (accessToken: string, email: string) => {
 
     const response = await fetch(url, {
       headers: { authorization: `Bearer ${accessToken}` },
-      redirect: "error",
+      redirect: "manual",
       signal: AbortSignal.timeout(10_000),
     });
 

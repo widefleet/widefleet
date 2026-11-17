@@ -22,6 +22,7 @@
         "apps/control-plane/src/routes/**/*.svelte",
         "apps/control-plane/src/lib/*.svelte",
         "apps/control-plane/src/lib/components/*.svelte",
+        "packages/app-runtime/src/ui/**/*.svelte",
         "packages/ui/src/*.svelte",
         "packages/ui/src/components/ui/button/*.svelte",
         "packages/ui/src/components/ui/native-select/native-select.svelte"

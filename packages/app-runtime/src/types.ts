@@ -27,6 +27,7 @@ export type ParentEnvironment = {
   WIDEFLEET_CONFIGURATION: string;
   WIDEFLEET_EXECUTION_LIMITS?: string;
   WIDEFLEET_WORKLOAD_ISSUER?: string;
+  WIDEFLEET_MCP_ORIGIN?: string;
   WIDEFLEET_OAUTH?: string;
   [name: string]:
     | undefined

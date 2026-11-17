@@ -2,6 +2,7 @@ import { building } from "$app/env";
 import type { Handle, HandleServerError, ServerInit } from "@sveltejs/kit/hooks";
 import { createRequestRuntime } from "#server/runtime-services";
 import { getRuntime } from "#server/runtime-node";
+import { checkFormOrigin } from "#server/form-origin";
 import { handleSession } from "#server/session";
 
 export const init: ServerInit = async () => {
@@ -12,6 +13,9 @@ import { proxyAnalyticsRequest } from "#server/analytics-proxy";
 import { analyticsEnvironmentSchema, readAnalyticsConfiguration } from "#lib/analytics-config";
 
 export const handle: Handle = async ({ event, resolve }) => {
+  const rejected = checkFormOrigin(event.request);
+
+  if (rejected) return rejected;
   event.locals.analytics = readAnalyticsConfiguration(
     analyticsEnvironmentSchema.parse(process.env),
   );

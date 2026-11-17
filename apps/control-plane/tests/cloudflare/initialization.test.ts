@@ -6,10 +6,19 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { authControlPath } from "@platform/auth-proxy/publication";
 import { appLoginClientId, readAppLogin } from "../../src/lib/server/app-login-client.ts";
-import { account, oauthClient, oauthResource, user } from "../../src/lib/server/auth-schema.ts";
+import {
+  account,
+  oauthClient,
+  oauthResource,
+  organization,
+  ssoProvider,
+  user,
+} from "../../src/lib/server/auth-schema.ts";
+import { organizationSettings } from "../../src/lib/server/schema.ts";
+import { encryptSecret } from "../../src/lib/server/secret-encryption.ts";
 import { cliScopes } from "../../src/lib/server/auth-options.ts";
 import { cloudflareConfigurationSchema } from "../../src/lib/server/cloudflare-config.ts";
 import { createDatabase } from "../../src/lib/server/database.ts";
@@ -124,7 +133,12 @@ describe("Hosted installation initialization", () => {
       { id: installed.ownerId, email: "owner@example.test" },
     ]);
     expect(await database.db.select().from(oauthClient)).toHaveLength(1);
-    expect(await database.db.select().from(oauthResource)).toMatchObject([
+    expect(
+      await database.db
+        .select()
+        .from(oauthResource)
+        .where(eq(oauthResource.identifier, `${environment.PLATFORM_URL}/api/v1`)),
+    ).toMatchObject([
       {
         identifier: `${environment.PLATFORM_URL}/api/v1`,
         allowedScopes: cliScopes,
@@ -211,7 +225,7 @@ describe("Hosted installation initialization", () => {
   });
 
   it.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
-    "publishes default app sign-in when only the extension supplies email",
+    "publishes app sign-in and restores MCP configuration for all saved organizations on upgrade",
     async () => {
       const { unstable_dev } = await import("wrangler");
       const workerName = `initialize-${name}`;
@@ -219,7 +233,15 @@ describe("Hosted installation initialization", () => {
       await writeFile(
         entry,
         `import { manageAuthConfiguration } from ${JSON.stringify(fileURLToPath(import.meta.resolve("@platform/auth-proxy/worker")))};
-        export default { fetch: manageAuthConfiguration };`,
+        export default { async fetch(request,env) {
+          if(new URL(request.url).pathname==='/fixture/reset-mcp') {
+            for(const {name} of (await env.AUTH_CONFIG.list({prefix:'mcp/'})).keys) await env.AUTH_CONFIG.delete(name);
+            return new Response(null,{status:204});
+          }
+          if(new URL(request.url).pathname==='/fixture/mcp-keys')
+            return Response.json((await env.AUTH_CONFIG.list({prefix:'mcp/'})).keys.map(key=>key.name));
+          return manageAuthConfiguration(request,env);
+        } };`,
       );
       const runtimePath = join(directory, "runtime.json");
       await writeFile(
@@ -279,6 +301,46 @@ describe("Hosted installation initialization", () => {
             expect.objectContaining({ clientId: appLoginClientId("widefleet"), disabled: false }),
           ]),
         );
+
+        await database.db
+          .insert(organization)
+          .values({ id: "company", name: "Company", slug: "company", createdAt: new Date() });
+        await database.db
+          .insert(organizationSettings)
+          .values({ organizationId: "company", ssoRequired: true, settings: {} });
+        await database.db.insert(ssoProvider).values({
+          id: "company-provider",
+          providerId: "company-provider",
+          organizationId: "company",
+          issuer: "https://accounts.google.com",
+          domain: "company.example.test",
+          domainVerified: true,
+          appIdentityType: "google",
+          oidcConfig: await encryptSecret(
+            environment.PLATFORM_ENCRYPTION_KEY,
+            JSON.stringify({ clientId: "company-client", clientSecret: "company-secret" }),
+          ),
+        });
+        const saved = await database.db.select().from(ssoProvider);
+        await worker.fetch("http://localhost/fixture/reset-mcp");
+        expect(await (await worker.fetch("http://localhost/fixture/mcp-keys")).json()).toEqual([]);
+
+        await initialize(undefined, configPath, {
+          WIDEFLEET_RUNTIME_EXTENSION: emailExtension,
+          APP_COOKIE_SECRET: Buffer.alloc(32, 1).toString("base64url"),
+        });
+        expect(await (await worker.fetch("http://localhost/fixture/mcp-keys")).json()).toEqual([
+          "mcp/login",
+          "mcp/organizations/google/company.example.test/company",
+        ]);
+        expect(await database.db.select().from(ssoProvider)).toEqual(saved);
+        expect(
+          await (
+            await worker.fetch(
+              `http://localhost${authControlPath}/organizations/company/configuration`,
+            )
+          ).json(),
+        ).toMatchObject({ state: "active" });
       } finally {
         await worker.stop();
       }
@@ -299,9 +361,12 @@ describe("Hosted installation initialization", () => {
       await database.db.update(oauthClient).set({ scopes: ["platform:read"] });
 
       expect((await initialize()).stdout).toContain("Hosted installation initialized");
-      expect(await database.db.select().from(oauthResource)).toMatchObject([
-        { allowedScopes: cliScopes, accessTokenTtl: 300 },
-      ]);
+      expect(
+        await database.db
+          .select()
+          .from(oauthResource)
+          .where(eq(oauthResource.identifier, `${environment.PLATFORM_URL}/api/v1`)),
+      ).toMatchObject([{ allowedScopes: cliScopes, accessTokenTtl: 300 }]);
       expect(await database.db.select().from(oauthClient)).toMatchObject([{ scopes: cliScopes }]);
     });
 
@@ -326,9 +391,12 @@ describe("Hosted installation initialization", () => {
       }
 
       expect((await initialize()).stdout).toContain("Hosted installation initialized");
-      expect(await database.db.select().from(oauthResource)).toMatchObject([
-        { accessTokenTtl: 300 },
-      ]);
+      expect(
+        await database.db
+          .select()
+          .from(oauthResource)
+          .where(eq(oauthResource.identifier, `${environment.PLATFORM_URL}/api/v1`)),
+      ).toMatchObject([{ accessTokenTtl: 300 }]);
     }, 30_000);
   });
 });

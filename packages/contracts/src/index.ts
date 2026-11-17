@@ -8,6 +8,9 @@ import { z } from "zod";
 import { appSourceSummary, gitBranch, sourceRevision } from "./source.ts";
 
 import { serviceDocumentation } from "./service-documentation.ts";
+
+export * from "./mcp.ts";
+
 import { organizationIdentifier } from "./organizations.ts";
 import { appAccessSnapshot } from "./app-access.ts";
 import { networkSnapshot } from "./network.ts";
@@ -43,7 +46,10 @@ export const appSlug = z
   .regex(/^[a-z](?:[a-z0-9-]*[a-z0-9])?$/);
 
 export const createAppInput = z.strictObject({
-  slug: appSlug.refine((value) => value !== "auth", "The auth hostname is reserved for SSO"),
+  slug: appSlug.refine(
+    (value) => !["auth", "mcp"].includes(value),
+    "The auth and mcp hostnames are reserved for platform services",
+  ),
   displayName: z.string().trim().min(1).max(120),
   parentId: identifier.nullable().default(null),
   previewBranch: gitBranch.optional(),
@@ -349,11 +355,7 @@ export const runtimeRelease = z.strictObject({
     .min(1),
 });
 
-export const appCaller = z.strictObject({
-  issuer: z.url(),
-  subject: z.string().min(1),
-  name: z.string(),
-});
+export { appCaller } from "./app-caller.ts";
 
 const appSecretMaxBytes = 5_000;
 
