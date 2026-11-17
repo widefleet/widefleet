@@ -2,7 +2,7 @@ import { APIError } from "better-auth/api";
 import { getRequestEvent } from "$app/server";
 import { error, redirect } from "@sveltejs/kit";
 import type { DatabaseUnavailable, InvalidOperation, StorageUnavailable } from "./errors.ts";
-import { getRuntime } from "./runtime.ts";
+import { getRuntime, reportRequestException } from "./runtime.ts";
 import type { AuthenticationFailed } from "./identity.ts";
 import { runExtensionEffect } from "../extension-effects.ts";
 
@@ -109,17 +109,14 @@ export const pageFailure = (
     | APIError,
 ): never => {
   if (cause instanceof APIError) {
-    if (cause.statusCode >= 500)
-      runExtensionEffect(async () => {
-        (await getRuntime()).reporting.exception(cause);
-      });
+    if (cause.statusCode >= 500) runExtensionEffect(() => reportRequestException(cause));
     error(cause.statusCode, cause.message);
   }
 
   if (cause._tag === "DatabaseUnavailable" || cause._tag === "StorageUnavailable")
-    runExtensionEffect(async () => {
-      (await getRuntime()).reporting.exception(cause.cause instanceof Error ? cause.cause : cause);
-    });
+    runExtensionEffect(() =>
+      reportRequestException(cause.cause instanceof Error ? cause.cause : cause),
+    );
 
   if (cause._tag === "DatabaseUnavailable") error(503, "The database is temporarily unavailable.");
 

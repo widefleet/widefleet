@@ -4,7 +4,7 @@ import { error, invalid } from "@sveltejs/kit";
 import type { Result } from "better-result";
 import { DatabaseUnavailable, InvalidOperation, StorageUnavailable } from "./errors.ts";
 import { getUserSession, pageFailure } from "./page-auth.ts";
-import { getRuntime } from "./runtime.ts";
+import { getRuntime, reportRequestException } from "./runtime.ts";
 
 export const remoteContext = async (write?: { organizationId: string }) => {
   const { request } = getRequestEvent();
@@ -59,7 +59,7 @@ export const remoteOperation = async <T>(operation: () => Promise<T>) => {
     if (cause instanceof InvalidOperation) pageFailure(cause);
 
     if (cause instanceof APIError) {
-      if (cause.statusCode >= 500) (await getRuntime()).reporting.exception(cause);
+      if (cause.statusCode >= 500) await reportRequestException(cause);
       error(cause.statusCode, cause.message);
     }
 
