@@ -389,15 +389,21 @@ describe("MCP OAuth in the data plane", () => {
     expect(bad.status).toBe(400);
   });
 
-  it("uses the normal Widefleet sign-in when there is no company SSO context", async () => {
-    idp.settings.google = false;
+  it.each([false, true])("refreshes generic OIDC (Google issuer: %s)", async (google) => {
+    idp.settings.google = google;
 
     const published = await send("/fixture/organizations/fallback/configuration", {
       method: "PUT",
       headers,
       body: JSON.stringify({
         organizationId: "fallback",
-        provider: { type: "oidc", issuer: idp.origin, label: "Widefleet" },
+        provider: {
+          type: "oidc",
+          issuer: google ? "https://accounts.google.com" : idp.origin,
+          label: "Company",
+          groupsClaim: "roles",
+        },
+        scopes: ["openid", "profile", "email", "offline_access"],
         clientId: "app-login",
         clientSecret: "synthetic-client-secret",
         cookieSecret: Buffer.alloc(32, 1).toString("base64url"),
@@ -429,6 +435,14 @@ describe("MCP OAuth in the data plane", () => {
     expect(upstream.searchParams.get("redirect_uri")).toBe(
       "https://auth.apps.example.test/oauth2/fallback/callback",
     );
+    expect(upstream.searchParams.get("scope")?.includes("offline_access")).toBe(!google);
+
+    if (google) {
+      expect(upstream.searchParams.get("access_type")).toBe("offline");
+      expect(upstream.searchParams.get("prompt")).toBe("consent");
+      expect(upstream.searchParams.has("hd")).toBe(false);
+    }
+
     const bridge = await login(upstream.href);
     expect(bridge.status, await bridge.clone().text()).toBe(303);
     const callback = await send(z.string().parse(bridge.headers.get("location")));
@@ -441,15 +455,46 @@ describe("MCP OAuth in the data plane", () => {
     );
 
     expect(responseToken.status, await responseToken.clone().text()).toBe(200);
-    const grant = z.object({ access_token: z.string() }).parse(await responseToken.json());
+
+    const grant = z
+      .object({ access_token: z.string(), refresh_token: z.string() })
+      .parse(await responseToken.json());
 
     const identity = await send("/fixture/identity", {
       headers: { authorization: `Bearer ${grant.access_token}` },
     });
 
     expect(await identity.json()).toMatchObject({
-      mcp: { organizationId: "fallback", identity: { subject: "pairwise-subject" } },
+      mcp: {
+        organizationId: "fallback",
+        identity: { subject: "pairwise-subject", groups: ["accounting"] },
+      },
     });
+
+    const refreshed = await send("/oauth/token", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        client_id: auth.client,
+        refresh_token: grant.refresh_token,
+        resource: `${origin}/mcp`,
+      }).toString(),
+    });
+
+    expect(refreshed.status, await refreshed.clone().text()).toBe(200);
+
+    const renewed = z
+      .object({ access_token: z.string(), refresh_token: z.string() })
+      .parse(await refreshed.json());
+
+    expect(
+      (
+        await send("/fixture/identity", {
+          headers: { authorization: `Bearer ${renewed.access_token}` },
+        })
+      ).status,
+    ).toBe(200);
     idp.settings.google = true;
   });
 
