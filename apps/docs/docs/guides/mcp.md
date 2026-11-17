@@ -215,8 +215,10 @@ updated configuration is active.
 
 If a service is missing, check the connected organization, user or group grant and
 active deployment. For pending permissions, check the deployment agent and the
-activation error on the availability page. If sign-in fails, verify the registered
-callback addresses, published login configuration and provider permissions.
+activation error on the availability page. If saving permissions asks for a
+runtime update, install the matching app-runtime release: updating management and
+the agent does not replace an already active runtime. If sign-in fails, verify the
+registered callback addresses, published login configuration and provider permissions.
 
 ## Service-grant administration API
 
