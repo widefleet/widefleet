@@ -373,8 +373,18 @@ async fn publish(
                 .any(|workflow| workflow.class_name == *name)
         })
         .collect();
-    let service_documentation =
-        crate::service_docs::extract(project, temporary.path(), &entrypoints)?;
+    // Type analysis can outlast the server's keep-alive timeout. Keep the async
+    // workers free to observe closed connections before the next API request.
+    let service_documentation = {
+        let project = project.to_owned();
+        let output = temporary.path().to_owned();
+        let entrypoints = entrypoints.clone();
+        tokio::task::spawn_blocking(move || {
+            crate::service_docs::extract(&project, &output, &entrypoints)
+        })
+        .await
+        .map_err(|error| Error::invalid(format!("Service documentation failed: {error}")))??
+    };
     let worker = bundled.source;
     if worker.len() > 20 * 1024 * 1024 {
         return Err(Error::invalid("Worker exceeds 20 MiB".into()));
