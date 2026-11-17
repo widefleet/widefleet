@@ -2,9 +2,9 @@
   import { authClient } from "#lib/auth-client";
   import { resetClientContext } from "#lib/analytics-client";
   import EmailCodeForm from "#shadcn/components/EmailCodeForm.svelte";
-  import AuthLayout from "#shadcn/components/AuthLayout.svelte";
+  import AuthLayout from "@platform/ui/auth-layout";
   import Feedback from "#shadcn/components/Feedback.svelte";
-  import { Button } from "#shadcn/components/ui/button/index.js";
+  import { Button } from "@platform/ui/button";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
   import type { PageData } from "./$types";
   import { onMount } from "svelte";

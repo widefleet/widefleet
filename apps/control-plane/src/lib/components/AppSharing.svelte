@@ -2,10 +2,10 @@
   import OrganizationField from "#shadcn/OrganizationField.svelte";
   import { getAppDetails, grantAccess, revokeAccess } from "#lib/apps.remote";
   import FormIssues from "#shadcn/FormIssues.svelte";
-  import { Button } from "#shadcn/components/ui/button/index.js";
-  import { Input } from "#shadcn/components/ui/input/index.js";
-  import { Label } from "#shadcn/components/ui/label/index.js";
-  import { Badge } from "#shadcn/components/ui/badge/index.js";
+  import { Button } from "@platform/ui/button";
+  import { Input } from "@platform/ui/input";
+  import { Label } from "@platform/ui/label";
+  import { Badge } from "@platform/ui/badge";
   import UserPlus from "@lucide/svelte/icons/user-plus";
   import Search from "@lucide/svelte/icons/search";
   import ShieldCheck from "@lucide/svelte/icons/shield-check";

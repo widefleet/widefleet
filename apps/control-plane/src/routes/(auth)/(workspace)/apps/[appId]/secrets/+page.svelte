@@ -3,10 +3,10 @@
   import { getAppSecrets, putAppSecret, deleteAppSecret } from "#lib/services.remote";
   import OrganizationField from "#shadcn/OrganizationField.svelte";
   import FormIssues from "#shadcn/FormIssues.svelte";
-  import { Input } from "#shadcn/components/ui/input/index.js";
-  import { Textarea } from "#shadcn/components/ui/textarea/index.js";
-  import { Label } from "#shadcn/components/ui/label/index.js";
-  import { Button } from "#shadcn/components/ui/button/index.js";
+  import { Input } from "@platform/ui/input";
+  import { Textarea } from "@platform/ui/textarea";
+  import { Label } from "@platform/ui/label";
+  import { Button } from "@platform/ui/button";
 
   const context = getAppContext();
 

@@ -1160,6 +1160,37 @@ test("offers Google and Microsoft alongside email and highlights the last succes
   ).toHaveAccessibleDescription("Last used");
   await expect(page.getByRole("button", { name: /^Continue with Microsoft/ })).toBeVisible();
   await expect(page.getByLabel("Email", { exact: true })).toBeVisible();
+
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+
+    for (const width of [390, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+        true,
+      );
+      expect(
+        await page
+          .locator("img")
+          .evaluateAll((images) =>
+            images.every(
+              (image) =>
+                image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0,
+            ),
+          ),
+      ).toBe(true);
+      await page.screenshot({
+        path: fileURLToPath(
+          new URL(
+            `../../../../.local/playwright/shared-sign-in-${colorScheme}-${width}.png`,
+            import.meta.url,
+          ),
+        ),
+        fullPage: true,
+      });
+    }
+  }
+
   await page.route("**/api/auth/sign-in/social", async (route) => {
     expect(route.request().postDataJSON()).toMatchObject({
       provider: "widefleet-microsoft",

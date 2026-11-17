@@ -1,12 +1,12 @@
 <script lang="ts">
   import FormIssues from "#shadcn/FormIssues.svelte";
-  import AuthLayout from "#shadcn/components/AuthLayout.svelte";
+  import AuthLayout from "@platform/ui/auth-layout";
   import Feedback from "#shadcn/components/Feedback.svelte";
-  import { Button } from "#shadcn/components/ui/button/index.js";
+  import { Button } from "@platform/ui/button";
   import { resetClientContext } from "#lib/analytics-client";
   import { selectOrganization, createOrganization } from "#lib/organizations.remote";
-  import { Input } from "#shadcn/components/ui/input/index.js";
-  import { Label } from "#shadcn/components/ui/label/index.js";
+  import { Input } from "@platform/ui/input";
+  import { Label } from "@platform/ui/label";
   import { authClient } from "#lib/auth-client";
   import type { PageData } from "./$types";
 

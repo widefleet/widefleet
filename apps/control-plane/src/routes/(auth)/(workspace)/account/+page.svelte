@@ -4,7 +4,7 @@
   import { authClient } from "#lib/auth-client";
   import PageHeading from "#shadcn/components/PageHeading.svelte";
   import Feedback from "#shadcn/components/Feedback.svelte";
-  import { Button } from "#shadcn/components/ui/button/index.js";
+  import { Button } from "@platform/ui/button";
 
   const account = $derived(await getCompanyAccount());
 

@@ -1,8 +1,8 @@
 <script lang="ts">
   import { getTemplates } from "#lib/catalog.remote";
   import { page } from "$app/state";
-  import { Button } from "#shadcn/components/ui/button/index.js";
-  import { Input } from "#shadcn/components/ui/input/index.js";
+  import { Button } from "@platform/ui/button";
+  import { Input } from "@platform/ui/input";
   import EmptyState from "#shadcn/components/EmptyState.svelte";
   import CopyValue from "#shadcn/components/CopyValue.svelte";
   import Search from "@lucide/svelte/icons/search";

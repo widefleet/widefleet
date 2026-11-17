@@ -1,5 +1,5 @@
 <script lang="ts">
-  import AuthLayout from "#shadcn/components/AuthLayout.svelte";
+  import AuthLayout from "@platform/ui/auth-layout";
   import EmailCodeForm from "#shadcn/components/EmailCodeForm.svelte";
   import type { PageData } from "./$types";
   import SocialSignIn from "#shadcn/components/SocialSignIn.svelte";

@@ -15,12 +15,12 @@
     setExternalManagement,
     updateSettings,
   } from "#lib/settings.remote";
-  import { Button } from "#shadcn/components/ui/button/index.js";
-  import { Input } from "#shadcn/components/ui/input/index.js";
-  import { Label } from "#shadcn/components/ui/label/index.js";
-  import { NativeSelect } from "#shadcn/components/ui/native-select/index.js";
-  import { Checkbox } from "#shadcn/components/ui/checkbox/index.js";
-  import * as Dialog from "#shadcn/components/ui/dialog/index.js";
+  import { Button } from "@platform/ui/button";
+  import { Input } from "@platform/ui/input";
+  import { Label } from "@platform/ui/label";
+  import { NativeSelect } from "@platform/ui/native-select";
+  import { Checkbox } from "@platform/ui/checkbox";
+  import * as Dialog from "@platform/ui/dialog";
   import PageHeading from "#shadcn/components/PageHeading.svelte";
   import CopyValue from "#shadcn/components/CopyValue.svelte";
   import Feedback from "#shadcn/components/Feedback.svelte";

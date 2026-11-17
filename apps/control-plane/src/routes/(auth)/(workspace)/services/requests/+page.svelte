@@ -2,8 +2,8 @@
   import { getConnectionRequests, decideConnectionRequest } from "#lib/services.remote";
   import OrganizationField from "#shadcn/OrganizationField.svelte";
   import FormIssues from "#shadcn/FormIssues.svelte";
-  import { Button } from "#shadcn/components/ui/button/index.js";
-  import { Badge } from "#shadcn/components/ui/badge/index.js";
+  import { Button } from "@platform/ui/button";
+  import { Badge } from "@platform/ui/badge";
 
   const requests = $derived(await getConnectionRequests());
 

@@ -1,8 +1,8 @@
 <script lang="ts">
   import { getAppServices } from "#lib/services.remote";
   import PageHeading from "#shadcn/components/PageHeading.svelte";
-  import { Button } from "#shadcn/components/ui/button/index.js";
-  import { Input } from "#shadcn/components/ui/input/index.js";
+  import { Button } from "@platform/ui/button";
+  import { Input } from "@platform/ui/input";
   import type { PageData } from "./$types";
 
   let { data }: { data: PageData } = $props();

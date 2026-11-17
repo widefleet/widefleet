@@ -6,11 +6,11 @@
   import { getWorkflows, getWorkflowOperation, manageWorkflow } from "#lib/workflows.remote";
   import { warnBeforeLeaving } from "#lib/unsaved-changes";
   import { getAppContext } from "#lib/app-context";
-  import { Button } from "#shadcn/components/ui/button/index.js";
-  import { Input } from "#shadcn/components/ui/input/index.js";
-  import { Label } from "#shadcn/components/ui/label/index.js";
-  import { NativeSelect } from "#shadcn/components/ui/native-select/index.js";
-  import { Textarea } from "#shadcn/components/ui/textarea/index.js";
+  import { Button } from "@platform/ui/button";
+  import { Input } from "@platform/ui/input";
+  import { Label } from "@platform/ui/label";
+  import { NativeSelect } from "@platform/ui/native-select";
+  import { Textarea } from "@platform/ui/textarea";
   import Feedback from "#shadcn/components/Feedback.svelte";
 
   const workspace = getWorkspaceContext();

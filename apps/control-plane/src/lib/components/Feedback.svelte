@@ -3,7 +3,7 @@
   import CircleCheck from "@lucide/svelte/icons/circle-check";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import Info from "@lucide/svelte/icons/info";
-  import * as Alert from "#shadcn/components/ui/alert/index.js";
+  import * as Alert from "@platform/ui/alert";
 
   let { kind = "info", children }: { kind?: "info" | "success" | "error"; children: Snippet } =
     $props();
