@@ -17,6 +17,7 @@ import { InvalidOperation } from "./errors.ts";
 
 export type UserConnectionRequest = (
   input: z.infer<typeof userConnectionInvocation>,
+  signal?: AbortSignal,
 ) => Promise<{ status: number; text(): Promise<string> }>;
 
 export const createUserConnections = (
@@ -49,6 +50,7 @@ export const createUserConnections = (
     target: Awaited<ReturnType<typeof candidates>>[number],
     identity: Awaited<ReturnType<typeof identify>>,
     operation: z.infer<typeof userConnectionAction>,
+    signal?: AbortSignal,
   ) => {
     if (!request)
       throw new APIError("SERVICE_UNAVAILABLE", {
@@ -63,6 +65,7 @@ export const createUserConnections = (
         ...identity,
         operation,
       }),
+      signal,
     );
 
     if (response.status === 404) return null;
@@ -93,31 +96,56 @@ export const createUserConnections = (
   };
 
   return {
-    hasCandidates: async (principal: Principal) => (await candidates(principal)).length > 0,
     list: async (principal: Principal) => {
       const records = await candidates(principal);
 
       if (!records.length) return [];
       const identity = await identify(principal);
-      const results: z.infer<typeof userConnectionEntry>[] = [];
 
-      // Bound fan-out: each status request can execute customer code.
-      for (const record of records) {
-        try {
-          const result = await call(principal, record, identity, { action: "status" });
+      const results: (z.infer<typeof userConnectionEntry> | null)[] = records.map((record) => ({
+        ...record,
+        status: null,
+        unavailable: true,
+      }));
 
-          if (result !== null)
-            results.push({
-              ...record,
-              status: userConnectionStatus.parse(result),
-              unavailable: false,
-            });
-        } catch {
-          results.push({ ...record, status: null, unavailable: true });
-        }
-      }
+      const deadline = AbortSignal.timeout(5_000);
+      let next = 0;
 
-      return results;
+      // Each request executes customer code. Bound both concurrency and the total
+      // wait; records not reached before the deadline remain explicitly unavailable.
+      await Promise.all(
+        Array.from({ length: Math.min(4, records.length) }, async () => {
+          while (!deadline.aborted) {
+            const index = next++;
+            const record = records[index];
+
+            if (!record) return;
+
+            try {
+              const result = await call(
+                principal,
+                record,
+                identity,
+                { action: "status" },
+                deadline,
+              );
+
+              results[index] =
+                result === null
+                  ? null
+                  : {
+                      ...record,
+                      status: userConnectionStatus.parse(result),
+                      unavailable: false,
+                    };
+            } catch {
+              // Preserve the unavailable result, including for aborted requests.
+            }
+          }
+        }),
+      );
+
+      return results.filter((result) => result !== null);
     },
     prepare: async (principal: Principal, appId: string, onboarding = false) => {
       const record = await target(principal, appId);

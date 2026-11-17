@@ -39,12 +39,13 @@ const startRuntime = async () => {
     storage,
     reporting,
     encryptionKey,
-    userConnectionRequest: (input) =>
+    userConnectionRequest: (input, signal) =>
       runtimeManagementRequest(
         configuration,
         userConnectionControlPath,
         "POST",
         JSON.stringify(input),
+        signal,
       ),
     authCookies: sveltekitCookies(getRequestEvent),
   });

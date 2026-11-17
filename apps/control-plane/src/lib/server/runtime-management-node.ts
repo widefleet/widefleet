@@ -8,6 +8,7 @@ export const runtimeManagementRequest = async (
   path: string,
   method: string,
   body?: string,
+  signal?: AbortSignal,
 ) => {
   const key = z
     .string()
@@ -22,7 +23,7 @@ export const runtimeManagementRequest = async (
     method,
     headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
     redirect: "error",
-    signal: AbortSignal.timeout(15_000),
+    signal: signal ?? AbortSignal.timeout(15_000),
   };
 
   if (body !== undefined) options.body = body;

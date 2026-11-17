@@ -60,25 +60,34 @@
         </p>
       {/if}
     </div>
-    {#if !connection.unavailable && status?.connection === "connected"}
-      <Button
-        variant="ghost"
-        size="sm"
-        href={`${path}${onboarding ? "&" : "?"}disconnect=${connection.appId}`}
-        >Disconnect<span class="sr-only"> {connection.displayName}</span></Button
-      >
-    {:else if !connection.unavailable && status?.setup === "ready"}
-      <form {...connect}>
-        <OrganizationField field={connect.fields.organizationId} />
-        <input {...connect.fields.appId.as("hidden", connection.appId)} />
-        <input {...connect.fields.onboarding.as("hidden", String(onboarding))} />
-        <Button type="submit" size="sm" disabled={connect.pending > 0}
-          >{connect.pending > 0 ? "Opening…" : "Connect"}<span class="sr-only">
-            {connection.displayName}</span
-          ></Button
+    <div class="flex flex-wrap items-center gap-2">
+      {#if !connection.unavailable && status?.setup === "ready"}
+        <form {...connect}>
+          <OrganizationField field={connect.fields.organizationId} />
+          <input {...connect.fields.appId.as("hidden", connection.appId)} />
+          <input {...connect.fields.onboarding.as("hidden", String(onboarding))} />
+          <Button
+            type="submit"
+            size="sm"
+            variant={status.connection === "connected" ? "outline" : "default"}
+            disabled={connect.pending > 0}
+            >{connect.pending > 0
+              ? "Opening…"
+              : status.connection === "connected"
+                ? "Reconnect"
+                : "Connect"}<span class="sr-only"> {connection.displayName}</span></Button
+          >
+        </form>
+      {/if}
+      {#if !connection.unavailable && status?.connection === "connected"}
+        <Button
+          variant="ghost"
+          size="sm"
+          href={`${path}${onboarding ? "&" : "?"}disconnect=${connection.appId}`}
+          >Disconnect<span class="sr-only"> {connection.displayName}</span></Button
         >
-      </form>
-    {/if}
+      {/if}
+    </div>
   </div>
   <FormIssues issues={connect.fields.allIssues()} />
   {#if confirmDisconnect && status?.connection === "connected"}

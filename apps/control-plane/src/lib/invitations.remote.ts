@@ -20,5 +20,5 @@ export const acceptInvitation = form(invitationAcceptance, async ({ invitationId
   const selected = await runtime.identity.selectOrganization(request, result.organizationId);
 
   if (selected.isErr()) pageFailure(selected.error);
-  redirect(303, "/connections?onboarding=1");
+  redirect(303, "/");
 });

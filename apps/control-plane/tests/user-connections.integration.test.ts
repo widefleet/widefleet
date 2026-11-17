@@ -248,6 +248,47 @@ describe("Personal connector accounts", () => {
     expect(calls).toHaveLength(count);
   });
 
+  it("bounds connector concurrency and returns healthy results when the shared deadline expires", async () => {
+    const healthy = await deploy("a-healthy");
+
+    for (const name of ["b", "c", "d", "e", "f", "g"]) await deploy(`${name}-slow`);
+    let active = 0;
+    let peak = 0;
+    let started = 0;
+
+    const connections = createUserConnections(
+      environment.database.db,
+      environment.configuration,
+      identify,
+      async (input, signal) => {
+        started++;
+        active++;
+        peak = Math.max(peak, active);
+
+        try {
+          if (input.appId === healthy.id) return Response.json(disconnected);
+
+          if (!signal) throw new Error("Status checks must have a deadline");
+
+          return await new Promise<Response>((_resolve, reject) => {
+            signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+          });
+        } finally {
+          active--;
+        }
+      },
+    );
+
+    const results = await connections.list(principal());
+    expect(results).toHaveLength(7);
+    expect(results.find((entry) => entry.appId === healthy.id)?.status).toEqual(disconnected);
+    expect(results.filter((entry) => entry.unavailable)).toHaveLength(6);
+    expect(peak).toBeGreaterThan(1);
+    expect(peak).toBeLessThanOrEqual(4);
+    expect(started).toBeLessThan(7);
+    expect(active).toBe(0);
+  }, 10_000);
+
   it("preserves Entra oid identity and serializes refresh while keeping a rotated token after a directory outage", async () => {
     const idp = await createIdentityProvider();
     idp.settings.entra = true;

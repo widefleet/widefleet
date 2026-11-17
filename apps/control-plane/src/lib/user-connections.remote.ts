@@ -5,6 +5,7 @@ import { organizationSelection, userConnectionInput } from "@platform/contracts"
 import { z } from "zod";
 import { InvalidOperation } from "#server/errors";
 import { remoteContext } from "#server/remote-support";
+import { connectionOnboardingCookie } from "#server/connection-onboarding";
 
 export const getUserConnections = query(async () => {
   const { runtime, principal } = await remoteContext();
@@ -63,8 +64,8 @@ export const finishConnectionOnboarding = form(
   async ({ organizationId }) => {
     const { principal } = await remoteContext({ organizationId });
     getRequestEvent().cookies.set(
-      "widefleet_connections_seen",
-      `${principal.id}:${organizationId}`,
+      await connectionOnboardingCookie(principal.id, organizationId),
+      "1",
       { path: "/", httpOnly: true, sameSite: "lax", maxAge: 365 * 24 * 60 * 60 },
     );
     redirect(303, "/catalog");

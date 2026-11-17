@@ -27,6 +27,7 @@ import { apiResource, cliClientId } from "../../src/lib/server/auth-options.ts";
 import { createTestEnvironment } from "../environment.ts";
 import { authConfiguration, createAuthProxy } from "@platform/auth-proxy";
 import { registerAppLogin, readAppLogin } from "../../src/lib/server/app-login-client.ts";
+import { prepareOrganizationInvitation } from "../../src/lib/server/members.ts";
 
 let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
 
@@ -3177,7 +3178,6 @@ for (const javaScriptEnabled of [true, false])
     });
 
     await environment.users.saveUser(person);
-    await environment.linkMicrosoftUser(person.id);
     await environment.database.db.update(organizationSettings).set({ ssoRequired: false });
     await registerAppLogin(
       environment.database.db,
@@ -3188,6 +3188,9 @@ for (const javaScriptEnabled of [true, false])
     const appIds: string[] = [];
     const connected = new Set<string>();
     let unavailable = false;
+    let denied = false;
+    let expectedUser = person.id;
+    let launches = 0;
 
     const context = await browser.newContext({
       javaScriptEnabled,
@@ -3195,15 +3198,20 @@ for (const javaScriptEnabled of [true, false])
       extraHTTPHeaders: { "x-forwarded-proto": "http" },
     });
 
-    const login = await environment.users.login({ userId: person.id });
-    await context.addCookies(
-      login.cookies.map((cookie) => ({
-        ...cookie,
-        domain: "localhost",
-        secure: false,
-        sameSite: "Lax" as const,
-      })),
-    );
+    const signInAs = async (userId: string) => {
+      expectedUser = userId;
+      const login = await environment.users.login({ userId });
+      await context.addCookies(
+        login.cookies.map((cookie) => ({
+          ...cookie,
+          domain: "localhost",
+          secure: false,
+          sameSite: "Lax" as const,
+        })),
+      );
+    };
+
+    await signInAs(person.id);
 
     try {
       for (const [slug, displayName] of [
@@ -3250,7 +3258,9 @@ for (const javaScriptEnabled of [true, false])
       const gmail = z.string().parse(appIds[2]);
       connected.add(files);
       environment.authControl.userConnection((input) => {
-        expect(input.identity.subject).toBe(person.id);
+        expect(input.identity.subject).toBe(expectedUser);
+
+        if (denied) return new Response(null, { status: 404 });
 
         if (unavailable && input.appId === files) return new Response(null, { status: 503 });
 
@@ -3269,6 +3279,7 @@ for (const javaScriptEnabled of [true, false])
           return Response.json({ disconnected: true });
         }
 
+        launches++;
         connected.add(input.appId);
 
         // Runtime and provider redirect correctness is covered with the real loader;
@@ -3279,7 +3290,16 @@ for (const javaScriptEnabled of [true, false])
         });
       });
       const page = await context.newPage();
-      await page.goto("/");
+
+      const invitation = await environment.database.db.transaction((transaction) =>
+        prepareOrganizationInvitation(transaction, "widefleet", environment.owner.id, {
+          email: person.email,
+          role: "member",
+        }),
+      );
+
+      await page.goto(`/invitations/${invitation.invitation.id}`);
+      await page.getByRole("button", { name: "Accept invitation" }).click();
       await expect(page).toHaveURL(/\/connections\?onboarding=1$/);
       await expect(page.getByRole("heading", { name: "Connect your accounts" })).toBeVisible();
       await expect(
@@ -3322,6 +3342,11 @@ for (const javaScriptEnabled of [true, false])
       await page.keyboard.press("Enter");
       await expect(githubRow.getByText("Connected · taylor@example.test")).toBeVisible();
       expect(connected.has(github)).toBe(true);
+      await githubRow.getByRole("button", { name: "Reconnect GitHub" }).click();
+      await expect.poll(() => launches).toBe(2);
+      await expect(githubRow.getByRole("button", { name: "Reconnect GitHub" })).toBeEnabled();
+      await expect(githubRow.getByText("Connected · taylor@example.test")).toBeVisible();
+      expect(connected.has(github)).toBe(true);
       await githubRow.getByRole("link", { name: "Disconnect GitHub" }).click();
       await githubRow.getByRole("button", { name: "Disconnect account" }).click();
       await expect(githubRow.getByRole("button", { name: "Connect GitHub" })).toBeVisible();
@@ -3335,6 +3360,32 @@ for (const javaScriptEnabled of [true, false])
       await expect(page).toHaveURL(/\/catalog$/);
       await page.goto("/");
       await expect(page).toHaveURL(environment.configuration.PLATFORM_URL + "/");
+
+      // Completing onboarding for another signed-in account must not erase this
+      // account's choice in the same browser cookie jar.
+      const other = environment.users.createUser({
+        name: "Other member",
+        email: `other-personal-${javaScriptEnabled}@example.test`,
+      });
+
+      await environment.users.saveUser(other);
+      await environment.linkMicrosoftUser(other.id);
+      await signInAs(other.id);
+      await page.goto("/");
+      await expect(page).toHaveURL(/\/connections\?onboarding=1$/);
+      await page.getByRole("button", { name: "Continue to apps" }).click();
+      await expect(page).toHaveURL(/\/catalog$/);
+      await signInAs(person.id);
+      await page.goto("/");
+      await expect(page).toHaveURL(environment.configuration.PLATFORM_URL + "/");
+
+      await context.clearCookies({ name: /^widefleet_connections_seen_/ });
+      denied = true;
+      await page.goto("/");
+      await expect(page).toHaveURL(environment.configuration.PLATFORM_URL + "/");
+      denied = false;
+      await page.goto("/");
+      await expect(page).toHaveURL(/\/connections\?onboarding=1$/);
       await page.goto("/connections?success=true");
       await expect(githubRow.getByRole("button", { name: "Connect GitHub" })).toBeVisible();
       await environment.database.db
