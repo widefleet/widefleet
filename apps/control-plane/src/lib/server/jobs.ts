@@ -85,7 +85,7 @@ export const createJobService = (
 
       return Result.ok(agent);
     }),
-  claim: (agentId: string, accessRules = false) =>
+  claim: (agentId: string, accessRules = false, serviceAccessRules = false) =>
     transact(database, async (transaction) => {
       const [agent] = await transaction
         .select()
@@ -155,6 +155,17 @@ export const createJobService = (
           }),
         );
 
+      if (
+        app &&
+        app.serviceAccessRevision > 0 &&
+        !serviceAccessRules &&
+        candidate.job.kind !== "delete"
+      )
+        throw new InvalidOperation({
+          code: "CONFLICT",
+          message: "Upgrade the agent to support service user access before claiming this job",
+        });
+
       let deploymentId = candidate.job.deploymentId;
       let artifactId = candidate.artifactId;
 
@@ -177,6 +188,15 @@ export const createJobService = (
             groups: app.accessGroups,
           })
         : null;
+
+      const serviceAccess =
+        app && serviceAccessRules
+          ? contract.serviceAccessSnapshot.parse({
+              revision: app.serviceAccessRevision,
+              mode: app.serviceAccessMode,
+              grants: app.serviceGrants,
+            })
+          : null;
 
       const network = app
         ? contract.networkSnapshot.parse({
@@ -207,6 +227,7 @@ export const createJobService = (
           runtime: selectedRuntime,
           deploymentId,
           access,
+          serviceAccess,
           network,
           capabilities,
           appSecrets: app
@@ -252,6 +273,7 @@ export const createJobService = (
           deploymentId: claimed.deploymentId,
           artifactId,
           access,
+          serviceAccess,
           network,
           capabilities,
           attempt: claimed.attempt,
@@ -587,6 +609,34 @@ export const createJobService = (
               .set({
                 networkError:
                   result.outcome === "failed" && app.appliedNetworkRevision !== network.revision
+                    ? result.message
+                    : null,
+              })
+              .where(eq(apps.id, app.id));
+        }
+
+        if (lease.kind !== "delete" && lease.serviceAccess) {
+          const snapshot = contract.serviceAccessSnapshot.parse(lease.serviceAccess);
+
+          if (result.outcome === "succeeded" && lease.deploymentId) {
+            if (result.serviceAccessRevision !== snapshot.revision)
+              return yield* new InvalidOperation({
+                code: "CONFLICT",
+                message: "The agent must confirm the active service access revision",
+              });
+            await transaction
+              .update(apps)
+              .set({ appliedServiceAccessRevision: snapshot.revision })
+              .where(eq(apps.id, app.id));
+          }
+
+          if (snapshot.revision === app.serviceAccessRevision)
+            await transaction
+              .update(apps)
+              .set({
+                serviceAccessError:
+                  result.outcome === "failed" &&
+                  app.appliedServiceAccessRevision !== snapshot.revision
                     ? result.message
                     : null,
               })

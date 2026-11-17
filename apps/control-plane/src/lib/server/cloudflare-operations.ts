@@ -1,3 +1,4 @@
+import { applyServiceAccessChange } from "./service-user-access.ts";
 import { applyCapabilityChange } from "./capability-changes.ts";
 import { lockOrganizationRuntime } from "./organization-runtime.ts";
 import * as contract from "@platform/contracts";
@@ -26,6 +27,7 @@ export const operationTarget = z.object({
   appId: z.uuid(),
   runtime: runtimeReference,
   accessRevision: z.number().int().nonnegative(),
+  serviceAccessRevision: z.number().int().nonnegative().default(0),
   networkRevision: z.number().int().nonnegative(),
   capabilityRevision: z.number().int().nonnegative().default(0),
   publicationStarted: z.boolean().optional(),
@@ -85,6 +87,7 @@ export const registerCloudflareOperation = (
         | z.infer<typeof contract.deployment>
         | z.infer<typeof contract.networkState>
         | z.infer<typeof contract.appAccessState>
+        | z.infer<typeof contract.serviceGrantsState>
         | z.infer<typeof contract.capabilityState>;
 
       if (command.kind === "deploy") {
@@ -168,6 +171,10 @@ export const registerCloudflareOperation = (
             command.connectionRequestId,
           ),
         );
+      } else if (command.kind === "service-access") {
+        result = yield* Result.await(
+          applyServiceAccessChange(transaction, command.actor, app.id, command.input, false),
+        );
       } else {
         const access = yield* Result.await(
           applyAccessChange(transaction, command.actor, app.id, command.input, false),
@@ -192,6 +199,7 @@ export const registerCloudflareOperation = (
           appId,
           runtime,
           accessRevision: target.accessRevision,
+          serviceAccessRevision: target.serviceAccessRevision,
           networkRevision: target.networkRevision,
           capabilityRevision: target.capabilityRevision,
           publicationStarted: false,

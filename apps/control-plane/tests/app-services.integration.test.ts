@@ -85,6 +85,133 @@ describe("App service connections", () => {
     return { ...app, artifactId };
   };
 
+  it("versions user and group grants independently, rejects stale writes and requires organization administration", async () => {
+    const target = await app(["Reader", "Writer"]);
+    const initial = (await services().userAccess(principal, target.id)).unwrap();
+    expect(initial).toMatchObject({ revision: 0, appliedRevision: null, grants: [] });
+
+    const grant = {
+      entrypoint: "Reader",
+      users: [{ issuer: "https://identity.example.test", subject: "alice" }],
+      groups: ["finance"],
+    };
+
+    const saved = (
+      await services().setUserAccess(principal, target.id, { revision: 0, grants: [grant] })
+    ).unwrap();
+
+    expect(saved).toMatchObject({
+      revision: 1,
+      appliedRevision: null,
+      state: "pending",
+      grants: [grant],
+    });
+    expect(
+      (await environment.database.db.select().from(jobs).where(eq(jobs.appId, target.id))).some(
+        (job) => job.kind === "configure",
+      ),
+    ).toBe(true);
+    expect(
+      (await services().setUserAccess(principal, target.id, { revision: 0, grants: [] })).isErr(),
+    ).toBe(true);
+
+    const nonadmin = {
+      ...principal,
+      admin: false,
+      application: { ...principal.application, admin: false },
+    };
+
+    expect(
+      (await services().setUserAccess(nonadmin, target.id, { revision: 1, grants: [] })).isErr(),
+    ).toBe(true);
+    expect(
+      (
+        await services().userAccess(
+          { ...principal, application: { ...principal.application, organizationId: "other" } },
+          target.id,
+        )
+      ).isErr(),
+    ).toBe(true);
+    expect(
+      (
+        await services().setUserAccess(principal, target.id, {
+          revision: 1,
+          grants: [{ ...grant, entrypoint: "Missing" }],
+        })
+      ).isErr(),
+    ).toBe(true);
+
+    const changes = await Promise.all([
+      services().setUserAccess(principal, target.id, { revision: 1, grants: [] }),
+      services().setUserAccess(principal, target.id, {
+        revision: 1,
+        grants: [{ ...grant, entrypoint: "Writer" }],
+      }),
+    ]);
+
+    expect(changes.filter((change) => change.isOk())).toHaveLength(1);
+    expect((await services().userAccess(principal, target.id)).unwrap().revision).toBe(2);
+  });
+
+  it("allows narrowing stale entrypoint grants without allowing new recipients", async () => {
+    const target = await app(["Reader", "Writer"]);
+    const alice = { issuer: "https://identity.example.test", subject: "alice" };
+    const bob = { issuer: "https://identity.example.test", subject: "bob" };
+    const reader = { entrypoint: "Reader", users: [alice, bob], groups: ["finance", "audit"] };
+    (
+      await services().setUserAccess(principal, target.id, { revision: 0, grants: [reader] })
+    ).unwrap();
+    await environment.database.db
+      .update(artifacts)
+      .set({
+        metadata: contract.workerMetadata.parse({
+          main_module: "worker.js",
+          compatibility_date: "2026-10-01",
+          entrypoints: ["Writer"],
+          assets: { upload_session: target.artifactId },
+        }),
+      })
+      .where(eq(artifacts.id, target.artifactId));
+    const writer = { entrypoint: "Writer", users: [bob], groups: [] };
+    expect(
+      (
+        await services().setUserAccess(principal, target.id, {
+          revision: 1,
+          grants: [reader, writer],
+        })
+      ).unwrap().grants,
+    ).toEqual([reader, writer]);
+    const narrowed = { ...reader, users: [alice], groups: ["finance"] };
+    expect(
+      (
+        await services().setUserAccess(principal, target.id, {
+          revision: 2,
+          grants: [narrowed, writer],
+        })
+      ).unwrap().grants,
+    ).toEqual([narrowed, writer]);
+
+    for (const invalid of [
+      reader,
+      { ...narrowed, users: [{ ...alice, issuer: "https://other.example.test" }] },
+      { ...narrowed, groups: ["new-group"] },
+      { ...narrowed, entrypoint: "Missing" },
+    ]) {
+      expect(
+        await services().setUserAccess(principal, target.id, {
+          revision: 3,
+          grants: [invalid, writer],
+        }),
+      ).toMatchObject({ error: { code: "BAD_REQUEST" } });
+    }
+
+    expect(
+      (
+        await services().setUserAccess(principal, target.id, { revision: 3, grants: [writer] })
+      ).unwrap().grants,
+    ).toEqual([writer]);
+  });
+
   it("publishes app APIs and restricts grants to administrators in the owning organization", async () => {
     const source = await app();
     const target = await app(["Reader"]);

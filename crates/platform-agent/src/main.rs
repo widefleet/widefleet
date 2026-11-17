@@ -313,7 +313,7 @@ async fn run(
         let claimed = async {
             json::<Option<Job>>(
                 api.authenticated(Method::POST, "/agent/jobs/claim", &configuration.token)
-                    .json(&value!({ "accessRules": 1 }))
+                    .json(&value!({ "accessRules": 1, "serviceAccessRules": 1 }))
                     .send()
                     .await?,
             )
@@ -352,6 +352,9 @@ async fn run(
                     && let Some(access) = &job.access
                 {
                     completion["accessRevision"] = value!(access.revision);
+                    if let Some(service_access) = &job.service_access {
+                        completion["serviceAccessRevision"] = value!(service_access.revision);
+                    }
                 }
                 if let Ok(Some(fields)) = &result
                     && let Some(fields) = fields.as_object()

@@ -97,6 +97,8 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
         catalog.some((entry) => request.url === `/api/v1/app-services/${entry.appId}/access`)
       ) {
         response.end(body);
+      } else if (request.url === `/api/v1/app-services/${service.appId}/user-access`) {
+        response.end(request.method === "PUT" ? body : JSON.stringify({ revision: 2, grants: [] }));
       } else if (request.url?.startsWith("/api/v1/connection-requests")) {
         response.end(
           JSON.stringify(
@@ -253,6 +255,41 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
       timeout: 10000,
       env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: "normal-credential" },
     });
+
+  it("manages versioned user and group access through the API", async () => {
+    const grants = {
+      revision: 2,
+      grants: [
+        {
+          entrypoint: "Reader",
+          users: [{ issuer: "https://accounts.google.com", subject: "warehouse-user" }],
+          groups: ["warehouse-readers"],
+        },
+      ],
+    };
+
+    await writeFile(join(directory, "service-access.json"), JSON.stringify(grants));
+    expect(JSON.parse((await command("services", "user-access", "erp-app")).stdout)).toEqual({
+      revision: 2,
+      grants: [],
+    });
+    expect(
+      JSON.parse(
+        (await command("services", "user-access", "erp-app", "--file", "service-access.json"))
+          .stdout,
+      ),
+    ).toEqual(grants);
+    expect(requests.map(({ path, method }) => `${method} ${path}`)).toEqual([
+      "GET /api/v1/app-services",
+      `GET /api/v1/app-services/${service.appId}/user-access`,
+      "GET /api/v1/app-services",
+      `PUT /api/v1/app-services/${service.appId}/user-access`,
+    ]);
+    expect(JSON.parse(requests.at(-1)?.body ?? "")).toEqual(grants);
+    expect(requests.every((entry) => entry.authorization === "Bearer normal-credential")).toBe(
+      true,
+    );
+  });
 
   it("requests a connection without binding and exposes administrator decisions and availability", async () => {
     const requested = await command(

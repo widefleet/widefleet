@@ -1,3 +1,7 @@
+import { serviceAccessSnapshot } from "./service-grants.ts";
+
+export * from "./service-grants.ts";
+
 export { appEventConfiguration } from "./app-events.ts";
 
 export { workerHostname } from "./hostnames.ts";
@@ -536,6 +540,7 @@ export const job = z.strictObject({
   workflow: workflowRequest.nullable().default(null),
   migration: migrationArtifact.nullable().default(null),
   access: appAccessSnapshot.nullable(),
+  serviceAccess: serviceAccessSnapshot.nullable().optional(),
   network: networkSnapshot.nullable(),
   capabilities: capabilitySnapshot.nullable().default(null),
   appId: identifier.nullable(),
@@ -556,6 +561,7 @@ export const jobUpdate = z.strictObject({
 export const jobResult = jobUpdate.extend({
   outcome: z.enum(["succeeded", "failed"]),
   accessRevision: z.number().int().nonnegative().optional(),
+  serviceAccessRevision: z.number().int().nonnegative().optional(),
   migrations: z.array(migrationEntry).max(1000).optional(),
   workflow: z.json().optional(),
 });

@@ -15,6 +15,56 @@ export const getAppServices = query(async () => {
   };
 });
 
+export const getServiceUserAccess = query(contract.appPath, async ({ appId }) => {
+  const { runtime, principal } = await remoteContext();
+
+  return queryValue(await runtime.connections.userAccess(principal, appId));
+});
+
+export const changeServiceUserAccess = form(
+  contract.appPath.extend({
+    ...contract.organizationSelection.shape,
+    revision: z.number().int().nonnegative(),
+    entrypoint: contract.serviceGrant.shape.entrypoint,
+    kind: z.enum(["user", "group"]),
+    action: z.enum(["add", "remove"]),
+    issuer: z.string().default(""),
+    subject: z.string().default(""),
+    group: z.string().default(""),
+    id: z.string().optional(),
+  }),
+  async ({ organizationId, appId, revision, entrypoint, kind, action, issuer, subject, group }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
+    const state = queryValue(await runtime.connections.userAccess(principal, appId));
+    const grants = state.grants.filter((entry) => entry.entrypoint !== entrypoint);
+
+    const current = state.grants.find((entry) => entry.entrypoint === entrypoint) ?? {
+      entrypoint,
+      users: [],
+      groups: [],
+    };
+
+    if (kind === "user") {
+      const user = contract.serviceUser.parse({ issuer, subject });
+      current.users = current.users.filter(
+        (entry) => entry.issuer !== user.issuer || entry.subject !== user.subject,
+      );
+
+      if (action === "add") current.users.push(user);
+    } else {
+      const value = contract.appAccessGroup.parse(group);
+      current.groups = current.groups.filter((entry) => entry !== value);
+
+      if (action === "add") current.groups.push(value);
+    }
+
+    if (current.users.length || current.groups.length) grants.push(current);
+    formValue(await runtime.connections.setUserAccess(principal, appId, { revision, grants }));
+    await getServiceUserAccess({ appId }).refresh();
+    redirect(303, `/services/${appId}/availability?saved=1`);
+  },
+);
+
 export const getServiceDescription = query(contract.servicePath, async ({ service }) => {
   const { runtime, principal } = await remoteContext();
   const description = queryValue(await runtime.connections.describe(principal, service));
@@ -43,6 +93,7 @@ export const setServiceAccess = form(
   async ({ organizationId, appId, accessMode }) => {
     const { runtime, principal } = await remoteContext({ organizationId });
     formValue(await runtime.connections.setAccess(principal, appId, accessMode));
+    await getServiceUserAccess({ appId }).refresh();
     await getAppServices().refresh();
     redirect(303, `/services/${appId}/availability?saved=1`);
   },

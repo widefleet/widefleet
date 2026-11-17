@@ -214,9 +214,12 @@ for (const javaScriptEnabled of [true, false]) {
       for (const service of [target.id, target.slug]) {
         await adminPage.goto(`/services/${service}/availability`);
         await expect(
-          adminPage.getByText(`Choose who can connect ${target.displayName} to their apps.`, {
-            exact: true,
-          }),
+          adminPage.getByText(
+            `Choose who can connect apps and use ${target.displayName} through MCP.`,
+            {
+              exact: true,
+            },
+          ),
         ).toBeVisible();
         await page.goto(`/services/${service}/connect`);
         await expect(

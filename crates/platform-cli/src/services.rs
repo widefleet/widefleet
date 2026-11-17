@@ -28,6 +28,12 @@ enum CatalogCommand {
     },
     /// List your connection requests, or all requests as an administrator.
     Requests,
+    /// Read user/group service grants, or replace them from a JSON file with a revision.
+    UserAccess {
+        app: String,
+        #[arg(long)]
+        file: Option<PathBuf>,
+    },
     /// Approve a request and submit its connection for activation.
     Approve { request: Uuid },
     /// Reject a pending connection request.
@@ -119,6 +125,24 @@ pub async fn catalog(api: &Api, credentials: &auth::Credentials, options: Catalo
             }
             CatalogCommand::Requests => {
                 api.authenticated(Method::GET, "/connection-requests", &token)
+            }
+            CatalogCommand::UserAccess { app, file } => {
+                let entries: Vec<Service> = json(
+                    api.authenticated(Method::GET, "/app-services", &token)
+                        .send()
+                        .await?,
+                )
+                .await?;
+                let target = resolve_service(&entries, &app)?;
+                let path = format!("/app-services/{}/user-access", target.app_id);
+                match file {
+                    Some(file) => {
+                        let input: serde_json::Value =
+                            serde_json::from_slice(&std::fs::read(file)?)?;
+                        api.authenticated(Method::PUT, &path, &token).json(&input)
+                    }
+                    None => api.authenticated(Method::GET, &path, &token),
+                }
             }
             CatalogCommand::Approve { request } => api
                 .authenticated(

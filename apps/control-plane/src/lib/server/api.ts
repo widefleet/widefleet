@@ -359,6 +359,20 @@ export const createApi = (runtime: Runtime) => {
       .handler(async ({ context, input }) =>
         unwrap(await runtime.connections.describe(context.principal, input.service)),
       ),
+    serviceUserAccess: read
+      .route({ method: "GET", path: "/app-services/{appId}/user-access" })
+      .input(contract.appPath)
+      .output(contract.serviceGrantsState)
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.connections.userAccess(context.principal, input.appId)),
+      ),
+    serviceUserAccessChange: write
+      .route({ method: "PUT", path: "/app-services/{appId}/user-access" })
+      .input(contract.appPath.extend(contract.serviceGrantsChange.shape))
+      .output(contract.serviceGrantsState)
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.connections.setUserAccess(context.principal, input.appId, input)),
+      ),
     serviceAccess: write
       .route({ method: "PUT", path: "/app-services/{appId}/access" })
       .input(contract.appPath.extend(contract.serviceAccessChange.shape))
@@ -827,10 +841,23 @@ export const createApi = (runtime: Runtime) => {
       ),
     claimJob: agent
       .route({ method: "POST", path: "/agent/jobs/claim" })
-      .input(z.object({ accessRules: z.literal(1).optional() }).default({}))
+      .input(
+        z
+          .object({
+            accessRules: z.literal(1).optional(),
+            serviceAccessRules: z.literal(1).optional(),
+          })
+          .default({}),
+      )
       .output(contract.job.nullable())
       .handler(async ({ context, input }) =>
-        unwrap(await runtime.jobs.claim(context.agent.id, input.accessRules === 1)),
+        unwrap(
+          await runtime.jobs.claim(
+            context.agent.id,
+            input.accessRules === 1,
+            input.serviceAccessRules === 1,
+          ),
+        ),
       ),
     heartbeat: agent
       .route({ method: "POST", path: "/agent/jobs/{jobId}/heartbeat" })

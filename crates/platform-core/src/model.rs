@@ -231,6 +231,7 @@ pub struct Job {
     pub kind: JobKind,
     pub migration: Option<crate::migrations::ArtifactReference>,
     pub access: Option<AppAccessSnapshot>,
+    pub service_access: Option<ServiceAccessSnapshot>,
     pub workflow: Option<serde_json::Value>,
     pub network: Option<NetworkSnapshot>,
     pub capabilities: Option<CapabilitySnapshot>,
@@ -255,6 +256,33 @@ impl Job {
             .as_deref()
             .ok_or_else(|| crate::Error::invalid("This job has no hostname".into()))
     }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ServiceAccessMode {
+    ApprovalRequired,
+    Organization,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ServiceUser {
+    pub issuer: String,
+    pub subject: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ServiceUserGrant {
+    pub entrypoint: String,
+    pub users: Vec<ServiceUser>,
+    pub groups: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ServiceAccessSnapshot {
+    pub revision: u64,
+    pub mode: ServiceAccessMode,
+    pub grants: Vec<ServiceUserGrant>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

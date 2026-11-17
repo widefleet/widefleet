@@ -21,7 +21,12 @@ pub fn publication(job: &Job) -> Result<Value> {
     {
         return Err(Error::invalid("Invalid app access groups".into()));
     }
-    Ok(json!({ "organizationId": job.organization_id, "appId": job.app_id()?, "access": access }))
+    let mut route =
+        json!({ "organizationId": job.organization_id, "appId": job.app_id()?, "access": access });
+    if let Some(service_access) = &job.service_access {
+        route["serviceAccess"] = serde_json::to_value(service_access)?;
+    }
+    Ok(route)
 }
 
 pub fn origin(configuration: &Configuration) -> Result<Url> {

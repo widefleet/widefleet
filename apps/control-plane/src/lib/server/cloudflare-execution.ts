@@ -1,3 +1,4 @@
+import { validateServiceAccessChange } from "./service-user-access.ts";
 import { createCloudflareRemoval } from "./cloudflare-removal-admission.ts";
 import { validateAppQueues } from "./cloudflare-app-package.ts";
 import { createCloudflareRuntimeReleases } from "./cloudflare-runtime-releases.ts";
@@ -218,6 +219,24 @@ export const createCloudflareExecution = (
       });
 
       return accepted.map((record) => contract.networkState.parse(record.result));
+    },
+    serviceAccess: async (actor, appId, input) => {
+      const allowed = await transact(database, (transaction) =>
+        validateServiceAccessChange(transaction, actor, appId, input),
+      );
+
+      if (allowed.isErr()) return allowed;
+
+      const accepted = await admit({
+        kind: "service-access",
+        id: crypto.randomUUID(),
+        appId,
+        actor,
+        input,
+        createdAt: new Date().toISOString(),
+      });
+
+      return accepted.map((record) => contract.serviceGrantsState.parse(record.result));
     },
     access: async (actor, appId, input) => {
       const allowed = await transact(database, (transaction) =>

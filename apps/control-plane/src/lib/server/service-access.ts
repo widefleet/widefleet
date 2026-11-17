@@ -1,6 +1,11 @@
+import {
+  applyServiceAccessChange,
+  serviceAccessApp,
+  serviceAccessState,
+} from "./service-user-access.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { z } from "zod";
 import { user } from "./auth-schema.ts";
@@ -56,31 +61,35 @@ const readRequests = async (transaction: Transaction, principal: Principal, requ
 };
 
 export const createServiceAccess = (database: Database, execution?: HostedExecution) => ({
-  setAccess: (
+  userAccess: (principal: Principal, appId: string) =>
+    transact(database, async (transaction) =>
+      Result.ok(serviceAccessState(await serviceAccessApp(transaction, principal, appId))),
+    ),
+  setUserAccess: (
+    principal: Principal,
+    appId: string,
+    input: z.infer<typeof contract.serviceGrantsChange>,
+  ) =>
+    execution
+      ? execution.serviceAccess(principal, appId, input)
+      : transact(database, (transaction) =>
+          applyServiceAccessChange(transaction, principal, appId, input),
+        ),
+  setAccess: async (
     principal: Principal,
     appId: string,
     accessMode: z.infer<typeof contract.serviceAccessMode>,
-  ) =>
-    transact(database, async (transaction) => {
-      organizationAdministrator(principal);
-      await lockOrganizationRuntime(transaction, principal.application.organizationId);
+  ) => {
+    const result = execution
+      ? await execution.serviceAccess(principal, appId, { mode: accessMode })
+      : await transact(database, (transaction) =>
+          applyServiceAccessChange(transaction, principal, appId, { mode: accessMode }),
+        );
 
-      const [updated] = await transaction
-        .update(apps)
-        .set({ serviceAccessMode: accessMode })
-        .where(
-          and(
-            eq(apps.id, appId),
-            eq(apps.organizationId, principal.application.organizationId),
-            isNull(apps.removedAt),
-          ),
-        )
-        .returning({ accessMode: apps.serviceAccessMode });
+    if (result.isErr()) return result;
 
-      if (!updated) throw new InvalidOperation({ code: "NOT_FOUND", message: "App not found" });
-
-      return Result.ok(updated);
-    }),
+    return Result.ok({ accessMode: result.value.mode });
+  },
   requests: (principal: Principal) =>
     transact(database, async (transaction) =>
       Result.ok(await readRequests(transaction, principal)),

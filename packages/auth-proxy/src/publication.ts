@@ -1,4 +1,8 @@
-import { appAccessSnapshot, organizationIdentifier } from "@platform/contracts";
+import {
+  appAccessSnapshot,
+  organizationIdentifier,
+  serviceAccessSnapshot,
+} from "@platform/contracts";
 import { symmetricDecrypt, symmetricEncrypt } from "better-auth/crypto";
 import { z } from "zod";
 import { authConfiguration, type AuthConfiguration } from "./configuration.ts";
@@ -9,6 +13,7 @@ export const authRoute = z.strictObject({
   organizationId: organizationIdentifier,
   appId: z.uuid(),
   access: appAccessSnapshot,
+  serviceAccess: serviceAccessSnapshot.optional(),
 });
 
 const publication = z.strictObject({

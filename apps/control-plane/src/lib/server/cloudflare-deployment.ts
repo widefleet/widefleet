@@ -422,6 +422,11 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               organizationId: app.organizationId,
               appId: app.id,
               access,
+              serviceAccess: contract.serviceAccessSnapshot.parse({
+                revision: app.serviceAccessRevision,
+                mode: app.serviceAccessMode,
+                grants: app.serviceGrants,
+              }),
             });
 
             if (currentBody !== body) {
@@ -478,6 +483,8 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
                 appliedNetworkRevision: network.revision,
                 networkError: null,
                 appliedAccessRevision: access.revision,
+                appliedServiceAccessRevision: app.serviceAccessRevision,
+                serviceAccessError: null,
                 accessError: null,
                 appliedCapabilities: capabilities,
                 appliedCapabilityRevision: capabilities.revision,
@@ -570,6 +577,15 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
                 await transaction
                   .update(apps)
                   .set({ capabilityError: failure })
+                  .where(eq(apps.id, app.id));
+
+              if (
+                target.serviceAccessRevision === app.serviceAccessRevision &&
+                app.appliedServiceAccessRevision !== target.serviceAccessRevision
+              )
+                await transaction
+                  .update(apps)
+                  .set({ serviceAccessError: failure })
                   .where(eq(apps.id, app.id));
 
               if (

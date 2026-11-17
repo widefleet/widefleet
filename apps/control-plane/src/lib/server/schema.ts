@@ -76,6 +76,10 @@ export const apps = pgTable(
     serviceAccessMode: text("service_access_mode", { enum: ["approval_required", "organization"] })
       .notNull()
       .default("approval_required"),
+    serviceGrants: jsonb("service_grants").notNull().default([]),
+    serviceAccessRevision: integer("service_access_revision").notNull().default(0),
+    appliedServiceAccessRevision: integer("applied_service_access_revision"),
+    serviceAccessError: text("service_access_error"),
     catalogListed: boolean("catalog_listed").notNull().default(false),
     parentId: uuid("parent_id"),
     organizationId: text("organization_id")
@@ -237,6 +241,7 @@ export const jobs = pgTable(
     workflow: jsonb(),
     rollback: boolean().notNull().default(false),
     access: jsonb(),
+    serviceAccess: jsonb("service_access"),
     network: jsonb(),
     capabilities: jsonb(),
     appSecrets: jsonb("app_secrets"),

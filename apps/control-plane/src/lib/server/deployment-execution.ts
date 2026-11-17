@@ -42,6 +42,11 @@ export const deploymentCommand = z.discriminatedUnion("kind", [
     connectionRequestId: contract.identifier.optional(),
   }),
   command.extend({
+    kind: z.literal("service-access"),
+    actor: deploymentActor,
+    input: contract.serviceAccessUpdate,
+  }),
+  command.extend({
     kind: z.literal("access"),
     actor: deploymentActor,
     input: contract.appAccessChange,
@@ -62,6 +67,11 @@ type ExecutionResult<T> = Promise<
 >;
 
 export type HostedExecution = {
+  serviceAccess: (
+    actor: z.infer<typeof deploymentActor>,
+    appId: string,
+    input: z.infer<typeof contract.serviceAccessUpdate>,
+  ) => ExecutionResult<z.infer<typeof contract.serviceGrantsState>>;
   runtime: {
     read: (principal: Principal) => ExecutionResult<z.infer<typeof contract.runtimeStatus>>;
     select: (
