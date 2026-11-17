@@ -373,8 +373,20 @@ async fn publish(
                 .any(|workflow| workflow.class_name == *name)
         })
         .collect();
-    let service_documentation =
-        crate::service_docs::extract(project, temporary.path(), &entrypoints)?;
+    // Type analysis must not block the executor from observing closed idle HTTP
+    // connections between the pre-build source lookup and the deployment upload.
+    let documentation_project = project.to_owned();
+    let documentation_output = temporary.path().to_owned();
+    let documentation_exports = entrypoints.clone();
+    let service_documentation = tokio::task::spawn_blocking(move || {
+        crate::service_docs::extract(
+            &documentation_project,
+            &documentation_output,
+            &documentation_exports,
+        )
+    })
+    .await
+    .unwrap_or_else(|error| std::panic::resume_unwind(error.into_panic()))?;
     let worker = bundled.source;
     if worker.len() > 20 * 1024 * 1024 {
         return Err(Error::invalid("Worker exceeds 20 MiB".into()));

@@ -519,6 +519,54 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken },
       });
 
+    it("deploys a large worker after the source lookup connection expires", async () => {
+      const worker = join(state, "project with spaces", "worker.js");
+      const original = await readFile(worker, "utf8");
+      const timeout = server.keepAliveTimeout;
+      const buffer = server.keepAliveTimeoutBuffer;
+      let connections = 0;
+
+      const connected = () => {
+        connections += 1;
+      };
+
+      server.on("connection", connected);
+      server.keepAliveTimeout = 250;
+      server.keepAliveTimeoutBuffer = 0;
+
+      try {
+        await writeFile(
+          worker,
+          `const values = [${Array.from({ length: 250_000 }, (_, index) => index).join(",")}]; export default { fetch() { return Response.json(values); } };`,
+        );
+
+        // A single executor thread makes blocking analysis stall connection cleanup.
+        const result = await executeCli(
+          join(state, "installation", executableName),
+          ["deploy", "--skip-build", "--no-wait", "--json"],
+          {
+            cwd: join(state, "project with spaces"),
+            timeout: 30_000,
+            env: {
+              ...process.env,
+              PLATFORM_URL: origin,
+              PLATFORM_ACCESS_TOKEN: accessToken,
+              TOKIO_WORKER_THREADS: "1",
+              WIDEFLEET_TELEMETRY_DISABLED: "1",
+            },
+          },
+        );
+
+        expect(JSON.parse(result.stdout)).toMatchObject({ status: "queued" });
+        expect(connections).toBeGreaterThan(1);
+      } finally {
+        server.off("connection", connected);
+        server.keepAliveTimeout = timeout;
+        server.keepAliveTimeoutBuffer = buffer;
+        await writeFile(worker, original);
+      }
+    });
+
     it.each([{ args: [] }, { args: [app.id] }])(
       "rejects an unconfirmed main-app branch mismatch before building: %j",
       async ({ args }) => {
