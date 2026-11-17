@@ -11,6 +11,7 @@ const authorization = z.object({
   nonce: z.string().min(1).optional(),
   code_challenge: z.string().min(1),
   code_challenge_method: z.literal("S256"),
+  access_type: z.string().optional(),
 });
 
 export const tenantId = "00000000-0000-4000-8000-000000000001";
@@ -246,7 +247,10 @@ export const createIdentityProvider = async (
 
         const result = JSON.stringify({
           access_token: "fixture-access-token",
-          refresh_token: settings.issueRefreshToken ? refreshToken : undefined,
+          refresh_token:
+            settings.issueRefreshToken && (!settings.google || parameters.access_type === "offline")
+              ? refreshToken
+              : undefined,
           token_type: "Bearer",
           scope:
             refreshing && settings.omitRefreshScopes

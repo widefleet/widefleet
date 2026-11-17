@@ -131,6 +131,7 @@ export const companySsoPlugin = (
               .looseObject({
                 providerId: z.string().optional(),
                 scopes: z.array(z.string()).optional(),
+                additionalParams: z.record(z.string(), z.string()).optional(),
               })
               .parse(context.body);
 
@@ -152,9 +153,16 @@ export const companySsoPlugin = (
                 body: {
                   ...input,
                   scopes: companyScopes(
-                    { type: z.enum(["entra", "google", "oidc"]).parse(provider.appIdentityType) },
+                    {
+                      type: z.enum(["entra", "google", "oidc"]).parse(provider.appIdentityType),
+                      issuer: provider.issuer,
+                    },
                     input.scopes ?? z.array(z.string()).optional().parse(config["scopes"]),
                   ),
+                  additionalParams:
+                    provider.issuer.replace(/\/$/, "") === "https://accounts.google.com"
+                      ? { ...input.additionalParams, access_type: "offline", prompt: "consent" }
+                      : input.additionalParams,
                 },
               },
             };

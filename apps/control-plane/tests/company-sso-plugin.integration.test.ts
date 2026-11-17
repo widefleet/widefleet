@@ -161,12 +161,14 @@ describe("Better Auth SSO provider integration", () => {
     });
   });
 
-  it.each(["registered", "migrated"])(
-    "completes %s-provider sign-in without changing stored configuration",
-    async (kind) => {
+  it.each(
+    ["registered", "migrated"].flatMap((kind) => [false, true].map((google) => ({ kind, google }))),
+  )(
+    "completes $kind-provider sign-in without changing stored configuration (Google issuer: $google)",
+    async ({ kind, google }) => {
       await environment.database.db.delete(ssoProvider);
       await environment.database.db.update(organizationSettings).set({ ssoRequired: false });
-      const issuer = "https://issuer.example.test";
+      const issuer = google ? "https://accounts.google.com" : "https://issuer.example.test";
       const providerId = `split-origin-${kind}`;
 
       const encryptionKey =
@@ -257,7 +259,7 @@ describe("Better Auth SSO provider integration", () => {
             clientId: "synthetic-client",
             clientSecret: "synthetic-client-secret",
             pkce: true,
-            scopes: ["openid", "profile", "email"],
+            scopes: ["openid", "profile", "email", "offline_access"],
           },
         };
 
@@ -298,7 +300,10 @@ describe("Better Auth SSO provider integration", () => {
 
         await environment.auth.api.updateSSOProvider({
           headers: logged.headers,
-          body: { providerId, oidcConfig: { scopes: ["openid", "email", "profile"] } },
+          body: {
+            providerId,
+            oidcConfig: { scopes: ["openid", "email", "profile", "offline_access"] },
+          },
         });
         expect(request).not.toHaveBeenCalled();
 
@@ -330,6 +335,10 @@ describe("Better Auth SSO provider integration", () => {
         expect(response.status, JSON.stringify(body)).toBe(200);
         const target = z.object({ url: z.url(), redirect: z.literal(true) }).parse(body);
         expect(new URL(target.url).origin).toBe("https://login.example.test");
+        const parameters = new URL(target.url).searchParams;
+        expect(parameters.get("scope")?.split(" ").includes("offline_access")).toBe(!google);
+        expect(parameters.get("access_type")).toBe(google ? "offline" : null);
+        expect(parameters.get("prompt")).toBe(google ? "consent" : null);
         expect(visited).toEqual(
           new Set(kind === "migrated" ? [`${issuer}/.well-known/openid-configuration`] : []),
         );

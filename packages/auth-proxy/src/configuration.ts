@@ -73,15 +73,22 @@ export const sessionVersion = async (
 
 // Management sign-in and app sign-in must obtain the same identity evidence.
 export const companyScopes = (
-  provider: { type: z.infer<typeof companyProvider>["type"] },
+  provider: { type: z.infer<typeof companyProvider>["type"]; issuer?: string },
   scopes: string[] = [],
-) => [
-  ...new Set([
-    "openid",
-    "profile",
-    "email",
-    ...(provider.type === "google" ? [] : ["offline_access"]),
-    ...scopes.filter((scope) => provider.type !== "google" || scope !== "offline_access"),
-    ...(provider.type === "entra" ? ["User.Read"] : []),
-  ]),
-];
+) => {
+  const google =
+    provider.type === "google" ||
+    (provider.type === "oidc" &&
+      provider.issuer?.replace(/\/$/, "") === "https://accounts.google.com");
+
+  return [
+    ...new Set([
+      "openid",
+      "profile",
+      "email",
+      ...(google ? [] : ["offline_access"]),
+      ...scopes.filter((scope) => !google || scope !== "offline_access"),
+      ...(provider.type === "entra" ? ["User.Read"] : []),
+    ]),
+  ];
+};
