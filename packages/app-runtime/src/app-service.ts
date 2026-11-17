@@ -28,7 +28,7 @@ export class AppService extends WorkerEntrypoint<
           );
 
     await requireOrganizationAvailability(this.env, organizationId);
-    const app = await readApp(this.env, `hosts/${hostname}.json`);
+    const app = await readApp(this.env, `hosts/${hostname}.json`, { appId, organizationId });
 
     if (!app || app.appId !== appId || app.organizationId !== organizationId)
       throw new Error("App service is not available");

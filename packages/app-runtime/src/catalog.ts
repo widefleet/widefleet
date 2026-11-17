@@ -1,8 +1,13 @@
 import { publishedHost, serviceDocumentation } from "@platform/contracts";
 import type { ParentEnvironment, PublishedApp } from "./types.ts";
 import { reportRuntimeException } from "./runtime-errors.ts";
+import type { WorkerIdentity } from "./runtime-extension.ts";
 
-export const readApp = async (environment: ParentEnvironment, key: string) => {
+export const readApp = async (
+  environment: ParentEnvironment,
+  key: string,
+  identity: Partial<Pick<WorkerIdentity, "appId" | "organizationId">> = {},
+) => {
   try {
     const object = await environment.WIDEFLEET_PACKAGES.get(key);
 
@@ -11,7 +16,7 @@ export const readApp = async (environment: ParentEnvironment, key: string) => {
 
     return "deleted" in entry ? null : entry;
   } catch (cause) {
-    reportRuntimeException(cause, environment, { operation: "read_app" });
+    reportRuntimeException(cause, environment, { operation: "read_app", ...identity });
     throw cause;
   }
 };

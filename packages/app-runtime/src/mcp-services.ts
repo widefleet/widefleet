@@ -22,7 +22,11 @@ const target = async (
     !hasAppAccess(route.access.groups, claims.mcp.identity.groups)
   )
     throw new Error("Service is unavailable or not permitted");
-  const app = await readApp(environment, `hosts/${hostname}.json`);
+
+  const app = await readApp(environment, `hosts/${hostname}.json`, {
+    appId: route.appId,
+    organizationId: route.organizationId,
+  });
 
   if (
     !app ||
@@ -59,7 +63,11 @@ export const searchMcpServices = async (
         !hasAppAccess(route.access.groups, claims.mcp.identity.groups)
       )
         return [];
-      const app = await readApp(environment, `hosts/${hostname}.json`);
+
+      const app = await readApp(environment, `hosts/${hostname}.json`, {
+        appId: route.appId,
+        organizationId: route.organizationId,
+      });
 
       if (!app || app.appId !== route.appId || app.organizationId !== route.organizationId)
         return [];

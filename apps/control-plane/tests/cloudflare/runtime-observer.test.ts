@@ -317,8 +317,17 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Runtime observer in
           { operation: "read_availability", organizationId: "observer-fixture" },
         ]),
       );
+      expect((await worker.fetch("http://fixture/platform-error/catalog-context")).status).toBe(
+        500,
+      );
+      await expect.poll(() => exceptions.length, { timeout: 8_000 }).toBe(4);
+      expect(exceptions[3]?.context).toEqual({
+        operation: "read_app",
+        appId: "a0000000-0000-4000-8000-000000000004",
+        organizationId: "observer-fixture",
+      });
       expect((await worker.fetch("http://fixture/customer-error")).status).toBe(500);
-      expect(exceptions).toHaveLength(3);
+      expect(exceptions).toHaveLength(4);
     } finally {
       for (const response of pending) response.writeHead(503).end();
       await worker?.stop();

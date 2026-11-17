@@ -10,7 +10,10 @@ export const oauthAppAvailable = async (
   environment: ParentEnvironment,
   identity: OAuthIdentity,
 ) => {
-  const app = await readApp(environment, `hosts/${new URL(identity.origin).hostname}.json`);
+  const app = await readApp(environment, `hosts/${new URL(identity.origin).hostname}.json`, {
+    appId: identity.appId,
+    organizationId: identity.organizationId,
+  });
 
   if (
     !app ||

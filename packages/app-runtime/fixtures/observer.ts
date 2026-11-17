@@ -45,9 +45,18 @@ export default {
 
     if (path.startsWith("/platform-error/")) {
       try {
-        if (path.endsWith("/catalog")) {
+        if (path.endsWith("/catalog") || path.endsWith("/catalog-context")) {
           await env.WIDEFLEET_PACKAGES.put("invalid.json", "invalid-json");
-          await readApp(env, "invalid.json");
+          await readApp(
+            env,
+            "invalid.json",
+            path.endsWith("/catalog-context")
+              ? {
+                  appId: service.appId,
+                  organizationId: service.organizationId,
+                }
+              : {},
+          );
         } else if (path.endsWith("/availability")) {
           await readOrganizationAvailability(
             { ...env, WIDEFLEET_HTTP_AVAILABILITY: "kv" },
