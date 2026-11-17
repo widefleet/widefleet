@@ -347,12 +347,14 @@ mod tests {
     -> std::result::Result<(), Box<dyn std::error::Error>> {
         let directory = tempfile::tempdir()?;
         let map = directory.path().join("worker.js.map");
-        rustix::fs::mkfifoat(
-            rustix::fs::CWD,
-            &map,
-            rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
-        )
-        .map_err(std::io::Error::from)?;
+        // rustix does not expose mkfifoat on macOS; the POSIX utility works on
+        // both supported Unix hosts without excluding this regression there.
+        let status = tokio::process::Command::new("mkfifo")
+            .args(["-m", "600"])
+            .arg(&map)
+            .status()
+            .await?;
+        assert!(status.success(), "could not create the source map FIFO");
         let (opened, reading) = tokio::sync::oneshot::channel();
         let (resume, resumed) = std::sync::mpsc::channel();
         // The writer releases the read only after the async executor responds.
