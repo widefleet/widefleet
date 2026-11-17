@@ -10,7 +10,12 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { build } from "esbuild";
-import { publishedApp, appSecretPreparation, serviceAccessSnapshot } from "@platform/contracts";
+import {
+  publishedApp,
+  appSecretPreparation,
+  serviceAccessSnapshot,
+  serviceDocumentation,
+} from "@platform/contracts";
 import { encodeConfiguration } from "@platform/auth-proxy/publication";
 import { runtimeIdentity } from "./runtime-identity.ts";
 import { hashAsset } from "../src/lib/server/asset-hash.ts";
@@ -214,6 +219,8 @@ export default { async fetch(request, env, ctx) {
       const {app,source,assets} = await request.json();
       await env.WIDEFLEET_PACKAGES.put('apps/'+app.appId+'/modules/'+app.modules[0].sha256,source);
       for(const [path,content] of Object.entries(assets)) await env.WIDEFLEET_PACKAGES.put('apps/'+app.appId+'/assets/'+app.manifest[path].hash,content);
+      if(app.metadata.service_documentation) await env.WIDEFLEET_PACKAGES.put('apps/'+app.appId+'/service-documentation/'+app.id+'.json',JSON.stringify(app.metadata.service_documentation));
+      delete app.metadata.service_documentation;
       await env.WIDEFLEET_PACKAGES.put('hosts/'+app.hostname+'.json',JSON.stringify(app));
       await env.AUTH_CONFIG.put('organizations/widefleet/configuration',${JSON.stringify(encrypted)});
       await env.AUTH_CONFIG.put('apps/'+app.hostname, JSON.stringify({organizationId:'widefleet',appId:app.appId,access:{revision:1,groups:[]}}));
@@ -400,7 +407,7 @@ export default { async fetch(request, env, ctx) {
         expect(response.status, await response.clone().text()).toBe(200);
         const body = await response.text();
 
-        const payload = body.startsWith("event:")
+        const payload = response.headers.get("content-type")?.includes("text/event-stream")
           ? body
               .split("\n")
               .find((line) => line.startsWith("data: "))
@@ -431,6 +438,106 @@ export default { async fetch(request, env, ctx) {
         method: "read",
         arguments: [],
       };
+
+      const docs = serviceDocumentation.parse({
+        format: 1,
+        entrypoints: [
+          {
+            name: "Reader",
+            summary: "Read inventory records",
+            remarks: "",
+            examples: [],
+            http: true,
+            methods: [
+              {
+                name: "read",
+                summary: "Read one record",
+                remarks: "",
+                examples: [],
+                throws: [],
+                signatures: [
+                  {
+                    parameters: [
+                      {
+                        name: "limit",
+                        type: "number",
+                        description: "Result limit",
+                        optional: true,
+                        rest: false,
+                      },
+                    ],
+                    returns: { type: "InventoryRecord", description: "The record" },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+        types: [
+          {
+            name: "InventoryRecord",
+            definition: "{ version: string; secret: string }",
+            summary: "A record",
+            remarks: "",
+            examples: [],
+          },
+        ],
+      });
+
+      const described = async () => {
+        const response = await rpc("describe", {
+          hostname: service.hostname,
+          entrypoint: service.entrypoint,
+        });
+
+        expect(response.isError, response.content[0]?.text).not.toBe(true);
+
+        return z.json().parse(JSON.parse(response.content[0]?.text ?? "null"));
+      };
+
+      expect(await described()).toMatchObject({ documentation: null, types: [] });
+
+      const documented = await publish(targetId, target("v1"), "v1", {
+        metadata: {
+          ...snapshot(targetId, target("v1")).metadata,
+          service_documentation: docs,
+        },
+      });
+
+      await setup();
+      expect(await described()).toMatchObject({
+        documentation: docs.entrypoints[0],
+        types: docs.types,
+      });
+      const search = await rpc("search", { query: "inventory records" });
+      expect(JSON.parse(search.content[0]?.text ?? "null")).toMatchObject({
+        services: [{ hostname: service.hostname, summary: "Read inventory records" }],
+      });
+
+      const denied = await rpc(
+        "describe",
+        { hostname: service.hostname, entrypoint: service.entrypoint },
+        await issue("bob"),
+      );
+
+      expect(denied.isError).toBe(true);
+
+      const nextDocs = {
+        ...docs,
+        entrypoints: docs.entrypoints.map((entry) => ({ ...entry, summary: "New inventory API" })),
+      };
+
+      await publish(targetId, target("v1"), "v1", {
+        metadata: { ...documented.metadata, service_documentation: nextDocs },
+      });
+      await setup();
+      expect(await described()).toMatchObject({ documentation: { summary: "New inventory API" } });
+      await request("/seed", { app: documented, source: target("v1"), assets: {} });
+      await setup();
+      expect(await described()).toMatchObject({
+        documentation: docs.entrypoints[0],
+        types: docs.types,
+      });
 
       const called = await rpc("call", service);
       expect(called.isError).not.toBe(true);
@@ -494,11 +601,20 @@ export default { async fetch(request, env, ctx) {
         ).toBe(true);
       }
 
+      const started = Date.now();
+
+      const expired = await rpc("execute", {
+        code: "await new Promise(resolve => setTimeout(resolve, 60000)); return 'ran past deadline';",
+      });
+
+      expect(expired.isError, expired.content[0]?.text).toBe(true);
+      expect(Date.now() - started).toBeLessThan(40_000);
+
       await request("/mcp-revoke", { token: accessToken });
       expect(
         (await request("/mcp", undefined, { authorization: `Bearer ${accessToken}` })).status,
       ).toBe(401);
-    }, 30000);
+    }, 60000);
 
     it("issues app and service tokens with public verification and no control plane, including concurrent cold calls", async () => {
       const results = await Promise.all(

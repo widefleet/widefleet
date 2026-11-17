@@ -1005,6 +1005,22 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     expect(executionArtifact.id).toBe(first.artifactId);
     expect(executionArtifact.metadata).not.toHaveProperty("service_documentation");
 
+    const packages = contract.runtimePackages.parse(
+      await (
+        await json(
+          `/agent/jobs/${retry.id}/packages?leaseToken=${retry.leaseToken}`,
+          "GET",
+          undefined,
+          agentHeaders,
+        )
+      ).json(),
+    );
+
+    expect(packages.serviceDocumentation).toEqual({
+      artifactId: first.artifactId,
+      documentation: { format: 1, entrypoints: [], types: [] },
+    });
+
     const [storedArtifact] = await environment.database.db
       .select()
       .from(artifacts)

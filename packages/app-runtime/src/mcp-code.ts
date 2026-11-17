@@ -78,6 +78,7 @@ export const executeMcpCode = async (
   signal: AbortSignal,
 ) => {
   const deadline = Date.now() + 30_000;
+  const cancellation = AbortSignal.any([signal, AbortSignal.timeout(30_000)]);
 
   const worker = environment.WIDEFLEET_LOADER.load({
     compatibilityDate: "2026-10-01",
@@ -106,8 +107,10 @@ export const executeMcpCode = async (
       .fetch(
         new Request("https://code.invalid/run", {
           method: "POST",
-          signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
+          signal: cancellation,
         }),
+        // celld forwards cancellation only through the explicit subrequest option.
+        { signal: cancellation },
       );
 
     if (!response.ok)

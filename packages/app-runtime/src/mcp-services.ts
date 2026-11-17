@@ -1,6 +1,6 @@
 import { mcpServiceCall, type mcpClaims } from "@platform/contracts";
 import type { z } from "zod";
-import { readApp } from "./catalog.ts";
+import { readApp, readServiceDocumentation } from "./catalog.ts";
 import { mayUseService, serviceRoute, verifyMcpToken } from "./mcp-authorization.ts";
 import { appWorker } from "./worker.ts";
 import { invokeApp } from "./app-rpc.ts";
@@ -57,12 +57,15 @@ export const searchMcpServices = async (
       if (!app || app.appId !== route.appId || app.organizationId !== route.organizationId)
         return [];
 
-      return (app.metadata.entrypoints ?? []).flatMap((entrypoint) => {
-        if (!mayUseService(claims, entrypoint, route.serviceAccess)) return [];
+      const entrypoints = (app.metadata.entrypoints ?? []).filter((entrypoint) =>
+        mayUseService(claims, entrypoint, route.serviceAccess),
+      );
 
-        const documentation = app.metadata.service_documentation?.entrypoints.find(
-          (entry) => entry.name === entrypoint,
-        );
+      if (!entrypoints.length) return [];
+      const docs = await readServiceDocumentation(environment, app);
+
+      return entrypoints.flatMap((entrypoint) => {
+        const documentation = docs?.entrypoints.find((entry) => entry.name === entrypoint);
 
         const summary = documentation?.summary ?? "";
 
@@ -84,7 +87,7 @@ export const describeMcpService = async (
   entrypoint: string,
 ) => {
   const app = await target(environment, claims, hostname, entrypoint);
-  const documentation = app.metadata.service_documentation;
+  const documentation = await readServiceDocumentation(environment, app);
 
   return {
     appId: app.appId,

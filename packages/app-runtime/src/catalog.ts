@@ -1,4 +1,4 @@
-import { publishedHost } from "@platform/contracts";
+import { publishedHost, serviceDocumentation } from "@platform/contracts";
 import type { ParentEnvironment, PublishedApp } from "./types.ts";
 
 export const readApp = async (environment: ParentEnvironment, key: string) => {
@@ -11,3 +11,16 @@ export const readApp = async (environment: ParentEnvironment, key: string) => {
 };
 
 export const appKey = (app: PublishedApp) => app.version;
+
+// Select documentation by the serving artifact, so failed deployments and rollbacks
+// cannot expose another version's signatures.
+export const readServiceDocumentation = async (
+  environment: ParentEnvironment,
+  app: PublishedApp,
+) => {
+  const object = await environment.WIDEFLEET_PACKAGES.get(
+    `apps/${app.appId}/service-documentation/${app.id}.json`,
+  );
+
+  return object ? serviceDocumentation.parse(await object.json()) : null;
+};

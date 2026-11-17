@@ -319,9 +319,23 @@ export const createJobService = (
           }
         : undefined;
 
+      const [artifact] = lease.value.deploymentId
+        ? await transaction
+            .select({ id: artifacts.id, metadata: artifacts.metadata })
+            .from(deployments)
+            .innerJoin(artifacts, eq(deployments.artifactId, artifacts.id))
+            .where(eq(deployments.id, lease.value.deploymentId))
+        : [];
+
+      const documentation = artifact
+        ? contract.workerMetadata.parse(artifact.metadata).service_documentation
+        : undefined;
+
       return Result.ok({
         ...runtime,
         appSecrets,
+        serviceDocumentation:
+          artifact && documentation ? { artifactId: artifact.id, documentation } : undefined,
       });
     }),
   artifact: (agentId: string, jobId: string, leaseToken: string) =>

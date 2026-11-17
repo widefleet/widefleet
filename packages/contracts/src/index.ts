@@ -305,8 +305,8 @@ export const workerMetadata = workerConfiguration
     }
   });
 
-// Documentation belongs to the control plane. Existing runtime releases validate
-// metadata strictly, so keep these build-time additions out of execution snapshots.
+// Existing runtimes validate metadata strictly. Publish documentation separately
+// from execution snapshots, and retain source provenance in the control plane.
 export function executionWorkerMetadata(value: z.infer<typeof workerMetadata>) {
   const metadata = { ...value };
   delete metadata.service_documentation;
@@ -474,6 +474,12 @@ export const connectionRequest = z.strictObject({
 export const runtimePackages = z.strictObject({
   runtime: runtimeRelease,
   appSecrets: appSecretPreparation.optional(),
+  serviceDocumentation: z
+    .strictObject({
+      artifactId: identifier,
+      documentation: serviceDocumentation,
+    })
+    .optional(),
 });
 
 export const runtimeVersion = runtimeRelease.shape.version;
