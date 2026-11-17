@@ -2,64 +2,72 @@ import MarkdownIt from "markdown-it";
 import type { serviceDocumentation } from "@platform/contracts";
 import type { z } from "zod";
 
-export function renderServiceDocumentation(documentation: z.infer<typeof serviceDocumentation>) {
-  const sections: string[] = [];
+// Type references from extracted declarations carry module paths that callers never import.
+const typeName = (type: string) => type.replaceAll(/import\("[^"]*"\)\./g, "");
 
-  for (const entry of documentation.entrypoints) {
-    sections.push(`## ${entry.name}`, entry.summary, entry.remarks);
+export function presentServiceDocumentation(documentation: z.infer<typeof serviceDocumentation>) {
+  const markdown = new MarkdownIt({ html: false });
 
-    if (entry.deprecated) sections.push(`Deprecated: ${entry.deprecated}`);
+  const render = (...parts: (string | undefined)[]) => {
+    const source = parts.filter(Boolean).join("\n\n");
 
-    if (entry.http) sections.push("Supports HTTP through `fetch()`.");
-    sections.push(...entry.examples);
+    return source ? markdown.render(source) : null;
+  };
 
-    for (const method of entry.methods) {
-      sections.push(`### ${method.name}`, method.summary);
+  const inline = (source: string) => markdown.renderInline(source);
 
-      if (method.deprecated) sections.push(`Deprecated: ${method.deprecated}`);
+  return {
+    entrypoints: documentation.entrypoints.map((entry) => ({
+      name: entry.name,
+      http: entry.http,
+      description: render(
+        entry.summary,
+        entry.remarks,
+        entry.deprecated && `Deprecated: ${entry.deprecated}`,
+        ...entry.examples,
+      ),
+      methods: entry.methods.map((method) => ({
+        name: method.name,
+        summary: render(method.summary, method.deprecated && `Deprecated: ${method.deprecated}`),
+        signatures: method.signatures.map((signature) => {
+          const typeParameters = signature.typeParameters?.length
+            ? `<${signature.typeParameters.join(", ")}>`
+            : "";
 
-      for (const signature of method.signatures) {
-        const parameters = signature.parameters.map(
-          (param) =>
-            `${param.rest ? "..." : ""}${param.name}${param.optional ? "?" : ""}: ${param.type}`,
-        );
+          const parameters = signature.parameters.map(
+            (param) =>
+              `${param.rest ? "..." : ""}${param.name}${param.optional ? "?" : ""}: ${typeName(param.type)}`,
+          );
 
-        const typeParameters = signature.typeParameters?.length
-          ? `<${signature.typeParameters.join(", ")}>`
-          : "";
-
-        sections.push(
-          `\`\`\`ts\n${method.name}${typeParameters}(${parameters.join(", ")}): ${signature.returns.type}\n\`\`\``,
-        );
-
-        for (const parameter of signature.parameters)
-          if (parameter.description)
-            sections.push(`**${parameter.name}:** ${parameter.description}`);
-
-        if (signature.returns.description)
-          sections.push(`**Returns:** ${signature.returns.description}`);
-      }
-
-      sections.push(method.remarks);
-
-      for (const error of method.throws) sections.push(`**Throws:** ${error}`);
-
-      for (const example of method.examples) sections.push("**Example**", example);
-    }
-  }
-
-  for (const type of documentation.types) {
-    sections.push(
-      `## ${type.name}`,
-      type.summary,
-      type.remarks,
-      `\`\`\`ts\n${type.definition}\n\`\`\``,
-    );
-
-    if (type.deprecated) sections.push(`Deprecated: ${type.deprecated}`);
-
-    for (const example of type.examples) sections.push("**Example**", example);
-  }
-
-  return new MarkdownIt({ html: false }).render(sections.join("\n\n"));
+          return {
+            code: `${method.name}${typeParameters}(${parameters.join(", ")}): ${typeName(signature.returns.type)}`,
+            parameters: signature.parameters.map((param) => ({
+              name: `${param.name}${param.optional ? "?" : ""}`,
+              type: typeName(param.type),
+              description: param.description ? inline(param.description) : null,
+            })),
+            returns: {
+              type: typeName(signature.returns.type),
+              description: signature.returns.description
+                ? inline(signature.returns.description)
+                : null,
+            },
+          };
+        }),
+        remarks: render(method.remarks),
+        throws: method.throws.map(inline),
+        examples: render(...method.examples),
+      })),
+    })),
+    types: documentation.types.map((type) => ({
+      name: typeName(type.name),
+      description: render(
+        type.summary,
+        type.remarks,
+        type.deprecated && `Deprecated: ${type.deprecated}`,
+      ),
+      definition: typeName(type.definition),
+      examples: render(...type.examples),
+    })),
+  };
 }

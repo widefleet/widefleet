@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, expect, it } from "vitest";
 import { executionWorkerMetadata, serviceDocumentation, workerMetadata } from "@platform/contracts";
 import { extractServiceDocumentation } from "./service-documentation-fixture.ts";
-import { renderServiceDocumentation } from "../src/lib/server/service-documentation.ts";
+import { presentServiceDocumentation } from "../src/lib/server/service-documentation.ts";
 
 const native = it.runIf(process.env["RUN_CLI_TESTS"] === "1");
 
@@ -591,9 +591,11 @@ native(
     expect(result.documentation.types.find((type) => type.name === "Item")?.definition).toContain(
       "id: string",
     );
-    expect(renderServiceDocumentation(result.documentation)).toContain(
-      "read&lt;T extends { id: string; }&gt;(input: T): Promise&lt;T&gt;",
-    );
+    expect(
+      presentServiceDocumentation(result.documentation)
+        .entrypoints.flatMap((entry) => entry.methods)
+        .find((method) => method.name === "read")?.signatures[0]?.code,
+    ).toBe("read<T extends { id: string; }>(input: T): Promise<T>");
   },
 );
 
@@ -687,14 +689,14 @@ native(
   },
 );
 
-it("renders replacement advice and examples on referenced types", () => {
+it("renders replacement advice, examples and short names on referenced types", () => {
   const docs = serviceDocumentation.parse({
     format: 1,
     entrypoints: [],
     types: [
       {
-        name: "Query",
-        definition: "type Query = { id: string };",
+        name: 'import("./src/query").Query',
+        definition: 'type Query = { id: import("./src/item").ItemId };',
         summary: "Select one item.",
         remarks: "Identifiers are case-sensitive.",
         deprecated: "Use ItemQuery for new integrations.",
@@ -703,10 +705,11 @@ it("renders replacement advice and examples on referenced types", () => {
     ],
   });
 
-  const html = renderServiceDocumentation(docs);
-  expect(html).toContain("Deprecated: Use ItemQuery for new integrations.");
-  expect(html).toContain("<strong>Example</strong>");
-  expect(html).toContain("const query: Query = { id: &quot;one&quot; };");
+  const [type] = presentServiceDocumentation(docs).types;
+  expect(type?.name).toBe("Query");
+  expect(type?.definition).toBe("type Query = { id: ItemId };");
+  expect(type?.description).toContain("Deprecated: Use ItemQuery for new integrations.");
+  expect(type?.examples).toContain("const query: Query = { id: &quot;one&quot; };");
 });
 
 it("rejects oversized and mismatched artifact documentation and renders authored HTML as text", () => {
@@ -742,7 +745,9 @@ it("rejects oversized and mismatched artifact documentation and renders authored
       ],
     }).success,
   ).toBe(false);
-  expect(renderServiceDocumentation(serviceDocumentation.parse(docs))).not.toContain("<script>");
+  expect(
+    presentServiceDocumentation(serviceDocumentation.parse(docs)).entrypoints[0]?.description,
+  ).not.toContain("<script>");
 
   const metadata = workerMetadata.parse({
     main_module: "worker.js",

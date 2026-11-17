@@ -47,6 +47,7 @@
   }
   .markdown :global(pre) {
     overflow-x: auto;
+    line-height: 1.5rem;
     padding: 1rem;
     border-radius: var(--radius);
     background: var(--muted);

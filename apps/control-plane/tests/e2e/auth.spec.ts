@@ -229,7 +229,7 @@ for (const javaScriptEnabled of [true, false]) {
       await page.goto("/services");
       await expect(page.getByText("Manage availability", { exact: true })).toHaveCount(0);
       await expect(page.getByLabel("Binding name in your code")).toHaveCount(0);
-      await page.getByRole("link", { name: `Set up connection to ${target.displayName}` }).focus();
+      await page.getByRole("link", { name: `Connect to ${target.displayName}` }).focus();
       await page.keyboard.press("Enter");
       await expect(page.getByLabel("Binding name in your code")).toHaveCount(0);
       await page.getByLabel("Your app", { exact: true }).selectOption(source.id);
@@ -266,7 +266,7 @@ for (const javaScriptEnabled of [true, false]) {
       await adminPage.goto("/services/requests");
 
       const review = adminPage
-        .getByRole("region", {
+        .getByRole("listitem", {
           name: `${source.displayName} to ${target.displayName}`,
           exact: true,
         })
@@ -353,7 +353,7 @@ for (const javaScriptEnabled of [true, false]) {
         ]),
       );
       await page.goto(`/services?app=${source.id}`);
-      await page.getByRole("link", { name: `Set up connection to ${target.displayName}` }).click();
+      await page.getByRole("link", { name: `Connect to ${target.displayName}` }).click();
       await expect(page.getByLabel("Your app", { exact: true })).toHaveCount(0);
       await page.getByLabel("Binding name in your code").fill("FREE");
 
@@ -526,12 +526,13 @@ test("shows versioned service documentation through authenticated API and access
     documentation: metadata.service_documentation,
   });
   await page.goto("/services");
-  await page.getByRole("link", { name: "View API documentation", exact: true }).click();
-  await expect(
-    page.getByRole("heading", { name: "Inventory service API", exact: true }),
-  ).toBeVisible();
+  await page
+    .getByRole("link", { name: "Inventory service API documentation", exact: true })
+    .click();
+  await expect(page.getByRole("heading", { name: "Inventory service", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "findItems", exact: true })).toBeVisible();
   await expect(page.getByText("Words to search for.", { exact: false })).toBeVisible();
+  await page.getByText("InventoryItem", { exact: true }).click();
   await expect(page.getByText("Deprecated: Use CatalogItem when migrating callers.")).toBeVisible();
   await expect(
     page.getByText('const item: InventoryItem = { id: "one", displayName: "Spare part" };'),
