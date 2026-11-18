@@ -35,6 +35,8 @@ export * from "./reporting.ts";
 
 export * from "./templates.ts";
 
+export * from "./service-input.ts";
+
 export const protocolVersion = 1;
 
 export const identifier = z.uuid();

@@ -60,6 +60,10 @@ service's [TSDoc comments](/guides/app-services#document-service-methods) and is
 published with every deployment. Each call carries your identity, so the service
 can apply its own permissions to individual records.
 
+A service can [ask you to confirm](/guides/app-services#ask-the-user-before-continuing)
+an action or fill in a short form before it continues. Clients on protocol revision
+2026-07-28 show the question as a form in the conversation.
+
 ### Combine calls
 
 `execute` runs a script that calls several services and returns one result. This

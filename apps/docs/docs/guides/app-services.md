@@ -195,6 +195,75 @@ user checks and CSRF protection in the app.
 Find ready-made integrations in [App templates](/guides/app-templates), then
 connect the deployed app using the same flow.
 
+## Ask the user before continuing
+
+A service method can ask the person behind a call to confirm an action or fill in
+a short form, then continue with the answer. Requires an app runtime released
+after 0.7.7.
+
+Return the question instead of a result. `requestState` holds values the method
+needs again, such as text the person is about to approve:
+
+```ts
+import { WorkerEntrypoint } from "cloudflare:workers";
+
+type Answer = { action: "accept" | "decline" | "cancel"; content?: { note?: string } };
+type Input = { inputResponses: { confirm?: Answer }; requestState: { text: string } };
+
+export class Offers extends WorkerEntrypoint<Env, { input?: Input }> {
+  async send(offerId: string) {
+    const input = this.ctx.props.input;
+
+    if (!input) {
+      const text = await this.writeOffer(offerId);
+      return {
+        resultType: "input_required",
+        inputRequests: {
+          confirm: {
+            message: `Send this offer?\n\n${text}`,
+            requestedSchema: { type: "object", properties: { note: { type: "string" } } },
+          },
+        },
+        requestState: { text },
+      };
+    }
+
+    if (input.inputResponses.confirm?.action !== "accept") return { sent: false };
+    await this.deliver(offerId, input.requestState.text);
+    return { sent: true };
+  }
+}
+```
+
+The method is called again with the same arguments, and `ctx.props.input` holds
+the answers and the `requestState` it returned:
+
+- [MCP clients](/guides/mcp) on protocol revision 2026-07-28 show each request as
+  a form and send the answers back on their own.
+- A calling app receives the question as the method's result, shows it in its own
+  interface and sends the answers with `withInput`:
+
+```ts
+const result = await env.OFFERS.send(offerId);
+
+if (result.resultType === "input_required") {
+  // Show result.inputRequests, then call again with the answers:
+  return env.OFFERS.withInput({ inputResponses, requestState: result.requestState }).send(offerId);
+}
+```
+
+The calling app passes `requestState` back unchanged; Widefleet keeps its contents
+private to the service. Answers reach only the same method with the same
+arguments, for the same caller, within 24 hours, and accepted content matches the
+requested form. Make the confirmed action idempotent, for example by recording
+that the offer was sent, so a repeated answer has no second effect.
+
+- A call asks up to 8 questions. Each form has up to 32 `string`, `number`,
+  `integer` or `boolean` fields, the primitive subset of MCP form elicitation.
+  Strings support `enum`, `format`, length limits and defaults.
+- Questions take up to 16 KiB and `requestState` up to 8 KiB of JSON.
+- `withInput` is reserved on app bindings, so it cannot be a service method name.
+
 ## API availability and connection requests
 
 APIs require administrator approval by default. An organization administrator can open the provider's

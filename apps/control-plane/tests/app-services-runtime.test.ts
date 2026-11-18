@@ -84,6 +84,9 @@ export default class Source extends WorkerEntrypoint {
   slow() { return this.env.TARGET.slow(); }
   fetch(request) { return this.env.TARGET.fetch(request); }
   secret() { return this.env.WIDEFLEET_SECRETS.get('TOKEN'); }
+  ask() { return this.env.TARGET.ask('offer-42'); }
+  async answer() { const question=await this.env.TARGET.ask('offer-42'); return this.env.TARGET.withInput({inputResponses:{confirm:{action:'accept',content:{note:'ok'}}},requestState:question.requestState}).ask('offer-42'); }
+  async misdirect() { const question=await this.env.TARGET.ask('offer-42'); return this.env.TARGET.withInput({inputResponses:{confirm:{action:'accept',content:{note:'ok'}}},requestState:question.requestState}).ask('offer-43'); }
   root() { return this.env.WIDEFLEET_SECRETS_KEY ?? null; }
   async identity() { return {own: await this.env.WIDEFLEET_IDENTITY.getToken('data-api', {appId: '${targetId}', organizationId: 'forged'}), target: await this.env.TARGET.identity(), key: this.env.WIDEFLEET_CONTROL_TOKEN ?? null}; }
 }`;
@@ -92,6 +95,11 @@ const target = (version: string) => `import {WorkerEntrypoint} from 'cloudflare:
 export class Reader extends WorkerEntrypoint {
   identity() { return this.env.WIDEFLEET_IDENTITY.getToken('other-api'); }
   async read() { return {version:${JSON.stringify(version)}, secret:await this.env.WIDEFLEET_SECRETS.get('TOKEN')}; }
+  ask(offerId) {
+    const input=this.ctx.props.input;
+    if(!input) return {resultType:'input_required',inputRequests:{confirm:{message:'Send '+offerId+'?',requestedSchema:{type:'object',properties:{note:{type:'string'}},required:['note']}}},requestState:{seen:'private-offer-text'}};
+    return {offerId,input,caller:this.ctx.props.caller?.subject ?? null};
+  }
   async slow() { await this.env.KV.put('started','yes'); while (!await this.env.KV.get('release')) await new Promise(resolve=>setTimeout(resolve,10)); return this.read(); }
   fetch() { return new Response(new ReadableStream({start(controller){controller.enqueue(new TextEncoder().encode(${JSON.stringify(version)}));controller.close();}})); }
 }
@@ -734,6 +742,99 @@ export default { async fetch(request, env, ctx) {
       expect(called.isError).not.toBe(true);
       expect(JSON.parse(called.content[0]?.text ?? "null")).toMatchObject({ version: "v1" });
 
+      // Protocol revision 2026-07-28 asks through input_required and a retry of the same call.
+      const ask = { ...service, method: "ask", arguments: ["offer-42"] };
+
+      const modern = async (
+        retry: { requestState?: string; inputResponses?: z.infer<ReturnType<typeof z.json>> },
+        bearer = accessToken,
+      ) => {
+        const response = await (harness ? harness.fetch : fetch)(`${origin}/mcp`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${bearer}`,
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+            "mcp-protocol-version": "2026-07-28",
+            "mcp-method": "tools/call",
+            "mcp-name": "call",
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: {
+              name: "call",
+              arguments: ask,
+              ...retry,
+              _meta: {
+                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientCapabilities": { elicitation: { form: {} } },
+                "io.modelcontextprotocol/clientInfo": { name: "test", version: "1" },
+              },
+            },
+          }),
+        });
+
+        const body = await response.text();
+        const line = body.split("\n").find((entry) => entry.startsWith("data: "));
+
+        return z.json().parse(JSON.parse(line ? line.slice(6) : body));
+      };
+
+      const elicited = z
+        .object({
+          result: z.object({
+            resultType: z.literal("input_required"),
+            inputRequests: z.object({
+              confirm: z.object({
+                method: z.literal("elicitation/create"),
+                params: z.object({ message: z.string() }).loose(),
+              }),
+            }),
+            requestState: z.string(),
+          }),
+        })
+        .parse(await modern({})).result;
+
+      expect(elicited.inputRequests.confirm.params.message).toBe("Send offer-42?");
+      expect(elicited.requestState).not.toContain("private-offer-text");
+
+      const confirmed = z
+        .object({ result: z.object({ content: z.array(z.object({ text: z.string() })) }) })
+        .parse(
+          await modern({
+            requestState: elicited.requestState,
+            inputResponses: { confirm: { action: "accept", content: { note: "ok" } } },
+          }),
+        ).result;
+
+      expect(JSON.parse(confirmed.content[0]?.text ?? "null")).toEqual({
+        offerId: "offer-42",
+        input: {
+          inputResponses: { confirm: { action: "accept", content: { note: "ok" } } },
+          requestState: { seen: "private-offer-text" },
+        },
+        caller: "alice",
+      });
+
+      // State minted for alice does not answer for bob.
+      expect(
+        JSON.stringify(
+          await modern(
+            {
+              requestState: elicited.requestState,
+              inputResponses: { confirm: { action: "accept", content: { note: "ok" } } },
+            },
+            await issue("bob", ["readers"]),
+          ),
+        ),
+      ).toContain("Invalid or expired input request state");
+
+      const legacy = await rpc("call", ask);
+      expect(legacy.isError).toBe(true);
+      expect(legacy.content[0]?.text).toContain("2026-07-28");
+
       const executed = await rpc("execute", {
         code: `const first = await tools.call(${JSON.stringify(service)}); return {version:first.version, credentials:typeof process};`,
       });
@@ -1111,6 +1212,34 @@ export default { async fetch(request, env, ctx) {
       expect(await (await request("/root")).json()).toBeNull();
       expect(await (await request("/stored")).text()).not.toContain("synthetic-one");
     });
+    it("lets a calling app answer a provider's input request with withInput", async () => {
+      const asked = await request("/ask");
+      const question = await asked.text();
+      expect(asked.status, question).toBe(200);
+      expect(JSON.parse(question)).toMatchObject({
+        resultType: "input_required",
+        inputRequests: { confirm: { message: "Send offer-42?" } },
+      });
+      // The calling app relays the provider's state without reading it.
+      expect(question).not.toContain("private-offer-text");
+
+      const answered = await request("/answer");
+      expect(answered.status, await answered.clone().text()).toBe(200);
+      expect(await answered.json()).toEqual({
+        offerId: "offer-42",
+        input: {
+          inputResponses: { confirm: { action: "accept", content: { note: "ok" } } },
+          requestState: { seen: "private-offer-text" },
+        },
+        caller: null,
+      });
+
+      // Answers are delivered only to the call that asked.
+      const misdirected = await request("/misdirect");
+      expect(misdirected.status).toBe(409);
+      expect(await misdirected.text()).toContain("Invalid or expired input request state");
+    });
+
     it("pins in-flight code and secrets while new calls switch to the active version", async () => {
       const pending = request("/slow");
       await vi.waitFor(async () => expect(await (await request("/started")).json()).toBe("yes"));

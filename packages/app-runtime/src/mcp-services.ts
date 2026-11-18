@@ -1,9 +1,15 @@
-import { mcpServiceCall, hasAppAccess, type mcpClaims } from "@platform/contracts";
+import {
+  mcpServiceCall,
+  hasAppAccess,
+  type InputAnswer,
+  type mcpClaims,
+} from "@platform/contracts";
 import type { z } from "zod";
 import { readApp, readServiceDocumentation } from "./catalog.ts";
 import { serviceRoute, verifyMcpToken } from "./mcp-authorization.ts";
 import { appWorker } from "./worker.ts";
 import { invokeApp } from "./app-rpc.ts";
+import { openInput, requestedInput, sealInput } from "./service-input.ts";
 import { signAppCaller } from "./app-caller.ts";
 import { executionOptions } from "./execution-limits.ts";
 import type { ParentEnvironment } from "./types.ts";
@@ -111,11 +117,13 @@ export const describeMcpService = async (
   };
 };
 
+// `answer` carries the client's responses when it retries a call that asked for input.
 export const callMcpService = async (
   environment: ParentEnvironment,
   context: ExecutionContext,
   token: string,
   input: z.infer<typeof mcpServiceCall>,
+  answer?: InputAnswer,
 ) => {
   // Recheck the published policy on every subcall, including calls from code mode.
   const claims = await verifyMcpToken(environment, token);
@@ -135,14 +143,35 @@ export const callMcpService = async (
     claims.exp * 1000,
   );
 
+  // Answers belong to the signed-in person and to this exact call.
+  const binding = JSON.stringify(["mcp", claims.mcp.organizationId, caller.issuer, caller.subject]);
+
+  const call = {
+    appId: app.appId,
+    entrypoint: input.entrypoint,
+    method: input.method,
+    args: input.arguments,
+  };
+
+  const secret = environment.WIDEFLEET_CONTROL_TOKEN;
+
+  const props =
+    answer === undefined
+      ? { caller, appCaller: proof }
+      : { caller, appCaller: proof, input: await openInput(secret, binding, call, answer) };
+
   const worker = await appWorker(app, environment, context);
 
-  return invokeApp(
+  const value = await invokeApp(
     worker.getEntrypoint(input.entrypoint === "default" ? undefined : input.entrypoint, {
       ...executionOptions(environment.WIDEFLEET_EXECUTION_LIMITS, "service"),
-      props: { caller, appCaller: proof },
+      props,
     }),
     input.method,
     input.arguments,
   );
+
+  const question = requestedInput(value);
+
+  return question ? sealInput(secret, binding, call, question) : value;
 };

@@ -36,7 +36,7 @@ const service = (name: string) => {
 for (const name of config.capabilities ?? [])
   Object.defineProperty(env, name, {
     value: appProxy(
-      (method, args) => service(name).invoke(method, args, currentAppCaller()),
+      (method, args, answer) => service(name).invoke(method, args, currentAppCaller(), answer),
       (request) => {
         const headers = new Headers(request.headers);
         const proof = currentAppCaller();

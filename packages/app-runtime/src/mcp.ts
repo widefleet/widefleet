@@ -1,5 +1,5 @@
-import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
-import { mcpServiceCall, mcpScopes } from "@platform/contracts";
+import { createMcpHandler, inputRequired, McpServer } from "@modelcontextprotocol/server";
+import { inputAnswer, mcpServiceCall, mcpScopes, sealedInputRequired } from "@platform/contracts";
 import { z } from "zod";
 import type { ParentEnvironment } from "./types.ts";
 import { mcpAnalytics } from "./mcp-analytics.ts";
@@ -71,7 +71,7 @@ export const mcpRequest = async (
   const extension = await catalog.extension();
 
   return createMcpHandler(
-    () => {
+    ({ era }) => {
       const server = new McpServer(
         { name: "Widefleet", version: WIDEFLEET_RUNTIME_VERSION },
         { instructions: mcpInstructions },
@@ -123,8 +123,45 @@ export const mcpRequest = async (
           description: "Invoke a permitted app service with positional JSON arguments.",
           inputSchema: mcpServiceCall.shape,
         },
-        async (service) =>
-          result((await callMcpService(environment, context, token, service)) ?? null),
+        async (service, call) => {
+          // A retry of a call that asked for input carries the sealed state and the answers.
+          const state = call.mcpReq.requestState();
+
+          const answer =
+            state === undefined
+              ? undefined
+              : inputAnswer.parse({
+                  inputResponses: call.mcpReq.inputResponses ?? {},
+                  requestState: state,
+                });
+
+          const value = await callMcpService(environment, context, token, service, answer);
+          const question = sealedInputRequired.safeParse(value);
+
+          if (!question.success) return result(value ?? null);
+
+          // Stateless 2025-era serving has no way back to the client for a dialog.
+          if (era !== "modern")
+            return {
+              isError: true,
+              content: [
+                {
+                  type: "text" as const,
+                  text: "This method asks the user for input. Use an MCP client with protocol revision 2026-07-28 or later.",
+                },
+              ],
+            };
+
+          return inputRequired({
+            inputRequests: Object.fromEntries(
+              Object.entries(question.data.inputRequests).map(([name, request]) => [
+                name,
+                inputRequired.elicit(request),
+              ]),
+            ),
+            requestState: question.data.requestState,
+          });
+        },
       );
       server.registerTool(
         "execute",
