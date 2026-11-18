@@ -13,9 +13,15 @@ it("revokes only the selected organization's sign-in and MCP discovery entries",
 
   const compiled = await build({
     stdin: {
+      // A test header makes deleting one KV key fail, as a transient storage error would.
       contents: `import {createAuthHandler} from './worker.ts';
         export default {fetch(request,env){
-          return createAuthHandler(env,async()=>new Response('App')).fetch(request);
+          const failing=request.headers.get('x-test-failing-key');
+          const storage=failing ? new Proxy(env.AUTH_CONFIG,{get(target,name){
+            if(name==='delete') return async(key)=>{ if(key===failing) throw new Error('Synthetic KV failure'); return target.delete(key); };
+            const value=target[name]; return typeof value==='function' ? value.bind(target) : value;
+          }}) : env.AUTH_CONFIG;
+          return createAuthHandler({...env,AUTH_CONFIG:storage},async()=>new Response('App')).fetch(request);
         }};`,
       resolveDir: fileURLToPath(new URL(".", import.meta.url)),
     },
@@ -56,11 +62,19 @@ it("revokes only the selected organization's sign-in and MCP discovery entries",
   try {
     const storage = await runtime.getKVNamespace("AUTH_CONFIG");
 
-    const control = (path: string, method: string, body?: string, authorized = true) => {
-      const options: WorkerRequestInit = {
-        method,
-        headers: authorized ? { authorization: `Bearer ${key}` } : {},
-      };
+    const control = (
+      path: string,
+      method: string,
+      body?: string,
+      authorized = true,
+      failingKey?: string,
+    ) => {
+      const headers: Record<string, string> = {};
+
+      if (authorized) headers["authorization"] = `Bearer ${key}`;
+
+      if (failingKey) headers["x-test-failing-key"] = failingKey;
+      const options: WorkerRequestInit = { method, headers };
 
       if (body !== undefined) options.body = body;
 
@@ -107,6 +121,22 @@ it("revokes only the selected organization's sign-in and MCP discovery entries",
       emailDomains: ["retained.example"],
     });
 
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const dropped = `${mcpDomainPrefix("shared.example")}retained`;
+
+    // A failed cleanup keeps the previous configuration, so the retry still removes the key.
+    expect(
+      (
+        await control(
+          authConfigurationKey("retained"),
+          "PUT",
+          JSON.stringify(narrowed),
+          true,
+          dropped,
+        )
+      ).status,
+    ).toBe(503);
+    expect(await storage.get(dropped)).toBe("retained");
     expect(
       (await control(authConfigurationKey("retained"), "PUT", JSON.stringify(narrowed))).status,
     ).toBe(204);
@@ -130,6 +160,20 @@ it("revokes only the selected organization's sign-in and MCP discovery entries",
     const configurationKey = authConfigurationKey("revoked");
     expect((await control(configurationKey, "DELETE", undefined, false)).status).toBe(403);
     expect(await storage.get(configurationKey)).not.toBeNull();
+    expect(
+      (
+        await control(
+          configurationKey,
+          "DELETE",
+          undefined,
+          true,
+          `${mcpDomainPrefix("shared.example")}revoked`,
+        )
+      ).status,
+    ).toBe(503);
+    // Revocation keeps the configuration until every index key it lists is gone.
+    expect(await storage.get(configurationKey)).not.toBeNull();
+    error.mockRestore();
     expect((await control(configurationKey, "DELETE")).status).toBe(204);
     expect((await control(configurationKey, "DELETE")).status).toBe(204);
     expect(await storage.get(configurationKey)).toBeNull();

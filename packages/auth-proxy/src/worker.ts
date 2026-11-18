@@ -109,26 +109,30 @@ const control = async (request: Request, environment: AuthEnvironment) => {
       if (input.organizationId !== organizationId)
         return reply(400, "Organization does not match configuration");
       const previous = await readAuthConfiguration(environment, organizationId);
-      await environment.AUTH_CONFIG.put(
-        authConfigurationKey(organizationId),
-        await encodeConfiguration(environment.WIDEFLEET_CONTROL_TOKEN, input),
-      );
       const current = discoveryKeys(input);
 
+      // Change the index before the configuration it derives from. After a failed
+      // write the previous configuration remains, so a retry recomputes every change.
       for (const key of current) await environment.AUTH_CONFIG.put(key, organizationId);
 
       for (const key of previous ? discoveryKeys(previous.configuration) : [])
         if (!current.includes(key)) await environment.AUTH_CONFIG.delete(key);
+
+      await environment.AUTH_CONFIG.put(
+        authConfigurationKey(organizationId),
+        await encodeConfiguration(environment.WIDEFLEET_CONTROL_TOKEN, input),
+      );
 
       return reply(204, "");
     }
 
     if (request.method === "DELETE") {
       const previous = await readAuthConfiguration(environment, organizationId);
-      await environment.AUTH_CONFIG.delete(authConfigurationKey(organizationId));
 
       for (const key of previous ? discoveryKeys(previous.configuration) : [])
         await environment.AUTH_CONFIG.delete(key);
+
+      await environment.AUTH_CONFIG.delete(authConfigurationKey(organizationId));
 
       return reply(204, "");
     }
