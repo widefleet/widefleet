@@ -11,6 +11,11 @@ If you have a shell, use it. Do not tell the user that deployment is unavailable
 
 Install the CLI with `pnpm add --global widefleet` (install pnpm first if it is
 missing), then run `widefleet login` and share the printed link with the user.
+If your sandbox keeps only the working directory between commands, first set
+`PLATFORM_SESSION_FILE` to a file there, outside the app project, and keep it set.
+
+If a command fails, fix the cause or retry it. Do not deploy with `--no-source`
+as a workaround; the app's source code would not be saved.
 
 Read the documentation before acting, and follow it over your memory:
 https://widefleet.com/docs/llms.txt

@@ -475,7 +475,10 @@ describe.runIf(
         email: "employee@example.test",
       });
       await cli(["logout"], overrides);
-      await expect(cli(["whoami"], overrides)).rejects.toThrow();
+      // Also reached when a sandbox discards the credential file between commands.
+      await expect(cli(["whoami"], overrides)).rejects.toThrow(
+        "No session is stored for https://platform.example.test. Run widefleet login first",
+      );
     },
   );
 

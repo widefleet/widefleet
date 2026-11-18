@@ -69,14 +69,16 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("CLI authentication diagnos
   };
 
   it.runIf(process.platform === "linux")(
-    "explains an unavailable credential service and names the noninteractive alternative",
+    "reports a missing session without a credential service and names the alternatives",
     async () => {
       const result = await cliFailure();
       expect(result.code).toBe(1);
       expect(result.stdout).toBe("");
-      expect(result.stderr).toContain("Could not initialize the operating system credential store");
-      expect(result.stderr).toContain("Secret Service");
+      expect(result.stderr).toContain("No session is stored");
+      expect(result.stderr).toContain("Run widefleet login first");
+      expect(result.stderr).toContain("PLATFORM_SESSION_FILE");
       expect(result.stderr).toContain("PLATFORM_ACCESS_TOKEN");
+      expect(result.stderr).not.toContain("zbus");
       expect(result.stderr).not.toContain("No default store has been set");
     },
   );
