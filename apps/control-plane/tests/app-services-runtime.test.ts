@@ -864,6 +864,29 @@ export default { async fetch(request, env, ctx) {
         expect(event.properties).not.toHaveProperty("$mcp_response");
       }
 
+      const appCalls = toolCalls.filter(
+        (event) =>
+          event.properties["$mcp_tool_name"] === "call" ||
+          event.properties["$mcp_tool_name"] === "execute",
+      );
+
+      // Failed app calls are recorded without their messages, which come from customer apps.
+      expect(appCalls.filter((event) => event.properties["$mcp_is_error"] === true)).not.toEqual(
+        [],
+      );
+
+      for (const event of appCalls)
+        expect(event.properties).not.toHaveProperty("$mcp_error_message");
+
+      expect(
+        toolCalls.filter(
+          (event) =>
+            event.properties["$mcp_tool_name"] === "skills" &&
+            event.properties["$mcp_error_message"] ===
+              'Unknown skill "missing". Available: widefleet',
+        ),
+      ).toHaveLength(1);
+
       // A fragment of the code sent to execute, which must not leave the runtime.
       expect(JSON.stringify(toolCalls)).not.toContain("typeof process");
       // App failures behind call and execute are not platform exceptions.
