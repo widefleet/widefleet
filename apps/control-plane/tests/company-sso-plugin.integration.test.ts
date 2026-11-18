@@ -124,7 +124,7 @@ describe("Better Auth SSO provider integration", () => {
     expect(await authenticate()).toMatchObject({ error: { code: "SSO_REQUIRED" } });
   });
 
-  it("publishes updated app claims after re-verifying an activated connection", async () => {
+  it("withdraws app sign-in after a domain change and restores updated claims after verification", async () => {
     const principal = {
       ...environment.owner,
       role: "owner" as const,
@@ -136,6 +136,10 @@ describe("Better Auth SSO provider integration", () => {
     const credential = await organizationCredential(environment, principal);
     const next = editableSettings(await environment.settings.read(principal));
 
+    expect(environment.authControl.read().configuration?.provider).toMatchObject({
+      groupsClaim: "groups",
+    });
+
     if (!next.sso) throw new Error("Missing fixture provider");
     next.sso.domain = "changed.example.test";
     next.sso.oidcConfig.mapping.extraFields.groups = "roles";
@@ -145,8 +149,11 @@ describe("Better Auth SSO provider integration", () => {
       false,
       credential,
     );
-    expect(environment.authControl.read().configuration?.provider).toMatchObject({
-      groupsClaim: "groups",
+    expect(environment.authControl.read().configuration).toBeNull();
+    expect(await environment.settings.read(principal)).toMatchObject({
+      ssoRequired: false,
+      sso: { domainVerified: false },
+      activation: { state: "waiting" },
     });
 
     const proof = await environment.settings.domainVerification(
@@ -157,7 +164,11 @@ describe("Better Auth SSO provider integration", () => {
 
     resolver.mockResolvedValue([[proof.value]]);
     await environment.settings.verifyDomain(principal, credential.auth, credential.headers);
-    expect((await environment.settings.read(principal)).ssoRequired).toBe(true);
+    expect(await environment.settings.read(principal)).toMatchObject({
+      ssoRequired: true,
+      sso: { domainVerified: true },
+      activation: { state: "active" },
+    });
     expect(environment.authControl.read().configuration?.provider).toMatchObject({
       groupsClaim: "roles",
     });
