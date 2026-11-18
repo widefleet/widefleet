@@ -1,7 +1,7 @@
 ---
 title: Company sign-in settings
 description: Configure company sign-in through the CLI or API, manage credentials and check OpenID Connect requirements.
-lastModified: 2026-11-15
+lastModified: 2026-11-19
 ---
 
 For setup through the browser, follow [Set up company sign-in](/guides/company-sign-in).
@@ -102,6 +102,25 @@ The registration must be in the same tenant and have the Microsoft Graph
 `GroupMember.Read.All` application permission with administrator consent.
 App membership checks use the sign-in registration's delegated `User.Read`
 permission independently of this search connection.
+
+### Embedding hosts
+
+To [show apps in Microsoft Teams](/guides/embedded-apps) or another portal with
+Entra app identity, list every page origin that may contain an app frame in the
+exported `embeddingOrigins` field:
+
+```json
+[
+  "https://teams.microsoft.com",
+  "https://*.teams.microsoft.com",
+  "https://*.cloud.microsoft",
+  "https://portal.example.com"
+]
+```
+
+Each entry is an HTTPS origin. A leading `*.` includes all subdomains. Use an
+empty list to stop embedding. Applying a file without `embeddingOrigins` keeps
+the saved list.
 
 This Entra connection supports `widefleet groups search "Finance" --json` and
 `GET /api/v1/groups?query=Finance`. Results contain `id`, `name`, `description`,

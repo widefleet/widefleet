@@ -8,6 +8,7 @@ export default defineMeta({
     "applications",
     "members",
     "company-sign-in",
+    "embedded-apps",
     "deployments",
     "source-code",
     "migrations",
