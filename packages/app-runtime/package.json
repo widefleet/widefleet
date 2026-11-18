@@ -35,6 +35,7 @@
     "@platform/auth-proxy": "workspace:*",
     "@platform/contracts": "workspace:*",
     "@platform/ui": "workspace:*",
+    "@posthog/mcp": "1.2.3",
     "effect": "4.1.0",
     "jose": "6.2.10",
     "posthog-node": "5.55.0",

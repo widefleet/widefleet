@@ -2,6 +2,7 @@ import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
 import { mcpServiceCall, mcpScopes } from "@platform/contracts";
 import { z } from "zod";
 import type { ParentEnvironment } from "./types.ts";
+import { mcpAnalytics } from "./mcp-analytics.ts";
 import { verifyMcpToken } from "./mcp-authorization.ts";
 import { readMcpConfiguration } from "./mcp-oauth.ts";
 import { callMcpService, describeMcpService, searchMcpServices } from "./mcp-services.ts";
@@ -64,6 +65,7 @@ export const mcpRequest = async (
   }
 
   const principal = claims;
+  const instrumentAnalytics = mcpAnalytics(environment, principal.mcp.organizationId);
   const catalog = skills();
   const extension = await catalog.extension();
 
@@ -133,6 +135,8 @@ export const mcpRequest = async (
         async ({ code }) =>
           result(await executeMcpCode(environment, context, token, code, request.signal)),
       );
+
+      instrumentAnalytics?.(server);
 
       return server;
     },
