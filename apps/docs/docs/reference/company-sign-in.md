@@ -58,13 +58,14 @@ Use the read-only `ssoPolicy` from `widefleet settings get` to choose the next s
 | `domainVerificationRequired` | `true`: verify the company domain before testing sign-in. `false`: continue directly to the sign-in test.  |
 | `allowEmailAccountLinking`   | The operator's choice for self-hosted email-based account linking: `true` enables it; `false` disables it. |
 
-When `domainVerificationRequired` is `true`, request a record:
+When `domainVerificationRequired` is `true`, request the pending verification records:
 
 ```sh
 widefleet settings domain-verification
 ```
 
-Publish the returned TXT record in your company's DNS, then verify it:
+Each domain has its own TXT record. Publish the returned records in your company's
+DNS, then verify them:
 
 ```sh
 widefleet settings verify-domain
@@ -97,9 +98,11 @@ different company provider requires its own company sign-in.
 | `google`          | `https://accounts.google.com`                      | Cloud Identity API with optional user consent, direct membership only |
 | `oidc` (default)  | Your provider's issuer URL                         | The ID-token field named by `oidcConfig.mapping.extraFields.groups`   |
 
-`domain` is the company email domain, without a URL or wildcard. When
-`ssoPolicy.domainVerificationRequired` is `false`, Entra and generic OIDC may omit
-it or use an empty string. For Google it must match the user's Workspace domain.
+`domain` accepts company email domains separated by commas, such as
+`example.com,example.org`, without URLs or wildcards. Omit it when updating a
+connection to keep the saved domains. When `ssoPolicy.domainVerificationRequired`
+is `false`, Entra and generic OIDC can start without a domain; use an empty string
+to clear an existing domain list. Google uses one domain matching the user's Workspace.
 For Entra, use your Directory (tenant) ID, formatted as a UUID, in the issuer URL.
 For generic OIDC, the default name, email
 and group fields are `name`, `email` and `groups`; its mapping is shared by workspace

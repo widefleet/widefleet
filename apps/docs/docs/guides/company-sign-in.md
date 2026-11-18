@@ -163,9 +163,10 @@ Continue with [verify and activate](#verify-and-activate).
 For the default self-hosted setup, [enable account linking](/self-hosting/installation#company-sso-trust-and-account-linking)
 to connect your existing administrator account before testing company sign-in.
 
-1. If **Get verification record** is shown, add the displayed TXT record to your
-   company domain's DNS, then choose **Verify domain**. Otherwise, continue with
-   the sign-in test.
+1. If **Verify an email domain** is shown, open **Email domains** and choose
+   **Verify** beside your domain. Add the displayed TXT record to your DNS, then
+   choose **Verify domain** and return to **Company sign-in**. Otherwise, continue
+   with the sign-in test.
 2. Choose **Test company sign-in**. Use the company account with the same email
    as your Widefleet administrator account.
 3. Check that Widefleet reports **Company sign-in and administrator access
@@ -176,6 +177,11 @@ to connect your existing administrator account before testing company sign-in.
 Members now sign in through the company provider. Linked accounts keep their
 memberships and roles. Colleagues and agents using the CLI can run
 `widefleet login` to connect through company sign-in.
+
+Manage email domains under **Settings → Email domains**. Entra and generic OIDC
+can use several domains. Hosted organizations verify each with its own DNS
+record; the default self-hosted setup uses optional domains to help members find
+company sign-in by email. Google Workspace uses one Workspace domain.
 
 ## Check app access
 
