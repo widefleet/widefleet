@@ -1,7 +1,7 @@
 ---
 title: Installation reporting
 description: Usage insights that help improve Widefleet.
-lastModified: 2026-11-16
+lastModified: 2026-11-18
 ---
 
 Usage insights help us focus on the features you use and make Widefleet more reliable. Installations share usage statistics and sanitized error reports by default. You can configure these two categories independently.
@@ -31,7 +31,13 @@ PLATFORM_USAGE_REPORTING=false
 PLATFORM_CRASH_REPORTING=false
 ```
 
-This example turns off both categories. Apply changes by recreating management and the agent through your normal deployment process.
+This example turns off both categories. Apply changes by running the start
+commands again; Compose recreates management and the agent with the new values:
+
+```sh
+docker compose --env-file widefleet-images-0.7.6.env --env-file /absolute/path/deployment.env up -d control-plane
+docker compose --env-file widefleet-images-0.7.6.env --env-file /absolute/path/deployment.env --profile agent up -d agent
+```
 
 Explicit environment values take precedence over saved preferences. Otherwise, Widefleet uses the saved preferences, which default to enabled and survive updates. Reporting is off in the local demo and CI.
 

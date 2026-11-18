@@ -30,12 +30,10 @@ permissions and renews saved sessions automatically. See [headless login](/getti
 
 Login uses a configured platform address or finds one through your email in the
 browser, then saves it for future commands. See
-[CLI configuration](/reference/cli-configuration) for version requirements and
-address precedence, and [agent login](/reference/authentication#agent-login) for
-signing in while working with an agent.
-
-Use `--organization` or `PLATFORM_ORGANIZATION` to select the organization for
-API commands. See [organization selection](/reference/cli-configuration#select-an-organization).
+[CLI configuration](/reference/cli-configuration) for address precedence and
+[organization selection](/reference/cli-configuration#select-an-organization), and
+[agent login](/reference/authentication#agent-login) for signing in while working
+with an agent.
 
 ## Create an organization
 
@@ -50,16 +48,24 @@ Creation prints `{ "id": "...", "name": "Example Team", "slug": "example-team" }
 Use the returned ID with `--organization ID` for subsequent app commands.
 `widefleet organizations` also lists your organizations.
 
-If setup asks you to retry, run the creation command again. If creation is
-unavailable, ask an administrator for an invitation. See the
+If setup asks you to retry, run the creation command again. If your installation
+does not offer organization creation, ask an administrator for an invitation. See the
 [API reference](/reference/api#organization-creation) for permissions and errors.
 
-## App commands
+## Members and accounts
 
-The CLI also provides `widefleet account`,
-`widefleet members` and `widefleet invitations`. See [member management](/guides/members)
-for complete examples and permissions. `widefleet account` prints your link status and
-the browser URL for company sign-in. Accounts with matching verified company email are linked during SSO.
+| Command                 | Purpose                                                                        |
+| ----------------------- | ------------------------------------------------------------------------------ |
+| `widefleet members`     | Manage the selected organization's members and roles.                          |
+| `widefleet invitations` | Invite people to the organization or accept an invitation.                     |
+| `widefleet account`     | Show your company-account link status and the browser URL for company sign-in. |
+| `widefleet settings`    | Configure the selected organization's company sign-in (Owner or Admin role).   |
+
+Company sign-in links accounts with a matching verified company email. See
+[member management](/guides/members) for complete examples and permissions, and
+[company sign-in settings](/reference/company-sign-in) for `widefleet settings`.
+
+## App commands
 
 `APP_UUID`, `DEPLOYMENT_UUID` and `ARTIFACT_UUID` below are placeholders. Find app
 IDs with `widefleet apps` and deployment IDs and artifact IDs with `widefleet history APP_UUID`.
@@ -108,9 +114,9 @@ equivalent to `--template sveltekit`. The CLI includes both templates, so projec
 creation needs no platform login or template download. Dependency installation
 still requires the package registry or a populated local package cache.
 
-`DIRECTORY` must not exist. The CLI derives the app name in `wrangler.jsonc` from
-the directory name; review it before deploying. An unknown template exits with an
-error and does not create a project.
+`DIRECTORY` must be a new path. The CLI derives the app name in `wrangler.jsonc`
+from the directory name; review it before deploying. An unknown template exits
+with an error and creates nothing.
 
 Inside either project, run `pnpm install --frozen-lockfile`, `pnpm check`, then
 `pnpm dev`. Follow [app development](/guides/app-development) for identity,
@@ -131,17 +137,23 @@ These flags apply to both `deploy` and `preview`:
 | `--json`                  | Print one result on stdout; build output and progress go to stderr.                                            |
 
 Previews with saved source use the current branch for both their name and code.
-Use `--source-branch` when CI checks out a commit without a local branch. If a
-local branch is checked out, the flag must match it. A preview's branch cannot
-be changed. See [previews](/reference/previews).
+Use `--source-branch` when CI checks out a commit without a local branch; with a
+local branch checked out, the flag must match it. A preview keeps its branch for
+its lifetime. See [previews](/reference/previews).
 
-After activation, the command prints `Deployment succeeded` and the app URL. Headless apps have no launch URL; their JSON deployment result uses `url: null`. For automation, use `widefleet deploy --json`: stdout contains one JSON object with the final deployment fields and `url`, while build output and progress go to stderr. The `id` field identifies the deployment and `appId` identifies the app. Existing scripts that parsed the default JSON output must add `--json`. With `--no-wait --json`, the result describes the queued deployment. Uploading with `--no-wait` requires only `platform:write`; waiting for deployment events and history also requires `platform:read`. Failures exit nonzero and leave stdout empty. Update the management server together with the CLI so it can provide the complete URL, including its configured HTTPS port.
+Deployment output:
 
-Each command's help documents its output options.
-
-When code is saved to Widefleet Git, the JSON result includes `source` with
-`commit`, `branch` and `directory`. The directory is the app's path within the
-repository, or `.` for an app at its root. Without source saving, `source` is null.
+- **Default:** after activation, stdout shows `Deployment succeeded` and the app
+  URL. Headless apps have no launch URL.
+- **`--json`:** stdout contains one JSON object with the final deployment fields.
+  `id` identifies the deployment, `appId` the app, and `url` the launch URL
+  (`null` for headless apps). Build output and progress go to stderr.
+- **`source`:** when code is saved to Widefleet Git, the JSON result includes
+  `commit`, `branch` and `directory` (the app's path in the repository, or `.` at
+  its root). Without source saving, `source` is `null`.
+- **`--no-wait`:** the result describes the queued deployment. Uploading needs
+  only `platform:write`; waiting for events and history also needs `platform:read`.
+- **Failures:** exit nonzero and leave stdout empty.
 
 ## Source repositories
 

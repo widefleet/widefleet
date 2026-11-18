@@ -3,15 +3,19 @@ title: Widefleet documentation
 description: Let agents deploy apps and workflows with company login, databases, file storage, and controlled access to your systems.
 sidebar:
   label: Overview
-lastModified: 2026-10-29
+lastModified: 2026-11-18
 ---
 
 **Open-source platform for agent-built apps and workflows.**
 
-Start with the local demo to try the complete platform, or connect the CLI to an
-existing Widefleet installation.
+Widefleet runs your organization's internal apps. You or your coding agent create an
+app with the CLI and deploy it with one command. Widefleet signs colleagues in with
+their company account, gives each app its own database and file storage, and lets
+you choose which groups can open it and which systems it can reach. Apps can offer
+APIs to other apps and to AI clients through MCP.
 
-Explore the [roadmap](/roadmap) for planned product capabilities.
+Use Widefleet Cloud or run Widefleet on your own infrastructure. With self-hosting,
+you manage identity configuration, updates and backups.
 
 <CardGroup cols={2}>
   <Card title="Try Widefleet locally" href="/getting-started/quickstart" icon="rocket">
@@ -28,18 +32,36 @@ Explore the [roadmap](/roadmap) for planned product capabilities.
   </Card>
 </CardGroup>
 
-## Hosting
-
-Use Widefleet Cloud or run Widefleet on your own infrastructure. With
-self-hosting, you manage identity configuration, updates and backups.
-
 ## Find the right guide
 
-- [Share an app](/guides/applications): choose access groups and publish a catalog listing.
+**Build and ship apps**
+
+- [App development](/guides/app-development): develop locally, use the signed-in user, store data and deploy.
+- [Use an app template](/guides/app-templates): start from a ready-made app in the catalog.
 - [Deployments](/guides/deployments): preview changes, inspect failures and roll back code.
+- [Save and recover source code](/guides/source-code): keep app code in Git and continue in another session.
+- [Database migrations](/guides/migrations): change a D1 schema explicitly.
+- [Workflows](/guides/workflows): run durable, multi-step background work.
+
+**Share apps and manage people**
+
+- [Applications](/guides/applications): choose access groups and publish a catalog listing.
+- [Members and app sign-in](/guides/members): join an organization, invite colleagues and remove access.
+- [Set up company sign-in](/guides/company-sign-in): connect Microsoft Entra, Google Workspace or another provider.
+
+**Connect to other systems**
+
+- [Network permissions](/guides/network): allow an app to call external APIs.
+- [Connect apps](/guides/app-services): offer and use app APIs and keep provider secrets private.
+- [Authenticate apps to external APIs](/guides/workload-identity): use short-lived tokens instead of stored API keys.
+- [Connect AI clients with MCP](/guides/mcp): use app services from Claude and other MCP clients.
+
+**Reference and operations**
+
 - [CLI reference](/reference/cli): look up commands, app selection and output behavior.
 - [Configuration](/reference/configuration): understand app fields, bindings and migrations.
-
-- [Self-hosting](/self-hosting): install, configure, upgrade and recover your platform.
 - [Runtime](/reference/runtime): understand activation, resource persistence and supported app APIs.
 - [API and uploads](/reference/api): integrate with the authenticated management API.
+- [Self-hosting](/self-hosting): install, configure, upgrade and recover your platform.
+
+See the [roadmap](/roadmap) for planned capabilities.

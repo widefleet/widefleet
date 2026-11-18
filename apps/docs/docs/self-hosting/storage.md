@@ -4,19 +4,24 @@ description: Configure artifact and fleet storage, credentials and existing data
 lastModified: 2026-11-18
 ---
 
-The control plane and deployment agent support S3-compatible storage, Azure Blob Storage and Google Cloud Storage. S3 remains the default when the provider variables are omitted. The default Compose installation uses RustFS. Maintained [Compose service selections](/self-hosting/external-services) connect the same installation to existing external S3, Azure Blob or GCS resources. See [initialization and existing data](#initialization-and-existing-data) when changing storage.
+Widefleet stores files in two locations on S3-compatible storage, Azure Blob
+Storage or Google Cloud Storage:
 
-| Backend              | Control plane            | Fleet runtime                |
-| -------------------- | ------------------------ | ---------------------------- |
-| S3 / RustFS          | AWS S3 SDK               | Native `s3://` through celld |
-| Azure Blob           | Azure Blob SDK           | Native `az://` through celld |
-| Google Cloud Storage | Google Cloud Storage SDK | Native `gs://` through celld |
+- The **artifact** bucket holds uploaded app code, assets, source maps and runtime
+  packages. Management and the agent use it.
+- The **fleet** bucket holds app data (D1, R2, KV and queues), published app
+  snapshots and the generated key for app secrets. The agent and the runtime use it.
 
-The control plane stores uploaded modules and assets. The agent publishes them into a separate fleet bucket/container, where celld also persists D1 and R2 data. App artifacts use `apps/<app-id>/`; runtime packages use `packages/sha256/<checksum>.json`. Runtime state uses `organizations/<organization-id>/`, independently of executor registration. App-owned resource identities include the app UUID, so equal resource names in two apps stay separate. PostgreSQL holds runtime versions and checksums, not package bodies. App code and the CLI upload contract are independent of the selected backend. PostgreSQL and local runtime state still require their own storage.
+The default installation uses local RustFS through S3. Apps work the same on
+every backend. Back up both locations together with PostgreSQL and the runtime
+state; see [backup and restore](/self-hosting/operations#back-up-and-restore).
+To select a backend with Compose, see
+[external services](/self-hosting/external-services#object-storage).
 
 ## Control plane configuration
 
-Set `ARTIFACT_STORAGE_PROVIDER` to `s3`, `azure` or `gcs`. Configure only the selected backend. These variables supplement the existing database, authentication and platform settings.
+Set `ARTIFACT_STORAGE_PROVIDER` to `s3` (the default), `azure` or `gcs`, and
+configure only that provider:
 
 | Provider       | Required settings                                                      | Optional settings                                               |
 | -------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------- |
@@ -24,40 +29,72 @@ Set `ARTIFACT_STORAGE_PROVIDER` to `s3`, `azure` or `gcs`. Configure only the se
 | `azure`        | `AZURE_STORAGE_ACCOUNT_NAME`, `AZURE_STORAGE_CONTAINER`                | Azure credentials described below                               |
 | `gcs`          | `GCS_BUCKET`                                                           | `GOOGLE_APPLICATION_CREDENTIALS`: absolute credential file path |
 
-Azure supports the public Azure cloud. Authentication uses exactly one of:
+For Azure, use the public Azure cloud with a storage account name. SAS URLs,
+custom Blob endpoints and sovereign clouds are not supported. Set exactly one
+authentication method:
 
 - An account key in `AZURE_STORAGE_ACCESS_KEY`.
 - Managed identity, with optional `AZURE_CLIENT_ID` to select a user-assigned identity.
 - Workload identity, with all three of `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` and `AZURE_FEDERATED_TOKEN_FILE`.
 
-Account keys cannot be combined with identity settings. The SDK uses the selected identity directly; it does not fall back to a developer's Azure CLI login. SAS URLs, arbitrary Blob endpoints and sovereign Azure authorities are outside this configuration contract.
+Widefleet uses the configured identity only; a developer's Azure CLI login is never
+used.
 
-GCS uses Application Default Credentials (ADC). For a portable file-based configuration, supply a service-account JSON file through `GOOGLE_APPLICATION_CREDENTIALS`. Without an explicit file, ADC resolves in each process's environment, including an attached VM service account where available. Ensure the control plane, agent and app runtimes have their intended identities. The current Rust clients do not support every ADC credential-file type; external-account / Workload Identity Federation files are not a supported fleet configuration.
+GCS uses Application Default Credentials. Supply a service-account JSON file
+through `GOOGLE_APPLICATION_CREDENTIALS`, or omit it to use each container's
+environment, such as an attached VM service account. Make sure management, the
+agent and the runtime each have their intended identity. External-account
+(Workload Identity Federation) credential files are not supported.
 
 ## Agent and runtime configuration
 
-Set `FLEET_STORAGE_PROVIDER` independently to `s3`, `azure` or `gcs`; it also defaults to `s3`.
+Set `FLEET_STORAGE_PROVIDER` to `s3` (the default), `azure` or `gcs`,
+independently of the control plane:
 
-| Provider | Required settings                                                                                       | Optional settings                                                    |
-| -------- | ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `s3`     | Existing `FLEET_S3_ENDPOINT`, `FLEET_S3_BUCKET`, `FLEET_S3_ACCESS_KEY_ID`, `FLEET_S3_SECRET_ACCESS_KEY` | `FLEET_S3_REGION` (default `us-east-1`), `FLEET_RUNTIME_S3_ENDPOINT` |
-| `azure`  | `AZURE_STORAGE_ACCOUNT_NAME`, `FLEET_AZURE_CONTAINER`                                                   | Same Azure credential settings as above                              |
-| `gcs`    | `FLEET_GCS_BUCKET`                                                                                      | `GOOGLE_APPLICATION_CREDENTIALS`                                     |
+| Provider | Required settings                                                                              | Optional settings                                                    |
+| -------- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `s3`     | `FLEET_S3_ENDPOINT`, `FLEET_S3_BUCKET`, `FLEET_S3_ACCESS_KEY_ID`, `FLEET_S3_SECRET_ACCESS_KEY` | `FLEET_S3_REGION` (default `us-east-1`), `FLEET_RUNTIME_S3_ENDPOINT` |
+| `azure`  | `AZURE_STORAGE_ACCOUNT_NAME`, `FLEET_AZURE_CONTAINER`                                          | Same Azure credential settings as above                              |
+| `gcs`    | `FLEET_GCS_BUCKET`                                                                             | `GOOGLE_APPLICATION_CREDENTIALS`                                     |
 
-The agent rejects settings for an unselected provider. It supplies the native bucket scheme and only that backend's credentials to celld. Azure/GCS invocations have no S3 endpoint, region or keys. The agent's app-scoped cleanup uses the same backend while preserving the shared fleet prefix.
+Set only the variables for the selected provider; the agent rejects settings for
+other providers. Without a credential file, the managed or VM identity endpoint
+must be reachable from the agent and runtime containers.
 
-When authentication uses `AZURE_FEDERATED_TOKEN_FILE` or `GOOGLE_APPLICATION_CREDENTIALS`, also set `FLEET_CREDENTIAL_HOST_FILE` to the absolute path of that same file on the Docker host. The agent-visible path and host path can differ when the agent runs in a container. The agent checks its local file before processing jobs. The Compose credential overlay mounts the host file read-only at `/run/widefleet/storage-credential` in the shared runtime and the services that need storage access. The file is not copied into an artifact or Docker image. Credential refresh must preserve the mounted file's inode; replacing the host file atomically requires recreating the affected containers. Container recreation for credential rotation is an operator procedure, not automated here.
+### Credential files
 
-Without a credential file, managed/VM identity endpoints must be reachable from both the agent and fleet runtime containers. Cloud network and IAM configuration remain operator responsibilities. App-scoped bindings separate resource access while celld uses shared fleet credentials.
+When authentication uses `AZURE_FEDERATED_TOKEN_FILE` or
+`GOOGLE_APPLICATION_CREDENTIALS`, also set `FLEET_CREDENTIAL_HOST_FILE` to the
+absolute path of the same file on the Docker host. The agent checks the file
+before it processes jobs. The Compose credential file mounts it read-only at
+`/run/widefleet/storage-credential` in the runtime and the other services that
+need storage; it is never copied into an artifact or image.
 
-## Initialization and existing data
+Update a rotated credential file in place. If your tooling replaces the file
+instead, recreate the services that mount it.
 
-Artifact uploads are create-only: writing an existing key preserves its original bytes and succeeds. Runtime packages use content-addressed keys, so retries and concurrent uploads can safely reuse them. Object Storage is outside the PostgreSQL transaction; a failed transaction can leave an unreferenced package, which a later retry reuses without deleting it. Other storage errors fail the operation before a database reference is committed.
+## Initialization
 
-The Compose `initialize` service creates missing S3 buckets. In Azure/GCS mode it only checks existing artifact and fleet containers/buckets; missing resources are an error. It does not create storage accounts, cloud buckets, identities or IAM bindings. This tool expects matching artifact/fleet providers and access to both locations using the control plane's credentials. The fleet name comes from `FLEET_AZURE_CONTAINER` or `FLEET_GCS_BUCKET`.
+On first start, the `initialize` service prepares both locations with the control
+plane's credentials. It creates missing S3 buckets. For Azure and GCS, it checks
+that the artifact and fleet containers or buckets exist and are accessible; create
+storage accounts, buckets, identities and access rights beforehand. The fleet
+location comes from `FLEET_AZURE_CONTAINER` or `FLEET_GCS_BUCKET`.
 
-Changing a provider, bucket, endpoint or account is not a data migration. Before publishing or deleting an app with an existing runtime container, the agent checks that the configured fleet location matches that container. A mismatch stops the job before publishing data or removing the container. No automatic migration of stored artifacts, D1/R2 data or existing runtime containers is included. Preserve the matching storage settings for all existing apps until a migration procedure has been designed and verified.
+## Existing data
 
-Object versions, snapshots, soft-deleted objects and retention policies are managed by the storage operator. App deletion removes routes, app snapshots, artifact files and declared R2 objects. Native D1/KV/queue cells can remain after their app references are removed: the runtime has no per-app physical purge in a shared fleet. Do not delete live cell files manually. Provider-retained historical versions also remain governed by the storage provider. Cloud replication and soft deletion do not replace a coordinated backup of PostgreSQL, fleet storage and local runtime state.
+Keep the provider, bucket, endpoint and account unchanged once apps are deployed.
+Before each job, the agent checks that the configured fleet location matches the
+one the apps use and stops the job if it does not. Widefleet does not move stored
+artifacts or app data between locations.
 
-For installation checks, follow [start and verify](/self-hosting/external-services#start-and-verify).
+Deleting an app removes its routes, snapshots, artifact files and declared R2
+objects. Its D1, KV and queue data files stay in fleet storage. Do not delete
+live data files manually.
+
+Object versions, soft deletion and retention follow your storage provider's
+policies. They complement, but do not replace, a coordinated backup of
+PostgreSQL, both storage locations and the runtime state.
+
+To check the installation, follow
+[start and verify](/self-hosting/external-services#start-and-verify).

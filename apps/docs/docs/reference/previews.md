@@ -1,10 +1,11 @@
 ---
 title: Previews
-description: Preview names, flags, isolation, DNS and cleanup.
+description: Preview names, flags, isolation, addresses and cleanup.
 lastModified: 2026-11-18
 ---
 
-Run these commands from an existing app project:
+A preview runs your changes at their own address with their own data, next to the
+published app. Deploy the parent app first, then run these commands from its project:
 
 ```sh
 # Preview changes on a work branch.
@@ -15,9 +16,32 @@ widefleet preview
 widefleet preview --name review
 ```
 
-On a standard installation, a preview named `review` for `notes.apps.example.com` is available at `review.notes.apps.example.com`. The app is resolved from `name` in `wrangler.jsonc` and the selected platform URL. It must already be registered; a preview never creates or deploys the parent app. Use `--app NAME_OR_UUID` to choose another parent. Previews cannot themselves be preview parents.
+The command builds locally, creates or reuses the preview, uploads the build, waits
+for activation and prints the server-provided URL. On a standard installation, a
+preview named `review` for `notes.apps.example.com` is available at
+`review.notes.apps.example.com`.
 
-The command builds locally, creates or reuses the preview, uploads the build, waits for activation and prints the server-provided URL. Failed builds do not create previews. A name belonging to an unrelated app, a deleting app or a legacy preview at another hostname is rejected before uploading code.
+The parent app is resolved from `name` in `wrangler.jsonc` and the selected platform
+URL; use `--app NAME_OR_UUID` to choose another. Previews cannot themselves be
+preview parents. Failed builds do not create previews. A name belonging to an
+unrelated app, a deleting app or a legacy preview at another hostname is rejected
+before uploading code.
+
+Self-hosted installations need DNS and a TLS certificate for these nested hostnames;
+see [automatic HTTPS](/self-hosting/external-services#automatic-https-with-cloudflare).
+With automatic HTTPS, the first preview of an app becomes reachable over HTTPS once
+its certificate is issued, which can be shortly after the deployment succeeds.
+
+## Own data and settings
+
+Each preview starts with its own empty D1, R2, KV and Queue resources, separate
+from the published app's data. Plain-text variables and resource
+declarations come from the project configuration being deployed. Configure network
+permissions and app connections separately for the preview's own app ID when needed.
+
+Previews use the same sign-in as the app and always follow the original app's
+access groups. Manage them on the original app, for example with
+`widefleet access set --group GROUP_ID`. See [app access](/reference/app-access#previews).
 
 ## Names and repeated deployments
 
@@ -33,10 +57,6 @@ Switching branches selects that branch's preview. To update an existing preview
 with `widefleet deploy PREVIEW_ID`, check out its branch first. For a CI checkout
 without a local branch, pass `--source-branch BRANCH`.
 See [source code](/guides/source-code) for saving and recovering preview code.
-
-Manage access groups on the original app with `widefleet access set --group GROUP_ID`. Its previews inherit the rule and all later changes automatically. See [app access](/reference/app-access).
-
-Previews start with their own empty D1, R2, KV and Queue resources. Plain-text variables and resource declarations come from the project configuration being deployed. Configure network permissions and app connections separately for the preview's own app ID when needed.
 
 ## Organization addresses
 
@@ -63,16 +83,4 @@ widefleet history PREVIEW_UUID
 widefleet delete PREVIEW_UUID --yes
 ```
 
-Deleting an app also queues deletion of all its previews, including descendants created through the legacy `create --parent` workflow. They immediately stop accepting deployments and new previews; the agent processes cleanup asynchronously. Deleting a preview leaves its parent and sibling previews intact. The [resource cleanup limits](/reference/runtime#app-removal) also apply to previews.
-
-## DNS, HTTPS and upgrades
-
-Update the CLI, control plane, agent and generated edge configuration together before using this command. Existing apps and previews keep their hostnames; the manual `create --parent` workflow remains supported with its existing flat hostname.
-
-With the versioned `compose.acme-cloudflare.yaml` overlay, Traefik automatically requests and renews one wildcard certificate per parent app when a nested preview is first deployed. For example, `review.notes.apps.example.com` and `other.notes.apps.example.com` share `*.notes.apps.example.com`. The agent receives `TLS_MODE=cloudflare` and `APP_DOMAIN` through Compose and writes the certificate request into the preview's persistent route. Only Traefik receives the DNS token. Certificate state remains in the existing ACME volume across restarts.
-
-The existing `*.apps.example.com` DNS wildcard can resolve deeper preview names when no closer DNS record overrides it. If there are explicit records at `notes.apps.example.com`, also configure `*.notes.apps.example.com` to reach the same proxy. A TLS wildcard covers only one label: `*.apps.example.com` alone does not cover `review.notes.apps.example.com`.
-
-When using `TLS_MODE=provided`, supply a certificate covering the preview hostname or its parent wildcard as well as the existing app and management hosts. Automatic certificate issuance is available through the Cloudflare ACME overlay. Follow the [versioned DNS and TLS setup](/self-hosting/external-services#automatic-https-with-cloudflare) and the installation's normal deployment process.
-
-Initial certificate issuance is asynchronous. A successful app deployment confirms runtime activation and route publication; HTTPS may remain unavailable until Traefik has issued the first certificate. Check Traefik logs if issuance fails. Nested previews use the same SSO and credential-stripping middleware as regular apps.
+Deleting an app also queues deletion of all its previews, including descendants created through the legacy `create --parent` workflow, which keep their flat hostnames. They immediately stop accepting deployments and new previews; the agent processes cleanup asynchronously. Deleting a preview leaves its parent and sibling previews intact. The [app removal cleanup](/reference/runtime#app-removal) also applies to previews.

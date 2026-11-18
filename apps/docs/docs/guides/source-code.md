@@ -62,8 +62,8 @@ Widefleet saves your code to `feature/review` in the app's repository and uses
 that branch to name the preview. Deploying from the same branch updates the same
 preview. Another branch gets its own preview.
 
-A preview keeps its branch. To update it, check out that branch again. The main
-app uses `main`, so preview deployments from `main` are rejected.
+A preview keeps its branch. To update it, check out that branch again. Run
+previews from any branch except `main`, which belongs to the main app.
 
 When you're ready to publish the changes to the main app:
 
@@ -138,8 +138,8 @@ Widefleet stops so the saved code and the build stay in sync. If a Git commit ho
 or signing fails, fix the reported error and retry; your previous staging
 selection is preserved.
 
-If Git is temporarily unavailable, retry once it recovers. A failed status
-request does not mean your saved code is gone.
+If Git is temporarily unavailable, retry once it recovers; code that was already
+saved stays in place.
 
 ## Delete an app or preview
 

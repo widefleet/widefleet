@@ -1,14 +1,20 @@
 ---
 title: Application runtime
-description: Runtime versions, activation, recovery, storage and supported app APIs.
+description: Runtime versions, deployments, supported app APIs and app removal.
 lastModified: 2026-11-18
 ---
 
-The installation's celld runtime runs apps and previews as separate Dynamic Workers. The installer manages one node. Apps and agents belong directly to an organization with one execution configuration. Registering, disabling or replacing an agent does not change that ownership. A replacement agent reuses the same Docker host, persistent node state, routing directory and runtime storage.
+Each app and each preview runs as its own Dynamic Worker in the installation's
+runtime and sees only the resources it declares. This page lists the APIs apps
+can use, how deployments take effect and what app removal cleans up. For the
+node, storage and recovery setup, see [operations](/self-hosting/operations).
 
 ## Versions and updates
 
-The app runtime shares the Widefleet version. `widefleet runtime update VERSION` downloads the runtime package from the matching `vVERSION` GitHub release, verifies its checksum and activates it through the management API. Use the Widefleet release version for `VERSION`; runtime activation remains independent of container updates.
+The app runtime has the same version as Widefleet. Features such as
+[MCP](/guides/mcp) and [workload identities](/guides/workload-identity) need the
+matching runtime active. Administrators check and change it with the CLI, using
+the Widefleet release version for `VERSION`:
 
 ```sh
 widefleet login
@@ -17,42 +23,42 @@ widefleet runtime update VERSION
 widefleet runtime rollback PREVIOUS_VERSION
 ```
 
-Use the normal login with administrator membership and `platform:read platform:write`. `status` reports the selected version, last acknowledged active version, latest update state and stored versions. Update and rollback wait for the executor's result; `--no-wait` returns after queueing. Failed activation returns a nonzero exit status. Rollback selects an already stored version without downloading it again. A newer submitted update stops an older CLI waiter with an explicit message.
+Sign in with administrator membership; the default scopes `platform:read platform:write` are sufficient.
 
-The control plane keeps package bytes in Object Storage and only checksums/version references in PostgreSQL. Published versions are immutable. The installed package, app snapshots and native deployment are persisted in fleet storage. A runtime update has its own organization job and works before any app exists, installing only the requested release. Rollback requires a previously installed release. The first app deployment can initialize the runtime from the release bundled with the control-plane distribution; later control-plane upgrades do not silently change an organization's selected runtime.
+- `status` reports the selected version, the last acknowledged active version, the latest update state and the stored versions.
+- `update` downloads the runtime package from the matching `vVERSION` GitHub release, verifies its checksum and activates it.
+- `rollback` selects a version the installation already stores, without downloading it again.
 
-If an update returns `409: Runtime versions are immutable`, the installation already stores different bytes under that version. This can happen when a source checkout builds a modified runtime without changing its version, including changes to bundled license notices. Use a matching published platform build or a newly versioned runtime release; do not overwrite stored packages or edit their checksums. `runtime rollback` selects the installation's existing package, not the download from GitHub.
+Update and rollback wait for the result and exit nonzero if activation fails; `--no-wait` returns after queueing. A newer submitted update stops an older waiting CLI with an explicit message. Activating a runtime is separate from updating container images.
 
-Widefleet 0.7.6 includes app runtime 0.7.6 and celld 0.6.3-widefleet.1. Use matching control-plane, agent and CLI releases. The platform checks runtime compatibility before activation. [MCP](/guides/mcp) requires app runtime 0.7.6 or newer.
+If an update returns `409: Runtime versions are immutable`, the installation already stores different bytes under that version, for example from a source checkout that built a modified runtime (including changed license notices) without changing its version. Use a matching published platform build or a newly versioned runtime release. Do not overwrite stored packages or edit their checksums.
 
-The runtime forwards incoming HTTP request cancellation to the loaded app. If the client disconnects before response headers, the app's `request.signal` is aborted. App code must pass that signal to any downstream requests it wants to cancel, for example `env.SERVICE.fetch(url, { signal: request.signal })`. A timeout after a fetch has returned still needs explicit cancellation of the response body.
+## Request cancellation
 
-## Activation and recovery
+The runtime forwards HTTP request cancellation to the app. If the client disconnects before response headers, the app's `request.signal` is aborted. Pass that signal to downstream requests you want to cancel, for example `env.SERVICE.fetch(url, { signal: request.signal })`. A timeout after a fetch has returned still needs explicit cancellation of the response body.
 
-App code is selected through immutable snapshots. The loader binds only the app's declared D1, R2, KV, Queue, asset and plain-text resources. Equal resource names in different apps resolve to different native resources. Previews belong to the same organization with their own app identity and data. Resources are created only when declared.
+## Deployments and resources
 
-An app-code update can select a new snapshot without a native reload. Changes to native resources, event subscriptions or runtime code also publish and reload celld configuration. The installer validates the candidate before publishing its host reference. Runtime updates evaluate every published app snapshot before acceptance. Requests already using an older snapshot can finish on it. Native reloads retain the old generation during transition; long-lived connections remain subject to celld's generation drain behavior.
+Every deployment selects an immutable snapshot of the app code. Requests already running on the previous snapshot can finish on it.
 
-Activation uses a persistent journal. Rejected runtime updates restore the last serving native deployment so a subsequent cold restart uses that version. If an executor is interrupted mid-activation, the next executor recovers the journal before doing new work. For an interrupted update, allow that recovery to complete before deliberately restarting the node. Successfully published apps and ordinary node restarts require neither management nor a running executor; the edge proxy, runtime storage and the configured identity provider remain operational dependencies.
+The app receives only its declared D1, R2, KV, Queue, asset and plain-text bindings. Resources are created when they are first declared. Equal resource names in different apps resolve to different resources, and previews have their own app identity and data.
 
-Cron schedule and queue attachment changes use two native phases: validate new resources with the published apps’ previous schedules and subscriptions, then select the app and final schedules/subscriptions. Removed consumers are detached before removing their code. Newly attached, unpaused queues are resumed through celld's supported queue command so existing backlog is delivered. Intentionally paused queues remain paused.
+When a deployment changes Cron schedules or queue consumers, removed consumers are detached before their code is removed. A newly attached queue delivers its existing backlog unless it was paused intentionally; paused queues stay paused.
 
-## Compatibility and current limits
+## Supported app APIs
 
-The [celld/Cloudflare comparison](/reference/runtime-compatibility) separates native differences from Widefleet implementation choices.
+| Facility         | Behavior                                                                                                                                                                                                              |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D1               | Prepared statements, batch transactions, raw rows and sessions. `dump()` is not available.                                                                                                                            |
+| R2               | Bodies, metadata, conditions, ranges and multipart uploads. Customer-provided encryption keys are not available.                                                                                                      |
+| KV               | Text, JSON, bytes, streams, metadata, bulk reads and listing. Values are buffered in memory.                                                                                                                          |
+| Cron / Queues    | Declared schedules and consumers call the app's `scheduled`/`queue` handlers, including `waitUntil`, acknowledgment and retry decisions.                                                                              |
+| Telemetry        | Console logs and exceptions from HTTP requests, per app. Cron, Queue and service (RPC) executions do not appear in app logs, and distributed traces are not exported. See [runtime logs](/self-hosting/runtime-logs). |
+| Dynamic capacity | Up to 256 loaded dynamic instances per process, with at most 255 from one loader generation. The limit counts loaded instances; unreferenced instances are eligible for collection.                                   |
+| Scaling          | Self-hosted installations run all apps on one managed node, without automatic node provisioning or load balancing. All apps share that node's availability, so size, monitor and back it up accordingly.              |
 
-| Facility         | Behavior                                                                                                                                                                                                                                       |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| D1               | Prepared statements, batch transactions, raw rows and sessions are forwarded. `dump()` is unsupported.                                                                                                                                         |
-| R2               | Bodies, metadata, conditions, ranges and multipart uploads are supported. Customer-provided encryption keys are unsupported.                                                                                                                   |
-| KV               | Text, JSON, bytes, metadata, bulk reads and listing are supported. Streams use the native HTTP service-binding transport; values are buffered in memory.                                                                                       |
-| Cron / Queues    | Declared schedules and consumers call the app's `scheduled`/`queue` handlers, including `waitUntil`, acknowledgment and retry decisions.                                                                                                       |
-| Telemetry        | App HTTP tails provide console logs and exceptions. celld's Dynamic Worker tails do not cover RPC, Cron or Queue executions; native distributed traces are not exported through this app channel. See [telemetry](/self-hosting/runtime-logs). |
-| Dynamic capacity | Up to 256 loaded dynamic instances per process, with at most 255 from one loader generation. The limit counts loaded instances; unreferenced instances are eligible for collection.                                                            |
-| Scaling          | One managed node initially; no automatic node provisioning or load balancing. A node failure affects all apps on it.                                                                                                                           |
-
-[App Workflows](/guides/workflows) require a compatible agent and runtime with Workflow support. Native Durable Object namespaces inside dynamic apps are not part of this app contract. [App services](/guides/app-services) use the same app runtime and resource declarations. The trusted loader enforces [backend network permissions and browser CSP](/guides/network).
+[App Workflows](/guides/workflows) and [app services](/guides/app-services) use the same runtime and resource declarations. Apps cannot declare Durable Object classes. The runtime enforces [backend network permissions and browser CSP](/guides/network). For differences from Cloudflare, see [runtime compatibility](/reference/runtime-compatibility).
 
 ## App removal
 
-Deletion queues cleanup for the app and all its previews. Each cleanup removes the route, app references, deployment artifacts, snapshots and safely removable R2 objects; unrelated apps and the shared fleet remain running. Native D1/KV/Queue cells may remain without app references because the runtime has no per-app physical purge. Do not delete files owned by a running native cell. Provider snapshots/version history and telemetry retention have their own lifecycle.
+Deleting an app queues cleanup for the app and all its previews. Cleanup removes the route, app references, deployment artifacts, snapshots and safely removable R2 objects; other apps keep running. D1, KV and Queue storage can remain on the node without app references, because the runtime has no per-app physical purge. Do not delete files owned by a running native cell. Provider snapshots, version history and telemetry retention follow their own lifecycle.

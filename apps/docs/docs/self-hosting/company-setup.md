@@ -1,12 +1,12 @@
 ---
 title: Company setup
-description: Configure employees' agents and computers so they do not need to know the platform URL.
+description: Configure employees' agents and computers so `widefleet login` finds your installation.
 lastModified: 2026-11-18
 ---
 
-Employees should be able to run `widefleet login` without knowing the management
-URL. Distribute configuration with your existing agent or device setup, or
-publish discovery information under your work email domain. These options can
+Employees and their agents connect with `widefleet login` alone. Distribute the
+platform URL with your existing agent or device setup, or publish discovery
+information under your work email domain. These options can
 be combined. `widefleet login --help` lists `--email` and `--domain` for explicit
 discovery. The same setup flow applies on Windows, macOS and Linux.
 
@@ -86,8 +86,8 @@ Serve this JSON at exactly `https://example.com/.well-known/widefleet`:
 Use `Content-Type: application/json` and a valid TLS certificate. Serve the file
 without authentication or redirects, including redirects to `www.example.com`.
 Keep it below 8 KiB. The URL must be an HTTPS origin without a path, query,
-fragment or embedded credentials. The file is hosted on the work email domain;
-publishing it only on the platform's own domain does not let employees find it.
+fragment or embedded credentials. Host the file on the work email domain, where
+employees' logins look for it.
 
 If you use multiple email domains, publish discovery for each one. Use the exact
 domain from employees' email addresses. When publishing both DNS and HTTPS,

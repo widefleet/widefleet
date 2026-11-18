@@ -6,9 +6,11 @@ export default defineMeta({
   pages: [
     "index",
     "installation",
-    "company-setup",
     "external-services",
     "storage",
+    "sign-in-and-settings",
+    "company-setup",
+    "operations",
     "runtime-logs",
     "installation-reporting",
   ],

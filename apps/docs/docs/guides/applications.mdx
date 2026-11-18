@@ -1,7 +1,7 @@
 ---
 title: Applications
 description: Give colleagues access to a deployed app and publish it in the app catalog.
-lastModified: 2026-11-15
+lastModified: 2026-11-18
 ---
 
 Use this guide to share a deployed app with your team. You need app-owner or
@@ -33,10 +33,10 @@ groups:
    group's object ID. For another provider, ask your identity administrator for
    its group claim value.
 2. Add any other groups that should have access. Membership in any one listed
-   group is enough. For Google Workspace, people must belong directly to one of
-   those groups and be allowed to view their membership lists. Ask your administrator
-   to [enable Google group access](/guides/company-sign-in#allow-app-access-by-google-group)
-   if needed. Membership through a nested group does not count.
+   group is enough. Google group access uses direct membership, and people must be
+   allowed to view the group's membership list. Ask your administrator to
+   [enable Google group access](/guides/company-sign-in#allow-app-access-by-google-group)
+   if needed.
 3. Choose **Save app rules** and wait for **Active**. Existing and future previews
    inherit the same rule.
 
@@ -60,8 +60,8 @@ again, run `widefleet access set --all-authenticated`.
 With Entra directory search configured, `widefleet groups search "Finance"` finds
 group IDs from the CLI.
 
-Permission to edit an app does not bypass its access rules. Business permissions
-inside the app remain the app author's responsibility.
+Access rules apply to everyone, including app managers. Inside the app, use the
+signed-in identity for record-level permissions.
 
 ## Make the app discoverable
 
@@ -72,9 +72,9 @@ widefleet catalog publish APP_UUID
 widefleet catalog list
 ```
 
-Original apps with an active deployment can be listed. Colleagues can
-find them in **App catalog** and follow their launch URLs, subject to the app's
-SSO and group rules. Management permissions remain separate. Use
+Any app with an active deployment can be listed; previews can't. Colleagues find
+it in **App catalog** and open its launch URL, subject to the app's sign-in and
+group rules. Management permissions remain separate. Use
 `widefleet catalog unpublish APP_UUID` to withdraw the listing without deleting the app.
 
 ## Verify access
@@ -87,9 +87,9 @@ Repeat these checks after changing groups. Existing app logins pick up directory
 changes at the next automatic membership check; a fresh browser profile checks
 new sign-in behavior immediately. See [when membership changes take effect](/reference/app-access#when-membership-changes-take-effect).
 
-If access activation fails, inspect `widefleet access` and the reported error. The
-last installed rules can remain active until the change is successfully applied.
-After the operator resolves the cause, save the intended rules again and verify.
+If activation reports an error, the previous rules stay in effect. Share the error
+from `widefleet access` with your operator, then save the intended rules again and
+verify.
 
 Next, [publish a preview or update the app](/guides/deployments).
 

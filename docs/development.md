@@ -105,7 +105,7 @@ These containers have no durable volumes. Stopping them discards their databases
 
 ## Run management from source
 
-Use [`apps/control-plane/.env.example`](../apps/control-plane/.env.example) with local PostgreSQL, a private test artifact bucket and writable local state. Open the browser after startup to create the first administrator. Identity setup, configuration and recovery are documented in the [self-hosting guide](https://widefleet.com/docs/self-hosting/installation).
+Use [`apps/control-plane/.env.example`](../apps/control-plane/.env.example) with local PostgreSQL, a private test artifact bucket and writable local state. Open the browser after startup to create the first administrator. Identity setup, configuration and recovery are documented in [sign-in and settings](https://widefleet.com/docs/self-hosting/sign-in-and-settings).
 
 ```sh
 cd apps/control-plane
