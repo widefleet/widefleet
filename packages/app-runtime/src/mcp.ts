@@ -6,12 +6,18 @@ import { verifyMcpToken } from "./mcp-authorization.ts";
 import { readMcpConfiguration } from "./mcp-oauth.ts";
 import { callMcpService, describeMcpService, searchMcpServices } from "./mcp-services.ts";
 import { executeMcpCode, mcpJson } from "./mcp-code.ts";
+import { mcpInstructions, mcpSkillCatalog } from "./mcp-skills.ts";
 
 const resultSchema = mcpJson.transform((value) => ({
   content: [{ type: "text" as const, text: JSON.stringify(value) }],
 }));
 
 const result = resultSchema.parse.bind(resultSchema);
+
+let skillCatalog: ReturnType<typeof mcpSkillCatalog> | undefined;
+
+// The build embeds the plugin's skill so the plugin and the MCP server serve the same file.
+const skills = () => (skillCatalog ??= mcpSkillCatalog({ widefleet: WIDEFLEET_SKILL_SOURCE }));
 
 export const mcpRequest = async (
   request: Request,
@@ -58,10 +64,27 @@ export const mcpRequest = async (
   }
 
   const principal = claims;
+  const catalog = skills();
+  const extension = await catalog.extension();
 
   return createMcpHandler(
     () => {
-      const server = new McpServer({ name: "Widefleet", version: WIDEFLEET_RUNTIME_VERSION });
+      const server = new McpServer(
+        { name: "Widefleet", version: WIDEFLEET_RUNTIME_VERSION },
+        { instructions: mcpInstructions },
+      );
+
+      extension.attach(server);
+      server.registerTool(
+        "skills",
+        {
+          description:
+            "List Widefleet skills, or read one by name. Read the widefleet skill before building, changing or deploying an app.",
+          inputSchema: { name: z.string().min(1).max(64).optional() },
+          annotations: { readOnlyHint: true },
+        },
+        async ({ name }) => result(await catalog.read(name)),
+      );
       server.registerTool(
         "search",
         {

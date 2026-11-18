@@ -4,6 +4,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { buildMcpUi } from "./build-ui.ts";
+import { mcpSkillCatalog } from "./src/mcp-skills.ts";
 
 await buildMcpUi();
 
@@ -58,6 +59,14 @@ const compile = async (entry: string, define: Record<string, string>) => {
   return output.text;
 };
 
+const skill = await readFile(
+  new URL("../../plugins/widefleet/skills/widefleet/SKILL.md", import.meta.url),
+  "utf8",
+);
+
+// Markdown-only changes skip CI, so an invalid skill must fail the build instead of every MCP request.
+await mcpSkillCatalog({ widefleet: skill }).read();
+
 const source = await compile("loader", {
   WIDEFLEET_BINDINGS_SOURCE: JSON.stringify(await compile("bindings", {})),
   WIDEFLEET_WORKFLOW_SOURCE: JSON.stringify(await compile("workflow-runner", {})),
@@ -66,6 +75,7 @@ const source = await compile("loader", {
   ),
   WIDEFLEET_EVENTS_SOURCE: JSON.stringify(await compile("events", {})),
   WIDEFLEET_RUNTIME_VERSION: JSON.stringify(version),
+  WIDEFLEET_SKILL_SOURCE: JSON.stringify(skill),
 });
 
 const directory = new URL("dist/", import.meta.url);
