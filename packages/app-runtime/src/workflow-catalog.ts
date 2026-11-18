@@ -301,15 +301,21 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
   }
   // Called only by the trusted Workflow hosts when execution reaches an event wait.
   // Replays reach completed waits again; a settled wait never reopens its prompt.
-  publishPrompt(scope: WorkflowScope, id: string, step: string, prompt: PendingPrompt) {
+  // A replay of an open wait keeps its prompt ID; a restarted wait gets a new one.
+  publishPrompt(scope: WorkflowScope, id: string, step: string, prompt: Omit<PendingPrompt, "id">) {
     return this.ctx.blockConcurrencyWhile(async () => {
       const record = await this.instanceRecord(scope, id);
 
       if (!record || record.settledPrompts?.includes(step)) return;
 
+      const published = workflowPendingPrompt.parse({
+        ...prompt,
+        id: record.prompts?.[step]?.id ?? crypto.randomUUID(),
+      });
+
       await this.storePrompts(
         record,
-        [...Object.entries(record.prompts ?? {}), [step, workflowPendingPrompt.parse(prompt)]],
+        [...Object.entries(record.prompts ?? {}), [step, published]],
         record.settledPrompts ?? [],
       );
     });
@@ -322,7 +328,13 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
       if (record) await this.settlePrompts(record, [step]);
     });
   }
-  private async operate(scope: WorkflowScope, id: string, action: string, input?: InstanceInput) {
+  private async operate(
+    scope: WorkflowScope,
+    id: string,
+    action: string,
+    input?: InstanceInput,
+    prompt?: string,
+  ) {
     await this.active(scope);
     const name = key(scope.workflow, workflowInstanceId.parse(id));
     const record = await this.ctx.storage.get<RecordEntry>(name);
@@ -359,6 +371,15 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
         const event = z
           .strictObject({ type: workflowEventType, payload: z.unknown() })
           .parse(input);
+
+        // An answer to a specific prompt must not reach a wait that replaced it.
+        if (
+          prompt !== undefined &&
+          !Object.values(record.prompts ?? {}).some(
+            (open) => open.id === prompt && open.type === event.type,
+          )
+        )
+          throw new WorkflowAdmissionError("Workflow prompt is no longer open");
 
         await instance.sendEvent(event);
         // The answered question must not be offered again while the instance resumes.
@@ -510,6 +531,7 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
                   : request.action === "restart"
                     ? { from: request.from }
                     : undefined,
+                request.action === "sendEvent" ? request.prompt : undefined,
               );
       } catch (error) {
         // Admission errors occur before native execution. Keep ambiguous native

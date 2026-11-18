@@ -71,9 +71,10 @@ export const workflowStepName = z
   .max(256)
   .refine((value) => !Array.from(value).some((character) => character.charCodeAt(0) < 32));
 
-// A prompt published by a waiting instance, as status reports it.
+// A prompt published by a waiting instance, as status reports it. Each
+// publication has its own ID, so an answer can target exactly this question.
 export const workflowPendingPrompt = z
-  .strictObject({ name: workflowStepName, type: workflowEventType, ...promptContent })
+  .strictObject({ id: z.uuid(), name: workflowStepName, type: workflowEventType, ...promptContent })
   .refine(fitsPromptLimit, "Prompts must not exceed 16 KiB");
 
 export const workflowRestartFrom = z.strictObject({
@@ -111,6 +112,8 @@ const request = z.discriminatedUnion("action", [
     workflow: workflowName,
     id: workflowInstanceId,
     event: z.strictObject({ type: workflowEventType, payload: z.json() }),
+    // Deliver only while this prompt is open, never to a restarted wait.
+    prompt: z.uuid().optional(),
   }),
 ]);
 

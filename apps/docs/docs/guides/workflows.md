@@ -133,6 +133,7 @@ While the wait is open, `status` lists its prompt:
   "status": "waiting",
   "prompts": [
     {
+      "id": "0b9d3c4e-6f1a-4c2b-9e57-3d8a1f6b2c90",
       "name": "approval",
       "type": "approval",
       "message": "Send \"Example\"?",
@@ -145,12 +146,12 @@ While the wait is open, `status` lists its prompt:
 }
 ```
 
-Answer with an ordinary event of the prompt's `type`. MCP clients answer with `{ "action": "accept", "content": { … } }`, `{ "action": "decline" }` or `{ "action": "cancel" }`; use the same payload elsewhere so the Workflow handles every answer alike. For example, save `{"action":"accept","content":{"note":"Approved"}}` as `answer.json` and run `widefleet workflows send-event WORKFLOW INSTANCE_ID approval --payload answer.json`. The same `status` and `sendEvent` operations are available through the HTTP API, the app detail page and an app's own Workflow binding, so an app can show the question in its own interface. Widefleet does not validate payloads from these interfaces against `requestedSchema`; the Workflow receives them unchanged.
+Answer with an ordinary event of the prompt's `type`. MCP clients answer with `{ "action": "accept", "content": { … } }`, `{ "action": "decline" }` or `{ "action": "cancel" }`; use the same payload elsewhere so the Workflow handles every answer alike. For example, save `{"action":"accept","content":{"note":"Approved"}}` as `answer.json` and run `widefleet workflows send-event WORKFLOW INSTANCE_ID approval --payload answer.json --prompt PROMPT_ID`. With the prompt's `id` (`--prompt`, or `"prompt"` in a management `sendEvent` request), the event is delivered only while that prompt is open, so an answer to a question that a restart has replaced fails instead of reaching the new run. Workflow bindings keep Cloudflare's `sendEvent` signature without this check. The same `status` and `sendEvent` operations are available through the HTTP API, the app detail page and an app's own Workflow binding, so an app can show the question in its own interface. Widefleet does not validate payloads from these interfaces against `requestedSchema`; the Workflow receives them unchanged.
 
 - `message` holds up to 4,096 characters. `requestedSchema` is a flat object with up to 32 `string`, `number`, `integer` or `boolean` fields, the primitive subset of MCP form elicitation. Strings support `enum`, `format`, length limits and defaults. Omit `requestedSchema` for a plain confirmation. A prompt must not exceed 16 KiB.
 - An invalid prompt rejects the `waitForEvent` call before the wait starts.
 - Sending an event removes every open prompt of that type, and replays of a completed wait do not publish its prompt again. Give parallel questions distinct event types.
-- Restarting an instance publishes prompts again when execution reaches their waits. Terminating it removes them. Paused, failed and finished instances report no prompts.
+- Restarting an instance publishes prompts again with new IDs when execution reaches their waits. Terminating it removes them. Replays of an open wait keep its prompt's ID. Paused, failed and finished instances report no prompts.
 - An event wait can be reported as `running` before the Workflow engine hibernates it; its prompt is listed in both states.
 
 `prompt` is not part of Cloudflare's `WorkflowStep` type. In TypeScript, add it with a declaration in your project:

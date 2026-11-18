@@ -369,11 +369,24 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
         },
       };
 
+      const published = z.object({ prompts: z.tuple([z.object({ id: z.uuid() })]) });
       expect(await status(id, "waiting")).toMatchObject({ prompts: [prompt] });
+      const [{ id: first }] = published.parse(await call("status", id)).prompts;
       await stop(true);
       await start();
-      expect(await status(id, "waiting")).toMatchObject({ prompts: [prompt] });
-      await call("continue", id);
+      // A replay of the open wait keeps the prompt's identity.
+      expect(await status(id, "waiting")).toMatchObject({ prompts: [{ ...prompt, id: first }] });
+
+      const answer = (promptId: string) =>
+        manage({
+          action: "sendEvent",
+          workflow: "fixture",
+          id,
+          event: { type: "continue", payload: { add: 1 } },
+          prompt: promptId,
+        });
+
+      await answer(first);
       // Answering settles the prompt before the resumed replay reaches the wait again.
       expect(await call("status", id)).not.toHaveProperty("prompts");
       const completed = await status(id, "complete");
@@ -388,6 +401,11 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
         { timeout: 5000, interval: 20 },
       );
 
+      // The restarted wait asks anew; an answer to the earlier prompt is refused.
+      const [{ id: second }] = published.parse(await call("status", id)).prompts;
+      expect(second).not.toBe(first);
+      await expect(answer(first)).rejects.toThrow("Workflow prompt is no longer open");
+      expect(await status(id, "waiting")).toMatchObject({ prompts: [{ ...prompt, id: second }] });
       await call("terminate", id);
       expect(await status(id, "terminated")).not.toHaveProperty("prompts");
     }, 30000);
