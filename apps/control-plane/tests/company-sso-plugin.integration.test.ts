@@ -8,9 +8,9 @@ import { syncBuiltinESMExports } from "node:module";
 import { createTestEnvironment, organizationCredential } from "./environment.ts";
 import { editableSettings } from "./settings-input.ts";
 import { createIdentityProvider } from "./edge/auth-proxy-idp.ts";
-import { organizationSettings } from "../src/lib/server/schema.ts";
+import { organizationSettings, ssoDomains } from "../src/lib/server/schema.ts";
 import { createIdentityService } from "../src/lib/server/identity.ts";
-import { ssoProvider } from "../src/lib/server/auth-schema.ts";
+import { organization, ssoProvider } from "../src/lib/server/auth-schema.ts";
 import { companySsoOrigins } from "../src/lib/server/company-sso.ts";
 import { decryptSecret, encryptSecret } from "../src/lib/server/secret-encryption.ts";
 
@@ -122,7 +122,7 @@ describe("Better Auth SSO provider integration", () => {
     expect(await authenticate()).toMatchObject({ error: { code: "SSO_REQUIRED" } });
   });
 
-  it("publishes updated app claims after re-verifying an activated connection", async () => {
+  it("adds domains to an activated connection and verifies each separately", async () => {
     const principal = {
       ...environment.owner,
       role: "owner" as const,
@@ -135,30 +135,185 @@ describe("Better Auth SSO provider integration", () => {
     const next = editableSettings(await environment.settings.read(principal));
 
     if (!next.sso) throw new Error("Missing fixture provider");
-    next.sso.domain = "changed.example.test";
+    next.sso.domain = "changed.example.test, Alias.example.test";
+    await expect(
+      environment.settings.update(
+        principal,
+        { ...next, acknowledgeRestart: false },
+        false,
+        credential,
+      ),
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: "Keep a verified email domain while company SSO is required",
+    });
+
+    next.sso.domain = "example.test, changed.example.test, Alias.example.test";
     next.sso.oidcConfig.mapping.extraFields.groups = "roles";
-    await environment.settings.update(
+
+    const updated = await environment.settings.update(
       principal,
       { ...next, acknowledgeRestart: false },
       false,
       credential,
     );
-    expect(environment.authControl.read().configuration?.provider).toMatchObject({
-      groupsClaim: "groups",
-    });
+    // Pending domains leave the verified one and the required connection untouched.
 
-    const proof = await environment.settings.domainVerification(
-      principal,
-      credential.auth,
-      credential.headers,
-    );
-
-    resolver.mockResolvedValue([[proof.value]]);
-    await environment.settings.verifyDomain(principal, credential.auth, credential.headers);
-    expect((await environment.settings.read(principal)).ssoRequired).toBe(true);
+    expect(updated.ssoRequired).toBe(true);
     expect(environment.authControl.read().configuration?.provider).toMatchObject({
       groupsClaim: "roles",
     });
+
+    const proof = await environment.settings.domainVerification(principal);
+    const [alias, changed] = proof.records;
+
+    expect(proof.records.map(({ domain, name, type }) => ({ domain, name, type }))).toEqual([
+      {
+        domain: "alias.example.test",
+        name: "_better-auth-token-test-company.alias.example.test",
+        type: "TXT",
+      },
+      {
+        domain: "changed.example.test",
+        name: "_better-auth-token-test-company.changed.example.test",
+        type: "TXT",
+      },
+    ]);
+    expect(alias?.value).not.toBe(changed?.value);
+    expect(proof.name).toBe(alias?.name);
+    expect((await environment.settings.read(principal)).sso?.domain).toBe(
+      "alias.example.test,changed.example.test,example.test",
+    );
+
+    // Each domain is proven by its own record and stays verified independently.
+    resolver.mockImplementation(async (name) => (name === changed?.name ? [[changed.value]] : []));
+    await expect(environment.settings.verifyDomain(principal)).rejects.toThrow(
+      "No matching TXT record was found for alias.example.test.",
+    );
+
+    const partial = await environment.settings.read(principal);
+    expect(partial.ssoDomains.map(({ domain, verified }) => ({ domain, verified }))).toEqual([
+      { domain: "alias.example.test", verified: false },
+      { domain: "changed.example.test", verified: true },
+      { domain: "example.test", verified: true },
+    ]);
+    expect(partial.ssoRequired).toBe(true);
+
+    const [stored] = await environment.database.db
+      .select()
+      .from(ssoProvider)
+      .where(eq(ssoProvider.providerId, "test-company"));
+
+    expect(stored?.domain).toBe("changed.example.test,example.test");
+
+    // Records published for earlier releases use Better Auth's identifier=value form.
+    resolver.mockImplementation(async (name) =>
+      name === alias?.name ? [[`_better-auth-token-test-company=${alias.value}`]] : [],
+    );
+    await environment.settings.verifyDomain(principal, "alias.example.test");
+
+    const [both] = await environment.database.db
+      .select()
+      .from(ssoProvider)
+      .where(eq(ssoProvider.providerId, "test-company"));
+
+    expect(both?.domain).toBe("alias.example.test,changed.example.test,example.test");
+    expect(both?.domainVerified).toBe(true);
+  });
+
+  it("adds and removes domains without interrupting required company SSO", async () => {
+    const principal = {
+      ...environment.owner,
+      role: "owner" as const,
+      admin: true,
+      creator: true,
+      application: { organizationId: "widefleet", admin: true },
+    };
+
+    const added = await environment.settings.addDomain(principal, "new.example.test", false);
+    expect(added.ssoRequired).toBe(true);
+    expect(added.ssoDomains.find((entry) => entry.domain === "new.example.test")).toMatchObject({
+      verified: false,
+      record: { name: "_better-auth-token-test-company.new.example.test", type: "TXT" },
+    });
+    await expect(
+      environment.settings.addDomain(principal, "new.example.test", false),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+
+    const [stored] = await environment.database.db
+      .select()
+      .from(ssoProvider)
+      .where(eq(ssoProvider.providerId, "test-company"));
+
+    expect(stored).toMatchObject({
+      domain: "alias.example.test,changed.example.test,example.test",
+      domainVerified: true,
+    });
+
+    for (const domain of ["new.example.test", "alias.example.test", "changed.example.test"])
+      await environment.settings.removeDomain(principal, domain, false);
+    await expect(
+      environment.settings.removeDomain(principal, "example.test", false),
+    ).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Keep at least one company email domain",
+    });
+
+    await environment.settings.addDomain(principal, "pending.example.test", false);
+    await expect(
+      environment.settings.removeDomain(principal, "example.test", false),
+    ).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: "Keep a verified email domain while company SSO is required",
+    });
+    expect((await environment.settings.read(principal)).ssoRequired).toBe(true);
+  });
+
+  it("refuses a domain another organization has verified", async () => {
+    const organizationId = crypto.randomUUID();
+    await environment.database.db.insert(organization).values({
+      id: organizationId,
+      name: "Other company",
+      slug: `other-${organizationId}`,
+      createdAt: new Date(),
+    });
+    await environment.database.db.insert(ssoProvider).values({
+      id: crypto.randomUUID(),
+      providerId: `other-${organizationId}`,
+      organizationId,
+      issuer: "https://other.example.test",
+      domain: "claimed.example.test",
+      domainVerified: true,
+    });
+    await environment.database.db.insert(ssoDomains).values({
+      organizationId,
+      domain: "claimed.example.test",
+      verificationToken: "other-token",
+      verifiedAt: new Date(),
+    });
+
+    const principal = {
+      ...environment.owner,
+      role: "owner" as const,
+      admin: true,
+      creator: true,
+      application: { organizationId: "widefleet", admin: true },
+    };
+
+    try {
+      const view = await environment.settings.addDomain(principal, "claimed.example.test", false);
+      const record = view.ssoDomains.find((entry) => entry.domain === "claimed.example.test");
+      resolver.mockResolvedValue([[record?.record?.value ?? ""]]);
+      await expect(
+        environment.settings.verifyDomain(principal, "claimed.example.test"),
+      ).rejects.toMatchObject({
+        code: "CONFLICT",
+        message: "claimed.example.test is verified by another organization",
+      });
+    } finally {
+      await environment.settings.removeDomain(principal, "claimed.example.test", false);
+      await environment.database.db.delete(organization).where(eq(organization.id, organizationId));
+    }
   });
 
   it.each(["registered", "migrated"])(

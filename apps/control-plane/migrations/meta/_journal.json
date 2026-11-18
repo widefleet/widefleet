@@ -232,6 +232,13 @@
       "when": 1794787200000,
       "tag": "0032_service_access",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1794873600000,
+      "tag": "0033_sso_domains",
+      "breakpoints": true
     }
   ]
 }

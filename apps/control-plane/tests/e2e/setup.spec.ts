@@ -140,7 +140,9 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
 
     const initial = environment.authControl.read();
 
-    await page.getByRole("button", { name: "Get verification record" }).click();
+    await page.getByRole("link", { name: "Verify an email domain", exact: true }).click();
+    const domains = page.getByRole("list", { name: "Email domains" });
+    await expect(domains.getByText("Pending", { exact: true })).toBeVisible();
 
     const recordResponse = await page.request.post("/api/v1/settings/domain-verification", {
       headers: { origin: environment.configuration.PLATFORM_URL },
@@ -148,9 +150,18 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
 
     expect(recordResponse.ok()).toBe(true);
     const record = domainVerification.parse(await recordResponse.json());
-    await expect(page.getByText(record.value, { exact: true })).toBeVisible();
+    await domains.getByRole("button", { name: "Verify", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog.getByRole("heading", { name: "Verify example.test" })).toBeVisible();
+    await expect(dialog.getByText(record.name, { exact: true })).toBeVisible();
+    await expect(dialog.getByText(record.value, { exact: true })).toBeVisible();
+    await dialog.getByRole("button", { name: "Verify domain", exact: true }).click();
+    await expect(dialog.getByRole("alert")).toContainText("No matching TXT record");
     await writeFile(dnsFile, JSON.stringify({ [record.name]: record.value }));
-    await page.getByRole("button", { name: "Verify domain", exact: true }).click();
+    await dialog.getByRole("button", { name: "Verify domain", exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(domains.getByText("Verified", { exact: true })).toBeVisible();
+    await page.getByRole("link", { name: "Company sign-in", exact: true }).click();
     await page.getByRole("button", { name: "Test company sign-in" }).click();
     await page.getByRole("button", { name: /sso@example.test/ }).click();
     await expect(
@@ -266,10 +277,14 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
     await page.goto(link);
     await expect(page).toHaveURL(/\/settings$/);
     await expect(page.getByRole("heading", { name: "Settings", exact: true })).toBeVisible();
-    await page.getByLabel("Company email domain").fill("example.test");
-    await page.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(page.getByText("Settings saved.", { exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Get verification record" }).click();
+    // The migrated connection has no email domain yet; add it to the domain list.
+    await expect(page.getByLabel("Company email domain")).toHaveCount(0);
+    await page.getByRole("link", { name: "Email domains", exact: true }).click();
+    await page.getByRole("button", { name: "Add domain", exact: true }).click();
+    const addition = page.getByRole("dialog");
+    await addition.getByLabel("Domain", { exact: true }).fill("example.test");
+    await addition.getByRole("button", { name: "Add domain", exact: true }).click();
+    await expect(addition.getByRole("heading", { name: "Verify example.test" })).toBeVisible();
 
     const upgradeRecordResponse = await page.request.post("/api/v1/settings/domain-verification", {
       headers: { origin: environment.configuration.PLATFORM_URL },
@@ -278,7 +293,18 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
     expect(upgradeRecordResponse.ok()).toBe(true);
     const upgradeRecord = domainVerification.parse(await upgradeRecordResponse.json());
     await writeFile(dnsFile, JSON.stringify({ [upgradeRecord.name]: upgradeRecord.value }));
-    await page.getByRole("button", { name: "Verify domain", exact: true }).click();
+
+    // Released CLIs verify every pending domain with a request without a body.
+    const verified = await page.request.post("/api/v1/settings/verify-domain", {
+      headers: { origin: environment.configuration.PLATFORM_URL },
+    });
+
+    expect(await verified.json()).toEqual({ success: true });
+    await page.reload();
+    await expect(
+      page.getByRole("list", { name: "Email domains" }).getByText("Verified", { exact: true }),
+    ).toBeVisible();
+    await page.getByRole("link", { name: "Company sign-in", exact: true }).click();
     await page.getByRole("button", { name: "Test company sign-in" }).click();
     await page.getByRole("button", { name: /sso@example.test/ }).click();
     await expect(

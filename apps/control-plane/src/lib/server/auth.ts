@@ -11,6 +11,7 @@ import { betterAuth } from "better-auth";
 import type { sveltekitCookies } from "better-auth/svelte-kit";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { eq, sql } from "drizzle-orm";
+import { parseCompanyDomains } from "@platform/contracts";
 import {
   apiResource,
   authenticationOptions,
@@ -227,7 +228,9 @@ export const createAuthentication = (
               if (
                 subject &&
                 !subject.emailVerified &&
-                subject.email.toLowerCase().split("@")[1] === provider.domain
+                parseCompanyDomains(provider.domain).includes(
+                  subject.email.toLowerCase().split("@")[1] ?? "",
+                )
               )
                 await context.context.internalAdapter.updateUser(record.userId, {
                   emailVerified: true,

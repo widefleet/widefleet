@@ -151,6 +151,25 @@ describe("Organization login settings", () => {
     expect(identity?.provider.type).toBe("google");
     expect(identity?.scopes).toContain(googleGroupsScope);
     expect(identity?.directory).toBeNull();
+
+    const multiDomain = settingsInput.parse({
+      ...input,
+      sso: { ...input.sso, domain: `${input.sso?.domain},alias.example.test` },
+    });
+
+    await expect(settings.plan(target.principal, multiDomain)).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Google Workspace app identity supports one company email domain",
+    });
+    await expect(
+      settings.plan(
+        target.principal,
+        settingsInput.parse({
+          ...multiDomain,
+          sso: { ...multiDomain.sso, appIdentityType: "oidc" },
+        }),
+      ),
+    ).resolves.toBeDefined();
   });
 
   it("disables the built-in app client for company SSO and restores the encrypted secret on return", async () => {

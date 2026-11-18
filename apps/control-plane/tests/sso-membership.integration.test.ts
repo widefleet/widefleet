@@ -3,7 +3,14 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { createAuthentication } from "../src/lib/server/auth.ts";
 import type { OrganizationAccess } from "../src/lib/server/application-context.ts";
-import { account, invitation, member, organization, user } from "../src/lib/server/auth-schema.ts";
+import {
+  account,
+  invitation,
+  member,
+  organization,
+  ssoProvider,
+  user,
+} from "../src/lib/server/auth-schema.ts";
 import { createIdentityService } from "../src/lib/server/identity.ts";
 import { organizationRuntimes } from "../src/lib/server/schema.ts";
 import { createTestEnvironment } from "./environment.ts";
@@ -143,6 +150,21 @@ describe("Native SSO organization membership", () => {
       ).toEqual(memberships);
     },
   );
+
+  it("verifies addresses on every verified provider domain, including earlier alias users", async () => {
+    provider.settings.email = `${organizationId}@alias.test`;
+    const before = await login();
+    expect(before.current?.user.emailVerified).toBe(false);
+
+    await environment.database.db
+      .update(ssoProvider)
+      .set({ domain: "example.test,alias.test" })
+      .where(eq(ssoProvider.providerId, providerId));
+
+    const after = await login();
+    expect(after.current?.user.id).toBe(before.current?.user.id);
+    expect(after.current?.user.emailVerified).toBe(true);
+  });
 
   it("links an existing verified company address and adds its missing membership", async () => {
     const existing = environment.users.createUser({

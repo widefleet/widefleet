@@ -8,8 +8,6 @@
   import { authClient } from "#lib/auth-client";
   import {
     activateCompanySso,
-    requestDomainVerification,
-    verifyCompanyDomain,
     getSettings,
     planSettings,
     setExternalManagement,
@@ -23,6 +21,7 @@
   import * as Dialog from "@platform/ui/dialog";
   import PageHeading from "#shadcn/components/PageHeading.svelte";
   import CopyValue from "#shadcn/components/CopyValue.svelte";
+  import CompanyDomains from "#shadcn/components/CompanyDomains.svelte";
   import Feedback from "#shadcn/components/Feedback.svelte";
   import type { PageData } from "./$types";
 
@@ -54,7 +53,8 @@
           providerId: source.sso.providerId,
           appIdentityType: source.sso.appIdentityType,
           issuer: source.sso.issuer,
-          domain: source.sso.domain,
+          // Saved connections manage their email domains in a separate list.
+          domain: undefined,
           oidcConfig: { ...$state.snapshot(source.sso.oidcConfig), clientSecret: "" },
         }
       : {
@@ -96,11 +96,20 @@
 
   const sections = [
     { id: "identity", label: "Company sign-in" },
+    { id: "domains", label: "Email domains" },
     { id: "management", label: "Administration" },
   ];
 
   beforeNavigate(({ cancel, to, type }) => {
-    if (!dirty || (to?.url.origin === page.url.origin && to.url.pathname === "/settings")) return;
+    const withinSettings = to?.url.origin === page.url.origin && to.url.pathname === "/settings";
+
+    // Outcomes belong to the section where they happened.
+    if (withinSettings) {
+      saved = false;
+      message = "";
+    }
+
+    if (!dirty || withinSettings) return;
 
     if (type === "leave" || !window.confirm("You have unsaved changes. Leave this page anyway?"))
       cancel();
@@ -124,7 +133,6 @@
     draft = initialDraft(updated.view);
     configureCompany = Boolean(updated.view.sso) || !data.emailSignIn;
     savedDraft = JSON.stringify(draft);
-    proof = null;
     pending = null;
     restartOpen = false;
     saved = true;
@@ -240,36 +248,6 @@
     }
   };
 
-  let proof = $state<{ name: string; type: "TXT"; value: string } | null>(null);
-
-  const requestProof = async () => {
-    busy = true;
-    message = "";
-
-    try {
-      proof = await requestDomainVerification({ organizationId: workspace.organizationId });
-    } catch (cause) {
-      message = cause instanceof Error ? cause.message : "Could not request domain verification.";
-    } finally {
-      busy = false;
-    }
-  };
-
-  const verifyProof = async () => {
-    busy = true;
-    message = "";
-
-    try {
-      await verifyCompanyDomain({ organizationId: workspace.organizationId });
-      await getSettings().refresh();
-    } catch (cause) {
-      message =
-        cause instanceof Error ? cause.message : "The DNS TXT record could not be verified.";
-    } finally {
-      busy = false;
-    }
-  };
-
   const activateSso = async () => {
     busy = true;
     message = "";
@@ -329,7 +307,23 @@
   {#if message}<Feedback kind="error">{message}</Feedback>{/if}
   {#if view.error}<Feedback kind="error">{view.error}</Feedback>{/if}
   {#if saved}<Feedback kind="success">Settings saved.</Feedback>{/if}
-  {#if route.section === "management"}
+  {#if route.section === "domains"}
+    {#if view.sso}
+      <CompanyDomains
+        domains={view.ssoDomains}
+        organizationId={workspace.organizationId}
+        {readonly}
+      />
+    {:else}
+      <section class="space-y-3 rounded-xl border p-6">
+        <h2 class="text-base font-semibold">Email domains</h2>
+        <p class="text-muted-foreground text-sm">
+          Configure company SSO before adding the email domains of its members.
+        </p>
+        <Button variant="outline" href="/settings?section=identity">Configure company SSO</Button>
+      </section>
+    {/if}
+  {:else if route.section === "management"}
     <section class="space-y-4 rounded-xl border p-6">
       <h2 class="text-base font-semibold">Manage configuration</h2>
       <p class="text-muted-foreground text-sm">
@@ -392,14 +386,20 @@
               required
             />
           </div>
-          <div class="space-y-2">
-            <Label for="company-domain">Company email domain</Label><Input
-              id="company-domain"
-              bind:value={draft.sso.domain}
-              placeholder="example.com"
-              required
-            />
-          </div>
+          {#if !view.sso}
+            <div class="space-y-2">
+              <Label for="company-domain">Company email domain</Label><Input
+                id="company-domain"
+                bind:value={draft.sso.domain}
+                placeholder="example.com"
+                aria-describedby="company-domain-help"
+                required
+              />
+              <p id="company-domain-help" class="text-muted-foreground text-xs">
+                You can add more domains after saving.
+              </p>
+            </div>
+          {/if}
           <div class="space-y-2">
             <p class="text-xs font-medium">Workspace redirect URI</p>
             <CopyValue value={callback} label="Copy workspace redirect URI" />
@@ -551,18 +551,12 @@
           {#if dirty}<Feedback>Save your changes before verifying company sign-in.</Feedback>{/if}
           {#if !view.sso.domainVerified}
             <p class="text-muted-foreground text-sm">
-              Verify ownership of {view.sso.domain} to enable company sign-in testing. This does not change
-              how members currently access the organization.
+              Verify an email domain to test company sign-in. This does not change how members
+              currently access the organization.
             </p>
-            {#if proof}
-              <CopyValue label="DNS record name" value={proof.name} /><CopyValue
-                label="TXT value"
-                value={proof.value}
-              />
-              <Button disabled={busy || dirty} onclick={verifyProof}>Verify domain</Button>
-            {:else}<Button disabled={busy || dirty} onclick={requestProof}
-                >Get verification record</Button
-              >{/if}
+            <Button variant="outline" href="/settings?section=domains"
+              >Verify an email domain</Button
+            >
           {:else}
             {#if !data.tested}
               <Button variant="outline" disabled={busy || dirty} onclick={signIn}

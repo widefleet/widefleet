@@ -5,6 +5,7 @@ import {
   settingsUpdate,
   setupOwner,
   organizationSelection,
+  ssoDomainInput,
 } from "@platform/contracts";
 import { z } from "zod";
 import { remoteContext, remoteOperation } from "#server/remote-support";
@@ -66,21 +67,36 @@ export const createOwner = command(setupOwner, async (input) => {
   return remoteOperation(() => runtime.settings.createOwner(input));
 });
 
-export const requestDomainVerification = command(organizationSelection, async (input) => {
-  const { runtime, principal, request } = await remoteContext(input);
+export const addCompanyDomain = command(
+  ssoDomainInput.extend(organizationSelection.shape),
+  async ({ organizationId, domain }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
+    await remoteOperation(() => runtime.settings.addDomain(principal, domain, true));
+    await getSettings().refresh();
+  },
+);
 
-  return remoteOperation(() =>
-    runtime.settings.domainVerification(principal, runtime.auth, request.headers),
-  );
-});
+export const removeCompanyDomain = command(
+  ssoDomainInput.extend(organizationSelection.shape),
+  async ({ organizationId, domain }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
+    await remoteOperation(() => runtime.settings.removeDomain(principal, domain, true));
+    await getSettings().refresh();
+  },
+);
 
-export const verifyCompanyDomain = command(organizationSelection, async (input) => {
-  const { runtime, principal, request } = await remoteContext(input);
+export const verifyCompanyDomain = command(
+  ssoDomainInput.extend(organizationSelection.shape),
+  async ({ organizationId, domain }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
 
-  return remoteOperation(() =>
-    runtime.settings.verifyDomain(principal, runtime.auth, request.headers),
-  );
-});
+    try {
+      await remoteOperation(() => runtime.settings.verifyDomain(principal, domain));
+    } finally {
+      await getSettings().refresh();
+    }
+  },
+);
 
 export const activateCompanySso = command(organizationSelection, async (input) => {
   const { runtime, principal } = await remoteContext(input);

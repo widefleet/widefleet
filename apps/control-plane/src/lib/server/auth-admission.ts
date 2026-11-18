@@ -1,7 +1,7 @@
 import type { OAuthClaimExtensionInput } from "@better-auth/oauth-provider";
 import { readAuthenticationReference } from "./authentication-context.ts";
 import { APIError } from "better-auth/api";
-import { and, eq, gt } from "drizzle-orm";
+import { and, eq, gt, sql } from "drizzle-orm";
 import { z } from "zod";
 import { organizationIdentifier } from "@platform/contracts";
 import type { OrganizationAccess } from "./application-context.ts";
@@ -25,7 +25,13 @@ export const createAuthenticationAdmission = (
     const candidates = await database
       .select({ id: ssoProvider.organizationId, providerId: ssoProvider.providerId })
       .from(ssoProvider)
-      .where(and(eq(ssoProvider.domain, domain), eq(ssoProvider.domainVerified, true)));
+      .where(
+        and(
+          // Better Auth stores a provider's domains as one canonical comma-separated value.
+          sql`${domain} = any(string_to_array(${ssoProvider.domain}, ','))`,
+          eq(ssoProvider.domainVerified, true),
+        ),
+      );
 
     const allowed = new Set(await access.filterOrganizations(candidates));
     const providers = candidates.filter((candidate) => allowed.has(candidate.id));

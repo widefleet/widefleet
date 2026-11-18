@@ -277,24 +277,36 @@ test("accepts emailed owner invitations and manages members in isolated organiza
       ).toBeVisible();
     };
 
+    const recordName = (domain: string) => `_better-auth-token-company-widefleet.${domain}`;
+
     await configure();
-    await operator.getByRole("button", { name: "Get verification record" }).click();
+    await expect(operator.getByLabel("Company email domain")).toHaveCount(0);
+    await operator.getByRole("link", { name: "Email domains", exact: true }).click();
+    const domains = operator.getByRole("list", { name: "Email domains" });
+    await expect(domains.getByText("example.test", { exact: true })).toBeVisible();
+
+    await operator.getByRole("button", { name: "Add domain", exact: true }).click();
+    const dialog = operator.getByRole("dialog");
+    await dialog.getByLabel("Domain", { exact: true }).fill("https://alias.example.test");
+    await dialog.getByRole("button", { name: "Add domain", exact: true }).click();
     await expect(
-      operator.getByText("_better-auth-token-company-widefleet.example.test", { exact: true }),
-    ).toBeVisible();
-    await operator.getByLabel("Company email domain").fill("changed.example.test");
-    await operator.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(operator.getByText("Settings saved.", { exact: true })).toBeVisible();
-    await expect(operator.getByRole("button", { name: "Get verification record" })).toBeVisible();
-    await expect(
-      operator.getByText("_better-auth-token-company-widefleet.example.test", { exact: true }),
-    ).toHaveCount(0);
-    await operator.getByRole("button", { name: "Get verification record" }).click();
-    await expect(
-      operator.getByText("_better-auth-token-company-widefleet.changed.example.test", {
+      dialog.getByText("Enter the company's email domain, without a URL or wildcard", {
         exact: true,
       }),
     ).toBeVisible();
+    await dialog.getByLabel("Domain", { exact: true }).fill("alias.example.test");
+    await dialog.getByRole("button", { name: "Add domain", exact: true }).click();
+    await expect(dialog.getByText(recordName("alias.example.test"), { exact: true })).toBeVisible();
+    await dialog.getByRole("button", { name: "Verify later", exact: true }).click();
+    await expect(domains.getByText("Pending", { exact: true })).toHaveCount(2);
+
+    await operator.getByRole("button", { name: "Remove example.test", exact: true }).click();
+    await expect(domains.getByText("example.test", { exact: true })).toHaveCount(0);
+    await expect(
+      operator.getByRole("button", { name: "Remove alias.example.test", exact: true }),
+    ).toHaveCount(0);
+
+    await operator.getByRole("link", { name: "Company sign-in", exact: true }).click();
     await operator
       .getByRole("button", { name: "Remove company SSO and use Widefleet", exact: true })
       .click();
@@ -302,12 +314,10 @@ test("accepts emailed owner invitations and manages members in isolated organiza
       operator.getByRole("button", { name: "Configure company SSO", exact: true }),
     ).toBeVisible();
     await configure();
-    await expect(operator.getByRole("button", { name: "Get verification record" })).toBeVisible();
-    await expect(
-      operator.getByText("_better-auth-token-company-widefleet.changed.example.test", {
-        exact: true,
-      }),
-    ).toHaveCount(0);
+    await operator.getByRole("link", { name: "Email domains", exact: true }).click();
+    await expect(domains.getByText("example.test", { exact: true })).toBeVisible();
+    await expect(domains.getByText("alias.example.test", { exact: true })).toHaveCount(0);
+    await operator.getByRole("link", { name: "Company sign-in", exact: true }).click();
 
     // A recipient may already have an email session when their company enables SSO.
     const emailPage = await emailContext.newPage();
