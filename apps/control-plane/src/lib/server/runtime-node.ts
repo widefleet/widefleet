@@ -2,8 +2,11 @@ import { getRequestEvent } from "$app/server";
 import { sveltekitCookies } from "better-auth/svelte-kit";
 import { initializeRuntime } from "./runtime-initialization.ts";
 import { createReporting } from "./reporting.ts";
-import { createRuntime } from "./runtime-services.ts";
+import { createRuntime, type Runtime } from "./runtime-services.ts";
 import { createStorage } from "./storage.ts";
+import { createProductAnalytics } from "./analytics.ts";
+import { analyticsEnvironmentSchema } from "../analytics-config.ts";
+import { runtimeConfigurationSchema } from "./config.ts";
 
 export type { Runtime } from "./runtime-services.ts";
 
@@ -19,7 +22,10 @@ const startRuntime = async () => {
   process.once("uncaughtException", (error) => {
     console.error("Control plane stopped after an uncaught exception", error);
     reporting.exception(error);
-    void reporting.close().finally(() => process.exit(1));
+    observation.exception(error);
+    void Promise.allSettled([reporting.close(), observation.close()]).finally(() =>
+      process.exit(1),
+    );
   });
 
   process.once("sveltekit:shutdown", () => {
@@ -41,10 +47,28 @@ const startRuntime = async () => {
   });
 };
 
-let runtime: ReturnType<typeof startRuntime> | undefined;
+let runtime: Promise<Runtime> | undefined;
 
 export const getRuntime = async () => {
-  runtime ??= startRuntime();
+  runtime ??= startRuntime()
+    .then((resolve) => resolve())
+    .catch(async (cause: unknown) => {
+      try {
+        const observation = createProductAnalytics({
+          ...analyticsEnvironmentSchema.parse(process.env),
+          PLATFORM_URL: runtimeConfigurationSchema.shape.PLATFORM_URL.parse(
+            process.env["PLATFORM_URL"],
+          ),
+        });
 
-  return (await runtime)();
+        observation.exception(cause instanceof Error ? cause : new Error(String(cause)));
+        await observation.close();
+      } catch {
+        // Invalid analytics configuration must not replace the initialization error.
+      }
+
+      throw cause;
+    });
+
+  return runtime;
 };
