@@ -26,6 +26,42 @@ const pending = new Map<string, Promise<z.infer<typeof tokens>>>();
 
 const tokenFailure = z.object({ error: z.string().optional(), status: z.number().optional() });
 
+// Logs error codes and messages only, never tokens or claims.
+export const failureSummary = (cause: unknown) => {
+  const failure = tokenFailure.safeParse(cause);
+
+  return {
+    type: cause instanceof Error ? cause.name : "non-error",
+    message: cause instanceof Error ? cause.message.slice(0, 300) : undefined,
+    status: failure.success ? failure.data.status : undefined,
+    error: failure.success ? failure.data.error : undefined,
+  };
+};
+
+const refreshError = (cause: unknown) => {
+  const failure = failureSummary(cause);
+
+  console.error("App session renewal failed", { stage: "refresh", ...failure });
+
+  if (failure.error === "invalid_grant") return new APIError("UNAUTHORIZED");
+
+  if (failure.status === 403) return new APIError("FORBIDDEN");
+
+  // Keep the session through outages and rate limits. Any other provider
+  // rejection or malformed token response fails again on retry; a new login can
+  // still succeed, so it must not leave the session stuck.
+  if (
+    cause instanceof z.ZodError ||
+    (failure.status !== undefined &&
+      failure.status >= 400 &&
+      failure.status < 500 &&
+      failure.status !== 429)
+  )
+    return new APIError("UNAUTHORIZED");
+
+  return new APIError("SERVICE_UNAVAILABLE");
+};
+
 const refreshTogether = async (key: string, refresh: () => Promise<z.infer<typeof tokens>>) => {
   const existing = pending.get(key);
 
@@ -69,7 +105,11 @@ export const sessionRenewal = (verified: () => z.infer<typeof authorization> | u
           (candidate) => candidate.id === "company",
         );
 
-        if (!provider?.refreshAccessToken) throw new APIError("SERVICE_UNAVAILABLE");
+        if (!provider?.refreshAccessToken) {
+          console.error("App session renewal failed", { stage: "discovery" });
+          throw new APIError("SERVICE_UNAVAILABLE");
+        }
+
         const refresh = provider.refreshAccessToken;
         const credential = account.refreshToken;
         let renewed: z.infer<typeof tokens>;
@@ -93,13 +133,7 @@ export const sessionRenewal = (verified: () => z.infer<typeof authorization> | u
             },
           );
         } catch (cause) {
-          const failure = tokenFailure.safeParse(cause);
-
-          if (failure.success && failure.data.error === "invalid_grant")
-            throw new APIError("UNAUTHORIZED");
-
-          if (failure.success && failure.data.status === 403) throw new APIError("FORBIDDEN");
-          throw new APIError("SERVICE_UNAVAILABLE");
+          throw refreshError(cause);
         }
 
         // An omitted refresh scope inherits the original grant (OAuth 2.0 §6).
@@ -136,8 +170,10 @@ export const sessionRenewal = (verified: () => z.infer<typeof authorization> | u
           next.data.identity.id !== previous.data.identity.id ||
           (next.data.nonce !== undefined && next.data.nonce !== previous.data.nonce) ||
           next.data.expiresAt <= Date.now()
-        )
+        ) {
+          console.error("App session renewal failed", { stage: "verification" });
           throw new APIError("UNAUTHORIZED");
+        }
 
         const now = new Date();
 

@@ -255,7 +255,7 @@ describe("Auth proxy session lifecycle", () => {
     expect((await visit(configuration, cookie)).status).toBe(401);
   });
 
-  it.each(["invalid_grant", "missing-refresh-token"])(
+  it.each(["invalid_grant", "invalid_request", "invalid_client", "missing-refresh-token"])(
     "requires login after %s",
     async (failure) => {
       if (failure === "missing-refresh-token") {

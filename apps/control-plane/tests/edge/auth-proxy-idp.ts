@@ -170,11 +170,12 @@ export const createIdentityProvider = async (
           if (settings.refreshFailure) {
             response
               .writeHead(
-                settings.refreshFailure === "invalid_grant"
-                  ? 400
-                  : settings.refreshFailure === "access_denied"
-                    ? 403
-                    : 503,
+                new Map([
+                  ["invalid_grant", 400],
+                  ["invalid_request", 400],
+                  ["invalid_client", 401],
+                  ["access_denied", 403],
+                ]).get(settings.refreshFailure) ?? 503,
               )
               .end(JSON.stringify({ error: settings.refreshFailure }));
 
