@@ -457,9 +457,9 @@ export default { async fetch(request, env, ctx) {
       await setup();
       const accessToken = await issue();
 
-      const rpc = async (
-        name: string,
-        args: z.infer<ReturnType<typeof z.json>>,
+      const send = async (
+        method: string,
+        params: z.infer<ReturnType<typeof z.json>>,
         bearer = accessToken,
       ) => {
         const response = await (harness ? harness.fetch : fetch)(`${origin}/mcp`, {
@@ -468,14 +468,9 @@ export default { async fetch(request, env, ctx) {
             authorization: `bEaReR ${bearer}`,
             "content-type": "application/json",
             accept: "application/json, text/event-stream",
-            "mcp-protocol-version": "2025-06-18",
+            "mcp-protocol-version": "2025-11-25",
           },
-          body: JSON.stringify({
-            jsonrpc: "2.0",
-            id: 1,
-            method: "tools/call",
-            params: { name, arguments: args },
-          }),
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
         });
 
         expect(response.status, await response.clone().text()).toBe(200);
@@ -488,15 +483,22 @@ export default { async fetch(request, env, ctx) {
               ?.slice(6)
           : body;
 
-        return z
+        return z.json().parse(JSON.parse(payload ?? "null"));
+      };
+
+      const rpc = async (
+        name: string,
+        args: z.infer<ReturnType<typeof z.json>>,
+        bearer = accessToken,
+      ) =>
+        z
           .object({
             result: z.object({
               isError: z.boolean().optional(),
               content: z.array(z.object({ text: z.string() })),
             }),
           })
-          .parse(JSON.parse(payload ?? "null")).result;
-      };
+          .parse(await send("tools/call", { name, arguments: args }, bearer)).result;
 
       expect((await request("/mcp")).status).toBe(401);
       expect(
@@ -505,6 +507,49 @@ export default { async fetch(request, env, ctx) {
         resource: "https://mcp.apps.example.test/mcp",
         authorization_servers: ["https://mcp.apps.example.test"],
       });
+
+      const skill = await readFile(
+        join(root, "plugins/widefleet/skills/widefleet/SKILL.md"),
+        "utf8",
+      );
+
+      const skillUri = "skill://widefleet/SKILL.md";
+
+      const initialized = z
+        .object({
+          result: z.object({
+            instructions: z.string(),
+            capabilities: z.object({ extensions: z.record(z.string(), z.json()) }),
+          }),
+        })
+        .parse(
+          await send("initialize", {
+            protocolVersion: "2025-11-25",
+            capabilities: {},
+            clientInfo: { name: "test", version: "1" },
+          }),
+        ).result;
+
+      expect(initialized.instructions).toContain(skillUri);
+      expect(initialized.capabilities.extensions).toHaveProperty("io.modelcontextprotocol/skills");
+
+      expect(await send("skills/list", {})).toMatchObject({
+        result: { skills: [{ uri: skillUri, frontmatter: { name: "widefleet" } }] },
+      });
+
+      expect(await send("resources/read", { uri: skillUri })).toMatchObject({
+        result: { contents: [{ uri: skillUri, text: skill }] },
+      });
+
+      expect(JSON.parse((await rpc("skills", {})).content[0]?.text ?? "null")).toMatchObject({
+        skills: [{ name: "widefleet", uri: skillUri }],
+      });
+
+      expect(
+        JSON.parse((await rpc("skills", { name: "widefleet" })).content[0]?.text ?? "null"),
+      ).toMatchObject({ name: "widefleet", uri: skillUri, content: skill });
+
+      expect((await rpc("skills", { name: "missing" })).isError).toBe(true);
 
       const service = {
         hostname: `${targetId}.apps.example.test`,
