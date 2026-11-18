@@ -26,7 +26,8 @@
           "Show me which app services I can use"
         ],
         "logo": "./assets/logo.svg",
-        "logoDark": "./assets/logo-dark.svg"
+        "logoDark": "./assets/logo-dark.svg",
+        "privacyPolicyURL": "https://widefleet.com/privacy"
       }
     }
   }
