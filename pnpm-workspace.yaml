@@ -23,6 +23,7 @@ patchedDependencies:
   # Persist terminal workflow failures and prevent steps from starting after pause
   # so local pause/resume and replay match the native workflow contract.
   miniflare@5.20261001.0-alpha: patches/miniflare@5.20261001.0-alpha.patch
+  "@posthog/mcp@1.2.3": patches/@posthog__mcp@1.2.3.patch
 
 allowBuilds:
   core-js: false

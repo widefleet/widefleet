@@ -1,0 +1,105 @@
+diff --git a/dist/extensions/lib-identity.d.ts b/dist/extensions/lib-identity.d.ts
+index 070c3e8fb38a40116486ca87d9f8eeee9326150c..1dc4ba852f4d5b876351545aeb8c63b73c9a6537 100644
+--- a/dist/extensions/lib-identity.d.ts
++++ b/dist/extensions/lib-identity.d.ts
+@@ -1,4 +1,4 @@
+-import type { PostHog } from 'posthog-node';
++import type { PostHog } from 'posthog-node/edge';
+ /**
+  * Make `client` report `@posthog/mcp`'s identity as the standard PostHog `$lib`
+  * / `$lib_version` on every event it sends.
+diff --git a/dist/extensions/posthog-mcp.d.ts b/dist/extensions/posthog-mcp.d.ts
+index 91984e021ca0fc50f679a800d3b1c9acb50483d8..6d39373d2a8d0052d1dcfc11e73d1dad56cec9ba 100644
+--- a/dist/extensions/posthog-mcp.d.ts
++++ b/dist/extensions/posthog-mcp.d.ts
+@@ -1,4 +1,4 @@
+-import { PostHog, type EventMessage, type PostHogOptions } from 'posthog-node';
++import { PostHog, type EventMessage, type PostHogOptions } from 'posthog-node/edge';
+ import type { FeedbackCaptureData, CollectFeedbackConfig, InitializeCaptureData, MCPAnalyticsOptions, MissingCapabilityCaptureData, PreparedToolCall, PreparedToolResult, PrepareToolCallOptions, PrepareToolListOptions, ToolCallCaptureData, ToolsListCaptureData, UnknownToolCaptureData } from '../types';
+ import { type ContextInjectableTool } from './context-parameters';
+ /**
+diff --git a/dist/extensions/posthog-mcp.js b/dist/extensions/posthog-mcp.js
+index 510aaef2ea717816838e129cb623b9c2a6b4396d..f5f4fbcf7f53111e3bb050911698416a22a6260c 100644
+--- a/dist/extensions/posthog-mcp.js
++++ b/dist/extensions/posthog-mcp.js
+@@ -30,7 +30,7 @@ __webpack_require__.r(__webpack_exports__);
+ __webpack_require__.d(__webpack_exports__, {
+     PostHogMCP: ()=>PostHogMCP
+ });
+-const external_posthog_node_namespaceObject = require("posthog-node");
++const external_posthog_node_namespaceObject = require("posthog-node/edge");
+ const external_feedback_js_namespaceObject = require("./feedback.js");
+ const external_analytics_parameters_js_namespaceObject = require("./analytics-parameters.js");
+ const external_conversation_id_js_namespaceObject = require("./conversation-id.js");
+diff --git a/dist/extensions/posthog-mcp.mjs b/dist/extensions/posthog-mcp.mjs
+index ad7153cd6da8547778ef332ceca11f803d4f1a23..0ecc72cae9a3d8329fcaf0416054b77beafcff21 100644
+--- a/dist/extensions/posthog-mcp.mjs
++++ b/dist/extensions/posthog-mcp.mjs
+@@ -1,4 +1,4 @@
+-import { PostHog } from "posthog-node";
++import { PostHog } from "posthog-node/edge";
+ import { SEND_FEEDBACK_TOOL_NAME, buildFeedbackEventProperties, buildFeedbackIntent, getFeedbackToolDescriptor, parseFeedbackReport, resolveCollectFeedbackOptions } from "./feedback.mjs";
+ import { getAnalyticsParameterOwnership, stripOwnedAnalyticsArguments } from "./analytics-parameters.mjs";
+ import { addConversationIdToTools, canInjectConversationIdPromptBack, injectConversationIdPromptBack, resolveConversationId } from "./conversation-id.mjs";
+diff --git a/dist/extensions/sink.d.ts b/dist/extensions/sink.d.ts
+index 0a5cc327b65cc48093558f4fdcd3ec07e61e77ba..32242f1b7e2a97a4aeac9ecc37fa5750d793c3e9 100644
+--- a/dist/extensions/sink.d.ts
++++ b/dist/extensions/sink.d.ts
+@@ -1,4 +1,4 @@
+-import type { PostHog } from 'posthog-node';
++import type { PostHog } from 'posthog-node/edge';
+ import type { BeforeSendFn, Event, McpEvent } from '../types';
+ import { type LoggerFn } from './logger';
+ import { type PostHogCaptureEvent } from './posthog-events';
+diff --git a/dist/index.d.ts b/dist/index.d.ts
+index 6eb68a21349276cc0f48289255589e41974bd4c1..cf7b0258b65f051d6579dd7915e18471d99c328e 100644
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -1,4 +1,4 @@
+-import type { PostHog } from 'posthog-node';
++import type { PostHog } from 'posthog-node/edge';
+ import { deriveSessionIdFromMCPSession, newSessionId } from './extensions/session';
+ import type { McpAnalytics, MCPAnalyticsOptions } from './types';
+ /**
+@@ -17,7 +17,7 @@ import type { McpAnalytics, MCPAnalyticsOptions } from './types';
+  * @example
+  * ```ts
+  * import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
+- * import { PostHog } from "posthog-node"
++ * import { PostHog } from "posthog-node/edge"
+  * import { instrument } from "@posthog/mcp"
+  *
+  * const posthog = new PostHog(process.env.POSTHOG_PROJECT_TOKEN, { host: "https://us.i.posthog.com" })
+@@ -56,7 +56,7 @@ export { PostHogMCP, type PostHogMCPOptions } from './extensions/posthog-mcp';
+ export { getMoreToolsResult } from './extensions/tools';
+ export { sendFeedbackResult, SEND_FEEDBACK_TOOL_NAME } from './extensions/feedback';
+ export { setLogger } from './extensions/logger';
+-export { PostHog, type PostHogOptions } from 'posthog-node';
++export { PostHog, type PostHogOptions } from 'posthog-node/edge';
+ export type { FeedbackCaptureData, FeedbackExtraPropertySchema, CollectFeedbackOptions, FeedbackReport, FeedbackSentiment, FeedbackType, BeforeSendFn, CaptureEventData, CollectFeedbackConfig, InitializeCaptureData, InputAliasMap, McpAnalytics, McpCaptureCommon, MCPAnalyticsContextOptions, MCPAnalyticsIntentSource, MCPAnalyticsModelOptions, MCPAnalyticsModelSource, MCPAnalyticsOptions, MissingCapabilityCaptureData, PreparedToolCall, PreparedToolResult, PrepareToolCallOptions, PrepareToolListOptions, RequestHeaderBag, ShouldRecordInputKeyFn, ToolCallCaptureData, ToolInputOptions, ToolsListCaptureData, UnknownToolCaptureData, UserIdentity, } from './types';
+ export type IdentifyFunction = MCPAnalyticsOptions['identify'];
+ export { instrument, instrumentMutator };
+diff --git a/dist/index.js b/dist/index.js
+index 0ac1be724618b2d39f96a26f346f3810904111df..7aefe496858c43e48d73d3c56fd34660d923cf24 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -65,7 +65,7 @@ const request_headers_js_namespaceObject = require("./extensions/request-headers
+ const tool_input_js_namespaceObject = require("./extensions/tool-input.js");
+ const posthog_mcp_js_namespaceObject = require("./extensions/posthog-mcp.js");
+ const tools_js_namespaceObject = require("./extensions/tools.js");
+-const external_posthog_node_namespaceObject = require("posthog-node");
++const external_posthog_node_namespaceObject = require("posthog-node/edge");
+ function instrument(server, posthog, options = {}) {
+     const logger = (0, logger_js_namespaceObject.createLogger)(options?.logger);
+     (0, server_build_js_namespaceObject.validateServerBuild)(options?.serverBuild);
+diff --git a/dist/index.mjs b/dist/index.mjs
+index 1713f8265599b7e1a27e7abc5eec4ae80f1236d2..cee1419213f364729264ceb8494a61891e9167bf 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -110,5 +110,5 @@ export { getRequestHeaders } from "./extensions/request-headers.mjs";
+ export { getToolInputProperties } from "./extensions/tool-input.mjs";
+ export { PostHogMCP } from "./extensions/posthog-mcp.mjs";
+ export { getMoreToolsResult } from "./extensions/tools.mjs";
+-export { PostHog } from "posthog-node";
++export { PostHog } from "posthog-node/edge";
+ export { SEND_FEEDBACK_TOOL_NAME, deriveSessionIdFromMCPSession, instrument, instrumentMutator, newSessionId, sendFeedbackResult, setLogger };

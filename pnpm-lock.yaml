@@ -167,6 +167,7 @@ patchedDependencies:
   '@better-auth/oauth-provider@1.7.12': ced50d8b6168855d56716f1f9fdae99d515b7d1b859db90623bb66cc34ac9685
   '@cloudflare/workers-oauth-provider@1.2.4': f21d52790d10f0313efdc1b0a03895a0f63f54f7dfd6b6bd51c889c69415b5d5
   '@opencode/codemode@2.3.0': 74a3d62cb776da99648b8b8841dac898697a072918fc2c1b31477eb2273c744a
+  '@posthog/mcp@1.2.3': 31a6ad688b35719de0cd9687e80a6bc43dd6c7200be76ebfbf54f6406cefa750
   better-auth@1.7.12: 59cc85d92370b210ec1e241d7f02cff726ee2f33b968ea405e3e826d753217d9
   blume@2.1.1: 2c0ac8744c28a89c517113155d46a029e40470a816a9d26331d8ea4e056e49f2
   miniflare@5.20261001.0-alpha: 14a20cb93d5b33de95aab0b33f8ba5c91a75a9c1eb4438753b017be53fb04f73
@@ -383,7 +384,7 @@ importers:
         version: link:../ui
       '@posthog/mcp':
         specifier: 1.2.3
-        version: 1.2.3(@modelcontextprotocol/sdk@1.32.0(supports-color@10.2.2)(zod@4.6.5))(@modelcontextprotocol/server@2.4.0)(posthog-node@5.55.0)
+        version: 1.2.3(patch_hash=31a6ad688b35719de0cd9687e80a6bc43dd6c7200be76ebfbf54f6406cefa750)(@modelcontextprotocol/sdk@1.32.0(supports-color@10.2.2)(zod@4.6.5))(@modelcontextprotocol/server@2.4.0)(posthog-node@5.55.0)
       effect:
         specifier: 4.1.0
         version: 4.1.0
@@ -8929,7 +8930,7 @@ snapshots:
     dependencies:
       '@posthog/types': 1.425.1
 
-  '@posthog/mcp@1.2.3(@modelcontextprotocol/sdk@1.32.0(supports-color@10.2.2)(zod@4.6.5))(@modelcontextprotocol/server@2.4.0)(posthog-node@5.55.0)':
+  '@posthog/mcp@1.2.3(patch_hash=31a6ad688b35719de0cd9687e80a6bc43dd6c7200be76ebfbf54f6406cefa750)(@modelcontextprotocol/sdk@1.32.0(supports-color@10.2.2)(zod@4.6.5))(@modelcontextprotocol/server@2.4.0)(posthog-node@5.55.0)':
     dependencies:
       '@posthog/core': 1.68.0
       posthog-node: 5.55.0

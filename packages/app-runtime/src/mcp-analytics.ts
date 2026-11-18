@@ -2,7 +2,7 @@ import { waitUntil } from "cloudflare:workers";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { instrument } from "@posthog/mcp";
 import type { BeforeSendFn } from "@posthog/mcp";
-import { PostHog } from "posthog-node";
+import { PostHog } from "posthog-node/edge";
 import type { ParentEnvironment } from "./types.ts";
 
 // Arguments, results and app errors of `call` and `execute` carry customer app data.
