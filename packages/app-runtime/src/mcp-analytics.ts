@@ -37,7 +37,6 @@ export const mcpAnalytics = (environment: ParentEnvironment, organizationId: str
   return (server: McpServer) => {
     instrument(server, client, {
       context: true,
-      enableConversationId: false,
       // Failed tool calls are mostly app errors, which are not platform exceptions.
       enableExceptionAutocapture: false,
       serverBuild: WIDEFLEET_RUNTIME_VERSION,

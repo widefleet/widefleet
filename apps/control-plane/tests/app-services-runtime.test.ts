@@ -834,8 +834,25 @@ export default { async fetch(request, env, ctx) {
         })
         .parse(await send("tools/list", {}));
 
-      for (const tool of listed.result.tools)
+      for (const tool of listed.result.tools) {
         expect(tool.inputSchema.properties).toHaveProperty("context");
+        expect(tool.inputSchema.properties).toHaveProperty("conversation_id");
+      }
+
+      // Each request has its own server, so the conversation ID links calls into one session.
+      const first = await rpc("skills", {});
+
+      const { conversation_id: conversationId } = z
+        .object({ conversation_id: z.string() })
+        .parse(JSON.parse(first.content.at(-1)?.text ?? "null"));
+
+      await rpc("skills", { conversation_id: conversationId });
+
+      const conversation = () =>
+        analytics.filter((event) => event.properties["$mcp_conversation_id"] === conversationId);
+
+      await expect.poll(() => conversation().length, { timeout: 8_000 }).toBe(2);
+      expect(new Set(conversation().map((event) => event.properties["$session_id"])).size).toBe(1);
 
       await expect
         .poll(
