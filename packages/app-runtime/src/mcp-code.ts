@@ -3,7 +3,8 @@ import { Effect, Schema } from "effect";
 import { mcpServiceCall } from "@platform/contracts";
 import { z } from "zod";
 import type { ParentEnvironment } from "./types.ts";
-import { callMcpService } from "./mcp-services.ts";
+import { invokeMcpService } from "./mcp-services.ts";
+import { workflowReference, type WorkflowTarget } from "./mcp-workflows.ts";
 
 export const mcpJson = z.json().transform((result) => {
   if (new TextEncoder().encode(JSON.stringify(result)).byteLength > 1024 * 1024)
@@ -19,6 +20,10 @@ export const executeMcpCode = async (
   code: string,
   signal: AbortSignal,
 ) => {
+  // Workflow references returned by services in this run, with the app that
+  // returned them. A reference the program builds itself is never resolved.
+  const issued: WorkflowTarget[] = [];
+
   const runtime = CodeMode.make({
     tools: {
       call: Tool.make({
@@ -26,16 +31,21 @@ export const executeMcpCode = async (
         input: Schema.Unknown,
         output: Schema.Unknown,
         execute: (input) =>
-          Effect.tryPromise(async () =>
-            mcpJson.parse(
-              (await callMcpService(
-                environment,
-                context,
-                token,
-                mcpServiceCall.parse(mcpJson.parse(input)),
-              )) ?? null,
-            ),
-          ),
+          Effect.tryPromise(async () => {
+            const call = mcpServiceCall.parse(mcpJson.parse(input));
+            const { app, value } = await invokeMcpService(environment, context, token, call);
+            const reference = workflowReference.safeParse(value);
+
+            if (reference.success)
+              issued.push({
+                appId: app.appId,
+                hostname: call.hostname,
+                entrypoint: call.entrypoint,
+                ...reference.data.workflowInstance,
+              });
+
+            return mcpJson.parse(value ?? null);
+          }),
       }),
     },
     limits: { timeoutMs: 30_000, maxToolCalls: 32, maxOutputBytes: 1024 * 1024 },
@@ -49,6 +59,20 @@ export const executeMcpCode = async (
     );
 
   if (result.truncated) throw new Error("MCP result exceeds 1 MiB; request a smaller page");
+  const value = mcpJson.parse(result.value);
+  const reference = workflowReference.safeParse(value);
 
-  return mcpJson.parse(result.value);
+  const matches = reference.success
+    ? issued.filter(
+        (target) =>
+          target.workflow === reference.data.workflowInstance.workflow &&
+          target.id === reference.data.workflowInstance.id,
+      )
+    : [];
+
+  // Instance IDs are scoped per app: resolve only an unambiguous reference.
+  const workflow =
+    new Set(matches.map((target) => target.appId)).size === 1 ? matches[0] : undefined;
+
+  return { value, workflow };
 };

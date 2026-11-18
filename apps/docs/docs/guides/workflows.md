@@ -109,25 +109,24 @@ Prompts require an app runtime released after 0.7.5.
 Add a `prompt` to `step.waitForEvent` to publish the question that the event answers. Widefleet stores it with the instance while the wait is open and passes only `type` and `timeout` to the Workflow engine:
 
 ```ts
-const approval = await step.waitForEvent<{ accepted: boolean }>("approval", {
+type Answer = { action: "accept" | "decline" | "cancel"; content?: { note?: string } };
+
+const answer = await step.waitForEvent<Answer>("approval", {
   type: "approval",
-  timeout: "1 day",
+  timeout: "15 minutes",
   prompt: {
     message: `Send "${message}"?`,
     requestedSchema: {
       type: "object",
-      properties: { accepted: { type: "boolean", title: "Send" } },
-      required: ["accepted"],
+      properties: { note: { type: "string", title: "Note" } },
     },
   },
 });
+
+if (answer.payload.action !== "accept") return { sent: false };
 ```
 
-`status` lists the open prompts of a running or waiting instance:
-
-```sh
-widefleet workflows status process example-1
-```
+While the wait is open, `status` lists its prompt:
 
 ```json
 {
@@ -139,15 +138,14 @@ widefleet workflows status process example-1
       "message": "Send \"Example\"?",
       "requestedSchema": {
         "type": "object",
-        "properties": { "accepted": { "type": "boolean", "title": "Send" } },
-        "required": ["accepted"]
+        "properties": { "note": { "type": "string", "title": "Note" } }
       }
     }
   ]
 }
 ```
 
-Answer with an ordinary event of the prompt's `type`, for example `widefleet workflows send-event process example-1 approval --payload approval.json`. The same `status` and `sendEvent` operations are available through the HTTP API, the app detail page and an app's own Workflow binding, so an app can show the question in its own interface. Widefleet does not validate the payload against `requestedSchema`; the Workflow receives it unchanged.
+Answer with an ordinary event of the prompt's `type`. MCP clients answer with `{ "action": "accept", "content": { … } }`, `{ "action": "decline" }` or `{ "action": "cancel" }`; use the same payload elsewhere so the Workflow handles every answer alike. For example, save `{"action":"accept","content":{"note":"Approved"}}` as `answer.json` and run `widefleet workflows send-event WORKFLOW INSTANCE_ID approval --payload answer.json`. The same `status` and `sendEvent` operations are available through the HTTP API, the app detail page and an app's own Workflow binding, so an app can show the question in its own interface. Widefleet does not validate payloads from these interfaces against `requestedSchema`; the Workflow receives them unchanged.
 
 - `message` holds up to 4,096 characters. `requestedSchema` is a flat object with up to 32 `string`, `number`, `integer` or `boolean` fields, the primitive subset of MCP form elicitation. Strings support `enum`, `format`, length limits and defaults. Omit `requestedSchema` for a plain confirmation. A prompt must not exceed 16 KiB.
 - An invalid prompt rejects the `waitForEvent` call before the wait starts.
@@ -192,6 +190,34 @@ declare module "cloudflare:workers" {
   }
 }
 ```
+
+### Answer through MCP clients
+
+A service method called through Widefleet's MCP endpoint can hand a Workflow instance it started to the MCP client. Return a reference with the Workflow's `name` from the Wrangler configuration and the instance ID:
+
+```ts
+import { WorkerEntrypoint } from "cloudflare:workers";
+
+export class Offers extends WorkerEntrypoint<Environment> {
+  async send(offerId: string) {
+    const instance = await this.env.SEND_OFFER.create({ params: { offerId } });
+
+    return { workflowInstance: { workflow: "send-offer", id: instance.id } };
+  }
+}
+```
+
+When `call` receives exactly this value, the endpoint waits up to 10 seconds for the instance to ask or finish:
+
+- An open prompt becomes a form in the MCP client (protocol revision 2026-07-28). The client's answer is sent to the instance as the event payload described above, and the endpoint again waits for the next prompt or the end. Several open prompts are asked in one request.
+- A completed instance returns its output, which must be JSON. A failed or terminated instance returns an error.
+- An instance that is still busy or paused returns the reference with its `status`.
+
+Only instances of the app that returned the reference are resolved. The answer round is signed for the signed-in user, expires after 15 minutes and checks access to the service again before it sends the event. A retried answer does not send a second event.
+
+In `execute`, a program that returns a reference received from `tools.call` in the same run is resolved the same way. The answer continues the Workflow, not the program: code after the returned value does not run.
+
+Clients on 2025 protocol revisions receive the reference, `status` and open `prompts` as the result. Answer those prompts through the other interfaces above.
 
 ## Restart from a step
 

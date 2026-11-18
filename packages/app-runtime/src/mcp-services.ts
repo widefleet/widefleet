@@ -8,7 +8,7 @@ import { signAppCaller } from "./app-caller.ts";
 import { executionOptions } from "./execution-limits.ts";
 import type { ParentEnvironment } from "./types.ts";
 
-const target = async (
+export const mcpServiceApp = async (
   environment: ParentEnvironment,
   claims: z.infer<typeof mcpClaims>,
   hostname: string,
@@ -91,7 +91,7 @@ export const describeMcpService = async (
   hostname: string,
   entrypoint: string,
 ) => {
-  const app = await target(environment, claims, hostname, entrypoint);
+  const app = await mcpServiceApp(environment, claims, hostname, entrypoint);
   const documentation = await readServiceDocumentation(environment, app);
 
   return {
@@ -103,7 +103,7 @@ export const describeMcpService = async (
   };
 };
 
-export const callMcpService = async (
+export const invokeMcpService = async (
   environment: ParentEnvironment,
   context: ExecutionContext,
   token: string,
@@ -111,7 +111,7 @@ export const callMcpService = async (
 ) => {
   // Recheck the published policy on every subcall, including calls from code mode.
   const claims = await verifyMcpToken(environment, token);
-  const app = await target(environment, claims, input.hostname, input.entrypoint);
+  const app = await mcpServiceApp(environment, claims, input.hostname, input.entrypoint);
 
   const caller = {
     issuer: claims.mcp.identity.issuer,
@@ -129,7 +129,7 @@ export const callMcpService = async (
 
   const worker = await appWorker(app, environment, context);
 
-  return invokeApp(
+  const value = await invokeApp(
     worker.getEntrypoint(input.entrypoint === "default" ? undefined : input.entrypoint, {
       ...executionOptions(environment.WIDEFLEET_EXECUTION_LIMITS, "service"),
       props: { caller, appCaller: proof },
@@ -137,4 +137,6 @@ export const callMcpService = async (
     input.method,
     input.arguments,
   );
+
+  return { app, value };
 };

@@ -1,17 +1,62 @@
-import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
+import {
+  createMcpHandler,
+  createRequestStateCodec,
+  McpServer,
+  type ServerContext,
+} from "@modelcontextprotocol/server";
 import { mcpServiceCall, mcpScopes } from "@platform/contracts";
 import { z } from "zod";
 import type { ParentEnvironment } from "./types.ts";
 import { verifyMcpToken } from "./mcp-authorization.ts";
 import { readMcpConfiguration } from "./mcp-oauth.ts";
-import { callMcpService, describeMcpService, searchMcpServices } from "./mcp-services.ts";
+import {
+  describeMcpService,
+  invokeMcpService,
+  mcpServiceApp,
+  searchMcpServices,
+} from "./mcp-services.ts";
 import { executeMcpCode, mcpJson } from "./mcp-code.ts";
+import {
+  answerWorkflow,
+  presentWorkflow,
+  workflowAnswers,
+  workflowInstanceStatus,
+  workflowReference,
+  workflowRound,
+  type WorkflowInstanceAccess,
+  type WorkflowOutcome,
+  type WorkflowRound,
+  type WorkflowTarget,
+} from "./mcp-workflows.ts";
+import { workflowCatalog } from "./workflow-catalog.ts";
 
 const resultSchema = mcpJson.transform((value) => ({
   content: [{ type: "text" as const, text: JSON.stringify(value) }],
 }));
 
 const result = resultSchema.parse.bind(resultSchema);
+
+const respond = (outcome: WorkflowOutcome) =>
+  "input" in outcome ? outcome.input : result(outcome.value);
+
+// A dedicated key keeps request state signatures apart from other uses of the control token.
+const requestStateKey = async (secret: string) => {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+
+  return new Uint8Array(
+    await crypto.subtle.sign(
+      "HMAC",
+      key,
+      new TextEncoder().encode("widefleet-mcp-request-state/v1"),
+    ),
+  );
+};
 
 export const mcpRequest = async (
   request: Request,
@@ -59,9 +104,69 @@ export const mcpRequest = async (
 
   const principal = claims;
 
+  // Workflow answers round-trip through the client: sign them for this principal.
+  const codec = createRequestStateCodec<WorkflowRound>({
+    key: await requestStateKey(environment.WIDEFLEET_CONTROL_TOKEN),
+    ttlSeconds: 15 * 60,
+    bind: () =>
+      JSON.stringify([
+        principal.mcp.organizationId,
+        principal.mcp.identity.issuer,
+        principal.mcp.identity.subject,
+      ]),
+  });
+
+  const instance = (target: WorkflowTarget): WorkflowInstanceAccess => {
+    const catalog = workflowCatalog(environment, target.appId);
+    const scope = { appId: target.appId, hostname: target.hostname, workflow: target.workflow };
+
+    return {
+      status: async () =>
+        workflowInstanceStatus.parse(await catalog.instance(scope, target.id, "status")),
+      async sendEvent(requestId, event) {
+        await catalog.manage(scope, requestId, {
+          action: "sendEvent",
+          workflow: target.workflow,
+          id: target.id,
+          event,
+        });
+      },
+    };
+  };
+
+  const present = (target: WorkflowTarget, context: ServerContext, era: "legacy" | "modern") =>
+    presentWorkflow(
+      target,
+      instance(target),
+      era === "modern" ? (round) => codec.mint(round, context) : undefined,
+    );
+
+  // A retried call answers the Workflow from the signed round; the service is
+  // not invoked again, but access to it is checked again.
+  const resume = async (context: ServerContext) => {
+    const round = workflowRound.parse(context.mcpReq.requestState());
+    const current = await verifyMcpToken(environment, token);
+    const app = await mcpServiceApp(environment, current, round.hostname, round.entrypoint);
+
+    if (app.appId !== round.appId) throw new Error("Service is unavailable or not permitted");
+
+    return respond(
+      await answerWorkflow(
+        round,
+        workflowAnswers.parse(context.mcpReq.inputResponses ?? {}),
+        instance(round),
+        (next) => codec.mint(next, context),
+      ),
+    );
+  };
+
   return createMcpHandler(
-    () => {
-      const server = new McpServer({ name: "Widefleet", version: WIDEFLEET_RUNTIME_VERSION });
+    ({ era }) => {
+      const server = new McpServer(
+        { name: "Widefleet", version: WIDEFLEET_RUNTIME_VERSION },
+        { requestState: { verify: (state, context) => codec.verify(state, context) } },
+      );
+
       server.registerTool(
         "search",
         {
@@ -97,8 +202,26 @@ export const mcpRequest = async (
           description: "Invoke a permitted app service with positional JSON arguments.",
           inputSchema: mcpServiceCall.shape,
         },
-        async (service) =>
-          result((await callMcpService(environment, context, token, service)) ?? null),
+        async (service, call) => {
+          if (call.mcpReq.requestState() !== undefined) return resume(call);
+          const { app, value } = await invokeMcpService(environment, context, token, service);
+          const reference = workflowReference.safeParse(value);
+
+          if (!reference.success) return result(value ?? null);
+
+          return respond(
+            await present(
+              {
+                appId: app.appId,
+                hostname: service.hostname,
+                entrypoint: service.entrypoint,
+                ...reference.data.workflowInstance,
+              },
+              call,
+              era,
+            ),
+          );
+        },
       );
       server.registerTool(
         "execute",
@@ -107,8 +230,19 @@ export const mcpRequest = async (
             "Run a supported JavaScript subset in a confined interpreter. Use await tools.call({hostname,entrypoint,method,arguments}) and return JSON. No network or credentials. Limits: 32 calls, 30 seconds elapsed, 1 MiB result. Completed calls survive errors; never replay blindly.",
           inputSchema: { code: z.string().min(1).max(32768) },
         },
-        async ({ code }) =>
-          result(await executeMcpCode(environment, context, token, code, request.signal)),
+        async ({ code }, call) => {
+          if (call.mcpReq.requestState() !== undefined) return resume(call);
+
+          const { value, workflow } = await executeMcpCode(
+            environment,
+            context,
+            token,
+            code,
+            request.signal,
+          );
+
+          return workflow ? respond(await present(workflow, call, era)) : result(value);
+        },
       );
 
       return server;
