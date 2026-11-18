@@ -240,6 +240,9 @@ describe("Platform setup and managed settings", () => {
 
     const signIn = {
       callbackUrl: "https://auth.apps.localhost/oauth2/widefleet/callback",
+      revoke: async () => {
+        throw new Error("Configured sign-in must not be revoked");
+      },
       plan: () => Promise.resolve({ restartRequired: false, message: "Fixture" }),
       status: () =>
         Promise.resolve({
@@ -355,6 +358,9 @@ describe("Platform setup and managed settings", () => {
 
     const signIn: AppSignIn = {
       callbackUrl: "https://auth.apps.localhost/oauth2/widefleet/callback",
+      revoke: async () => {
+        throw new Error("A read must not revoke sign-in");
+      },
       plan: () => Promise.resolve({ restartRequired: false, message: "Fixture" }),
       publish: () => {
         throw new Error("A read must not publish");

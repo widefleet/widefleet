@@ -92,6 +92,7 @@ export const saveSsoProvider = async (
   organizationId: string,
   input: z.infer<typeof oidcProviderInput> | null,
   credential: OrganizationCredential,
+  domainVerificationRequired = true,
 ) => {
   const existing = await readSsoProvider(database, organizationId);
 
@@ -121,19 +122,24 @@ export const saveSsoProvider = async (
       body: connection,
     });
   else {
-    if (!domain)
+    if (!domain && (domainVerificationRequired || connection.appIdentityType === "google"))
       throw new InvalidOperation({
         code: "BAD_REQUEST",
         message: "Enter a company email domain",
       });
     await credential.auth.api.registerSSOProvider({
       headers: credential.headers,
-      body: { ...connection, domain, organizationId },
+      body: { ...connection, domain: domain ?? "", organizationId },
     });
   }
 
   if (domain === undefined) return;
   await database.transaction((transaction) =>
-    changeSsoDomains(transaction, organizationId, { replace: parseCompanyDomains(domain) }),
+    changeSsoDomains(
+      transaction,
+      organizationId,
+      { replace: parseCompanyDomains(domain) },
+      domainVerificationRequired,
+    ),
   );
 };

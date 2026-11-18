@@ -1,3 +1,4 @@
+import { companySsoAvailableSql } from "./sso-policy.ts";
 import { and, eq, gt } from "drizzle-orm";
 import { APIError } from "better-auth/api";
 import { Result } from "better-result";
@@ -185,7 +186,7 @@ export const createInvitationService = (
             eq(invitation.id, invitationId),
             eq(invitation.status, "pending"),
             gt(invitation.expiresAt, new Date()),
-            eq(ssoProvider.domainVerified, true),
+            companySsoAvailableSql(configuration),
             eq(organizationSettings.ssoRequired, true),
           ),
         );

@@ -134,7 +134,12 @@ export const createRuntime = ({
     storage,
     invitations: createInvitationService(database.db, configuration, sendEmail, organizationAccess),
     emailSignIn: Boolean(createSignInEmail(configuration, sendEmail)),
-    signInProvider: createAuthenticationAdmission(database.db, organizationAccess).signInProvider,
+    signInProvider: createAuthenticationAdmission(
+      database.db,
+      organizationAccess,
+      false,
+      configuration,
+    ).signInProvider,
     discoverPlatform: (domain: string) => discoverPlatform(domain, discoveryTransport),
     cliLogin: createCliLogin(database.db, configuration),
     source: createAppSource(database.db, source),

@@ -312,6 +312,9 @@
       <CompanyDomains
         domains={view.ssoDomains}
         organizationId={workspace.organizationId}
+        verificationRequired={view.ssoPolicy.domainVerificationRequired}
+        domainRequired={view.ssoPolicy.domainVerificationRequired ||
+          view.sso.appIdentityType === "google"}
         {readonly}
       />
     {:else}
@@ -388,12 +391,18 @@
           </div>
           {#if !view.sso}
             <div class="space-y-2">
-              <Label for="company-domain">Company email domain</Label><Input
+              <Label for="company-domain"
+                >Company email domain{view.ssoPolicy.domainVerificationRequired ||
+                draft.sso.appIdentityType === "google"
+                  ? ""
+                  : " (optional)"}</Label
+              ><Input
                 id="company-domain"
                 bind:value={draft.sso.domain}
                 placeholder="example.com"
                 aria-describedby="company-domain-help"
-                required
+                required={view.ssoPolicy.domainVerificationRequired ||
+                  draft.sso.appIdentityType === "google"}
               />
               <p id="company-domain-help" class="text-muted-foreground text-xs">
                 You can add more domains after saving.
@@ -548,8 +557,19 @@
       {#if view.sso}
         <section class="space-y-4 rounded-xl border p-6">
           <h2 class="text-base font-semibold">Verify company sign-in</h2>
+          {#if !view.ssoPolicy.domainVerificationRequired}
+            <p class="text-muted-foreground text-sm">
+              This installation trusts its configured identity provider. DNS verification is not
+              required.
+            </p>
+            <p class="text-muted-foreground text-sm">
+              {view.ssoPolicy.allowEmailAccountLinking
+                ? "The installation operator allows matching email addresses to link existing accounts."
+                : "Matching email addresses do not automatically link existing accounts. The installation operator can enable this when moving existing users to SSO."}
+            </p>
+          {/if}
           {#if dirty}<Feedback>Save your changes before verifying company sign-in.</Feedback>{/if}
-          {#if !view.sso.domainVerified}
+          {#if view.ssoPolicy.domainVerificationRequired && !view.sso.domainVerified}
             <p class="text-muted-foreground text-sm">
               Verify an email domain to test company sign-in. This does not change how members
               currently access the organization.

@@ -18,7 +18,15 @@
     domains,
     organizationId,
     readonly,
-  }: { domains: z.infer<typeof ssoDomain>[]; organizationId: string; readonly: boolean } = $props();
+    verificationRequired,
+    domainRequired,
+  }: {
+    domains: z.infer<typeof ssoDomain>[];
+    organizationId: string;
+    readonly: boolean;
+    verificationRequired: boolean;
+    domainRequired: boolean;
+  } = $props();
 
   // The dialog asks for a new domain, then shows the DNS record of the selected one.
   let open = $state(false);
@@ -70,7 +78,9 @@
 
     try {
       await addCompanyDomain({ organizationId, domain: parsed.data });
-      selected = parsed.data;
+
+      if (verificationRequired) selected = parsed.data;
+      else open = false;
     } catch (cause) {
       dialogError = failure(cause, "The domain could not be added.");
     } finally {
@@ -114,8 +124,9 @@
     <div class="max-w-md">
       <h2 id="email-domains-title" class="text-base font-semibold">Email domains</h2>
       <p class="text-muted-foreground mt-2 text-sm leading-6">
-        Members with these addresses sign in through company SSO. Each domain is verified with its
-        own DNS record.
+        {verificationRequired
+          ? "Members with these addresses sign in through company SSO. Each domain is verified with its own DNS record."
+          : "Email domains help members find company sign-in from their email address. Your installation trusts the configured provider, so DNS verification is optional."}
       </p>
     </div>
     <Button variant="outline" size="sm" disabled={readonly} onclick={startAdding}>Add domain</Button
@@ -128,7 +139,9 @@
     <div class="border-t">
       <EmptyState
         title="No email domains"
-        description="Add the domain of your members' email addresses to use company SSO."
+        description={domainRequired
+          ? "Add the domain of your members' email addresses to use company SSO."
+          : "Company sign-in is available without an email domain. Add one to help members find it by email."}
         >{#snippet icon()}<Globe />{/snippet}</EmptyState
       >
     </div>
@@ -140,23 +153,23 @@
             <p class="min-w-0 basis-full truncate text-sm font-medium sm:flex-1 sm:basis-0">
               {entry.domain}
             </p>
-            <Badge
-              variant="outline"
-              class="gap-1.5 whitespace-nowrap border-transparent bg-muted/60 px-2 py-1 font-normal"
-            >
-              <span
-                class={`size-1.5 rounded-full ${entry.verified ? "bg-emerald-500" : "bg-amber-500"}`}
-                aria-hidden="true"
-              ></span>
-              {entry.verified ? "Verified" : "Pending"}
-            </Badge>
+            {#if verificationRequired}<Badge
+                variant="outline"
+                class="gap-1.5 whitespace-nowrap border-transparent bg-muted/60 px-2 py-1 font-normal"
+              >
+                <span
+                  class={`size-1.5 rounded-full ${entry.verified ? "bg-emerald-500" : "bg-amber-500"}`}
+                  aria-hidden="true"
+                ></span>
+                {entry.verified ? "Verified" : "Pending"}
+              </Badge>{/if}
             <div class="ml-auto flex items-center gap-1">
-              {#if !entry.verified}
+              {#if verificationRequired && !entry.verified}
                 <Button variant="outline" size="sm" onclick={() => showRecord(entry.domain)}
                   >Verify</Button
                 >
               {/if}
-              {#if domains.length > 1}
+              {#if domains.length > 1 || !domainRequired}
                 <Button
                   variant="ghost"
                   size="icon-sm"

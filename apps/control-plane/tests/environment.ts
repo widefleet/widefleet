@@ -34,6 +34,9 @@ import { companyAccountProvider, companyIdentity } from "../src/lib/server/compa
 export const createTestEnvironment = async (
   platformUrl = "http://localhost:25430",
   provider: "entra" | "oidc" = "entra",
+  ssoPolicy: { trustProvider: boolean; allowEmailAccountLinking?: boolean } = {
+    trustProvider: false,
+  },
 ) => {
   const name = `test_${crypto.randomUUID().replaceAll("-", "")}`;
   const tenantId = "00000000-0000-4000-8000-000000000001";
@@ -107,6 +110,8 @@ export const createTestEnvironment = async (
   const ownerSubject = "00000000-0000-4000-8000-000000000003";
 
   const environment = {
+    PLATFORM_SSO_TRUST_PROVIDER: String(ssoPolicy.trustProvider),
+    PLATFORM_SSO_ALLOW_EMAIL_ACCOUNT_LINKING: String(ssoPolicy.allowEmailAccountLinking ?? false),
     PLATFORM_USAGE_REPORTING: "false",
     PLATFORM_CRASH_REPORTING: "false",
     PLATFORM_STATE_DIRECTORY: directory,
@@ -223,7 +228,8 @@ export const createTestEnvironment = async (
     emailSignIn: false,
     publicSignup: false,
     onboarding: createOnboardingService(database.db, settings),
-    signInProvider: createAuthenticationAdmission(database.db).signInProvider,
+    signInProvider: createAuthenticationAdmission(database.db, undefined, false, configuration)
+      .signInProvider,
     discoverPlatform,
     cliLogin: createCliLogin(database.db, configuration),
     reporting: createReporting(configuration, database.db),

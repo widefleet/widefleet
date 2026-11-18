@@ -1,3 +1,4 @@
+import { companySsoAvailable, ssoPolicy } from "./sso-policy.ts";
 import {
   installationSettings,
   parseCompanyDomains,
@@ -61,6 +62,8 @@ const createOrganizationSettingsService = (
   organizationId: string,
   emailSignIn: boolean,
 ) => {
+  const { domainVerificationRequired } = ssoPolicy(configuration, organizationId);
+
   const lockSettings = async (transaction: DatabaseExecutor) => {
     await transaction
       .insert(organizationSettings)
@@ -101,7 +104,7 @@ const createOrganizationSettingsService = (
     let identity: z.infer<typeof companyIdentity> | null = null;
 
     try {
-      if (sso?.domainVerified && sso.required) {
+      if (sso && companySsoAvailable(configuration, sso) && sso.required) {
         identity = ssoRuntimeIdentity(sso);
 
         if (state.settings.directory)
@@ -154,18 +157,24 @@ const createOrganizationSettingsService = (
 
         let expectedRevision = "";
 
-        if (identity && appSignIn) {
+        if (appSignIn) {
           try {
-            const secret = identity.management.clientSecret;
+            if (identity) {
+              const secret = identity.management.clientSecret;
 
-            const [company] = await transaction
-              .select({ name: organization.name })
-              .from(organization)
-              .where(eq(organization.id, organizationId));
+              const [company] = await transaction
+                .select({ name: organization.name })
+                .from(organization)
+                .where(eq(organization.id, organizationId));
 
-            expectedRevision = await appSignIn.revision(identity, secret, company?.name);
+              expectedRevision = await appSignIn.revision(identity, secret, company?.name);
 
-            if (publish) await appSignIn.publish(identity, secret, company?.name);
+              if (publish) await appSignIn.publish(identity, secret, company?.name);
+            } else if (publish) {
+              // With no admitted provider or fallback, remove any earlier grant.
+              // Skipping publication would leave app sign-in using stale trust.
+              await appSignIn.revoke();
+            }
           } catch (cause) {
             current.errors.push(
               cause instanceof InvalidOperation
@@ -190,7 +199,7 @@ const createOrganizationSettingsService = (
             revision: "",
             state: "waiting" as const,
             message:
-              resolved.sso && !resolved.sso.domainVerified
+              resolved.sso && !companySsoAvailable(configuration, resolved.sso)
                 ? "Verify the company domain before publishing its app sign-in configuration."
                 : "App sign-in has no publishable configuration.",
           };
@@ -229,7 +238,10 @@ const createOrganizationSettingsService = (
       settings: resolved.state.settings,
       ssoDomains: resolved.domains,
       sso,
-      ssoRequired: Boolean(connection?.domainVerified && connection.required),
+      ssoRequired: Boolean(
+        connection && companySsoAvailable(configuration, connection) && connection.required,
+      ),
+      ssoPolicy: ssoPolicy(configuration, organizationId),
       managementCallbackUrl: sso
         ? `${configuration.PLATFORM_URL}/api/auth/sso/callback/${sso.providerId}`
         : null,
@@ -239,8 +251,24 @@ const createOrganizationSettingsService = (
     };
   };
 
-  const prepare = async (input: z.infer<typeof settingsInput>) => {
+  const parseInput = (input: z.infer<typeof settingsInput>) => {
     const next = settingsInput.parse(input);
+
+    if (
+      next.sso?.appIdentityType === "entra" &&
+      !z.uuid().safeParse(new URL(next.sso.issuer).pathname.match(/^\/([^/]+)\/v2\.0\/?$/)?.[1])
+        .success
+    )
+      throw new InvalidOperation({
+        code: "BAD_REQUEST",
+        message: "Entra app claims require a tenant-specific Entra issuer",
+      });
+
+    return next;
+  };
+
+  const prepare = async (input: z.infer<typeof settingsInput>) => {
+    const next = parseInput(input);
 
     if (!emailSignIn && !next.sso)
       throw new InvalidOperation({
@@ -272,7 +300,11 @@ const createOrganizationSettingsService = (
         ? (await readSsoDomains(database, organizationId)).map((entry) => entry.domain)
         : parseCompanyDomains(next.sso.domain);
 
-    if (next.sso && !domains.length && !(await readSsoProvider(database, organizationId)))
+    if (
+      next.sso &&
+      !domains.length &&
+      (domainVerificationRequired || next.sso.appIdentityType === "google")
+    )
       throw new InvalidOperation({
         code: "BAD_REQUEST",
         message: "Enter a company email domain",
@@ -285,6 +317,7 @@ const createOrganizationSettingsService = (
         organizationId,
         { replace: domains },
         next.sso.appIdentityType,
+        domainVerificationRequired,
       );
 
     // Google app sign-in requests one Workspace domain from Google and checks its `hd` claim.
@@ -313,9 +346,16 @@ const createOrganizationSettingsService = (
     input: z.infer<typeof settingsInput>,
     credential?: OrganizationCredential,
   ) => {
-    const next = settingsInput.parse(input);
+    const next = parseInput(input);
 
-    if (credential) await saveSsoProvider(database, organizationId, next.sso, credential);
+    if (credential)
+      await saveSsoProvider(
+        database,
+        organizationId,
+        next.sso,
+        credential,
+        domainVerificationRequired,
+      );
     else if (next.sso)
       throw new InvalidOperation({
         code: "FORBIDDEN",
@@ -441,7 +481,12 @@ const createOrganizationSettingsService = (
             code: "CONFLICT",
             message: `${domain} is already a company email domain`,
           });
-        await changeSsoDomains(transaction, organizationId, { add: [domain] });
+        await changeSsoDomains(
+          transaction,
+          organizationId,
+          { add: [domain] },
+          domainVerificationRequired,
+        );
       });
 
       return inspect();
@@ -462,7 +507,12 @@ const createOrganizationSettingsService = (
             code: "NOT_FOUND",
             message: `${domain} is not a company email domain`,
           });
-        await changeSsoDomains(transaction, organizationId, { remove: [domain] });
+        await changeSsoDomains(
+          transaction,
+          organizationId,
+          { remove: [domain] },
+          domainVerificationRequired,
+        );
       });
 
       return inspect();
@@ -488,7 +538,7 @@ const createOrganizationSettingsService = (
         await lockSettings(transaction);
         const provider = await readSsoConfiguration(transaction, encryptionKey, organizationId);
 
-        if (!provider?.domainVerified)
+        if (!companySsoAvailable(configuration, provider))
           throw new InvalidOperation({
             code: "CONFLICT",
             message: "Verify the company domain before activating SSO",

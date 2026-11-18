@@ -63,6 +63,9 @@ export const createAuthControl = async (directory: string) => {
       configurations.set(organizationId, { configuration, revision });
       publications++;
       response.writeHead(204).end();
+    } else if (request.method === "DELETE") {
+      configurations.delete(organizationId);
+      response.writeHead(204).end();
     } else {
       const { configuration, revision } = configurations.get(organizationId) ?? {
         configuration: null,

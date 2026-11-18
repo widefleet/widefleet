@@ -91,9 +91,9 @@ export const oidcProviderInput = z.strictObject({
   providerId: z.string().min(1),
   appIdentityType: z.enum(["oidc", "entra", "google"]).default("oidc"),
   issuer: identityUrl,
-  // Required to register a connection. Afterwards it replaces the listed domains
-  // when present; each new domain stays pending until its DNS record is verified.
-  domain: companyDomains.optional(),
+  // An omitted list preserves saved domains; an empty list is allowed only by
+  // the operator-trusted self-hosted policy, enforced by the settings service.
+  domain: companyDomains.or(z.literal("")).optional(),
   oidcConfig: z.strictObject({
     clientId: z.string().min(1).max(512),
     clientSecret: z.string().min(1).max(16_384).optional(),
@@ -161,6 +161,10 @@ export const settingsView = z.strictObject({
   settings: installationSettings,
   ssoDomains: z.array(ssoDomain),
   ssoRequired: z.boolean(),
+  ssoPolicy: z.strictObject({
+    domainVerificationRequired: z.boolean(),
+    allowEmailAccountLinking: z.boolean(),
+  }),
   managementCallbackUrl: z.string().nullable(),
   appCallbackUrl: z.url(),
   activation: activationStatus,

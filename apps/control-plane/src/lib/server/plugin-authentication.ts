@@ -1,9 +1,10 @@
+import { companySsoAvailableSql, operatorTrustedSso } from "./sso-policy.ts";
 import { createHash } from "node:crypto";
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import type { JSONWebKeySet } from "jose";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { identityUrl } from "@platform/contracts";
+import { companyDomains, identityUrl } from "@platform/contracts";
 import { verifyAccessToken } from "./access-token.ts";
 import { organizationSettings } from "./schema.ts";
 import { invitation, ssoProvider, user } from "./auth-schema.ts";
@@ -84,6 +85,7 @@ export const pluginAuthentication = (
         providerId: z.string().optional(),
         invitationId: z.string().optional(),
         issuer: identityUrl.optional(),
+        domain: z.string().optional(),
         oidcConfig: oidcConfiguration.optional(),
       })
       .parse(context.body);
@@ -121,6 +123,12 @@ export const pluginAuthentication = (
     )
       throw new APIError("FORBIDDEN", { message: "This organization is unavailable" });
 
+    if (
+      ["/sso/register", "/sso/update-provider"].includes(context.path) &&
+      !operatorTrustedSso(configuration, organizationId)
+    )
+      companyDomains.parse(input.domain ?? provider?.domain);
+
     const authority = z
       .string()
       .nullable()
@@ -142,7 +150,7 @@ export const pluginAuthentication = (
       });
 
     const [company] = await database
-      .select({ verified: ssoProvider.domainVerified })
+      .select({ verified: companySsoAvailableSql(configuration) })
       .from(ssoProvider)
       .innerJoin(
         organizationSettings,

@@ -73,6 +73,14 @@ export const runtimeConfigurationSchema = z.object({
     .optional()
     .transform((value) => value || undefined),
   PLATFORM_ENCRYPTION_KEY_FILE: z.string().min(1).optional(),
+  PLATFORM_SSO_TRUST_PROVIDER: z
+    .enum(["true", "false", ""])
+    .default("false")
+    .transform((value) => value === "true"),
+  PLATFORM_SSO_ALLOW_EMAIL_ACCOUNT_LINKING: z
+    .enum(["true", "false", ""])
+    .default("false")
+    .transform((value) => value === "true"),
   LOGIN_CODE_DELIVERY: z.enum(["email", "console"]).default("email"),
 });
 

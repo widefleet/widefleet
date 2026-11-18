@@ -1,9 +1,11 @@
 import { sso } from "@better-auth/sso";
-import { eq } from "drizzle-orm";
+import type { Configuration } from "./config.ts";
+import { companySsoAvailable, operatorTrustedSso } from "./sso-policy.ts";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { installationOrganizationId } from "../organization.ts";
 import type { OrganizationAccess } from "./application-context.ts";
-import { ssoProvider } from "./auth-schema.ts";
+import { ssoProvider, user } from "./auth-schema.ts";
 import type { DatabaseExecutor } from "./database.ts";
 import { decryptSecret, encryptSecret } from "./secret-encryption.ts";
 import { oidcConfiguration, prepareCompanyOidc } from "./sso-origins.ts";
@@ -13,6 +15,7 @@ export const companySsoOrigins = async (
   platformUrl: string,
   encryptionKey: string,
   request?: Request,
+  policy?: Configuration,
 ) => {
   const origins = [platformUrl];
 
@@ -47,7 +50,7 @@ export const companySsoOrigins = async (
     .from(ssoProvider)
     .where(eq(ssoProvider.providerId, providerId));
 
-  if (!provider?.domainVerified || !provider.oidcConfig) return origins;
+  if (!companySsoAvailable(policy, provider) || !provider?.oidcConfig) return origins;
 
   const configuration = oidcConfiguration.parse(
     JSON.parse(await decryptSecret(encryptionKey, provider.oidcConfig)),
@@ -64,11 +67,12 @@ export const companySsoPlugin = (
   database: DatabaseExecutor,
   encryptionKey: string,
   access: OrganizationAccess = { filterOrganizations: async () => [installationOrganizationId] },
+  policy?: Configuration,
 ) => {
   const plugin = sso({
     // The schema permits one provider per organization, regardless of its creator.
     providersLimit: Number.MAX_SAFE_INTEGER,
-    domainVerification: { enabled: true },
+    domainVerification: { enabled: !operatorTrustedSso(policy) },
     schema: {
       ssoProvider: {
         additionalFields: {
@@ -81,21 +85,62 @@ export const companySsoPlugin = (
         },
       },
     },
-    resolveUser: async (input) => {
+    resolveUser: async (input, context) => {
       const [provider] = await database
         .select()
         .from(ssoProvider)
         .where(eq(ssoProvider.providerId, input.providerId));
 
       if (
-        !provider?.domainVerified ||
+        !provider ||
+        !companySsoAvailable(policy, provider) ||
         !(await access.filterOrganizations([{ id: provider.organizationId }])).includes(
           provider.organizationId,
         )
       )
         return { action: "reject", code: "ORGANIZATION_UNAVAILABLE" };
 
+      if (
+        operatorTrustedSso(policy, provider.organizationId) &&
+        policy?.PLATFORM_SSO_ALLOW_EMAIL_ACCOUNT_LINKING
+      ) {
+        const bound = await context.database.findOne({
+          model: "account",
+          where: [
+            { field: "providerId", value: input.providerId },
+            { field: "accountId", value: input.accountKey.accountId },
+          ],
+        });
+
+        if (!bound) {
+          const existing = await context.database.findOne<{ id: string }>({
+            model: "user",
+            where: [{ field: "email", value: input.providerUser.email.toLowerCase() }],
+          });
+
+          if (existing) return { action: "link", userId: existing.id, profile: "preserve" };
+        }
+      }
+
       return { action: "continue" };
+    },
+    provisionUserOnEveryLogin: true,
+    provisionUser: async ({ user: subject, userInfo, provider }) => {
+      if (
+        !provider.organizationId ||
+        !operatorTrustedSso(policy, provider.organizationId) ||
+        subject.emailVerified
+      )
+        return;
+
+      // The operator vouches for this provider's email addresses. Confirm only
+      // the matching local address so the user can accept its invitations.
+      const email = z.string().parse(userInfo["email"]).toLowerCase();
+
+      await database
+        .update(user)
+        .set({ emailVerified: true })
+        .where(and(eq(user.id, subject.id), eq(user.email, email)));
     },
   });
 

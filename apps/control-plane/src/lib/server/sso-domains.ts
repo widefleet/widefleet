@@ -118,6 +118,7 @@ const planChange = (
   provider: { appIdentityType: string; required: boolean | null },
   domains: { domain: string; verified: boolean }[],
   change: DomainChange,
+  domainVerificationRequired: boolean,
 ) => {
   const existing = new Set(domains.map((entry) => entry.domain));
   const add = "replace" in change ? change.replace : (change.add ?? []);
@@ -132,7 +133,7 @@ const planChange = (
   const remaining = domains.filter((entry) => !removed.has(entry.domain));
   const count = remaining.length + added.length;
 
-  if (count === 0)
+  if (count === 0 && (domainVerificationRequired || provider.appIdentityType === "google"))
     throw new InvalidOperation({
       code: "BAD_REQUEST",
       message: "Keep at least one company email domain",
@@ -151,6 +152,7 @@ const planChange = (
     });
 
   if (
+    domainVerificationRequired &&
     provider.required &&
     domains.some((entry) => entry.verified) &&
     !remaining.some((entry) => entry.verified)
@@ -169,6 +171,7 @@ export const checkSsoDomainChange = async (
   organizationId: string,
   change: DomainChange,
   appIdentityType: string,
+  domainVerificationRequired = true,
 ) => {
   const provider = await readProvider(database, organizationId);
 
@@ -177,6 +180,7 @@ export const checkSsoDomainChange = async (
       { ...provider, appIdentityType },
       await readSsoDomains(database, organizationId),
       change,
+      domainVerificationRequired,
     );
 };
 
@@ -192,6 +196,7 @@ export const changeSsoDomains = async (
   transaction: DatabaseExecutor,
   organizationId: string,
   change: DomainChange,
+  domainVerificationRequired = true,
 ) => {
   await lockProvider(transaction, organizationId);
   const provider = await readProvider(transaction, organizationId);
@@ -211,6 +216,7 @@ export const changeSsoDomains = async (
       verified: row.verifiedAt !== null,
     })),
     change,
+    domainVerificationRequired,
   );
 
   if (removed.size)

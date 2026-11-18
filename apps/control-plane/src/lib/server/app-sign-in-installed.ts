@@ -12,7 +12,7 @@ export const createInstalledAppSignIn = (
   cookieSecret: string | undefined,
   request: (
     path: string,
-    method: "GET" | "PUT",
+    method: "GET" | "PUT" | "DELETE",
     body?: string,
   ) => Promise<{ text(): Promise<string> }>,
   propagation: "immediate" | "eventual",
@@ -37,6 +37,9 @@ export const createInstalledAppSignIn = (
 
   return {
     callbackUrl: appCallbackUrl(configuration, organizationId),
+    revoke: async () => {
+      await request(`/${authConfigurationKey(organizationId)}`, "DELETE");
+    },
     revision: (identity, clientSecret, organizationName) =>
       configurationRevision(prepare(identity, clientSecret, organizationName)),
     publish: async (identity, clientSecret, organizationName) => {
