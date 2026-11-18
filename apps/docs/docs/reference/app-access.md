@@ -12,7 +12,6 @@ Management permissions do not bypass the running app's access rules.
 The same rules apply to [MCP clients](/guides/mcp): everyone who may open an app
 can use its published service methods.
 
-Platform 0.4.0 applies these rules to the app's organization.
 Without a company IdP, Widefleet admits verified organization members and supplies no
 company group claims; use an empty group list for that mode. With company SSO, the
 app IdP registration determines who can authenticate. See [published app sign-in](/guides/members#opening-published-apps)

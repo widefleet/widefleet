@@ -1,12 +1,11 @@
 ---
 title: Save and recover source code
 description: Keep your app's code in Git and continue working from another session or machine.
-lastModified: 2026-11-16
+lastModified: 2026-11-18
 ---
 
 Widefleet keeps your app's source code so you or your agent can pick up where you
-left off, even in a new workspace. Source storage is available on Widefleet Cloud.
-Support for self-hosted installations is coming soon.
+left off, even in a new workspace. Source storage is included in Widefleet Cloud.
 
 Install Git and the [Widefleet CLI](/getting-started/installation), sign in and
 select your organization. You need management access to the app.

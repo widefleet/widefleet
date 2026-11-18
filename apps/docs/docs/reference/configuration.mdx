@@ -1,7 +1,7 @@
 ---
 title: Configuration
 description: App configuration fields, storage bindings and settings managed by the platform.
-lastModified: 2026-10-29
+lastModified: 2026-11-18
 ---
 
 App projects use `wrangler.jsonc`. Start with the generated starter and use the
@@ -50,14 +50,14 @@ platform URL to select the installation; see [CLI configuration](/reference/cli-
 
 ## Resources
 
-| Configuration                           | Resource                                                                                                                                               |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `d1_databases`                          | D1 database bindings with `binding`, `database_name` and optional `database_id` and migration settings.                                                |
-| `r2_buckets`                            | File storage bindings with `binding` and `bucket_name`.                                                                                                |
-| `kv_namespaces`                         | Key-value bindings with `binding` and `id`.                                                                                                            |
-| `queues.producers` / `queues.consumers` | Queue producers and Worker queue handlers.                                                                                                             |
-| `triggers.crons`                        | Schedules delivered to an exported `scheduled` handler.                                                                                                |
-| `workflows`                             | Named Workflow classes with `binding`, `name` and `class_name`; requires CLI and platform `0.3.0` or newer and a runtime advertising Workflow support. |
+| Configuration                           | Resource                                                                                                |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `d1_databases`                          | D1 database bindings with `binding`, `database_name` and optional `database_id` and migration settings. |
+| `r2_buckets`                            | File storage bindings with `binding` and `bucket_name`.                                                 |
+| `kv_namespaces`                         | Key-value bindings with `binding` and `id`.                                                             |
+| `queues.producers` / `queues.consumers` | Queue producers and Worker queue handlers.                                                              |
+| `triggers.crons`                        | Schedules delivered to an exported `scheduled` handler.                                                 |
+| `workflows`                             | Named Workflow classes with `binding`, `name` and `class_name`.                                         |
 
 Resources are scoped to each app or preview. Keep resource identifiers stable to
 preserve access to existing data. Native data remains after a declaration is removed.
@@ -77,7 +77,7 @@ running, and the setting does not delete Queue data or pause existing consumers.
 
 ### Dynamic Worker execution limits
 
-With Widefleet **0.5.0 or newer**, Cloudflare installation operators can set CPU
+Cloudflare installation operators can set CPU
 and subrequest budgets in the versioned installation profile, then deploy it
 through their normal deployment process. For example:
 

@@ -1,18 +1,15 @@
 ---
 title: Authenticate apps to external APIs
 description: Use short-lived app identities to call APIs without storing an API key in each app.
-lastModified: 2026-11-17
+lastModified: 2026-11-18
 ---
 
 Widefleet apps can request a signed token identifying their organization and app.
 An external API verifies that token and decides which data the app may access.
 This works without a signed-in user and without an API key in the app.
 
-Use matching Widefleet **0.7.2 or newer** releases for the platform, deployment
-tools, native agent and app runtime. For an existing installation,
-[update the installation components](/self-hosting/installation#versions-and-updates)
-and [activate the matching app runtime](/reference/runtime#versions-and-updates).
-Run `widefleet runtime status` to check the selected and active versions.
+Self-hosted installations need Widefleet **0.7.2 or newer** with
+[the matching app runtime active](/reference/runtime#versions-and-updates).
 
 The receiving API must support RS256 JWT verification and trust your installation's
 workload issuer.

@@ -1,7 +1,7 @@
 ---
 title: Installation
 description: Set up the Widefleet CLI and create an app for an existing installation.
-lastModified: 2026-10-29
+lastModified: 2026-11-18
 ---
 
 Use the Widefleet CLI to create and deploy apps from your own machine. You need
@@ -58,8 +58,6 @@ This creates the default SvelteKit project. For React, see the
 Both projects pin pnpm 12.4.2 in `packageManager`. With pnpm's default version
 management, an existing pnpm 10.34.5 or newer installation automatically downloads
 and runs that version when you run a command inside the project.
-pnpm 10.34.5 includes the [version-switching fix](https://github.com/pnpm/pnpm/releases/tag/v10.34.5)
-needed to start pnpm 12 on macOS and Windows.
 
 The starter includes a notes app, a D1 database, private R2 file storage and a
 server-side identity helper. Local development uses a synthetic user. Open the
@@ -67,8 +65,7 @@ local URL printed by `pnpm dev`, then stop that server with Ctrl-C before contin
 
 ## Connect and deploy
 
-Connect and deploy using CLI **0.4.3 or newer** and
-[browser login](/reference/cli-configuration):
+Connect with [browser login](/reference/cli-configuration) and deploy:
 
 ```sh
 widefleet login
@@ -104,7 +101,7 @@ For ongoing development, follow [app development](/guides/app-development).
 ## Headless login
 
 The CLI stores logins in your operating system's credential store. On Linux and
-macOS, CLI 0.4.3 or newer automatically uses a private credential file when that
+macOS, the CLI automatically uses a private credential file when that
 store is unavailable and prints its location. Windows uses Credential Manager.
 
 Credential files contain unencrypted tokens; keep them outside app projects and

@@ -8,7 +8,7 @@ An app can expose exported Worker entrypoints to other apps in its organization.
 It uses the same deployment, resources, networking and logs as any other app.
 Use a headless app when the service does not need browser access.
 
-Use Widefleet platform, CLI and runtime **0.7.1 or newer**. Publishing requires app
+Self-hosted installations need Widefleet **0.7.1 or newer**. Publishing requires app
 creation or collaboration permissions. To connect a caller, you must
 manage that app. The provider and caller must belong to the same organization.
 Organization administrators decide whether each API needs approval.

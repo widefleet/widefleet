@@ -1,16 +1,14 @@
 ---
 title: Company setup
 description: Configure employees' agents and computers so they do not need to know the platform URL.
-lastModified: 2026-10-23
+lastModified: 2026-11-18
 ---
 
 Employees should be able to run `widefleet login` without knowing the management
 URL. Distribute configuration with your existing agent or device setup, or
 publish discovery information under your work email domain. These options can
-be combined. Use CLI **0.4.3 or newer** for browser-based discovery;
-`widefleet login --help` lists `--email` and `--domain` for explicit discovery.
-The same setup flow applies on Windows, macOS and Linux. See
-[CLI configuration](/reference/cli-configuration) for earlier-version support.
+be combined. `widefleet login --help` lists `--email` and `--domain` for explicit
+discovery. The same setup flow applies on Windows, macOS and Linux.
 
 ## Preconfigured agents
 

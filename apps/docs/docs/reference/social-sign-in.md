@@ -4,7 +4,7 @@ description: Sign in with a personal provider account and configure providers fo
 lastModified: 2026-11-18
 ---
 
-Widefleet **0.4.15 or newer** supports Google and Microsoft sign-in. When enabled
+Widefleet supports Google and Microsoft sign-in. When enabled
 by the installation, these options appear alongside the email-code form. Microsoft supports both work or
 school accounts and personal accounts such as Outlook.com. Registration offers
 the same options when public registration is enabled.

@@ -1,7 +1,7 @@
 ---
 title: Previews
 description: Preview names, flags, isolation, DNS and cleanup.
-lastModified: 2026-11-16
+lastModified: 2026-11-18
 ---
 
 Run these commands from an existing app project:
@@ -39,8 +39,6 @@ Manage access groups on the original app with `widefleet access set --group GROU
 Previews start with their own empty D1, R2, KV and Queue resources. Plain-text variables and resource declarations come from the project configuration being deployed. Configure network permissions and app connections separately for the preview's own app ID when needed.
 
 ## Organization addresses
-
-Organization hostname suffixes require platform and CLI **0.4.0 or newer**.
 
 An installation can assign a stable hostname suffix to an organization. With suffix `acme`
 and `APP_DOMAIN=apps.example.com`, an app named `notes` has address

@@ -104,8 +104,6 @@ POST bodies contain a `request` object, for example `{"request":{"action":"creat
 
 ## Restart from a step
 
-Selective restart requires CLI and control plane 0.3.2 or newer and app runtime 0.2.2 or newer. Existing fleets retain their selected runtime when the control plane is upgraded; an administrator must [update the app runtime](/reference/runtime) with `widefleet runtime update 0.2.2`. Confirm the active version with `widefleet runtime status` before using selective restart.
-
 Use selective restart to repeat part of an instance while retaining earlier step results. The target must already exist in that instance's execution history. These examples use the Workflow definition and JSON files above; create a separate instance so that it has not been deleted by the lifecycle example:
 
 ```sh
@@ -180,10 +178,8 @@ Management request IDs have durable receipts. A retry returns the recorded resul
 
 ## Supported step API and limits
 
-Supported operations are `step.do`, `step.sleep`, `step.sleepUntil` and `step.waitForEvent`, including parallel branches, repeated step names, native static-delay retry policies, callback attempt context and `NonRetryableError`. `sleepUntil` requires a future deadline when scheduled, as in celld. Do not nest step calls inside a `step.do` callback.
+Supported operations are `step.do`, `step.sleep`, `step.sleepUntil` and `step.waitForEvent`, including parallel branches, repeated step names, native static-delay retry policies, callback attempt context and `NonRetryableError`. `sleepUntil` requires a future deadline when scheduled. Do not nest step calls inside a `step.do` callback.
 
 Short global `setTimeout` waits and `fetch` calls (including response body methods such as `json()` and `text()`) can run between steps while another branch waits for an event. They repeat on replay. Command delivery has a 60-second timeout; use durable steps for longer work. Put other asynchronous I/O, such as direct app service calls, Node APIs and manual stream reads, inside `step.do`, and use `step.sleep` for durable delays.
 
 Function-valued retry delays, step rollback handlers and rollback-on-termination are not supported. Unsupported options are rejected. Workflow scheduling/facets and cross-app bindings are not part of this interface.
-
-Cloudflare's `@cloudflare/dynamic-workflows` helper cannot directly supply this transport on celld 0.6.2: dynamic Workflow entrypoint lookup and native step-object transport are unavailable. The platform preserves the supported app API with its own transport.

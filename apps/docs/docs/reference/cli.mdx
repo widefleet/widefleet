@@ -1,12 +1,12 @@
 ---
 title: CLI
 description: Common Widefleet commands, app selection, authentication and deployment output.
-lastModified: 2026-11-16
+lastModified: 2026-11-18
 ---
 
 For installation and your first deployment, start with [CLI setup](/getting-started/installation).
 Use `widefleet --version` and `widefleet --help` to check the installed release.
-Each command also accepts `--help`; newer commands require matching platform components.
+Each command also accepts `--help`. Keep the CLI and platform on the same release.
 
 ## Authentication and target
 
@@ -19,8 +19,8 @@ Each command also accepts `--help`; newer commands require matching platform com
 | `widefleet config set-url URL` / `unset-url`        | Save or clear the platform URL without changing credentials.                                              |
 | `PLATFORM_CONFIG_FILE` / `--config-file PATH`       | Use one explicit configuration file instead of the user and managed defaults.                             |
 | `widefleet whoami`                                  | Inspect the authenticated user.                                                                           |
-| `widefleet organizations`                           | List available organizations (0.4.0 or newer).                                                            |
-| `PLATFORM_ORGANIZATION` / `--organization ID`       | Select an organization for API commands (0.4.0 or newer).                                                 |
+| `widefleet organizations`                           | List available organizations.                                                                             |
+| `PLATFORM_ORGANIZATION` / `--organization ID`       | Select an organization for API commands.                                                                  |
 | `widefleet logout`                                  | Revoke the stored refresh token and remove the saved session.                                             |
 | `PLATFORM_SESSION_FILE` / `--session-file PATH`     | Choose an unencrypted Unix session file instead of automatic credential storage.                          |
 | `PLATFORM_ACCESS_TOKEN`                             | Externally supplied token; overrides saved credentials for API commands and does not renew automatically. |
@@ -39,8 +39,7 @@ API commands. See [organization selection](/reference/cli-configuration#select-a
 
 ## Create an organization
 
-With platform and CLI **0.4.13 or newer**, sign in with a verified personal
-account and run these commands on an installation that offers organization creation:
+Sign in with a verified personal account and run these commands on an installation that offers organization creation:
 
 ```sh
 widefleet organizations create --name "Example Team" --slug example-team
@@ -57,7 +56,7 @@ unavailable, ask an administrator for an invitation. See the
 
 ## App commands
 
-Platform and CLI 0.4.0 or newer also provide `widefleet account`,
+The CLI also provides `widefleet account`,
 `widefleet members` and `widefleet invitations`. See [member management](/guides/members)
 for complete examples and permissions. `widefleet account` prints your link status and
 the browser URL for company sign-in. Accounts with matching verified company email are linked during SSO.
@@ -99,9 +98,6 @@ for permissions, activation states and app selection.
 
 ## Create a project
 
-Use CLI 0.3.3 or newer for the TanStack Start template and the Node.js 22.18
-minimum. Check the installed version with `widefleet --version`.
-
 ```sh
 widefleet init my-app
 widefleet init my-react-app --template tanstack-start
@@ -114,8 +110,7 @@ still requires the package registry or a populated local package cache.
 
 `DIRECTORY` must not exist. The CLI derives the app name in `wrangler.jsonc` from
 the directory name; review it before deploying. An unknown template exits with an
-error and does not create a project. If the installed CLI rejects `--template`,
-check `widefleet --version` and upgrade to CLI 0.3.3 or newer.
+error and does not create a project.
 
 Inside either project, run `pnpm install --frozen-lockfile`, `pnpm check`, then
 `pnpm dev`. Follow [app development](/guides/app-development) for identity,

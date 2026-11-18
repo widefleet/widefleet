@@ -1,7 +1,7 @@
 ---
 title: API and uploads
 description: Authentication, app publication and the Worker upload contract.
-lastModified: 2026-11-16
+lastModified: 2026-11-18
 ---
 
 Authenticated clients can fetch `/api/v1/openapi.json`. The document covers management operations, agent jobs, binary assets and multipart Workers.
@@ -31,8 +31,6 @@ Authenticate at the returned installation using [CLI login](/reference/authentic
 For publishing discovery records, see [company setup](/self-hosting/company-setup).
 
 ## Organization context
-
-Organization selection requires platform **0.4.0 or newer**.
 
 `GET /api/v1/organizations` requires an authenticated session or a token with
 `platform:read`. It works before an organization is selected and returns only
@@ -124,8 +122,7 @@ See [Use an app template](/guides/app-templates) for the UI and CLI workflow.
 
 ## Organization creation
 
-Requires platform **0.4.13 or newer** and an installation that enables
-self-service organization creation.
+Requires an installation that enables self-service organization creation.
 
 `POST /api/v1/organizations` requires a verified personal account and accepts:
 
@@ -146,7 +143,6 @@ slug. A `403` response means creation is disabled or the account is ineligible.
 
 ## Members, invitations and company sign-in
 
-These endpoints require platform **0.4.0 or newer**.
 Reads require `platform:read`, writes require `platform:write`; browser requests use
 session authentication. Administrator operations use the
 selected organization and the owner restrictions described in [member management](/guides/members).

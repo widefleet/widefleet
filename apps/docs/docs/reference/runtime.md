@@ -4,11 +4,11 @@ description: Runtime versions, activation, recovery, storage and supported app A
 lastModified: 2026-11-18
 ---
 
-The installation's celld runtime runs apps and previews as separate Dynamic Workers. The installer manages one node. Starting with platform 0.4.0, apps and agents belong directly to an organization with one execution configuration. Registering, disabling or replacing an agent does not change that ownership. A replacement agent reuses the same Docker host, persistent node state, routing directory and runtime storage.
+The installation's celld runtime runs apps and previews as separate Dynamic Workers. The installer manages one node. Apps and agents belong directly to an organization with one execution configuration. Registering, disabling or replacing an agent does not change that ownership. A replacement agent reuses the same Docker host, persistent node state, routing directory and runtime storage.
 
 ## Versions and updates
 
-Use platform, CLI and runtime **0.5.0 or newer** for app services. The app runtime shares the Widefleet version. `widefleet runtime update VERSION` downloads the runtime package from the matching `vVERSION` GitHub release, verifies its checksum and activates it through the management API. Use the Widefleet release version for `VERSION`; runtime activation remains independent of container updates.
+The app runtime shares the Widefleet version. `widefleet runtime update VERSION` downloads the runtime package from the matching `vVERSION` GitHub release, verifies its checksum and activates it through the management API. Use the Widefleet release version for `VERSION`; runtime activation remains independent of container updates.
 
 ```sh
 widefleet login
@@ -25,7 +25,7 @@ If an update returns `409: Runtime versions are immutable`, the installation alr
 
 Widefleet 0.7.6 includes app runtime 0.7.6 and celld 0.6.3-widefleet.1. Use matching control-plane, agent and CLI releases. The platform checks runtime compatibility before activation. [MCP](/guides/mcp) requires app runtime 0.7.6 or newer.
 
-Runtime 0.2.1 forwards incoming HTTP request cancellation explicitly to the loaded app. If the client disconnects before response headers, the app's `request.signal` is aborted. App code must pass that signal to any downstream requests it wants to cancel, for example `env.SERVICE.fetch(url, { signal: request.signal })`. A timeout after a fetch has returned still needs explicit cancellation of the response body.
+The runtime forwards incoming HTTP request cancellation to the loaded app. If the client disconnects before response headers, the app's `request.signal` is aborted. App code must pass that signal to any downstream requests it wants to cancel, for example `env.SERVICE.fetch(url, { signal: request.signal })`. A timeout after a fetch has returned still needs explicit cancellation of the response body.
 
 ## Activation and recovery
 
@@ -43,16 +43,16 @@ The [celld/Cloudflare comparison](/reference/runtime-compatibility) separates na
 
 | Facility         | Behavior                                                                                                                                                                                                                                       |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| D1               | Prepared statements, batch transactions, raw rows and sessions are forwarded. `dump()` is unsupported by celld 0.6.1.                                                                                                                          |
+| D1               | Prepared statements, batch transactions, raw rows and sessions are forwarded. `dump()` is unsupported.                                                                                                                                         |
 | R2               | Bodies, metadata, conditions, ranges and multipart uploads are supported. Customer-provided encryption keys are unsupported.                                                                                                                   |
-| KV               | Text, JSON, bytes, metadata, bulk reads and listing are supported. Streams use the native HTTP service-binding transport because celld 0.6.1 cannot clone streams through custom RPC; celld still buffers values internally.                   |
+| KV               | Text, JSON, bytes, metadata, bulk reads and listing are supported. Streams use the native HTTP service-binding transport; values are buffered in memory.                                                                                       |
 | Cron / Queues    | Declared schedules and consumers call the app's `scheduled`/`queue` handlers, including `waitUntil`, acknowledgment and retry decisions.                                                                                                       |
 | Telemetry        | App HTTP tails provide console logs and exceptions. celld's Dynamic Worker tails do not cover RPC, Cron or Queue executions; native distributed traces are not exported through this app channel. See [telemetry](/self-hosting/runtime-logs). |
-| Dynamic capacity | celld 0.6.1 has a native limit of 256 loaded dynamic instances per process, with at most 255 from one loader generation. The limit counts loaded instances; unreferenced instances are eligible for collection.                                |
+| Dynamic capacity | Up to 256 loaded dynamic instances per process, with at most 255 from one loader generation. The limit counts loaded instances; unreferenced instances are eligible for collection.                                                            |
 | Scaling          | One managed node initially; no automatic node provisioning or load balancing. A node failure affects all apps on it.                                                                                                                           |
 
 [App Workflows](/guides/workflows) require a compatible agent and runtime with Workflow support. Native Durable Object namespaces inside dynamic apps are not part of this app contract. [App services](/guides/app-services) use the same app runtime and resource declarations. The trusted loader enforces [backend network permissions and browser CSP](/guides/network).
 
 ## App removal
 
-Deletion queues cleanup for the app and all its previews. Each cleanup removes the route, app references, deployment artifacts, snapshots and safely removable R2 objects; unrelated apps and the shared fleet remain running. Native D1/KV/Queue cells may remain without app references because celld 0.6.1 exposes no supported per-app physical purge. Do not delete files owned by a running native cell. Provider snapshots/version history and telemetry retention have their own lifecycle.
+Deletion queues cleanup for the app and all its previews. Each cleanup removes the route, app references, deployment artifacts, snapshots and safely removable R2 objects; unrelated apps and the shared fleet remain running. Native D1/KV/Queue cells may remain without app references because the runtime has no per-app physical purge. Do not delete files owned by a running native cell. Provider snapshots/version history and telemetry retention have their own lifecycle.

@@ -1,7 +1,7 @@
 ---
 title: Runtime logs
 description: Enable app telemetry and query errors with private source maps.
-lastModified: 2026-11-16
+lastModified: 2026-11-18
 ---
 
 Runtime logs stay in your infrastructure.
@@ -67,7 +67,7 @@ Log queries return HTTP 503 with code `TELEMETRY_NOT_CONFIGURED` when runtime lo
 
 A tail is a trusted handler receiving console records and exceptions after a Dynamic Worker HTTP request. The loader attaches an app-specific handler, which sends OTLP JSON to management using credentials unavailable to app code. Ingress verifies the credential and that the app still exists and is not deleting; the Collector overwrites the resource app ID from a trusted ingress header before queuing. An application's message cannot choose another app's partition.
 
-Dynamic Worker tails cover HTTP requests. RPC, Cron and Queue console logs and exceptions are outside this capture channel in celld 0.6.1. Native fleet OTLP export is disabled to keep ingestion scoped to individual apps, so native distributed traces are also absent. Operators can inspect container logs for fleet diagnostics.
+Dynamic Worker tails cover HTTP requests. RPC, Cron and Queue console logs and exceptions are outside this capture channel. Native fleet OTLP export is disabled to keep ingestion scoped to individual apps, so native distributed traces are also absent. Operators can inspect container logs for fleet diagnostics.
 
 The starter reports unexpected SvelteKit errors, server HTTP 5xx outcomes, browser `error` and `unhandledrejection` events, and explicit `captureError` calls. Browser reporting requires existing app authentication, same-origin requests, bounded payloads, rate limits and duplicate suppression. Browser reports preserve the build ID of the running tab. The loader injects the server deployment ID. The trusted tail adds the executing snapshot’s build and deployment IDs to ordinary console records and unhandled exceptions; structured reports keep their own context. HTTP tails do not provide native trace/span IDs, so ordinary console records cannot inherit request IDs from the starter’s structured request records.
 
