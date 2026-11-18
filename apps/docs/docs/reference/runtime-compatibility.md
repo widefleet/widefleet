@@ -1,11 +1,12 @@
 ---
 title: Runtime compatibility
 description: Supported runtime integrations and verified differences from Cloudflare.
-lastModified: 2026-10-29
+lastModified: 2026-11-18
 ---
 
-Widefleet currently uses celld **0.6.2**.
-See the [native release notes](https://github.com/denoland/celld/releases/tag/v0.6.2)
+Widefleet uses **celld 0.6.3-widefleet.1**, based on upstream 0.6.3 with AES-KW
+support for MCP OAuth. The packaged binary is pinned by version and checksum.
+See the [native release notes](https://github.com/widefleet/celld/releases/tag/v0.6.3-widefleet.1)
 and [platform version requirements](/self-hosting/installation#versions-and-updates).
 
 This reference compares Widefleet with Cloudflare's hosted platform, its local
@@ -27,7 +28,7 @@ This reference compares Widefleet with Cloudflare's hosted platform, its local
 
 Sources: [celld Dynamic Workers](https://github.com/denoland/celld/blob/v0.6.1/docs/services/dynamic-workers.md), [celld RPC und Streams](https://github.com/denoland/celld/blob/v0.6.1/docs/cloudflare-compat.md#rpc), [native Stream-Übertragung](https://github.com/denoland/celld/blob/v0.6.1/crates/celld/js/harness.js#L3580), [KV](https://github.com/denoland/celld/blob/v0.6.1/docs/services/kv.md), [R2](https://github.com/denoland/celld/blob/v0.6.1/docs/services/r2.md), [D1](https://github.com/denoland/celld/blob/v0.6.1/docs/services/d1.md), [Cloudflare Dynamic-Worker-Limits](https://developers.cloudflare.com/dynamic-workers/platform/limits/), [Cloudflare RPC](https://developers.cloudflare.com/workers/runtime-apis/rpc/), [Cloudflare Egress](https://developers.cloudflare.com/dynamic-workers/usage/egress-control/), [Dynamic-Worker-Observability](https://developers.cloudflare.com/dynamic-workers/usage/observability/), [Cloudflare KV](https://developers.cloudflare.com/kv/concepts/how-kv-works/), [Cloudflare D1](https://developers.cloudflare.com/d1/worker-api/d1-database/#dump).
 
-App packages support ES modules and Wasm on **celld 0.6.2**.
+App packages support ES modules and Wasm on **celld 0.6.3-widefleet.1**.
 Local workerd also loads separate text and binary data modules; celld rejects them
 with “must be a string or wasm bytes”. Uploads allow up to 32 runtime modules and
 500 source maps, with at most 20 MiB per file.
@@ -41,7 +42,7 @@ Widefleet integrates the native runtime as follows:
   for capture coverage and delivery behavior.
 - Provisioning manages one node per installation. celld itself supports multiple nodes.
 - [Workflows](/guides/workflows) use the usual `WorkflowEntrypoint` and step APIs
-  through a platform adapter on unchanged celld. Automatic facets are excluded.
+  through a platform adapter. Automatic facets are excluded.
 - With Widefleet 0.5.0, [app services](/guides/app-services) expose explicitly
   declared Worker entrypoints on celld and Cloudflare. Service calls transfer values;
   use `fetch()` for HTTP bodies. Callbacks, returned RPC objects and custom-RPC
@@ -61,7 +62,7 @@ export conditions; bundled CommonJS dependencies can require runtime builtins.
 Existing apps must opt in and redeploy with CLI 0.1.3 or newer and a compatible
 management server.
 
-Supported APIs are listed in the [celld 0.6.1 Node API reference](https://github.com/denoland/celld/blob/v0.6.1/docs/cloudflare-compat.md#nodejs-compatibility).
+Supported APIs are listed in the [pinned celld Node API reference](https://github.com/widefleet/celld/blob/v0.6.3-widefleet.1/docs/cloudflare-compat.md#nodejs-compatibility).
 Crypto ciphers and child processes are unavailable, and `fs` uses celld's virtual
 filesystem. The `nodejs_compat` flag configures Widefleet's bundling; celld exposes
 its implemented Node APIs independently. The agent deploys the code bundled locally.

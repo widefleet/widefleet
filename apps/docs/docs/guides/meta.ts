@@ -16,5 +16,6 @@ export default defineMeta({
     "app-services",
     "workload-identity",
     "app-templates",
+    "mcp",
   ],
 });
