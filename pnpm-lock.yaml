@@ -381,6 +381,9 @@ importers:
       '@platform/ui':
         specifier: workspace:*
         version: link:../ui
+      '@posthog/mcp':
+        specifier: 1.2.3
+        version: 1.2.3(@modelcontextprotocol/sdk@1.32.0(supports-color@10.2.2)(zod@4.6.5))(@modelcontextprotocol/server@2.4.0)(posthog-node@5.55.0)
       effect:
         specifier: 4.1.0
         version: 4.1.0
@@ -2587,11 +2590,30 @@ packages:
   '@posthog/core@1.61.0':
     resolution: {integrity: sha512-FxOHbuxCZCFGb/46KdcBtilTX5ROeB4Gs8ZrWESzyNlCCxLw4/5xBVh8nfmPjbztuPvxRs5tOcpQ1kNnr2nlAA==}
 
+  '@posthog/core@1.68.0':
+    resolution: {integrity: sha512-5kjPcLquzj47qBGn52+7RRXrJJvrTHaRKgxV9izYPFzoVFEftFqSXYZF/ug+yialxDU73dR9apyi+mSaAeaXPw==}
+
+  '@posthog/mcp@1.2.3':
+    resolution: {integrity: sha512-94xzRN3Ov9Lb6QqEji49p4Tj3d1w3Ax+j8Ed6JCIPSxq2uCziaQjAJ2VI7DitYIQmTBWawM8b9Eth01C5QDi4A==}
+    engines: {node: ^20.20.0 || >=22.22.0}
+    peerDependencies:
+      '@modelcontextprotocol/sdk': '>=1.26.0'
+      '@modelcontextprotocol/server': '>=2.0.0'
+      posthog-node: ^5.0.0
+    peerDependenciesMeta:
+      '@modelcontextprotocol/sdk':
+        optional: true
+      '@modelcontextprotocol/server':
+        optional: true
+
   '@posthog/types@1.415.1':
     resolution: {integrity: sha512-7Qs2wcqipl8KcFpIkIKE1Wcj1djX4dEB3cfq907HrNpKK7/xKh3U4N4bkOD6h9+8j3SxWWrj9JNpE8CZXsE35w==}
 
   '@posthog/types@1.416.1':
     resolution: {integrity: sha512-PG06HE2axHNyyZ9CKSSHKSW4pWfQwEtPA1dewFqIwggcIgk1BsQ+tHSNqvZz+IvE2WnBZ8OcOkF9SWI55VxQfA==}
+
+  '@posthog/types@1.425.1':
+    resolution: {integrity: sha512-mh7jyQ5lN+XCeOnMdYkBEFtO/G0TxeLOKTWNH6E6OZjxS4nVM0Tb2xQt+FG5DCFM9qzL2HmuX6A793TwlJVDvw==}
 
   '@rolldown/binding-android-arm-eabi@1.2.12':
     resolution: {integrity: sha512-dB/a1214qKfHMXCpgqR4OZT+jS4kTyEXbQGJPqzobt5EwH5rX080pxE37alt3RzvR1bf1Yz/yGqRfrYAxuPw0A==}
@@ -8903,9 +8925,23 @@ snapshots:
     dependencies:
       '@posthog/types': 1.416.1
 
+  '@posthog/core@1.68.0':
+    dependencies:
+      '@posthog/types': 1.425.1
+
+  '@posthog/mcp@1.2.3(@modelcontextprotocol/sdk@1.32.0(supports-color@10.2.2)(zod@4.6.5))(@modelcontextprotocol/server@2.4.0)(posthog-node@5.55.0)':
+    dependencies:
+      '@posthog/core': 1.68.0
+      posthog-node: 5.55.0
+    optionalDependencies:
+      '@modelcontextprotocol/sdk': 1.32.0(supports-color@10.2.2)(zod@4.6.5)
+      '@modelcontextprotocol/server': 2.4.0
+
   '@posthog/types@1.415.1': {}
 
   '@posthog/types@1.416.1': {}
+
+  '@posthog/types@1.425.1': {}
 
   '@rolldown/binding-android-arm-eabi@1.2.12':
     optional: true

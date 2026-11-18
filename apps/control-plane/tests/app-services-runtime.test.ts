@@ -10,6 +10,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gunzipSync } from "node:zlib";
 import { createHash } from "node:crypto";
 import { build } from "esbuild";
 import {
@@ -28,6 +29,14 @@ import { executionProfiles, executionRecorder } from "./cloudflare/execution-lim
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 
 const hash = (source: string) => createHash("sha256").update(source).digest("hex");
+
+const analyticsEvent = z.object({
+  event: z.string(),
+  distinct_id: z.string(),
+  properties: z.record(z.string(), z.json()),
+});
+
+const analyticsBatch = z.object({ batch: z.array(analyticsEvent) });
 
 const sourceId = crypto.randomUUID();
 
@@ -131,6 +140,19 @@ describe.runIf(process.env["RUN_SERVICE_TESTS"] === "1").each(["workerd", "celld
     let native: ReturnType<typeof spawn> | undefined;
     let origin: string;
     let identityIssuer: string;
+    const analytics: z.infer<typeof analyticsEvent>[] = [];
+
+    // Receives the runtime's PostHog batches instead of the real ingestion endpoint.
+    const collector = createHttpServer((incoming, response) => {
+      const chunks: Buffer[] = [];
+      incoming.on("data", (chunk: Buffer) => chunks.push(chunk));
+      incoming.on("end", () => {
+        const bytes = Buffer.concat(chunks);
+        const body = incoming.headers["content-encoding"] === "gzip" ? gunzipSync(bytes) : bytes;
+        analytics.push(...analyticsBatch.parse(JSON.parse(body.toString())).batch);
+        response.writeHead(200).end("{}");
+      });
+    });
 
     const request = (
       path: string,
@@ -176,6 +198,9 @@ describe.runIf(process.env["RUN_SERVICE_TESTS"] === "1").each(["workerd", "celld
 
     beforeAll(async () => {
       directory = await mkdtemp(join(tmpdir(), "widefleet-app-services-"));
+      collector.listen(0, "127.0.0.1");
+      await once(collector, "listening");
+      const analyticsPort = z.object({ port: z.number() }).parse(collector.address()).port;
       const identity = await runtimeIdentity("apps.example.test", [], [], "bob");
       identityIssuer =
         identity.configuration.provider.type === "oidc"
@@ -203,6 +228,12 @@ describe.runIf(process.env["RUN_SERVICE_TESTS"] === "1").each(["workerd", "celld
 import * as workers from 'cloudflare:workers';
 import {mcpFixture} from './mcp-fixture.js';
 import runtime, {AppService as Service, WorkloadIdentity as Identity} from './runtime.js'; export * from './runtime.js';
+const originalFetch = globalThis.fetch;
+globalThis.fetch = (input, init) => {
+  const request = new Request(input, init);
+  const url = new URL(request.url);
+  return originalFetch(url.origin === 'https://eu.i.posthog.com' ? new Request('http://127.0.0.1:${analyticsPort}'+url.pathname, request) : request);
+};
 ${executionRecorder}
 export class AppService extends Service { constructor(ctx, env) { super(ctx, recordExecution(env)); } }
 export class UnconfiguredIdentity extends Identity { constructor(ctx, env) { super(ctx, {...env,WIDEFLEET_WORKLOAD_ISSUER:undefined}); } }
@@ -277,6 +308,8 @@ export default { async fetch(request, env, ctx) {
             WIDEFLEET_WORKLOAD_ISSUER: "https://auth.apps.example.test/workload",
             WIDEFLEET_MCP_ORIGIN: "https://mcp.apps.example.test",
             WIDEFLEET_CONFIGURATION: '{"crons":{},"queues":{}}',
+            POSTHOG_PROJECT_TOKEN: "phc_synthetic_fixture",
+            POSTHOG_SCOPE: "fixture",
           },
           worker_loaders: [{ binding: "WIDEFLEET_LOADER" }],
           r2_buckets: [{ binding: "WIDEFLEET_PACKAGES", bucket_name: "packages" }],
@@ -329,6 +362,7 @@ export default { async fetch(request, env, ctx) {
     }, 30000);
     afterAll(async () => {
       await harness?.close();
+      collector.close();
 
       if (native && native.exitCode === null) {
         const exited = once(native, "exit");
@@ -786,6 +820,58 @@ export default { async fetch(request, env, ctx) {
       expect(expired.isError, expired.content[0]?.text).toBe(true);
       expect(expired.content[0]?.text).toContain("TimeoutExceeded");
       expect(Date.now() - started).toBeLessThan(40_000);
+
+      const listed = z
+        .object({
+          result: z.object({
+            tools: z.array(
+              z.object({
+                name: z.string(),
+                inputSchema: z.object({ properties: z.record(z.string(), z.unknown()) }),
+              }),
+            ),
+          }),
+        })
+        .parse(await send("tools/list", {}));
+
+      for (const tool of listed.result.tools)
+        expect(tool.inputSchema.properties).toHaveProperty("context");
+
+      await expect
+        .poll(
+          () =>
+            new Set(
+              analytics.flatMap((event) =>
+                event.event === "$mcp_tool_call" ? [event.properties["$mcp_tool_name"]] : [],
+              ),
+            ),
+          { timeout: 8_000 },
+        )
+        .toEqual(new Set(["skills", "search", "describe", "call", "execute"]));
+
+      const toolCalls = analytics.filter((event) => event.event.startsWith("$mcp_"));
+
+      for (const event of toolCalls) {
+        expect(event).toMatchObject({
+          distinct_id: "organization:widefleet",
+          properties: {
+            $groups: { organization: "widefleet" },
+            scope: "fixture",
+            service: "app-runtime",
+          },
+        });
+        expect(event.properties).not.toHaveProperty("$mcp_parameters");
+        expect(event.properties).not.toHaveProperty("$mcp_response");
+      }
+
+      // A fragment of the code sent to execute, which must not leave the runtime.
+      expect(JSON.stringify(toolCalls)).not.toContain("typeof process");
+      // App failures behind call and execute are not platform exceptions.
+      expect(
+        analytics.filter(
+          (event) => event.event === "$exception" && "$mcp_tool_name" in event.properties,
+        ),
+      ).toEqual([]);
 
       await request("/mcp-revoke", { token: accessToken });
       expect(

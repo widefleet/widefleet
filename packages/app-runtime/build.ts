@@ -54,6 +54,17 @@ const compile = async (entry: string, define: Record<string, string>) => {
       "node:*",
     ],
     alias: Object.fromEntries(alias),
+    plugins: [
+      {
+        // posthog-node's root entry is Node-only; the MCP analytics SDK imports it there.
+        name: "posthog-node-edge",
+        setup(bundler) {
+          bundler.onResolve({ filter: /^posthog-node$/ }, ({ kind, resolveDir }) =>
+            bundler.resolve("posthog-node/edge", { kind, resolveDir }),
+          );
+        },
+      },
+    ],
     banner: { js: `/*!\n${license}*/` },
     define,
     write: false,

@@ -2,6 +2,7 @@ import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
 import { mcpServiceCall, mcpScopes } from "@platform/contracts";
 import { z } from "zod";
 import type { ParentEnvironment } from "./types.ts";
+import { mcpAnalytics } from "./mcp-analytics.ts";
 import { verifyMcpToken } from "./mcp-authorization.ts";
 import { readMcpConfiguration } from "./mcp-oauth.ts";
 import { callMcpService, describeMcpService, searchMcpServices } from "./mcp-services.ts";
@@ -64,10 +65,11 @@ export const mcpRequest = async (
   }
 
   const principal = claims;
+  const analytics = mcpAnalytics(environment, principal.mcp.organizationId);
   const catalog = skills();
   const extension = await catalog.extension();
 
-  return createMcpHandler(
+  const response = await createMcpHandler(
     () => {
       const server = new McpServer(
         { name: "Widefleet", version: WIDEFLEET_RUNTIME_VERSION },
@@ -134,8 +136,12 @@ export const mcpRequest = async (
           result(await executeMcpCode(environment, context, token, code, request.signal)),
       );
 
+      analytics?.instrument(server);
+
       return server;
     },
     { maxRequestBodySize: 1024 * 1024 },
   ).fetch(request);
+
+  return analytics ? analytics.deliver(response) : response;
 };
