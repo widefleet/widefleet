@@ -185,47 +185,47 @@ test("opens organization settings without installation reporting privileges", as
   }
 });
 
-for (const javaScriptEnabled of [true, false]) {
-  test(`asks which organization an MCP client connects, despite an active one (JavaScript ${javaScriptEnabled})`, async ({
-    browser,
-  }) => {
-    const { person, alpha, beta, context } = await organizationSession(browser, javaScriptEnabled);
+// The redirect is server-side; without JavaScript this test loads no client modules, which
+// would make Vite optimize dependencies while the next browser test starts.
+test("asks which organization an MCP client connects, despite an active one", async ({
+  browser,
+}) => {
+  const { person, alpha, beta, context } = await organizationSession(browser, false);
 
-    try {
-      // The active organization may be left over from earlier work in another tab.
-      await environment.database.db
-        .update(session)
-        .set({ activeOrganizationId: alpha })
-        .where(eq(session.userId, person.id));
-      const state = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
-      const signIn = `/mcp/sign-in?${new URLSearchParams({ state })}`;
+  try {
+    // The active organization may be left over from earlier work in another tab.
+    await environment.database.db
+      .update(session)
+      .set({ activeOrganizationId: alpha })
+      .where(eq(session.userId, person.id));
+    const state = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
+    const signIn = `/mcp/sign-in?${new URLSearchParams({ state })}`;
 
-      const response = await context.request.get(signIn, { maxRedirects: 0 });
-      expect(response.status()).toBe(303);
-      const chooser = new URL(response.headers()["location"] ?? "invalid", "http://localhost");
-      expect(chooser.pathname).toBe("/organizations");
-      expect(chooser.searchParams.get("next")).toBe(
-        `/mcp/sign-in?${new URLSearchParams({ state, chosen: "1" })}`,
-      );
+    const response = await context.request.get(signIn, { maxRedirects: 0 });
+    expect(response.status()).toBe(303);
+    const chooser = new URL(response.headers()["location"] ?? "invalid", "http://localhost");
+    expect(chooser.pathname).toBe("/organizations");
+    expect(chooser.searchParams.get("next")).toBe(
+      `/mcp/sign-in?${new URLSearchParams({ state, chosen: "1" })}`,
+    );
 
-      const page = await context.newPage();
-      await page.goto(signIn);
+    const page = await context.newPage();
+    await page.goto(signIn);
 
-      // Routes do not intercept redirected requests; observe the data-plane request instead.
-      const reached = page.waitForRequest((request) =>
-        request.url().startsWith("https://mcp.apps.localhost/"),
-      );
+    // Routes do not intercept redirected requests; observe the data-plane request instead.
+    const reached = page.waitForRequest((request) =>
+      request.url().startsWith("https://mcp.apps.localhost/"),
+    );
 
-      await page.getByRole("button", { name: /Beta/ }).click();
+    await page.getByRole("button", { name: /Beta/ }).click();
 
-      const target = new URL((await reached).url());
-      expect(target.pathname).toBe("/oauth/organization");
-      expect(Object.fromEntries(target.searchParams)).toEqual({ state, organization: beta });
-    } finally {
-      await context.close();
-    }
-  });
-}
+    const target = new URL((await reached).url());
+    expect(target.pathname).toBe("/oauth/organization");
+    expect(Object.fromEntries(target.searchParams)).toEqual({ state, organization: beta });
+  } finally {
+    await context.close();
+  }
+});
 
 test("returns MCP sign-in directly for a person with one organization", async ({ browser }) => {
   const { person, alpha, beta, context } = await organizationSession(browser, false);
