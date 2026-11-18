@@ -3,6 +3,7 @@ import { betterAuth } from "better-auth";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
+import { settingsInput } from "@platform/contracts";
 import dns from "node:dns/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { createTestEnvironment, organizationCredential } from "./environment.ts";
@@ -358,6 +359,116 @@ describe("Better Auth SSO provider integration", () => {
       await environment.settings.removeDomain(principal, "claimed.example.test", false);
       await environment.database.db.delete(organization).where(eq(organization.id, organizationId));
     }
+  });
+
+  it("registers several pending domains and requires their DNS proof before activation", async () => {
+    await environment.database.db.delete(ssoProvider);
+    await environment.database.db.delete(ssoDomains);
+    await environment.database.db.update(organizationSettings).set({ ssoRequired: false });
+
+    const principal = {
+      ...environment.owner,
+      role: "owner" as const,
+      admin: true,
+      creator: true,
+      application: { organizationId: "widefleet", admin: true },
+    };
+
+    const credential = await organizationCredential(environment, principal);
+    await environment.settings.initialize(
+      settingsInput.parse({
+        sso: {
+          providerId: "multiple-domains",
+          domain: "first.example.test,second.example.test",
+          issuer: idp.origin,
+          oidcConfig: { clientId: "app-login", clientSecret: "synthetic-client-secret" },
+        },
+      }),
+      "widefleet",
+      credential,
+    );
+    expect(await environment.settings.read(principal)).toMatchObject({
+      ssoPolicy: { domainVerificationRequired: true },
+      sso: { domain: "first.example.test,second.example.test", domainVerified: false },
+      ssoDomains: [
+        { domain: "first.example.test", verified: false },
+        { domain: "second.example.test", verified: false },
+      ],
+    });
+    await expect(environment.settings.activateSso(principal)).rejects.toMatchObject({
+      code: "CONFLICT",
+    });
+  });
+
+  it("saves credentials and claims without replacing a verified domain list", async () => {
+    // Start with the stored provider shape used by connections with several proven domains.
+    await environment.database.db.delete(ssoDomains);
+    await environment.database.db.update(ssoProvider).set({
+      appIdentityType: "oidc",
+      domain: "first.example.test,second.example.test",
+      domainVerified: true,
+    });
+
+    const principal = {
+      ...environment.owner,
+      role: "owner" as const,
+      admin: true,
+      creator: true,
+      application: { organizationId: "widefleet", admin: true },
+    };
+
+    const credential = await organizationCredential(environment, principal);
+    await environment.settings.activateSso(principal);
+    const before = await environment.settings.read(principal);
+    const next = editableSettings(before);
+
+    if (!next.sso) throw new Error("Missing fixture provider");
+    delete next.sso.domain;
+    next.sso.oidcConfig.clientSecret = "rotated-synthetic-client-secret";
+    next.sso.oidcConfig.mapping.extraFields.groups = "roles";
+
+    const updated = await environment.settings.update(
+      principal,
+      { ...next, acknowledgeRestart: false },
+      false,
+      credential,
+    );
+
+    expect(updated).toMatchObject({
+      ssoRequired: true,
+      sso: { domain: "first.example.test,second.example.test", domainVerified: true },
+      ssoDomains: before.ssoDomains,
+      activation: { state: "active" },
+    });
+    const [stored] = await environment.database.db.select().from(ssoProvider);
+
+    expect(
+      JSON.parse(
+        await decryptSecret(
+          environment.environment.PLATFORM_ENCRYPTION_KEY,
+          stored?.oidcConfig ?? "",
+        ),
+      ),
+    ).toMatchObject({
+      clientSecret: "rotated-synthetic-client-secret",
+      mapping: { extraFields: { groups: "roles" } },
+    });
+    expect(environment.authControl.read().configuration?.provider).toMatchObject({
+      groupsClaim: "roles",
+    });
+
+    for (const domain of [
+      "",
+      "first.example.test,*.example.test",
+      "first.example.test,https://example.test",
+    ])
+      await expect(
+        credential.auth.api.updateSSOProvider({
+          headers: credential.headers,
+          body: { providerId: next.sso.providerId, domain },
+        }),
+      ).rejects.toThrow();
+    expect((await environment.settings.read(principal)).ssoDomains).toEqual(before.ssoDomains);
   });
 
   it.each(["registered", "migrated"])(

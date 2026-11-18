@@ -4,7 +4,7 @@ import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/a
 import type { JSONWebKeySet } from "jose";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
-import { companyDomain, identityUrl } from "@platform/contracts";
+import { companyDomains, identityUrl } from "@platform/contracts";
 import { verifyAccessToken } from "./access-token.ts";
 import { organizationSettings } from "./schema.ts";
 import { invitation, ssoProvider, user } from "./auth-schema.ts";
@@ -127,7 +127,7 @@ export const pluginAuthentication = (
       ["/sso/register", "/sso/update-provider"].includes(context.path) &&
       !operatorTrustedSso(configuration, organizationId)
     )
-      companyDomain.parse(input.domain ?? provider?.domain);
+      companyDomains.parse(input.domain ?? provider?.domain);
 
     if (
       ["/sso/request-domain-verification", "/sso/verify-domain"].includes(context.path) &&
