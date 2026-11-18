@@ -147,12 +147,10 @@ export const createUserConnections = (
 
       return results.filter((result) => result !== null);
     },
-    prepare: async (principal: Principal, appId: string, onboarding = false) => {
+    prepare: async (principal: Principal, appId: string) => {
       const record = await target(principal, appId);
       const completion = new URL("/connections", configuration.PLATFORM_URL);
       completion.searchParams.set("completed", appId);
-
-      if (onboarding) completion.searchParams.set("onboarding", "1");
 
       const result = await call(principal, record, await identify(principal), {
         action: "prepare",

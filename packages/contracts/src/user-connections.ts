@@ -41,8 +41,4 @@ export const userConnectionEntry = z.strictObject({
 
 export const userConnectionInput = z.strictObject({ appId: z.uuid() });
 
-export const userConnectionPrepareInput = userConnectionInput.extend({
-  onboarding: z.boolean().default(false),
-});
-
 export const userConnectionControlPath = "/.well-known/widefleet/user-connections";

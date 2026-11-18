@@ -11,12 +11,10 @@
 
   let {
     connection,
-    onboarding,
     confirmDisconnect,
     showHostname = false,
   }: {
     connection: z.infer<typeof userConnectionEntry>;
-    onboarding: boolean;
     confirmDisconnect: boolean;
     showHostname?: boolean;
   } = $props();
@@ -24,8 +22,6 @@
   const connect = $derived(prepareUserConnection.for(connection.appId));
 
   const disconnect = $derived(disconnectUserConnection.for(connection.appId));
-
-  const path = $derived(onboarding ? "/connections?onboarding=1" : "/connections");
 
   let menu = $state<HTMLDetailsElement>();
 
@@ -112,7 +108,6 @@
             <form {...connect}>
               <OrganizationField field={connect.fields.organizationId} />
               <input {...connect.fields.appId.as("hidden", connection.appId)} />
-              <input {...connect.fields.onboarding.as("hidden", String(onboarding))} />
               <Button
                 type="submit"
                 variant="ghost"
@@ -128,7 +123,7 @@
           <Button
             variant="ghost"
             class="w-full justify-start"
-            href={`${path}${onboarding ? "&" : "?"}disconnect=${connection.appId}`}
+            href={`/connections?disconnect=${connection.appId}`}
           >
             Disconnect<span class="sr-only"> {connection.displayName}</span>
           </Button>
@@ -138,7 +133,6 @@
       <form {...connect} class="shrink-0">
         <OrganizationField field={connect.fields.organizationId} />
         <input {...connect.fields.appId.as("hidden", connection.appId)} />
-        <input {...connect.fields.onboarding.as("hidden", String(onboarding))} />
         <Button type="submit" size="sm" variant="outline" disabled={connect.pending > 0}>
           {connect.pending > 0 ? "Opening…" : "Connect"}<span class="sr-only">
             {connection.displayName}</span
@@ -152,7 +146,6 @@
     <form {...disconnect} class="bg-muted/40 mt-4 space-y-3 rounded-lg p-4">
       <OrganizationField field={disconnect.fields.organizationId} />
       <input {...disconnect.fields.appId.as("hidden", connection.appId)} />
-      <input {...disconnect.fields.onboarding.as("hidden", String(onboarding))} />
       <p class="text-sm">
         Disconnect your {connection.displayName} account? Apps using this connection will lose access
         until you connect again.
@@ -162,7 +155,7 @@
         <Button type="submit" size="sm" variant="destructive" disabled={disconnect.pending > 0}
           >{disconnect.pending > 0 ? "Disconnecting…" : "Disconnect account"}</Button
         >
-        <Button href={path} size="sm" variant="ghost">Cancel</Button>
+        <Button href="/connections" size="sm" variant="ghost">Cancel</Button>
       </div>
     </form>
   {/if}

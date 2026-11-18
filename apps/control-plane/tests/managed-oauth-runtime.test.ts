@@ -331,7 +331,7 @@ export default class Consumer extends WorkerEntrypoint {
     if (flow === "personal") {
       const prepared = await manage({
         action: "prepare",
-        completionUrl: "https://widefleet.example.test/connections?onboarding=1",
+        completionUrl: "https://widefleet.example.test/connections?completed=example",
       });
 
       expect(prepared.status, await prepared.clone().text()).toBe(200);
@@ -367,7 +367,7 @@ export default class Consumer extends WorkerEntrypoint {
 
     if (flow === "personal")
       expect((await browser(completion)).headers.get("location")).toBe(
-        "https://widefleet.example.test/connections?onboarding=1",
+        "https://widefleet.example.test/connections?completed=example",
       );
     else expect(completion, await returned.text()).toBe(`${origin}/`);
     expect(await (await manage({ action: "status" })).json()).toEqual({

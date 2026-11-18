@@ -609,12 +609,10 @@ export const createApi = (runtime: Runtime) => {
       ),
     prepareUserConnection: write
       .route({ method: "POST", path: "/user-connections/{appId}/connect" })
-      .input(contract.userConnectionPrepareInput)
+      .input(contract.userConnectionInput)
       .output(contract.userConnectionLaunch)
       .handler(({ context, input }) =>
-        apiOperation(() =>
-          runtime.userConnections.prepare(context.principal, input.appId, input.onboarding),
-        ),
+        apiOperation(() => runtime.userConnections.prepare(context.principal, input.appId)),
       ),
     disconnectUserConnection: write
       .route({ method: "DELETE", path: "/user-connections/{appId}" })

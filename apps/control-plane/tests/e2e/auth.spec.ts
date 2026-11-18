@@ -3169,7 +3169,7 @@ for (const javaScriptEnabled of [true, false]) {
 }
 
 for (const javaScriptEnabled of [true, false])
-  test(`personal connections onboarding and account controls (javascript=${javaScriptEnabled})`, async ({
+  test(`personal connections account controls and workspace entry (javascript=${javaScriptEnabled})`, async ({
     browser,
   }) => {
     const person = environment.users.createUser({
@@ -3191,6 +3191,7 @@ for (const javaScriptEnabled of [true, false])
     let denied = false;
     let expectedUser = person.id;
     let launches = 0;
+    let statusReads = 0;
 
     const context = await browser.newContext({
       javaScriptEnabled,
@@ -3264,7 +3265,9 @@ for (const javaScriptEnabled of [true, false])
 
         if (unavailable && input.appId === files) return new Response(null, { status: 503 });
 
-        if (input.operation.action === "status")
+        if (input.operation.action === "status") {
+          statusReads++;
+
           return Response.json({
             setup: input.appId === gmail ? "required" : "ready",
             connection: connected.has(input.appId) ? "connected" : "disconnected",
@@ -3272,6 +3275,7 @@ for (const javaScriptEnabled of [true, false])
               ? { id: "example-account", label: "taylor@example.test" }
               : null,
           });
+        }
 
         if (input.operation.action === "disconnect") {
           connected.delete(input.appId);
@@ -3300,9 +3304,33 @@ for (const javaScriptEnabled of [true, false])
 
       await page.goto(`/invitations/${invitation.invitation.id}`);
       await page.getByRole("button", { name: "Accept invitation" }).click();
-      await expect(page).toHaveURL(/\/connections\?onboarding=1$/);
-      await expect(page.getByRole("heading", { name: "Connect your accounts" })).toBeVisible();
-      await expect(page.getByRole("heading", { name: "Gmail", exact: true })).toHaveCount(0);
+      await expect(page).toHaveURL(environment.configuration.PLATFORM_URL + "/");
+      expect(statusReads).toBe(0);
+
+      if (javaScriptEnabled) {
+        await mkdir("../../.local/personal-connections", { recursive: true });
+
+        for (const [name, width, height, colorScheme] of [
+          ["desktop-light", 1440, 1000, "light"],
+          ["desktop-dark", 1440, 1000, "dark"],
+          ["mobile-dark", 390, 844, "dark"],
+          ["mobile-light", 390, 844, "light"],
+        ] as const) {
+          await page.setViewportSize({ width, height });
+          await page.emulateMedia({ colorScheme });
+          await page.screenshot({
+            path: `../../.local/personal-connections/workspace-${name}.png`,
+            fullPage: true,
+          });
+        }
+      }
+
+      if (javaScriptEnabled) await page.getByText("Menu", { exact: true }).click();
+      await page.getByRole("link", { name: "My connections", exact: true }).click();
+      await expect(
+        page.getByRole("heading", { name: "My connections", exact: true }),
+      ).toBeVisible();
+      await expect(page.getByRole("button", { name: "Continue to apps" })).toHaveCount(0);
       await expect(page.getByText("Not connected", { exact: true })).toHaveCount(0);
       await expect(page.getByText("personal-github.apps.localhost", { exact: true })).toHaveCount(
         0,
@@ -3310,37 +3338,11 @@ for (const javaScriptEnabled of [true, false])
       await expect(page.getByRole("link", { name: "Refresh", exact: true })).toHaveCount(0);
       await expect(page.getByText("taylor@example.test", { exact: false })).toBeVisible();
 
-      if (javaScriptEnabled) {
-        await mkdir("../../.local/personal-connections", { recursive: true });
-        await page.setViewportSize({ width: 1440, height: 1000 });
-        await page.screenshot({
-          path: "../../.local/personal-connections/desktop-light.png",
-          fullPage: true,
-        });
-        await page.emulateMedia({ colorScheme: "dark" });
-        await page.screenshot({
-          path: "../../.local/personal-connections/desktop-dark.png",
-          fullPage: true,
-        });
-        await page.setViewportSize({ width: 390, height: 844 });
-        await page.screenshot({
-          path: "../../.local/personal-connections/mobile-dark.png",
-          fullPage: true,
-        });
-        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
-          true,
-        );
-        await page.emulateMedia({ colorScheme: "light" });
-        await page.screenshot({
-          path: "../../.local/personal-connections/mobile-light.png",
-          fullPage: true,
-        });
-      }
-
-      await page.goto("/connections");
       await expect(page.getByText("Awaiting administrator setup")).toBeVisible();
 
       if (javaScriptEnabled) {
+        await mkdir("../../.local/personal-connections", { recursive: true });
+
         for (const [name, width, height, colorScheme] of [
           ["desktop-light", 1440, 1000, "light"],
           ["desktop-dark", 1440, 1000, "dark"],
@@ -3358,8 +3360,6 @@ for (const javaScriptEnabled of [true, false])
           ).toBe(true);
         }
       }
-
-      await page.goto("/connections?onboarding=1");
 
       const githubRow = page
         .locator("li")
@@ -3380,7 +3380,7 @@ for (const javaScriptEnabled of [true, false])
         await expect(githubRow.getByRole("button", { name: "Reconnect GitHub" })).toBeHidden();
         await expect(options).toBeFocused();
         await page.keyboard.press("Enter");
-        await page.getByRole("heading", { name: "Connect your accounts" }).click();
+        await page.getByRole("heading", { name: "My connections", exact: true }).click();
         await expect(githubRow.getByRole("button", { name: "Reconnect GitHub" })).toBeHidden();
         await options.click();
         await page.screenshot({
@@ -3425,13 +3425,9 @@ for (const javaScriptEnabled of [true, false])
       await page.getByRole("link", { name: "Try again", exact: true }).click();
       await expect(page.getByText("Could not check this account.")).toBeHidden();
       await expect(page.getByRole("link", { name: "Try again", exact: true })).toBeHidden();
-      await page.getByRole("button", { name: "Continue to apps" }).click();
-      await expect(page).toHaveURL(/\/catalog$/);
       await page.goto("/");
       await expect(page).toHaveURL(environment.configuration.PLATFORM_URL + "/");
 
-      // Completing onboarding for another signed-in account must not erase this
-      // account's choice in the same browser cookie jar.
       const other = environment.users.createUser({
         name: "Other member",
         email: `other-personal-${javaScriptEnabled}@example.test`,
@@ -3441,20 +3437,16 @@ for (const javaScriptEnabled of [true, false])
       await environment.linkMicrosoftUser(other.id);
       await signInAs(other.id);
       await page.goto("/");
-      await expect(page).toHaveURL(/\/connections\?onboarding=1$/);
-      await page.getByRole("button", { name: "Continue to apps" }).click();
-      await expect(page).toHaveURL(/\/catalog$/);
-      await signInAs(person.id);
-      await page.goto("/");
       await expect(page).toHaveURL(environment.configuration.PLATFORM_URL + "/");
 
-      await context.clearCookies({ name: /^widefleet_connections_seen_/ });
+      if (javaScriptEnabled) await page.getByText("Menu", { exact: true }).click();
+      await page.getByRole("link", { name: "My connections", exact: true }).click();
+      await expect(githubRow.getByRole("button", { name: "Connect GitHub" })).toBeVisible();
+      await signInAs(person.id);
       denied = true;
-      await page.goto("/");
-      await expect(page).toHaveURL(environment.configuration.PLATFORM_URL + "/");
+      await page.goto("/connections");
+      await expect(page.getByText("No personal connections available")).toBeVisible();
       denied = false;
-      await page.goto("/");
-      await expect(page).toHaveURL(/\/connections\?onboarding=1$/);
       await page.goto("/connections?success=true");
       await expect(githubRow.getByRole("button", { name: "Connect GitHub" })).toBeVisible();
       // Duplicate names retain the hostnames needed to distinguish deployments.
@@ -3465,12 +3457,11 @@ for (const javaScriptEnabled of [true, false])
       await page.reload();
       await expect(page.getByText("personal-github.apps.localhost", { exact: true })).toBeVisible();
       await expect(page.getByText("personal-gmail.apps.localhost", { exact: true })).toBeVisible();
-      // Setup-only connectors must not send a new member into an empty onboarding task.
+      // Incomplete setup remains visible when opening connection management.
       await environment.database.db
         .update(apps)
         .set({ catalogListed: false })
         .where(inArray(apps.id, [github, files]));
-      await context.clearCookies({ name: /^widefleet_connections_seen_/ });
       await page.goto("/");
       await expect(page).toHaveURL(environment.configuration.PLATFORM_URL + "/");
       await page.goto("/connections");

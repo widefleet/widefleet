@@ -1,31 +1,9 @@
-import { redirect } from "@sveltejs/kit";
-import { pagePrincipal } from "#server/page-auth";
-import { connectionOnboardingCookie } from "#server/connection-onboarding";
-import { getUserConnections } from "#lib/user-connections.remote";
 import { getApps } from "#lib/apps.remote";
 import { z } from "zod";
 import type { PageServerLoad } from "./$types";
 
-export const load: PageServerLoad = async ({ setHeaders, url, cookies }) => {
+export const load: PageServerLoad = async ({ setHeaders, url }) => {
   setHeaders({ "cache-control": "private, no-store" });
-  const principal = await pagePrincipal();
-
-  if (
-    !principal.application.admin &&
-    cookies.get(
-      await connectionOnboardingCookie(principal.id, principal.application.organizationId),
-    ) !== "1"
-  ) {
-    const result = await getUserConnections();
-
-    if (
-      result.connections.some(
-        (connection) => !connection.unavailable && connection.status?.setup === "ready",
-      )
-    )
-      redirect(303, "/connections?onboarding=1");
-  }
-
   await getApps();
 
   return {

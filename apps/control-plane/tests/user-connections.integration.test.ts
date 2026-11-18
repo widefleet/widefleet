@@ -135,11 +135,11 @@ describe("Personal connector accounts", () => {
       name: "Member",
       groups: [],
     });
-    const prepared = await service().prepare(principal(), visible.id, true);
+    const prepared = await service().prepare(principal(), visible.id);
     expect(new URL(prepared.url).hostname).toBe(visible.hostname);
     expect(calls.at(-1)?.operation).toEqual({
       action: "prepare",
-      completionUrl: `${environment.configuration.PLATFORM_URL}/connections?completed=${visible.id}&onboarding=1`,
+      completionUrl: `${environment.configuration.PLATFORM_URL}/connections?completed=${visible.id}`,
     });
     await expect(service().prepare(principal(), hidden.id)).rejects.toMatchObject({
       code: "NOT_FOUND",

@@ -231,7 +231,7 @@ for (const [template, kind, prefix, profile] of [
       async (custom) => {
         await runtime.setOptions(configuration(custom));
         const alice = browser("alice");
-        const completionUrl = "https://widefleet.example.test/connections?onboarding=1";
+        const completionUrl = "https://widefleet.example.test/connections?completed=example";
         expect(await (await alice.request("/rpc/personal/status")).json()).toEqual({
           setup: "ready",
           connection: "disconnected",
@@ -301,7 +301,7 @@ for (const [template, kind, prefix, profile] of [
 
     it("rejects expired launch tickets and returns cancelled authorization to the original context", async () => {
       const alice = browser("alice");
-      const completionUrl = "https://widefleet.example.test/connections?onboarding=1";
+      const completionUrl = "https://widefleet.example.test/connections?completed=example";
 
       const prepare = async () =>
         z
