@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { ssoProvider } from "../../src/lib/server/auth-schema.ts";
 import { organizationSettings } from "../../src/lib/server/schema.ts";
-import { createTestEnvironment } from "../environment.ts";
+import { createTestEnvironment, linkCompanyAccount } from "../environment.ts";
 
 test.use({ baseURL: "http://localhost:25435" });
 
@@ -66,7 +66,9 @@ test("configures self-hosted SSO without a company domain or DNS proof", async (
       .fill(z.string().parse(logs.match(/code is (\d{6})/)?.[1]));
     await page.getByRole("button", { name: "Verify and sign in", exact: true }).click();
     await expect(page).toHaveURL(/\/settings$/);
-    await page.getByRole("button", { name: "Configure company SSO", exact: true }).click();
+    await page.getByRole("link", { name: /^Company SSO.*Set up$/ }).click();
+    await page.getByRole("button", { name: /^Microsoft Entra/ }).click();
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
     const domain = page.getByLabel("Company email domain (optional)");
     await expect(domain).not.toHaveAttribute("required");
     await page
@@ -74,16 +76,20 @@ test("configures self-hosted SSO without a company domain or DNS proof", async (
       .fill(
         `${environment.environment.ENTRA_AUTHORITY}/${environment.environment.ENTRA_TENANT_ID}/v2.0`,
       );
-    await page.getByLabel("App identity provider").selectOption("entra");
     await page
       .getByLabel("Client ID", { exact: true })
       .fill(environment.environment.ENTRA_CLIENT_ID);
     await page
       .getByLabel("Client secret", { exact: true })
       .fill(environment.environment.ENTRA_CLIENT_SECRET);
-    await page.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(page.getByText("Settings saved.", { exact: true })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Get verification record" })).toHaveCount(0);
+    await page.getByRole("button", { name: "Save and continue", exact: true }).click();
+    await expect(
+      page.getByText(
+        "This installation trusts its configured identity provider. DNS verification is not required.",
+        { exact: true },
+      ),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
     await expect(page.getByRole("button", { name: "Test company sign-in" })).toBeVisible();
     await expect(
       page.getByText(
@@ -92,7 +98,8 @@ test("configures self-hosted SSO without a company domain or DNS proof", async (
       ),
     ).toBeVisible();
 
-    await page.getByRole("link", { name: "Email domains", exact: true }).click();
+    await page.getByRole("link", { name: "Manage connection", exact: true }).click();
+    await page.waitForLoadState("networkidle");
     await expect(page.getByText("No email domains", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Add domain", exact: true }).click();
     await page.getByLabel("Domain", { exact: true }).fill("example.test");
@@ -119,7 +126,10 @@ test("configures self-hosted SSO without a company domain or DNS proof", async (
     await page.getByRole("button", { name: "Remove example.test", exact: true }).focus();
     await page.keyboard.press("Enter");
     await expect(page.getByText("No email domains", { exact: true })).toBeVisible();
-    await page.getByRole("link", { name: "Company sign-in", exact: true }).click();
+    // A completed company sign-in links the administrator, which activation requires.
+    await linkCompanyAccount(environment.database.db, environment.owner.id);
+    await page.goto("/settings/sso/setup?step=activate");
+    await page.waitForLoadState("networkidle");
 
     for (const theme of ["light", "dark"] as const) {
       await page.emulateMedia({ colorScheme: theme });

@@ -6,14 +6,14 @@ import { EventEmitter, once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import { organization, ssoProvider } from "../../src/lib/server/auth-schema.ts";
+import { organization, ssoProvider, user } from "../../src/lib/server/auth-schema.ts";
 import {
   installation,
   organizationRuntimes,
   organizationSettings,
 } from "../../src/lib/server/schema.ts";
 import { prepareOrganizationInvitation } from "../../src/lib/server/members.ts";
-import { createTestEnvironment } from "../environment.ts";
+import { createTestEnvironment, linkCompanyAccount } from "../environment.ts";
 import { createIdentityProvider } from "../edge/auth-proxy-idp.ts";
 
 const emailMessage = z.object({ to: z.email(), subject: z.string(), text: z.string() });
@@ -500,9 +500,20 @@ test("accepts emailed owner invitations and manages members in isolated organiza
     await operator.goto("/settings/sso/setup?step=test");
     await operator.waitForLoadState("networkidle");
     await expect(operator.getByRole("button", { name: "Test company sign-in" })).toBeVisible();
-    // Testing is optional once a domain is verified, also without the desktop step list.
-    await operator.getByRole("button", { name: "Activate without testing" }).click();
-    await expect(operator).toHaveURL(/step=activate$/);
+    // Activation needs the administrator's account linked to the provider; until then the
+    // flow stays on the sign-in test.
+    await operator.goto("/settings/sso/setup?step=activate");
+    await operator.waitForLoadState("networkidle");
+    await expect(operator.getByRole("heading", { name: "Test sign-in" })).toBeVisible();
+
+    const [operatorUser] = await environment.database.db
+      .select({ id: user.id })
+      .from(user)
+      .where(eq(user.email, "email-setup@example.test"));
+
+    await linkCompanyAccount(environment.database.db, z.string().parse(operatorUser?.id));
+    await operator.reload();
+    await operator.waitForLoadState("networkidle");
     await expect(
       operator.getByRole("button", { name: "Activate company SSO", exact: true }),
     ).toBeEnabled();

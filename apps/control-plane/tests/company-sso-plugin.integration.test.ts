@@ -6,7 +6,11 @@ import { z } from "zod";
 import { settingsInput } from "@platform/contracts";
 import dns from "node:dns/promises";
 import { syncBuiltinESMExports } from "node:module";
-import { createTestEnvironment, organizationCredential } from "./environment.ts";
+import {
+  createTestEnvironment,
+  organizationCredential,
+  linkCompanyAccount,
+} from "./environment.ts";
 import { editableSettings } from "./settings-input.ts";
 import { createIdentityProvider } from "./edge/auth-proxy-idp.ts";
 import { organizationSettings, ssoDomains } from "../src/lib/server/schema.ts";
@@ -93,6 +97,9 @@ describe("Better Auth SSO provider integration", () => {
       auth.api.signInSSO({ body: { providerId: "test-company", callbackURL: "/apps" } }),
     ).rejects.toThrow();
 
+    // Widefleet tracks domains it verifies; a provider registered directly through the
+    // plugin gets its domain through the settings service.
+    await environment.settings.addDomain(principal, "example.test", false);
     resolver.mockResolvedValue([["wrong-token"]]);
     await expect(environment.settings.verifyDomain(principal)).rejects.toThrow();
     const proof = await environment.settings.domainVerification(principal);
@@ -116,7 +123,12 @@ describe("Better Auth SSO provider integration", () => {
     expect(redirect.url).not.toContain("synthetic-client-secret");
     expect((await authenticate()).isOk()).toBe(true);
     expect((await environment.settings.read(principal)).ssoRequired).toBe(false);
-    // The test redirect was not completed: activation deliberately requires no test-login proof.
+    // Without a linked company account the administrator would lose access once SSO is required.
+    await expect(environment.settings.activateSso(principal)).rejects.toMatchObject({
+      code: "CONFLICT",
+      message: "Sign in with company SSO once to link your account before activating it",
+    });
+    await linkCompanyAccount(environment.database.db, principal.id);
     const activated = await environment.settings.activateSso(principal);
     expect(activated.ssoRequired).toBe(true);
     expect(environment.authControl.read().configuration?.clientId).toBe("app-login");
@@ -191,7 +203,7 @@ describe("Better Auth SSO provider integration", () => {
     expect(alias?.value).not.toBe(changed?.value);
     expect(proof.name).toBe(alias?.name);
     expect((await environment.settings.read(principal)).sso?.domain).toBe(
-      "alias.example.test,changed.example.test,example.test",
+      "example.test,alias.example.test,changed.example.test",
     );
 
     // Each domain is proven by its own record and stays verified independently.
@@ -202,9 +214,9 @@ describe("Better Auth SSO provider integration", () => {
 
     const partial = await environment.settings.read(principal);
     expect(partial.ssoDomains.map(({ domain, verified }) => ({ domain, verified }))).toEqual([
+      { domain: "example.test", verified: true },
       { domain: "alias.example.test", verified: false },
       { domain: "changed.example.test", verified: true },
-      { domain: "example.test", verified: true },
     ]);
     expect(partial.ssoRequired).toBe(true);
 
@@ -213,7 +225,7 @@ describe("Better Auth SSO provider integration", () => {
       .from(ssoProvider)
       .where(eq(ssoProvider.providerId, "test-company"));
 
-    expect(stored?.domain).toBe("changed.example.test,example.test");
+    expect(stored?.domain).toBe("example.test,changed.example.test");
 
     // Records published for earlier releases use Better Auth's identifier=value form.
     resolver.mockImplementation(async (name) =>
@@ -226,7 +238,7 @@ describe("Better Auth SSO provider integration", () => {
       .from(ssoProvider)
       .where(eq(ssoProvider.providerId, "test-company"));
 
-    expect(both?.domain).toBe("alias.example.test,changed.example.test,example.test");
+    expect(both?.domain).toBe("example.test,alias.example.test,changed.example.test");
     expect(both?.domainVerified).toBe(true);
   });
 
@@ -255,7 +267,7 @@ describe("Better Auth SSO provider integration", () => {
       .where(eq(ssoProvider.providerId, "test-company"));
 
     expect(stored).toMatchObject({
-      domain: "alias.example.test,changed.example.test,example.test",
+      domain: "example.test,alias.example.test,changed.example.test",
       domainVerified: true,
     });
 
@@ -416,6 +428,7 @@ describe("Better Auth SSO provider integration", () => {
     };
 
     const credential = await organizationCredential(environment, principal);
+    await linkCompanyAccount(environment.database.db, principal.id);
     await environment.settings.activateSso(principal);
     const before = await environment.settings.read(principal);
     const next = editableSettings(before);

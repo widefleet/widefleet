@@ -18,7 +18,11 @@ import {
 } from "../src/lib/server/installation-store.ts";
 import { createRecoveryLink } from "../src/lib/server/recovery.ts";
 import { createIdentityService } from "../src/lib/server/identity.ts";
-import { createTestEnvironment, organizationCredential } from "./environment.ts";
+import {
+  createTestEnvironment,
+  organizationCredential,
+  linkCompanyAccount,
+} from "./environment.ts";
 import { createSettingsService } from "../src/lib/server/settings.ts";
 import type { AppSignIn } from "../src/lib/server/app-sign-in.ts";
 import { createInstalledAppSignIn } from "../src/lib/server/app-sign-in-installed.ts";
@@ -605,6 +609,7 @@ describe("Platform setup and managed settings", () => {
       expect(state.bootstrapPending).toBe(false);
       await initialized.settings.setExternalManagement(principal(), true);
       await initialized.database.db.update(ssoProvider).set({ domainVerified: true });
+      await linkCompanyAccount(initialized.database.db, principal().id);
       await initialized.settings.activateSso(principal());
     } finally {
       await initialized.database.close();

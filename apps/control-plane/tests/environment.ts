@@ -26,8 +26,8 @@ import {
 } from "../src/lib/server/installation-store.ts";
 import { createAuthentication, registerCli } from "../src/lib/server/auth.ts";
 import { configurationSchema } from "../src/lib/server/config.ts";
-import { createDatabase } from "../src/lib/server/database.ts";
-import { account, member, session } from "../src/lib/server/auth-schema.ts";
+import { createDatabase, type DatabaseExecutor } from "../src/lib/server/database.ts";
+import { account, member, session, ssoProvider } from "../src/lib/server/auth-schema.ts";
 import { enrollCompanyUser, initializeOrganization } from "../src/lib/server/organization.ts";
 import { companyAccountProvider, companyIdentity } from "../src/lib/server/company-identity.ts";
 
@@ -287,4 +287,27 @@ export const organizationCredential = async (
     .where(eq(session.id, current.session.id));
 
   return { auth, headers };
+};
+
+// Activating required SSO needs the administrator's account linked to the provider,
+// as a completed company sign-in would leave it.
+export const linkCompanyAccount = async (
+  database: DatabaseExecutor,
+  userId: string,
+  organizationId = "widefleet",
+) => {
+  const [provider] = await database
+    .select({ providerId: ssoProvider.providerId })
+    .from(ssoProvider)
+    .where(eq(ssoProvider.organizationId, organizationId));
+
+  if (!provider) throw new Error("The organization has no company SSO provider");
+  await database.insert(account).values({
+    id: crypto.randomUUID(),
+    accountId: `${userId}-company`,
+    providerId: provider.providerId,
+    userId,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
 };

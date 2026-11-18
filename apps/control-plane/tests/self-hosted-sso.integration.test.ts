@@ -9,7 +9,11 @@ import { createIdentityService } from "../src/lib/server/identity.ts";
 import { createAuthenticationAdmission } from "../src/lib/server/auth-admission.ts";
 import { createSettingsService } from "../src/lib/server/settings.ts";
 import { createAppSignIn } from "../src/lib/server/app-sign-in-node.ts";
-import { createTestEnvironment, organizationCredential } from "./environment.ts";
+import {
+  createTestEnvironment,
+  organizationCredential,
+  linkCompanyAccount,
+} from "./environment.ts";
 import { editableSettings } from "./settings-input.ts";
 import { createIdentityProvider } from "./edge/auth-proxy-idp.ts";
 
@@ -87,6 +91,7 @@ describe("Operator-trusted self-hosted SSO", () => {
   };
 
   it("activates a domainless provider, publishes app login and provisions stable member identities", async () => {
+    await linkCompanyAccount(environment.database.db, principal().id);
     const activated = await environment.settings.activateSso(principal());
     expect(activated).toMatchObject({
       ssoRequired: true,
@@ -136,6 +141,7 @@ describe("Operator-trusted self-hosted SSO", () => {
     await environment.database.db
       .update(ssoProvider)
       .set({ domain: "verified.example.test", domainVerified: true });
+    await linkCompanyAccount(environment.database.db, principal().id);
     await environment.settings.activateSso(principal());
     const added = await environment.settings.addDomain(principal(), "optional.example.test", false);
     expect(added.ssoDomains).toEqual(
@@ -205,6 +211,7 @@ describe("Operator-trusted self-hosted SSO", () => {
     );
 
     expect(cleared).toMatchObject({ ssoDomains: [], sso: { domain: "", domainVerified: false } });
+    await linkCompanyAccount(environment.database.db, principal().id);
     expect((await environment.settings.activateSso(principal())).ssoRequired).toBe(true);
   });
 
@@ -234,6 +241,7 @@ describe("Operator-trusted self-hosted SSO", () => {
     await environment.database.db
       .update(ssoProvider)
       .set({ domain: "example.test", domainVerified: options.verified });
+    await linkCompanyAccount(environment.database.db, principal().id);
     await environment.settings.activateSso(principal());
     expect(environment.authControl.read().configuration?.clientId).toBe("app-login");
 
@@ -279,6 +287,7 @@ describe("Operator-trusted self-hosted SSO", () => {
   });
 
   it("reports a failed trust withdrawal and retries it on republication", async () => {
+    await linkCompanyAccount(environment.database.db, principal().id);
     await environment.settings.activateSso(principal());
     const configuration = { ...environment.configuration, PLATFORM_SSO_TRUST_PROVIDER: false };
 

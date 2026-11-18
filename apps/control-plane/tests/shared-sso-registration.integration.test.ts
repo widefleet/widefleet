@@ -4,7 +4,11 @@ import { eq } from "drizzle-orm";
 import { settingsInput } from "@platform/contracts";
 import { createAuthProxy } from "@platform/auth-proxy";
 import { ssoProvider } from "../src/lib/server/auth-schema.ts";
-import { createTestEnvironment, organizationCredential } from "./environment.ts";
+import {
+  createTestEnvironment,
+  organizationCredential,
+  linkCompanyAccount,
+} from "./environment.ts";
 import { createIdentityProvider } from "./edge/auth-proxy-idp.ts";
 import { editableSettings } from "./settings-input.ts";
 import { EventEmitter, once } from "node:events";
@@ -56,6 +60,7 @@ it.each([false, true])(
           .update(ssoProvider)
           .set({ domainVerified: true })
           .where(eq(ssoProvider.organizationId, "widefleet"));
+      await linkCompanyAccount(environment.database.db, environment.owner.id);
       await environment.settings.activateSso({
         ...environment.owner,
         role: "owner",

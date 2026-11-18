@@ -410,7 +410,11 @@
               Your account is already linked to this provider. Test again after changing the
               connection, or continue.
             </p>
-          {:else if !view.ssoPolicy.domainVerificationRequired && !view.ssoPolicy.allowEmailAccountLinking}
+          {:else if !view.ssoPolicy.domainVerificationRequired && view.ssoPolicy.allowEmailAccountLinking}
+            <p class="text-muted-foreground text-sm leading-6">
+              The installation operator allows matching email addresses to link existing accounts.
+            </p>
+          {:else if !view.ssoPolicy.domainVerificationRequired}
             <Feedback
               >Matching email addresses do not automatically link existing accounts. Ask the
               installation operator to allow email account linking, so your account can be linked
