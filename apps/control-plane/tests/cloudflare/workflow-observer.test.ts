@@ -90,6 +90,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
             write: false,
             format: "esm",
             platform: "browser",
+            conditions: ["workerd"],
             external: [
               "cloudflare:*",
               "node:*",
@@ -116,6 +117,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           bundle: true,
           format: "esm",
           platform: "browser",
+          conditions: ["workerd"],
           external: ["cloudflare:*", "node:*"],
           alias: { "#runtime-extension": extension },
           define: {
