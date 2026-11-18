@@ -1,11 +1,11 @@
 ---
 title: Company sign-in settings
 description: Configure company sign-in through the CLI or API, manage credentials and check OpenID Connect requirements.
-lastModified: 2026-11-15
+lastModified: 2026-11-18
 ---
 
 For setup through the browser, follow [Set up company sign-in](/guides/company-sign-in).
-This reference covers the same settings for administrators using the CLI or API.
+Administrators and agents can use the CLI or API below to configure the same connection.
 Settings belong to the selected organization and require Owner or Admin permissions.
 
 ## Export and apply settings
@@ -48,18 +48,35 @@ Protect files containing secrets and keep them outside version control.
 ```sh
 widefleet settings plan --file settings.json
 widefleet settings apply --file settings.json
-widefleet settings domain-verification
 ```
 
 If the plan requires it, add `--acknowledge-restart` to the apply command.
-Publish the returned TXT record in your company's DNS, then verify it:
+Use the read-only `ssoPolicy` from `widefleet settings get` to choose the next setup step:
+
+| Field                        | Meaning                                                                                                    |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `domainVerificationRequired` | `true`: verify the company domain before testing sign-in. `false`: continue directly to the sign-in test.  |
+| `allowEmailAccountLinking`   | The operator's choice for self-hosted email-based account linking: `true` enables it; `false` disables it. |
+
+When `domainVerificationRequired` is `true`, request the pending verification records:
+
+```sh
+widefleet settings domain-verification
+```
+
+Each domain has its own TXT record. Publish the returned records in your company's
+DNS, then verify them:
 
 ```sh
 widefleet settings verify-domain
 ```
 
+Self-hosted operators choose these options in the
+[deployment environment](/self-hosting/installation#company-sso-trust-and-account-linking).
+Hosted sign-in links existing accounts using matching verified company email addresses.
+
 In the browser, open **Settings → Company sign-in** and use **Test company
-sign-in** to verify administrator access. Then require the provider for members:
+sign-in** to verify administrator access. Then activate company sign-in for members:
 
 ```sh
 widefleet settings activate-sso
@@ -81,8 +98,13 @@ different company provider requires its own company sign-in.
 | `google`          | `https://accounts.google.com`                      | Cloud Identity API with optional user consent, direct membership only |
 | `oidc` (default)  | Your provider's issuer URL                         | The ID-token field named by `oidcConfig.mapping.extraFields.groups`   |
 
-`domain` is the company email domain, without a URL or wildcard. For Google it
-must match the user's Workspace domain. For generic OIDC, the default name, email
+`domain` accepts company email domains separated by commas, such as
+`example.com,example.org`, without URLs or wildcards. Omit it when updating a
+connection to keep the saved domains. When `ssoPolicy.domainVerificationRequired`
+is `false`, Entra and generic OIDC can start without a domain; use an empty string
+to clear an existing domain list. Google uses one domain matching the user's Workspace.
+For Entra, use your Directory (tenant) ID, formatted as a UUID, in the issuer URL.
+For generic OIDC, the default name, email
 and group fields are `name`, `email` and `groups`; its mapping is shared by workspace
 and app sign-in. Google app identity uses its standard verified email, name and
 subject claims.

@@ -32,7 +32,7 @@ After sign-in, **Publish your first app** shows CLI connection and deployment co
 
 Follow [Set up company sign-in](/guides/company-sign-in) for Microsoft Entra,
 Google Workspace or another OpenID Connect provider. It covers registering
-both redirect URIs, connecting groups, verifying your domain and testing
+both redirect URIs, connecting groups and testing
 administrator access before activation.
 
 Open a published app with an allowed and a disallowed test account, as
@@ -44,7 +44,28 @@ Customer administrators can change their own SSO and directory settings without 
 
 Company sign-in automatically enrolls users admitted by the organization's provider as Members who can create apps, including external guests. Restrict the shared IdP registration to the intended users. Existing memberships keep their roles, and pending invitations retain their acceptance flow. Without company SSO, customers join through invitations. Apps enforce their own access rules and business permissions using the verified user and group context.
 
-Existing accounts with a matching email in the verified company domain are linked automatically, retaining their membership and role. External guests admitted by the provider can join, but a different email domain does not establish trusted linking to an existing account. See [company sign-in settings](/reference/company-sign-in) for CLI configuration and provider replacement.
+Connect existing accounts to company sign-in while keeping their memberships and roles using the settings below. For CLI configuration and provider changes, see [company sign-in settings](/reference/company-sign-in).
+
+### Company SSO trust and account linking
+
+The reference Compose setup lets you connect your chosen identity provider and proceed directly to the sign-in test. The company email domain is optional for Microsoft Entra and generic OpenID Connect. For Google Workspace, enter your Workspace domain. Choose who can join Widefleet through your provider's application registration.
+
+As the installation operator, manage these options in your private deployment environment file:
+
+```dotenv
+PLATFORM_SSO_TRUST_PROVIDER=true
+PLATFORM_SSO_ALLOW_EMAIL_ACCOUNT_LINKING=false
+```
+
+`PLATFORM_SSO_TRUST_PROVIDER=true` lets the installation use its configured provider directly. Set it to `false` to include DNS verification in setup. The default is `true` in reference Compose and `false` when running the control plane directly.
+
+With provider trust enabled, you can connect existing accounts by matching their email addresses. Choose this when your identity provider manages those addresses, including the administrator's email from first setup:
+
+1. Set `PLATFORM_SSO_ALLOW_EMAIL_ACCOUNT_LINKING=true` in the deployment environment file.
+2. Recreate the control-plane container with your selected Compose files to apply the settings.
+3. Keep your administrator session open and use **Test company sign-in** to confirm access with the existing account. Then activate company SSO.
+
+Linked accounts keep their memberships and roles; new users join as Members. You can turn email-based linking off again by setting it to `false` and recreating the container. Existing account links continue to work.
 
 Known runtime limitation: celld `0.6.2` drops incoming header values containing non-ASCII bytes. Display names can therefore be empty in Workers; the stable user identifier remains available for authorization.
 
@@ -92,7 +113,9 @@ services:
       - /absolute/private/bootstrap.json:/run/widefleet/bootstrap.json:ro
 ```
 
-The bootstrap file initializes the administrator and the optional settings once. If initialization fails after creating the administrator, the next start resumes with that account. Keep the file mounted, correct the reported configuration or provider failure, and restart until initialization succeeds. After successful initialization, the file is ignored and can be removed; later UI/API changes survive restarts. Use an email-code login or a recovery link to complete DNS verification and test the company login.
+The bootstrap file initializes the administrator and the optional settings once. If initialization fails after creating the administrator, the next start resumes with that account. Keep the file mounted, correct the reported configuration or provider failure, and restart until initialization succeeds. After successful initialization, the file is ignored and can be removed; later UI/API changes survive restarts.
+
+Sign in with an email code or a recovery link, then follow [Set up company sign-in](/guides/company-sign-in). Use the [account-linking steps](#company-sso-trust-and-account-linking) to connect the bootstrap administrator to the company provider.
 
 ### UI, API and CLI configuration
 

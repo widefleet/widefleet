@@ -1,22 +1,28 @@
 ---
 title: Set up company sign-in
 description: Connect Microsoft Entra, Google Workspace or another identity provider, then check that colleagues can sign in and open the right apps.
-lastModified: 2026-11-15
+lastModified: 2026-11-18
 ---
 
 Connect your company's login so colleagues can use their work accounts for
-Widefleet and its apps. You configure the connection once for your organization.
+Widefleet and its apps. Set up the connection once, then choose who can open
+each app.
 
-You need an Owner or Admin account in Widefleet, access to your identity
-provider's administration console, and permission to add a DNS record for your
-company email domain. Have a published app and two test accounts ready: one
-that should be allowed to open it and one that should not.
+You need an Owner or Admin account in Widefleet and access to your identity
+provider's administration console. Have a published app and two test accounts
+ready to check access: one inside and one outside the app's intended audience.
+
+The reference self-hosted setup connects directly to your chosen provider.
+Hosted setup includes verifying your company email domain with a DNS record.
+**Settings** shows the steps for your installation.
 
 ## Start in Widefleet
 
 1. Select the organization you want to configure and open **Settings → Company sign-in**.
 2. Choose **Configure company SSO** if no connection exists yet.
-3. Enter your **Company email domain**, such as `example.com`.
+3. Enter your **Company email domain**, such as `example.com`, when requested.
+   For Google Workspace, use your Workspace domain. For Entra and generic OIDC,
+   a field marked optional can stay empty.
 4. Copy the **Workspace redirect URI** and **App redirect URI**. Your provider
    needs both so people can sign in to Widefleet and open published apps.
 5. Complete the section for [Microsoft Entra](#microsoft-entra),
@@ -154,18 +160,28 @@ Continue with [verify and activate](#verify-and-activate).
 
 ## Verify and activate
 
-1. Choose **Get verification record**. Add the displayed TXT record to your
-   company domain's DNS, then choose **Verify domain**.
+For the default self-hosted setup, [enable account linking](/self-hosting/installation#company-sso-trust-and-account-linking)
+to connect your existing administrator account before testing company sign-in.
+
+1. If **Verify an email domain** is shown, open **Email domains** and choose
+   **Verify** beside your domain. Add the displayed TXT record to your DNS, then
+   choose **Verify domain** and return to **Company sign-in**. Otherwise, continue
+   with the sign-in test.
 2. Choose **Test company sign-in**. Use the company account with the same email
    as your Widefleet administrator account.
 3. Check that Widefleet reports **Company sign-in and administrator access
-   verified successfully**. Resolve any error before continuing.
+   verified successfully**.
 4. Choose **Activate company SSO**. Check that the page reports **Company SSO is
    required for this organization** and that app sign-in activation succeeds.
 
-Members must now use the company provider for this organization. Existing
-accounts with matching verified company email addresses keep their memberships
-and roles. Colleagues who use the CLI need to run `widefleet login` again.
+Members now sign in through the company provider. Linked accounts keep their
+memberships and roles. Colleagues and agents using the CLI can run
+`widefleet login` to connect through company sign-in.
+
+Manage email domains under **Settings → Email domains**. Entra and generic OIDC
+can use several domains. Hosted organizations verify each with its own DNS
+record; the default self-hosted setup uses optional domains to help members find
+company sign-in by email. Google Workspace uses one Workspace domain.
 
 ## Check app access
 
@@ -185,18 +201,19 @@ These rules also apply to the app's previews.
 Setup is complete when company sign-in works and both access checks produce the
 expected result. Next, [share the app with colleagues](/guides/applications).
 
-## If setup fails
+## Setup help
 
 | What you see                                         | What to do                                                                                                                                                                                      |
 | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Redirect URI mismatch                                | Copy both redirect URIs from Widefleet again and register them exactly, including the path, on the same provider client.                                                                        |
 | Domain verification fails                            | Check the displayed DNS name and TXT value. Allow the DNS change to propagate, then choose **Verify domain** again.                                                                             |
+| Existing self-hosted account needs linking           | Enable [account linking](/self-hosting/installation#company-sso-trust-and-account-linking) and use the company account with the same email.                                                     |
 | Google group access is unavailable                   | Check that Cloud Identity API is enabled in the OAuth client's project, the group scope is configured, and your organization permits it.                                                        |
 | Google sign-in works, but group access is denied     | Check the group's primary email address, direct membership and **Who can view members** setting. If the user declined group permission, repeat sign-in in a fresh browser profile and allow it. |
 | Sign-in works, but a colleague cannot open the app   | Check the app's allowed groups and the colleague's membership. Repeat the test in a fresh browser profile.                                                                                      |
 | Settings are saved, but app sign-in activation fails | Check the activation error in Settings. Ask the installation operator to resolve it, then save again and repeat the app test.                                                                   |
 
-If company sign-in locks you out of a self-hosted installation, use
+To restore administrator access on a self-hosted installation, use
 [administrator recovery](/self-hosting/installation#secrets-and-administrator-recovery).
 For credential changes and automated configuration, see the
 [company sign-in reference](/reference/company-sign-in).
