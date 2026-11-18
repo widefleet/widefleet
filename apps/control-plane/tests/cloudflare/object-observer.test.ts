@@ -70,6 +70,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("R2 observer in work
           bundle: true,
           format: "esm",
           platform: "browser",
+          conditions: ["workerd"],
           external: ["cloudflare:*", "node:*", "./__widefleet_app.js", "./__widefleet_workflow.js"],
           alias: {
             "#runtime-extension": extension,
@@ -103,6 +104,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("R2 observer in work
           bundle: true,
           format: "esm",
           platform: "browser",
+          conditions: ["workerd"],
           external: ["cloudflare:*", "node:*"],
           alias: enabled ? { "#runtime-extension": extension } : {},
           define,

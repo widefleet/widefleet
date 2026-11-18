@@ -91,6 +91,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("D1 observation in w
             bundle: true,
             format: "esm",
             platform: "browser",
+            conditions: ["workerd"],
             external: ["cloudflare:*", "node:*", "./__widefleet_app.js"],
             alias: { "#runtime-extension": extension, "widefleet:app": "./__widefleet_app.js" },
             write: false,
@@ -138,6 +139,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("D1 observation in w
           bundle: true,
           format: "esm",
           platform: "browser",
+          conditions: ["workerd"],
           external: ["cloudflare:*", "node:*"],
           alias: aliases,
           define: {

@@ -192,6 +192,7 @@ describe.runIf(process.env["RUN_SERVICE_TESTS"] === "1").each(["workerd", "celld
         bundle: true,
         format: "esm",
         platform: "neutral",
+        conditions: ["workerd"],
         mainFields: ["module", "main"],
         external: ["cloudflare:*", "node:*"],
         logLevel: "silent",

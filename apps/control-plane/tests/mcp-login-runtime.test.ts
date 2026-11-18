@@ -130,6 +130,7 @@ describe("MCP OAuth in the data plane", () => {
       write: false,
       format: "esm",
       platform: "neutral",
+      conditions: ["workerd"],
       mainFields: ["module", "main"],
       external: ["cloudflare:*", "node:*"],
     });

@@ -42,6 +42,8 @@ const compile = async (entry: string, define: Record<string, string>) => {
     bundle: true,
     format: "esm",
     platform: "neutral",
+    // The runtime only runs in Workers runtimes (workerd and celld), so dependencies resolve their workerd builds.
+    conditions: ["workerd"],
     mainFields: ["module", "main"],
     target: "es2023",
     external: [
