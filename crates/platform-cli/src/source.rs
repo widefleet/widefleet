@@ -300,42 +300,8 @@ async fn tree(project: &Path) -> Result<String> {
 }
 
 pub async fn snapshot(project: &Path) -> Result<String> {
-    let probe = git(project)
-        .args(["rev-parse", "--show-toplevel"])
-        .output()
-        .await?;
-    if probe.status.success() {
-        let root = PathBuf::from(String::from_utf8_lossy(&probe.stdout).trim_end());
-        return tree(&root).await;
-    }
-
-    // Check Git's file selection without initializing the project before a build
-    // succeeds or requiring source storage on the target installation. The
-    // temporary repository stays in the project, which agent sandboxes can write.
-    let temporary = tempfile::Builder::new()
-        .prefix(".widefleet-snapshot-")
-        .tempdir_in(project)?;
-    let name = temporary
-        .path()
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| Error::invalid("Invalid temporary directory name".into()))?;
-    output(git(project).args(["init", "--bare"]).arg(temporary.path())).await?;
-    output(
-        git(project)
-            .env("GIT_DIR", temporary.path())
-            .env("GIT_WORK_TREE", project)
-            .args(["add", "--all", "--", "."])
-            .arg(format!(":(exclude,literal){name}")),
-    )
-    .await?;
-    output(
-        git(project)
-            .env("GIT_DIR", temporary.path())
-            .env("GIT_WORK_TREE", project)
-            .arg("write-tree"),
-    )
-    .await
+    // Saving the source initializes the repository anyway, so it can exist before the build.
+    tree(&root(project).await?).await
 }
 
 async fn commit_all(project: &Path, branch: &str) -> Result<String> {
@@ -1101,7 +1067,8 @@ mod tests {
         let fixture = Fixture::new().await?;
         std::fs::write(fixture.project.join("app.ts"), "before build")?;
         let before = snapshot(&fixture.project).await?;
-        assert!(!fixture.project.join(".git").exists());
+        // The snapshot initializes the repository but commits nothing.
+        assert_eq!(revision(&fixture.project, "HEAD").await?, None);
         std::fs::write(fixture.project.join("app.ts"), "after build")?;
         let error = save_repository(&fixture.project, fixture.repository("main"), "", &before)
             .await
