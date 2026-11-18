@@ -2,15 +2,12 @@ export type McpPage =
   | {
       kind: "connect";
       handle: string;
+      authorize: string;
       clientName: string;
       redirectHost: string;
       redirectIsLoopback: boolean;
-      providers: ("google" | "microsoft")[];
       accounts: { organizationId: string; organizationName: string; name: string }[];
-    }
-  | {
-      kind: "organizations";
-      state: string;
       organizations: { id: string; name: string }[];
     }
+  | { kind: "unavailable"; handle: string; authorize: string }
   | { kind: "error"; message: string };

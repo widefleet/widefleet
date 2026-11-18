@@ -1,9 +1,13 @@
 <script lang="ts">
   import { Button } from "@platform/ui/button";
-  import SocialButton from "@platform/ui/social-button";
+  import { Input } from "@platform/ui/input";
+  import { Label } from "@platform/ui/label";
   import type { McpPage } from "./pages.ts";
 
   let { page }: { page: Extract<McpPage, { kind: "connect" }> } = $props();
+
+  // A known organization is the likely choice; otherwise the email continues.
+  const known = $derived(page.accounts.length + page.organizations.length > 0);
 </script>
 
 <p class="text-muted-foreground mt-3 text-sm leading-relaxed wrap-anywhere">
@@ -14,28 +18,59 @@
   Connecting to <strong class="text-foreground">{page.redirectHost}</strong>.
   {#if page.redirectIsLoopback}A local application on your device will receive this connection.{/if}
 </p>
-<form method="post" action="/oauth/continue" class="mt-6 grid gap-3">
+{#snippet organization(id: string, name: string, detail: string, primary: boolean)}
+  <Button
+    type="submit"
+    variant={primary ? "default" : "outline"}
+    name="provider"
+    value={`organization:${id}`}
+    class="h-auto min-h-11 w-full flex-col items-start gap-0.5 px-3 py-2.5 text-left whitespace-normal wrap-anywhere"
+  >
+    <span class="font-medium">{name}</span>
+    <span class="text-xs font-normal opacity-75">{detail}</span>
+  </Button>
+{/snippet}
+
+{#if known}
+  <form method="post" action="/oauth/continue" class="mt-6 grid gap-3">
+    <input type="hidden" name="handle" value={page.handle} />
+    <input type="hidden" name="authorize" value={page.authorize} />
+    {#each page.accounts as account, index (account.organizationId)}
+      {@render organization(
+        account.organizationId,
+        account.organizationName,
+        `Signed in as ${account.name}`,
+        index === 0,
+      )}
+    {/each}
+    {#each page.organizations as remembered, index (remembered.id)}
+      {@render organization(
+        remembered.id,
+        remembered.name,
+        "Connected before",
+        page.accounts.length === 0 && index === 0,
+      )}
+    {/each}
+  </form>
+{/if}
+<form method="post" action="/oauth/continue" class="mt-6 grid gap-2">
   <input type="hidden" name="handle" value={page.handle} />
-  {#each page.accounts as account (account.organizationId)}
-    <Button
-      type="submit"
-      variant="outline"
-      name="provider"
-      value={`organization:${account.organizationId}`}
-      class="h-auto min-h-11 w-full whitespace-normal px-3 py-2.5 wrap-anywhere"
-    >
-      Continue as {account.name} · {account.organizationName}
-    </Button>
-  {/each}
-  {#if page.providers.length}
-    <div class="grid grid-cols-2 gap-2.5">
-      {#each page.providers as provider (provider)}
-        <div class={page.providers.length === 1 ? "col-span-2" : undefined}>
-          <SocialButton {provider} compact type="submit" name="provider" value={provider} />
-        </div>
-      {/each}
-    </div>
-  {/if}
+  <input type="hidden" name="authorize" value={page.authorize} />
+  <Label for="email">{known ? "Another organization? Enter your work email" : "Work email"}</Label>
+  <Input id="email" type="email" name="email" autocomplete="email" required maxlength={320} />
+  <Button
+    type="submit"
+    variant={known ? "outline" : "default"}
+    name="provider"
+    value="email"
+    class="mt-1 h-11 w-full"
+  >
+    Continue
+  </Button>
+</form>
+<form method="post" action="/oauth/continue" class="mt-3 grid gap-3">
+  <input type="hidden" name="handle" value={page.handle} />
+  <input type="hidden" name="authorize" value={page.authorize} />
   <Button type="submit" variant="outline" name="provider" value="widefleet" class="h-11 w-full">
     Continue with Widefleet
   </Button>

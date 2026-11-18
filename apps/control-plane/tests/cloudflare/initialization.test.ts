@@ -332,7 +332,6 @@ describe("Hosted installation initialization", () => {
         expect(await (await worker.fetch("http://localhost/fixture/mcp-keys")).json()).toEqual([
           "mcp/domains/company.example.test/company",
           "mcp/login",
-          "mcp/organizations/google/company.example.test/company",
         ]);
         expect(await database.db.select().from(ssoProvider)).toEqual(saved);
         expect(

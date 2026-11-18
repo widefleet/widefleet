@@ -6,8 +6,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { googleGroupsScope, organizationHttpAvailabilityKey } from "@platform/contracts";
 import { authConfigurationKey } from "@platform/auth-proxy/publication";
-import { mcpLoginKey, mcpOrganizationPrefix } from "@platform/auth-proxy/mcp-login";
-import { createIdentityProvider } from "./edge/auth-proxy-idp.ts";
+import { mcpDomainPrefix, mcpLoginKey } from "@platform/auth-proxy/mcp-login";
+import { createIdentityProvider, tenantId } from "./edge/auth-proxy-idp.ts";
 
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 
@@ -23,6 +23,7 @@ describe("MCP OAuth in the data plane", () => {
   const directoryRequests: string[] = [];
   let directoryGroups = ["accounting@example.test"];
   let directoryAvailable = true;
+  let controlPlaneAvailable = true;
   const logs: string[] = [];
   const cookies = new Map<string, string>();
 
@@ -71,11 +72,12 @@ describe("MCP OAuth in the data plane", () => {
         organizationName: `Example ${organizationId}`,
         provider: { type: "google", domain },
         scopes,
-        clientId: "customer-app",
-        clientSecret: "customer-secret",
+        clientId: "app-login",
+        clientSecret: "synthetic-client-secret",
         cookieSecret: Buffer.alloc(32, 1).toString("base64url"),
         domain: "apps.example.test",
         redirectUrl: `https://auth.apps.example.test/oauth2/${organizationId}/callback`,
+        emailDomains: [domain],
       }),
     });
 
@@ -83,11 +85,11 @@ describe("MCP OAuth in the data plane", () => {
   };
 
   beforeAll(async () => {
-    idp = await createIdentityProvider([
-      `${origin}/oauth/callback/google`,
-      `${origin}/oauth/callback/company`,
-      "https://auth.apps.example.test/oauth2/fallback/callback",
-    ]);
+    idp = await createIdentityProvider(
+      ["company", "second", "entra", "fallback"].map(
+        (organizationId) => `https://auth.apps.example.test/oauth2/${organizationId}/callback`,
+      ),
+    );
     idp.settings.google = true;
 
     const compiled = await build({
@@ -176,6 +178,20 @@ describe("MCP OAuth in the data plane", () => {
                   });
                 }
 
+                if (url.origin === "https://platform.example.test" && url.pathname === "/healthz")
+                  return new WorkerResponse(null, { status: controlPlaneAvailable ? 200 : 503 });
+
+                // Microsoft's public discovery resolves any domain of the fixture tenant.
+                if (
+                  url.origin === "https://login.microsoftonline.com" &&
+                  /^\/[a-z.-]+\/v2\.0\/\.well-known\/openid-configuration$/.test(url.pathname)
+                )
+                  return url.pathname.startsWith("/tenant-alias.example.test/")
+                    ? WorkerResponse.json({
+                        issuer: `https://login.microsoftonline.com/${tenantId}/v2.0`,
+                      })
+                    : WorkerResponse.json({ error: "invalid_tenant" }, { status: 400 });
+
                 let path = url.pathname;
 
                 if (url.origin === "https://oauth2.googleapis.com") path = "/token";
@@ -186,6 +202,7 @@ describe("MCP OAuth in the data plane", () => {
                   ![
                     idp.origin,
                     "https://accounts.google.com",
+                    "https://login.microsoftonline.com",
                     "https://oauth2.googleapis.com",
                     "https://www.googleapis.com",
                   ].includes(url.origin)
@@ -219,8 +236,6 @@ describe("MCP OAuth in the data plane", () => {
       body: JSON.stringify({
         origin,
         platformUrl: "https://platform.example.test",
-        google: { clientId: "app-login", clientSecret: "synthetic-client-secret" },
-        microsoft: { clientId: "app-login", clientSecret: "synthetic-client-secret" },
       }),
     });
 
@@ -270,16 +285,24 @@ describe("MCP OAuth in the data plane", () => {
     return { client: client.client_id, verifier, handle, url: `/authorize?${parameters}` };
   };
 
-  const continueWith = (handle: string, provider = "google", withCookies = true) =>
+  const continueWith = (
+    handle: string,
+    provider: string,
+    fields: Record<string, string> = {},
+    withCookies = true,
+  ) =>
     send(
       "/oauth/continue",
       {
         method: "POST",
         headers: { origin, "content-type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ handle, provider }).toString(),
+        body: new URLSearchParams({ handle, provider, ...fields }).toString(),
       },
       withCookies,
     );
+
+  const continueWithEmail = (handle: string, email = "person@example.test") =>
+    continueWith(handle, "email", { email, authorize: "/authorize?client_id=retry" });
 
   const login = async (target: string) => {
     const url = new URL(target);
@@ -287,6 +310,14 @@ describe("MCP OAuth in the data plane", () => {
     expect(authorized.status, await authorized.clone().text()).toBe(302);
 
     return send(z.string().parse(authorized.headers.get("location")));
+  };
+
+  // Company sign-in returns through the auth host, which bridges to the MCP origin.
+  const companyLogin = async (target: string) => {
+    const bridge = await login(target);
+    expect(bridge.status, await bridge.clone().text()).toBe(303);
+
+    return send(z.string().parse(bridge.headers.get("location")));
   };
 
   const exchange = async (callback: string, client: string, verifier: string) => {
@@ -308,79 +339,210 @@ describe("MCP OAuth in the data plane", () => {
     });
   };
 
-  it("completes OAuth, refreshes, revokes and keeps all tokens scoped to the selected company without the control plane", async () => {
-    const auth = await authorize();
-    const signIn = await continueWith(auth.handle);
-    expect(signIn.status, await signIn.clone().text()).toBe(303);
-    const callback = await login(z.string().parse(signIn.headers.get("location")));
-    expect(callback.status, await callback.clone().text()).toBe(303);
+  it("finds the company from a work email, remembers it and keeps tokens scoped without the control plane", async () => {
+    controlPlaneAvailable = false;
 
-    const result = await exchange(
-      z.string().parse(callback.headers.get("location")),
-      auth.client,
-      auth.verifier,
-    );
+    try {
+      const auth = await authorize();
+      expect(await (await send(auth.url)).text()).not.toContain("Connected before");
+      const signIn = await continueWithEmail(auth.handle);
+      expect(signIn.status, await signIn.clone().text()).toBe(303);
 
-    expect(result.status, await result.clone().text()).toBe(200);
+      // The organization's own registration signs the person in, with the email as hint.
+      const upstream = new URL(z.string().parse(signIn.headers.get("location")));
+      expect(upstream.searchParams.get("client_id")).toBe("app-login");
+      expect(upstream.searchParams.get("login_hint")).toBe("person@example.test");
+      expect(upstream.searchParams.get("redirect_uri")).toBe(
+        "https://auth.apps.example.test/oauth2/company/callback",
+      );
 
-    const grant = z
-      .object({ access_token: z.string(), refresh_token: z.string() })
-      .parse(await result.json());
+      const callback = await companyLogin(upstream.href);
+      expect(callback.status, await callback.clone().text()).toBe(303);
 
-    const claims = await send("/fixture/identity", {
-      headers: { authorization: `Bearer ${grant.access_token}` },
+      const result = await exchange(
+        z.string().parse(callback.headers.get("location")),
+        auth.client,
+        auth.verifier,
+      );
+
+      expect(result.status, await result.clone().text()).toBe(200);
+
+      const grant = z
+        .object({ access_token: z.string(), refresh_token: z.string() })
+        .parse(await result.json());
+
+      const claims = await send("/fixture/identity", {
+        headers: { authorization: `Bearer ${grant.access_token}` },
+      });
+
+      expect(await claims.json()).toMatchObject({
+        mcp: { organizationId: "company", identity: { subject: "pairwise-subject", groups: [] } },
+      });
+      expect(directoryRequests).toEqual([]);
+
+      // The browser remembers the organization for the next client it connects.
+      const next = await authorize();
+      const offered = await (await send(next.url)).text();
+      expect(offered).toContain("Example company");
+      expect(offered).toContain("Connected before");
+      const remembered = await continueWith(next.handle, "organization:company");
+      expect(remembered.status, await remembered.clone().text()).toBe(303);
+      expect(new URL(z.string().parse(remembered.headers.get("location"))).origin).toBe(idp.origin);
+
+      const refreshed = await send("/oauth/token", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "refresh_token",
+          client_id: auth.client,
+          refresh_token: grant.refresh_token,
+          resource: `${origin}/mcp`,
+        }).toString(),
+      });
+
+      expect(refreshed.status, await refreshed.clone().text()).toBe(200);
+      const renewed = z.object({ access_token: z.string() }).parse(await refreshed.json());
+
+      const metadata = z
+        .object({ revocation_endpoint: z.string() })
+        .parse(await (await send("/.well-known/oauth-authorization-server")).json());
+
+      const revoked = await send(metadata.revocation_endpoint, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          token: renewed.access_token,
+          client_id: auth.client,
+        }).toString(),
+      });
+
+      expect(revoked.status, await revoked.clone().text()).toBe(200);
+      expect(
+        (
+          await send("/fixture/identity", {
+            headers: { authorization: `Bearer ${renewed.access_token}` },
+          })
+        ).status,
+      ).toBe(401);
+
+      const repeated = await exchange(
+        z.string().parse(callback.headers.get("location")),
+        auth.client,
+        auth.verifier,
+      );
+
+      expect(repeated.status).toBe(400);
+    } finally {
+      controlPlaneAvailable = true;
+    }
+  });
+
+  it("ignores remembered organizations whose cookie was altered", async () => {
+    const name = [...cookies.keys()].find((key) => key === "__Host-widefleet-mcp-organizations");
+    const saved = name ? cookies.get(name) : undefined;
+
+    if (!name || !saved) throw new Error("Expected a remembered organization");
+
+    try {
+      const [, signature] = saved.split(".");
+      const forged = Buffer.from(JSON.stringify(["second"])).toString("base64url");
+      cookies.set(name, `${forged}.${signature}`);
+      const auth = await authorize();
+      expect(await (await send(auth.url)).text()).not.toContain("Connected before");
+      expect((await continueWith(auth.handle, "organization:second")).status).toBe(400);
+    } finally {
+      cookies.set(name, saved);
+    }
+  });
+
+  it("finds an Entra organization from any domain of its tenant", async () => {
+    const published = await send("/fixture/organizations/entra/configuration", {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({
+        organizationId: "entra",
+        organizationName: "Example Entra",
+        provider: {
+          type: "entra",
+          authority: "https://login.microsoftonline.com",
+          tenantId,
+          label: "Microsoft Entra",
+        },
+        clientId: "app-login",
+        clientSecret: "synthetic-client-secret",
+        cookieSecret: Buffer.alloc(32, 1).toString("base64url"),
+        domain: "apps.example.test",
+        redirectUrl: "https://auth.apps.example.test/oauth2/entra/callback",
+      }),
     });
 
-    expect(await claims.json()).toMatchObject({
-      mcp: { organizationId: "company", identity: { subject: "pairwise-subject", groups: [] } },
-    });
-    expect(directoryRequests).toEqual([]);
+    expect(published.status).toBe(204);
+    idp.settings.entra = true;
+    idp.settings.entraAuthority = "https://login.microsoftonline.com";
 
-    const refreshed = await send("/oauth/token", {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "refresh_token",
-        client_id: auth.client,
-        refresh_token: grant.refresh_token,
-        resource: `${origin}/mcp`,
-      }).toString(),
-    });
+    try {
+      const auth = await authorize();
+      const signIn = await continueWithEmail(auth.handle, "person@tenant-alias.example.test");
+      expect(signIn.status, await signIn.clone().text()).toBe(303);
+      const upstream = new URL(z.string().parse(signIn.headers.get("location")));
+      expect(upstream.searchParams.get("login_hint")).toBe("person@tenant-alias.example.test");
+      expect(upstream.searchParams.get("redirect_uri")).toBe(
+        "https://auth.apps.example.test/oauth2/entra/callback",
+      );
+    } finally {
+      idp.settings.entra = false;
+      idp.settings.entraAuthority = "";
+      await send("/fixture/organizations/entra/configuration", { method: "DELETE" });
+    }
+  });
 
-    expect(refreshed.status, await refreshed.clone().text()).toBe(200);
-    const next = z.object({ access_token: z.string() }).parse(await refreshed.json());
+  it("falls back to Widefleet sign-in for unknown or shared domains and explains an outage", async () => {
+    const platform = (response: { headers: { get(name: string): string | null } }) => {
+      const target = new URL(z.string().parse(response.headers.get("location")));
+      expect(target.origin + target.pathname).toBe("https://platform.example.test/mcp/sign-in");
+    };
 
-    const metadata = z
-      .object({ revocation_endpoint: z.string() })
-      .parse(await (await send("/.well-known/oauth-authorization-server")).json());
+    // A guest's own company domain names no organization here.
+    const unknown = await authorize();
+    platform(await continueWithEmail(unknown.handle, "guest@consultancy.example.test"));
 
-    const revoked = await send(metadata.revocation_endpoint, {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ token: next.access_token, client_id: auth.client }).toString(),
-    });
+    // A domain proven by several organizations needs the person's memberships.
+    await publish("second");
 
-    expect(revoked.status, await revoked.clone().text()).toBe(200);
-    expect(
-      (
-        await send("/fixture/identity", {
-          headers: { authorization: `Bearer ${next.access_token}` },
-        })
-      ).status,
-    ).toBe(401);
+    try {
+      const shared = await authorize();
+      platform(await continueWithEmail(shared.handle));
+    } finally {
+      await publish("second", "second.example.test");
+    }
 
-    const repeated = await exchange(
-      z.string().parse(callback.headers.get("location")),
-      auth.client,
-      auth.verifier,
-    );
+    controlPlaneAvailable = false;
 
-    expect(repeated.status).toBe(400);
+    try {
+      const auth = await authorize();
+      const unavailable = await continueWithEmail(auth.handle, "guest@consultancy.example.test");
+      expect(unavailable.status).toBe(200);
+      const html = await unavailable.text();
+      expect(html).toContain("Widefleet sign-in is unavailable");
+      expect(html).toContain('href="/authorize?client_id=retry"');
+
+      // The consent is still open, so the person can retry or try anyway.
+      platform(
+        await continueWith(auth.handle, "widefleet", {
+          confirmed: "1",
+          authorize: "/authorize?client_id=retry",
+        }),
+      );
+    } finally {
+      controlPlaneAvailable = true;
+    }
   });
 
   it("rejects consent from a different browser and keeps the redirect bound to the registered client", async () => {
     const auth = await authorize();
-    expect((await continueWith(auth.handle, "google", false)).status).toBe(400);
+    expect(
+      (await continueWith(auth.handle, "email", { email: "person@example.test" }, false)).status,
+    ).toBe(400);
 
     const bad = await send(
       `/authorize?client_id=${auth.client}&redirect_uri=https://attacker.example.test&response_type=code`,
@@ -415,7 +577,11 @@ describe("MCP OAuth in the data plane", () => {
 
     expect(published.status).toBe(204);
     const auth = await authorize();
-    const response = await continueWith(auth.handle, "widefleet");
+
+    const response = await continueWith(auth.handle, "widefleet", {
+      authorize: "/authorize?client_id=retry",
+    });
+
     const target = new URL(z.string().parse(response.headers.get("location")));
     expect(target.origin + target.pathname).toBe("https://platform.example.test/mcp/sign-in");
     expect(target.searchParams.get("state")).toMatch(/^[A-Za-z0-9_-]{43}$/);
@@ -444,9 +610,7 @@ describe("MCP OAuth in the data plane", () => {
       expect(upstream.searchParams.has("hd")).toBe(false);
     }
 
-    const bridge = await login(upstream.href);
-    expect(bridge.status, await bridge.clone().text()).toBe(303);
-    const callback = await send(z.string().parse(bridge.headers.get("location")));
+    const callback = await companyLogin(upstream.href);
     expect(callback.status, await callback.clone().text()).toBe(303);
 
     const responseToken = await exchange(
@@ -499,18 +663,17 @@ describe("MCP OAuth in the data plane", () => {
     idp.settings.google = true;
   });
 
-  it("requests directory access only after discovering an organization that uses Google groups", async () => {
+  it("requests Google group access through the organization's registration", async () => {
     directoryGroups = Array.from({ length: 205 }, (_, index) => `group${index}@example.test`);
     await publish("company", "example.test", [googleGroupsScope]);
     const auth = await authorize();
-    const start = await continueWith(auth.handle);
-    const extra = await login(z.string().parse(start.headers.get("location")));
-    expect(extra.status, await extra.clone().text()).toBe(303);
-    const provider = new URL(z.string().parse(extra.headers.get("location")));
+    const start = await continueWithEmail(auth.handle);
+    const provider = new URL(z.string().parse(start.headers.get("location")));
+    expect(provider.searchParams.get("client_id")).toBe("app-login");
     expect(provider.searchParams.get("scope")).toContain(googleGroupsScope);
     expect(provider.searchParams.get("hd")).toBe("example.test");
     idp.settings.grantedScopes = `openid email profile ${googleGroupsScope}`;
-    const callback = await login(provider.href);
+    const callback = await companyLogin(provider.href);
     expect(callback.status, await callback.clone().text()).toBe(303);
 
     const response = await exchange(
@@ -550,8 +713,8 @@ describe("MCP OAuth in the data plane", () => {
 
     try {
       const auth = await authorize();
-      const signIn = await continueWith(auth.handle);
-      const callback = await login(z.string().parse(signIn.headers.get("location")));
+      const signIn = await continueWithEmail(auth.handle);
+      const callback = await companyLogin(z.string().parse(signIn.headers.get("location")));
 
       const response = await exchange(
         z.string().parse(callback.headers.get("location")),
@@ -631,13 +794,13 @@ describe("MCP OAuth in the data plane", () => {
     }
   });
 
-  it.each(["/oauth/continue", "/oauth/select"])(
-    "stops reading oversized %s forms at the byte limit",
-    async (route) => {
-      const response = await send(`/fixture/form-limit?${new URLSearchParams({ route })}`);
-      expect(await response.json()).toEqual({ status: 400, reads: 2, cancelled: true });
-    },
-  );
+  it("stops reading oversized forms at the byte limit", async () => {
+    const response = await send(
+      `/fixture/form-limit?${new URLSearchParams({ route: "/oauth/continue" })}`,
+    );
+
+    expect(await response.json()).toEqual({ status: 400, reads: 2, cancelled: true });
+  });
 
   it("logs unavailable login configuration while returning a safe error page", async () => {
     const auth = await authorize();
@@ -647,7 +810,11 @@ describe("MCP OAuth in the data plane", () => {
     const first = logs.length;
 
     try {
-      const response = await send(auth.url);
+      // Only the fallback to Widefleet sign-in needs the shared login configuration.
+      const response = await continueWith(auth.handle, "widefleet", {
+        authorize: "/authorize?client_id=retry",
+      });
+
       expect(response.status).toBe(400);
       expect(await response.text()).not.toContain("MCP sign-in is not configured");
       await expect
@@ -659,62 +826,21 @@ describe("MCP OAuth in the data plane", () => {
     }
   });
 
-  it("shows only organizations matching the verified account and binds the choice to the browser", async () => {
-    await publish("second");
-    await publish("other-company", "other.example.test");
-    const auth = await authorize();
-    const start = await continueWith(auth.handle);
-    const selection = await login(z.string().parse(start.headers.get("location")));
-    expect(selection.status, await selection.clone().text()).toBe(200);
-    const html = await selection.text();
-    expect(html).toContain("Example company");
-    expect(html).toContain("Example second");
-    expect(html).not.toContain("Example other-company");
-    const state = z.string().parse(/name="state" value="([^"]+)"/.exec(html)?.[1]);
-
-    const chosen = await send("/oauth/select", {
-      method: "POST",
-      headers: { origin, "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ state, organization: "second" }).toString(),
-    });
-
-    expect(chosen.status, await chosen.clone().text()).toBe(303);
-
-    const response = await exchange(
-      z.string().parse(chosen.headers.get("location")),
-      auth.client,
-      auth.verifier,
-    );
-
-    const grant = z.object({ access_token: z.string() }).parse(await response.json());
-
-    const identity = await send("/fixture/identity", {
-      headers: { authorization: `Bearer ${grant.access_token}` },
-    });
-
-    expect(await identity.json()).toMatchObject({ mcp: { organizationId: "second" } });
-
-    const replay = await send("/oauth/select", {
-      method: "POST",
-      headers: { origin, "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ state, organization: "company" }).toString(),
-    });
-
-    expect(replay.status).toBe(400);
-    await publish("second", "elsewhere.example.test");
-  });
-
   it("rejects a different Workspace even when its verified email has a familiar suffix", async () => {
     idp.settings.workspaceDomain = "unconfigured.example.test";
-    const auth = await authorize();
-    const start = await continueWith(auth.handle);
-    const callback = await login(z.string().parse(start.headers.get("location")));
-    expect(callback.status).toBe(400);
-    expect(callback.headers.get("location")).toBeNull();
-    idp.settings.workspaceDomain = "example.test";
+
+    try {
+      const auth = await authorize();
+      const start = await continueWithEmail(auth.handle);
+      const callback = await companyLogin(z.string().parse(start.headers.get("location")));
+      expect(callback.status).toBe(400);
+      expect(callback.headers.get("location")).toBeNull();
+    } finally {
+      idp.settings.workspaceDomain = "example.test";
+    }
   });
 
-  it("keeps active company sign-in usable when the tenant index contains suspended or deleted organizations", async () => {
+  it("finds active organizations when the domain index contains suspended, deleted or stale entries", async () => {
     const storage = await runtime.getKVNamespace("AUTH_CONFIG");
     await publish("suspended");
     await storage.put(
@@ -723,12 +849,13 @@ describe("MCP OAuth in the data plane", () => {
     );
     await publish("deleted");
     await storage.delete(authConfigurationKey("deleted"));
-    await storage.put(`${mcpOrganizationPrefix("google", "example.test")}second`, "second");
+    // The current configuration of "second" no longer lists this domain.
+    await storage.put(`${mcpDomainPrefix("example.test")}second`, "second");
 
     try {
       const auth = await authorize();
-      const start = await continueWith(auth.handle);
-      const callback = await login(z.string().parse(start.headers.get("location")));
+      const start = await continueWithEmail(auth.handle);
+      const callback = await companyLogin(z.string().parse(start.headers.get("location")));
       expect(callback.status, await callback.clone().text()).toBe(303);
 
       const response = await exchange(
@@ -759,22 +886,17 @@ describe("MCP OAuth in the data plane", () => {
       ).toBe(401);
     } finally {
       await storage.delete(organizationHttpAvailabilityKey("company"));
+      await storage.delete(organizationHttpAvailabilityKey("suspended"));
 
       for (const id of ["suspended", "deleted", "second"])
-        await storage.delete(`${mcpOrganizationPrefix("google", "example.test")}${id}`);
+        await storage.delete(`${mcpDomainPrefix("example.test")}${id}`);
     }
   });
 
   it("does not rewrite shared login credentials when another organization publishes the same registration", async () => {
     const storage = await runtime.getKVNamespace("AUTH_CONFIG");
     const original = await storage.get(mcpLoginKey);
-
-    const configuration = {
-      origin,
-      platformUrl: "https://platform.example.test",
-      google: { clientId: "app-login", clientSecret: "synthetic-client-secret" },
-      microsoft: { clientId: "app-login", clientSecret: "synthetic-client-secret" },
-    };
+    const configuration = { origin, platformUrl: "https://platform.example.test" };
 
     const repeated = await send("/fixture/mcp/login", {
       method: "PUT",

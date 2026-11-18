@@ -232,6 +232,8 @@ const originalFetch = globalThis.fetch;
 globalThis.fetch = (input, init) => {
   const request = new Request(input, init);
   const url = new URL(request.url);
+  if (url.origin === 'https://platform.example.test' && url.pathname === '/healthz') return Promise.resolve(new Response(null, {status: 200}));
+  if (url.origin === 'https://login.microsoftonline.com') return Promise.resolve(Response.json({error: 'invalid_tenant'}, {status: 400}));
   return originalFetch(url.origin === 'https://eu.i.posthog.com' ? new Request('http://127.0.0.1:${analyticsPort}'+url.pathname, request) : request);
 };
 ${executionRecorder}
@@ -394,13 +396,12 @@ export default { async fetch(request, env, ctx) {
     });
 
     it.each([
-      ["Continue with Google", "https://accounts.google.com"],
-      ["Continue with Microsoft", "https://login.microsoftonline.com"],
-      ["Continue with Widefleet", "https://platform.example.test"],
-      ["Cancel", "https://client.example.test"],
+      ["Continue", "https://platform.example.test", "guest@unknown.example.test"],
+      ["Continue with Widefleet", "https://platform.example.test", ""],
+      ["Cancel", "https://client.example.test", ""],
     ])(
       "submits %s in the browser and follows its OAuth redirect",
-      async (button, destination) => {
+      async (button, destination, email) => {
         const browser = await chromium.launch();
         const destinationReferrers: (string | undefined)[] = [];
 
@@ -453,6 +454,10 @@ export default { async fetch(request, env, ctx) {
             });
           });
           await page.goto("https://mcp.apps.example.test/authorize");
+
+          // A domain without an organization falls back to Widefleet sign-in.
+          if (email) await page.getByLabel("Work email").fill(email);
+
           await page.getByRole("button", { name: button, exact: true }).click();
           await page.waitForURL(callback);
           expect(await page.locator("body").innerText()).toBe("OAuth destination reached");

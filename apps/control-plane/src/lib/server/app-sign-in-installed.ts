@@ -53,20 +53,6 @@ export const createInstalledAppSignIn = (
       const login = mcpLoginConfiguration.parse({
         origin: origin.origin,
         platformUrl: configuration.PLATFORM_URL,
-        google:
-          configuration.GOOGLE_CLIENT_ID && configuration.GOOGLE_CLIENT_SECRET
-            ? {
-                clientId: configuration.GOOGLE_CLIENT_ID,
-                clientSecret: configuration.GOOGLE_CLIENT_SECRET,
-              }
-            : undefined,
-        microsoft:
-          configuration.MICROSOFT_CLIENT_ID && configuration.MICROSOFT_CLIENT_SECRET
-            ? {
-                clientId: configuration.MICROSOFT_CLIENT_ID,
-                clientSecret: configuration.MICROSOFT_CLIENT_SECRET,
-              }
-            : undefined,
       });
 
       await request("/mcp/login", "PUT", JSON.stringify(login));
