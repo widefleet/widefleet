@@ -40,7 +40,10 @@
           );
           if (draft.sso.appIdentityType === "google")
             draft.sso.issuer = "https://accounts.google.com";
-          if (draft.sso.appIdentityType !== "entra") draft.directory = null;
+          if (draft.sso.appIdentityType !== "entra") {
+            draft.directory = null;
+            draft.embeddingOrigins = [];
+          }
         }}
       >
         {#each Object.entries(ssoProviders) as [id, provider] (id)}

@@ -1,4 +1,9 @@
-import { companyProvider, googleGroupsScope, organizationIdentifier } from "@platform/contracts";
+import {
+  companyProvider,
+  embeddingOrigins,
+  googleGroupsScope,
+  organizationIdentifier,
+} from "@platform/contracts";
 import { base64url } from "jose";
 import { z } from "zod";
 
@@ -21,8 +26,17 @@ export const authConfiguration = z
       ),
     domain: hostname,
     redirectUrl: z.url(),
+    // Omitted unless configured, so existing publications keep their revision.
+    embeddingOrigins: embeddingOrigins.min(1).optional(),
   })
   .superRefine((configuration, context) => {
+    if (configuration.embeddingOrigins && configuration.provider.type !== "entra")
+      context.addIssue({
+        code: "custom",
+        path: ["embeddingOrigins"],
+        message: "Embedded sign-in requires Microsoft Entra app identity",
+      });
+
     if (!z.url().safeParse(configuration.redirectUrl).success) return;
     const url = new URL(configuration.redirectUrl);
 

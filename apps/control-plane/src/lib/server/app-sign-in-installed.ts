@@ -33,6 +33,7 @@ export const createInstalledAppSignIn = (
       cookieSecret,
       domain: configuration.APP_DOMAIN,
       redirectUrl: appCallbackUrl(configuration, organizationId),
+      embeddingOrigins: identity.embeddingOrigins.length ? identity.embeddingOrigins : undefined,
     });
 
   return {

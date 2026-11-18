@@ -196,6 +196,40 @@ describe("Platform setup and managed settings", () => {
     expect(bundle.configuration?.clientSecret).toBe("rotated-app-secret");
   });
 
+  it("publishes embedding origins and keeps them when a settings file omits them", async () => {
+    const update = async (embeddingOrigins?: string[]) => {
+      const { embeddingOrigins: _, ...current } = await input();
+
+      return environment.settings.update(
+        principal(),
+        { ...current, embeddingOrigins, acknowledgeRestart: false },
+        true,
+        await organizationCredential(environment, principal()),
+      );
+    };
+
+    await expect(
+      update(["https://teams.example.test", "https://*.Host.example.test"]),
+    ).resolves.toMatchObject({
+      settings: {
+        embeddingOrigins: ["https://teams.example.test", "https://*.host.example.test"],
+      },
+    });
+    expect(environment.authControl.read().configuration?.embeddingOrigins).toEqual([
+      "https://teams.example.test",
+      "https://*.host.example.test",
+    ]);
+
+    await update();
+    expect(environment.authControl.read().configuration?.embeddingOrigins).toHaveLength(2);
+
+    await expect(update(["http://teams.example.test"])).rejects.toThrow();
+
+    await update([]);
+    expect(environment.authControl.read().configuration).not.toHaveProperty("embeddingOrigins");
+    expect((await input()).embeddingOrigins).toEqual([]);
+  });
+
   it("reads installed status without publishing and reports unavailable or unapplied settings", async () => {
     const current = await input();
     const before = environment.authControl.read().publications;

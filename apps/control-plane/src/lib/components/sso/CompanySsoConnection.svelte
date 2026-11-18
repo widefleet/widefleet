@@ -23,6 +23,7 @@
   import CompanyDomains from "../CompanyDomains.svelte";
   import RestartDialog from "./RestartDialog.svelte";
   import SsoConnectionFields from "./SsoConnectionFields.svelte";
+  import EmbeddingOrigins from "./EmbeddingOrigins.svelte";
 
   let {
     view,
@@ -99,7 +100,9 @@
   };
 
   const remove = () =>
-    removal.save(() => settingsInput.parse({ ...view.settings, sso: null, directory: null }));
+    removal.save(() =>
+      settingsInput.parse({ ...view.settings, sso: null, directory: null, embeddingOrigins: [] }),
+    );
 </script>
 
 {#if view.sso}
@@ -197,6 +200,10 @@
       domainRequired={domainRequired(view, view.sso.appIdentityType)}
     />
 
+    {#if view.sso.appIdentityType === "entra"}
+      <EmbeddingOrigins {view} {organizationId} {readonly} />
+    {/if}
+
     <section class="space-y-4 rounded-xl border p-6" aria-labelledby="test-title">
       <div>
         <h3 id="test-title" class="text-base font-semibold">Test sign-in</h3>
@@ -231,8 +238,8 @@
           <Trash2 class="size-4" />Remove company SSO
         </h3>
         <p class="text-muted-foreground mt-2 text-sm leading-6">
-          Members sign in with Widefleet again, and apps use Widefleet sign-in. The email domains of
-          this connection are removed.
+          Members sign in with Widefleet again, and apps use Widefleet sign-in. The email domains
+          and embedding hosts of this connection are removed.
         </p>
         {#if removal.error}<div class="mt-4">
             <Feedback kind="error">{removal.error}</Feedback>

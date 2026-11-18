@@ -166,6 +166,7 @@ export const createAuthHandler = (
     appId: string,
     organizationId: string,
     caller: z.infer<typeof appCaller>,
+    frameAncestors: string[],
   ) => Promise<Response>,
 ) => ({
   async fetch(request: Request) {
@@ -232,7 +233,13 @@ export const createAuthHandler = (
           if (!route || route.organizationId !== organizationId) return reply(404, "Not found");
           phase = "app-runtime";
 
-          return runApp(forwarded, route.appId, route.organizationId, caller);
+          return runApp(
+            forwarded,
+            route.appId,
+            route.organizationId,
+            caller,
+            installed.configuration.embeddingOrigins ?? [],
+          );
         },
       });
 

@@ -6,7 +6,10 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
 
-export const createBrowserGateway = async (directory: string, upstream: string) => {
+const serveHttps = async (
+  directory: string,
+  respond: (path: string, init: RequestInit, host: string) => Promise<Response>,
+) => {
   const key = join(directory, "browser.key");
   const cert = join(directory, "browser.pem");
 
@@ -46,7 +49,7 @@ export const createBrowserGateway = async (directory: string, upstream: string) 
         const init: RequestInit = { method: request.method ?? "GET", headers, redirect: "manual" };
 
         if (chunks.length) init.body = Buffer.concat(chunks);
-        const result = await fetch(new URL(request.url ?? "/", upstream), init);
+        const result = await respond(request.url ?? "/", init, request.headers.host ?? "");
 
         const body = Buffer.from(await result.arrayBuffer());
 
@@ -83,3 +86,15 @@ export const createBrowserGateway = async (directory: string, upstream: string) 
       ),
   };
 };
+
+export const createBrowserGateway = (directory: string, upstream: string) =>
+  serveHttps(directory, (path, init) => fetch(new URL(path, upstream), init));
+
+// Serves requests in-process, for handlers that do not run behind a local listener.
+export const createBrowserServer = (
+  directory: string,
+  handle: (request: Request) => Promise<Response>,
+) =>
+  serveHttps(directory, (path, init, host) =>
+    handle(new Request(new URL(path, `https://${host}`), init)),
+  );
