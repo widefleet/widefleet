@@ -7,8 +7,6 @@ CREATE TABLE sso_domain (
   PRIMARY KEY (organization_id, domain)
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX sso_domain_verified_idx ON sso_domain(domain) WHERE verified_at IS NOT NULL;
---> statement-breakpoint
 -- Keep a pending Better Auth token valid so a published TXT record still verifies.
 INSERT INTO sso_domain (organization_id, domain, verification_token, verified_at)
 SELECT DISTINCT ON (provider.organization_id, listed.domain)

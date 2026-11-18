@@ -1,5 +1,5 @@
 import dns from "node:dns/promises";
-import { and, asc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { maxCompanyDomains, parseCompanyDomains } from "@platform/contracts";
 import { ssoProvider } from "./auth-schema.ts";
 import type { DatabaseExecutor } from "./database.ts";
@@ -112,22 +112,14 @@ const mirrorToProvider = async (transaction: DatabaseExecutor, organizationId: s
     .where(eq(ssoProvider.organizationId, organizationId));
 };
 
-export const changeSsoDomains = async (
-  transaction: DatabaseExecutor,
-  organizationId: string,
-  change: { add?: string[]; remove?: string[] } | { replace: string[] },
+type DomainChange = { add?: string[]; remove?: string[] } | { replace: string[] };
+
+const planChange = (
+  provider: { appIdentityType: string; required: boolean | null },
+  domains: { domain: string; verified: boolean }[],
+  change: DomainChange,
 ) => {
-  const provider = await readProvider(transaction, organizationId);
-
-  if (!provider)
-    throw new InvalidOperation({
-      code: "BAD_REQUEST",
-      message: "Save the company SSO configuration first",
-    });
-
-  await adoptProviderDomains(transaction, organizationId);
-  const rows = await readRows(transaction, organizationId);
-  const existing = new Set(rows.map((row) => row.domain));
+  const existing = new Set(domains.map((entry) => entry.domain));
   const add = "replace" in change ? change.replace : (change.add ?? []);
 
   const remove =
@@ -137,7 +129,7 @@ export const changeSsoDomains = async (
 
   const added = [...new Set(add)].filter((domain) => !existing.has(domain));
   const removed = new Set(remove.filter((domain) => existing.has(domain)));
-  const remaining = rows.filter((row) => !removed.has(row.domain));
+  const remaining = domains.filter((entry) => !removed.has(entry.domain));
   const count = remaining.length + added.length;
 
   if (count === 0)
@@ -160,13 +152,66 @@ export const changeSsoDomains = async (
 
   if (
     provider.required &&
-    rows.some((row) => row.verifiedAt !== null) &&
-    !remaining.some((row) => row.verifiedAt !== null)
+    domains.some((entry) => entry.verified) &&
+    !remaining.some((entry) => entry.verified)
   )
     throw new InvalidOperation({
       code: "CONFLICT",
       message: "Keep a verified email domain while company SSO is required",
     });
+
+  return { added, removed };
+};
+
+// Checks a change before related connection settings are written.
+export const checkSsoDomainChange = async (
+  database: DatabaseExecutor,
+  organizationId: string,
+  change: DomainChange,
+  appIdentityType: string,
+) => {
+  const provider = await readProvider(database, organizationId);
+
+  if (provider)
+    planChange(
+      { ...provider, appIdentityType },
+      await readSsoDomains(database, organizationId),
+      change,
+    );
+};
+
+// Serializes domain writes so each mirrors the complete list into the provider.
+const lockProvider = (transaction: DatabaseExecutor, organizationId: string) =>
+  transaction
+    .select({ id: ssoProvider.id })
+    .from(ssoProvider)
+    .where(eq(ssoProvider.organizationId, organizationId))
+    .for("update");
+
+export const changeSsoDomains = async (
+  transaction: DatabaseExecutor,
+  organizationId: string,
+  change: DomainChange,
+) => {
+  await lockProvider(transaction, organizationId);
+  const provider = await readProvider(transaction, organizationId);
+
+  if (!provider)
+    throw new InvalidOperation({
+      code: "BAD_REQUEST",
+      message: "Save the company SSO configuration first",
+    });
+
+  await adoptProviderDomains(transaction, organizationId);
+
+  const { added, removed } = planChange(
+    provider,
+    (await readRows(transaction, organizationId)).map((row) => ({
+      domain: row.domain,
+      verified: row.verifiedAt !== null,
+    })),
+    change,
+  );
 
   if (removed.size)
     await transaction
@@ -245,25 +290,9 @@ export const verifySsoDomains = async (
     )
   ).filter((entry) => entry !== null);
 
-  if (found.length) {
-    const [claimed] = await database
-      .select({ domain: ssoDomains.domain })
-      .from(ssoDomains)
-      .where(
-        and(
-          inArray(ssoDomains.domain, found),
-          isNotNull(ssoDomains.verifiedAt),
-          ne(ssoDomains.organizationId, organizationId),
-        ),
-      );
-
-    if (claimed)
-      throw new InvalidOperation({
-        code: "CONFLICT",
-        message: `${claimed.domain} is verified by another organization`,
-      });
-
+  if (found.length)
     await database.transaction(async (transaction) => {
+      await lockProvider(transaction, organizationId);
       await adoptProviderDomains(transaction, organizationId);
       await transaction
         .update(ssoDomains)
@@ -277,7 +306,6 @@ export const verifySsoDomains = async (
         );
       await mirrorToProvider(transaction, organizationId);
     });
-  }
 
   return {
     verified: found,

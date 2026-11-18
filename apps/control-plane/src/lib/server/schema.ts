@@ -341,10 +341,5 @@ export const ssoDomains = pgTable(
     verifiedAt: timestamp("verified_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [
-    primaryKey({ columns: [table.organizationId, table.domain] }),
-    uniqueIndex("sso_domain_verified_idx")
-      .on(table.domain)
-      .where(sql`${table.verifiedAt} IS NOT NULL`),
-  ],
+  (table) => [primaryKey({ columns: [table.organizationId, table.domain] })],
 );

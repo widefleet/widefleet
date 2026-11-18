@@ -24,7 +24,12 @@ import {
   ssoRuntimeIdentity,
   saveSsoProvider,
 } from "./sso-settings.ts";
-import { changeSsoDomains, readSsoDomains, verifySsoDomains } from "./sso-domains.ts";
+import {
+  changeSsoDomains,
+  checkSsoDomainChange,
+  readSsoDomains,
+  verifySsoDomains,
+} from "./sso-domains.ts";
 import { appLoginClientId, readAppLogin, registerAppLogin } from "./app-login-client.ts";
 import { organizationSettings } from "./schema.ts";
 import type { Observation } from "./observation.ts";
@@ -272,6 +277,15 @@ const createOrganizationSettingsService = (
         code: "BAD_REQUEST",
         message: "Enter a company email domain",
       });
+
+    // Rejects an invalid domain list before the connection itself is saved.
+    if (next.sso?.domain !== undefined)
+      await checkSsoDomainChange(
+        database,
+        organizationId,
+        { replace: domains },
+        next.sso.appIdentityType,
+      );
 
     // Google app sign-in requests one Workspace domain from Google and checks its `hd` claim.
     if (next.sso?.appIdentityType === "google" && domains.length > 1)
