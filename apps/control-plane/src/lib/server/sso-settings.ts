@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { z } from "zod";
-import { oidcProviderInput } from "@platform/contracts";
+import { oidcProviderInput, parseCompanyDomains } from "@platform/contracts";
 import { organizationSettings } from "./schema.ts";
 import { ssoProvider } from "./auth-schema.ts";
 import { companyIdentity } from "./company-identity.ts";
@@ -8,6 +8,7 @@ import type { DatabaseExecutor } from "./database.ts";
 import { decryptSecret } from "./secret-encryption.ts";
 import type { OrganizationCredential } from "./organization-operations.ts";
 import { InvalidOperation } from "./errors.ts";
+import { changeSsoDomains } from "./sso-domains.ts";
 
 export const readSsoProvider = async (database: DatabaseExecutor, organizationId: string) => {
   const [record] = await database
@@ -110,14 +111,29 @@ export const saveSsoProvider = async (
       message: "Remove the current SSO connection before registering another provider",
     });
 
+  // Widefleet verifies each domain itself, so Better Auth's provider domain is
+  // changed only through the domain list.
+  const { domain, ...connection } = input;
+
   if (existing)
     await credential.auth.api.updateSSOProvider({
       headers: credential.headers,
-      body: input,
+      body: connection,
     });
-  else
+  else {
+    if (!domain)
+      throw new InvalidOperation({
+        code: "BAD_REQUEST",
+        message: "Enter a company email domain",
+      });
     await credential.auth.api.registerSSOProvider({
       headers: credential.headers,
-      body: { ...input, organizationId },
+      body: { ...connection, domain, organizationId },
     });
+  }
+
+  if (domain === undefined) return;
+  await database.transaction((transaction) =>
+    changeSsoDomains(transaction, organizationId, { replace: parseCompanyDomains(domain) }),
+  );
 };

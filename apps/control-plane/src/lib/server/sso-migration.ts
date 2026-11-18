@@ -1,11 +1,12 @@
 import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
-import { companyProvider, installationSettings } from "@platform/contracts";
+import { companyProvider, installationSettings, parseCompanyDomains } from "@platform/contracts";
 import { ssoProvider } from "./auth-schema.ts";
 import { organizationSettings } from "./schema.ts";
 import type { Database } from "./database.ts";
 import { decryptSecret, encryptSecret } from "./secret-encryption.ts";
 import { companyAccountProvider, providerIssuer } from "./company-identity.ts";
+import { changeSsoDomains } from "./sso-domains.ts";
 
 const legacyClient = z.object({
   clientId: z.string(),
@@ -75,6 +76,11 @@ export const migrateSsoSettings = async (database: Database, key: string) => {
               }),
             ),
           });
+
+          const domains = parseCompanyDomains(identity.domain ?? "");
+
+          if (domains.length)
+            await changeSsoDomains(transaction, row.organizationId, { add: domains });
         }
       }
 

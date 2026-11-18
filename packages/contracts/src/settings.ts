@@ -15,14 +15,40 @@ export const identityUrl = z.url().refine((value) => {
 
 const claimName = z.string().regex(/^[A-Za-z_][A-Za-z0-9_.-]{0,127}$/);
 
+const domainName = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
 export const companyDomain = z
   .string()
   .trim()
   .toLowerCase()
   .max(253)
-  .regex(
-    /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/,
-    "Enter the company's email domain, without a URL or wildcard",
+  .regex(domainName, "Enter the company's email domain, without a URL or wildcard");
+
+export const maxCompanyDomains = 20;
+
+export const parseCompanyDomains = (value: string) =>
+  value
+    .split(",")
+    .map((domain) => domain.trim().toLowerCase())
+    .filter(Boolean);
+
+// Settings files list every company email domain in one comma-separated value.
+export const companyDomains = z
+  .string()
+  .overwrite((value) => parseCompanyDomains(value).join(","))
+  .refine(
+    (value) =>
+      value !== "" &&
+      value.split(",").every((domain) => domain.length <= 253 && domainName.test(domain)),
+    "Enter the company's email domains separated by commas, without a URL or wildcard",
+  )
+  .refine(
+    (value) => new Set(value.split(",")).size === value.split(",").length,
+    "Enter each company email domain once",
+  )
+  .refine(
+    (value) => value.split(",").length <= maxCompanyDomains,
+    `Enter at most ${maxCompanyDomains} company email domains`,
   );
 
 export const companyProvider = z.discriminatedUnion("type", [
@@ -65,7 +91,9 @@ export const oidcProviderInput = z.strictObject({
   providerId: z.string().min(1),
   appIdentityType: z.enum(["oidc", "entra", "google"]).default("oidc"),
   issuer: identityUrl,
-  domain: companyDomain,
+  // Required to register a connection. Afterwards it replaces the listed domains
+  // when present; each new domain stays pending until its DNS record is verified.
+  domain: companyDomains.optional(),
   oidcConfig: z.strictObject({
     clientId: z.string().min(1).max(512),
     clientSecret: z.string().min(1).max(16_384).optional(),
@@ -114,22 +142,38 @@ export const activationStatus = z.strictObject({
   message: z.string(),
 });
 
+const domainVerificationRecord = z.object({
+  domain: z.string(),
+  name: z.string(),
+  type: z.literal("TXT"),
+  value: z.string(),
+});
+
+export const ssoDomain = z.strictObject({
+  domain: z.string(),
+  verified: z.boolean(),
+  record: domainVerificationRecord.omit({ domain: true }).nullable(),
+});
+
+export const ssoDomainInput = z.strictObject({ domain: companyDomain });
+
 export const settingsView = z.strictObject({
   settings: installationSettings,
+  ssoDomains: z.array(ssoDomain),
   ssoRequired: z.boolean(),
   managementCallbackUrl: z.string().nullable(),
   appCallbackUrl: z.url(),
   activation: activationStatus,
   error: z.string().nullable(),
   sso: oidcProviderInput
-    .extend({ domain: z.union([companyDomain, z.literal("")]), domainVerified: z.boolean() })
+    .extend({ domain: z.union([companyDomains, z.literal("")]), domainVerified: z.boolean() })
     .nullable(),
 });
 
-export const domainVerification = z.object({
-  name: z.string(),
-  type: z.literal("TXT"),
-  value: z.string(),
+// Lists pending domains. The top-level record is the first one's, kept for clients
+// that predate `records`.
+export const domainVerification = domainVerificationRecord.omit({ domain: true }).extend({
+  records: z.array(domainVerificationRecord).min(1),
 });
 
 export const settingsPlan = z.strictObject({

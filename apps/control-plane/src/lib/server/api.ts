@@ -582,21 +582,40 @@ export const createApi = (runtime: Runtime) => {
       .route({ method: "POST", path: "/settings/domain-verification" })
       .output(contract.domainVerification)
       .handler(({ context }) =>
+        apiOperation(() => runtime.settings.domainVerification(context.principal)),
+      ),
+    addDomain: write
+      .route({ method: "POST", path: "/settings/domains" })
+      .input(contract.ssoDomainInput)
+      .output(contract.settingsView)
+      .handler(({ context, input }) =>
         apiOperation(() =>
-          runtime.settings.domainVerification(
+          runtime.settings.addDomain(
             context.principal,
-            runtime.auth,
-            context.request.headers,
+            input.domain,
+            !context.request.headers.has("authorization"),
+          ),
+        ),
+      ),
+    removeDomain: write
+      .route({ method: "DELETE", path: "/settings/domains/{domain}" })
+      .input(contract.ssoDomainInput)
+      .output(contract.settingsView)
+      .handler(({ context, input }) =>
+        apiOperation(() =>
+          runtime.settings.removeDomain(
+            context.principal,
+            input.domain,
+            !context.request.headers.has("authorization"),
           ),
         ),
       ),
     verifyDomain: write
       .route({ method: "POST", path: "/settings/verify-domain" })
+      .input(contract.ssoDomainInput.partial().optional())
       .output(z.object({ success: z.boolean() }))
-      .handler(({ context }) =>
-        apiOperation(() =>
-          runtime.settings.verifyDomain(context.principal, runtime.auth, context.request.headers),
-        ),
+      .handler(({ context, input }) =>
+        apiOperation(() => runtime.settings.verifyDomain(context.principal, input?.domain)),
       ),
     activateSso: write
       .route({ method: "POST", path: "/settings/activate-sso" })
