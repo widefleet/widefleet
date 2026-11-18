@@ -141,7 +141,8 @@ export const createMcpCliLogin = (
 
 export const mcpCliLoginPlugin = (login: ReturnType<typeof createMcpCliLogin>) => ({
   id: "mcp-cli-login",
-  rateLimit: [{ pathMatcher: (path: string) => path === "/mcp/cli-login", window: 60, max: 10 }],
+  // Hosted installations provide one Cloudflare binding per policy; reuse an existing one.
+  rateLimit: [{ pathMatcher: (path: string) => path === "/mcp/cli-login", window: 60, max: 5 }],
   endpoints: {
     redeemMcpCliLogin: createAuthEndpoint(
       "/mcp/cli-login",
