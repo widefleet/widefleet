@@ -17,7 +17,11 @@ import * as encryption from "../src/lib/server/secret-encryption.ts";
 import { createSettingsService } from "../src/lib/server/settings.ts";
 import { cliClientId } from "../src/lib/server/auth-options.ts";
 import { readAppLogin, appLoginClientId } from "../src/lib/server/app-login-client.ts";
-import { createTestEnvironment, organizationCredential } from "./environment.ts";
+import {
+  createTestEnvironment,
+  organizationCredential,
+  linkCompanyAccount,
+} from "./environment.ts";
 
 describe("Organization login settings", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
@@ -82,7 +86,10 @@ describe("Organization login settings", () => {
       .set({ domainVerified: true })
       .where(eq(ssoProvider.organizationId, organizationId));
 
+    await linkCompanyAccount(environment.database.db, principal.id, organizationId);
     await settings.activateSso(principal);
+    // The fixture link only satisfies activation; these tests manage the provider itself.
+    await environment.database.db.delete(account).where(eq(account.userId, principal.id));
 
     return { organizationId, principal, input };
   };
@@ -221,6 +228,7 @@ describe("Organization login settings", () => {
       .update(ssoProvider)
       .set({ domainVerified: true })
       .where(eq(ssoProvider.organizationId, target.organizationId));
+    await linkCompanyAccount(environment.database.db, target.principal.id, target.organizationId);
     await settings.activateSso(target.principal);
     expect(await disabled()).toBe(true);
     await settings.update(

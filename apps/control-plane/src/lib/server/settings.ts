@@ -6,7 +6,7 @@ import {
   settingsUpdate,
   setupOwner,
 } from "@platform/contracts";
-import { eq, isNotNull, or, sql } from "drizzle-orm";
+import { and, eq, isNotNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { OrganizationCredential } from "./organization-operations.ts";
 import { appCallbackUrl, type AppSignIn } from "./app-sign-in.ts";
@@ -18,7 +18,7 @@ import { InvalidOperation } from "./errors.ts";
 import { decryptSecret, encryptSecret } from "./secret-encryption.ts";
 import { installationOrganizationId } from "../organization.ts";
 import { readOrganizationSettings, createInstallationOwner } from "./installation-store.ts";
-import { oauthClient, organization } from "./auth-schema.ts";
+import { account, oauthClient, organization } from "./auth-schema.ts";
 import {
   readSsoConfiguration,
   readSsoProvider,
@@ -538,10 +538,24 @@ const createOrganizationSettingsService = (
         await lockSettings(transaction);
         const provider = await readSsoConfiguration(transaction, encryptionKey, organizationId);
 
-        if (!companySsoAvailable(configuration, provider))
+        if (!provider || !companySsoAvailable(configuration, provider))
           throw new InvalidOperation({
             code: "CONFLICT",
             message: "Verify the company domain before activating SSO",
+          });
+
+        // Required SSO denies email sessions, so an administrator whose account is not
+        // linked to the provider would lose access to this organization.
+        const [linked] = await transaction
+          .select({ id: account.id })
+          .from(account)
+          .where(and(eq(account.userId, principal.id), eq(account.providerId, provider.providerId)))
+          .limit(1);
+
+        if (!linked)
+          throw new InvalidOperation({
+            code: "CONFLICT",
+            message: "Sign in with company SSO once to link your account before activating it",
           });
         await transaction
           .update(organizationSettings)

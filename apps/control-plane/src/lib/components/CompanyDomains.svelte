@@ -1,16 +1,18 @@
 <script lang="ts">
   import { isHttpError } from "@sveltejs/kit";
+  import { goto } from "$app/navigation";
+  import { page } from "$app/state";
   import Globe from "@lucide/svelte/icons/globe";
   import Trash from "@lucide/svelte/icons/trash-2";
   import { companyDomain, type ssoDomain } from "@platform/contracts";
   import type { z } from "zod";
   import { addCompanyDomain, removeCompanyDomain, verifyCompanyDomain } from "#lib/settings.remote";
-  import { Badge } from "@platform/ui/badge";
   import { Button } from "@platform/ui/button";
   import * as Dialog from "@platform/ui/dialog";
   import { Input } from "@platform/ui/input";
   import { Label } from "@platform/ui/label";
-  import CopyButton from "./CopyButton.svelte";
+  import DnsRecord from "./DnsRecord.svelte";
+  import StatusBadge from "./StatusBadge.svelte";
   import EmptyState from "./EmptyState.svelte";
   import Feedback from "./Feedback.svelte";
 
@@ -28,10 +30,15 @@
     domainRequired: boolean;
   } = $props();
 
-  // The dialog asks for a new domain, then shows the DNS record of the selected one.
-  let open = $state(false);
+  // The open dialog is part of the URL, so it can be shared and survives a reload:
+  // `add` asks for a new domain and `domain` shows the DNS record of a pending one.
+  const adding = $derived(!readonly && page.url.searchParams.has("add"));
 
-  let selected = $state<string | null>(null);
+  const selected = $derived(page.url.searchParams.get("domain"));
+
+  const current = $derived(domains.find((entry) => entry.domain === selected) ?? null);
+
+  const open = $derived(adding || Boolean(current?.record));
 
   let input = $state("");
 
@@ -45,22 +52,35 @@
 
   let verified = $state("");
 
-  const current = $derived(domains.find((entry) => entry.domain === selected) ?? null);
-
   const failure = (cause: unknown, fallback: string) =>
     isHttpError(cause) ? cause.body.message : cause instanceof Error ? cause.message : fallback;
 
+  const navigate = (dialog: { add: true } | { domain: string } | null) => {
+    const url = new URL(page.url.href);
+    url.searchParams.delete("add");
+    url.searchParams.delete("domain");
+
+    if (dialog && "add" in dialog) url.searchParams.set("add", "");
+    else if (dialog) url.searchParams.set("domain", dialog.domain);
+
+    return goto(url, { reset: false });
+  };
+
+  const close = () => navigate(null);
+
   const startAdding = () => {
-    selected = null;
     input = "";
     dialogError = "";
-    open = true;
+    verified = "";
+
+    return navigate({ add: true });
   };
 
   const showRecord = (domain: string) => {
-    selected = domain;
     dialogError = "";
-    open = true;
+    verified = "";
+
+    return navigate({ domain });
   };
 
   const add = async (event: SubmitEvent) => {
@@ -78,9 +98,8 @@
 
     try {
       await addCompanyDomain({ organizationId, domain: parsed.data });
-
-      if (verificationRequired) selected = parsed.data;
-      else open = false;
+      // Operator-trusted installations use domains for discovery only.
+      await navigate(verificationRequired ? { domain: parsed.data } : null);
     } catch (cause) {
       dialogError = failure(cause, "The domain could not be added.");
     } finally {
@@ -96,7 +115,7 @@
     try {
       await verifyCompanyDomain({ organizationId, domain: selected });
       verified = selected;
-      open = false;
+      await close();
     } catch (cause) {
       dialogError = failure(cause, "The DNS record could not be verified.");
     } finally {
@@ -153,16 +172,10 @@
             <p class="min-w-0 basis-full truncate text-sm font-medium sm:flex-1 sm:basis-0">
               {entry.domain}
             </p>
-            {#if verificationRequired}<Badge
-                variant="outline"
-                class="gap-1.5 whitespace-nowrap border-transparent bg-muted/60 px-2 py-1 font-normal"
-              >
-                <span
-                  class={`size-1.5 rounded-full ${entry.verified ? "bg-emerald-500" : "bg-amber-500"}`}
-                  aria-hidden="true"
-                ></span>
-                {entry.verified ? "Verified" : "Pending"}
-              </Badge>{/if}
+            {#if verificationRequired}<StatusBadge
+                tone={entry.verified ? "success" : "pending"}
+                label={entry.verified ? "Verified" : "Pending"}
+              />{/if}
             <div class="ml-auto flex items-center gap-1">
               {#if verificationRequired && !entry.verified}
                 <Button variant="outline" size="sm" onclick={() => showRecord(entry.domain)}
@@ -193,7 +206,12 @@
   {/if}
 </section>
 
-<Dialog.Root bind:open>
+<Dialog.Root
+  {open}
+  onOpenChange={(next) => {
+    if (!next && !busy) void close();
+  }}
+>
   <Dialog.Content
     class="sm:max-w-lg"
     showCloseButton={!busy}
@@ -212,23 +230,10 @@
           to appear.
         </Dialog.Description>
       </Dialog.Header>
-      <dl
-        class="bg-muted/50 grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-4 rounded-lg border px-4 py-2 text-xs"
-      >
-        <dt class="text-muted-foreground py-2">Type</dt>
-        <dd class="col-span-2 py-2 font-mono">TXT</dd>
-        <dt class="text-muted-foreground py-2">Name</dt>
-        <dd class="font-mono wrap-anywhere">{current.record.name}</dd>
-        <dd><CopyButton value={current.record.name} label="Copy record name" /></dd>
-        <dt class="text-muted-foreground py-2">Value</dt>
-        <dd class="font-mono wrap-anywhere">{current.record.value}</dd>
-        <dd><CopyButton value={current.record.value} label="Copy record value" /></dd>
-      </dl>
+      <DnsRecord name={current.record.name} value={current.record.value} />
       {#if dialogError}<p class="text-destructive text-sm" role="alert">{dialogError}</p>{/if}
       <Dialog.Footer>
-        <Button variant="outline" disabled={busy} onclick={() => (open = false)}
-          >Verify later</Button
-        >
+        <Button variant="outline" disabled={busy} onclick={close}>Verify later</Button>
         <Button disabled={busy} onclick={verify}>{busy ? "Verifying …" : "Verify domain"}</Button>
       </Dialog.Footer>
     {:else}
@@ -255,9 +260,7 @@
             </p>{/if}
         </div>
         <Dialog.Footer>
-          <Button variant="outline" type="button" disabled={busy} onclick={() => (open = false)}
-            >Cancel</Button
-          >
+          <Button variant="outline" type="button" disabled={busy} onclick={close}>Cancel</Button>
           <Button type="submit" disabled={busy}>{busy ? "Adding …" : "Add domain"}</Button>
         </Dialog.Footer>
       </form>
