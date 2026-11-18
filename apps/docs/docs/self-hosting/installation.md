@@ -46,6 +46,8 @@ Company sign-in automatically enrolls users admitted by the organization's provi
 
 Existing accounts with a matching email in the verified company domain are linked automatically, retaining their membership and role. External guests admitted by the provider can join, but a different email domain does not establish trusted linking to an existing account. See [company sign-in settings](/reference/company-sign-in) for CLI configuration and provider replacement.
 
+Display names that contain non-ASCII characters can arrive empty in apps. Use the stable user identifier for authorization.
+
 If sign-in returns `429`, wait for the delay in the `X-Retry-After` header before retrying.
 Users behind a shared proxy share an IP-based request limit.
 
