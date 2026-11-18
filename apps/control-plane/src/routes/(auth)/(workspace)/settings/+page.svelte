@@ -1,21 +1,17 @@
 <script lang="ts">
-  import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import KeyRound from "@lucide/svelte/icons/key-round";
   import { getWorkspaceContext } from "#lib/workspace-context";
   import { onMount } from "svelte";
   import { beforeNavigate } from "$app/navigation";
   import { page } from "$app/state";
   import { settingsInput } from "@platform/contracts";
   import { getSettings, setExternalManagement } from "#lib/settings.remote";
-  import {
-    failureMessage,
-    nextSetupStep,
-    SettingsWriter,
-    ssoProviders,
-  } from "#lib/sso-setup.svelte";
+  import { failureMessage, SettingsWriter } from "#lib/sso-setup.svelte";
   import { Button } from "@platform/ui/button";
   import PageHeading from "#shadcn/components/PageHeading.svelte";
   import Feedback from "#shadcn/components/Feedback.svelte";
-  import StatusBadge from "#shadcn/components/StatusBadge.svelte";
+  import EmptyState from "#shadcn/components/EmptyState.svelte";
+  import CompanySsoConnection from "#shadcn/components/sso/CompanySsoConnection.svelte";
   import RestartDialog from "#shadcn/components/sso/RestartDialog.svelte";
   import type { PageData } from "./$types";
 
@@ -50,10 +46,6 @@
     { id: "identity", label: "Company sign-in" },
     { id: "management", label: "Administration" },
   ];
-
-  const next = $derived(nextSetupStep(view, data.linked));
-
-  const provider = $derived(view.sso ? ssoProviders[view.sso.appIdentityType] : null);
 
   beforeNavigate(({ to }) => {
     // Outcomes belong to the section where they happened.
@@ -130,32 +122,28 @@
       >
     </section>
   {:else}
-    <a
-      href={view.ssoRequired
-        ? "/settings/sso"
-        : view.sso
-          ? `/settings/sso/setup?step=${next}`
-          : "/settings/sso/setup"}
-      class="hover:bg-muted/40 flex items-center justify-between gap-4 rounded-xl border p-6 transition-colors"
-    >
-      <div class="min-w-0">
-        <div class="flex flex-wrap items-center gap-2">
-          <h2 class="text-base font-semibold">Company SSO</h2>
-          {#if view.ssoRequired}<StatusBadge tone="success" label="Active" />{:else if view.sso}
-            <StatusBadge tone="pending" label="Setup in progress" />{/if}
-        </div>
-        <p class="text-muted-foreground mt-1 text-sm leading-6">
-          {provider?.label ??
-            "Let members sign in with Microsoft Entra, Google Workspace or another OpenID Connect provider."}
-        </p>
-      </div>
-      <span class="text-primary flex shrink-0 items-center gap-1 text-sm font-medium"
-        >{view.ssoRequired ? "Manage" : view.sso ? "Continue setup" : "Set up"}<ChevronRight
-          class="size-4"
-          aria-hidden="true"
-        /></span
-      >
-    </a>
+    {#if view.sso}
+      <CompanySsoConnection
+        {view}
+        organizationId={workspace.organizationId}
+        platformUrl={data.platformUrl}
+        linked={data.linked}
+        tested={data.tested}
+        emailSignIn={data.emailSignIn}
+        loginFailed={route.loginFailed}
+      />
+    {:else}
+      <section class="rounded-xl border" aria-label="Company SSO">
+        <EmptyState
+          title="Company SSO"
+          description="Let members sign in with Microsoft Entra, Google Workspace or another OpenID Connect provider."
+          >{#snippet icon()}<KeyRound />{/snippet}<Button
+            href="/settings/sso/setup"
+            disabled={readonly}>Set up company SSO</Button
+          ></EmptyState
+        >
+      </section>
+    {/if}
 
     {#if data.emailSignIn && !view.sso}
       <section class="space-y-3 rounded-xl border p-6" aria-labelledby="app-sign-in-title">

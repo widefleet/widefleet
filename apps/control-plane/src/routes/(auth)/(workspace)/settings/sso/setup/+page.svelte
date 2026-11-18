@@ -196,7 +196,7 @@
       await activateCompanySso({ organizationId: workspace.organizationId });
 
       // Activation replaces this browser's email session with a company one.
-      const failure = await startCompanySignIn(view.sso.providerId, "/settings/sso");
+      const failure = await startCompanySignIn(view.sso.providerId, "/settings");
 
       if (failure) error = failure;
     }, "Could not activate company SSO.");
@@ -218,8 +218,7 @@
     </p>
   </div>
   <!-- A saved connection's credentials, domains and removal stay reachable during setup. -->
-  {#if view.sso}<Button variant="outline" size="sm" href="/settings/sso">Manage connection</Button
-    >{/if}
+  {#if view.sso}<Button variant="outline" size="sm" href="/settings">Manage connection</Button>{/if}
 </div>
 
 <div class="mt-8 grid gap-8 md:grid-cols-[13rem_minmax(0,1fr)]">
@@ -384,7 +383,7 @@
           <p class="text-muted-foreground text-sm leading-6">
             Add the email domain of your members, then verify it with a DNS record.
           </p>
-          <Button href="/settings/sso?add">Add email domain</Button>
+          <Button href="/settings?add">Add email domain</Button>
         {/if}
       {:else if step === "test"}
         <p class="text-muted-foreground text-sm leading-6">
@@ -395,7 +394,7 @@
           <Feedback kind="error"
             >Company sign-in failed. Check your provider, redirect URIs and credentials.</Feedback
           >
-          <Button variant="outline" href="/settings/sso?edit">Edit configuration</Button>
+          <Button variant="outline" href="/settings?edit">Edit configuration</Button>
         {/if}
         {#if data.tested}
           <Feedback kind="success"

@@ -114,7 +114,7 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
       preferences: { usage: false },
       effective: { usage: false, crashes: false },
     });
-    await page.getByRole("link", { name: /^Company SSO.*Set up$/ }).click();
+    await page.getByRole("link", { name: "Set up company SSO", exact: true }).click();
     await expect(page).toHaveURL(/\/settings\/sso\/setup$/);
     await page.getByRole("button", { name: /^Microsoft Entra/ }).click();
     await expect(page.getByRole("heading", { name: "Register Widefleet" })).toBeVisible();
@@ -166,7 +166,7 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
     await page.getByRole("button", { name: "Continue", exact: true }).click();
     await page.getByRole("button", { name: "Activate company SSO" }).click();
     await page.getByRole("button", { name: /sso@example.test/ }).click();
-    await expect(page).toHaveURL(/\/settings\/sso$/);
+    await expect(page).toHaveURL(/\/settings$/);
     await expect(page.getByText("Required for all members", { exact: false })).toBeVisible();
     await page.goto("/settings");
     await page.waitForLoadState("networkidle");
@@ -180,16 +180,16 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
     await page.goto("/settings?section=management");
     await page.waitForLoadState("networkidle");
     await page.getByRole("button", { name: "Manage settings externally" }).click();
-    await page.goto("/settings/sso");
+    await page.goto("/settings");
     await page.waitForLoadState("networkidle");
     await expect(page.getByRole("button", { name: "Edit configuration" })).toBeDisabled();
     await page.goto("/settings?section=management");
     await page.waitForLoadState("networkidle");
     await page.getByRole("button", { name: "Enable browser editing" }).click();
-    await page.goto("/settings/sso");
+    await page.goto("/settings");
     await page.waitForLoadState("networkidle");
     await page.getByRole("button", { name: "Edit configuration" }).click();
-    await expect(page).toHaveURL(/\/settings\/sso\?edit$/);
+    await expect(page).toHaveURL(/\/settings\?edit$/);
     await page.reload();
     await page.waitForLoadState("networkidle");
     await page.getByLabel("Client secret", { exact: true }).fill("rotated-secret");
@@ -279,7 +279,7 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
     await expect(page.getByRole("heading", { name: "Settings", exact: true })).toBeVisible();
     // The migrated connection has no email domain yet; add it to the domain list.
     await expect(page.getByLabel("Company email domain")).toHaveCount(0);
-    await page.goto("/settings/sso");
+    await page.goto("/settings");
     await page.waitForLoadState("networkidle");
     await page.getByRole("button", { name: "Add domain", exact: true }).click();
     const addition = page.getByRole("dialog");
@@ -305,7 +305,7 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
     await expect(
       page.getByRole("list", { name: "Email domains" }).getByText("Verified", { exact: true }),
     ).toBeVisible();
-    await page.goto("/settings/sso");
+    await page.goto("/settings");
     await page.waitForLoadState("networkidle");
     await page.getByRole("button", { name: "Test company sign-in" }).click();
     await page.getByRole("button", { name: /sso@example.test/ }).click();
@@ -342,7 +342,7 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
 
     await page.goto(replacementLink);
     await expect(page).toHaveURL(/\/settings$/);
-    await page.goto("/settings/sso");
+    await page.goto("/settings");
     await page.waitForLoadState("networkidle");
     await page.getByRole("button", { name: "Edit configuration" }).click();
     await page

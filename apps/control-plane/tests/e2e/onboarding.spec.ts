@@ -256,7 +256,7 @@ test("accepts emailed owner invitations and manages members in isolated organiza
     // Configure company SSO, remove it, then configure it again without reloading.
     // The removed provider must not leave saved credentials in the browser draft.
     const configure = async () => {
-      await operator.getByRole("link", { name: /^Company SSO.*Set up$/ }).click();
+      await operator.getByRole("link", { name: "Set up company SSO", exact: true }).click();
       await operator.waitForLoadState("networkidle");
       await operator.getByRole("button", { name: /^Microsoft Entra/ }).click();
       await operator.getByRole("heading", { name: "Register Widefleet" }).waitFor();
@@ -290,7 +290,7 @@ test("accepts emailed owner invitations and manages members in isolated organiza
     await configure();
     await expect(operator.getByText(recordName("example.test"), { exact: true })).toBeVisible();
     await operator.getByRole("link", { name: "Manage connection", exact: true }).click();
-    await expect(operator).toHaveURL(/\/settings\/sso$/);
+    await expect(operator).toHaveURL(/\/settings$/);
     await operator.waitForLoadState("networkidle");
     const domains = operator.getByRole("list", { name: "Email domains" });
     await expect(domains.getByText("example.test", { exact: true })).toBeVisible();
@@ -313,7 +313,7 @@ test("accepts emailed owner invitations and manages members in isolated organiza
     await operator.waitForLoadState("networkidle");
     await expect(dialog.getByText(recordName("alias.example.test"), { exact: true })).toBeVisible();
     await dialog.getByRole("button", { name: "Verify later", exact: true }).click();
-    await expect(operator).toHaveURL(/\/settings\/sso$/);
+    await expect(operator).toHaveURL(/\/settings$/);
     await expect(domains.getByText("Pending", { exact: true })).toHaveCount(2);
 
     await operator.getByRole("button", { name: "Remove example.test", exact: true }).click();
@@ -322,14 +322,16 @@ test("accepts emailed owner invitations and manages members in isolated organiza
       operator.getByRole("button", { name: "Remove alias.example.test", exact: true }),
     ).toHaveCount(0);
 
-    await operator.goto("/settings/sso");
+    await operator.goto("/settings");
     await operator.waitForLoadState("networkidle");
     await operator.getByText("Remove this connection", { exact: true }).click();
     await operator.getByRole("button", { name: "Remove company SSO", exact: true }).click();
     await expect(operator).toHaveURL(/\/settings$/);
-    await expect(operator.getByRole("link", { name: /^Company SSO.*Set up$/ })).toBeVisible();
+    await expect(
+      operator.getByRole("link", { name: "Set up company SSO", exact: true }),
+    ).toBeVisible();
     await configure();
-    await operator.goto("/settings/sso");
+    await operator.goto("/settings");
     await operator.waitForLoadState("networkidle");
     await expect(domains.getByText("example.test", { exact: true })).toBeVisible();
     await expect(domains.getByText("alias.example.test", { exact: true })).toHaveCount(0);

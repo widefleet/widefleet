@@ -66,7 +66,7 @@ test("configures self-hosted SSO without a company domain or DNS proof", async (
       .fill(z.string().parse(logs.match(/code is (\d{6})/)?.[1]));
     await page.getByRole("button", { name: "Verify and sign in", exact: true }).click();
     await expect(page).toHaveURL(/\/settings$/);
-    await page.getByRole("link", { name: /^Company SSO.*Set up$/ }).click();
+    await page.getByRole("link", { name: "Set up company SSO", exact: true }).click();
     await page.getByRole("button", { name: /^Microsoft Entra/ }).click();
     await page.getByRole("button", { name: "Continue", exact: true }).click();
     const domain = page.getByLabel("Company email domain (optional)");
