@@ -7,7 +7,7 @@ import { getUserSession, pageFailure } from "./page-auth.ts";
 import { getRuntime, reportRequestException } from "./runtime.ts";
 
 export const remoteContext = async (write?: { organizationId: string }) => {
-  const { request, locals } = getRequestEvent();
+  const { request } = getRequestEvent();
   const { user, session } = getUserSession();
   const runtime = await getRuntime();
 
@@ -15,6 +15,7 @@ export const remoteContext = async (write?: { organizationId: string }) => {
     user.id,
     session.activeOrganizationId ?? null,
     session.identityOrganizationId ?? null,
+    session.id,
   );
 
   if (principal.isErr()) {
@@ -28,7 +29,7 @@ export const remoteContext = async (write?: { organizationId: string }) => {
     error(409, "Your organization selection changed. Reload this page before making changes.");
 
   runtime.reporting.active(principal.value.id);
-  locals.principal = principal.value;
+  session.activeOrganizationId = principal.value.application.organizationId;
 
   return { runtime, principal: principal.value, request };
 };

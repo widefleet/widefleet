@@ -52,8 +52,6 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
-  delete requestLocals.principal;
-
   if (requestLocals.session)
     requestLocals.session.activeOrganizationId = environment.application.organizationId;
   exception.mockClear();
@@ -251,19 +249,30 @@ it("does not retain a page identity after its session is gone", async () => {
   expect(exception).toHaveBeenCalledExactlyOnceWith(error, undefined, { $groups: undefined });
 });
 
-it("uses an automatically selected organization when the session has no explicit selection", async () => {
-  if (!requestLocals.session || !requestLocals.user) throw new Error("Missing fixture session");
-  requestLocals.session.activeOrganizationId = null;
-  const principal = await runtime.identity.principal(requestLocals.user.id, null, null);
+it("uses the session's persisted automatic organization selection", async () => {
+  const credential = await environment.users.login({ userId: environment.owner.id });
+  const current = await runtime.auth.api.getSession({ headers: credential.headers });
+
+  if (!current) throw new Error("Missing fixture session");
+  expect(current.session.activeOrganizationId).toBeNull();
+
+  const principal = await runtime.identity.principal(
+    current.user.id,
+    null,
+    null,
+    current.session.id,
+  );
 
   if (principal.isErr()) throw principal.error;
-  requestLocals.principal = principal.value;
+  const selected = await runtime.auth.api.getSession({ headers: credential.headers });
+
+  if (!selected) throw new Error("Missing fixture session");
+  expect(selected.session.activeOrganizationId).toBe(environment.application.organizationId);
   const cause = new Error("Failure after organization selection");
-  await reportRequestException(cause, requestLocals);
+  await reportRequestException(cause, { ...requestLocals, ...selected });
   expect(exception).toHaveBeenCalledExactlyOnceWith(cause, `user:${environment.owner.id}`, {
     $groups: { organization: environment.application.organizationId },
   });
-  expect(requestLocals.session.activeOrganizationId).toBeNull();
 });
 
 it("reports server APIErrors in remote operations and skips expected client errors", async () => {

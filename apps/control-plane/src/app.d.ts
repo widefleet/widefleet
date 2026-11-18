@@ -14,7 +14,6 @@ declare global {
     }
 
     interface Locals {
-      principal?: Principal;
       user: Authentication["$Infer"]["Session"]["user"] | null;
       session: Authentication["$Infer"]["Session"]["session"] | null;
       analytics: AnalyticsConfiguration | null;

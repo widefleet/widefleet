@@ -58,17 +58,18 @@ export const invitationIdentity = async (invitationId: string) => {
 
 export const pagePrincipal = async () => {
   const { user, session } = getUserSession();
-  const { url, locals } = getRequestEvent();
+  const { url } = getRequestEvent();
   const runtime = await getRuntime();
 
   const result = await runtime.identity.principal(
     user.id,
     session.activeOrganizationId ?? null,
     session.identityOrganizationId ?? null,
+    session.id,
   );
 
   if (result.isOk()) {
-    locals.principal = result.value;
+    session.activeOrganizationId = result.value.application.organizationId;
     runtime.reporting.active(result.value.id);
 
     return result.value;

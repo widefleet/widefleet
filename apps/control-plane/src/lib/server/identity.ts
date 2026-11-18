@@ -80,17 +80,18 @@ export const createIdentityService = (
     userId: string,
     organizationId: string | null,
     identityOrganizationId: string | null,
+    sessionId?: string | null,
   ) =>
     Result.gen(async function* () {
-      organizationId ??= access.defaultOrganizationId ?? null;
+      const selectedOrganizationId = organizationId ?? access.defaultOrganizationId ?? null;
       const records = yield* Result.await(memberships(userId, identityOrganizationId));
 
       const matching =
-        organizationId === null
+        selectedOrganizationId === null
           ? records
-          : records.filter((record) => record.organizationId === organizationId);
+          : records.filter((record) => record.organizationId === selectedOrganizationId);
 
-      if (organizationId === null && matching.length !== 1)
+      if (selectedOrganizationId === null && matching.length !== 1)
         return yield* new AuthenticationFailed({
           code: "ORGANIZATION_REQUIRED",
           message:
@@ -111,6 +112,37 @@ export const createIdentityService = (
           organizationSlug: record.organizationSlug,
           message: `Sign in with company SSO for ${record.organizationName}. Open /sign-in?organization=${encodeURIComponent(record.organizationSlug)} before authorizing the CLI.`,
         });
+
+      if (organizationId === null && sessionId) {
+        const [current] = yield* Result.await(
+          Result.tryPromise({
+            try: () =>
+              database
+                .update(sessions)
+                // Concurrent requests may choose the same default, but an explicit
+                // selection from another tab must never be overwritten.
+                .set({
+                  activeOrganizationId: sql`coalesce(${sessions.activeOrganizationId}, ${record.organizationId})`,
+                })
+                .where(and(eq(sessions.id, sessionId), eq(sessions.userId, userId)))
+                .returning({ organizationId: sessions.activeOrganizationId }),
+            catch: (cause) =>
+              new DatabaseUnavailable({ message: "Could not save organization selection", cause }),
+          }),
+        );
+
+        if (!current)
+          return yield* new AuthenticationFailed({
+            code: "UNAUTHORIZED",
+            message: "Sign in to continue",
+          });
+
+        if (current.organizationId !== record.organizationId)
+          return yield* new AuthenticationFailed({
+            code: "CONFLICT",
+            message: "Your organization selection changed. Reload this page before making changes.",
+          });
+      }
 
       const admin = organizationRoles[record.role].authorize({ agent: ["manage"] }).success;
 
@@ -228,13 +260,15 @@ export const createIdentityService = (
       const verified = yield* Result.await(verify(request, scope));
 
       const organizationId =
-        request.headers.get("x-widefleet-organization") ??
-        verified.activeOrganizationId ??
-        access.defaultOrganizationId ??
-        null;
+        request.headers.get("x-widefleet-organization") ?? verified.activeOrganizationId ?? null;
 
       const principal = yield* Result.await(
-        resolveUser(verified.userId, organizationId, verified.identityOrganizationId),
+        resolveUser(
+          verified.userId,
+          organizationId,
+          verified.identityOrganizationId,
+          verified.sessionId,
+        ),
       );
 
       // A rendered browser form carries its displayed organization. Never reinterpret
