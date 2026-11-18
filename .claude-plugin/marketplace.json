@@ -1,0 +1,15 @@
+{
+  "name": "widefleet",
+  "description": "Widefleet plugins for building, deploying and using internal apps.",
+  "owner": {
+    "name": "Widefleet",
+    "url": "https://widefleet.com"
+  },
+  "plugins": [
+    {
+      "name": "widefleet",
+      "source": "./plugins/widefleet",
+      "description": "Build, deploy and use internal apps on Widefleet."
+    }
+  ]
+}
