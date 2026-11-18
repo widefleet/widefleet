@@ -6,6 +6,7 @@ import { installationOrganizationId } from "../organization.ts";
 
 export interface AppSignIn {
   callbackUrl: string;
+  revoke(): Promise<void>;
   publish(
     identity: z.infer<typeof companyIdentity>,
     clientSecret: string,

@@ -113,6 +113,16 @@ const control = async (request: Request, environment: AuthEnvironment) => {
 
       return reply(204, "");
     }
+
+    if (request.method === "DELETE") {
+      const previous = await readAuthConfiguration(environment, organizationId);
+      await environment.AUTH_CONFIG.delete(authConfigurationKey(organizationId));
+      const previousKey = previous ? mcpOrganizationKey(previous.configuration) : null;
+
+      if (previousKey) await environment.AUTH_CONFIG.delete(previousKey);
+
+      return reply(204, "");
+    }
   }
 
   if (path.startsWith("/apps/")) {

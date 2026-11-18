@@ -134,18 +134,24 @@ const createOrganizationSettingsService = (
 
         let expectedRevision = "";
 
-        if (identity && appSignIn) {
+        if (appSignIn) {
           try {
-            const secret = identity.management.clientSecret;
+            if (identity) {
+              const secret = identity.management.clientSecret;
 
-            const [company] = await transaction
-              .select({ name: organization.name })
-              .from(organization)
-              .where(eq(organization.id, organizationId));
+              const [company] = await transaction
+                .select({ name: organization.name })
+                .from(organization)
+                .where(eq(organization.id, organizationId));
 
-            expectedRevision = await appSignIn.revision(identity, secret, company?.name);
+              expectedRevision = await appSignIn.revision(identity, secret, company?.name);
 
-            if (publish) await appSignIn.publish(identity, secret, company?.name);
+              if (publish) await appSignIn.publish(identity, secret, company?.name);
+            } else if (publish) {
+              // With no admitted provider or fallback, remove any earlier grant.
+              // Skipping publication would leave app sign-in using stale trust.
+              await appSignIn.revoke();
+            }
           } catch (cause) {
             current.errors.push(
               cause instanceof InvalidOperation

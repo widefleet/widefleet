@@ -7,6 +7,7 @@ import { organizationSettings } from "../src/lib/server/schema.ts";
 import { createAuthentication } from "../src/lib/server/auth.ts";
 import { createIdentityService } from "../src/lib/server/identity.ts";
 import { createSettingsService } from "../src/lib/server/settings.ts";
+import { createAppSignIn } from "../src/lib/server/app-sign-in-node.ts";
 import { createTestEnvironment } from "./environment.ts";
 import { createIdentityProvider } from "./edge/auth-proxy-idp.ts";
 
@@ -145,6 +146,77 @@ describe("Operator-trusted self-hosted SSO", () => {
         .from(account)
         .where(eq(account.userId, environment.owner.id)),
     ).toEqual([]);
+  });
+
+  it.each([
+    { verified: false, emailSignIn: false },
+    { verified: false, emailSignIn: true },
+    { verified: true, emailSignIn: false },
+  ])("withdraws operator trust and republishes only an admitted login (%j)", async (options) => {
+    await environment.database.db
+      .update(ssoProvider)
+      .set({ domain: "example.test", domainVerified: options.verified });
+    await environment.settings.activateSso(principal());
+    expect(environment.authControl.read().configuration?.clientId).toBe("app-login");
+
+    const configuration = {
+      ...environment.configuration,
+      PLATFORM_SSO_TRUST_PROVIDER: false,
+    };
+
+    const settings = createSettingsService(
+      configuration,
+      environment.database.db,
+      environment.environment.PLATFORM_ENCRYPTION_KEY,
+      (organizationId) =>
+        createAppSignIn(configuration, Buffer.alloc(32, 1).toString("base64url"), organizationId),
+      options.emailSignIn,
+    );
+
+    await settings.republish();
+    const installed = environment.authControl.read().configuration;
+
+    if (options.verified) expect(installed?.clientId).toBe("app-login");
+    else if (options.emailSignIn) {
+      expect(installed?.provider).toMatchObject({
+        type: "oidc",
+        issuer: `${origin}/api/auth`,
+      });
+      expect(installed?.clientId).not.toBe("app-login");
+    } else {
+      expect(installed).toBeNull();
+      expect(await settings.read(principal())).toMatchObject({
+        error: null,
+        activation: { state: "waiting" },
+      });
+      await expect(
+        createAuthentication(configuration, environment.database.db).api.signInSSO({
+          body: { providerId, callbackURL: "/apps" },
+        }),
+      ).rejects.toThrow();
+    }
+
+    await environment.settings.republish();
+    expect(environment.authControl.read().configuration?.clientId).toBe("app-login");
+  });
+
+  it("reports a failed trust withdrawal and retries it on republication", async () => {
+    await environment.settings.activateSso(principal());
+    const configuration = { ...environment.configuration, PLATFORM_SSO_TRUST_PROVIDER: false };
+
+    const settings = createSettingsService(
+      configuration,
+      environment.database.db,
+      environment.environment.PLATFORM_ENCRYPTION_KEY,
+      (organizationId) =>
+        createAppSignIn(configuration, Buffer.alloc(32, 1).toString("base64url"), organizationId),
+    );
+
+    environment.authControl.available(false);
+    await expect(settings.republish()).rejects.toThrow("App sign-in could not be prepared");
+    environment.authControl.available(true);
+    await settings.republish();
+    expect(environment.authControl.read().configuration).toBeNull();
   });
 
   it("links existing accounts only with the operator option and preserves the owner and account binding", async () => {
