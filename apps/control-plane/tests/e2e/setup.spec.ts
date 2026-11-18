@@ -103,6 +103,7 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
     await page.getByRole("link", { name: "Organization settings", exact: true }).click();
     await expect(page.getByRole("link", { name: "Privacy", exact: true })).toHaveCount(0);
     await page.goto("/settings?section=reporting");
+    await page.waitForLoadState("networkidle");
     await expect(page.getByRole("link", { name: "Company sign-in", exact: true })).toHaveAttribute(
       "aria-current",
       "page",
@@ -113,14 +114,10 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
       preferences: { usage: false },
       effective: { usage: false, crashes: false },
     });
-    await page.getByRole("button", { name: "Configure company SSO", exact: true }).click();
-    await page.getByLabel("Company email domain").fill("example.test");
-    await page
-      .getByLabel("Issuer URL")
-      .fill(
-        `${environment.environment.ENTRA_AUTHORITY}/${environment.environment.ENTRA_TENANT_ID}/v2.0`,
-      );
-    await page.getByLabel("App identity provider").selectOption("entra");
+    await page.getByRole("link", { name: /^Company SSO.*Set up$/ }).click();
+    await expect(page).toHaveURL(/\/settings\/sso\/setup$/);
+    await page.getByRole("button", { name: /^Microsoft Entra/ }).click();
+    await expect(page.getByRole("heading", { name: "Register Widefleet" })).toBeVisible();
     await expect(
       page.getByText("http://localhost:25430/api/auth/sso/callback/company-widefleet", {
         exact: true,
@@ -129,20 +126,23 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
     await expect(
       page.getByText("https://auth.apps.localhost/oauth2/widefleet/callback", { exact: true }),
     ).toBeVisible();
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await page
+      .getByLabel("Issuer URL")
+      .fill(
+        `${environment.environment.ENTRA_AUTHORITY}/${environment.environment.ENTRA_TENANT_ID}/v2.0`,
+      );
+    await page.getByLabel("Company email domain").fill("example.test");
     await page
       .getByLabel("Client ID", { exact: true })
       .fill(environment.environment.ENTRA_CLIENT_ID);
     await page
       .getByLabel("Client secret", { exact: true })
       .fill(environment.environment.ENTRA_CLIENT_SECRET);
-    await page.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(page.getByText("Settings saved.", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Save and continue", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Verify email domain" })).toBeVisible();
 
     const initial = environment.authControl.read();
-
-    await page.getByRole("link", { name: "Verify an email domain", exact: true }).click();
-    const domains = page.getByRole("list", { name: "Email domains" });
-    await expect(domains.getByText("Pending", { exact: true })).toBeVisible();
 
     const recordResponse = await page.request.post("/api/v1/settings/domain-verification", {
       headers: { origin: environment.configuration.PLATFORM_URL },
@@ -150,27 +150,26 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
 
     expect(recordResponse.ok()).toBe(true);
     const record = domainVerification.parse(await recordResponse.json());
-    await domains.getByRole("button", { name: "Verify", exact: true }).click();
-    const dialog = page.getByRole("dialog");
-    await expect(dialog.getByRole("heading", { name: "Verify example.test" })).toBeVisible();
-    await expect(dialog.getByText(record.name, { exact: true })).toBeVisible();
-    await expect(dialog.getByText(record.value, { exact: true })).toBeVisible();
-    await dialog.getByRole("button", { name: "Verify domain", exact: true }).click();
-    await expect(dialog.getByRole("alert")).toContainText("No matching TXT record");
+    await expect(page.getByText(record.name, { exact: true })).toBeVisible();
+    await expect(page.getByText(record.value, { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Verify example.test", exact: true }).click();
+    await expect(page.getByRole("alert")).toContainText("No matching TXT record");
     await writeFile(dnsFile, JSON.stringify({ [record.name]: record.value }));
-    await dialog.getByRole("button", { name: "Verify domain", exact: true }).click();
-    await expect(dialog).toHaveCount(0);
-    await expect(domains.getByText("Verified", { exact: true })).toBeVisible();
-    await page.getByRole("link", { name: "Company sign-in", exact: true }).click();
+    await page.getByRole("button", { name: "Verify example.test", exact: true }).click();
+    await expect(page.getByText("example.test is verified.", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
     await page.getByRole("button", { name: "Test company sign-in" }).click();
     await page.getByRole("button", { name: /sso@example.test/ }).click();
     await expect(
       page.getByText("Company sign-in and administrator access verified successfully."),
     ).toBeVisible();
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
     await page.getByRole("button", { name: "Activate company SSO" }).click();
     await page.getByRole("button", { name: /sso@example.test/ }).click();
-    await expect(page).toHaveURL(/\/settings(?:\?|$)/);
-    await expect(page.getByRole("button", { name: "Activate company SSO" })).toHaveCount(0);
+    await expect(page).toHaveURL(/\/settings\/sso$/);
+    await expect(page.getByText("Required for all members", { exact: false })).toBeVisible();
+    await page.goto("/settings");
+    await page.waitForLoadState("networkidle");
 
     const passwordLogin = await request.post("/api/auth/sign-in/email", {
       headers: { origin: environment.configuration.PLATFORM_URL },
@@ -178,26 +177,27 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
     });
 
     expect(passwordLogin.status()).toBe(404);
-    await page
-      .getByRole("navigation", { name: "Settings sections" })
-      .getByRole("link", { name: "Administration", exact: true })
-      .click();
+    await page.goto("/settings?section=management");
+    await page.waitForLoadState("networkidle");
     await page.getByRole("button", { name: "Manage settings externally" }).click();
-    await page.getByRole("link", { name: "Company sign-in", exact: true }).click();
-    await expect(page.getByLabel("Client ID", { exact: true })).toBeDisabled();
-    await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
-    await page
-      .getByRole("navigation", { name: "Settings sections" })
-      .getByRole("link", { name: "Administration", exact: true })
-      .click();
+    await page.goto("/settings/sso");
+    await page.waitForLoadState("networkidle");
+    await expect(page.getByRole("button", { name: "Edit configuration" })).toBeDisabled();
+    await page.goto("/settings?section=management");
+    await page.waitForLoadState("networkidle");
     await page.getByRole("button", { name: "Enable browser editing" }).click();
-    await page.getByRole("link", { name: "Company sign-in", exact: true }).click();
+    await page.goto("/settings/sso");
+    await page.waitForLoadState("networkidle");
+    await page.getByRole("button", { name: "Edit configuration" }).click();
+    await expect(page).toHaveURL(/\/settings\/sso\?edit$/);
+    await page.reload();
+    await page.waitForLoadState("networkidle");
     await page.getByLabel("Client secret", { exact: true }).fill("rotated-secret");
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(page.getByText("Settings saved.", { exact: true })).toBeVisible();
     await expect(page.getByRole("dialog")).toHaveCount(0);
     // The HTTP publication is acknowledged before the settings save completes.
-    await expect(page.getByLabel("Client ID", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Connection" })).toBeVisible();
     await expect(
       page.getByText("The sign-in configuration is published.", {
         exact: true,
@@ -219,7 +219,7 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
     const settingsResponse = await page.request.get("/api/v1/settings");
     expect(settingsResponse.ok()).toBe(true);
     expect(settingsView.parse(await settingsResponse.json()).activation.state).toBe("failed");
-    await expect(page.getByLabel("Client ID", { exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Connection" })).toBeVisible();
     environment.authControl.available(true);
 
     // Model the state preserved by migration 0023: saved encrypted credentials,
@@ -279,7 +279,8 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
     await expect(page.getByRole("heading", { name: "Settings", exact: true })).toBeVisible();
     // The migrated connection has no email domain yet; add it to the domain list.
     await expect(page.getByLabel("Company email domain")).toHaveCount(0);
-    await page.getByRole("link", { name: "Email domains", exact: true }).click();
+    await page.goto("/settings/sso");
+    await page.waitForLoadState("networkidle");
     await page.getByRole("button", { name: "Add domain", exact: true }).click();
     const addition = page.getByRole("dialog");
     await addition.getByLabel("Domain", { exact: true }).fill("example.test");
@@ -304,7 +305,8 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
     await expect(
       page.getByRole("list", { name: "Email domains" }).getByText("Verified", { exact: true }),
     ).toBeVisible();
-    await page.getByRole("link", { name: "Company sign-in", exact: true }).click();
+    await page.goto("/settings/sso");
+    await page.waitForLoadState("networkidle");
     await page.getByRole("button", { name: "Test company sign-in" }).click();
     await page.getByRole("button", { name: /sso@example.test/ }).click();
     await expect(
@@ -340,6 +342,9 @@ test("verifies company DNS, preserves matching accounts and enforces company SSO
 
     await page.goto(replacementLink);
     await expect(page).toHaveURL(/\/settings$/);
+    await page.goto("/settings/sso");
+    await page.waitForLoadState("networkidle");
+    await page.getByRole("button", { name: "Edit configuration" }).click();
     await page
       .getByLabel("Issuer URL")
       .fill(
