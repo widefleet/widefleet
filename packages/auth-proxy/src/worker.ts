@@ -153,14 +153,25 @@ const control = async (request: Request, environment: AuthEnvironment) => {
 
     if (request.method === "DELETE") {
       const listed = await listedDiscoveryKeys(environment, organizationId);
+      const listKey = discoveryListKey(organizationId);
 
-      // Revoke sign-in first. A failed index cleanup must not keep the provider trusted;
-      // the list remains, so a retry removes the rest.
+      // Revoke sign-in first, so index cleanup can never keep the provider trusted.
       await environment.AUTH_CONFIG.delete(authConfigurationKey(organizationId));
+      const remaining = [...listed.keys];
 
-      for (const key of listed.keys) await environment.AUTH_CONFIG.delete(key);
+      try {
+        for (const key of listed.keys) {
+          await environment.AUTH_CONFIG.delete(key);
+          remaining.shift();
+        }
+      } catch (cause) {
+        // A list derived from the deleted configuration exists nowhere else. Save the
+        // keys that are left for the retry; one write, as KV allows per key and second.
+        if (!listed.stored) await environment.AUTH_CONFIG.put(listKey, JSON.stringify(remaining));
+        throw cause;
+      }
 
-      await environment.AUTH_CONFIG.delete(discoveryListKey(organizationId));
+      if (listed.stored) await environment.AUTH_CONFIG.delete(listKey);
 
       return reply(204, "");
     }

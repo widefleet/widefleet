@@ -160,6 +160,8 @@ it("revokes only the selected organization's sign-in and MCP discovery entries",
     const configurationKey = authConfigurationKey("revoked");
     expect((await control(configurationKey, "DELETE", undefined, false)).status).toBe(403);
     expect(await storage.get(configurationKey)).not.toBeNull();
+    // Like an organization published before discovery lists existed.
+    await storage.delete("organizations/revoked/discovery");
     expect(
       (
         await control(
@@ -175,7 +177,12 @@ it("revokes only the selected organization's sign-in and MCP discovery entries",
     expect(await storage.get(configurationKey)).toBeNull();
     expect((await runtime.dispatchFetch("https://ledger.apps.example.test/")).status).toBe(503);
     expect(await storage.get(`${mcpDomainPrefix("shared.example")}revoked`)).toBe("revoked");
+    // Its derived list is gone with the configuration, so the remaining key is saved.
+    expect(
+      JSON.parse(z.string().parse(await storage.get("organizations/revoked/discovery"))),
+    ).toEqual([`${mcpDomainPrefix("shared.example")}revoked`]);
     expect((await control(configurationKey, "DELETE")).status).toBe(204);
+    expect(await storage.get("organizations/revoked/discovery")).toBeNull();
     expect((await control(configurationKey, "DELETE")).status).toBe(204);
     expect(await storage.get(configurationKey)).toBeNull();
     expect(await storage.get("mcp/organizations/google/example.test/revoked")).toBeNull();
