@@ -36,7 +36,6 @@ const compile = async (entry: string, define: Record<string, string>) => {
     bundle: true,
     format: "esm",
     platform: "neutral",
-    conditions: ["workerd"],
     mainFields: ["module", "main"],
     target: "es2023",
     external: [

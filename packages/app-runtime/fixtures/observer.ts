@@ -44,6 +44,12 @@ export default {
     const keyValue = path.endsWith("/kv");
 
     if (path.startsWith("/platform-error/")) {
+      env = { ...env };
+
+      if (new URL(request.url).searchParams.has("unconfigured")) delete env.POSTHOG_PROJECT_TOKEN;
+
+      if (new URL(request.url).searchParams.has("default-scope")) delete env.POSTHOG_SCOPE;
+
       try {
         if (path.endsWith("/catalog") || path.endsWith("/catalog-context")) {
           await env.WIDEFLEET_PACKAGES.put("invalid.json", "invalid-json");

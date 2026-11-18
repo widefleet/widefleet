@@ -37,6 +37,7 @@
     "@platform/ui": "workspace:*",
     "effect": "4.1.0",
     "jose": "6.2.10",
+    "posthog-node": "5.55.0",
     "zod": "4.6.5"
   },
   "devDependencies": {
