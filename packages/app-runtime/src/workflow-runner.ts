@@ -5,7 +5,6 @@ import {
   WorkerEntrypoint,
   WorkflowEntrypoint,
   type WorkflowSleepDuration,
-  type WorkflowTimeoutDuration,
   type WorkflowStepRollbackOptions,
 } from "cloudflare:workers";
 import { activity, insideStep } from "./workflow-activity.ts";
@@ -22,6 +21,7 @@ import {
   type ReplayCommand,
   type StepConfig,
   type StepContext,
+  type EventWaitOptions,
 } from "./workflow-protocol.ts";
 
 type Callback = (context: StepContext) => Promise<WorkflowValue>;
@@ -125,10 +125,7 @@ export const workflowSteps = {
   sleepUntil(name: string, deadline: Date | number) {
     return operation({ kind: "sleepUntil", ...identity(name, "sleep"), deadline });
   },
-  waitForEvent(
-    name: string,
-    options: { type: string; timeout?: number | WorkflowTimeoutDuration },
-  ) {
+  waitForEvent(name: string, options: EventWaitOptions) {
     return operation({ kind: "waitForEvent", ...identity(name, "waitForEvent"), options });
   },
 };

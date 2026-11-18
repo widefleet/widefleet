@@ -355,6 +355,49 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
       expect(labels(id)).toEqual(["first", "finish"]);
     }, 30000);
 
+    it("publishes an event prompt while waiting and clears it once answered", async () => {
+      const id = await create("prompted");
+
+      const prompt = {
+        name: "approval",
+        type: "continue",
+        message: `Approve ${id}?`,
+        requestedSchema: {
+          type: "object",
+          properties: { approved: { type: "boolean" } },
+          required: ["approved"],
+        },
+      };
+
+      expect(await status(id, "waiting")).toMatchObject({ prompts: [prompt] });
+      await stop(true);
+      await start();
+      expect(await status(id, "waiting")).toMatchObject({ prompts: [prompt] });
+      await call("continue", id);
+      // Answering settles the prompt before the resumed replay reaches the wait again.
+      expect(await call("status", id)).not.toHaveProperty("prompts");
+      const completed = await status(id, "complete");
+      expect(completed).toMatchObject({ output: 42 });
+      expect(completed).not.toHaveProperty("prompts");
+      expect(labels(id)).toEqual(["first", "finish"]);
+      await call("restart", id);
+
+      await vi.waitFor(
+        async () =>
+          expect(await call("status", id)).toMatchObject({ status: "waiting", prompts: [prompt] }),
+        { timeout: 5000, interval: 20 },
+      );
+
+      await call("terminate", id);
+      expect(await status(id, "terminated")).not.toHaveProperty("prompts");
+    }, 30000);
+
+    it("rejects an invalid event prompt without waiting", async () => {
+      const id = await create("invalid-prompt");
+      expect(await status(id, "errored")).not.toHaveProperty("prompts");
+      expect(labels(id)).toEqual([]);
+    });
+
     it("supports sleep and sleepUntil without repeating completed callbacks", async () => {
       const started = Date.now();
       const id = await create("sleep");

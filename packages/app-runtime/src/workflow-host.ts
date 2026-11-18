@@ -9,6 +9,7 @@ import { workflowApp } from "./workflow-app.ts";
 import { workerCode } from "./worker.ts";
 import type { ParentEnvironment } from "./types.ts";
 import type { WorkflowRunner } from "./workflow-runner.ts";
+import { waitForPromptedEvent } from "./workflow-prompts.ts";
 import { executionOptions } from "./execution-limits.ts";
 import {
   fault,
@@ -237,7 +238,14 @@ export class AppWorkflow extends WorkflowEntrypoint<CelldWorkflowEnvironment, St
 
                 return undefined;
               case "waitForEvent":
-                return step.waitForEvent(name, command.options);
+                return waitForPromptedEvent(
+                  this.env,
+                  start,
+                  command.id,
+                  command.name,
+                  command.options,
+                  (options) => step.waitForEvent(name, options),
+                );
               default:
                 throw new Error("Invalid Workflow command");
             }

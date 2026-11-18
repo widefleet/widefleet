@@ -38,7 +38,7 @@ export class ExampleWorkflow extends WorkflowEntrypoint {
     await step.sleep('nap', 1);
     // The deadline crosses RPC boundaries before the native engine validates it.
     await step.sleepUntil('deadline', Date.now() + 1000);
-    await step.waitForEvent('continue', { type: 'continue', timeout: '5 minutes' });
+    await step.waitForEvent('continue', { type: 'continue', timeout: '5 minutes', prompt: { message: 'private-prompt' } });
     return step.do('finish', async () => ({ result, secret: this.env.OBSERVER_LABEL ?? null }));
   }
 }
@@ -278,7 +278,33 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           body: '{"blocked":false}',
         });
         await call({ action: "resume", id });
+        // The local engine reports an event wait as running before it hibernates.
+        await expect
+          .poll(
+            async () => {
+              const { result } = z
+                .object({ result: z.object({ status: z.string(), prompts: z.unknown() }) })
+                .parse(await call({ action: "status", id }));
+
+              return { open: ["running", "waiting"].includes(result.status), result };
+            },
+            { timeout: 15000 },
+          )
+          .toMatchObject({
+            open: true,
+            result: {
+              prompts: [
+                {
+                  name: "continue",
+                  type: "continue",
+                  message: "private-prompt",
+                  requestedSchema: { type: "object", properties: {} },
+                },
+              ],
+            },
+          });
         await call({ action: "sendEvent", id, event: { type: "continue", payload: {} } });
+        expect(await call({ action: "status", id })).not.toHaveProperty("result.prompts");
         await complete(id, { result: 3, secret: null });
         await expect.poll(() => count("do")).toBe(4);
         expect(count("create")).toBe(1);
@@ -297,6 +323,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         // Partial restart reuses the first two results, reexecutes retry and finish.
         await call({ action: "restart", id, from: { name: "retry", type: "do", count: 1 } });
         await expect.poll(() => count("do")).toBe(5);
+        // A restarted wait publishes its prompt again.
+        await expect
+          .poll(() => call({ action: "status", id }), { timeout: 15000 })
+          .toMatchObject({ result: { prompts: [{ message: "private-prompt" }] } });
         await call({ action: "sendEvent", id, event: { type: "continue", payload: {} } });
         await complete(id, { result: 3, secret: null });
         await expect.poll(() => count("do")).toBe(6);
@@ -363,6 +393,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           "private-name",
           "private-message",
           "private-retry",
+          "private-prompt",
           "spoofed",
         ])
           expect(serialized).not.toContain(forbidden);

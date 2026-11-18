@@ -1,6 +1,6 @@
 import { NonRetryableError } from "cloudflare:workflows";
 import { z } from "zod";
-import { workflowInstanceId, workflowRestartFrom } from "@platform/contracts";
+import { workflowEventPrompt, workflowInstanceId, workflowRestartFrom } from "@platform/contracts";
 import type {
   WorkflowEvent,
   WorkflowStepConfig,
@@ -35,6 +35,13 @@ export type StepConfig = Omit<WorkflowStepConfig, "retries"> & {
 
 export type StepContext = WorkflowStepContext;
 
+// Native options plus Widefleet's optional question for the person who answers.
+export type EventWaitOptions = {
+  type: string;
+  timeout?: number | WorkflowTimeoutDuration;
+  prompt?: z.input<typeof workflowEventPrompt>;
+};
+
 export const stepId = ({ name, type, count }: z.infer<typeof workflowRestartFrom>) =>
   JSON.stringify([name, type, count]);
 
@@ -52,7 +59,8 @@ export type Command =
   | {
       kind: "waitForEvent";
       id: string;
-      options: { type: string; timeout?: number | WorkflowTimeoutDuration };
+      name: string;
+      options: EventWaitOptions;
     }
   | { kind: "complete"; value: WorkflowValue }
   | { kind: "error"; error: Fault };

@@ -4,6 +4,7 @@ import {
   workflowEventType,
   workflowInstanceId,
   workflowName,
+  workflowPendingPrompt,
   workflowRequest,
   workflowRestartOptions,
   workflowRestartFrom,
@@ -34,6 +35,8 @@ export type InstanceInput =
   | z.input<typeof workflowRestartOptions>
   | { rollback?: boolean };
 
+export type PendingPrompt = z.infer<typeof workflowPendingPrompt>;
+
 type RecordEntry = {
   creation: Omit<CreateOptions, "id" | "params">;
   id: string;
@@ -41,6 +44,9 @@ type RecordEntry = {
   createdAt: string;
   start: Start;
   started: boolean;
+  // Keyed by step identity, so parallel waits each publish their own question.
+  prompts?: Record<string, PendingPrompt>;
+  settledPrompts?: string[];
 };
 
 const key = (workflow: string, id: string) => `instance/${workflow}/${id}`;
@@ -267,6 +273,55 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
       return { id };
     });
   }
+  private async storePrompts(
+    record: RecordEntry,
+    prompts: [string, PendingPrompt][],
+    settled: string[],
+  ) {
+    if (prompts.length) record.prompts = Object.fromEntries(prompts);
+    else delete record.prompts;
+
+    if (settled.length) record.settledPrompts = settled;
+    else delete record.settledPrompts;
+    await this.ctx.storage.put(key(record.start.workflow, record.id), record);
+  }
+  private async settlePrompts(record: RecordEntry, steps: string[]) {
+    const entries = Object.entries(record.prompts ?? {});
+    const remaining = entries.filter(([step]) => !steps.includes(step));
+    const settled = record.settledPrompts ?? [];
+    const next = [...new Set([...settled, ...steps])];
+
+    if (remaining.length === entries.length && next.length === settled.length) return;
+    await this.storePrompts(record, remaining, next);
+  }
+  private async instanceRecord(scope: WorkflowScope, id: string) {
+    scopeSchema.parse(scope);
+
+    return this.ctx.storage.get<RecordEntry>(key(scope.workflow, workflowInstanceId.parse(id)));
+  }
+  // Called only by the trusted Workflow hosts when execution reaches an event wait.
+  // Replays reach completed waits again; a settled wait never reopens its prompt.
+  publishPrompt(scope: WorkflowScope, id: string, step: string, prompt: PendingPrompt) {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      const record = await this.instanceRecord(scope, id);
+
+      if (!record || record.settledPrompts?.includes(step)) return;
+
+      await this.storePrompts(
+        record,
+        [...Object.entries(record.prompts ?? {}), [step, workflowPendingPrompt.parse(prompt)]],
+        record.settledPrompts ?? [],
+      );
+    });
+  }
+  // Called by the hosts once the native wait returns or fails.
+  settlePrompt(scope: WorkflowScope, id: string, step: string) {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      const record = await this.instanceRecord(scope, id);
+
+      if (record) await this.settlePrompts(record, [step]);
+    });
+  }
   private async operate(scope: WorkflowScope, id: string, action: string, input?: InstanceInput) {
     await this.active(scope);
     const name = key(scope.workflow, workflowInstanceId.parse(id));
@@ -286,17 +341,37 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
       return null;
     }
 
-    if (action === "status") return this.readStatus(record);
+    if (action === "status") {
+      const status = await this.readStatus(record);
+      const prompts = Object.values(record.prompts ?? {});
+
+      // Paused, failed and finished instances do not take answers.
+      return ["running", "waiting"].includes(status.status) && prompts.length > 0
+        ? { ...status, prompts }
+        : status;
+    }
 
     if (action === "resume" || action === "restart") await this.requireExecution(scope);
     const instance = await this.native(record);
 
     switch (action) {
-      case "sendEvent":
-        await instance.sendEvent(
-          z.strictObject({ type: workflowEventType, payload: z.unknown() }).parse(input),
+      case "sendEvent": {
+        const event = z
+          .strictObject({ type: workflowEventType, payload: z.unknown() })
+          .parse(input);
+
+        await instance.sendEvent(event);
+        // The answered question must not be offered again while the instance resumes.
+        // Waits sharing an event type are answered by the same event.
+        await this.settlePrompts(
+          record,
+          Object.entries(record.prompts ?? {}).flatMap(([step, prompt]) =>
+            prompt.type === event.type ? [step] : [],
+          ),
         );
         break;
+      }
+
       case "pause":
         await instance.pause();
         break;
@@ -319,6 +394,8 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
             throw cause;
           }
         } else await instance.restart();
+        // Restarted waits publish their prompts again when execution reaches them.
+        await this.storePrompts(record, [], []);
         break;
       }
 
@@ -326,6 +403,7 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
         if (input !== undefined)
           z.strictObject({ rollback: z.literal(false).optional() }).parse(input);
         await instance.terminate();
+        await this.storePrompts(record, [], []);
         break;
       default:
         throw new Error("Unsupported Workflow operation");

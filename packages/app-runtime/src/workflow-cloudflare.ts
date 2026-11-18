@@ -10,7 +10,15 @@ import { workflowApp } from "./workflow-app.ts";
 import { workerCode } from "./worker.ts";
 import { WorkflowCatalog } from "./workflow-catalog.ts";
 import type { ParentEnvironment, PublishedApp } from "./types.ts";
-import { restore, type Start, type StepConfig, type StepContext } from "./workflow-protocol.ts";
+import {
+  restore,
+  stepId,
+  type Start,
+  type StepConfig,
+  type StepContext,
+  type EventWaitOptions,
+} from "./workflow-protocol.ts";
+import { waitForPromptedEvent } from "./workflow-prompts.ts";
 import type { WorkflowRunner } from "./workflow-cloudflare-runner.ts";
 import { workflowObserver } from "./workflow-observation.ts";
 import type { WorkflowObservation } from "./runtime-extension.ts";
@@ -51,10 +59,17 @@ const workflowWorkerKey = async (
 export class CloudflareWorkflowSteps extends RpcTarget {
   #step;
   #observe;
-  constructor(step: WorkflowStep, observe?: (event: WorkflowObservation) => void) {
+  #prompt;
+  #waits = new Map<string, number>();
+  constructor(
+    step: WorkflowStep,
+    prompt: { environment: ParentEnvironment; start: Start },
+    observe?: (event: WorkflowObservation) => void,
+  ) {
     super();
     this.#step = step;
     this.#observe = observe;
+    this.#prompt = prompt;
   }
   do(
     name: string,
@@ -90,8 +105,21 @@ export class CloudflareWorkflowSteps extends RpcTarget {
       return undefined;
     });
   }
-  waitForEvent(...args: Parameters<WorkflowStep["waitForEvent"]>) {
-    return captureWorkflow(() => this.#step.waitForEvent(...args));
+  waitForEvent(name: string, options: EventWaitOptions) {
+    // Mirror the engine's occurrence counting so each wait has a stable identity.
+    const count = (this.#waits.get(name) ?? 0) + 1;
+    this.#waits.set(name, count);
+
+    return captureWorkflow(() =>
+      waitForPromptedEvent(
+        this.#prompt.environment,
+        this.#prompt.start,
+        stepId({ name, type: "waitForEvent", count }),
+        name,
+        options,
+        (native) => this.#step.waitForEvent(name, native),
+      ),
+    );
   }
 }
 
@@ -120,6 +148,7 @@ export class CloudflareAppWorkflow extends WorkflowEntrypoint<ParentEnvironment,
         },
         new CloudflareWorkflowSteps(
           step,
+          { environment: this.env, start },
           workflowObserver(this.ctx, this.env, {
             appId: start.appId,
             version: start.version,

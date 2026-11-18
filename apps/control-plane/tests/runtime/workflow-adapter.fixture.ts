@@ -90,6 +90,22 @@ export class AppWorkflow extends WorkflowEntrypoint {
       await step.waitForEvent('continue', { type: 'continue', timeout: '5 minutes' });
       return step.do('inspect', async () => ({ connected: !!this.env.OBSERVE, secret: this.env.PLATFORM_SECRET ?? null }));
     }
+    if (mode === 'prompted') {
+      const a = await step.do('first', () => record('first', 20));
+      const next = await step.waitForEvent('approval', {
+        type: 'continue',
+        timeout: '5 minutes',
+        prompt: {
+          message: 'Approve ' + id + '?',
+          requestedSchema: { type: 'object', properties: { approved: { type: 'boolean' } }, required: ['approved'] },
+        },
+      });
+      return step.do('finish', () => record('finish', 2 * (a + next.payload.add)));
+    }
+    if (mode === 'invalid-prompt') {
+      await step.waitForEvent('approval', { type: 'continue', prompt: { message: '' } });
+      return step.do('unreachable', () => record('unreachable', 0));
+    }
     if (mode === 'sequential') {
       const a = await step.do('first', () => record('first', 20));
       const next = await step.waitForEvent('continue', { type: 'continue', timeout: '5 minutes' });

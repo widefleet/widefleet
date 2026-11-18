@@ -1,5 +1,68 @@
 import { describe, expect, it } from "vitest";
-import { workflowQuery, workflowRequest, workflowRestartOptions } from "./workflows.ts";
+import {
+  workflowEventPrompt,
+  workflowQuery,
+  workflowRequest,
+  workflowRestartOptions,
+} from "./workflows.ts";
+
+describe("Workflow event prompts", () => {
+  it("defaults to a confirmation without fields", () => {
+    expect(workflowEventPrompt.parse({ message: "Send offer 42?" })).toEqual({
+      message: "Send offer 42?",
+      requestedSchema: { type: "object", properties: {} },
+    });
+  });
+
+  it("accepts flat primitive forms", () => {
+    const prompt = {
+      message: "Overwrite contact?",
+      requestedSchema: {
+        type: "object",
+        properties: {
+          overwrite: { type: "boolean", title: "Overwrite", default: false },
+          reason: { type: "string", maxLength: 200 },
+          priority: { type: "string", enum: ["low", "high"] },
+          count: { type: "integer", minimum: 1 },
+        },
+        required: ["overwrite"],
+      },
+    };
+
+    expect(workflowEventPrompt.parse(prompt)).toEqual(prompt);
+  });
+
+  it.each([
+    { message: "" },
+    { message: "x", extra: true },
+    { message: "x".repeat(4097) },
+    { message: "x", requestedSchema: { type: "object", properties: { a: { type: "object" } } } },
+    { message: "x", requestedSchema: { type: "object", properties: {}, required: ["missing"] } },
+    {
+      message: "x",
+      requestedSchema: {
+        type: "object",
+        properties: Object.fromEntries(
+          Array.from({ length: 33 }, (_, index) => [`f${index}`, { type: "boolean" }]),
+        ),
+      },
+    },
+    {
+      message: "x",
+      requestedSchema: {
+        type: "object",
+        properties: Object.fromEntries(
+          Array.from({ length: 20 }, (_, index) => [
+            `f${index}`,
+            { type: "string", description: "d".repeat(1000) },
+          ]),
+        ),
+      },
+    },
+  ])("rejects invalid prompts: %#", (prompt) => {
+    expect(workflowEventPrompt.safeParse(prompt).success).toBe(false);
+  });
+});
 
 describe("Workflow restart requests", () => {
   const request = { action: "restart", workflow: "example", id: "run-1" };

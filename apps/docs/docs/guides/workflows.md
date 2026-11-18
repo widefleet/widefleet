@@ -1,7 +1,7 @@
 ---
 title: Workflows
 description: Declare durable background work and manage Workflow instances.
-lastModified: 2026-10-12
+lastModified: 2026-11-18
 ---
 
 ## Declare and export a Workflow
@@ -102,6 +102,83 @@ HTTP management endpoints are:
 
 POST bodies contain a `request` object, for example `{"request":{"action":"create","workflow":"process","id":"example-1","params":{"message":"Example"}}}`. Supply a UUID `Idempotency-Key` header. All endpoints require management access to the app. Management payloads are JSON and bounded to 64 KiB; app-side bindings retain native structured-clone values. Management renders non-JSON outputs with `$type` tags (for example `BigInt`, `Map`, and binary values); repeated object references use `$ref` indices. Listings return instance summaries; use `status` for the output.
 
+## Ask a person to answer an event
+
+Prompts require an app runtime released after 0.7.5.
+
+Add a `prompt` to `step.waitForEvent` to publish the question that the event answers. Widefleet stores it with the instance while the wait is open and passes only `type` and `timeout` to the Workflow engine:
+
+```ts
+const approval = await step.waitForEvent<{ accepted: boolean }>("approval", {
+  type: "approval",
+  timeout: "1 day",
+  prompt: {
+    message: `Send "${message}"?`,
+    requestedSchema: {
+      type: "object",
+      properties: { accepted: { type: "boolean", title: "Send" } },
+      required: ["accepted"],
+    },
+  },
+});
+```
+
+`status` lists the open prompts of a running or waiting instance:
+
+```sh
+widefleet workflows status process example-1
+```
+
+```json
+{
+  "status": "waiting",
+  "prompts": [
+    {
+      "name": "approval",
+      "type": "approval",
+      "message": "Send \"Example\"?",
+      "requestedSchema": {
+        "type": "object",
+        "properties": { "accepted": { "type": "boolean", "title": "Send" } },
+        "required": ["accepted"]
+      }
+    }
+  ]
+}
+```
+
+Answer with an ordinary event of the prompt's `type`, for example `widefleet workflows send-event process example-1 approval --payload approval.json`. The same `status` and `sendEvent` operations are available through the HTTP API, the app detail page and an app's own Workflow binding, so an app can show the question in its own interface. Widefleet does not validate the payload against `requestedSchema`; the Workflow receives it unchanged.
+
+- `message` holds up to 4,096 characters. `requestedSchema` is a flat object with up to 32 `string`, `number`, `integer` or `boolean` fields, the primitive subset of MCP form elicitation. Strings support `enum`, `format`, length limits and defaults. Omit `requestedSchema` for a plain confirmation. A prompt must not exceed 16 KiB.
+- An invalid prompt rejects the `waitForEvent` call before the wait starts.
+- Sending an event removes every open prompt of that type, and replays of a completed wait do not publish its prompt again. Give parallel questions distinct event types.
+- Restarting an instance publishes prompts again when execution reaches their waits. Terminating it removes them. Paused, failed and finished instances report no prompts.
+- An event wait can be reported as `running` before the Workflow engine hibernates it; its prompt is listed in both states.
+
+`prompt` is not part of Cloudflare's `WorkflowStep` type. In TypeScript, add it with a declaration in your project:
+
+```ts
+declare module "cloudflare:workers" {
+  interface WorkflowStep {
+    waitForEvent<T extends Rpc.Serializable<T>>(
+      name: string,
+      options: {
+        type: string;
+        timeout?: WorkflowTimeoutDuration | number;
+        prompt?: {
+          message: string;
+          requestedSchema?: {
+            type: "object";
+            properties: Record<string, { type: "string" | "number" | "integer" | "boolean" }>;
+            required?: string[];
+          };
+        };
+      },
+    ): Promise<WorkflowStepEvent<T>>;
+  }
+}
+```
+
 ## Restart from a step
 
 Selective restart requires CLI and control plane 0.3.2 or newer and app runtime 0.2.2 or newer. Existing fleets retain their selected runtime when the control plane is upgraded; an administrator must [update the app runtime](/reference/runtime) with `widefleet runtime update 0.2.2`. Confirm the active version with `widefleet runtime status` before using selective restart.
@@ -180,7 +257,7 @@ Management request IDs have durable receipts. A retry returns the recorded resul
 
 ## Supported step API and limits
 
-Supported operations are `step.do`, `step.sleep`, `step.sleepUntil` and `step.waitForEvent`, including parallel branches, repeated step names, native static-delay retry policies, callback attempt context and `NonRetryableError`. `sleepUntil` requires a future deadline when scheduled, as in celld. Do not nest step calls inside a `step.do` callback.
+Supported operations are `step.do`, `step.sleep`, `step.sleepUntil` and `step.waitForEvent` (with an optional [prompt](#ask-a-person-to-answer-an-event)), including parallel branches, repeated step names, native static-delay retry policies, callback attempt context and `NonRetryableError`. `sleepUntil` requires a future deadline when scheduled, as in celld. Do not nest step calls inside a `step.do` callback.
 
 Short global `setTimeout` waits and `fetch` calls (including response body methods such as `json()` and `text()`) can run between steps while another branch waits for an event. They repeat on replay. Command delivery has a 60-second timeout; use durable steps for longer work. Put other asynchronous I/O, such as direct app service calls, Node APIs and manual stream reads, inside `step.do`, and use `step.sleep` for durable delays.
 
