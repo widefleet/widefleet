@@ -26,5 +26,4 @@ Start with:
 - Deployments: https://widefleet.com/docs/guides/deployments.md
 - Source code from earlier sessions: https://widefleet.com/docs/guides/source-code.md
 
-Ask the user before the first deployment of an app, before publishing changes to
-the main app, and before deleting anything or changing access, secrets or data.
+Ask the user before deleting anything or changing access, secrets or data.
