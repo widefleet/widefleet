@@ -4,6 +4,7 @@ import { createCloudflareRuntime } from "#server/runtime-cloudflare";
 import { createProductAnalytics } from "#server/analytics";
 import { checkFormOrigin } from "#server/form-origin";
 import { handleSession } from "#server/session";
+import { reportRequestException } from "#server/runtime";
 
 import { proxyAnalyticsRequest } from "#server/analytics-proxy";
 import { analyticsEnvironmentSchema, readAnalyticsConfiguration } from "#lib/analytics-config";
@@ -75,7 +76,7 @@ export const handleError: HandleServerError = async ({ error, kind, event }) => 
     console.error(error);
 
     try {
-      (await event.locals.runtime()).reporting.exception(error);
+      await reportRequestException(error, event.locals);
     } catch {
       try {
         const observation = createProductAnalytics({

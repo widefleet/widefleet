@@ -1,4 +1,5 @@
 import { runExtensionEffect } from "../extension-effects.ts";
+import type { PostHog } from "posthog-node";
 
 export interface ObservationEvent {
   event:
@@ -18,7 +19,11 @@ export interface ObservationEvent {
 export interface Observation {
   // Capture is nonblocking; implementations drain their pending delivery in close.
   capture: (event: ObservationEvent) => void | Promise<void>;
-  exception?: (error: Error) => void | Promise<void>;
+  exception?: (
+    error: Error,
+    distinctId?: string,
+    properties?: Parameters<PostHog["captureException"]>[2],
+  ) => void | Promise<void>;
   close: () => Promise<void>;
 }
 
