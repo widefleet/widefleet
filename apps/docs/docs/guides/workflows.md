@@ -214,7 +214,7 @@ When `call` receives exactly this value, the endpoint waits up to 10 seconds for
 - A completed instance returns its output, which must be JSON. A failed or terminated instance returns an error.
 - An instance that is still busy or paused returns the reference with its `status`.
 
-Only instances of the app that returned the reference are resolved. The answer round is signed for the signed-in user, expires after 15 minutes and checks access to the service again before it sends the event. A retried answer does not send a second event.
+Only instances of the app that returned the reference are resolved. The answer round is signed for the signed-in user, expires after 15 minutes and checks access to the service again before it sends the event. A retried answer does not send a second event, and a form whose prompt a restart has replaced sends none.
 
 In `execute`, a program that returns a reference received from `tools.call` in the same run is resolved the same way. The answer continues the Workflow, not the program: code after the returned value does not run.
 

@@ -123,12 +123,13 @@ export const mcpRequest = async (
     return {
       status: async () =>
         workflowInstanceStatus.parse(await catalog.instance(scope, target.id, "status")),
-      async sendEvent(requestId, event) {
+      async sendEvent(requestId, prompt, event) {
         await catalog.manage(scope, requestId, {
           action: "sendEvent",
           workflow: target.workflow,
           id: target.id,
           event,
+          prompt,
         });
       },
     };

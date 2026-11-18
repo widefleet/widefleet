@@ -28,21 +28,38 @@ const target = {
   id: "offer-42",
 };
 
-const prompt = (name: string, type: string) => ({
+const promptIds = new Map<string, string>();
+
+// One stable ID per name and type, like a wait that stays open.
+const prompt = (name: string, type: string, id = promptId(name, type)) => ({
+  id,
   name,
   type,
   message: `Send ${name}?`,
   requestedSchema: { type: "object" as const, properties: {} },
 });
 
+function promptId(name: string, type: string) {
+  const key = `${name}/${type}`;
+  const id = promptIds.get(key) ?? crypto.randomUUID();
+  promptIds.set(key, id);
+
+  return id;
+}
+
 const fake = (...states: z.input<typeof workflowInstanceStatus>[]) => {
-  const events: { requestId: string; event: { type: string; payload: unknown } }[] = [];
+  const events: {
+    requestId: string;
+    prompt: string;
+    event: { type: string; payload: unknown };
+  }[] = [];
+
   let read = 0;
 
   const access: WorkflowInstanceAccess = {
     status: async () => workflowInstanceStatus.parse(states[Math.min(read++, states.length - 1)]),
-    sendEvent: async (requestId, event) => {
-      events.push({ requestId, event });
+    sendEvent: async (requestId, prompt, event) => {
+      events.push({ requestId, prompt, event });
     },
   };
 
@@ -98,7 +115,7 @@ describe("Presenting a Workflow to an MCP client", () => {
     expect(round).not.toBe("");
     expect(signed).toEqual({
       ...target,
-      prompts: [{ key: "prompt-1", name: "approval", type: "approval" }],
+      prompts: [{ key: "prompt-1", prompt: promptId("approval", "approval"), type: "approval" }],
     });
   });
 
@@ -145,7 +162,10 @@ describe("Answering a Workflow from an MCP client", () => {
   });
 
   it("sends each answer once with a request ID that is stable across retries", async () => {
-    const answered = round([{ key: "prompt-1", name: "approval", type: "approval" }]);
+    const answered = round([
+      { key: "prompt-1", prompt: promptId("approval", "approval"), type: "approval" },
+    ]);
+
     const answers = workflowAnswers.parse({ "prompt-1": { action: "accept", content: {} } });
 
     const first = fake(
@@ -165,15 +185,16 @@ describe("Answering a Workflow from an MCP client", () => {
     ]);
     // Management operations require UUID request IDs.
     expect(z.uuid().safeParse(first.events[0]?.requestId).success).toBe(true);
+    expect(first.events[0]?.prompt).toBe(promptId("approval", "approval"));
     expect(retry.events).toEqual(first.events);
   });
 
   it("skips closed prompts, invalid answers and a second answer for the same event type", async () => {
     const asked = round([
-      { key: "prompt-1", name: "first", type: "shared" },
-      { key: "prompt-2", name: "second", type: "shared" },
-      { key: "prompt-3", name: "closed", type: "closed" },
-      { key: "prompt-4", name: "invalid", type: "invalid" },
+      { key: "prompt-1", prompt: promptId("first", "shared"), type: "shared" },
+      { key: "prompt-2", prompt: promptId("second", "shared"), type: "shared" },
+      { key: "prompt-3", prompt: promptId("closed", "closed"), type: "closed" },
+      { key: "prompt-4", prompt: promptId("invalid", "invalid"), type: "invalid" },
     ]);
 
     const answers = workflowAnswers.parse({
@@ -199,6 +220,34 @@ describe("Answering a Workflow from an MCP client", () => {
     expect(answers["prompt-4"]).toBeUndefined();
     expect(events.map(({ event }) => event)).toEqual([
       { type: "shared", payload: { action: "decline" } },
+    ]);
+  });
+
+  it("never answers a prompt that a restart published again", async () => {
+    const asked = round([
+      { key: "prompt-1", prompt: promptId("approval", "approval"), type: "approval" },
+    ]);
+
+    const restarted = {
+      status: "waiting",
+      prompts: [prompt("approval", "approval", crypto.randomUUID())],
+    };
+
+    const { access, events } = fake(restarted);
+
+    const outcome = await answerWorkflow(
+      asked,
+      workflowAnswers.parse({ "prompt-1": { action: "accept" } }),
+      access,
+      mint,
+      0,
+    );
+
+    expect(events).toEqual([]);
+    // The client is asked the restarted prompt instead.
+    expect(outcome).toMatchObject({ input: { resultType: "input_required" } });
+    expect(minted.at(-1)?.prompts).toEqual([
+      { key: "prompt-1", prompt: restarted.prompts[0]?.id, type: "approval" },
     ]);
   });
 });

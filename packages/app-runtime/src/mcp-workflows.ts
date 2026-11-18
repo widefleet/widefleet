@@ -23,7 +23,8 @@ export const workflowRound = z.strictObject({
   workflow: workflowName,
   id: workflowInstanceId,
   round: z.uuid(),
-  prompts: z.array(z.strictObject({ key: z.string(), name: z.string(), type: workflowEventType })),
+  // Each form answers exactly the prompt it showed, never one a restart published.
+  prompts: z.array(z.strictObject({ key: z.string(), prompt: z.uuid(), type: workflowEventType })),
 });
 
 export type WorkflowRound = z.infer<typeof workflowRound>;
@@ -47,7 +48,12 @@ type WorkflowInstanceStatus = z.infer<typeof workflowInstanceStatus>;
 // The Workflow instance operations the gateway needs, scoped to one instance.
 export type WorkflowInstanceAccess = {
   status(): Promise<WorkflowInstanceStatus>;
-  sendEvent(requestId: string, event: { type: string; payload: JsonValue }): Promise<void>;
+  // Delivers the event only while `prompt` is still open.
+  sendEvent(
+    requestId: string,
+    prompt: string,
+    event: { type: string; payload: JsonValue },
+  ): Promise<void>;
 };
 
 // The event payload a Workflow receives for an answer from an MCP client.
@@ -130,7 +136,7 @@ export const presentWorkflow = async (
           round: crypto.randomUUID(),
           prompts: prompts.map(({ key, prompt }) => ({
             key,
-            name: prompt.name,
+            prompt: prompt.id,
             type: prompt.type,
           })),
         }),
@@ -167,18 +173,13 @@ export const answerWorkflow = async (
   const open = (await access.status()).prompts ?? [];
   const answered = new Set<string>();
 
-  for (const { key, name, type } of round.prompts) {
+  for (const { key, prompt, type } of round.prompts) {
     const answer = answers[key];
 
     // One event answers every open prompt of its type; never send a second.
-    if (
-      !answer ||
-      answered.has(type) ||
-      !open.some((prompt) => prompt.name === name && prompt.type === type)
-    )
-      continue;
+    if (!answer || answered.has(type) || !open.some(({ id }) => id === prompt)) continue;
 
-    await access.sendEvent(await answerRequestId(round.round, key), {
+    await access.sendEvent(await answerRequestId(round.round, key), prompt, {
       type,
       payload: json.parse(answer),
     });
