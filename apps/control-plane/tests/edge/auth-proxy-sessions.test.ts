@@ -371,8 +371,14 @@ describe("Auth proxy session lifecycle", () => {
       expect(idp.graphRequests).toHaveLength(1);
       expireIdentity();
       idp.settings.graphFailure = "throttled";
+      const logged = vi.spyOn(console, "error").mockReturnValue(undefined);
       const limited = await visit();
 
+      expect(logged).toHaveBeenCalledWith(
+        "App session renewal failed",
+        expect.objectContaining({ stage: "identity", type: "APIError" }),
+      );
+      logged.mockRestore();
       expect(limited.status).toBe(503);
       expect(limited.headers.get("retry-after")).toBe("5");
       expect(cookies(limited)).toContain(".account_data=");

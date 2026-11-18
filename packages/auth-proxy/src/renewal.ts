@@ -160,7 +160,20 @@ export const sessionRenewal = (verified: () => z.infer<typeof authorization> | u
         // Refresh responses may omit the ID token. Never reuse the old ID token's
         // authorization claims as evidence of a newly verified identity.
         if (!renewed.idToken) throw new APIError("UNAUTHORIZED");
-        const profile = await provider.getUserInfo(renewed);
+        let profile: Awaited<ReturnType<typeof provider.getUserInfo>>;
+
+        try {
+          profile = await provider.getUserInfo(renewed);
+        } catch (cause) {
+          // Directory failures surface as error responses, not exceptions, so
+          // the proxy cannot log them after this point.
+          console.error("App session renewal failed", {
+            stage: "identity",
+            ...failureSummary(cause),
+          });
+          throw cause;
+        }
+
         const next = authorization.safeParse(verified());
 
         if (
