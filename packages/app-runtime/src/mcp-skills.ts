@@ -1,14 +1,12 @@
 import { memorySkillFiles, SkillsExtension } from "@modelcontextprotocol/server/ext/skills";
 import type { SkillCatalog } from "@modelcontextprotocol/server/ext/skills";
 
-const mcpDeploySteps =
-  "use the Widefleet CLI in your shell: install it with `pnpm add --global widefleet`, run `widefleet login`, then follow https://widefleet.com/docs/llms.txt";
-
 export const mcpInstructions = [
-  `To create, change or deploy a Widefleet app, ${mcpDeploySteps}.`,
-  "Deployment is available; do not tell the user otherwise.",
-  "search, describe, call and execute only use the APIs of apps that are already running.",
-  'The widefleet skill has details: call the skills tool with name "widefleet", or read skill://widefleet/SKILL.md.',
+  "Widefleet runs your organization's internal apps.",
+  "Use search, describe, call and execute to use the APIs of running apps.",
+  "Apps are built and deployed with the Widefleet CLI in your shell.",
+  "Before building, changing or deploying an app, read the widefleet skill",
+  '(the skills tool with name "widefleet", or skill://widefleet/SKILL.md).',
 ].join(" ");
 
 /** Serves skills through the MCP Skills extension and the `skills` tool from one catalog. */

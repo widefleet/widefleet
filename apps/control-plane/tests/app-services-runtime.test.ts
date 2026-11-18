@@ -531,7 +531,7 @@ export default { async fetch(request, env, ctx) {
         ).result;
 
       expect(initialized.instructions).toContain(skillUri);
-      expect(initialized.instructions).toMatch(/^To create, change or deploy .*widefleet login/);
+      expect(initialized.instructions).toContain("Widefleet CLI in your shell");
       expect(initialized.capabilities.extensions).toHaveProperty("io.modelcontextprotocol/skills");
 
       expect(await send("skills/list", {})).toMatchObject({
