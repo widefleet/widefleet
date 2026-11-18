@@ -500,11 +500,31 @@ describe("MCP OAuth in the data plane", () => {
     const platform = (response: { headers: { get(name: string): string | null } }) => {
       const target = new URL(z.string().parse(response.headers.get("location")));
       expect(target.origin + target.pathname).toBe("https://platform.example.test/mcp/sign-in");
+
+      return z.string().parse(target.searchParams.get("state"));
+    };
+
+    // The control plane returns the chosen organization; the entered email still hints the account.
+    const hinted = async (state: string) => {
+      const resumed = await send(
+        `/oauth/organization?${new URLSearchParams({ state, organization: "company" })}`,
+      );
+
+      expect(resumed.status, await resumed.clone().text()).toBe(303);
+
+      return new URL(z.string().parse(resumed.headers.get("location"))).searchParams.get(
+        "login_hint",
+      );
     };
 
     // A guest's own company domain names no organization here.
     const unknown = await authorize();
-    platform(await continueWithEmail(unknown.handle, "guest@consultancy.example.test"));
+
+    expect(
+      await hinted(
+        platform(await continueWithEmail(unknown.handle, "guest@consultancy.example.test")),
+      ),
+    ).toBe("guest@consultancy.example.test");
 
     // A domain proven by several organizations needs the person's memberships.
     await publish("second");
@@ -525,14 +545,16 @@ describe("MCP OAuth in the data plane", () => {
       const html = await unavailable.text();
       expect(html).toContain("Widefleet sign-in is unavailable");
       expect(html).toContain('href="/authorize?client_id=retry"');
+      expect(html).toContain('name="email" value="guest@consultancy.example.test"');
 
       // The consent is still open, so the person can retry or try anyway.
-      platform(
-        await continueWith(auth.handle, "widefleet", {
-          confirmed: "1",
-          authorize: "/authorize?client_id=retry",
-        }),
-      );
+      const retried = await continueWith(auth.handle, "widefleet", {
+        confirmed: "1",
+        authorize: "/authorize?client_id=retry",
+        email: "guest@consultancy.example.test",
+      });
+
+      expect(await hinted(platform(retried))).toBe("guest@consultancy.example.test");
     } finally {
       controlPlaneAvailable = true;
     }

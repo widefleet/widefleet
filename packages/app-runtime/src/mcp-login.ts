@@ -27,7 +27,7 @@ import type { ParentEnvironment } from "./types.ts";
 const random = () => base64url.encode(crypto.getRandomValues(new Uint8Array(32)));
 
 const upstream = z.discriminatedUnion("stage", [
-  z.object({ stage: z.literal("widefleet") }),
+  z.object({ stage: z.literal("widefleet"), loginHint: z.email().optional() }),
   z.object({
     stage: z.literal("company"),
     organizationId: organizationIdentifier,
@@ -278,8 +278,12 @@ export const mcpLoginRequest = async (
         return redirect(denied.redirectTo, denied.headers);
       }
 
-      if (option === "email") {
-        const email = z.email().max(320).parse(input.get("email")?.trim());
+      // The outage page passes an entered email on, so a retry still hints the account.
+      const email = input.has("email")
+        ? z.email().max(320).parse(input.get("email")?.trim())
+        : undefined;
+
+      if (option === "email" && email) {
         const organizations = await discoverOrganizations(environment, email);
         const [organization] = organizations;
 
@@ -306,13 +310,14 @@ export const mcpLoginRequest = async (
           kind: "unavailable",
           handle,
           authorize: z.string().startsWith("/authorize?").max(8192).parse(input.get("authorize")),
+          email: email ?? "",
         });
 
       const approved = await oauth.approveConsent(request, handle, { scope: ["mcp:services"] });
 
       const transaction = await oauth.beginUpstream(approved.request, {
         headers: approved.headers,
-        data: { stage: "widefleet" },
+        data: email ? { stage: "widefleet", loginHint: email } : { stage: "widefleet" },
       });
 
       const target = new URL("/mcp/sign-in", login.platformUrl);
@@ -346,6 +351,7 @@ export const mcpLoginRequest = async (
           resumed.request,
           organizationIdentifier.parse(url.searchParams.get("organization")),
           resumed.headers,
+          data.loginHint,
         );
 
       if (data.stage !== "company" || url.pathname !== "/oauth/callback/company")

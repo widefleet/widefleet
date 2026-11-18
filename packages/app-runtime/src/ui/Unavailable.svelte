@@ -15,6 +15,7 @@
     <input type="hidden" name="handle" value={page.handle} />
     <input type="hidden" name="authorize" value={page.authorize} />
     <input type="hidden" name="confirmed" value="1" />
+    {#if page.email}<input type="hidden" name="email" value={page.email} />{/if}
     <Button type="submit" variant="outline" name="provider" value="widefleet" class="h-11 w-full">
       Try Widefleet sign-in anyway
     </Button>

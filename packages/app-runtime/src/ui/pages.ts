@@ -9,5 +9,5 @@ export type McpPage =
       accounts: { organizationId: string; organizationName: string; name: string }[];
       organizations: { id: string; name: string }[];
     }
-  | { kind: "unavailable"; handle: string; authorize: string }
+  | { kind: "unavailable"; handle: string; authorize: string; email: string }
   | { kind: "error"; message: string };
