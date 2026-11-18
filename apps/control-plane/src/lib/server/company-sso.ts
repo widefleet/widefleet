@@ -162,16 +162,5 @@ export const companySsoPlugin = (
     };
   }
 
-  // Keep the DNS operations in the API even when the installation does not
-  // require them. Shared authorization rejects them in operator-trusted mode.
-  const verification = sso({ domainVerification: { enabled: true } });
-
-  return {
-    ...plugin,
-    endpoints: {
-      ...plugin.endpoints,
-      requestDomainVerification: verification.endpoints.requestDomainVerification,
-      verifyDomain: verification.endpoints.verifyDomain,
-    },
-  };
+  return plugin;
 };

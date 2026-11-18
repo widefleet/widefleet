@@ -33,7 +33,7 @@ describe("Better Auth SSO provider integration", () => {
     await environment.close();
   });
 
-  it("encrypts provider credentials and verifies the domain through the plugin", async () => {
+  it("encrypts provider credentials and verifies the domain through settings", async () => {
     await environment.database.db.delete(ssoProvider);
     await environment.database.db.update(organizationSettings).set({
       ssoRequired: false,
@@ -94,13 +94,11 @@ describe("Better Auth SSO provider integration", () => {
     ).rejects.toThrow();
 
     resolver.mockResolvedValue([["wrong-token"]]);
-    await expect(
-      auth.api.verifyDomain({ headers, body: { providerId: "test-company" } }),
-    ).rejects.toThrow();
-    resolver.mockResolvedValue([
-      [z.object({ domainVerificationToken: z.string() }).parse(created).domainVerificationToken],
-    ]);
-    await auth.api.verifyDomain({ headers, body: { providerId: "test-company" } });
+    await expect(environment.settings.verifyDomain(principal)).rejects.toThrow();
+    const proof = await environment.settings.domainVerification(principal);
+
+    resolver.mockResolvedValue([[proof.value]]);
+    await environment.settings.verifyDomain(principal);
     expect(resolver).toHaveBeenLastCalledWith("_better-auth-token-test-company.example.test");
 
     const [verified] = await environment.database.db

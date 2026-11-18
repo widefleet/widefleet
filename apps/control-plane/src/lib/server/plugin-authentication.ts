@@ -129,14 +129,6 @@ export const pluginAuthentication = (
     )
       companyDomains.parse(input.domain ?? provider?.domain);
 
-    if (
-      ["/sso/request-domain-verification", "/sso/verify-domain"].includes(context.path) &&
-      operatorTrustedSso(configuration, organizationId)
-    )
-      throw new APIError("BAD_REQUEST", {
-        message: "This installation trusts its configured provider without DNS verification",
-      });
-
     const authority = z
       .string()
       .nullable()

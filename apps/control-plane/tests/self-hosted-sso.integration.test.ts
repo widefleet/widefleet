@@ -373,17 +373,15 @@ describe("Operator-trusted self-hosted SSO", () => {
     ).rejects.toThrow();
   });
 
-  it("does not let API callers grant operator trust or enable account linking", async () => {
+  it("does not let API callers grant operator trust or enable account linking", () => {
     expect(settingsInput.safeParse({ sso: null, PLATFORM_SSO_TRUST_PROVIDER: true }).success).toBe(
       false,
     );
     expect(settingsInput.safeParse({ sso: null, allowEmailAccountLinking: true }).success).toBe(
       false,
     );
-    const { headers } = await environment.users.login({ userId: environment.owner.id });
-    await expect(
-      environment.auth.api.requestDomainVerification({ headers, body: { providerId } }),
-    ).rejects.toMatchObject({ statusCode: 400 });
+    expect(environment.auth.api).not.toHaveProperty("requestDomainVerification");
+    expect(environment.auth.api).not.toHaveProperty("verifyDomain");
   });
 
   it("does not extend installation trust to another organization", async () => {
