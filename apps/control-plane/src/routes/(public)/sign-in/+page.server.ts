@@ -1,3 +1,4 @@
+import { companySsoAvailableSql, operatorTrustedSso } from "#server/sso-policy";
 import type { PageServerLoad } from "./$types";
 import { redirect } from "@sveltejs/kit";
 import { eq } from "drizzle-orm";
@@ -23,7 +24,7 @@ export const load: PageServerLoad = async ({ locals, url, setHeaders }) => {
       name: organization.name,
       providerId: ssoProvider.providerId,
       appIdentityType: ssoProvider.appIdentityType,
-      verified: ssoProvider.domainVerified,
+      verified: companySsoAvailableSql(runtime.configuration),
       required: organizationSettings.ssoRequired,
     })
     .from(organization)
@@ -33,10 +34,12 @@ export const load: PageServerLoad = async ({ locals, url, setHeaders }) => {
 
   const provider = target?.verified ? target.providerId : null;
 
+  const companyOnly =
+    provider && target?.required && (slug || operatorTrustedSso(runtime.configuration, target?.id));
+
   return {
     signedOut: !locals.session,
-    socialProviders:
-      slug && provider && target?.required ? [] : availableSocialProviders(runtime.configuration),
+    socialProviders: companyOnly ? [] : availableSocialProviders(runtime.configuration),
     error: url.searchParams.has("error"),
     provider,
     publicSignup: runtime.publicSignup && !slug,
@@ -50,7 +53,7 @@ export const load: PageServerLoad = async ({ locals, url, setHeaders }) => {
         : (target?.name ?? "your company"),
     organizationSlug: slug,
     organizationName: target?.name ?? null,
-    emailSignIn: runtime.emailSignIn && !(slug && provider && target?.required),
+    emailSignIn: runtime.emailSignIn && !companyOnly,
     email: url.searchParams.get("email") ?? "",
     codeDelivery: runtime.configuration.LOGIN_CODE_DELIVERY,
     next: localDestination(url.searchParams.get("next")),

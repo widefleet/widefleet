@@ -65,7 +65,7 @@ export const oidcProviderInput = z.strictObject({
   providerId: z.string().min(1),
   appIdentityType: z.enum(["oidc", "entra", "google"]).default("oidc"),
   issuer: identityUrl,
-  domain: companyDomain,
+  domain: companyDomain.or(z.literal("")).default(""),
   oidcConfig: z.strictObject({
     clientId: z.string().min(1).max(512),
     clientSecret: z.string().min(1).max(16_384).optional(),
@@ -117,6 +117,10 @@ export const activationStatus = z.strictObject({
 export const settingsView = z.strictObject({
   settings: installationSettings,
   ssoRequired: z.boolean(),
+  ssoPolicy: z.strictObject({
+    domainVerificationRequired: z.boolean(),
+    allowEmailAccountLinking: z.boolean(),
+  }),
   managementCallbackUrl: z.string().nullable(),
   appCallbackUrl: z.url(),
   activation: activationStatus,

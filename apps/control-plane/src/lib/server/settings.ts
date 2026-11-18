@@ -1,3 +1,5 @@
+import { companyDomain } from "@platform/contracts";
+import { companySsoAvailable, ssoPolicy } from "./sso-policy.ts";
 import {
   installationSettings,
   settingsInput,
@@ -81,7 +83,7 @@ const createOrganizationSettingsService = (
     let identity: z.infer<typeof companyIdentity> | null = null;
 
     try {
-      if (sso?.domainVerified && sso.required) {
+      if (sso && companySsoAvailable(configuration, sso) && sso.required) {
         identity = ssoRuntimeIdentity(sso);
 
         if (state.settings.directory)
@@ -168,7 +170,7 @@ const createOrganizationSettingsService = (
             revision: "",
             state: "waiting" as const,
             message:
-              resolved.sso && !resolved.sso.domainVerified
+              resolved.sso && !companySsoAvailable(configuration, resolved.sso)
                 ? "Verify the company domain before publishing its app sign-in configuration."
                 : "App sign-in has no publishable configuration.",
           };
@@ -203,7 +205,10 @@ const createOrganizationSettingsService = (
     return {
       settings: resolved.state.settings,
       sso,
-      ssoRequired: Boolean(connection?.domainVerified && connection.required),
+      ssoRequired: Boolean(
+        connection && companySsoAvailable(configuration, connection) && connection.required,
+      ),
+      ssoPolicy: ssoPolicy(configuration, organizationId),
       managementCallbackUrl: sso
         ? `${configuration.PLATFORM_URL}/api/auth/sso/callback/${sso.providerId}`
         : null,
@@ -213,8 +218,31 @@ const createOrganizationSettingsService = (
     };
   };
 
-  const prepare = async (input: z.infer<typeof settingsInput>) => {
+  const parseInput = (input: z.infer<typeof settingsInput>) => {
     const next = settingsInput.parse(input);
+
+    if (
+      next.sso &&
+      (ssoPolicy(configuration, organizationId).domainVerificationRequired ||
+        next.sso.appIdentityType === "google")
+    )
+      companyDomain.parse(next.sso.domain);
+
+    if (
+      next.sso?.appIdentityType === "entra" &&
+      !z.uuid().safeParse(new URL(next.sso.issuer).pathname.match(/^\/([^/]+)\/v2\.0\/?$/)?.[1])
+        .success
+    )
+      throw new InvalidOperation({
+        code: "BAD_REQUEST",
+        message: "Entra app claims require a tenant-specific Entra issuer",
+      });
+
+    return next;
+  };
+
+  const prepare = async (input: z.infer<typeof settingsInput>) => {
+    const next = parseInput(input);
 
     if (!emailSignIn && !next.sso)
       throw new InvalidOperation({
@@ -260,7 +288,7 @@ const createOrganizationSettingsService = (
     input: z.infer<typeof settingsInput>,
     credential?: OrganizationCredential,
   ) => {
-    const next = settingsInput.parse(input);
+    const next = parseInput(input);
 
     if (credential) await saveSsoProvider(database, organizationId, next.sso, credential);
     else if (next.sso)
@@ -406,7 +434,7 @@ const createOrganizationSettingsService = (
         await lockSettings(transaction);
         const provider = await readSsoConfiguration(transaction, encryptionKey, organizationId);
 
-        if (!provider?.domainVerified)
+        if (!companySsoAvailable(configuration, provider))
           throw new InvalidOperation({
             code: "CONFLICT",
             message: "Verify the company domain before activating SSO",

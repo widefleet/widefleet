@@ -1,3 +1,4 @@
+import { companySsoAvailable } from "./sso-policy.ts";
 import { and, eq } from "drizzle-orm";
 import { companyLoginRevision, type Authentication } from "./auth.ts";
 import { account } from "./auth-schema.ts";
@@ -28,7 +29,7 @@ export const readCompanyAccount = async (
     accountUrl: `${runtime.configuration.PLATFORM_URL}/account`,
     linked: linked.length > 0,
     tested: Boolean(
-      resolved.sso?.domainVerified &&
+      companySsoAvailable(runtime.configuration, resolved.sso) &&
       session?.identityOrganizationId === organizationId &&
       session?.companyConfiguration === companyLoginRevision(resolved.sso),
     ),

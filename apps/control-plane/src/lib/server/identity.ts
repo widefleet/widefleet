@@ -1,3 +1,4 @@
+import { companySsoAvailableSql } from "./sso-policy.ts";
 import { verifyAccessToken } from "./access-token.ts";
 import { Result, TaggedError, type InferOk } from "better-result";
 import { and, eq, sql } from "drizzle-orm";
@@ -42,7 +43,7 @@ export const createIdentityService = (
             organizationId: organization.id,
             organizationName: organization.name,
             organizationSlug: organization.slug,
-            ssoRequired: sql<boolean>`coalesce(${ssoProvider.domainVerified} AND ${organizationSettings.ssoRequired}, false)`,
+            ssoRequired: sql<boolean>`coalesce(${companySsoAvailableSql(configuration)} AND ${organizationSettings.ssoRequired}, false)`,
           })
           .from(user)
           .innerJoin(member, eq(member.userId, user.id))

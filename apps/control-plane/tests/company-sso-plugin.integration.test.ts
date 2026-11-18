@@ -79,7 +79,7 @@ describe("Better Auth SSO provider integration", () => {
       },
     });
 
-    expect(created.domainVerified).toBe(false);
+    expect(z.object({ domainVerified: z.boolean() }).parse(created).domainVerified).toBe(false);
     await expect(environment.settings.activateSso(principal)).rejects.toMatchObject({
       code: "CONFLICT",
     });
@@ -96,7 +96,9 @@ describe("Better Auth SSO provider integration", () => {
     await expect(
       auth.api.verifyDomain({ headers, body: { providerId: "test-company" } }),
     ).rejects.toThrow();
-    resolver.mockResolvedValue([[z.string().parse(created.domainVerificationToken)]]);
+    resolver.mockResolvedValue([
+      [z.object({ domainVerificationToken: z.string() }).parse(created).domainVerificationToken],
+    ]);
     await auth.api.verifyDomain({ headers, body: { providerId: "test-company" } });
     expect(resolver).toHaveBeenLastCalledWith("_better-auth-token-test-company.example.test");
 

@@ -1,3 +1,4 @@
+import { companySsoAvailable, operatorTrustedSso } from "./sso-policy.ts";
 import type { AuthenticationExtension } from "./runtime-extension.ts";
 import { observe, type Observation } from "./observation.ts";
 import { runExtensionEffect } from "../extension-effects.ts";
@@ -59,6 +60,7 @@ export const createAuthentication = (
     database,
     options.organizationAccess,
     options.publicSignup,
+    configuration,
   );
 
   const settings = authenticationOptions(configuration, {
@@ -126,12 +128,18 @@ export const createAuthentication = (
     },
     disabledPaths: [...settings.disabledPaths, ...managedPluginPaths],
     trustedOrigins: (request) =>
-      companySsoOrigins(database, configuration.PLATFORM_URL, encryptionKey, request),
+      companySsoOrigins(
+        database,
+        configuration.PLATFORM_URL,
+        encryptionKey,
+        request,
+        configuration,
+      ),
     plugins: [
       ...(options.authentication?.plugins ?? []),
       ...settings.plugins,
       cliLoginPlugin(createCliLogin(database, configuration)),
-      companySsoPlugin(database, encryptionKey, options.organizationAccess),
+      companySsoPlugin(database, encryptionKey, options.organizationAccess, configuration),
       {
         id: "management-credentials",
         // These library endpoints are invoked by the shared services. Exposing
@@ -216,7 +224,7 @@ export const createAuthentication = (
                   .where(eq(authSchema.ssoProvider.providerId, providerId))
               : [];
 
-            if (providerId && !provider?.domainVerified)
+            if (providerId && !companySsoAvailable(configuration, provider))
               throw new APIError("FORBIDDEN", { message: "Company SSO is not verified" });
             let revision = "";
 
@@ -226,6 +234,8 @@ export const createAuthentication = (
               // Domain ownership proves matching addresses, not external guests' email.
               if (
                 subject &&
+                provider.domainVerified &&
+                !operatorTrustedSso(configuration, provider.organizationId) &&
                 !subject.emailVerified &&
                 subject.email.toLowerCase().split("@")[1] === provider.domain
               )

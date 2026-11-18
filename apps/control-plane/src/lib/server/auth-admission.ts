@@ -1,5 +1,7 @@
+import { companySsoAvailableSql } from "./sso-policy.ts";
 import type { OAuthClaimExtensionInput } from "@better-auth/oauth-provider";
 import { readAuthenticationReference } from "./authentication-context.ts";
+import type { Configuration } from "./config.ts";
 import { APIError } from "better-auth/api";
 import { and, eq, gt } from "drizzle-orm";
 import { z } from "zod";
@@ -16,6 +18,7 @@ export const createAuthenticationAdmission = (
   database: DatabaseExecutor,
   access: OrganizationAccess = { filterOrganizations: async () => [installationOrganizationId] },
   publicSignup = false,
+  configuration?: Configuration,
 ) => ({
   signInProvider: async (email: string) => {
     const domain = email.trim().toLowerCase().split("@")[1];
@@ -25,7 +28,7 @@ export const createAuthenticationAdmission = (
     const candidates = await database
       .select({ id: ssoProvider.organizationId, providerId: ssoProvider.providerId })
       .from(ssoProvider)
-      .where(and(eq(ssoProvider.domain, domain), eq(ssoProvider.domainVerified, true)));
+      .where(and(eq(ssoProvider.domain, domain), companySsoAvailableSql(configuration)));
 
     const allowed = new Set(await access.filterOrganizations(candidates));
     const providers = candidates.filter((candidate) => allowed.has(candidate.id));
@@ -91,7 +94,7 @@ export const createAuthenticationAdmission = (
       !(await access.filterOrganizations([{ id: organizationId }])).includes(organizationId) ||
       (
         await database
-          .select({ verified: ssoProvider.domainVerified })
+          .select({ verified: companySsoAvailableSql(configuration) })
           .from(ssoProvider)
           .innerJoin(
             organizationSettings,

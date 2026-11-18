@@ -1,4 +1,6 @@
 import { sso } from "@better-auth/sso";
+import type { Configuration } from "./config.ts";
+import { companySsoAvailable, operatorTrustedSso } from "./sso-policy.ts";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { installationOrganizationId } from "../organization.ts";
@@ -13,6 +15,7 @@ export const companySsoOrigins = async (
   platformUrl: string,
   encryptionKey: string,
   request?: Request,
+  policy?: Configuration,
 ) => {
   const origins = [platformUrl];
 
@@ -47,7 +50,7 @@ export const companySsoOrigins = async (
     .from(ssoProvider)
     .where(eq(ssoProvider.providerId, providerId));
 
-  if (!provider?.domainVerified || !provider.oidcConfig) return origins;
+  if (!companySsoAvailable(policy, provider) || !provider?.oidcConfig) return origins;
 
   const configuration = oidcConfiguration.parse(
     JSON.parse(await decryptSecret(encryptionKey, provider.oidcConfig)),
@@ -64,11 +67,12 @@ export const companySsoPlugin = (
   database: DatabaseExecutor,
   encryptionKey: string,
   access: OrganizationAccess = { filterOrganizations: async () => [installationOrganizationId] },
+  policy?: Configuration,
 ) => {
   const plugin = sso({
     // The schema permits one provider per organization, regardless of its creator.
     providersLimit: Number.MAX_SAFE_INTEGER,
-    domainVerification: { enabled: true },
+    domainVerification: { enabled: !operatorTrustedSso(policy) },
     schema: {
       ssoProvider: {
         additionalFields: {
@@ -81,19 +85,42 @@ export const companySsoPlugin = (
         },
       },
     },
-    resolveUser: async (input) => {
+    resolveUser: async (input, context) => {
       const [provider] = await database
         .select()
         .from(ssoProvider)
         .where(eq(ssoProvider.providerId, input.providerId));
 
       if (
-        !provider?.domainVerified ||
+        !provider ||
+        !companySsoAvailable(policy, provider) ||
         !(await access.filterOrganizations([{ id: provider.organizationId }])).includes(
           provider.organizationId,
         )
       )
         return { action: "reject", code: "ORGANIZATION_UNAVAILABLE" };
+
+      if (
+        operatorTrustedSso(policy, provider.organizationId) &&
+        policy?.PLATFORM_SSO_ALLOW_EMAIL_ACCOUNT_LINKING
+      ) {
+        const bound = await context.database.findOne({
+          model: "account",
+          where: [
+            { field: "providerId", value: input.providerId },
+            { field: "accountId", value: input.accountKey.accountId },
+          ],
+        });
+
+        if (!bound) {
+          const existing = await context.database.findOne<{ id: string }>({
+            model: "user",
+            where: [{ field: "email", value: input.providerUser.email.toLowerCase() }],
+          });
+
+          if (existing) return { action: "link", userId: existing.id, profile: "preserve" };
+        }
+      }
 
       return { action: "continue" };
     },
@@ -117,5 +144,16 @@ export const companySsoPlugin = (
     };
   }
 
-  return plugin;
+  // Keep the DNS operations in the API even when the installation does not
+  // require them. Shared authorization rejects them in operator-trusted mode.
+  const verification = sso({ domainVerification: { enabled: true } });
+
+  return {
+    ...plugin,
+    endpoints: {
+      ...plugin.endpoints,
+      requestDomainVerification: verification.endpoints.requestDomainVerification,
+      verifyDomain: verification.endpoints.verifyDomain,
+    },
+  };
 };
