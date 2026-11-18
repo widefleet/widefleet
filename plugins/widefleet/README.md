@@ -9,10 +9,17 @@ deploy apps with the Widefleet CLI in its shell and points it to the
 
 ## Install
 
-In Claude Code:
+In Claude Code 2.1.275 or newer:
 
 ```sh
 /plugin install widefleet --marketplace widefleet/widefleet
+```
+
+In older versions, add the marketplace first:
+
+```sh
+/plugin marketplace add widefleet/widefleet
+/plugin install widefleet@widefleet
 ```
 
 ## Contents
