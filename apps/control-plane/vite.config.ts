@@ -31,7 +31,7 @@ export const controlPlaneConfig = (target: "node" | "cloudflare") =>
   defineConfig({
     resolve: { alias: aliases },
     define: { "process.env.WIDEFLEET_BUILD_VERSION": JSON.stringify(release.version) },
-    build: { sourcemap: "hidden" },
+    build: { sourcemap: target === "cloudflare" ? true : "hidden" },
     plugins: [
       tailwindcss(),
       sveltekit({

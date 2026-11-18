@@ -19,6 +19,10 @@ const { version } = z
 
 const extension = process.env["WIDEFLEET_APP_RUNTIME_EXTENSION"];
 
+const directory = new URL("dist/", import.meta.url);
+
+await mkdir(directory, { recursive: true });
+
 if (extension && !isAbsolute(extension))
   throw new Error("WIDEFLEET_APP_RUNTIME_EXTENSION must be an absolute module path");
 
@@ -33,6 +37,8 @@ const compile = async (entry: string, define: Record<string, string>) => {
 
   const result = await build({
     entryPoints: [new URL(`src/${entry}.ts`, import.meta.url).pathname],
+    outfile: new URL(`${entry}.js`, directory).pathname,
+    sourcemap: entry === "loader" ? "linked" : false,
     bundle: true,
     format: "esm",
     platform: "neutral",
@@ -52,9 +58,12 @@ const compile = async (entry: string, define: Record<string, string>) => {
     legalComments: "eof",
   });
 
-  const output = result.outputFiles[0];
+  const output = result.outputFiles.find((file) => file.path.endsWith(".js"));
+  const sourceMap = result.outputFiles.find((file) => file.path.endsWith(".js.map"));
 
   if (!output) throw new Error("Runtime build produced no module");
+
+  if (sourceMap) await writeFile(sourceMap.path, sourceMap.contents);
 
   return output.text;
 };
@@ -77,10 +86,6 @@ const source = await compile("loader", {
   WIDEFLEET_RUNTIME_VERSION: JSON.stringify(version),
   WIDEFLEET_SKILL_SOURCE: JSON.stringify(skill),
 });
-
-const directory = new URL("dist/", import.meta.url);
-
-await mkdir(directory, { recursive: true });
 
 await writeFile(new URL("loader.js", directory), source);
 
