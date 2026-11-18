@@ -1,7 +1,7 @@
 ---
 title: Company sign-in settings
 description: Configure company sign-in through the CLI or API, manage credentials and check OpenID Connect requirements.
-lastModified: 2026-11-15
+lastModified: 2026-11-18
 ---
 
 For setup through the browser, follow [Set up company sign-in](/guides/company-sign-in).
@@ -48,15 +48,29 @@ Protect files containing secrets and keep them outside version control.
 ```sh
 widefleet settings plan --file settings.json
 widefleet settings apply --file settings.json
-widefleet settings domain-verification
 ```
 
 If the plan requires it, add `--acknowledge-restart` to the apply command.
+`widefleet settings get` returns the read-only `ssoPolicy`:
+
+- `domainVerificationRequired` tells you whether DNS verification is required.
+- `allowEmailAccountLinking` tells you whether the self-hosted operator explicitly allows matching emails to link existing accounts.
+
+When `domainVerificationRequired` is `true`, request a record:
+
+```sh
+widefleet settings domain-verification
+```
+
 Publish the returned TXT record in your company's DNS, then verify it:
 
 ```sh
 widefleet settings verify-domain
 ```
+
+When it is `false`, skip both DNS commands. Self-hosted operators control this
+through the [deployment environment](/self-hosting/installation#company-sso-trust-and-account-linking),
+not the settings document. Hosted organizations require DNS verification.
 
 In the browser, open **Settings → Company sign-in** and use **Test company
 sign-in** to verify administrator access. Then require the provider for members:
@@ -81,8 +95,11 @@ different company provider requires its own company sign-in.
 | `google`          | `https://accounts.google.com`                      | Cloud Identity API with optional user consent, direct membership only |
 | `oidc` (default)  | Your provider's issuer URL                         | The ID-token field named by `oidcConfig.mapping.extraFields.groups`   |
 
-`domain` is the company email domain, without a URL or wildcard. For Google it
-must match the user's Workspace domain. For generic OIDC, the default name, email
+`domain` is the company email domain, without a URL or wildcard. When
+`ssoPolicy.domainVerificationRequired` is `false`, Entra and generic OIDC may omit
+it or use an empty string. For Google it must match the user's Workspace domain.
+Entra requires a tenant UUID in the issuer URL; `common`, `organizations` and
+`consumers` are not supported tenant values. For generic OIDC, the default name, email
 and group fields are `name`, `email` and `groups`; its mapping is shared by workspace
 and app sign-in. Google app identity uses its standard verified email, name and
 subject claims.

@@ -32,7 +32,7 @@ After sign-in, **Publish your first app** shows CLI connection and deployment co
 
 Follow [Set up company sign-in](/guides/company-sign-in) for Microsoft Entra,
 Google Workspace or another OpenID Connect provider. It covers registering
-both redirect URIs, connecting groups, verifying your domain and testing
+both redirect URIs, connecting groups and testing
 administrator access before activation.
 
 Open a published app with an allowed and a disallowed test account, as
@@ -44,7 +44,24 @@ Customer administrators can change their own SSO and directory settings without 
 
 Company sign-in automatically enrolls users admitted by the organization's provider as Members who can create apps, including external guests. Restrict the shared IdP registration to the intended users. Existing memberships keep their roles, and pending invitations retain their acceptance flow. Without company SSO, customers join through invitations. Apps enforce their own access rules and business permissions using the verified user and group context.
 
-Existing accounts with a matching email in the verified company domain are linked automatically, retaining their membership and role. External guests admitted by the provider can join, but a different email domain does not establish trusted linking to an existing account. See [company sign-in settings](/reference/company-sign-in) for CLI configuration and provider replacement.
+Existing accounts keep their membership and role when linked to the company provider. Linking by matching email requires the operator's explicit choice described below. See [company sign-in settings](/reference/company-sign-in) for CLI configuration and provider replacement.
+
+### Company SSO trust and account linking
+
+The reference Compose deployment trusts the identity provider configured for its installation organization. Microsoft Entra and generic OpenID Connect do not require a company email domain or a DNS verification record. Entra requires a tenant-specific issuer; Google Workspace still requires its Workspace domain for app sign-in. Restrict the provider's application registration to the people who should have access.
+
+These settings belong in the operator's private deployment environment file:
+
+```dotenv
+PLATFORM_SSO_TRUST_PROVIDER=true
+PLATFORM_SSO_ALLOW_EMAIL_ACCOUNT_LINKING=false
+```
+
+The first option enables this installation-level trust. Set it to `false` to require company-domain verification. It defaults to `true` in reference Compose and `false` when running the control plane directly. Hosted organizations always require DNS verification; organization administrators cannot grant operator trust through Settings, the CLI or the API.
+
+Email-based account linking is off by default. To connect the administrator created during first setup, or other existing accounts, set `PLATFORM_SSO_ALLOW_EMAIL_ACCOUNT_LINKING=true` before testing company sign-in. Enable it only when the configured provider may assert ownership of existing users' email addresses. A matching login retains that account's identity, memberships and roles; a new user joins as a Member.
+
+Recreate the control-plane container with your selected Compose files after changing either option. Keep the current administrator session open and use **Test company sign-in** before activation. After the intended accounts are linked, you can set email-based linking back to `false` and recreate the container. Existing provider-account links continue to work. This option applies only when operator trust is enabled and does not mark a company domain as DNS-verified.
 
 Known runtime limitation: celld `0.6.2` drops incoming header values containing non-ASCII bytes. Display names can therefore be empty in Workers; the stable user identifier remains available for authorization.
 
@@ -92,7 +109,7 @@ services:
       - /absolute/private/bootstrap.json:/run/widefleet/bootstrap.json:ro
 ```
 
-The bootstrap file initializes the administrator and the optional settings once. If initialization fails after creating the administrator, the next start resumes with that account. Keep the file mounted, correct the reported configuration or provider failure, and restart until initialization succeeds. After successful initialization, the file is ignored and can be removed; later UI/API changes survive restarts. Use an email-code login or a recovery link to complete DNS verification and test the company login.
+The bootstrap file initializes the administrator and the optional settings once. If initialization fails after creating the administrator, the next start resumes with that account. Keep the file mounted, correct the reported configuration or provider failure, and restart until initialization succeeds. After successful initialization, the file is ignored and can be removed; later UI/API changes survive restarts. Use an email-code login or a recovery link to test the company login. Apply the [account-linking policy](#company-sso-trust-and-account-linking) for the bootstrap administrator, and complete DNS verification if the operator requires it.
 
 ### UI, API and CLI configuration
 
