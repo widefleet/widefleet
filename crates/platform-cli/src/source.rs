@@ -271,9 +271,18 @@ fn copy_index(source: &Path, destination: &Path) -> std::io::Result<()> {
         .set_modified(modified)
 }
 
+// Agent sandboxes may not provide a usable system temporary directory, so Git
+// scratch files stay inside the repository's Git directory.
+async fn scratch(project: &Path) -> Result<tempfile::TempDir> {
+    let directory = output(git(project).args(["rev-parse", "--absolute-git-dir"])).await?;
+    Ok(tempfile::Builder::new()
+        .prefix("widefleet-")
+        .tempdir_in(directory)?)
+}
+
 // An alternate index checks all files Git would add, without changing the user's staging area.
 async fn tree(project: &Path) -> Result<String> {
-    let temporary = tempfile::tempdir()?;
+    let temporary = scratch(project).await?;
     let index = temporary.path().join("index");
     let local_index =
         output(git(project).args(["rev-parse", "--path-format=absolute", "--git-path", "index"]))
@@ -301,14 +310,23 @@ pub async fn snapshot(project: &Path) -> Result<String> {
     }
 
     // Check Git's file selection without initializing the project before a build
-    // succeeds or requiring source storage on the target installation.
-    let temporary = tempfile::tempdir()?;
+    // succeeds or requiring source storage on the target installation. The
+    // temporary repository stays in the project, which agent sandboxes can write.
+    let temporary = tempfile::Builder::new()
+        .prefix(".widefleet-snapshot-")
+        .tempdir_in(project)?;
+    let name = temporary
+        .path()
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| Error::invalid("Invalid temporary directory name".into()))?;
     output(git(project).args(["init", "--bare"]).arg(temporary.path())).await?;
     output(
         git(project)
             .env("GIT_DIR", temporary.path())
             .env("GIT_WORK_TREE", project)
-            .args(["add", "--all", "--", "."]),
+            .args(["add", "--all", "--", "."])
+            .arg(format!(":(exclude,literal){name}")),
     )
     .await?;
     output(
@@ -334,7 +352,7 @@ async fn commit_all(project: &Path, branch: &str) -> Result<String> {
         ))
     })?;
     let lock = tempfile::TempPath::try_from_path(lock_path)?;
-    let temporary = tempfile::tempdir()?;
+    let temporary = scratch(project).await?;
     let pending = temporary.path().join("index");
     match copy_index(Path::new(&index), &pending) {
         Ok(_) => (),

@@ -621,6 +621,49 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       expect(requests).toEqual(["POST /api/v1/apps/source-target"]);
     });
 
+    it("saves source of a new project without a usable system temporary directory", async () => {
+      const project = join(state, "project with spaces");
+      const remote = join(state, "sandbox-source.git");
+      sourceTarget = { supported: true, branch: "main", preview: false };
+      sourceRepository = {
+        url: "https://git.example.test/apps/source.git",
+        branch: "main",
+        commit: null,
+      };
+      await execute("git", ["init", "--bare", remote]);
+      // Agent sandboxes can lack /tmp; the project has no Git repository yet.
+      vi.stubEnv("TMPDIR", join(state, "missing-temporary-directory"));
+      vi.stubEnv("GIT_CONFIG_COUNT", "1");
+      vi.stubEnv("GIT_CONFIG_KEY_0", `url.${pathToFileURL(remote).href}.insteadOf`);
+      vi.stubEnv("GIT_CONFIG_VALUE_0", sourceRepository.url);
+
+      try {
+        const { source: saved } = z
+          .object({ source: contract.sourceRevision })
+          .parse(JSON.parse((await cli("--no-wait", "--json")).stdout));
+
+        const files = await execute("git", [
+          "--git-dir",
+          remote,
+          "ls-tree",
+          "-r",
+          "--name-only",
+          saved.commit,
+        ]);
+
+        expect(files.stdout).toContain("wrangler.jsonc");
+        expect(files.stdout).not.toContain(".widefleet-");
+        expect(
+          (await execute("git", ["-C", project, "status", "--porcelain", "--ignored"])).stdout,
+        ).not.toContain(".widefleet-");
+        expect(requests).toContain(`PUT /api/v1/apps/${app.id}/worker`);
+      } finally {
+        vi.unstubAllEnvs();
+        await rm(join(project, ".git"), { recursive: true, force: true });
+        await rm(remote, { recursive: true, force: true });
+      }
+    });
+
     it("does not require branch confirmation without source storage or with --no-source", async () => {
       const project = join(state, "project with spaces");
       await execute("git", ["init", "--initial-branch=feature", project]);
