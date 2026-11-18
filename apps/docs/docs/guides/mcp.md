@@ -1,15 +1,15 @@
 ---
 title: Connect AI clients with MCP
 description: Discover and call app services from an AI client using your existing app access rules.
-lastModified: 2026-11-17
+lastModified: 2026-11-18
 ---
 
 Connect an MCP client to Widefleet to discover and call the app services available
 to your account. The gateway uses the services' existing entrypoints and method
 documentation and the same company-group rules as browser access to each app.
 
-Use matching control-plane, app-runtime, agent and CLI releases. Native
-installations require the packaged celld `0.6.3-widefleet.1` runtime. Your client
+MCP support is included in Widefleet **0.7.6**. Use matching control-plane,
+app-runtime, agent and CLI releases. Native installations require the packaged celld `0.6.3-widefleet.1` runtime. Your client
 must support remote HTTP MCP and OAuth authorization with PKCE.
 
 ## Connect
@@ -37,8 +37,10 @@ services. The `mcp:services` scope covers service discovery and calls. The accou
 app access rules determine which services are available; administrator status
 alone does not bypass an app's group restriction.
 
-The gateway exposes app services. Use Widefleet's UI, API or CLI for platform
-administration.
+The gateway exposes app services and a skill that guides app creation and deployment
+through the CLI. Read it with `skills({"name":"widefleet"})` or the MCP resource
+`skill://widefleet/SKILL.md`. The service tools themselves do not create, change or
+deploy apps. Use Widefleet's UI, API or CLI for platform administration.
 
 ## Configure the installation
 
@@ -103,10 +105,11 @@ those approvals do not determine a person's MCP access.
 
 ## Discover and call services
 
-The gateway exposes four tools:
+The gateway exposes five tools:
 
 | Tool       | Purpose                                                     |
 | ---------- | ----------------------------------------------------------- |
+| `skills`   | List skills, or read the Widefleet skill by name.           |
 | `search`   | Find service entrypoints available to your account.         |
 | `describe` | Read an entrypoint's published method documentation.        |
 | `call`     | Invoke a documented service method.                         |

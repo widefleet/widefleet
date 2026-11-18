@@ -1,7 +1,7 @@
 ---
 title: Runtime compatibility
 description: Supported runtime integrations and verified differences from Cloudflare.
-lastModified: 2026-11-17
+lastModified: 2026-11-18
 ---
 
 Widefleet uses **celld 0.6.3-widefleet.1**, based on upstream 0.6.3 with AES-KW

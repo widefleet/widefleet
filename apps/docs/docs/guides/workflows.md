@@ -1,7 +1,7 @@
 ---
 title: Workflows
 description: Declare durable background work and manage Workflow instances.
-lastModified: 2026-11-17
+lastModified: 2026-11-18
 ---
 
 ## Declare and export a Workflow
