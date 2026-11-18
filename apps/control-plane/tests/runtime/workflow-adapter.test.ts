@@ -392,6 +392,17 @@ describe.runIf(process.env["RUN_DYNAMIC_TESTS"] === "1")(
       expect(await status(id, "terminated")).not.toHaveProperty("prompts");
     }, 30000);
 
+    it("keeps an answered prompted wait when restarting a later parallel step", async () => {
+      const id = await create("prompted-parallel");
+      await status(id, "waiting");
+      await call("continue", id);
+      expect(await status(id, "complete")).toMatchObject({ output: 2 });
+      await call("restart", id, { options: JSON.stringify({ from: { name: "branch" } }) });
+      // The wait registered before the branch, so its consumed event is retained.
+      expect(await status(id, "complete")).toMatchObject({ output: 2 });
+      expect(labels(id)).toEqual(["branch", "finish", "branch", "finish"]);
+    }, 30000);
+
     it("rejects an invalid event prompt without waiting", async () => {
       const id = await create("invalid-prompt");
       expect(await status(id, "errored")).not.toHaveProperty("prompts");

@@ -102,6 +102,13 @@ export class AppWorkflow extends WorkflowEntrypoint {
       });
       return step.do('finish', () => record('finish', 2 * (a + next.payload.add)));
     }
+    if (mode === 'prompted-parallel') {
+      const [answer, value] = await Promise.all([
+        step.waitForEvent('approval', { type: 'continue', timeout: '5 minutes', prompt: { message: 'Approve?' } }),
+        step.do('branch', () => record('branch', 1)),
+      ]);
+      return step.do('finish', () => record('finish', answer.payload.add + value));
+    }
     if (mode === 'invalid-prompt') {
       await step.waitForEvent('approval', { type: 'continue', prompt: { message: '' } });
       return step.do('unreachable', () => record('unreachable', 0));

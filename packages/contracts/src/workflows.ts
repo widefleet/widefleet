@@ -54,8 +54,10 @@ const promptContent = {
 
 const eventPrompt = z.strictObject(promptContent);
 
-const fitsPromptLimit = (prompt: z.infer<typeof eventPrompt>) =>
-  new TextEncoder().encode(JSON.stringify(prompt)).byteLength <= 16 * 1024;
+// Pending prompts add their step name and event type; the limit covers only
+// the prompt itself so every accepted prompt can be published.
+const fitsPromptLimit = ({ message, requestedSchema }: z.infer<typeof eventPrompt>) =>
+  new TextEncoder().encode(JSON.stringify({ message, requestedSchema })).byteLength <= 16 * 1024;
 
 // The question a person answers to release an event wait. The form is the
 // flat primitive subset that MCP form elicitation and HTML forms both render.

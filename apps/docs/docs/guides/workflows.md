@@ -158,6 +158,20 @@ Answer with an ordinary event of the prompt's `type`, for example `widefleet wor
 `prompt` is not part of Cloudflare's `WorkflowStep` type. In TypeScript, add it with a declaration in your project:
 
 ```ts
+type WorkflowPromptField = { title?: string; description?: string } & (
+  | {
+      type: "string";
+      minLength?: number;
+      maxLength?: number;
+      format?: "email" | "uri" | "date" | "date-time";
+      enum?: string[];
+      enumNames?: string[];
+      default?: string;
+    }
+  | { type: "number" | "integer"; minimum?: number; maximum?: number; default?: number }
+  | { type: "boolean"; default?: boolean }
+);
+
 declare module "cloudflare:workers" {
   interface WorkflowStep {
     waitForEvent<T extends Rpc.Serializable<T>>(
@@ -169,7 +183,7 @@ declare module "cloudflare:workers" {
           message: string;
           requestedSchema?: {
             type: "object";
-            properties: Record<string, { type: "string" | "number" | "integer" | "boolean" }>;
+            properties: Record<string, WorkflowPromptField>;
             required?: string[];
           };
         };

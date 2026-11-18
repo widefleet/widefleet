@@ -21,12 +21,20 @@ export const waitForPromptedEvent = async <T>(
   const parsed = workflowEventPrompt.parse(prompt);
   const catalog = workflowCatalog(environment, start.appId);
   const scope = { appId: start.appId, hostname: start.hostname, workflow: start.workflow };
+  // Register the native wait before any later step: selective restart relies
+  // on native registration order. Publication runs alongside the wait.
+  const waiting = wait(options);
 
-  await catalog.publishPrompt(scope, start.id, step, { name, type: options.type, ...parsed });
+  const published = catalog
+    .publishPrompt(scope, start.id, step, { name, type: options.type, ...parsed })
+    .catch((cause: unknown) => console.error(cause));
 
   try {
-    return await wait(options);
+    return await waiting;
   } finally {
+    // Settle after publication so a fast cached replay cannot reopen the prompt.
+    await published;
+
     try {
       await catalog.settlePrompt(scope, start.id, step);
     } catch (cause) {

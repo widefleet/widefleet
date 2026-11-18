@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   workflowEventPrompt,
+  workflowPendingPrompt,
   workflowQuery,
   workflowRequest,
   workflowRestartOptions,
@@ -30,6 +31,30 @@ describe("Workflow event prompts", () => {
     };
 
     expect(workflowEventPrompt.parse(prompt)).toEqual(prompt);
+  });
+
+  it("publishes a prompt at the size limit with its step name and event type", () => {
+    const prompt = {
+      message: "x".repeat(3549),
+      requestedSchema: {
+        type: "object",
+        properties: Object.fromEntries(
+          Array.from({ length: 12 }, (_, index) => [
+            `f${index}`,
+            { type: "string", description: "d".repeat(1024) },
+          ]),
+        ),
+      },
+    };
+
+    expect(new TextEncoder().encode(JSON.stringify(prompt)).byteLength).toBe(16 * 1024);
+    expect(workflowEventPrompt.safeParse(prompt).success).toBe(true);
+    expect(
+      workflowPendingPrompt.safeParse({ name: "approval", type: "approval", ...prompt }).success,
+    ).toBe(true);
+    expect(
+      workflowEventPrompt.safeParse({ ...prompt, message: `${prompt.message}x` }).success,
+    ).toBe(false);
   });
 
   it.each([
