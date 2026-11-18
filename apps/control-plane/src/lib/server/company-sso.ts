@@ -1,11 +1,11 @@
 import { sso } from "@better-auth/sso";
 import type { Configuration } from "./config.ts";
 import { companySsoAvailable, operatorTrustedSso } from "./sso-policy.ts";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { installationOrganizationId } from "../organization.ts";
 import type { OrganizationAccess } from "./application-context.ts";
-import { ssoProvider } from "./auth-schema.ts";
+import { ssoProvider, user } from "./auth-schema.ts";
 import type { DatabaseExecutor } from "./database.ts";
 import { decryptSecret, encryptSecret } from "./secret-encryption.ts";
 import { oidcConfiguration, prepareCompanyOidc } from "./sso-origins.ts";
@@ -123,6 +123,24 @@ export const companySsoPlugin = (
       }
 
       return { action: "continue" };
+    },
+    provisionUserOnEveryLogin: true,
+    provisionUser: async ({ user: subject, userInfo, provider }) => {
+      if (
+        !provider.organizationId ||
+        !operatorTrustedSso(policy, provider.organizationId) ||
+        subject.emailVerified
+      )
+        return;
+
+      // The operator vouches for this provider's email addresses. Confirm only
+      // the matching local address so the user can accept its invitations.
+      const email = z.string().parse(userInfo["email"]).toLowerCase();
+
+      await database
+        .update(user)
+        .set({ emailVerified: true })
+        .where(and(eq(user.id, subject.id), eq(user.email, email)));
     },
   });
 
