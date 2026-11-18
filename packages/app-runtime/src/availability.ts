@@ -1,5 +1,6 @@
 import { organizationHttpAvailability, organizationHttpAvailabilityKey } from "@platform/contracts";
 import type { ParentEnvironment } from "./types.ts";
+import { reportRuntimeException } from "./runtime-errors.ts";
 
 export const readOrganizationAvailability = async (
   environment: ParentEnvironment,
@@ -15,7 +16,8 @@ export const readOrganizationAvailability = async (
     return value === null
       ? { blocked: false }
       : organizationHttpAvailability.parse(JSON.parse(value));
-  } catch {
+  } catch (cause) {
+    reportRuntimeException(cause, environment, { operation: "read_availability", organizationId });
     console.error("Organization availability could not be read");
 
     return null;

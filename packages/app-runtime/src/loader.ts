@@ -141,7 +141,16 @@ const dispatchApp = async (
   }
 
   const [app, availability] = await Promise.all([
-    readApp(environment, key),
+    readApp(
+      environment,
+      key,
+      authenticated
+        ? {
+            appId: authenticated.appId,
+            organizationId: authenticated.organizationId,
+          }
+        : {},
+    ),
     authenticated
       ? readOrganizationAvailability(environment, authenticated.organizationId)
       : { blocked: false },

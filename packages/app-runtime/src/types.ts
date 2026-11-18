@@ -29,6 +29,8 @@ export type ParentEnvironment = {
   WIDEFLEET_WORKLOAD_ISSUER?: string;
   WIDEFLEET_MCP_ORIGIN?: string;
   WIDEFLEET_OAUTH?: string;
+  POSTHOG_PROJECT_TOKEN?: string;
+  POSTHOG_SCOPE?: string;
   [name: string]:
     | undefined
     | NativeBindings[keyof NativeBindings]

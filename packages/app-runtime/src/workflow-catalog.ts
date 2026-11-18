@@ -91,7 +91,7 @@ export class WorkflowCatalog extends DurableObject<ParentEnvironment> {
     scopeSchema.parse(scope);
 
     if (await this.ctx.storage.get<boolean>("deleted")) throw new Error("App is being deleted");
-    const app = await readApp(this.env, `hosts/${scope.hostname}.json`);
+    const app = await readApp(this.env, `hosts/${scope.hostname}.json`, { appId: scope.appId });
 
     if (!app || app.appId !== scope.appId) throw new Error("App is not published");
 
