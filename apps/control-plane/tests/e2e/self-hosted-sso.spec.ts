@@ -92,6 +92,35 @@ test("configures self-hosted SSO without a company domain or DNS proof", async (
       ),
     ).toBeVisible();
 
+    await page.getByRole("link", { name: "Email domains", exact: true }).click();
+    await expect(page.getByText("No email domains", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Add domain", exact: true }).click();
+    await page.getByLabel("Domain", { exact: true }).fill("example.test");
+    await page.getByRole("dialog").getByRole("button", { name: "Add domain", exact: true }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page.getByRole("list", { name: "Email domains" })).toContainText("example.test");
+    await expect(page.getByRole("button", { name: "Verify", exact: true })).toHaveCount(0);
+
+    for (const theme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: theme });
+
+      for (const width of [1280, 390]) {
+        await page.setViewportSize({ width, height: 960 });
+        await page.screenshot({
+          path: `../../.local/sso-domains-${theme}-${width}.png`,
+          fullPage: true,
+        });
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        ).toBe(true);
+      }
+    }
+
+    await page.getByRole("button", { name: "Remove example.test", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByText("No email domains", { exact: true })).toBeVisible();
+    await page.getByRole("link", { name: "Company sign-in", exact: true }).click();
+
     for (const theme of ["light", "dark"] as const) {
       await page.emulateMedia({ colorScheme: theme });
 

@@ -170,6 +170,9 @@ describe("Organization discovery and selection", () => {
         admin: false,
         application: { organizationId: alpha, admin: true },
       });
+      expect((await runtime.auth.api.getSession({ headers }))?.session.activeOrganizationId).toBe(
+        authentication === "session" ? alpha : null,
+      );
 
       const created = await api(
         request(`/apps/by-name/automatic-${authentication}`, {
@@ -195,7 +198,58 @@ describe("Organization discovery and selection", () => {
     },
   );
 
-  it("rejects a stale browser write when the automatically available organization changes", async () => {
+  it("keeps an automatic selection when another organization becomes available", async () => {
+    admitted.clear();
+    admitted.add(alpha);
+    expect((await api(request("/me"))).status).toBe(200);
+    admitted.add(beta);
+    expect(await (await api(request("/me"))).json()).toMatchObject({
+      application: { organizationId: alpha },
+    });
+  });
+
+  it("keeps a request header's selection out of the browser session", async () => {
+    headers.set("x-widefleet-organization", alpha);
+    expect((await api(request("/me"))).status).toBe(200);
+    expect(
+      (await runtime.auth.api.getSession({ headers }))?.session.activeOrganizationId,
+    ).toBeNull();
+  });
+
+  it("allows concurrent automatic selections but preserves a selection from another tab", async () => {
+    admitted.clear();
+    admitted.add(alpha);
+    const current = await runtime.auth.api.getSession({ headers });
+
+    if (!current) throw new Error("Missing fixture session");
+    const resolve = () => runtime.identity.principal(userId, null, null, current.session.id);
+
+    expect((await Promise.all([resolve(), resolve()])).every((result) => result.isOk())).toBe(true);
+    admitted.add(beta);
+    expect((await runtime.identity.selectOrganization(request("/organization"), beta)).isOk()).toBe(
+      true,
+    );
+    admitted.delete(beta);
+    expect(await resolve()).toMatchObject({ error: { code: "CONFLICT" } });
+    expect((await runtime.auth.api.getSession({ headers }))?.session.activeOrganizationId).toBe(
+      beta,
+    );
+  });
+
+  it("does not select an organization for a revoked session", async () => {
+    admitted.clear();
+    admitted.add(alpha);
+    const credential = await environment.users.login({ userId });
+    const current = await runtime.auth.api.getSession({ headers: credential.headers });
+
+    if (!current) throw new Error("Missing fixture session");
+    await environment.database.db.delete(session).where(eq(session.id, current.session.id));
+    expect(await runtime.identity.principal(userId, null, null, current.session.id)).toMatchObject({
+      error: { code: "UNAUTHORIZED" },
+    });
+  });
+
+  it("rejects a browser write when its automatically selected organization becomes unavailable", async () => {
     const records = await environment.database.db.select().from(organizationRuntimes);
     const alphaRuntime = records.find((record) => record.organizationId === alpha);
     const betaRuntime = records.find((record) => record.organizationId === beta);
@@ -211,7 +265,10 @@ describe("Organization discovery and selection", () => {
     admitted.add(betaRuntime.organizationId);
     expect(
       await runtime.identity.authenticate(request("/apps"), "platform:write", alpha),
-    ).toMatchObject({ error: { code: "CONFLICT" } });
+    ).toMatchObject({ error: { code: "FORBIDDEN" } });
+    expect((await runtime.auth.api.getSession({ headers }))?.session.activeOrganizationId).toBe(
+      alpha,
+    );
     admitted.clear();
     expect((await api(request("/apps"))).status).toBe(403);
   });

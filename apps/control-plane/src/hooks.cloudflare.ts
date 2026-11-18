@@ -1,8 +1,10 @@
 import { env, waitUntil } from "cloudflare:workers";
 import type { Handle, HandleServerError } from "@sveltejs/kit/hooks";
 import { createCloudflareRuntime } from "#server/runtime-cloudflare";
+import { createProductAnalytics } from "#server/analytics";
 import { checkFormOrigin } from "#server/form-origin";
 import { handleSession } from "#server/session";
+import { reportRequestException } from "#server/runtime";
 
 import { proxyAnalyticsRequest } from "#server/analytics-proxy";
 import { analyticsEnvironmentSchema, readAnalyticsConfiguration } from "#lib/analytics-config";
@@ -74,9 +76,19 @@ export const handleError: HandleServerError = async ({ error, kind, event }) => 
     console.error(error);
 
     try {
-      (await event.locals.runtime()).reporting.exception(error);
+      await reportRequestException(error, event.locals);
     } catch {
-      /* Initialization may have failed. */
+      try {
+        const observation = createProductAnalytics({
+          ...analyticsEnvironmentSchema.parse(env),
+          PLATFORM_URL: new URL(env.PLATFORM_URL).origin,
+        });
+
+        observation.exception(error);
+        waitUntil(observation.close());
+      } catch {
+        // Invalid analytics configuration must not replace the initialization error.
+      }
     }
   }
 };

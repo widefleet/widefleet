@@ -6,9 +6,11 @@ import { account, member, organization, ssoProvider } from "../src/lib/server/au
 import { organizationSettings } from "../src/lib/server/schema.ts";
 import { createAuthentication } from "../src/lib/server/auth.ts";
 import { createIdentityService } from "../src/lib/server/identity.ts";
+import { createAuthenticationAdmission } from "../src/lib/server/auth-admission.ts";
 import { createSettingsService } from "../src/lib/server/settings.ts";
 import { createAppSignIn } from "../src/lib/server/app-sign-in-node.ts";
-import { createTestEnvironment } from "./environment.ts";
+import { createTestEnvironment, organizationCredential } from "./environment.ts";
+import { editableSettings } from "./settings-input.ts";
 import { createIdentityProvider } from "./edge/auth-proxy-idp.ts";
 
 const cookies = (response: Response) =>
@@ -128,6 +130,82 @@ describe("Operator-trusted self-hosted SSO", () => {
     ).rejects.toMatchObject({ statusCode: 403 });
     const [stored] = await environment.database.db.select().from(ssoProvider);
     expect(stored?.domainVerified).toBe(false);
+  });
+
+  it("uses optional domains alongside verified domains and allows removing the last domain", async () => {
+    await environment.database.db
+      .update(ssoProvider)
+      .set({ domain: "verified.example.test", domainVerified: true });
+    await environment.settings.activateSso(principal());
+    const added = await environment.settings.addDomain(principal(), "optional.example.test", false);
+    expect(added.ssoDomains).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ domain: "verified.example.test", verified: true }),
+        expect.objectContaining({ domain: "optional.example.test", verified: false }),
+      ]),
+    );
+
+    const admission = createAuthenticationAdmission(
+      environment.database.db,
+      undefined,
+      false,
+      environment.configuration,
+    );
+
+    expect(await admission.signInProvider("person@optional.example.test")).toBe(providerId);
+    expect(
+      await createAuthenticationAdmission(environment.database.db).signInProvider(
+        "person@optional.example.test",
+      ),
+    ).toBeNull();
+    await environment.settings.removeDomain(principal(), "verified.example.test", false);
+    expect(await environment.settings.read(principal())).toMatchObject({
+      ssoRequired: true,
+      sso: { domainVerified: false },
+    });
+
+    const removed = await environment.settings.removeDomain(
+      principal(),
+      "optional.example.test",
+      false,
+    );
+
+    expect(removed).toMatchObject({
+      ssoDomains: [],
+      sso: { domain: "", domainVerified: false },
+      ssoRequired: true,
+      activation: { state: "active" },
+    });
+    expect(await admission.signInProvider("person@optional.example.test")).toBeNull();
+    expect((await login()).session?.user.id).toBeTruthy();
+  });
+
+  it("preserves omitted domains on updates and accepts an explicitly empty list", async () => {
+    await environment.settings.addDomain(principal(), "first.example.test", false);
+    await environment.settings.addDomain(principal(), "second.example.test", false);
+    const credential = await organizationCredential(environment, principal());
+    const next = editableSettings(await environment.settings.read(principal()));
+
+    if (!next.sso) throw new Error("Missing fixture provider");
+    delete next.sso.domain;
+    await environment.settings.update(
+      principal(),
+      { ...next, acknowledgeRestart: false },
+      false,
+      credential,
+    );
+    expect((await environment.settings.read(principal())).ssoDomains).toHaveLength(2);
+    next.sso.domain = "";
+
+    const cleared = await environment.settings.update(
+      principal(),
+      { ...next, acknowledgeRestart: false },
+      false,
+      credential,
+    );
+
+    expect(cleared).toMatchObject({ ssoDomains: [], sso: { domain: "", domainVerified: false } });
+    expect((await environment.settings.activateSso(principal())).ssoRequired).toBe(true);
   });
 
   it("does not link matching email addresses by default, even after earlier DNS verification", async () => {
@@ -367,6 +445,6 @@ describe("Operator-trusted self-hosted SSO", () => {
           },
         }),
       ),
-    ).rejects.toBeInstanceOf(z.ZodError);
+    ).rejects.toMatchObject({ code: "BAD_REQUEST", message: "Enter a company email domain" });
   });
 });

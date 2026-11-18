@@ -4,6 +4,7 @@ import { createRequestRuntime } from "#server/runtime-services";
 import { getRuntime } from "#server/runtime-node";
 import { checkFormOrigin } from "#server/form-origin";
 import { handleSession } from "#server/session";
+import { reportRequestException } from "#server/runtime";
 
 export const init: ServerInit = async () => {
   if (!building) await getRuntime();
@@ -27,12 +28,12 @@ export const handle: Handle = async ({ event, resolve }) => {
   return handleSession({ event, resolve });
 };
 
-export const handleError: HandleServerError = async ({ error, kind }) => {
+export const handleError: HandleServerError = async ({ error, kind, event }) => {
   if (kind === "unknown" && error instanceof Error) {
     console.error(error);
 
     try {
-      (await getRuntime()).reporting.exception(error);
+      await reportRequestException(error, event.locals);
     } catch {
       /* Initialization may have failed before reporting is available. */
     }

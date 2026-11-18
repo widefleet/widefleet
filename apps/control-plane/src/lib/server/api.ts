@@ -7,6 +7,7 @@ import * as contract from "@platform/contracts";
 import type { Result } from "better-result";
 import { z } from "zod";
 import type { Runtime } from "./runtime.ts";
+import type { Principal } from "./identity.ts";
 import { parseWorkerUpload, readBody } from "./upload-body.ts";
 import { binaryPaths, binarySchemas } from "./openapi-binary.ts";
 import { DirectoryUnavailable } from "./directory.ts";
@@ -88,7 +89,16 @@ const idempotencyKey = (request: Request) => {
 };
 
 export const createApi = (runtime: Runtime) => {
-  const base = os.$context<{ request: Request }>().use(async ({ next }) => {
+  const principals = new WeakMap<Request, Principal>();
+
+  const reportException = (error: Error, request: Request) => {
+    const principal = principals.get(request);
+    runtime.reporting.exception(error, principal ? `user:${principal.id}` : undefined, {
+      $groups: principal ? { organization: principal.application.organizationId } : undefined,
+    });
+  };
+
+  const base = os.$context<{ request: Request }>().use(async ({ context, next }) => {
     try {
       return await next();
     } catch (cause) {
@@ -97,13 +107,14 @@ export const createApi = (runtime: Runtime) => {
         (!(cause instanceof ORPCError) ||
           (cause.status >= 500 && cause.code !== "TELEMETRY_NOT_CONFIGURED"))
       )
-        runtime.reporting.exception(cause.cause instanceof Error ? cause.cause : cause);
+        reportException(cause.cause instanceof Error ? cause.cause : cause, context.request);
       throw cause;
     }
   });
 
   const authenticateWrite = async (request: Request) => {
     const principal = unwrap(await runtime.identity.authenticate(request, "platform:write"));
+    principals.set(request, principal);
     runtime.reporting.active(principal.id);
 
     return principal;
@@ -111,6 +122,7 @@ export const createApi = (runtime: Runtime) => {
 
   const read = base.use(async ({ context, next }) => {
     const principal = unwrap(await runtime.identity.authenticate(context.request, "platform:read"));
+    principals.set(context.request, principal);
 
     if (new URL(context.request.url).pathname !== "/api/v1/reporting/status")
       runtime.reporting.active(principal.id);
@@ -139,6 +151,8 @@ export const createApi = (runtime: Runtime) => {
     const principal = unwrap(
       await runtime.identity.authenticate(context.request, "network:manage"),
     );
+
+    principals.set(context.request, principal);
 
     runtime.reporting.active(principal.id);
 
@@ -568,21 +582,40 @@ export const createApi = (runtime: Runtime) => {
       .route({ method: "POST", path: "/settings/domain-verification" })
       .output(contract.domainVerification)
       .handler(({ context }) =>
+        apiOperation(() => runtime.settings.domainVerification(context.principal)),
+      ),
+    addDomain: write
+      .route({ method: "POST", path: "/settings/domains" })
+      .input(contract.ssoDomainInput)
+      .output(contract.settingsView)
+      .handler(({ context, input }) =>
         apiOperation(() =>
-          runtime.settings.domainVerification(
+          runtime.settings.addDomain(
             context.principal,
-            runtime.auth,
-            context.request.headers,
+            input.domain,
+            !context.request.headers.has("authorization"),
+          ),
+        ),
+      ),
+    removeDomain: write
+      .route({ method: "DELETE", path: "/settings/domains/{domain}" })
+      .input(contract.ssoDomainInput)
+      .output(contract.settingsView)
+      .handler(({ context, input }) =>
+        apiOperation(() =>
+          runtime.settings.removeDomain(
+            context.principal,
+            input.domain,
+            !context.request.headers.has("authorization"),
           ),
         ),
       ),
     verifyDomain: write
       .route({ method: "POST", path: "/settings/verify-domain" })
+      .input(contract.ssoDomainInput.partial().optional())
       .output(z.object({ success: z.boolean() }))
-      .handler(({ context }) =>
-        apiOperation(() =>
-          runtime.settings.verifyDomain(context.principal, runtime.auth, context.request.headers),
-        ),
+      .handler(({ context, input }) =>
+        apiOperation(() => runtime.settings.verifyDomain(context.principal, input?.domain)),
       ),
     activateSso: write
       .route({ method: "POST", path: "/settings/activate-sso" })
@@ -891,7 +924,10 @@ export const createApi = (runtime: Runtime) => {
       );
 
     if (url.pathname === "/api/v1/openapi.json" && request.method === "GET") {
-      unwrap(await runtime.identity.authenticate(request, "platform:read"));
+      principals.set(
+        request,
+        unwrap(await runtime.identity.authenticate(request, "platform:read")),
+      );
 
       const document = await generator.generate(router, {
         info: { title: "App Platform API", version: "1.0.0" },
@@ -928,6 +964,7 @@ export const createApi = (runtime: Runtime) => {
 
     if (icon && request.method === "GET") {
       const principal = unwrap(await runtime.identity.authenticate(request, "platform:read"));
+      principals.set(request, principal);
       const appId = contract.identifier.parse(icon[1]);
 
       const result = unwrap(
@@ -1057,7 +1094,7 @@ export const createApi = (runtime: Runtime) => {
     } catch (cause) {
       if (cause instanceof ORPCError) {
         if (cause.status >= 500 && cause.code !== "TELEMETRY_NOT_CONFIGURED")
-          runtime.reporting.exception(cause.cause instanceof Error ? cause.cause : cause);
+          reportException(cause.cause instanceof Error ? cause.cause : cause, request);
 
         return Response.json(
           { code: z.string().parse(cause.code), message: cause.message },
@@ -1072,7 +1109,7 @@ export const createApi = (runtime: Runtime) => {
         );
       console.error("Request failed", cause);
 
-      if (cause instanceof Error) runtime.reporting.exception(cause);
+      if (cause instanceof Error) reportException(cause, request);
 
       return Response.json(
         { code: "INTERNAL_SERVER_ERROR", message: "The request could not be completed" },

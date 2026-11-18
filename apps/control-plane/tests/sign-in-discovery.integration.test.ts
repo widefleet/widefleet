@@ -23,6 +23,21 @@ describe("Email-first sign-in discovery", () => {
     await expect(discover("person@notexample.test")).resolves.toBeNull();
   });
 
+  it("routes each exact domain of a multi-domain provider", async () => {
+    const [stored] = await environment.database.db.select().from(ssoProvider);
+    const domain = stored?.domain ?? "";
+    await environment.database.db.update(ssoProvider).set({ domain: "example.test,alias.test" });
+
+    try {
+      await expect(discover("person@example.test")).resolves.toBe("microsoft");
+      await expect(discover("person@alias.test")).resolves.toBe("microsoft");
+      await expect(discover("person@sub.alias.test")).resolves.toBeNull();
+      await expect(discover("person@example.test,alias.test")).resolves.toBeNull();
+    } finally {
+      await environment.database.db.update(ssoProvider).set({ domain });
+    }
+  });
+
   it("does not discover an unverified or unadmitted SSO provider", async () => {
     const suspended = createAuthenticationAdmission(environment.database.db, {
       filterOrganizations: async () => [],

@@ -302,11 +302,29 @@ for (const javaScriptEnabled of [true, false]) {
       await page.goto("/apps/new");
       await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}/apps/new`);
       await expect(page.getByRole("link", { name: "Choose organization: Alpha" })).toBeVisible();
+      expect(
+        await environment.database.db
+          .select({ organizationId: session.activeOrganizationId })
+          .from(session)
+          .where(eq(session.userId, person.id)),
+      ).toEqual([{ organizationId: alpha }]);
+      // Remote forms must also repair existing sessions without a saved selection.
+      await environment.database.db
+        .update(session)
+        .set({ activeOrganizationId: null })
+        .where(eq(session.userId, person.id));
       await page.getByLabel("App name", { exact: true }).fill("Automatic organization");
       const slug = `automatic-${javaScriptEnabled}`;
       await page.getByLabel("URL slug").fill(slug);
       await page.getByRole("button", { name: "Create app", exact: true }).click();
       await expect(page).toHaveURL(/\/apps\/[a-f0-9-]+$/);
+
+      expect(
+        await environment.database.db
+          .select({ organizationId: session.activeOrganizationId })
+          .from(session)
+          .where(eq(session.userId, person.id)),
+      ).toEqual([{ organizationId: alpha }]);
 
       const records = await environment.database.db
         .select({ organizationId: organizationRuntimes.organizationId })

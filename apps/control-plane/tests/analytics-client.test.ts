@@ -5,7 +5,11 @@ const spySdk = async () => {
   const { default: posthog } = await import("posthog-js");
 
   return {
-    init: vi.spyOn(posthog, "init").mockReturnValue(posthog),
+    init: vi.spyOn(posthog, "init").mockImplementation((_token, options) => {
+      options?.loaded?.(posthog);
+
+      return posthog;
+    }),
     identify: vi.spyOn(posthog, "identify").mockImplementation(() => {}),
     group: vi.spyOn(posthog, "group").mockImplementation(() => {}),
     register: vi.spyOn(posthog, "register").mockImplementation(() => {}),
@@ -73,7 +77,10 @@ it("captures errors before sign-in or organization selection and identifies afte
 
 it("uses SDK defaults with only deployment and enabled-feature configuration", () => {
   analytics.updateClientContext(context);
-  expect(sdk.init).toHaveBeenCalledWith(config.projectToken, {
+  const [token, { loaded, ...options } = {}] = sdk.init.mock.calls[0] ?? [];
+  expect(token).toBe(config.projectToken);
+  expect(loaded).toBeTypeOf("function");
+  expect(options).toEqual({
     api_host: "/analytics",
     ui_host: config.uiOrigin,
     defaults: "2026-08-30",
@@ -122,6 +129,10 @@ it("preserves organization transitions and clears identified sessions without re
   });
   analytics.resetClientContext();
   expect(sdk.reset).toHaveBeenCalledTimes(2);
+  expect(sdk.register).toHaveBeenLastCalledWith({ scope: config.scope });
+  expect(sdk.register.mock.invocationCallOrder.at(-1)).toBeGreaterThan(
+    sdk.reset.mock.invocationCallOrder.at(-1) ?? 0,
+  );
   sdk.get_distinct_id.mockReturnValue("anonymous-id");
   analytics.resetClientContext();
   expect(sdk.reset).toHaveBeenCalledTimes(2);

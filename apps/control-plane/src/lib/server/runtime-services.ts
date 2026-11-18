@@ -76,9 +76,9 @@ export const createRuntime = ({
 }) => {
   const publicSignup = Boolean(createOrganization);
 
-  const reportException = (error: Error) => {
-    reporting.exception(error);
-    runExtensionEffect(() => observation?.exception?.(error));
+  const reportException = (...args: Parameters<NonNullable<Observation["exception"]>>) => {
+    reporting.exception(args[0]);
+    runExtensionEffect(() => observation?.exception?.(...args));
   };
 
   const organizationAccess =
