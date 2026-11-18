@@ -1,6 +1,6 @@
 import type { KVNamespace } from "@cloudflare/workers-types";
 import { organizationIdentifier, type appCaller } from "@platform/contracts";
-import type { z } from "zod";
+import { z } from "zod";
 import { authConfiguration, type AuthConfiguration } from "./configuration.ts";
 import {
   authControlPath,
@@ -39,6 +39,22 @@ const discoveryKeys = (configuration: AuthConfiguration) => [
     ),
   ),
 ];
+
+const discoveryListKey = (organizationId: string) =>
+  `organizations/${organizationIdentifier.parse(organizationId)}/discovery`;
+
+const discoveryList = z.array(z.string().regex(/^mcp\/(?:organizations|domains)\//));
+
+// Every index key that may exist for the organization, including keys that a
+// failed publication wrote. Earlier releases kept no list; derive theirs.
+const listedDiscoveryKeys = async (environment: AuthEnvironment, organizationId: string) => {
+  const stored = await environment.AUTH_CONFIG.get(discoveryListKey(organizationId));
+
+  if (stored) return { stored: true, keys: discoveryList.parse(JSON.parse(stored)) };
+  const previous = await readAuthConfiguration(environment, organizationId);
+
+  return { stored: false, keys: previous ? discoveryKeys(previous.configuration) : [] };
+};
 
 export const readAuthConfiguration = async (
   environment: AuthEnvironment,
@@ -108,31 +124,43 @@ const control = async (request: Request, environment: AuthEnvironment) => {
 
       if (input.organizationId !== organizationId)
         return reply(400, "Organization does not match configuration");
-      const previous = await readAuthConfiguration(environment, organizationId);
+      const listed = await listedDiscoveryKeys(environment, organizationId);
       const current = discoveryKeys(input);
+      const pending = [...new Set([...listed.keys, ...current])];
+      const listKey = discoveryListKey(organizationId);
+      // Record keys before writing them, so a failed publication leaves its cleanup
+      // to the next publication or revocation. KV accepts one write per key and
+      // second, so a list that only shrinks is written at the end instead.
+      const recorded = !listed.stored || pending.length !== listed.keys.length;
 
-      // Change the index before the configuration it derives from. After a failed
-      // write the previous configuration remains, so a retry recomputes every change.
-      for (const key of current) await environment.AUTH_CONFIG.put(key, organizationId);
-
-      for (const key of previous ? discoveryKeys(previous.configuration) : [])
-        if (!current.includes(key)) await environment.AUTH_CONFIG.delete(key);
+      if (recorded) await environment.AUTH_CONFIG.put(listKey, JSON.stringify(pending));
 
       await environment.AUTH_CONFIG.put(
         authConfigurationKey(organizationId),
         await encodeConfiguration(environment.WIDEFLEET_CONTROL_TOKEN, input),
       );
 
+      for (const key of current) await environment.AUTH_CONFIG.put(key, organizationId);
+
+      for (const key of listed.keys)
+        if (!current.includes(key)) await environment.AUTH_CONFIG.delete(key);
+
+      if (!recorded && current.length !== listed.keys.length)
+        await environment.AUTH_CONFIG.put(listKey, JSON.stringify(current));
+
       return reply(204, "");
     }
 
     if (request.method === "DELETE") {
-      const previous = await readAuthConfiguration(environment, organizationId);
+      const listed = await listedDiscoveryKeys(environment, organizationId);
 
-      for (const key of previous ? discoveryKeys(previous.configuration) : [])
-        await environment.AUTH_CONFIG.delete(key);
-
+      // Revoke sign-in first. A failed index cleanup must not keep the provider trusted;
+      // the list remains, so a retry removes the rest.
       await environment.AUTH_CONFIG.delete(authConfigurationKey(organizationId));
+
+      for (const key of listed.keys) await environment.AUTH_CONFIG.delete(key);
+
+      await environment.AUTH_CONFIG.delete(discoveryListKey(organizationId));
 
       return reply(204, "");
     }

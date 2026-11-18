@@ -13,12 +13,12 @@ it("revokes only the selected organization's sign-in and MCP discovery entries",
 
   const compiled = await build({
     stdin: {
-      // A test header makes deleting one KV key fail, as a transient storage error would.
+      // A test header makes writing or deleting one KV key fail, as a transient storage error would.
       contents: `import {createAuthHandler} from './worker.ts';
         export default {fetch(request,env){
           const failing=request.headers.get('x-test-failing-key');
           const storage=failing ? new Proxy(env.AUTH_CONFIG,{get(target,name){
-            if(name==='delete') return async(key)=>{ if(key===failing) throw new Error('Synthetic KV failure'); return target.delete(key); };
+            if(name==='put'||name==='delete') return async(key,...rest)=>{ if(key===failing) throw new Error('Synthetic KV failure'); return target[name](key,...rest); };
             const value=target[name]; return typeof value==='function' ? value.bind(target) : value;
           }}) : env.AUTH_CONFIG;
           return createAuthHandler({...env,AUTH_CONFIG:storage},async()=>new Response('App')).fetch(request);
@@ -124,7 +124,7 @@ it("revokes only the selected organization's sign-in and MCP discovery entries",
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const dropped = `${mcpDomainPrefix("shared.example")}retained`;
 
-    // A failed cleanup keeps the previous configuration, so the retry still removes the key.
+    // The discovery list keeps a key whose removal failed, so the retry removes it.
     expect(
       (
         await control(
@@ -171,9 +171,10 @@ it("revokes only the selected organization's sign-in and MCP discovery entries",
         )
       ).status,
     ).toBe(503);
-    // Revocation keeps the configuration until every index key it lists is gone.
-    expect(await storage.get(configurationKey)).not.toBeNull();
-    error.mockRestore();
+    // Sign-in is revoked even though index cleanup failed; the retry removes the rest.
+    expect(await storage.get(configurationKey)).toBeNull();
+    expect((await runtime.dispatchFetch("https://ledger.apps.example.test/")).status).toBe(503);
+    expect(await storage.get(`${mcpDomainPrefix("shared.example")}revoked`)).toBe("revoked");
     expect((await control(configurationKey, "DELETE")).status).toBe(204);
     expect((await control(configurationKey, "DELETE")).status).toBe(204);
     expect(await storage.get(configurationKey)).toBeNull();
@@ -193,6 +194,41 @@ it("revokes only the selected organization's sign-in and MCP discovery entries",
         (await runtime.dispatchFetch(`https://auth.apps.example.test/oauth2/revoked/${action}`))
           .status,
       ).toBe(404);
+
+    // Keys from a failed first publication are listed before they are written,
+    // so revoking the organization removes them.
+    const stranded = authConfiguration.parse({
+      organizationId: "stranded",
+      provider: { type: "google", domain: "stranded.example" },
+      clientId: "synthetic-client",
+      clientSecret: "synthetic-secret",
+      cookieSecret: Buffer.alloc(32, 1).toString("base64url"),
+      domain: "apps.example.test",
+      redirectUrl: "https://auth.apps.example.test/oauth2/stranded/callback",
+      emailDomains: ["first.example", "second.example"],
+    });
+
+    const [written, failed] = mcpDomainKeys(stranded);
+
+    if (!written || !failed) throw new Error("Expected two domain keys");
+    expect(
+      (
+        await control(
+          authConfigurationKey("stranded"),
+          "PUT",
+          JSON.stringify(stranded),
+          true,
+          failed,
+        )
+      ).status,
+    ).toBe(503);
+    expect(await storage.get(written)).toBe("stranded");
+    expect((await control(authConfigurationKey("stranded"), "DELETE")).status).toBe(204);
+
+    for (const key of [written, failed, "mcp/organizations/google/stranded.example/stranded"])
+      expect(await storage.get(key)).toBeNull();
+    expect(await storage.get("organizations/stranded/discovery")).toBeNull();
+    error.mockRestore();
   } finally {
     await runtime.dispose();
   }
