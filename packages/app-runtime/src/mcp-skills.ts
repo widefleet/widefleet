@@ -4,9 +4,9 @@ import type { SkillCatalog } from "@modelcontextprotocol/server/ext/skills";
 export const mcpInstructions = [
   "Widefleet runs your organization's internal apps.",
   "Use search, describe, call and execute to use the APIs of running apps.",
-  "These tools cannot create, change or deploy apps.",
+  "Apps are built and deployed with the Widefleet CLI in your shell.",
   "Before building, changing or deploying an app, read the widefleet skill",
-  "(skill://widefleet/SKILL.md, or the skills tool) and follow it.",
+  '(the skills tool with name "widefleet", or skill://widefleet/SKILL.md).',
 ].join(" ");
 
 /** Serves skills through the MCP Skills extension and the `skills` tool from one catalog. */

@@ -79,7 +79,7 @@ export const mcpRequest = async (
         "skills",
         {
           description:
-            "List Widefleet skills, or read one by name. Read the widefleet skill before building, changing or deploying an app.",
+            "List Widefleet skills, or read one by name. Skills are instructions for working with Widefleet, such as building and deploying apps.",
           inputSchema: { name: z.string().min(1).max(64).optional() },
           annotations: { readOnlyHint: true },
         },

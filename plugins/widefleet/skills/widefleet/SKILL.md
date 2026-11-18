@@ -9,6 +9,9 @@ Apps are built and deployed with the Widefleet CLI in your shell. The Widefleet 
 tools only use apps that are already running; they cannot create or deploy apps.
 If you have a shell, use it. Do not tell the user that deployment is unavailable.
 
+Install the CLI with `pnpm add --global widefleet` (install pnpm first if it is
+missing), then run `widefleet login` and share the printed link with the user.
+
 Read the documentation before acting, and follow it over your memory:
 https://widefleet.com/docs/llms.txt
 
