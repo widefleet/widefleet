@@ -1,7 +1,7 @@
 ---
 title: Connect personal accounts
 description: Let members connect their own accounts to connectors configured by their organization.
-lastModified: 2026-11-17
+lastModified: 2026-11-18
 ---
 
 Open **My connections** to connect your personal GitHub, Gmail or OneDrive account
@@ -23,14 +23,6 @@ Widefleet reads the status from the connector after you return. Closing or
 cancelling authorization does not create a connection. A connector can show
 **Could not check this account** when it cannot be reached; this does not mean your
 account was disconnected. Use **Try again** to check its status.
-
-Members enter this flow when opening the workspace, including after accepting
-an invitation, if accessible connectors are ready to connect and they have not completed
-this step in the current browser. Owners and administrators keep their normal
-workspace entry. Choose **Continue to apps** to skip any remaining accounts.
-This choice is remembered separately for each account and organization in browser
-cookies. Switching between them preserves each choice; another browser can show
-the step again. **My connections** remains available afterward.
 
 Open the **…** account options beside a saved account and choose **Reconnect** to
 repeat authorization, for example to grant missing permissions. You do not need
@@ -54,8 +46,7 @@ and export `UserConnection`. Preview deployments do not appear. Its existing
 No separate template registration is needed.
 
 If provider credentials are unavailable, **My connections** shows **Awaiting
-administrator setup**. These connectors are omitted from onboarding until setup
-is ready. The GitHub, Gmail and OneDrive templates support both operator-provided
+administrator setup**. The GitHub, Gmail and OneDrive templates support both operator-provided
 OAuth credentials, where configured, and the connector's own credentials. This
 feature does not change provider verification or consent requirements.
 

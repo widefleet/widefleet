@@ -1,7 +1,7 @@
 ---
 title: API and uploads
 description: Authentication, app publication and the Worker upload contract.
-lastModified: 2026-11-17
+lastModified: 2026-11-18
 ---
 
 Authenticated clients can fetch `/api/v1/openapi.json`. The document covers management operations, agent jobs, binary assets and multipart Workers.
@@ -94,8 +94,7 @@ is not required; the runtime checks the member's current app access.
 | `POST /api/v1/user-connections/{appId}/connect` | `{ url, expiresAt }` for a short-lived authorization launch.      |
 | `DELETE /api/v1/user-connections/{appId}`       | `{ disconnected: true }`.                                         |
 
-The connect body is `{}` or `{ "onboarding": true }`; `onboarding` preserves the
-onboarding view on return. Caller identity and completion URL are set by the
+The connect body is `{}`. Caller identity and completion URL are set by the
 server and cannot be supplied by clients. Open the returned URL in a browser
 signed in as the same user. The connector consumes it once, before its expiry.
 
