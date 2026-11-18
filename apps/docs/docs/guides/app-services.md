@@ -121,7 +121,7 @@ widefleet connections
 ```
 
 Use `--app CALLER` to select a caller by slug or UUID outside its project. The
-target accepts a service catalog slug or UUID. Bindings default to the `default`
+target accepts an app slug or UUID, including apps that the catalog does not list. Bindings default to the `default`
 entrypoint; the provider must export a default Worker handler or `WorkerEntrypoint` class.
 
 In the UI, open **App APIs** and choose **Set up connection** for the provider.

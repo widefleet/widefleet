@@ -85,13 +85,16 @@ struct Service {
     access_mode: AccessMode,
 }
 
-fn resolve_service<'a>(entries: &'a [Service], target: &str) -> Result<&'a Service> {
-    let by_id = Uuid::parse_str(target)
-        .ok()
-        .and_then(|id| entries.iter().find(|entry| entry.app_id == id));
-    by_id
-        .or_else(|| entries.iter().find(|entry| entry.slug == target))
-        .ok_or_else(|| Error::invalid("Target app has no available service API".into()))
+// Resolve one app through its description, which also covers deployed entrypoints that the
+// catalog omits, such as an undocumented default web handler that callers bind explicitly.
+async fn resolve_service(api: &Api, token: &str, target: &str) -> Result<Service> {
+    let service = app_bindings::segment(target)?;
+    json(
+        api.authenticated(Method::GET, &format!("/app-services/{service}"), token)
+            .send()
+            .await?,
+    )
+    .await
 }
 
 pub async fn catalog(api: &Api, credentials: &auth::Credentials, options: Catalog) -> Result<()> {
@@ -103,13 +106,7 @@ pub async fn catalog(api: &Api, credentials: &auth::Credentials, options: Catalo
                 api.authenticated(Method::GET, &format!("/app-services/{service}"), &token)
             }
             CatalogCommand::Access { app, mode } => {
-                let entries: Vec<Service> = json(
-                    api.authenticated(Method::GET, "/app-services", &token)
-                        .send()
-                        .await?,
-                )
-                .await?;
-                let target = resolve_service(&entries, &app)?;
+                let target = resolve_service(api, &token, &app).await?;
                 api.authenticated(
                     Method::PUT,
                     &format!("/app-services/{}/access", target.app_id),
@@ -149,13 +146,7 @@ pub async fn catalog(api: &Api, credentials: &auth::Credentials, options: Catalo
 
 pub async fn connect(api: &Api, credentials: &auth::Credentials, options: Connect) -> Result<()> {
     let token = auth::access_token(api, credentials).await?;
-    let entries: Vec<Service> = json(
-        api.authenticated(Method::GET, "/app-services", &token)
-            .send()
-            .await?,
-    )
-    .await?;
-    let target = resolve_service(&entries, &options.target)?;
+    let target = resolve_service(api, &token, &options.target).await?;
     if options.request {
         app_bindings::segment(&options.binding)?;
         let app = options.source.resolve(api, credentials).await?;

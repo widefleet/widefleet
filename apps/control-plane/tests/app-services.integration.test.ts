@@ -146,6 +146,25 @@ describe("App service connections", () => {
     });
   });
 
+  it("describes deployed apps that the catalog omits by slug or ID", async () => {
+    const target = await app(["default"], principal, {
+      format: 1,
+      entrypoints: [
+        { name: "default", summary: "", remarks: "", examples: [], http: true, methods: [] },
+      ],
+      types: [],
+    });
+
+    const describe = async (service: string) =>
+      (await services().describe(principal, service)).unwrap().appId;
+
+    const catalog = (await services().services(principal)).unwrap();
+    expect(catalog.some((entry) => entry.appId === target.id)).toBe(false);
+    expect(await describe(target.slug)).toBe(target.id);
+    expect(await describe(target.id)).toBe(target.id);
+    expect(await describe(target.id.toUpperCase())).toBe(target.id);
+  });
+
   it("publishes app APIs and restricts grants to administrators in the owning organization", async () => {
     const source = await app();
     const target = await app(["Reader"]);
