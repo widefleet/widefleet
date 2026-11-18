@@ -14,59 +14,6 @@ const resultSchema = mcpJson.transform((value) => ({
 
 const result = resultSchema.parse.bind(resultSchema);
 
-const loggedMessage = z.object({
-  method: z.string().max(128),
-  params: z
-    .object({ name: z.string().max(128).optional(), uri: z.string().max(512).optional() })
-    .optional(),
-});
-
-/** Logs which MCP methods clients use, without arguments or user identity. */
-const logMessage = async (request: Request, organizationId: string) => {
-  if (request.method !== "POST") return;
-  const message = loggedMessage.safeParse(await request.json().catch(() => null));
-
-  if (!message.success || message.data.method === "tools/call") return;
-  const uri = message.data.params?.uri;
-
-  console.log("MCP request", {
-    organizationId,
-    method: message.data.method,
-    skill: message.data.method === "skills/get" ? message.data.params?.name : undefined,
-    resource: uri?.startsWith("skill://") ? uri : undefined,
-  });
-};
-
-/** Runs one tool call and logs its outcome and result size, without arguments or user identity. */
-const observe = async <T>(
-  organizationId: string,
-  tool: string,
-  run: () => Promise<T>,
-  details: { skill?: string | undefined } = {},
-) => {
-  const started = Date.now();
-
-  const log = (ok: boolean, resultLength?: number) =>
-    console.log("MCP tool call", {
-      organizationId,
-      tool,
-      ...details,
-      ok,
-      resultLength,
-      durationMs: Date.now() - started,
-    });
-
-  try {
-    const output = result(await run());
-    log(true, output.content[0]?.text.length);
-
-    return output;
-  } catch (cause) {
-    log(false);
-    throw cause;
-  }
-};
-
 let skillCatalog: ReturnType<typeof mcpSkillCatalog> | undefined;
 
 // The build embeds the plugin's skill so the plugin and the MCP server serve the same file.
@@ -117,8 +64,6 @@ export const mcpRequest = async (
   }
 
   const principal = claims;
-  const organizationId = principal.mcp.organizationId;
-  await logMessage(request.clone(), organizationId);
   const catalog = skills();
   const extension = await catalog.extension();
 
@@ -137,8 +82,7 @@ export const mcpRequest = async (
           inputSchema: { name: z.string().min(1).max(64).optional() },
           annotations: { readOnlyHint: true },
         },
-        async ({ name }) =>
-          observe(organizationId, "skills", () => catalog.read(name), { skill: name }),
+        async ({ name }) => result(await catalog.read(name)),
       );
       server.registerTool(
         "search",
@@ -151,9 +95,7 @@ export const mcpRequest = async (
           annotations: { readOnlyHint: true },
         },
         async ({ query, cursor }) =>
-          observe(organizationId, "search", () =>
-            searchMcpServices(environment, principal, query, cursor),
-          ),
+          result(await searchMcpServices(environment, principal, query, cursor)),
       );
       server.registerTool(
         "describe",
@@ -165,10 +107,11 @@ export const mcpRequest = async (
           },
           annotations: { readOnlyHint: true },
         },
-        async (input) =>
-          observe(organizationId, "describe", () =>
-            describeMcpService(environment, principal, input.hostname, input.entrypoint),
-          ),
+        async (input) => {
+          return result(
+            await describeMcpService(environment, principal, input.hostname, input.entrypoint),
+          );
+        },
       );
       server.registerTool(
         "call",
@@ -177,11 +120,7 @@ export const mcpRequest = async (
           inputSchema: mcpServiceCall.shape,
         },
         async (service) =>
-          observe(
-            organizationId,
-            "call",
-            async () => (await callMcpService(environment, context, token, service)) ?? null,
-          ),
+          result((await callMcpService(environment, context, token, service)) ?? null),
       );
       server.registerTool(
         "execute",
@@ -191,9 +130,7 @@ export const mcpRequest = async (
           inputSchema: { code: z.string().min(1).max(32768) },
         },
         async ({ code }) =>
-          observe(organizationId, "execute", () =>
-            executeMcpCode(environment, context, token, code, request.signal),
-          ),
+          result(await executeMcpCode(environment, context, token, code, request.signal)),
       );
 
       return server;
