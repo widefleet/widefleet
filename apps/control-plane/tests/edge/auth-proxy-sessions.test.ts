@@ -255,7 +255,7 @@ describe("Auth proxy session lifecycle", () => {
     expect((await visit(configuration, cookie)).status).toBe(401);
   });
 
-  it.each(["invalid_grant", "missing-refresh-token"])(
+  it.each(["invalid_grant", "invalid_request", "invalid_client", "missing-refresh-token"])(
     "requires login after %s",
     async (failure) => {
       if (failure === "missing-refresh-token") {
@@ -371,8 +371,14 @@ describe("Auth proxy session lifecycle", () => {
       expect(idp.graphRequests).toHaveLength(1);
       expireIdentity();
       idp.settings.graphFailure = "throttled";
+      const logged = vi.spyOn(console, "error").mockReturnValue(undefined);
       const limited = await visit();
 
+      expect(logged).toHaveBeenCalledWith(
+        "App session renewal failed",
+        expect.objectContaining({ stage: "identity", type: "APIError" }),
+      );
+      logged.mockRestore();
       expect(limited.status).toBe(503);
       expect(limited.headers.get("retry-after")).toBe("5");
       expect(cookies(limited)).toContain(".account_data=");

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { companyCookie, createAuthentication, cookiePrefix } from "./authentication.ts";
 import { authConfiguration, type AuthConfiguration } from "./configuration.ts";
 import { issuer, proxyIdentity } from "./identity.ts";
-import { authorization } from "./renewal.ts";
+import { authorization, failureSummary } from "./renewal.ts";
 
 interface Apps {
   resolve: (hostname: string) => Promise<z.infer<typeof appAccessSnapshot> | null>;
@@ -188,7 +188,12 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
 
             return finish(unavailable);
           } else user = proxyIdentity.safeParse(await renewed.json());
-        } catch {
+        } catch (cause) {
+          console.error("App session renewal failed", {
+            stage: "proxy",
+            ...failureSummary(cause),
+          });
+
           return finish(response(503, "Company sign-in is temporarily unavailable."));
         }
       }
