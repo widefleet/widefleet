@@ -834,10 +834,28 @@ export default { async fetch(request, env, ctx) {
         })
         .parse(await send("tools/list", {}));
 
-      for (const tool of listed.result.tools) {
+      // send_feedback is the SDK's own tool and takes no analytics arguments.
+      for (const tool of listed.result.tools.filter(({ name }) => name !== "send_feedback")) {
         expect(tool.inputSchema.properties).toHaveProperty("context");
         expect(tool.inputSchema.properties).toHaveProperty("conversation_id");
       }
+
+      expect(listed.result.tools.map((tool) => tool.name)).toContain("send_feedback");
+
+      const feedback = await rpc("send_feedback", {
+        feedback_type: "missing_capability",
+        summary: "No tool to deploy an app.",
+      });
+
+      expect(feedback.isError).not.toBe(true);
+
+      const feedbackEvents = () => analytics.filter((event) => event.event === "$mcp_feedback");
+
+      await expect.poll(() => feedbackEvents().length, { timeout: 8_000 }).toBe(1);
+      expect(feedbackEvents()[0]).toMatchObject({
+        distinct_id: "organization:widefleet",
+        properties: { $groups: { organization: "widefleet" } },
+      });
 
       // Each request has its own server, so the conversation ID links calls into one session.
       const first = await rpc("skills", {});

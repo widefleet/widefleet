@@ -37,6 +37,8 @@ export const mcpAnalytics = (environment: ParentEnvironment, organizationId: str
   return (server: McpServer) => {
     instrument(server, client, {
       context: true,
+      // Lets agents report missing capabilities, confusing tools and other feedback.
+      collectFeedback: true,
       // Failed tool calls are mostly app errors, which are not platform exceptions.
       enableExceptionAutocapture: false,
       serverBuild: WIDEFLEET_RUNTIME_VERSION,
