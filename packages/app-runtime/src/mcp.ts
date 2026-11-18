@@ -65,11 +65,11 @@ export const mcpRequest = async (
   }
 
   const principal = claims;
-  const analytics = mcpAnalytics(environment, principal.mcp.organizationId);
+  const instrumentAnalytics = mcpAnalytics(environment, principal.mcp.organizationId);
   const catalog = skills();
   const extension = await catalog.extension();
 
-  const response = await createMcpHandler(
+  return createMcpHandler(
     () => {
       const server = new McpServer(
         { name: "Widefleet", version: WIDEFLEET_RUNTIME_VERSION },
@@ -136,12 +136,10 @@ export const mcpRequest = async (
           result(await executeMcpCode(environment, context, token, code, request.signal)),
       );
 
-      analytics?.instrument(server);
+      instrumentAnalytics?.(server);
 
       return server;
     },
     { maxRequestBodySize: 1024 * 1024 },
   ).fetch(request);
-
-  return analytics ? analytics.deliver(response) : response;
 };

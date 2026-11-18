@@ -30,39 +30,23 @@ export const mcpAnalytics = (environment: ParentEnvironment, organizationId: str
     flushInterval: 0,
     requestTimeout: 1500,
     fetchRetryCount: 0,
+    // Registers each delivery with the request, so it completes after the response.
+    waitUntil,
   });
 
-  return {
-    instrument(server: McpServer) {
-      instrument(server, client, {
-        context: true,
-        enableConversationId: false,
-        // Failed tool calls are mostly app errors, which are not platform exceptions.
-        enableExceptionAutocapture: false,
-        serverBuild: WIDEFLEET_RUNTIME_VERSION,
-        identify: {
-          distinctId: `organization:${organizationId}`,
-          groups: { organization: organizationId },
-        },
-        eventProperties: () => ({ scope, service: "app-runtime" }),
-        beforeSend: redact,
-      });
-    },
-
-    // Tool calls can finish while a streamed response is still open, so deliver after it ends.
-    deliver(response: Response) {
-      const flush = () => client.shutdown(1500).catch(() => undefined);
-
-      if (!response.body) {
-        waitUntil(flush());
-
-        return response;
-      }
-
-      const { readable, writable } = new TransformStream();
-      waitUntil(response.body.pipeTo(writable).then(flush, flush));
-
-      return new Response(readable, response);
-    },
+  return (server: McpServer) => {
+    instrument(server, client, {
+      context: true,
+      enableConversationId: false,
+      // Failed tool calls are mostly app errors, which are not platform exceptions.
+      enableExceptionAutocapture: false,
+      serverBuild: WIDEFLEET_RUNTIME_VERSION,
+      identify: {
+        distinctId: `organization:${organizationId}`,
+        groups: { organization: organizationId },
+      },
+      eventProperties: () => ({ scope, service: "app-runtime" }),
+      beforeSend: redact,
+    });
   };
 };
