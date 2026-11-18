@@ -211,6 +211,18 @@ native(
   },
 );
 
+native("keeps the TSDoc comment of an HTTP-only default object handler", async () => {
+  const root = await project(`/** Export orders as CSV over HTTP. */
+  export default {
+    fetch(request: Request) { return new Response(request.url); }
+  };`);
+
+  const result = await extractServiceDocumentation(root, await bundle(root), ["default"]);
+  expect(result.documentation.entrypoints).toMatchObject([
+    { name: "default", summary: "Export orders as CSV over HTTP.", http: true, methods: [] },
+  ]);
+});
+
 native("resolves Zod input types without requiring an app documentation dependency", async () => {
   const root = await project(`import {WorkerEntrypoint} from "cloudflare:workers";
     import {z} from "zod";

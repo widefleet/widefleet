@@ -1,7 +1,7 @@
 ---
 title: Connect apps
 description: Expose app APIs, connect callers and keep provider secrets private.
-lastModified: 2026-11-16
+lastModified: 2026-11-18
 ---
 
 An app can expose exported Worker entrypoints to other apps in its organization.
@@ -70,6 +70,11 @@ An app with only named service exports and no static assets has no browser launc
 link and returns `404` for browser requests. Named service entrypoints still support
 RPC and `fetch()`. A default export or configured static assets enables the app URL;
 web apps can expose named service entrypoints alongside their browser UI.
+**App APIs** and `widefleet services` list named entrypoints. They list a default export
+when it has RPC methods or a TSDoc comment. A default export with only an undocumented
+`fetch()` handler serves the app itself and is not listed; `widefleet connect` can still
+bind it explicitly. To publish an HTTP API, describe it in a TSDoc comment on the default
+export or export it as a named `WorkerEntrypoint`.
 No Widefleet-specific properties belong in `wrangler.jsonc`.
 
 ## Document service methods

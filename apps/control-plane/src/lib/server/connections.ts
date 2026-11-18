@@ -6,7 +6,7 @@ import { and, desc, eq, isNull, sql, ne, or } from "drizzle-orm";
 import type { z } from "zod";
 import { managedApp } from "./apps.ts";
 import { bindingState, applyCapabilityChange } from "./capability-changes.ts";
-import { serviceEntrypoints } from "./app-services.ts";
+import { catalogEntrypoints } from "./app-services.ts";
 import { apps, artifacts, deployments, jobs } from "./schema.ts";
 import type { Database } from "./database.ts";
 import type { HostedExecution } from "./deployment-execution.ts";
@@ -76,7 +76,7 @@ export const createConnectionService = (database: Database, execution?: HostedEx
           appId: app.id,
           slug: app.slug,
           displayName: app.displayName,
-          entrypoints: await serviceEntrypoints(transaction, app),
+          entrypoints: await catalogEntrypoints(transaction, app),
           accessMode: app.serviceAccessMode,
         })),
       );
