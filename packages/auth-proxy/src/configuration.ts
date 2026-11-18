@@ -1,4 +1,10 @@
-import { companyProvider, googleGroupsScope, organizationIdentifier } from "@platform/contracts";
+import {
+  companyDomain,
+  companyProvider,
+  googleGroupsScope,
+  maxCompanyDomains,
+  organizationIdentifier,
+} from "@platform/contracts";
 import { base64url } from "jose";
 import { z } from "zod";
 
@@ -21,6 +27,8 @@ export const authConfiguration = z
       ),
     domain: hostname,
     redirectUrl: z.url(),
+    // Company email domains the organization's SSO admits, for MCP organization discovery.
+    emailDomains: z.array(companyDomain).max(maxCompanyDomains).optional(),
   })
   .superRefine((configuration, context) => {
     if (!z.url().safeParse(configuration.redirectUrl).success) return;

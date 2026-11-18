@@ -4,11 +4,11 @@ import { build } from "esbuild";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { authConfiguration } from "./configuration.ts";
-import { mcpOrganizationKey } from "./mcp-login.ts";
+import { mcpDomainKeys, mcpDomainPrefix, mcpOrganizationKey } from "./mcp-login.ts";
 import { createAuthHandler, manageAuthConfiguration } from "./worker.ts";
 import { authConfigurationKey, authControlPath } from "./publication.ts";
 
-it("revokes only the selected organization's sign-in and MCP discovery entry", async () => {
+it("revokes only the selected organization's sign-in and MCP discovery entries", async () => {
   const key = "local-auth-proxy-control-key-never-deploy";
 
   const compiled = await build({
@@ -79,6 +79,7 @@ it("revokes only the selected organization's sign-in and MCP discovery entry", a
         cookieSecret: Buffer.alloc(32, 1).toString("base64url"),
         domain: "apps.example.test",
         redirectUrl: `https://auth.apps.example.test/oauth2/${organizationId}/callback`,
+        emailDomains: [`${organizationId}.example`, "shared.example"],
       });
 
       expect(
@@ -89,7 +90,29 @@ it("revokes only the selected organization's sign-in and MCP discovery entry", a
 
       if (!lookup) throw new Error("Expected a Google organization lookup");
       expect(await storage.get(lookup)).toBe(organizationId);
+
+      for (const key of mcpDomainKeys(configuration))
+        expect(await storage.get(key)).toBe(organizationId);
     }
+
+    // Republishing without a domain removes only that organization's entry for it.
+    const narrowed = authConfiguration.parse({
+      organizationId: "retained",
+      provider: { type: "google", domain: "example.test" },
+      clientId: "synthetic-client",
+      clientSecret: "synthetic-secret",
+      cookieSecret: Buffer.alloc(32, 1).toString("base64url"),
+      domain: "apps.example.test",
+      redirectUrl: "https://auth.apps.example.test/oauth2/retained/callback",
+      emailDomains: ["retained.example"],
+    });
+
+    expect(
+      (await control(authConfigurationKey("retained"), "PUT", JSON.stringify(narrowed))).status,
+    ).toBe(204);
+    expect(await storage.get(`${mcpDomainPrefix("shared.example")}retained`)).toBeNull();
+    expect(await storage.get(`${mcpDomainPrefix("shared.example")}revoked`)).toBe("revoked");
+    expect(await storage.get(`${mcpDomainPrefix("retained.example")}retained`)).toBe("retained");
 
     expect(
       (
@@ -113,6 +136,9 @@ it("revokes only the selected organization's sign-in and MCP discovery entry", a
     expect(await storage.get("mcp/organizations/google/example.test/revoked")).toBeNull();
     expect(await storage.get(authConfigurationKey("retained"))).not.toBeNull();
     expect(await storage.get("mcp/organizations/google/example.test/retained")).toBe("retained");
+    expect(await storage.get(`${mcpDomainPrefix("revoked.example")}revoked`)).toBeNull();
+    expect(await storage.get(`${mcpDomainPrefix("shared.example")}revoked`)).toBeNull();
+    expect(await storage.get(`${mcpDomainPrefix("retained.example")}retained`)).toBe("retained");
     expect(await (await control(configurationKey, "GET")).json()).toMatchObject({
       state: "waiting",
     });

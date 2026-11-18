@@ -1,7 +1,7 @@
 import type { KVNamespace } from "@cloudflare/workers-types";
 import { organizationIdentifier, type appCaller } from "@platform/contracts";
 import type { z } from "zod";
-import { authConfiguration } from "./configuration.ts";
+import { authConfiguration, type AuthConfiguration } from "./configuration.ts";
 import {
   authControlPath,
   authConfigurationKey,
@@ -15,6 +15,7 @@ import {
   encodeMcpLogin,
   decodeMcpLogin,
   mcpLoginConfiguration,
+  mcpDomainKeys,
   mcpLoginKey,
   mcpOrganizationKey,
 } from "./mcp-login.ts";
@@ -29,6 +30,15 @@ const reply = (status: number, message: string) =>
     status,
     headers: { "cache-control": "no-store" },
   });
+
+// KV keys through which the MCP sign-in finds an organization without the control plane.
+const discoveryKeys = (configuration: AuthConfiguration) => [
+  ...new Set(
+    [mcpOrganizationKey(configuration), ...mcpDomainKeys(configuration)].filter(
+      (key) => key !== null,
+    ),
+  ),
+];
 
 export const readAuthConfiguration = async (
   environment: AuthEnvironment,
@@ -103,13 +113,12 @@ const control = async (request: Request, environment: AuthEnvironment) => {
         authConfigurationKey(organizationId),
         await encodeConfiguration(environment.WIDEFLEET_CONTROL_TOKEN, input),
       );
-      const currentKey = mcpOrganizationKey(input);
-      const previousKey = previous ? mcpOrganizationKey(previous.configuration) : null;
+      const current = discoveryKeys(input);
 
-      if (currentKey) await environment.AUTH_CONFIG.put(currentKey, organizationId);
+      for (const key of current) await environment.AUTH_CONFIG.put(key, organizationId);
 
-      if (previousKey && previousKey !== currentKey)
-        await environment.AUTH_CONFIG.delete(previousKey);
+      for (const key of previous ? discoveryKeys(previous.configuration) : [])
+        if (!current.includes(key)) await environment.AUTH_CONFIG.delete(key);
 
       return reply(204, "");
     }
@@ -117,9 +126,9 @@ const control = async (request: Request, environment: AuthEnvironment) => {
     if (request.method === "DELETE") {
       const previous = await readAuthConfiguration(environment, organizationId);
       await environment.AUTH_CONFIG.delete(authConfigurationKey(organizationId));
-      const previousKey = previous ? mcpOrganizationKey(previous.configuration) : null;
 
-      if (previousKey) await environment.AUTH_CONFIG.delete(previousKey);
+      for (const key of previous ? discoveryKeys(previous.configuration) : [])
+        await environment.AUTH_CONFIG.delete(key);
 
       return reply(204, "");
     }
