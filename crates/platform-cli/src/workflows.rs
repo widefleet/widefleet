@@ -78,6 +78,9 @@ enum Command {
         event_type: String,
         #[arg(long)]
         payload: PathBuf,
+        /// Deliver only while this prompt ID from `status` is open.
+        #[arg(long)]
+        prompt: Option<Uuid>,
     },
     /// Read a previously queued management operation.
     Operation {
@@ -180,8 +183,13 @@ pub async fn run(api: &Api, credentials: &auth::Credentials, options: Options) -
             id,
             event_type,
             payload,
+            prompt,
         } => {
-            value!({ "action": "sendEvent", "workflow": workflow, "id": id, "event": { "type": event_type, "payload": read_json(&payload)? } })
+            let mut request = value!({ "action": "sendEvent", "workflow": workflow, "id": id, "event": { "type": event_type, "payload": read_json(&payload)? } });
+            if let Some(prompt) = prompt {
+                request["prompt"] = value!(prompt.to_string());
+            }
+            request
         }
     };
     let query = matches!(request["action"].as_str(), Some("list" | "status"));

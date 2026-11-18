@@ -50,7 +50,12 @@ describe("Workflow event prompts", () => {
     expect(new TextEncoder().encode(JSON.stringify(prompt)).byteLength).toBe(16 * 1024);
     expect(workflowEventPrompt.safeParse(prompt).success).toBe(true);
     expect(
-      workflowPendingPrompt.safeParse({ name: "approval", type: "approval", ...prompt }).success,
+      workflowPendingPrompt.safeParse({
+        id: crypto.randomUUID(),
+        name: "approval",
+        type: "approval",
+        ...prompt,
+      }).success,
     ).toBe(true);
     expect(
       workflowEventPrompt.safeParse({ ...prompt, message: `${prompt.message}x` }).success,
