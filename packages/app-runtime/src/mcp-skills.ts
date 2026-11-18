@@ -1,7 +1,7 @@
 import { memorySkillFiles, SkillsExtension } from "@modelcontextprotocol/server/ext/skills";
 import type { SkillCatalog } from "@modelcontextprotocol/server/ext/skills";
 
-export const mcpDeploySteps =
+const mcpDeploySteps =
   "use the Widefleet CLI in your shell: install it with `pnpm add --global widefleet`, run `widefleet login`, then follow https://widefleet.com/docs/llms.txt";
 
 export const mcpInstructions = [

@@ -6,7 +6,7 @@ import { verifyMcpToken } from "./mcp-authorization.ts";
 import { readMcpConfiguration } from "./mcp-oauth.ts";
 import { callMcpService, describeMcpService, searchMcpServices } from "./mcp-services.ts";
 import { executeMcpCode, mcpJson } from "./mcp-code.ts";
-import { mcpDeploySteps, mcpInstructions, mcpSkillCatalog } from "./mcp-skills.ts";
+import { mcpInstructions, mcpSkillCatalog } from "./mcp-skills.ts";
 
 const resultSchema = mcpJson.transform((value) => ({
   content: [{ type: "text" as const, text: JSON.stringify(value) }],
@@ -78,7 +78,8 @@ export const mcpRequest = async (
       server.registerTool(
         "skills",
         {
-          description: `Read how to build and deploy Widefleet apps. To create, change or deploy an app, ${mcpDeploySteps}. Call with name "widefleet" before you start; call without arguments to list skills.`,
+          description:
+            "List Widefleet skills, or read one by name. Skills are instructions for working with Widefleet, such as building and deploying apps.",
           inputSchema: { name: z.string().min(1).max(64).optional() },
           annotations: { readOnlyHint: true },
         },
