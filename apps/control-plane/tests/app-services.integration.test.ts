@@ -2,6 +2,7 @@ import { jobs } from "../src/lib/server/schema.ts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import * as contract from "@platform/contracts";
+import type { z } from "zod";
 import { createTestEnvironment } from "./environment.ts";
 import { createAppService } from "../src/lib/server/apps.ts";
 import { createConnectionService } from "../src/lib/server/connections.ts";
@@ -43,7 +44,11 @@ describe("App service connections", () => {
   const secrets = () =>
     createAppSecrets(environment.database.db, environment.environment.PLATFORM_ENCRYPTION_KEY);
 
-  const app = async (entrypoints: string[] = [], actor = principal) => {
+  const app = async (
+    entrypoints: string[] = [],
+    actor = principal,
+    documentation?: z.input<typeof contract.serviceDocumentation>,
+  ) => {
     const app = (
       await applications().create(actor, {
         slug: `app-${crypto.randomUUID()}`,
@@ -61,6 +66,7 @@ describe("App service connections", () => {
       web: false,
       entrypoints,
       assets: { upload_session: artifactId, binding: "ASSETS" },
+      service_documentation: documentation,
     });
 
     await environment.database.db.insert(artifacts).values({
@@ -84,6 +90,80 @@ describe("App service connections", () => {
 
     return { ...app, artifactId };
   };
+
+  it("lists default handlers as app APIs only with RPC methods or documentation", async () => {
+    const entry = (name: string, methods: string[], summary = "") => ({
+      name,
+      summary,
+      remarks: "",
+      examples: [],
+      http: true,
+      methods: methods.map((method) => ({
+        name: method,
+        summary: "",
+        remarks: "",
+        examples: [],
+        throws: [],
+        signatures: [{ parameters: [], returns: { type: "Promise<void>", description: "" } }],
+      })),
+    });
+
+    const documented = (...entrypoints: ReturnType<typeof entry>[]) => ({
+      format: 1 as const,
+      entrypoints,
+      types: [],
+    });
+
+    const web = await app(["default"], principal, documented(entry("default", [])));
+
+    const mixed = await app(
+      ["default", "Reader"],
+      principal,
+      documented(entry("default", []), entry("Reader", [])),
+    );
+
+    const rpc = await app(["default"], principal, documented(entry("default", ["status"])));
+
+    const http = await app(
+      ["default"],
+      principal,
+      documented(entry("default", [], "Order export over HTTP.")),
+    );
+
+    const undocumented = await app(["default"]);
+    const catalog = (await services().services(principal)).unwrap();
+    const listed = (id: string) => catalog.find((service) => service.appId === id)?.entrypoints;
+
+    expect(listed(web.id)).toBeUndefined();
+    expect(listed(mixed.id)).toEqual(["Reader"]);
+    expect(listed(rpc.id)).toEqual(["default"]);
+    expect(listed(http.id)).toEqual(["default"]);
+    expect(listed(undocumented.id)).toEqual(["default"]);
+    const source = await app();
+    const grant = { app: web.id, entrypoint: "default" };
+    expect((await services().bind(principal, source.id, "WEB", grant)).unwrap().grants).toEqual({
+      WEB: grant,
+    });
+  });
+
+  it("describes deployed apps that the catalog omits by slug or ID", async () => {
+    const target = await app(["default"], principal, {
+      format: 1,
+      entrypoints: [
+        { name: "default", summary: "", remarks: "", examples: [], http: true, methods: [] },
+      ],
+      types: [],
+    });
+
+    const describe = async (service: string) =>
+      (await services().describe(principal, service)).unwrap().appId;
+
+    const catalog = (await services().services(principal)).unwrap();
+    expect(catalog.some((entry) => entry.appId === target.id)).toBe(false);
+    expect(await describe(target.slug)).toBe(target.id);
+    expect(await describe(target.id)).toBe(target.id);
+    expect(await describe(target.id.toUpperCase())).toBe(target.id);
+  });
 
   it("publishes app APIs and restricts grants to administrators in the owning organization", async () => {
     const source = await app();
