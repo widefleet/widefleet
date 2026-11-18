@@ -93,6 +93,7 @@ export const createRuntime = ({
     encryptionKey,
     publicSignup,
     reportException,
+    cliLoginSettings: settings,
   };
 
   if (observation) authOptions.observation = observation;

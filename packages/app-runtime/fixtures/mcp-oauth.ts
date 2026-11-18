@@ -69,15 +69,16 @@ export const mcpFixture = async (
     code_challenge_method: "S256",
   });
 
-  if (path === "/mcp-sign-in") {
-    await environment.AUTH_CONFIG.put(
-      mcpLoginKey,
-      await encodeMcpLogin(environment.WIDEFLEET_CONTROL_TOKEN, {
-        origin: issuer,
-        platformUrl: "https://platform.example.test",
-      }),
-    );
+  // Every organization publication includes this registration, so issued tokens imply it.
+  await environment.AUTH_CONFIG.put(
+    mcpLoginKey,
+    await encodeMcpLogin(environment.WIDEFLEET_CONTROL_TOKEN, {
+      origin: issuer,
+      platformUrl: "https://platform.example.test",
+    }),
+  );
 
+  if (path === "/mcp-sign-in") {
     return mcpLoginRequest(
       new Request(`${issuer}/authorize?${parameters.toString()}`),
       environment,

@@ -1,6 +1,8 @@
 import { authConfiguration } from "@platform/auth-proxy";
 import { authConfigurationKey, configurationRevision } from "@platform/auth-proxy/publication";
 import { mcpLoginConfiguration } from "@platform/auth-proxy/mcp-login";
+import { mcpCliLogin } from "@platform/auth-proxy/mcp-cli-login";
+import { z } from "zod";
 import { activationStatus } from "@platform/contracts";
 import type { AppSignIn } from "./app-sign-in.ts";
 import { appCallbackUrl } from "./app-sign-in.ts";
@@ -12,7 +14,7 @@ export const createInstalledAppSignIn = (
   cookieSecret: string | undefined,
   request: (
     path: string,
-    method: "GET" | "PUT" | "DELETE",
+    method: "GET" | "PUT" | "POST" | "DELETE",
     body?: string,
   ) => Promise<{ text(): Promise<string> }>,
   propagation: "immediate" | "eventual",
@@ -96,5 +98,13 @@ export const createInstalledAppSignIn = (
           (propagation === "eventual" ? "KV propagation can take 60 seconds or longer. " : "") +
           "Changing the identity provider or app client requires signing in again.",
       }),
+    verifyCliLogin: async (code) =>
+      z
+        .object({ login: mcpCliLogin.nullable() })
+        .parse(
+          JSON.parse(
+            await (await request("/mcp/cli-login", "POST", JSON.stringify({ code }))).text(),
+          ),
+        ).login,
   };
 };

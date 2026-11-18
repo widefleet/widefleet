@@ -19,6 +19,7 @@ import {
   mcpLoginKey,
   mcpOrganizationKey,
 } from "./mcp-login.ts";
+import { verifyMcpCliLogin } from "./mcp-cli-login.ts";
 
 export interface AuthEnvironment {
   AUTH_CONFIG: KVNamespace;
@@ -92,6 +93,15 @@ const control = async (request: Request, environment: AuthEnvironment) => {
     );
 
     return reply(204, "");
+  }
+
+  if (path === "/mcp/cli-login" && request.method === "POST") {
+    const { code } = z.object({ code: z.string() }).parse(await request.json());
+
+    return Response.json(
+      { login: await verifyMcpCliLogin(environment.WIDEFLEET_CONTROL_TOKEN, code) },
+      { headers: { "cache-control": "no-store" } },
+    );
   }
 
   const match = /^\/organizations\/([A-Za-z0-9_-]+)\/configuration$/.exec(path);

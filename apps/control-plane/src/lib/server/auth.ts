@@ -29,6 +29,7 @@ import type { OrganizationAccess } from "./application-context.ts";
 import { companySsoOrigins, companySsoPlugin } from "./company-sso.ts";
 import { pluginAuthentication, managedPluginPaths } from "./plugin-authentication.ts";
 import { cliLoginPlugin, createCliLogin } from "./cli-login.ts";
+import { createMcpCliLogin, mcpCliLoginPlugin, type CliLoginSettings } from "./mcp-cli-login.ts";
 
 export const companyLoginRevision = (
   connection: Awaited<ReturnType<typeof readSsoConfiguration>>,
@@ -55,6 +56,7 @@ export const createAuthentication = (
     reportException?: (error: Error) => void;
     encryptionKey?: string;
     cookies?: ReturnType<typeof sveltekitCookies>;
+    cliLoginSettings?: CliLoginSettings;
   } = {},
 ) => {
   const admission = createAuthenticationAdmission(
@@ -140,6 +142,18 @@ export const createAuthentication = (
       ...(options.authentication?.plugins ?? []),
       ...settings.plugins,
       cliLoginPlugin(createCliLogin(database, configuration)),
+      ...(options.cliLoginSettings
+        ? [
+            mcpCliLoginPlugin(
+              createMcpCliLogin(
+                database,
+                configuration,
+                options.cliLoginSettings,
+                options.organizationAccess,
+              ),
+            ),
+          ]
+        : []),
       companySsoPlugin(database, encryptionKey, options.organizationAccess, configuration),
       {
         id: "management-credentials",
