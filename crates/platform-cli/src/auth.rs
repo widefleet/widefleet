@@ -182,7 +182,7 @@ async fn read_session(origin: String, credentials: &Credentials) -> Result<Sessi
         let entry = credential_entry(&origin).map_err(|error| {
             if cfg!(unix) {
                 Error::credentials(format!(
-                    "No session is stored for {origin}. Run widefleet login first. If this environment discards files outside the working directory between commands, set PLATFORM_SESSION_FILE to a file there, outside the app project, before logging in"
+                    "No session is stored for {origin}. Run widefleet login first. If this environment discards files outside the working directory between commands, set PLATFORM_SESSION_FILE to a file there, outside the app project, before logging in. For noninteractive use, set PLATFORM_ACCESS_TOKEN"
                 ))
             } else {
                 error
