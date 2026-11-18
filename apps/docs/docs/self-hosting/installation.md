@@ -206,11 +206,11 @@ The reference installation is designed for trusted company app creators. Its ins
 
 ## Versions and updates
 
-Use matching control-plane, agent, CLI and app-runtime releases. Widefleet 0.7.6 includes [MCP service access](/guides/mcp) and uses [celld 0.6.3-widefleet.1](https://github.com/widefleet/celld/releases/tag/v0.6.3-widefleet.1), the Widefleet fork with AES-KW support. When upgrading, use the matching agent and runtime images: the agent checks both its publisher binary and the running runtime container against this version.
-
-Existing app-runtime packages targeting celld 0.6.2 remain readable and can run on the pinned fork. Replacing the agent and container does not automatically change the selected app-runtime package. Keep the matching source checkout and image manifest with every backup; restoring older images alone does not reverse database or storage changes.
+Use matching 0.7.6 control-plane, agent, CLI and app runtime releases. The native runtime is celld 0.6.3-widefleet.1. Keep the matching source checkout and image manifest with every backup; restoring older images alone does not reverse database or storage changes.
 
 Check the selected and active versions with `widefleet runtime status`. Use the [runtime commands](/reference/runtime#versions-and-updates) to update or roll back with an administrator login. Updating container images and activating a runtime remain separate actions.
+
+Widefleet 0.7.6 serves [MCP](/guides/mcp) at `mcp.APP_DOMAIN` through the existing app wildcard DNS and certificate. The app name `mcp` is reserved; move an existing app with that name before upgrading. To offer Google and Microsoft in the MCP connection page, add the [MCP redirect addresses](/reference/social-sign-in#configure-an-installation).
 
 ## Management members and app collaboration
 

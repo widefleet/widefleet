@@ -4,8 +4,7 @@ description: Supported runtime integrations and verified differences from Cloudf
 lastModified: 2026-11-18
 ---
 
-Widefleet uses **celld 0.6.3-widefleet.1**, based on upstream 0.6.3 with AES-KW
-support for MCP OAuth. The packaged binary is pinned by version and checksum.
+Widefleet uses **celld 0.6.3-widefleet.1**, a Widefleet build of celld 0.6.3.
 See the [native release notes](https://github.com/widefleet/celld/releases/tag/v0.6.3-widefleet.1)
 and [platform version requirements](/self-hosting/installation#versions-and-updates).
 
