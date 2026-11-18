@@ -16,6 +16,7 @@ import { apps, artifacts, cloudflareOperations } from "./schema.ts";
 import { finishAppRemoval } from "./app-removal.ts";
 import { InvalidOperation } from "./errors.ts";
 import { removeAuthRoute } from "./cloudflare-auth-proxy.ts";
+import { refreshCloudflareServiceIndex } from "./cloudflare-service-index.ts";
 
 export const createCloudflareRemover = (
   bindings: CloudflareBindings,
@@ -235,6 +236,14 @@ export const executeCloudflareRemoval = async (
       );
 
       if (!present) continue;
+      // A failed refresh must not stop the removal; the index's periodic rebuild repairs it.
+      await step
+        .do(`index-${target.id}`, options, () =>
+          retryable(() => refreshCloudflareServiceIndex(bindings, target.id)),
+        )
+        .catch((cause: unknown) =>
+          console.error("The service search index could not be refreshed", cause),
+        );
       await step.do(`remove-events-${target.id}`, options, () =>
         retryable(() => runner.events(target)),
       );

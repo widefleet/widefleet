@@ -980,6 +980,12 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           const route = await env.AUTH_CONFIG.get('apps/' + url.searchParams.get('hostname'), 'json');
           return Response.json(obj ? { body: await obj.json(), access: route ? JSON.stringify(route.access) : null } : null);
         }
+        if (url.hostname === 'fixture' && url.pathname === '/service-index') {
+          const key = 'service-index/' + url.searchParams.get('organization') + '.json';
+          if (request.method === 'PUT') { await env.ARTIFACTS.put(key, await request.text()); return Response.json(true); }
+          const obj = await env.ARTIFACTS.get(key);
+          return Response.json(obj ? await obj.json() : null);
+        }
         if (url.hostname === 'fixture' && url.pathname === '/workflow') {
           const instance = await (url.searchParams.has('app-operation') ? env.APP_OPERATIONS : env.DEPLOYMENTS).get(url.searchParams.get('id'));
           if (request.method === 'POST') {
@@ -2784,6 +2790,48 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         (await environment.database.db.select().from(apps).where(eq(apps.id, appId)))[0]?.removedAt,
       ).toBeInstanceOf(Date);
     };
+
+    it("refreshes an existing MCP service index after activation and removal", async () => {
+      const target = await seedDeployment(environment.database.db, {
+        bindings: [],
+        web: false,
+        entrypoints: ["Reader"],
+        source:
+          "import {WorkerEntrypoint} from 'cloudflare:workers'; export class Reader extends WorkerEntrypoint {read(){return 'indexed';}}",
+      });
+
+      const [app] = await environment.database.db
+        .select({ organizationId: apps.organizationId })
+        .from(apps)
+        .where(eq(apps.id, target.appId));
+
+      const organization = z.string().parse(app?.organizationId);
+
+      const index = async () => {
+        const response = await worker.fetch(
+          `http://fixture/service-index?organization=${organization}`,
+        );
+
+        return z
+          .object({ services: z.record(z.string(), z.object({ appId: z.string() })) })
+          .parse(await response.json()).services;
+      };
+
+      // Search creates the index; publishers only refresh an existing one.
+      await worker.fetch(`http://fixture/service-index?organization=${organization}`, {
+        method: "PUT",
+        body: JSON.stringify({ format: 1, builtAt: Date.now(), services: {} }),
+      });
+      await seed(target);
+      await dispatch(target);
+      await completed(target.command.id);
+      expect(await index()).toEqual({ [target.hostname]: { appId: target.appId } });
+
+      const response = await remove(target.appId);
+      expect(response.status, await response.text()).toBe(200);
+      await removed(target.appId);
+      expect(await index()).toEqual({});
+    }, 60_000);
 
     it("deletes source through the configured extension, retaining preview source and retrying outages", async () => {
       const parent = await seedDeployment(environment.database.db, { bindings: [] });

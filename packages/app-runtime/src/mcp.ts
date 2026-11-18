@@ -91,15 +91,26 @@ export const mcpRequest = async (
       server.registerTool(
         "search",
         {
-          description: "Find permitted app services. Follow cursors for more results.",
+          description:
+            "Find permitted app services by words in their hostnames, entrypoints and documentation. Returns the best matches first. Pass an exact hostname to list its entrypoints, or omit query to list every service. To read the following page, call search again with the returned next object as the whole input; next is null on the last page. complete is false while the service list is still being built after an upgrade; search again for the remaining services.",
           inputSchema: {
-            query: z.string().max(200).default(""),
-            cursor: z.string().max(2048).optional(),
+            query: z
+              .string()
+              .max(200)
+              .default("")
+              .describe("Words matched against hostnames, entrypoints and documentation."),
+            limit: z
+              .number()
+              .int()
+              .min(1)
+              .max(50)
+              .default(10)
+              .describe("Most services to return, 10 by default."),
+            offset: z.number().int().min(0).default(0),
           },
           annotations: { readOnlyHint: true },
         },
-        async ({ query, cursor }) =>
-          result(await searchMcpServices(environment, principal, query, cursor)),
+        async (input) => result(await searchMcpServices(environment, principal, input)),
       );
       server.registerTool(
         "describe",

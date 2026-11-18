@@ -53,3 +53,9 @@ Previews have independent app resources within the same organization. Long-runni
 Backend network enforcement lives in the trusted loader outside app code, while browser restrictions depend on response CSP. See [backend egress](../packages/app-runtime/src/egress.ts), [browser policy](../packages/app-runtime/src/csp.ts) and the public [network guide](https://widefleet.com/docs/guides/network).
 
 The JavaScript runtime and agent share the product version. Runtime activation can happen independently, but the package protocol and celld version must match the agent's supported contract. Contract changes require a matching agent release. Before upgrading celld, review the [native runtime pitfalls](runtime-implementation.md).
+
+## MCP search reads a derived index
+
+MCP `search` reads one [service index](../packages/app-runtime/src/service-index.ts) per organization instead of every route, publication and documentation object. Route keys are shared across organizations, so without the index each search would grow with the whole installation.
+
+The index is derived state, never authorization. Every publisher must ask the runtime to refresh a host after its route and publication are committed, including after removal: the [Cloudflare deployment](../apps/control-plane/src/lib/server/cloudflare-deployment.ts), [Cloudflare removal](../apps/control-plane/src/lib/server/cloudflare-removal.ts) and the [agent](../crates/platform-agent/src/main.rs) do. A new write path that changes routes, access or service documentation needs the same refresh. Search rechecks the returned routes, and `describe` and `call` authorize independently, so a missed refresh can only hide a new service or keep stale text until the index is rebuilt.

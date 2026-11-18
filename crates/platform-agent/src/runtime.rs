@@ -110,6 +110,7 @@ mod tests {
             celld: "0.6.3-widefleet.1".into(),
             workflows: None,
             cloudflare: None,
+            search: None,
             main: "loader.js".into(),
             modules: vec![],
         };
