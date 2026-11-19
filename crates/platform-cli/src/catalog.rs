@@ -41,7 +41,7 @@ enum TemplateCommand {
     /// Build and deploy a template as an app, then print the app and deployment as JSON.
     Install {
         template: String,
-        /// The app to create or update; the template ID by default.
+        /// The new app's name; the template ID by default. An existing app is never replaced.
         #[arg(long)]
         name: Option<String>,
     },

@@ -91,7 +91,7 @@ export const deployment = z.strictObject({
 });
 
 export const templateInstallInput = templatePath.extend({
-  /** The app to create or update; the template ID by default. */
+  /** The new app's name; the template ID by default. */
   name: appSlug.optional(),
 });
 

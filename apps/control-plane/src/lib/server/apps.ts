@@ -512,6 +512,23 @@ export const createAppService = (
         ),
       });
     }),
+  /** Whether an app of the organization, visible to the caller or not, has this name. */
+  nameInUse: (principal: Principal, slug: string) =>
+    transact(database, async (transaction) => {
+      const [existing] = await transaction
+        .select({ id: apps.id })
+        .from(apps)
+        .where(
+          and(
+            isNull(apps.removedAt),
+            eq(apps.organizationId, principal.application.organizationId),
+            eq(apps.slug, slug),
+          ),
+        )
+        .limit(1);
+
+      return Result.ok(existing !== undefined);
+    }),
   create: (principal: Principal, input: z.infer<typeof contract.createAppInput>) =>
     provisionApp(database, configuration, principal, input, "create", observation),
   resolve: (principal: Principal, slug: string) =>

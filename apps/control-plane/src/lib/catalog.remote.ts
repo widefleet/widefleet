@@ -1,10 +1,17 @@
 import MarkdownIt from "markdown-it";
 import { templateCatalog, readTemplate } from "#server/app-templates";
 import { form, getRequestEvent, query } from "$app/server";
-import { redirect } from "@sveltejs/kit";
-import { appPath, organizationSelection, templatePath, templateSearch } from "@platform/contracts";
+import { invalid, redirect } from "@sveltejs/kit";
+import {
+  appPath,
+  organizationSelection,
+  templateInstallInput,
+  templatePath,
+  templateSearch,
+} from "@platform/contracts";
 import { z } from "zod";
 import { getAppDetails } from "#lib/apps.remote";
+import { InvalidOperation } from "#server/errors";
 import { formValue, queryValue, remoteContext } from "#server/remote-support";
 
 export const getCatalog = query(async () => {
@@ -39,10 +46,20 @@ export const getTemplates = query(templateSearch, async ({ search }) => {
 });
 
 export const installTemplate = form(
-  templatePath.extend(organizationSelection.shape),
-  async ({ organizationId, templateId }) => {
+  templateInstallInput.extend(organizationSelection.shape),
+  async ({ organizationId, templateId, name }, issue) => {
     const { runtime, principal } = await remoteContext({ organizationId });
-    const result = formValue(await runtime.templates.install(principal, { templateId }));
+    const installed = await runtime.templates.install(principal, { templateId, name });
+
+    // A taken name is an issue of the name field, which the page then shows.
+    if (
+      installed.isErr() &&
+      installed.error instanceof InvalidOperation &&
+      installed.error.code === "CONFLICT"
+    )
+      invalid(issue.name(installed.error.message));
+
+    const result = formValue(installed);
 
     // The deployment page shows the build's progress through activation.
     redirect(303, `/apps/${result.app.id}/deployments`);

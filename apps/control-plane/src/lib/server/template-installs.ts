@@ -1,9 +1,10 @@
 // One-click template installs: the builder builds a template's sources at the
 // current commit, and the result is published through the same upload path as
-// `widefleet deploy`, under the caller's authorization.
+// `widefleet deploy`, under the caller's authorization. An install creates a
+// new app; it never replaces an existing app of the same name.
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
-import type { z } from "zod";
+import { z } from "zod";
 import type { AppBuilder } from "./app-builder.ts";
 import { templateSources } from "./app-templates.ts";
 import type { createAppService } from "./apps.ts";
@@ -16,7 +17,7 @@ const encoder = new TextEncoder();
 
 export const createTemplateInstalls = (
   configuration: Pick<Configuration, "GITHUB_TOKEN">,
-  apps: Pick<ReturnType<typeof createAppService>, "resolve">,
+  apps: Pick<ReturnType<typeof createAppService>, "nameInUse" | "create">,
   uploads: Pick<ReturnType<typeof createUploadService>, "start" | "publish">,
   builder?: AppBuilder,
 ) => ({
@@ -29,9 +30,35 @@ export const createTemplateInstalls = (
           message: "This installation does not build templates; set one up with the Widefleet CLI",
         });
 
+      const appInput = contract.createAppInput.safeParse({
+        slug: input.name ?? input.templateId,
+        displayName: input.name ?? input.templateId,
+      });
+
+      if (!appInput.success)
+        return yield* new InvalidOperation({
+          code: "BAD_REQUEST",
+          message: z.prettifyError(appInput.error),
+        });
+
+      const name = appInput.data.slug;
+
+      const nameTaken = () =>
+        new InvalidOperation({
+          code: "CONFLICT",
+          message: `An app named ${name} already exists. Install the template under another name.`,
+        });
+
+      // Permission and name checks come before any build work.
+      if (!principal.creator)
+        return yield* new InvalidOperation({
+          code: "FORBIDDEN",
+          message: "App creator permission is required",
+        });
+
+      if (yield* Result.await(apps.nameInUse(principal, name))) return yield* nameTaken();
+
       const { files } = yield* Result.await(templateSources(configuration, input.templateId));
-      // Resolving first applies app permissions before any build work.
-      const app = yield* Result.await(apps.resolve(principal, input.name ?? input.templateId));
       const built = yield* Result.await(builder.bundle(files));
 
       const documented = yield* Result.await(
@@ -44,7 +71,19 @@ export const createTemplateInstalls = (
         }),
       );
 
-      const session = yield* Result.await(uploads.start(principal, app.id, {}));
+      // The app exists only once its build succeeded, so a failed build leaves
+      // the name free for another attempt.
+      const created = await apps.create(principal, appInput.data);
+
+      if (
+        created.isErr() &&
+        created.error instanceof InvalidOperation &&
+        created.error.code === "CONFLICT"
+      )
+        return yield* nameTaken();
+
+      const installed = yield* created;
+      const session = yield* Result.await(uploads.start(principal, installed.id, {}));
       const mapName = built.metadata.debug?.source_maps["worker.js"];
 
       const metadata = contract.workerMetadata.parse({
@@ -61,12 +100,12 @@ export const createTemplateInstalls = (
       ];
 
       const deployment = yield* Result.await(
-        uploads.publish(principal, app.id, metadata, modules, crypto.randomUUID()),
+        uploads.publish(principal, installed.id, metadata, modules, crypto.randomUUID()),
       );
 
       return Result.ok(
         contract.templateInstall.parse({
-          app,
+          app: installed,
           deployment,
           warnings: [...built.warnings, ...documented.warnings],
         }),

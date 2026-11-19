@@ -212,12 +212,20 @@ it("builds a template's sources and deploys them as the CLI would", async () => 
     ]),
   );
 
-  // Installing again publishes a new deployment of the same app.
-  const again = contract.templateInstall.parse(
-    await (await install(runtime, "gmail", { name: "mail-reader" })).json(),
+  // An install never replaces an app: a taken name ends it before the build.
+  const requests = builderRequests.length;
+  const taken = await install(runtime, "gmail", { name: "mail-reader" });
+
+  expect(taken.status).toBe(409);
+  expect(await taken.text()).toContain("An app named mail-reader already exists");
+  expect(builderRequests).toHaveLength(requests);
+
+  const renamed = contract.templateInstall.parse(
+    await (await install(runtime, "gmail", { name: "mail-reader-2" })).json(),
   );
 
-  expect(again.app.id).toBe(result.app.id);
+  expect(renamed.app.id).not.toBe(result.app.id);
+  expect(renamed.app.slug).toBe("mail-reader-2");
 });
 
 it("reports build errors and missing templates", async () => {
@@ -239,6 +247,18 @@ it("reports build errors and missing templates", async () => {
   const missing = await install(runtime, "missing");
 
   expect(missing.status).toBe(404);
+  expect(builderRequests).toHaveLength(2);
+
+  // Failed builds create no app, so the name stays free.
+  const apps = await environment.database.db.query.apps.findMany({
+    where: (apps, { eq }) => eq(apps.slug, "repository-reader"),
+  });
+
+  expect(apps).toEqual([]);
+
+  const reserved = await install(runtime, "github", { name: "auth" });
+
+  expect(reserved.status).toBe(400);
   expect(builderRequests).toHaveLength(2);
 });
 

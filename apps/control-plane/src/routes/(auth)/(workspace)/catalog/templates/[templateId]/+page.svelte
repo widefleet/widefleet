@@ -1,6 +1,7 @@
 <script lang="ts">
   import { getTemplate, installTemplate } from "#lib/catalog.remote";
   import { Button } from "@platform/ui/button";
+  import { Input } from "@platform/ui/input";
   import FormIssues from "#shadcn/FormIssues.svelte";
   import OrganizationField from "#shadcn/OrganizationField.svelte";
   import { page } from "$app/state";
@@ -10,6 +11,11 @@
   import ArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
 
   const template = $derived(await getTemplate({ templateId: page.params.templateId ?? "" }));
+
+  // An app with the template's name exists: ask for another name.
+  const naming = $derived(
+    Boolean(installTemplate.fields.name.issues()?.length || installTemplate.fields.name.value()),
+  );
 </script>
 
 <svelte:head><title>{template.name} template · Widefleet</title></svelte:head>
@@ -25,10 +31,25 @@
       <p class="text-muted-foreground mt-2 text-sm leading-6">{template.description}</p>
     </div>
     {#if template.installable}
-      <form {...installTemplate} class="w-full sm:w-auto">
+      <form {...installTemplate} class="flex w-full gap-2 sm:w-auto">
         <OrganizationField field={installTemplate.fields.organizationId} />
         <input {...installTemplate.fields.templateId.as("hidden", template.id)} />
-        <Button type="submit" class="w-full sm:w-auto" disabled={installTemplate.pending > 0}
+        {#if naming}
+          <Input
+            {...installTemplate.fields.name.as("text")}
+            aria-label="App name"
+            placeholder={`${template.id}-2`}
+            required
+            maxlength={48}
+            pattern="[a-z]([a-z0-9-]*[a-z0-9])?"
+            class="min-w-0 flex-1 sm:w-48"
+            disabled={installTemplate.pending > 0}
+          />
+        {/if}
+        <Button
+          type="submit"
+          class={naming ? "" : "w-full sm:w-auto"}
+          disabled={installTemplate.pending > 0}
           >{installTemplate.pending ? "Installing …" : "Install"}</Button
         >
       </form>
