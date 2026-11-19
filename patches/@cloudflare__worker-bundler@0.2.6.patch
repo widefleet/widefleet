@@ -126,10 +126,10 @@ index 53dd55f..eab70db 100644
  /**
   * Install npm dependencies into a virtual file system.
 diff --git a/dist/installer-Dzd--DQ7.js b/dist/installer-Dzd--DQ7.js
-index b670cba..78132f5 100644
+index b670cba..447ac56 100644
 --- a/dist/installer-Dzd--DQ7.js
 +++ b/dist/installer-Dzd--DQ7.js
-@@ -46,6 +46,30 @@ function isTextFile(path) {
+@@ -46,6 +46,33 @@ function isTextFile(path) {
  	return textExtensions.some((ext) => path.toLowerCase().endsWith(ext));
  }
  /**
@@ -140,7 +140,10 @@ index b670cba..78132f5 100644
 +	const lower = path.toLowerCase();
 +	const fileName = (path.split("/").pop() ?? "").toUpperCase();
 +	if ([".map", ".d.ts", ".d.mts", ".d.cts", ".md"].some((ext) => lower.endsWith(ext))) return false;
-+	if (["LICENSE", "README", "CHANGELOG"].some((name) => fileName.startsWith(name))) return false;
++	// Documentation without a code extension, such as LICENSE or README.txt;
++	// code such as license.js stays.
++	const documentation = ["LICENSE", "LICENCE", "README", "CHANGELOG"].some((name) => fileName === name || fileName.startsWith(`${name}.`) || fileName.startsWith(`${name}-`));
++	if (documentation && (!fileName.includes(".") || [".txt", ".markdown", ".rst"].some((ext) => lower.endsWith(ext)))) return false;
 +	return isTextFile(path);
 +}
 +/**
@@ -160,7 +163,7 @@ index b670cba..78132f5 100644
  * Fetch with a timeout.
  * Throws an error if the request takes longer than the specified timeout.
  */
-@@ -382,7 +406,9 @@ const NPM_REGISTRY = "https://registry.npmjs.org";
+@@ -382,7 +409,9 @@ const NPM_REGISTRY = "https://registry.npmjs.org";
  * @returns Metadata about the installation
  */
  async function installDependencies(fileSystem, options = {}) {
@@ -171,7 +174,7 @@ index b670cba..78132f5 100644
  	const result = {
  		installed: [],
  		warnings: []
-@@ -408,14 +434,14 @@ async function installDependencies(fileSystem, options = {}) {
+@@ -408,14 +437,14 @@ async function installDependencies(fileSystem, options = {}) {
  		if (Object.keys(depsToInstall).length === 0) return result;
  		const installedPackages = /* @__PURE__ */ new Set();
  		const inProgress = /* @__PURE__ */ new Map();
@@ -188,7 +191,7 @@ index b670cba..78132f5 100644
  	if (installedPackages.has(name)) return;
  	if (fileSystem.read(`node_modules/${name}/package.json`) !== null) {
  		installedPackages.add(name);
-@@ -438,10 +464,10 @@ async function installPackage(name, versionRange, result, fileSystem, installedP
+@@ -438,10 +467,10 @@ async function installPackage(name, versionRange, result, fileSystem, installedP
  			}
  			installedPackages.add(name);
  			result.installed.push(`${name}@${version}`);
@@ -201,7 +204,7 @@ index b670cba..78132f5 100644
  		} catch (error) {
  			const message = error instanceof Error ? error.message : String(error);
  			result.warnings.push(`Failed to install ${name}: ${message}`);
-@@ -455,6 +481,23 @@ async function installPackage(name, versionRange, result, fileSystem, installedP
+@@ -455,6 +484,23 @@ async function installPackage(name, versionRange, result, fileSystem, installedP
  	}
  }
  /**
@@ -225,7 +228,7 @@ index b670cba..78132f5 100644
  * Fetch package metadata from npm registry.
  */
  async function fetchPackageMetadata(name, registry) {
-@@ -479,13 +522,92 @@ function resolveVersion(range, metadata) {
+@@ -479,13 +525,93 @@ function resolveVersion(range, metadata) {
  /**
  * Fetch and extract package files from npm tarball.
  */
@@ -299,7 +302,8 @@ index b670cba..78132f5 100644
 +			const padded = Math.ceil(size / 512) * 512;
 +			const isRegularFile = typeFlag === 48 || typeFlag === 0;
 +			if (isRegularFile && filePath !== "") regularFilePaths.push(filePath);
-+			if (isRegularFile && size > 0 && keep(filePath)) {
++			// Empty files are valid modules, such as no-op browser replacements.
++			if (isRegularFile && filePath !== "" && keep(filePath)) {
 +				if (!await fill(size)) throw new Error("Truncated tarball");
 +				const content = take(size, true);
 +				try {

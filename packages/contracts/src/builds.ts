@@ -60,6 +60,10 @@ export const documentRequest = z.strictObject({
   entrypoints: z.array(bindingName).max(32),
 });
 
-export const documentResult = z.strictObject({ documentation: serviceDocumentation });
+export const documentResult = z.strictObject({
+  documentation: serviceDocumentation,
+  /** Declarations that could not be installed, which leaves their types unknown. */
+  warnings: z.array(z.string()),
+});
 
 export const buildFailure = z.strictObject({ message: z.string() });

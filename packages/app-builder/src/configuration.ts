@@ -77,12 +77,14 @@ const stripJsonc = (text: string) => {
       const end = text.indexOf("*/", index + 2);
       index = end === -1 ? text.length : end + 2;
     } else {
+      // A comma before a closing bracket, outside strings, is a trailing comma.
+      if (character === "}" || character === "]") output = output.replace(/,(\s*)$/, "$1");
       output += character;
       index++;
     }
   }
 
-  return output.replaceAll(/,(\s*[}\]])/g, "$1");
+  return output;
 };
 
 export const readConfiguration = (files: Readonly<Record<string, string>>) => {

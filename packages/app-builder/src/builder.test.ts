@@ -89,6 +89,22 @@ const packages = {
     "default.js": 'export const runtime = "default build";\n',
     "index.d.ts": "export declare const runtime: string;\n",
   },
+  // A no-op module, as browser replacements often are.
+  "empty-module": {
+    "package.json": JSON.stringify({ name: "empty-module", version: "1.0.0", main: "empty.js" }),
+    "empty.js": "",
+  },
+  // Code named like documentation stays installed.
+  licensed: {
+    "package.json": JSON.stringify({ name: "licensed", version: "1.0.0", main: "license.js" }),
+    "license.js": 'export const license = "MIT";\n',
+    LICENSE: "MIT License\n",
+  },
+  // Types only, used by a public method and erased from the bundle.
+  "shape-types": {
+    "package.json": JSON.stringify({ name: "shape-types", version: "2.0.0", types: "index.d.ts" }),
+    "index.d.ts": "/** A shape to measure. */\nexport interface Shape {\n  size: number;\n}\n",
+  },
 };
 
 const packageFiles = new Map<string, Readonly<Record<string, string>>>(Object.entries(packages));
@@ -134,7 +150,7 @@ const project = {
   "main": "src/app.ts",
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat"],
-  "vars": { "GREETING": "hi" },
+  "vars": { "GREETING": "hi", "PATTERN": "[,}]" },
   "d1_databases": [{ "binding": "DB", "database_name": "accounts" }],
   "triggers": { "crons": ["0 * * * *"] },
 }
@@ -142,7 +158,13 @@ const project = {
   "package.json": JSON.stringify({
     name: "fixture",
     private: true,
-    dependencies: { greeting: "1.0.0", "runtime-variant": "^1.0.0" },
+    dependencies: {
+      greeting: "1.0.0",
+      "runtime-variant": "^1.0.0",
+      "empty-module": "1.0.0",
+      licensed: "1.0.0",
+    },
+    devDependencies: { "shape-types": "2.0.0" },
   }),
   "tsconfig.json": JSON.stringify({
     compilerOptions: {
@@ -153,8 +175,11 @@ const project = {
     },
     include: ["src"],
   }),
-  "src/app.ts": `import { greet } from "greeting";
+  "src/app.ts": `import "empty-module";
+import { greet } from "greeting";
+import { license } from "licensed";
 import { runtime } from "runtime-variant";
+import type { Shape } from "shape-types";
 
 export default {
   /**
@@ -162,7 +187,12 @@ export default {
    * @param name Who to greet.
    */
   async greet(name: string): Promise<string> {
-    return \`\${greet(name)} from \${runtime}\`;
+    return \`\${greet(name)} from \${runtime} under \${license}\`;
+  },
+
+  /** Measure a shape. */
+  async measure(shape: Shape): Promise<number> {
+    return shape.size;
   },
 };
 `,
@@ -238,19 +268,23 @@ describe.runIf(process.env["RUN_BUILDER_TESTS"] === "1")("app builder", () => {
       compatibility_flags: ["nodejs_compat"],
       bindings: [
         { type: "plain_text", name: "GREETING", text: "hi" },
+        // Commas inside strings are not trailing commas.
+        { type: "plain_text", name: "PATTERN", text: "[,}]" },
         { type: "d1", name: "DB", database_name: "accounts" },
       ],
       web: true,
       entrypoints: ["default"],
       crons: ["0 * * * *"],
       queue_consumers: [],
-      debug: { source_maps: { "worker.js": "worker.js.map" } },
     });
     expect(result.metadata.debug?.build_id).toMatch(/^[0-9a-f]{64}$/);
+    // As the CLI names maps: by digest, so the build ID covers the map.
+    expect(result.metadata.debug?.source_maps["worker.js"]).toMatch(/^map-[0-9a-f]{64}\.map$/);
     // nodejs_compat bundles keep built-ins external behind the CLI's require bridge.
     expect(result.worker.startsWith("var require = (specifier) => {")).toBe(true);
     expect(result.worker).toContain("workerd build");
     expect(result.worker).not.toContain("node build");
+    expect(result.worker).toContain('"MIT"');
     expect(result.worker.trimEnd().endsWith("//# sourceMappingURL=worker.js.map")).toBe(true);
 
     const map = z
@@ -271,7 +305,9 @@ describe.runIf(process.env["RUN_BUILDER_TESTS"] === "1")("app builder", () => {
     });
 
     expect(documented.status).toBe(200);
-    const { documentation } = documentResult.parse(await documented.json());
+    const { documentation, warnings } = documentResult.parse(await documented.json());
+
+    expect(warnings).toEqual([]);
 
     expect(documentation.entrypoints).toEqual([
       expect.objectContaining({
@@ -295,10 +331,76 @@ describe.runIf(process.env["RUN_BUILDER_TESTS"] === "1")("app builder", () => {
               },
             ],
           }),
+          expect.objectContaining({
+            name: "measure",
+            summary: "Measure a shape.",
+            signatures: [
+              expect.objectContaining({
+                // Resolved from the installed declarations; without them it would be `any`.
+                parameters: [
+                  expect.objectContaining({
+                    name: "shape",
+                    type: 'import("./node_modules/shape-types/index").Shape',
+                  }),
+                ],
+              }),
+            ],
+          }),
         ],
       }),
     ]);
+    // The type-only development dependency is installed for documentation.
+    expect(documentation.types).toEqual([
+      expect.objectContaining({
+        name: 'import("./node_modules/shape-types/index").Shape',
+        definition: "{\n    size: number;\n}",
+        summary: "A shape to measure.",
+      }),
+    ]);
     expect(registryRequests).toEqual(expect.arrayContaining(["/greeting", "/runtime-variant"]));
+  });
+
+  it("derives the build ID from the bundle and its source map", async () => {
+    const build = async (files: Record<string, string>) =>
+      bundleResult.parse(await (await post("/bundle", { files })).json());
+
+    const first = await build(project);
+    // Comments change source map positions but not the bundle.
+
+    const second = await build({
+      ...project,
+      "src/app.ts": `// A note.\n${project["src/app.ts"]}`,
+    });
+
+    expect(second.worker).toBe(first.worker);
+    expect(second.map).not.toBe(first.map);
+    expect(second.metadata.debug?.build_id).not.toBe(first.metadata.debug?.build_id);
+  });
+
+  it("reports source errors as the CLI's bundler does", async () => {
+    const syntax = await post("/bundle", {
+      files: { ...project, "src/app.ts": "export default {\n  async greet( {\n};\n" },
+    });
+
+    expect(syntax.status).toBe(422);
+    expect(await failure(syntax)).toMatch(/src\/app\.ts:\d+:\d+: ERROR:/);
+
+    const relative = await post("/bundle", {
+      files: {
+        ...project,
+        "src/app.ts": 'import { value } from "./missing.ts";\nexport default { value };\n',
+      },
+    });
+
+    expect(relative.status).toBe(422);
+    expect(await failure(relative)).toBe("Could not resolve ./missing.ts");
+
+    const dependency = await post("/bundle", {
+      files: { ...project, "src/app.ts": 'import pad from "left-pad";\nexport default { pad };\n' },
+    });
+
+    expect(dependency.status).toBe(422);
+    expect(await failure(dependency)).toBe("Could not resolve left-pad");
   });
 
   it("reports project errors", async () => {

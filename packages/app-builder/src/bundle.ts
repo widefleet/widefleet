@@ -76,6 +76,34 @@ const decodeBase64 = (text: string) => {
   return new TextDecoder().decode(bytes);
 };
 
+// Externals match exactly or by subpath; `cloudflare:` and `node:` by prefix.
+const allowedExternal = (name: string, externals: readonly string[]) =>
+  name.startsWith("cloudflare:") ||
+  externals.some(
+    (external) =>
+      name === external ||
+      name.startsWith(`${external}/`) ||
+      (external.endsWith(":") && name.startsWith(external)),
+  );
+
+const buildFailure = z.object({
+  message: z.string(),
+  errors: z.array(z.object({ text: z.string() })).min(1),
+});
+
+// esbuild failures carry source diagnostics; report them as build errors.
+const bundleProject = async (options: Parameters<typeof createWorker>[0]) => {
+  try {
+    return await createWorker(options);
+  } catch (error) {
+    const failure = buildFailure.safeParse(error);
+
+    if (failure.success) throw new BuildError(failure.data.message.replaceAll("virtual:", ""));
+
+    throw error;
+  }
+};
+
 export const bundle = async (files: Readonly<Record<string, string>>, registry: string) => {
   const configuration = readConfiguration(files);
   const entry = configuration.main.replace(/^\.\//, "");
@@ -97,7 +125,15 @@ export const bundle = async (files: Readonly<Record<string, string>>, registry: 
   // Installs only files a bundle reads; createWorker then finds the packages.
   const installed = await installDependencies(project, { files: "build", registry });
 
-  const bundled = await createWorker({
+  const externals = [
+    "cloudflare:workers",
+    "cloudflare:workflows",
+    "cloudflare:sockets",
+    "node:async_hooks",
+    ...(nodeCompat ? ["node:", ...builtins] : []),
+  ];
+
+  const bundled = await bundleProject({
     files: project,
     entryPoint: entry,
     sourcemap: true,
@@ -106,13 +142,7 @@ export const bundle = async (files: Readonly<Record<string, string>>, registry: 
     // them would roughly double esbuild's source map memory.
     sourcesContent: false,
     target: "es2022",
-    externals: [
-      "cloudflare:workers",
-      "cloudflare:workflows",
-      "cloudflare:sockets",
-      "node:async_hooks",
-      ...(nodeCompat ? ["node:", ...builtins] : []),
-    ],
+    externals,
     conditions: nodeCompat ? ["workerd", "worker", "browser"] : [],
     registry,
   });
@@ -131,12 +161,24 @@ export const bundle = async (files: Readonly<Record<string, string>>, registry: 
   map.sources = map.sources.map((source) => source.replace(/^virtual:/, ""));
 
   const worker = `${banner}${output.slice(0, inline.index)}\n//# sourceMappingURL=worker.js.map\n`;
-  const [, exported] = parse(worker);
-  const sourceMaps = { "worker.js": "worker.js.map" };
+  const [imported, exported] = parse(worker);
+
+  // The bundler leaves imports it cannot resolve external; esbuild, and with it
+  // the CLI, reports them instead.
+  const unresolved = imported
+    .map((entry) => entry.n)
+    .filter((name): name is string => name !== undefined)
+    .filter((name) => !allowedExternal(name, externals));
+
+  if (unresolved.length > 0)
+    throw new BuildError(`Could not resolve ${[...new Set(unresolved)].join(", ")}`);
+  const mapText = JSON.stringify(map);
+  // As the CLI: the map module is named by its digest, so the build ID covers it.
+  const sourceMaps = { "worker.js": `map-${await sha256(mapText)}.map` };
 
   return bundleResult.parse({
     worker,
-    map: JSON.stringify(map),
+    map: mapText,
     entry,
     metadata: workerMetadata(
       configuration,
