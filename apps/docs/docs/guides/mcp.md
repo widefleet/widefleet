@@ -25,7 +25,7 @@ The client opens the Widefleet connection page in your browser:
 
 - Choose your organization if the page lists it. It lists organizations you are
   signed in to in an app and organizations you connected before in this browser.
-- Otherwise enter your work email and choose **Continue**. Widefleet opens your
+- Otherwise enter your work email and choose **Continue with email**. Widefleet opens your
   company sign-in.
 - If you are a guest in the organization, or your organization signs in with
   Widefleet, choose **Continue with Widefleet** and select the organization.
