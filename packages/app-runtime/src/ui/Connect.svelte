@@ -53,10 +53,18 @@
     {/each}
   </form>
 {/if}
+{#if known}
+  <!-- Same divider as the control plane's sign-in page. -->
+  <div class="text-muted-foreground mt-6 flex items-center gap-3 text-xs">
+    <div class="bg-border h-px flex-1"></div>
+    or use another organization
+    <div class="bg-border h-px flex-1"></div>
+  </div>
+{/if}
 <form method="post" action="/oauth/continue" class="mt-6 grid gap-2">
   <input type="hidden" name="handle" value={page.handle} />
   <input type="hidden" name="authorize" value={page.authorize} />
-  <Label for="email">{known ? "Another organization? Enter your work email" : "Work email"}</Label>
+  <Label for="email">Work email</Label>
   <Input id="email" type="email" name="email" autocomplete="email" required maxlength={320} />
   <Button
     type="submit"
@@ -65,7 +73,7 @@
     value="email"
     class="mt-1 h-11 w-full"
   >
-    Continue
+    Continue with email
   </Button>
 </form>
 <form method="post" action="/oauth/continue" class="mt-3 grid gap-3">

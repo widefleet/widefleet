@@ -396,7 +396,7 @@ export default { async fetch(request, env, ctx) {
     });
 
     it.each([
-      ["Continue", "https://platform.example.test", "guest@unknown.example.test"],
+      ["Continue with email", "https://platform.example.test", "guest@unknown.example.test"],
       ["Continue with Widefleet", "https://platform.example.test", ""],
       ["Cancel", "https://client.example.test", ""],
     ])(
