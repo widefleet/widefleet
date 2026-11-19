@@ -43,6 +43,12 @@ const applyContext = (context) => {
     document.head.append(element("style", { textContent: context.styles.css.fonts }));
 };
 
+const localTime = (value) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 19);
+};
+
 const field = (name, schema, required) => {
   const id = "field-" + name;
   let control;
@@ -65,7 +71,9 @@ const field = (name, schema, required) => {
     control = element("input", { type, id, name, required });
     if (schema.minLength !== undefined) control.minLength = schema.minLength;
     if (schema.maxLength !== undefined) control.maxLength = schema.maxLength;
-    if (schema.default !== undefined) control.value = schema.default;
+    // datetime-local holds local time without a zone; convert the default into it.
+    if (schema.default !== undefined) control.value = schema.format === "date-time" ? localTime(schema.default) : schema.default;
+    if (schema.format === "date-time") control.step = "1";
   } else {
     control = element("input", { type: "number", id, name, required, step: schema.type === "integer" ? "1" : "any" });
     if (schema.minimum !== undefined) control.min = String(schema.minimum);
@@ -89,10 +97,10 @@ const field = (name, schema, required) => {
   };
 };
 
-const finish = async (text) => {
+const finish = async (text, shown) => {
   done = true;
   root.replaceChildren();
-  status.textContent = "Answer sent.";
+  status.textContent = shown;
   const content = [{ type: "text", text }];
   // The model learns the outcome from the host; hosts differ in which path they offer.
   if (host.updateModelContext) await request("ui/update-model-context", { content }).catch(() => {});
@@ -154,10 +162,12 @@ const show = (question) => {
         status.textContent = "";
         show(next);
       } else if (result?.isError) {
-        status.textContent = text || "The answer was not accepted.";
-        await finish("The person answered the form for " + question.call.method + ", but the call failed: " + text);
+        await finish(
+          "The person answered the form for " + question.call.method + ", but the call failed: " + text,
+          "The answer was not accepted. " + text,
+        );
       } else {
-        await finish("The person answered the form for " + question.call.method + ". Result: " + text);
+        await finish("The person answered the form for " + question.call.method + ". Result: " + text, "Answer sent.");
       }
     } catch (error) {
       submit.disabled = decline.disabled = false;

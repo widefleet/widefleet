@@ -37,11 +37,15 @@ const sealed = z.strictObject({
 
 const encoder = new TextEncoder();
 
-const base64url = (data: Uint8Array) =>
-  btoa(String.fromCharCode(...data))
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replace(/=+$/, "");
+// Chunked, because spreading a large byte array exceeds the argument limit.
+const base64url = (data: Uint8Array) => {
+  let binary = "";
+
+  for (let index = 0; index < data.length; index += 0x8000)
+    binary += String.fromCharCode(...data.subarray(index, index + 0x8000));
+
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+};
 
 const unbase64url = (value: string) =>
   Uint8Array.from(atob(value.replaceAll("-", "+").replaceAll("_", "/")), (character) =>

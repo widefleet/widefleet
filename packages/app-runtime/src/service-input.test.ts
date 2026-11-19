@@ -190,6 +190,28 @@ describe("Service input requests", () => {
     }
   });
 
+  it("matches large byte arguments", async () => {
+    if (!question) throw new Error("Expected an input request");
+    const document = new Uint8Array(1024 * 1024).fill(7);
+    const changed = document.slice();
+    changed[changed.length - 1] = 8;
+    const inputResponses = { confirm: { action: "decline" } };
+
+    const { requestState } = await sealInput(
+      secret,
+      binding,
+      { ...call, args: [document] },
+      question,
+    );
+
+    await expect(
+      openInput(secret, binding, { ...call, args: [document] }, { requestState, inputResponses }),
+    ).resolves.toMatchObject({ inputResponses });
+    await expect(
+      openInput(secret, binding, { ...call, args: [changed] }, { requestState, inputResponses }),
+    ).rejects.toThrow("Invalid or expired input request state");
+  });
+
   it("checks string formats in accepted answers", async () => {
     const formatted = requestedInput({
       resultType: "input_required",
