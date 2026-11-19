@@ -104,10 +104,14 @@ describe("MCP OAuth in the data plane", () => {
         export class TestGrants extends McpGrants {
           async reset(){await this.ctx.storage.deleteAll();}
           // Ends the migration window now instead of after five minutes.
-          async finishMigration(){
+          // KV deletes of the given key fail, as during a KV outage.
+          async finishMigration(failing){
             const migration=await this.ctx.storage.get('migration');
-            if(migration) await this.ctx.storage.put('migration',{...migration,deleteAt:0});
-            await this.alarm();
+            if(migration) await this.ctx.storage.put('migration',{...migration,deleteAt:Date.now()});
+            const env=this.env;
+            const kv=env.AUTH_CONFIG;
+            this.env={...env,AUTH_CONFIG:{...kv,list:kv.list.bind(kv),get:kv.get.bind(kv),delete:(name)=>name===failing?Promise.reject(new Error('KV unavailable')):kv.delete(name)}};
+            try {await this.alarm();} finally {this.env=env;}
           }
         }
         export default {async fetch(request,env,ctx){
@@ -115,7 +119,8 @@ describe("MCP OAuth in the data plane", () => {
           if(url.pathname.startsWith('/fixture/')) {
             if(url.pathname==='/fixture/grants/reset' || url.pathname==='/fixture/grants/finish') {
               const object=env.WIDEFLEET_MCP_GRANTS.get(env.WIDEFLEET_MCP_GRANTS.idFromName(url.searchParams.get('owner')));
-              await (url.pathname.endsWith('/reset') ? object.reset() : object.finishMigration());
+              try {await (url.pathname.endsWith('/reset') ? object.reset() : object.finishMigration(url.searchParams.get('failing')));}
+              catch {return new Response(null,{status:503});}
               return new Response(null,{status:204});
             }
             if(url.pathname==='/fixture/grants') {
@@ -955,24 +960,32 @@ describe("MCP OAuth in the data plane", () => {
     const grants = await storedGrants(owner);
     const grant = grants.find(({ name }) => name === grantKey(connection.refresh_token));
     expect(grant?.metadata).toMatchObject({ clientId: connection.client });
-    await storeInKv(owner, grants);
+    const unrelated = `grant:${owner}:unrelated`;
 
-    const response = await refreshWith(connection.client, connection.refresh_token);
-    expect(response.status, await response.clone().text()).toBe(200);
+    await storeInKv(owner, [
+      ...grants,
+      { name: unrelated, value: "{}", expiration: Math.floor(Date.now() / 1000) + 600 },
+    ]);
 
-    expect((await storedGrants(owner)).map(({ name }) => name)).toEqual(
-      grants.map(({ name }) => name),
-    );
+    const finish = (failing = "") =>
+      send(
+        `/fixture/grants/finish?owner=${encodeURIComponent(owner)}&failing=${encodeURIComponent(failing)}`,
+        { method: "POST" },
+      );
 
     // KV keeps its copies until the migration window ends.
     const storage = await runtime.getKVNamespace("AUTH_CONFIG");
+    expect((await storedGrants(owner)).map(({ name }) => name)).toContain(unrelated);
     expect(await storage.get(grantKey(connection.refresh_token))).not.toBeNull();
 
-    const finished = await send(`/fixture/grants/finish?owner=${encodeURIComponent(owner)}`, {
-      method: "POST",
-    });
+    // A partly failed cleanup must not turn deleted KV copies into revocations.
+    expect((await finish(unrelated)).status).toBe(503);
+    expect(await storage.get(grantKey(connection.refresh_token))).toBeNull();
+    expect(await storage.get(unrelated)).not.toBeNull();
+    const response = await refreshWith(connection.client, connection.refresh_token);
+    expect(response.status, await response.clone().text()).toBe(200);
 
-    expect(finished.status).toBe(204);
+    expect((await finish()).status).toBe(204);
     expect((await storage.list({ prefix: `grant:${owner}:` })).keys).toEqual([]);
 
     const { refresh_token: token } = z

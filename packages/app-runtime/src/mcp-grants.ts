@@ -197,9 +197,8 @@ export class McpGrants extends DurableObject<ParentEnvironment> {
     const migration = await this.ctx.storage.get<Migration>(migrationKey);
 
     if (migration && migration.deleteAt <= Date.now()) {
-      // A failed delete fails the alarm, which Cloudflare retries.
-      await Promise.all(migration.names.map((name) => this.env.AUTH_CONFIG.delete(name)));
-
+      // Stop following KV before deleting from it: a deleted KV copy must not
+      // read as a revoked grant.
       for (const name of migration.names) {
         const entry = await this.ctx.storage.get<Entry>(name);
 
@@ -209,6 +208,19 @@ export class McpGrants extends DurableObject<ParentEnvironment> {
             expiration: entry.expiration,
             metadata: entry.metadata,
           });
+      }
+
+      const results = await Promise.allSettled(
+        migration.names.map((name) => this.env.AUTH_CONFIG.delete(name)),
+      );
+
+      const remaining = migration.names.filter((_, index) => results[index]?.status === "rejected");
+
+      if (remaining.length > 0) {
+        await this.ctx.storage.put<Migration>(migrationKey, { ...migration, names: remaining });
+
+        // Cloudflare retries a failed alarm.
+        throw new Error("Imported OAuth grants could not be deleted from KV");
       }
 
       await this.ctx.storage.delete(migrationKey);
