@@ -3,50 +3,36 @@ import {
   authorizationErrorRedirect,
   type AuthRequest,
 } from "@cloudflare/workers-oauth-provider";
-import { companyOAuth, companySession, companyTokens } from "@platform/auth-proxy/company-oauth";
-import { mcpOrganizationPrefix, mcpOrganizationKey } from "@platform/auth-proxy/mcp-login";
+import { companyOAuth, companySession } from "@platform/auth-proxy/company-oauth";
 import { readAuthConfiguration } from "@platform/auth-proxy/worker";
-import { socialIdentity, socialOAuth } from "@platform/auth-proxy/social-oauth";
-import { googleGroupsScope, organizationIdentifier } from "@platform/contracts";
+import { organizationIdentifier } from "@platform/contracts";
 import { base64url } from "jose";
 import { z } from "zod";
 import {
+  controlPlaneAvailable,
+  discoverOrganizations,
+  rememberOrganization,
+  rememberedOrganizations,
+} from "./mcp-discovery.ts";
+import {
   mcpAuthorizationServer,
   mcpGrant,
-  readMcpCompanyConfiguration,
   readMcpConfiguration,
   readMcpLogin,
   readMcpOrganization,
-  findMcpOrganization,
 } from "./mcp-oauth.ts";
 import { mcpPage } from "#mcp-ui";
 import type { ParentEnvironment } from "./types.ts";
 
 const random = () => base64url.encode(crypto.getRandomValues(new Uint8Array(32)));
 
-const socialProvider = z.enum(["google", "microsoft"]);
-
 const upstream = z.discriminatedUnion("stage", [
-  z.object({
-    stage: z.literal("social"),
-    provider: socialProvider,
-    verifier: z.string(),
-    nonce: z.string(),
-  }),
-  z.object({ stage: z.literal("widefleet") }),
-  z.object({
-    stage: z.literal("select"),
-    identity: socialIdentity,
-    tokens: companyTokens,
-    nonce: z.string(),
-  }),
+  z.object({ stage: z.literal("widefleet"), loginHint: z.email().optional() }),
   z.object({
     stage: z.literal("company"),
     organizationId: organizationIdentifier,
-    provider: socialProvider.optional(),
     verifier: z.string(),
     nonce: z.string(),
-    expected: socialIdentity.optional(),
   }),
 ]);
 
@@ -129,44 +115,9 @@ const form = async (request: Request) => {
   return parameters;
 };
 
-const callbackRequest = (request: Request, state: string) => {
-  const url = new URL(request.url);
-  url.search = new URLSearchParams({ state }).toString();
-
-  return new Request(url, { headers: request.headers });
-};
-
-const matchingOrganizations = async (
-  environment: ParentEnvironment,
-  identity: z.infer<typeof socialIdentity>,
-) => {
-  const prefix = mcpOrganizationPrefix(identity.provider, identity.tenant);
-  const organizations: Awaited<ReturnType<typeof readMcpOrganization>>[] = [];
-  let cursor: string | undefined;
-
-  do {
-    const options: KVNamespaceListOptions = { prefix };
-
-    if (cursor) options.cursor = cursor;
-    const page = await environment.AUTH_CONFIG.list(options);
-
-    for (const key of page.keys) {
-      const organizationId = organizationIdentifier.parse(key.name.slice(prefix.length));
-      const current = await findMcpOrganization(environment, organizationId);
-
-      // KV indexes can lag a changed company configuration. Authorize against the
-      // current configuration, never against an index entry by itself.
-      if (current && mcpOrganizationKey(current) === key.name) organizations.push(current);
-    }
-
-    cursor = page.list_complete ? undefined : page.cursor;
-  } while (cursor);
-
-  return organizations;
-};
-
 const complete = async (
   environment: ParentEnvironment,
+  browser: Request,
   request: AuthRequest,
   grant: z.infer<typeof mcpGrant>,
   headers: Headers,
@@ -189,74 +140,33 @@ const complete = async (
     props: grant,
   });
 
+  await rememberOrganization(browser, environment, headers, grant.organizationId);
+
   return redirect(result.redirectTo, headers);
 };
 
+// Every route ends here: the organization's own registration signs the person in,
+// so its assignment and access policies apply.
 const beginCompany = async (
   environment: ParentEnvironment,
   request: AuthRequest,
   organizationId: string,
   headers: Headers,
-  provider?: "google" | "microsoft",
-  expected?: z.infer<typeof socialIdentity>,
+  loginHint?: string,
 ) => {
-  const configuration = await readMcpCompanyConfiguration(environment, organizationId, provider);
-  const company = await companyOAuth(configuration);
+  const company = await companyOAuth(await readMcpOrganization(environment, organizationId));
   const verifier = random();
   const nonce = random();
   const { oauth } = mcpAuthorizationServer(environment);
 
   const transaction = await oauth.beginUpstream(request, {
     headers,
-    data: { stage: "company", organizationId, provider, expected, verifier, nonce },
+    data: { stage: "company", organizationId, verifier, nonce },
   });
 
-  const state = provider ? transaction.state : `mcp.${transaction.state}`;
-  const target = await company.authorize(state, verifier, nonce);
+  const target = await company.authorize(`mcp.${transaction.state}`, verifier, nonce, loginHint);
 
   return redirect(target.href, transaction.headers);
-};
-
-const acceptSocial = async (
-  environment: ParentEnvironment,
-  original: AuthRequest,
-  selection: Extract<z.infer<typeof upstream>, { stage: "select" }>,
-  organizationId: string,
-  headers: Headers,
-) => {
-  const organizations = await matchingOrganizations(environment, selection.identity);
-
-  if (!organizations.some((organization) => organization.organizationId === organizationId))
-    throw new SignInFailure("Your account cannot sign in to this organization.");
-
-  const configuration = await readMcpCompanyConfiguration(
-    environment,
-    organizationId,
-    selection.identity.provider,
-  );
-
-  if (
-    configuration.provider.type === "google" &&
-    configuration.scopes?.includes(googleGroupsScope) &&
-    !selection.tokens.scopes?.includes(googleGroupsScope)
-  )
-    return beginCompany(
-      environment,
-      original,
-      organizationId,
-      headers,
-      "google",
-      selection.identity,
-    );
-  const company = await companyOAuth(configuration);
-  const credential = await company.identify(selection.tokens, selection.nonce);
-
-  return complete(
-    environment,
-    original,
-    { organizationId, provider: selection.identity.provider, credential },
-    headers,
-  );
 };
 
 const companyCallback = async (request: Request, environment: ParentEnvironment) => {
@@ -309,22 +219,29 @@ export const mcpLoginRequest = async (
       const original = await oauth.parseAuthRequest(request);
       const description = await oauth.describeConsent(original);
       const transaction = await oauth.beginConsent(original);
-      const login = await readMcpLogin(environment);
-      const sessions = await appSessions(request, environment);
+      const accounts = await appSessions(request, environment);
+
+      const signedIn = new Set(accounts.map(({ configuration }) => configuration.organizationId));
 
       return mcpPage(
         {
           kind: "connect",
           handle: transaction.handle,
+          authorize: url.pathname + url.search,
           clientName: description.clientName,
           redirectHost: description.redirectHost,
           redirectIsLoopback: description.redirectIsLoopback,
-          providers: (["google", "microsoft"] as const).filter((name) => login[name]),
-          accounts: sessions.map(({ configuration, identity }) => ({
+          accounts: accounts.map(({ configuration, identity }) => ({
             organizationId: configuration.organizationId,
             organizationName: configuration.organizationName ?? configuration.organizationId,
             name: identity.name || identity.email,
           })),
+          organizations: (await rememberedOrganizations(request, environment))
+            .filter((configuration) => !signedIn.has(configuration.organizationId))
+            .map((configuration) => ({
+              id: configuration.organizationId,
+              name: configuration.organizationName ?? configuration.organizationId,
+            })),
         },
         transaction.headers,
       );
@@ -333,84 +250,84 @@ export const mcpLoginRequest = async (
     if (url.pathname === "/oauth/continue" && request.method === "POST") {
       const input = await form(request);
       const handle = z.string().parse(input.get("handle"));
-
       const choice = z.string().parse(input.get("provider"));
 
       if (choice.startsWith("organization:")) {
         const organizationId = organizationIdentifier.parse(choice.slice("organization:".length));
         const sessions = await appSessions(request, environment);
+        const remembered = await rememberedOrganizations(request, environment);
 
-        if (!sessions.some((session) => session.configuration.organizationId === organizationId))
+        if (
+          ![...sessions.map(({ configuration }) => configuration), ...remembered].some(
+            (configuration) => configuration.organizationId === organizationId,
+          )
+        )
           throw new SignInFailure(
-            "Your previous sign-in has expired. Reconnect and choose a sign-in provider.",
+            "This organization is no longer available here. Reconnect and enter your work email.",
           );
         const approved = await oauth.approveConsent(request, handle, { scope: ["mcp:services"] });
 
         return beginCompany(environment, approved.request, organizationId, approved.headers);
       }
 
-      const provider = z.enum(["google", "microsoft", "widefleet", "cancel"]).parse(choice);
+      const option = z.enum(["email", "widefleet", "cancel"]).parse(choice);
 
-      if (provider === "cancel") {
+      if (option === "cancel") {
         const denied = await oauth.denyConsent(request, handle);
 
         return redirect(denied.redirectTo, denied.headers);
       }
 
-      const approved = await oauth.approveConsent(request, handle, { scope: ["mcp:services"] });
-      const login = await readMcpLogin(environment);
+      // The outage page passes an entered email on, so a retry still hints the account.
+      const email = input.has("email")
+        ? z.email().max(320).parse(input.get("email")?.trim())
+        : undefined;
 
-      if (provider === "widefleet") {
-        const transaction = await oauth.beginUpstream(approved.request, {
-          headers: approved.headers,
-          data: { stage: "widefleet" },
-        });
+      if (option === "email" && email) {
+        const organizations = await discoverOrganizations(environment, email);
+        const [organization] = organizations;
 
-        const target = new URL("/mcp/sign-in", login.platformUrl);
-        target.searchParams.set("state", transaction.state);
+        // A guest or a shared domain needs the person's Widefleet memberships to choose.
+        if (organization && organizations.length === 1) {
+          const approved = await oauth.approveConsent(request, handle, {
+            scope: ["mcp:services"],
+          });
 
-        return redirect(target.href, transaction.headers);
+          return beginCompany(
+            environment,
+            approved.request,
+            organization.organizationId,
+            approved.headers,
+            email,
+          );
+        }
       }
 
-      const verifier = random();
-      const nonce = random();
+      const login = await readMcpLogin(environment);
+
+      if (input.get("confirmed") !== "1" && !(await controlPlaneAvailable(login.platformUrl)))
+        return mcpPage({
+          kind: "unavailable",
+          handle,
+          authorize: z.string().startsWith("/authorize?").max(8192).parse(input.get("authorize")),
+          email: email ?? "",
+        });
+
+      const approved = await oauth.approveConsent(request, handle, { scope: ["mcp:services"] });
 
       const transaction = await oauth.beginUpstream(approved.request, {
         headers: approved.headers,
-        data: { stage: "social", provider, verifier, nonce },
+        data: email ? { stage: "widefleet", loginHint: email } : { stage: "widefleet" },
       });
 
-      const social = socialOAuth(login, provider);
+      const target = new URL("/mcp/sign-in", login.platformUrl);
+      target.searchParams.set("state", transaction.state);
 
-      return redirect(
-        (await social.authorize(transaction.state, verifier, nonce)).href,
-        transaction.headers,
-      );
-    }
-
-    if (url.pathname === "/oauth/select" && request.method === "POST") {
-      const input = await form(request);
-
-      const resumed = await oauth.finishUpstream<unknown>(
-        callbackRequest(request, z.string().parse(input.get("state"))),
-      );
-
-      const selection = upstream.parse(resumed.data);
-
-      if (selection.stage !== "select")
-        throw new SignInFailure("Restart the connection from your app.");
-
-      return acceptSocial(
-        environment,
-        resumed.request,
-        selection,
-        organizationIdentifier.parse(input.get("organization")),
-        resumed.headers,
-      );
+      return redirect(target.href, transaction.headers);
     }
 
     if (
-      (url.pathname === "/oauth/organization" || url.pathname.startsWith("/oauth/callback/")) &&
+      (url.pathname === "/oauth/organization" || url.pathname === "/oauth/callback/company") &&
       request.method === "GET"
     ) {
       if (
@@ -434,67 +351,25 @@ export const mcpLoginRequest = async (
           resumed.request,
           organizationIdentifier.parse(url.searchParams.get("organization")),
           resumed.headers,
+          data.loginHint,
         );
+
+      if (data.stage !== "company" || url.pathname !== "/oauth/callback/company")
+        throw new SignInFailure("Restart the connection from your app.");
       const code = z.string().min(1).max(16384).parse(url.searchParams.get("code"));
 
-      if (
-        data.stage === "company" &&
-        url.pathname === `/oauth/callback/${data.provider ?? "company"}`
-      ) {
-        const company = await companyOAuth(
-          await readMcpCompanyConfiguration(environment, data.organizationId, data.provider),
-        );
+      const company = await companyOAuth(
+        await readMcpOrganization(environment, data.organizationId),
+      );
 
-        const credential = await company.exchange(code, data.verifier, data.nonce);
+      const credential = await company.exchange(code, data.verifier, data.nonce);
 
-        if (data.expected && credential.authorization.identity.id !== data.expected.subject)
-          throw new SignInFailure("Use the same company account to finish connecting.");
-
-        return complete(
-          environment,
-          resumed.request,
-          { organizationId: data.organizationId, provider: data.provider, credential },
-          resumed.headers,
-        );
-      }
-
-      if (data.stage !== "social" || url.pathname !== `/oauth/callback/${data.provider}`)
-        throw new SignInFailure("Restart the connection from your app.");
-      const social = socialOAuth(await readMcpLogin(environment), data.provider);
-      const result = await social.exchange(code, data.verifier, data.nonce);
-      const organizations = await matchingOrganizations(environment, result.identity);
-
-      if (!organizations.length)
-        throw new SignInFailure(
-          "No company sign-in is configured for this account. If your organization uses Widefleet sign-in, reconnect and choose Continue with Widefleet.",
-        );
-      const selection = { stage: "select" as const, ...result, nonce: data.nonce };
-      const first = organizations[0];
-
-      if (organizations.length === 1 && first)
-        return acceptSocial(
-          environment,
-          resumed.request,
-          selection,
-          first.organizationId,
-          resumed.headers,
-        );
-
-      const transaction = await oauth.beginUpstream(resumed.request, {
-        headers: resumed.headers,
-        data: selection,
-      });
-
-      return mcpPage(
-        {
-          kind: "organizations",
-          state: transaction.state,
-          organizations: organizations.map((organization) => ({
-            id: organization.organizationId,
-            name: organization.organizationName ?? organization.organizationId,
-          })),
-        },
-        transaction.headers,
+      return complete(
+        environment,
+        request,
+        resumed.request,
+        { organizationId: data.organizationId, credential },
+        resumed.headers,
       );
     }
 

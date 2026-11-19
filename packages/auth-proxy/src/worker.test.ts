@@ -4,12 +4,18 @@ import { build } from "esbuild";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { authConfiguration } from "./configuration.ts";
-import { mcpDomainKeys, mcpDomainPrefix, mcpOrganizationKey } from "./mcp-login.ts";
+import {
+  mcpDomainKeys,
+  mcpDomainPrefix,
+  mcpOrganizationKey,
+  mcpTenantPrefix,
+} from "./mcp-login.ts";
 import { createAuthHandler, manageAuthConfiguration } from "./worker.ts";
 import { authConfigurationKey, authControlPath } from "./publication.ts";
 
 it("revokes only the selected organization's sign-in and MCP discovery entries", async () => {
   const key = "local-auth-proxy-control-key-never-deploy";
+  const tenantId = "00000000-0000-4000-8000-0000000000aa";
 
   const compiled = await build({
     stdin: {
@@ -87,7 +93,7 @@ it("revokes only the selected organization's sign-in and MCP discovery entries",
     for (const organizationId of ["revoked", "retained"]) {
       const configuration = authConfiguration.parse({
         organizationId,
-        provider: { type: "google", domain: "example.test" },
+        provider: { type: "entra", authority: "https://login.microsoftonline.com", tenantId },
         clientId: "synthetic-client",
         clientSecret: "synthetic-secret",
         cookieSecret: Buffer.alloc(32, 1).toString("base64url"),
@@ -102,7 +108,7 @@ it("revokes only the selected organization's sign-in and MCP discovery entries",
       ).toBe(204);
       const lookup = mcpOrganizationKey(configuration);
 
-      if (!lookup) throw new Error("Expected a Google organization lookup");
+      if (!lookup) throw new Error("Expected an Entra tenant lookup");
       expect(await storage.get(lookup)).toBe(organizationId);
 
       for (const key of mcpDomainKeys(configuration))
@@ -112,7 +118,7 @@ it("revokes only the selected organization's sign-in and MCP discovery entries",
     // Republishing without a domain removes only that organization's entry for it.
     const narrowed = authConfiguration.parse({
       organizationId: "retained",
-      provider: { type: "google", domain: "example.test" },
+      provider: { type: "entra", authority: "https://login.microsoftonline.com", tenantId },
       clientId: "synthetic-client",
       clientSecret: "synthetic-secret",
       cookieSecret: Buffer.alloc(32, 1).toString("base64url"),
@@ -185,9 +191,9 @@ it("revokes only the selected organization's sign-in and MCP discovery entries",
     expect(await storage.get("organizations/revoked/discovery")).toBeNull();
     expect((await control(configurationKey, "DELETE")).status).toBe(204);
     expect(await storage.get(configurationKey)).toBeNull();
-    expect(await storage.get("mcp/organizations/google/example.test/revoked")).toBeNull();
+    expect(await storage.get(`${mcpTenantPrefix(tenantId)}revoked`)).toBeNull();
     expect(await storage.get(authConfigurationKey("retained"))).not.toBeNull();
-    expect(await storage.get("mcp/organizations/google/example.test/retained")).toBe("retained");
+    expect(await storage.get(`${mcpTenantPrefix(tenantId)}retained`)).toBe("retained");
     expect(await storage.get(`${mcpDomainPrefix("revoked.example")}revoked`)).toBeNull();
     expect(await storage.get(`${mcpDomainPrefix("shared.example")}revoked`)).toBeNull();
     expect(await storage.get(`${mcpDomainPrefix("retained.example")}retained`)).toBe("retained");
@@ -206,7 +212,7 @@ it("revokes only the selected organization's sign-in and MCP discovery entries",
     // so revoking the organization removes them.
     const stranded = authConfiguration.parse({
       organizationId: "stranded",
-      provider: { type: "google", domain: "stranded.example" },
+      provider: { type: "entra", authority: "https://login.microsoftonline.com", tenantId },
       clientId: "synthetic-client",
       clientSecret: "synthetic-secret",
       cookieSecret: Buffer.alloc(32, 1).toString("base64url"),
@@ -232,7 +238,7 @@ it("revokes only the selected organization's sign-in and MCP discovery entries",
     expect(await storage.get(written)).toBe("stranded");
     expect((await control(authConfigurationKey("stranded"), "DELETE")).status).toBe(204);
 
-    for (const key of [written, failed, "mcp/organizations/google/stranded.example/stranded"])
+    for (const key of [written, failed, `${mcpTenantPrefix(tenantId)}stranded`])
       expect(await storage.get(key)).toBeNull();
     expect(await storage.get("organizations/stranded/discovery")).toBeNull();
     error.mockRestore();

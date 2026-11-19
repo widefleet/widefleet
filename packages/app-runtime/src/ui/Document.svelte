@@ -1,7 +1,7 @@
 <script lang="ts">
   import AuthLayout from "@platform/ui/auth-layout";
   import Connect from "./Connect.svelte";
-  import Organizations from "./Organizations.svelte";
+  import Unavailable from "./Unavailable.svelte";
   import type { McpPage } from "./pages.ts";
   import styles from "./styles.css?inline";
 
@@ -9,7 +9,7 @@
 
   const titles = {
     connect: "Connect to Widefleet",
-    organizations: "Choose an organization",
+    unavailable: "Widefleet sign-in is unavailable",
     error: "Could not connect",
   };
 </script>
@@ -26,7 +26,7 @@
     <AuthLayout homeHref={null}>
       <h1 class="text-2xl font-semibold tracking-tight wrap-anywhere">{titles[page.kind]}</h1>
       {#if page.kind === "connect"}<Connect {page} />
-      {:else if page.kind === "organizations"}<Organizations {page} />
+      {:else if page.kind === "unavailable"}<Unavailable {page} />
       {:else}<p class="text-muted-foreground mt-3 text-sm leading-relaxed wrap-anywhere">
           {page.message}
         </p>{/if}

@@ -10,7 +10,6 @@
     "./identity": "./src/identity.ts",
     "./company-oauth": "./src/company-oauth.ts",
     "./mcp-login": "./src/mcp-login.ts",
-    "./social-oauth": "./src/social-oauth.ts",
     "./configuration": "./src/configuration.ts",
     "./worker": "./src/worker.ts"
   },

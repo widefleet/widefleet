@@ -91,12 +91,13 @@ export const companyOAuth = async (configuration: AuthConfiguration) => {
     version,
     identify: (tokens: z.infer<typeof companyTokens>, nonce: string) =>
       identify({ ...tokens, expectedIdTokenNonce: nonce }),
-    authorize: async (state: string, verifier: string, nonce: string) =>
+    authorize: async (state: string, verifier: string, nonce: string, loginHint?: string) =>
       provider.createAuthorizationURL({
         state,
         codeVerifier: verifier,
         idTokenNonce: nonce,
         redirectURI: configuration.redirectUrl,
+        loginHint,
       }),
     exchange: async (code: string, verifier: string, nonce: string) => {
       const tokens = await provider.validateAuthorizationCode({

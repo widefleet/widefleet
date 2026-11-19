@@ -75,8 +75,6 @@ export const mcpFixture = async (
       await encodeMcpLogin(environment.WIDEFLEET_CONTROL_TOKEN, {
         origin: issuer,
         platformUrl: "https://platform.example.test",
-        google: { clientId: "local-client", clientSecret: "synthetic-client-secret" },
-        microsoft: { clientId: "local-client", clientSecret: "synthetic-client-secret" },
       }),
     );
 
