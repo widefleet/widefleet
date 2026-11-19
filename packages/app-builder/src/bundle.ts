@@ -82,6 +82,8 @@ const decodeBase64 = (text: string) => {
 };
 
 // Externals match exactly or by subpath; `cloudflare:` and `node:` by prefix.
+const requireShimCall = /\b__require\(\s*["']([^"']+)["']\s*\)/g;
+
 const allowedExternal = (name: string, externals: readonly string[]) =>
   name.startsWith("cloudflare:") ||
   externals.some(
@@ -170,8 +172,10 @@ export const bundle = async (files: Readonly<Record<string, string>>, registry: 
 
   // The bundler leaves imports it cannot resolve external; esbuild, and with it
   // the CLI, reports them instead.
-  const unresolved = imported
-    .map((entry) => entry.n)
+  // require() calls it cannot resolve stay behind esbuild's require shim.
+  const required = [...worker.matchAll(requireShimCall)].map((match) => match[1]);
+
+  const unresolved = [...imported.map((entry) => entry.n), ...required]
     .filter((name): name is string => name !== undefined)
     .filter((name) => !allowedExternal(name, externals));
 

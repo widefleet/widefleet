@@ -462,6 +462,16 @@ describe.runIf(process.env["RUN_BUILDER_TESTS"] === "1")("app builder", () => {
 
     expect(dependency.status).toBe(422);
     expect(await failure(dependency)).toBe("Could not resolve left-pad");
+
+    const required = await post("/bundle", {
+      files: {
+        ...project,
+        "src/app.ts": 'const pad = require("left-pad");\nexport default { pad };\n',
+      },
+    });
+
+    expect(required.status).toBe(422);
+    expect(await failure(required)).toBe("Could not resolve left-pad");
   });
 
   it("reports project errors", async () => {
