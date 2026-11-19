@@ -12,6 +12,7 @@ import { mcpClaims, mcpScopes, organizationIdentifier } from "@platform/contract
 import { z } from "zod";
 import type { ParentEnvironment } from "./types.ts";
 import { readOrganizationAvailability } from "./availability.ts";
+import { mcpOAuthStorage } from "./mcp-grants.ts";
 
 export const mcpGrant = z.object({
   organizationId: organizationIdentifier,
@@ -107,7 +108,7 @@ export const mcpAuthorizationServer = (environment: ParentEnvironment) => {
 
   // The OAuth library owns client:, grant:, token: and transaction keys. App
   // configuration uses organizations/ and apps/ in the same installed KV store.
-  const storage = { OAUTH_KV: environment.AUTH_CONFIG };
+  const storage = { OAUTH_KV: mcpOAuthStorage(environment) };
 
   const server = new OAuthAuthorizationServer({
     issuer: location.issuer,

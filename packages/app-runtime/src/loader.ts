@@ -54,6 +54,8 @@ export {
   WorkflowCatalog as WidefleetWorkflowCatalog,
 } from "./workflow-catalog.ts";
 
+export { McpGrants } from "./mcp-grants.ts";
+
 export { Telemetry } from "./telemetry.ts";
 
 export { CloudflareTelemetry } from "./telemetry-cloudflare.ts";

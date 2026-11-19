@@ -98,9 +98,45 @@ describe("MCP OAuth in the data plane", () => {
         import {mcpLoginRequest} from './src/mcp-login.ts';
         import {verifyMcpToken} from './src/mcp-authorization.ts';
         import {manageAuthConfiguration} from '@platform/auth-proxy/worker';
+        import {mcpOAuthStorage} from './src/mcp-grants.ts';
+        import {McpGrants} from './src/mcp-grants.ts';
+        // Recreates an owner without the grant store, as before it existed.
+        export class TestGrants extends McpGrants {
+          async reset(){await this.ctx.storage.deleteAll();}
+          // Ends the migration window now instead of after five minutes.
+          // KV deletes of the given key fail, as during a KV outage.
+          async finishMigration(failing){
+            const migration=await this.ctx.storage.get('migration');
+            if(migration) await this.ctx.storage.put('migration',{...migration,deleteAt:Date.now()});
+            const env=this.env;
+            const kv=env.AUTH_CONFIG;
+            this.env={...env,AUTH_CONFIG:{...kv,list:kv.list.bind(kv),get:kv.get.bind(kv),delete:(name)=>name===failing?Promise.reject(new Error('KV unavailable')):kv.delete(name)}};
+            try {await this.alarm();} finally {this.env=env;}
+          }
+        }
         export default {async fetch(request,env,ctx){
           const url=new URL(request.url);
           if(url.pathname.startsWith('/fixture/')) {
+            if(url.pathname==='/fixture/grants/reset' || url.pathname==='/fixture/grants/finish') {
+              const object=env.WIDEFLEET_MCP_GRANTS.get(env.WIDEFLEET_MCP_GRANTS.idFromName(url.searchParams.get('owner')));
+              try {await (url.pathname.endsWith('/reset') ? object.reset() : object.finishMigration(url.searchParams.get('failing')));}
+              catch {return new Response(null,{status:503});}
+              return new Response(null,{status:204});
+            }
+            if(url.pathname==='/fixture/grants') {
+              const storage=mcpOAuthStorage(env);
+              const prefix=url.searchParams.get('prefix');
+              if(request.method==='DELETE') {
+                await storage.delete(url.searchParams.get('key'));
+                return new Response(null,{status:204});
+              }
+              if(request.method==='PUT') {
+                await storage.put(url.searchParams.get('key'),await request.text(),{expiration:Number(url.searchParams.get('expiration'))});
+                return new Response(null,{status:204});
+              }
+              const {keys}=await storage.list({prefix});
+              return Response.json(await Promise.all(keys.map(async (key)=>({...key,value:await storage.get(key.name)}))));
+            }
             if(url.pathname==='/fixture/form-limit') {
               let reads=0;
               let cancelled=false;
@@ -155,8 +191,14 @@ describe("MCP OAuth in the data plane", () => {
                 },
               },
             },
+            exports: { TestGrants: { type: "durable-object", storage: "sqlite" } },
             env: {
               AUTH_CONFIG: { type: "kv", id: "auth" },
+              WIDEFLEET_MCP_GRANTS: {
+                type: "durable-object",
+                worker: "mcp",
+                exportName: "TestGrants",
+              },
               WIDEFLEET_CONTROL_TOKEN: { type: "json", value: token },
               WIDEFLEET_MCP_ORIGIN: { type: "json", value: origin },
               WIDEFLEET_HTTP_AVAILABILITY: { type: "json", value: "kv" },
@@ -247,7 +289,7 @@ describe("MCP OAuth in the data plane", () => {
     await idp?.stop();
   });
 
-  const authorize = async () => {
+  const register = async () => {
     const registered = await send("/oauth/register", {
       method: "POST",
       headers,
@@ -261,7 +303,12 @@ describe("MCP OAuth in the data plane", () => {
     });
 
     expect(registered.status, await registered.clone().text()).toBe(201);
-    const client = z.object({ client_id: z.string() }).parse(await registered.json());
+
+    return z.object({ client_id: z.string() }).parse(await registered.json());
+  };
+
+  const authorize = async (client?: { client_id: string }) => {
+    client ??= await register();
     const verifier = crypto.randomUUID() + crypto.randomUUID();
 
     const parameters = new URLSearchParams({
@@ -337,6 +384,67 @@ describe("MCP OAuth in the data plane", () => {
       }).toString(),
       headers: { "content-type": "application/x-www-form-urlencoded" },
     });
+  };
+
+  const refreshWith = (client: string, token: string) =>
+    send("/oauth/token", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        client_id: client,
+        refresh_token: token,
+        resource: `${origin}/mcp`,
+      }).toString(),
+    });
+
+  const grantOwner = (token: string) => z.string().parse(token.split(":")[0]);
+
+  const grantKey = (token: string) => `grant:${token.split(":").slice(0, 2).join(":")}`;
+
+  // Grants live in the Durable Object store, read here through the same adapter.
+  const storedGrants = async (owner: string) => {
+    const response = await send(`/fixture/grants?prefix=${encodeURIComponent(`grant:${owner}:`)}`);
+    expect(response.status, await response.clone().text()).toBe(200);
+
+    return z
+      .array(
+        z.object({
+          name: z.string(),
+          value: z.string(),
+          expiration: z.number().optional(),
+          metadata: z.json().optional(),
+        }),
+      )
+      .parse(await response.json());
+  };
+
+  const storedGrant = async (token: string) =>
+    z
+      .string()
+      .parse(
+        (await storedGrants(grantOwner(token))).find(({ name }) => name === grantKey(token))?.value,
+      );
+
+  const connect = async (client?: { client_id: string }) => {
+    const auth = await authorize(client);
+    const signIn = await continueWithEmail(auth.handle);
+    const callback = await companyLogin(z.string().parse(signIn.headers.get("location")));
+
+    const response = await exchange(
+      z.string().parse(callback.headers.get("location")),
+      auth.client,
+      auth.verifier,
+    );
+
+    expect(response.status, await response.clone().text()).toBe(200);
+
+    return {
+      client: auth.client,
+      ...z
+        .object({ access_token: z.string(), refresh_token: z.string() })
+        .parse(await response.json()),
+    };
   };
 
   it("finds the company from a work email, remembers it and keeps tokens scoped without the control plane", async () => {
@@ -751,9 +859,8 @@ describe("MCP OAuth in the data plane", () => {
         .parse(await response.json());
 
       const storage = await runtime.getKVNamespace("AUTH_CONFIG");
-      const key = `grant:${grant.refresh_token.split(":").slice(0, 2).join(":")}`;
       const stored = z.object({ expiresAt: z.number(), encryptedProps: z.string() });
-      const before = stored.parse(await storage.get(key, "json"));
+      const before = stored.parse(JSON.parse(await storedGrant(grant.refresh_token)));
       const tokens = await storage.list({ prefix: "token:" });
 
       const refresh = (token = grant.refresh_token) =>
@@ -776,7 +883,7 @@ describe("MCP OAuth in the data plane", () => {
         error_description: "Company sign-in could not be refreshed",
       });
       const consumed = idp.refreshRequests.at(-1);
-      const after = stored.parse(await storage.get(key, "json"));
+      const after = stored.parse(JSON.parse(await storedGrant(grant.refresh_token)));
       expect(after.expiresAt).toBe(before.expiresAt);
       expect(after.encryptedProps).not.toBe(before.encryptedProps);
       expect(await storage.list({ prefix: "token:" })).toEqual(tokens);
@@ -814,6 +921,179 @@ describe("MCP OAuth in the data plane", () => {
       idp.settings.grantedScopes = "";
       await publish();
     }
+  });
+
+  it("keeps grants out of KV and rotates refresh tokens against the latest grant", async () => {
+    const connection = await connect();
+    const storage = await runtime.getKVNamespace("AUTH_CONFIG");
+    expect((await storage.list({ prefix: "grant:" })).keys).toEqual([]);
+    let token = connection.refresh_token;
+
+    for (let refresh = 0; refresh < 3; refresh++) {
+      const response = await refreshWith(connection.client, token);
+      expect(response.status, await response.clone().text()).toBe(200);
+      token = z.object({ refresh_token: z.string() }).parse(await response.json()).refresh_token;
+    }
+
+    // A refresh token from three rotations ago is no longer accepted.
+    expect((await refreshWith(connection.client, connection.refresh_token)).status).toBe(400);
+    expect((await refreshWith(connection.client, token)).status).toBe(200);
+    expect((await storage.list({ prefix: "grant:" })).keys).toEqual([]);
+  });
+
+  // Recreates the layout before the grant store: the owner's grants exist only in KV.
+  const storeInKv = async (owner: string, grants: Awaited<ReturnType<typeof storedGrants>>) => {
+    const reset = await send(`/fixture/grants/reset?owner=${encodeURIComponent(owner)}`, {
+      method: "POST",
+    });
+
+    expect(reset.status).toBe(204);
+    const storage = await runtime.getKVNamespace("AUTH_CONFIG");
+
+    for (const { name } of (await storage.list({ prefix: `grant:${owner}:` })).keys)
+      await storage.delete(name);
+
+    for (const { name, value, expiration, metadata } of grants)
+      await storage.put(name, value, { expiration: z.number().parse(expiration), metadata });
+  };
+
+  it("moves grants created before the grant store out of KV on first use", async () => {
+    const connection = await connect();
+    const owner = grantOwner(connection.refresh_token);
+    const grants = await storedGrants(owner);
+    const grant = grants.find(({ name }) => name === grantKey(connection.refresh_token));
+    expect(grant?.metadata).toMatchObject({ clientId: connection.client });
+    const unrelated = `grant:${owner}:unrelated`;
+
+    await storeInKv(owner, [
+      ...grants,
+      { name: unrelated, value: "{}", expiration: Math.floor(Date.now() / 1000) + 600 },
+    ]);
+
+    const finish = (failing = "") =>
+      send(
+        `/fixture/grants/finish?owner=${encodeURIComponent(owner)}&failing=${encodeURIComponent(failing)}`,
+        { method: "POST" },
+      );
+
+    // KV keeps its copies until the migration window ends.
+    const storage = await runtime.getKVNamespace("AUTH_CONFIG");
+    expect((await storedGrants(owner)).map(({ name }) => name)).toContain(unrelated);
+    expect(await storage.get(grantKey(connection.refresh_token))).not.toBeNull();
+
+    // A partly failed cleanup must not turn deleted KV copies into revocations.
+    expect((await finish(unrelated)).status).toBe(503);
+    expect(await storage.get(grantKey(connection.refresh_token))).toBeNull();
+    expect(await storage.get(unrelated)).not.toBeNull();
+    const response = await refreshWith(connection.client, connection.refresh_token);
+    expect(response.status, await response.clone().text()).toBe(200);
+
+    expect((await finish()).status).toBe(204);
+    expect((await storage.list({ prefix: `grant:${owner}:` })).keys).toEqual([]);
+
+    const { refresh_token: token } = z
+      .object({ refresh_token: z.string() })
+      .parse(await response.json());
+
+    expect((await refreshWith(connection.client, token)).status).toBe(200);
+  });
+
+  it("replaces a stale imported grant with the newer KV record", async () => {
+    const connection = await connect();
+    const owner = grantOwner(connection.refresh_token);
+    const stale = await storedGrants(owner);
+    const refreshed = await refreshWith(connection.client, connection.refresh_token);
+    expect(refreshed.status).toBe(200);
+
+    const { refresh_token: token } = z
+      .object({ refresh_token: z.string() })
+      .parse(await refreshed.json());
+
+    const current = await storedGrants(owner);
+
+    // The first import reads the record from before the refresh, as from a stale
+    // KV location cache. KV then returns the current record.
+    await storeInKv(owner, stale);
+    expect(await storedGrants(owner)).toEqual(stale);
+    const storage = await runtime.getKVNamespace("AUTH_CONFIG");
+
+    for (const { name, value, expiration, metadata } of current)
+      await storage.put(name, value, { expiration: z.number().parse(expiration), metadata });
+
+    const response = await refreshWith(connection.client, token);
+    expect(response.status, await response.clone().text()).toBe(200);
+
+    // A grant revoked after the import is not imported again from its KV copy.
+    await send(`/fixture/grants?key=${encodeURIComponent(grantKey(token))}`, {
+      method: "DELETE",
+    });
+
+    expect(await storage.get(grantKey(token))).not.toBeNull();
+    expect((await refreshWith(connection.client, token)).status).toBe(400);
+  });
+
+  it("takes the KV record when the migration window ends without a read", async () => {
+    const connection = await connect();
+    const owner = grantOwner(connection.refresh_token);
+    const stale = await storedGrants(owner);
+    const refreshed = await refreshWith(connection.client, connection.refresh_token);
+    expect(refreshed.status).toBe(200);
+
+    const { refresh_token: token } = z
+      .object({ refresh_token: z.string() })
+      .parse(await refreshed.json());
+
+    const current = await storedGrants(owner);
+    await storeInKv(owner, stale);
+    expect(await storedGrants(owner)).toEqual(stale);
+    const storage = await runtime.getKVNamespace("AUTH_CONFIG");
+
+    for (const { name, value, expiration, metadata } of current)
+      await storage.put(name, value, { expiration: z.number().parse(expiration), metadata });
+
+    // No refresh arrives before the window ends.
+    const finished = await send(`/fixture/grants/finish?owner=${encodeURIComponent(owner)}`, {
+      method: "POST",
+    });
+
+    expect(finished.status).toBe(204);
+    expect((await storage.list({ prefix: `grant:${owner}:` })).keys).toEqual([]);
+    const response = await refreshWith(connection.client, token);
+    expect(response.status, await response.clone().text()).toBe(200);
+  });
+
+  it("does not return expired grants", async () => {
+    const owner = "expiring-owner";
+    const seconds = Math.floor(Date.now() / 1000);
+
+    for (const [grant, expiration] of [
+      ["expired", seconds - 1],
+      ["current", seconds + 600],
+    ] as const) {
+      const response = await send(
+        `/fixture/grants?key=grant:${owner}:${grant}&expiration=${expiration}`,
+        { method: "PUT", body: "{}" },
+      );
+
+      expect(response.status).toBe(204);
+    }
+
+    expect((await storedGrants(owner)).map(({ name }) => name)).toEqual([`grant:${owner}:current`]);
+  });
+
+  it("replaces a client's earlier grant when the person connects it again", async () => {
+    const first = await connect();
+    const second = await connect({ client_id: first.client });
+    expect(grantOwner(second.refresh_token)).toBe(grantOwner(first.refresh_token));
+
+    expect((await refreshWith(first.client, first.refresh_token)).status).toBe(400);
+    expect((await refreshWith(second.client, second.refresh_token)).status).toBe(200);
+    expect(
+      (await storedGrants(grantOwner(second.refresh_token))).map((stored) => stored.name),
+    ).toContain(grantKey(second.refresh_token));
+    expect(
+      (await storedGrants(grantOwner(first.refresh_token))).map((stored) => stored.name),
+    ).not.toContain(grantKey(first.refresh_token));
   });
 
   it("stops reading oversized forms at the byte limit", async () => {
