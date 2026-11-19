@@ -13,10 +13,30 @@ import type { ParentEnvironment } from "./types.ts";
 
 const grantPrefix = "grant:";
 
+// Set once per owner and never removed, so grants deleted from KV can never be
+// imported again.
 const importedKey = "imported";
 
+// KV keys of imported grants, deleted by the alarm after `deleteAt`.
+const migrationKey = "migration";
+
+// Longer than KV's 60-second location cache, so a copy imported from a stale
+// cache is replaced by the current record before KV keeps no copy.
+const migrationWindow = 5 * 60 * 1000;
+
+// The minimum KV allows, so imported reads leave the location cache sooner.
+const importCacheTtl = 30;
+
 // Key metadata stays serialized: the library reads it only from listings.
-type Entry = { value: string; expiration: number | undefined; metadata: string | undefined };
+// `copied` marks an imported grant that has not been written since.
+type Entry = {
+  value: string;
+  expiration: number | undefined;
+  metadata: string | undefined;
+  copied?: true;
+};
+
+type Migration = { deleteAt: number; names: string[] };
 
 type ListedPage = {
   keys: { name: string; expiration: number | undefined; metadata: string | undefined }[];
@@ -39,14 +59,15 @@ const grantOwner = (name: string) => {
 };
 
 export class McpGrants extends DurableObject<ParentEnvironment> {
-  // Grants created before this store existed are moved out of KV on first use,
-  // so existing connections keep working and stop reading stale copies.
+  // Grants created before this store existed are copied from KV on first use,
+  // so existing connections keep working. KV keeps its copies until the
+  // migration window ends.
   private async load(owner: string) {
     if (await this.ctx.storage.get<boolean>(importedKey)) return;
 
     await this.ctx.blockConcurrencyWhile(async () => {
       if (await this.ctx.storage.get<boolean>(importedKey)) return;
-      const imported: string[] = [];
+      const names: string[] = [];
       let cursor: string | undefined;
 
       do {
@@ -56,26 +77,54 @@ export class McpGrants extends DurableObject<ParentEnvironment> {
         const page = await this.env.AUTH_CONFIG.list(range);
 
         for (const key of page.keys) {
-          const value = await this.env.AUTH_CONFIG.get(key.name);
+          const value = await this.env.AUTH_CONFIG.get(key.name, { cacheTtl: importCacheTtl });
 
           if (value === null) continue;
           await this.ctx.storage.put<Entry>(key.name, {
             value,
             expiration: key.expiration,
             metadata: key.metadata === undefined ? undefined : JSON.stringify(key.metadata),
+            copied: true,
           });
-          imported.push(key.name);
+          names.push(key.name);
         }
 
         cursor = page.list_complete ? undefined : page.cursor;
       } while (cursor);
 
-      await this.ctx.storage.put(importedKey, true);
+      if (names.length > 0)
+        await this.ctx.storage.put<Migration>(migrationKey, {
+          deleteAt: Date.now() + migrationWindow,
+          names,
+        });
 
-      if (imported.length === 0) return;
+      await this.ctx.storage.put(importedKey, true);
       await this.schedule();
-      await Promise.all(imported.map((name) => this.env.AUTH_CONFIG.delete(name)));
     });
+  }
+
+  // During the migration window, KV may still hold a newer record than the
+  // imported copy. An imported grant follows KV until the object writes it.
+  private async current(name: string) {
+    const entry = await this.ctx.storage.get<Entry>(name);
+
+    if (!entry?.copied || !(await this.ctx.storage.get<Migration>(migrationKey))) return entry;
+    const value = await this.env.AUTH_CONFIG.get(name, { cacheTtl: importCacheTtl });
+    // The KV read lets other calls run. Keep a write that happened meanwhile.
+    const latest = await this.ctx.storage.get<Entry>(name);
+
+    if (!latest?.copied || latest.value !== entry.value || value === entry.value) return latest;
+
+    if (value === null) {
+      await this.ctx.storage.delete(name);
+
+      return undefined;
+    }
+
+    const refreshed: Entry = { ...latest, value };
+    await this.ctx.storage.put(name, refreshed);
+
+    return refreshed;
   }
 
   private entries(range: DurableObjectListOptions = { prefix: grantPrefix }) {
@@ -86,27 +135,25 @@ export class McpGrants extends DurableObject<ParentEnvironment> {
     if (grantOwner(name) !== owner) throw new Error("OAuth grant belongs to another owner");
   }
 
-  // Expired grants are removed at the earliest expiry. An owner without grants
-  // leaves no storage behind.
+  // The alarm deletes expired grants and ends the migration window.
   private async schedule() {
-    const entries = [...(await this.entries()).values()];
+    const migration = await this.ctx.storage.get<Migration>(migrationKey);
 
-    if (entries.length === 0) {
-      await this.ctx.storage.deleteAll();
+    const next = Math.min(
+      migration?.deleteAt ?? Infinity,
+      ...[...(await this.entries()).values()].map((entry) =>
+        entry.expiration === undefined ? Infinity : entry.expiration * 1000,
+      ),
+    );
 
-      return;
-    }
-
-    const next = Math.min(...entries.map((entry) => entry.expiration ?? Infinity));
-
-    if (Number.isFinite(next)) await this.ctx.storage.setAlarm(next * 1000);
+    if (Number.isFinite(next)) await this.ctx.storage.setAlarm(next);
     else await this.ctx.storage.deleteAlarm();
   }
 
   async read(owner: string, name: string) {
     this.owned(owner, name);
     await this.load(owner);
-    const entry = await this.ctx.storage.get<Entry>(name);
+    const entry = await this.current(name);
 
     return entry && !expired(entry) ? entry : null;
   }
@@ -147,6 +194,26 @@ export class McpGrants extends DurableObject<ParentEnvironment> {
   }
 
   override async alarm() {
+    const migration = await this.ctx.storage.get<Migration>(migrationKey);
+
+    if (migration && migration.deleteAt <= Date.now()) {
+      // A failed delete fails the alarm, which Cloudflare retries.
+      await Promise.all(migration.names.map((name) => this.env.AUTH_CONFIG.delete(name)));
+
+      for (const name of migration.names) {
+        const entry = await this.ctx.storage.get<Entry>(name);
+
+        if (entry?.copied)
+          await this.ctx.storage.put<Entry>(name, {
+            value: entry.value,
+            expiration: entry.expiration,
+            metadata: entry.metadata,
+          });
+      }
+
+      await this.ctx.storage.delete(migrationKey);
+    }
+
     const removed = [...(await this.entries()).entries()].flatMap(([name, entry]) =>
       expired(entry) ? [name] : [],
     );
