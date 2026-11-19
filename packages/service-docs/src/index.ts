@@ -40,7 +40,7 @@ const notFound = -1;
 
 const encoder = new TextEncoder();
 
-const decoder = new TextDecoder("utf-8", { ignoreBOM: true });
+const decoder = new TextDecoder("utf-8", { fatal: false, ignoreBOM: true });
 
 class WasiExit extends Error {
   constructor(readonly code: number) {
@@ -78,7 +78,7 @@ const parent = (path: string) => path.slice(0, Math.max(1, path.lastIndexOf("/")
 
 // Files by path, and each directory's entries, as the module lists and stats them.
 const fileSystem = (files: ReadonlyMap<string, string>) => {
-  const contents = new Map<string, Uint8Array<ArrayBuffer>>();
+  const contents = new Map<string, Uint8Array>();
   const directories = new Map<string, Map<string, "d" | "f">>([["/", new Map()]]);
 
   for (const [path, content] of files) {
@@ -110,7 +110,7 @@ export const documentServices = (
   const { contents, directories } = fileSystem(request.files);
   const stderr: string[] = [];
   let memory: WebAssembly.Memory | undefined;
-  let staged = new Uint8Array(0);
+  let staged: Uint8Array = new Uint8Array(0);
 
   const bytes = (pointer: number, length: number) => {
     if (!memory) throw new DocumentationError("The module has no memory");
@@ -124,7 +124,7 @@ export const documentServices = (
     return new DataView(memory.buffer);
   };
 
-  const stage = (data: Uint8Array<ArrayBuffer>) => {
+  const stage = (data: Uint8Array) => {
     staged = data;
 
     return staged.length;
