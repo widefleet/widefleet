@@ -1091,9 +1091,13 @@ test("requires company SSO and links the matching verified company email without
   await environment.database.db.update(ssoProvider).set({ domainVerified: true });
 
   try {
+    // The signed-in member continues to company SSO without another click.
+    const authorization = page.waitForRequest(
+      (request) => new URL(request.url()).searchParams.get("login_hint") === "sso@example.test",
+    );
+
     await page.goto("/account");
-    await expect(page).toHaveURL(/sign-in.*organization=widefleet/);
-    await page.getByRole("button", { name: "Sign in with Microsoft" }).click();
+    await authorization;
     await page.getByRole("button", { name: /sso@example.test/ }).click();
     await expect(page.getByText("You are signed in with your company account.")).toBeVisible();
     expect(await (await page.request.get("/api/v1/me")).json()).toMatchObject({

@@ -37,8 +37,20 @@ export const load: PageServerLoad = async ({ locals, url, setHeaders }) => {
   const companyOnly =
     provider && target?.required && (slug || operatorTrustedSso(runtime.configuration, target?.id));
 
+  // A signed-in member reaches this page when an organization requires its own SSO.
+  // Their address is already known, so the company sign-in can start right away.
+  const continueAs =
+    companyOnly &&
+    slug &&
+    locals.user &&
+    locals.session?.identityOrganizationId !== target?.id &&
+    !url.searchParams.has("error")
+      ? locals.user.email
+      : null;
+
   return {
     signedOut: !locals.session,
+    continueAs,
     socialProviders: companyOnly ? [] : availableSocialProviders(runtime.configuration),
     error: url.searchParams.has("error"),
     provider,

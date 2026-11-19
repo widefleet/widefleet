@@ -387,27 +387,35 @@ test("accepts emailed owner invitations and manages members in isolated organiza
 
     expect(emailAcceptance.status()).toBe(403);
     // Submission of a page rendered before SSO was enabled must also restart company sign-in.
+    // The signed-in invitee continues to company SSO with their address as the login hint.
     await expect(emailPage.getByLabel("Your name")).toHaveCount(0);
+
+    const restarted = emailPage.waitForRequest(
+      (request) => new URL(request.url()).searchParams.get("login_hint") === company.email,
+    );
+
     await emailPage.getByRole("button", { name: "Accept invitation" }).click();
+    await restarted;
+    await expect(emailPage.getByRole("heading", { name: "Join browser-company" })).toBeVisible();
+    await expect(emailPage.getByLabel("Your name")).toHaveCount(0);
+
+    // Without a session, the organization page waits for the visitor to choose SSO.
     const companyPage = await companyContext.newPage();
     await companyPage.goto(`/invitations/${company.invitationId}`);
     await companyPage.waitForLoadState("networkidle");
-
-    for (const page of [emailPage, companyPage]) {
-      await expect(page).toHaveURL(
-        (url) =>
-          url.pathname === "/sign-in" && url.searchParams.get("organization") === "browser-company",
-      );
-      expect(new URL(page.url()).searchParams.get("next")).toBe(
-        `/invitations/${company.invitationId}`,
-      );
-      await expect(
-        page.getByRole("button", { name: "Continue with email", exact: true }),
-      ).toHaveCount(0);
-      await page.getByRole("button", { name: "Sign in with browser-company" }).click();
-      await expect(page.getByRole("heading", { name: "Join browser-company" })).toBeVisible();
-      await expect(page.getByLabel("Your name")).toHaveCount(0);
-    }
+    await expect(companyPage).toHaveURL(
+      (url) =>
+        url.pathname === "/sign-in" && url.searchParams.get("organization") === "browser-company",
+    );
+    expect(new URL(companyPage.url()).searchParams.get("next")).toBe(
+      `/invitations/${company.invitationId}`,
+    );
+    await expect(
+      companyPage.getByRole("button", { name: "Continue with email", exact: true }),
+    ).toHaveCount(0);
+    await companyPage.getByRole("button", { name: "Sign in with browser-company" }).click();
+    await expect(companyPage.getByRole("heading", { name: "Join browser-company" })).toBeVisible();
+    await expect(companyPage.getByLabel("Your name")).toHaveCount(0);
 
     await companyPage.getByRole("button", { name: "Accept invitation" }).click();
     await expect(companyPage).toHaveURL(`${environment.configuration.PLATFORM_URL}/`);
