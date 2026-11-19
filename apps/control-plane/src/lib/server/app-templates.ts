@@ -139,9 +139,12 @@ const github = async <T>(url: string, schema: z.ZodType<T>, headers: Headers) =>
   return schema.parse(await response.json());
 };
 
+// Tests, in test directories or beside the code, are not part of the deployed app.
+const testFile = /(?:^|\/)(?:tests|__tests__)\/|\.(?:test|spec)\.[cm]?[jt]sx?$/;
+
 /**
  * A template's source files at the current commit, by path relative to its
- * directory. Tests are not part of the deployed app.
+ * directory, without tests.
  */
 export const templateSources = (configuration: Pick<Configuration, "GITHUB_TOKEN">, id: string) =>
   Result.gen(async function* () {
@@ -194,7 +197,7 @@ export const templateSources = (configuration: Pick<Configuration, "GITHUB_TOKEN
           Object.fromEntries(
             await Promise.all(
               paths
-                .filter((path) => !path.startsWith("tests/"))
+                .filter((path) => !testFile.test(path))
                 .map(async (path) => {
                   const response = await fetch(`${raw}/${tree.commit}/${prefix}${path}`, {
                     signal: AbortSignal.timeout(10_000),

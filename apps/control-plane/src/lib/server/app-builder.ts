@@ -15,25 +15,37 @@ import { InvalidOperation, StorageUnavailable } from "./errors.ts";
 // Fetch and service binding responses, which have different nominal types.
 type BuilderResponse = { status: number; ok: boolean; text: () => Promise<string> };
 
-type Endpoint = (body: string) => Promise<BuilderResponse>;
+type Endpoint = (body: string, signal: AbortSignal) => Promise<BuilderResponse>;
 
 // Builds take seconds; installing a large dependency graph can take minutes.
-const timeout = 5 * 60 * 1000;
+const defaultTimeout = 5 * 60 * 1000;
+
+// Each phase answers within the deadline, also through service bindings,
+// which cannot take the control plane's abort signal.
+const before = <T>(promise: Promise<T>, signal: AbortSignal) =>
+  Promise.race([
+    promise,
+    new Promise<never>((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    }),
+  ]);
 
 const unavailable = (cause: unknown) =>
   new StorageUnavailable({ message: "The app builder is unavailable. Try again later.", cause });
 
-const call = <T>(endpoint: Endpoint, body: string, schema: z.ZodType<T>) =>
+const call = <T>(endpoint: Endpoint, body: string, schema: z.ZodType<T>, timeout: number) =>
   Result.gen(async function* () {
+    const signal = AbortSignal.timeout(timeout);
+
     const response = yield* Result.await(
-      Result.tryPromise({ try: () => endpoint(body), catch: unavailable }),
+      Result.tryPromise({ try: () => before(endpoint(body, signal), signal), catch: unavailable }),
     );
 
     // The builder reports project errors, such as an invalid Wrangler file.
     if (response.status === 422) {
       const failure = yield* Result.await(
         Result.tryPromise({
-          try: async () => buildFailure.parse(JSON.parse(await response.text())),
+          try: async () => buildFailure.parse(JSON.parse(await before(response.text(), signal))),
           catch: unavailable,
         }),
       );
@@ -46,7 +58,7 @@ const call = <T>(endpoint: Endpoint, body: string, schema: z.ZodType<T>) =>
 
     const value = yield* Result.await(
       Result.tryPromise({
-        try: async () => schema.parse(JSON.parse(await response.text())),
+        try: async () => schema.parse(JSON.parse(await before(response.text(), signal))),
         catch: unavailable,
       }),
     );
@@ -54,11 +66,14 @@ const call = <T>(endpoint: Endpoint, body: string, schema: z.ZodType<T>) =>
     return Result.ok(value);
   });
 
-export const createAppBuilder = (endpoints: { bundle: Endpoint; document: Endpoint }) => ({
+export const createAppBuilder = (
+  endpoints: { bundle: Endpoint; document: Endpoint },
+  timeout = defaultTimeout,
+) => ({
   bundle: (files: Record<string, string>) =>
-    call(endpoints.bundle, JSON.stringify({ files }), bundleResult),
+    call(endpoints.bundle, JSON.stringify({ files }), bundleResult, timeout),
   document: (request: z.input<typeof documentRequest>) =>
-    call(endpoints.document, JSON.stringify(request), documentResult),
+    call(endpoints.document, JSON.stringify(request), documentResult, timeout),
 });
 
 export type AppBuilder = ReturnType<typeof createAppBuilder>;
@@ -67,13 +82,8 @@ const headers = { "content-type": "application/json" };
 
 /** One builder at an origin on a private network. */
 export const httpAppBuilder = (origin: string) => {
-  const endpoint = (path: string) => (body: string) =>
-    fetch(new URL(path, origin), {
-      method: "POST",
-      headers,
-      body,
-      signal: AbortSignal.timeout(timeout),
-    });
+  const endpoint = (path: string) => (body: string, signal: AbortSignal) =>
+    fetch(new URL(path, origin), { method: "POST", headers, body, signal });
 
   return createAppBuilder({ bundle: endpoint("/bundle"), document: endpoint("/document") });
 };

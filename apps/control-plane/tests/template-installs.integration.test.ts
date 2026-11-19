@@ -175,7 +175,10 @@ it("builds a template's sources and deploys them as the CLI would", async () => 
   expect(Object.keys(files)).toEqual(
     expect.arrayContaining(["wrangler.jsonc", "package.json", "src/app.ts", "template.md"]),
   );
-  expect(Object.keys(files).some((path) => path.startsWith("tests/"))).toBe(false);
+  // Tests stay out, in test directories and beside the code (src/*.test.ts).
+  expect(
+    Object.keys(files).filter((path) => path.startsWith("tests/") || path.includes(".test.")),
+  ).toEqual([]);
 
   const document = builderRequests.find(({ phase }) => phase === "document");
   const documentInput = documentRequest.parse(JSON.parse(document?.body ?? "{}"));
@@ -237,6 +240,21 @@ it("reports build errors and missing templates", async () => {
 
   expect(missing.status).toBe(404);
   expect(builderRequests).toHaveLength(2);
+});
+
+it("ends a build that exceeds the deadline", async () => {
+  const stalled = createAppBuilder(
+    {
+      bundle: () => new Promise<Response>(() => {}),
+      document: () => new Promise<Response>(() => {}),
+    },
+    50,
+  );
+
+  const runtime = await runtimeWith(stalled);
+  const response = await install(runtime, "onedrive", { name: "file-reader" });
+
+  expect(response.status).toBe(503);
 });
 
 it("keeps templates on agent setup when no builder is configured", async () => {
