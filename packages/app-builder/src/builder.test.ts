@@ -101,6 +101,36 @@ const packages = {
     "license.js": 'export const license = "MIT";\n',
     LICENSE: "MIT License\n",
   },
+  // Separate entries for import and require, as dual packages publish them.
+  dual: {
+    "package.json": JSON.stringify({
+      name: "dual",
+      version: "1.0.0",
+      exports: { ".": { import: "./esm.mjs", require: "./cjs.js" } },
+    }),
+    "esm.mjs": 'export default () => "esm build";\n',
+    "cjs.js": 'module.exports = () => "cjs build";\n',
+  },
+  // CommonJS that requires the dual package.
+  "cjs-consumer": {
+    "package.json": JSON.stringify({
+      name: "cjs-consumer",
+      version: "1.0.0",
+      main: "index.js",
+      dependencies: { dual: "1.0.0" },
+    }),
+    "index.js": 'module.exports = { viaRequire: require("dual")() };\n',
+  },
+  // Types published as TypeScript sources rather than declaration files.
+  "source-types": {
+    "package.json": JSON.stringify({
+      name: "source-types",
+      version: "1.0.0",
+      exports: { ".": { types: "./src/index.ts", default: "./dist/index.js" } },
+    }),
+    "src/index.ts": "/** A note to file. */\nexport interface Note {\n  title: string;\n}\n",
+    "dist/index.js": "export {};\n",
+  },
   // Types only, used by a public method and erased from the bundle.
   "shape-types": {
     "package.json": JSON.stringify({ name: "shape-types", version: "2.0.0", types: "index.d.ts" }),
@@ -127,15 +157,19 @@ const registryResponse = (request: Request) => {
 
   if (separator === "-") return new Response(archive);
 
-  const { version } = z
-    .object({ version: z.string() })
+  // Version metadata repeats the package's manifest, as npm serves it.
+  const manifest = z
+    .looseObject({ version: z.string() })
     .parse(JSON.parse(files["package.json"] ?? "{}"));
+
+  const { version } = manifest;
 
   return Response.json({
     name,
     "dist-tags": { latest: version },
     versions: {
       [version]: {
+        ...manifest,
         name,
         version,
         dist: { tarball: `${registry}/${name}/-/${name}-${version}.tgz` },
@@ -164,8 +198,9 @@ const project = {
       "runtime-variant": "^1.0.0",
       "empty-module": "1.0.0",
       licensed: "1.0.0",
+      "cjs-consumer": "1.0.0",
     },
-    devDependencies: { "shape-types": "2.0.0" },
+    devDependencies: { "shape-types": "2.0.0", "source-types": "1.0.0" },
   }),
   "tsconfig.json": `{
   // TypeScript accepts comments and trailing commas.
@@ -181,8 +216,10 @@ const project = {
   "src/app.ts": `import "empty-module";
 import { greet } from "greeting";
 import { license } from "licensed";
+import { viaRequire } from "cjs-consumer";
 import { runtime } from "runtime-variant";
 import type { Shape } from "shape-types";
+import type { Note } from "source-types";
 
 export default {
   /**
@@ -190,12 +227,17 @@ export default {
    * @param name Who to greet.
    */
   async greet(name: string): Promise<string> {
-    return \`\${greet(name)} from \${runtime} under \${license}\`;
+    return \`\${greet(name)} from \${runtime} under \${license} via \${viaRequire}\`;
   },
 
   /** Measure a shape. */
   async measure(shape: Shape): Promise<number> {
     return shape.size;
+  },
+
+  /** File a note. */
+  async file(note: Note): Promise<string> {
+    return note.title;
   },
 };
 `,
@@ -282,6 +324,9 @@ describe.runIf(process.env["RUN_BUILDER_TESTS"] === "1")("app builder", () => {
     expect(result.worker).toContain("workerd build");
     expect(result.worker).not.toContain("node build");
     expect(result.worker).toContain('"MIT"');
+    // require() selects the dual package's CommonJS entry, as esbuild does.
+    expect(result.worker).toContain("cjs build");
+    expect(result.worker).not.toContain("esm build");
     expect(result.worker.trimEnd().endsWith("//# sourceMappingURL=worker.js.map")).toBe(true);
 
     const map = z
@@ -343,6 +388,21 @@ describe.runIf(process.env["RUN_BUILDER_TESTS"] === "1")("app builder", () => {
               }),
             ],
           }),
+          expect.objectContaining({
+            name: "file",
+            summary: "File a note.",
+            signatures: [
+              expect.objectContaining({
+                // Resolved from the package's TypeScript sources.
+                parameters: [
+                  expect.objectContaining({
+                    name: "note",
+                    type: 'import("./node_modules/source-types/src/index").Note',
+                  }),
+                ],
+              }),
+            ],
+          }),
         ],
       }),
     ]);
@@ -352,6 +412,10 @@ describe.runIf(process.env["RUN_BUILDER_TESTS"] === "1")("app builder", () => {
         name: 'import("./node_modules/shape-types/index").Shape',
         definition: "{\n    size: number;\n}",
         summary: "A shape to measure.",
+      }),
+      expect.objectContaining({
+        name: 'import("./node_modules/source-types/src/index").Note',
+        summary: "A note to file.",
       }),
     ]);
     expect(registryRequests).toEqual(expect.arrayContaining(["/greeting", "/runtime-variant"]));
