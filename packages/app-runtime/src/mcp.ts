@@ -92,7 +92,7 @@ export const mcpRequest = async (
         "search",
         {
           description:
-            "Find permitted app services by words in their hostnames, entrypoints and documentation. Returns the best matches first. Pass an exact hostname to list its entrypoints, or omit query to list every service. To read the following page, call search again with the returned next object as the whole input; next is null on the last page. complete is false while the service list is still being built after an upgrade; search again for the remaining services.",
+            "Find permitted app services by words in their hostnames, entrypoints and documentation. Returns the best matches first. Pass an exact hostname to list its entrypoints, or omit query to list every service. To read the following page, call search again with the returned next object as the whole input; next is null on the last page. complete is false while the service list is being rebuilt; search again to include the remaining services.",
           inputSchema: {
             query: z
               .string()

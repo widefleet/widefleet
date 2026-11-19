@@ -268,6 +268,7 @@ export default { async fetch(request, env, ctx) {
     }
     if(url.pathname === '/publish-during-next-scan') { publishDuringScan=await request.json(); return Response.json(true); }
     if(url.pathname === '/drop-index') { await env.WIDEFLEET_PACKAGES.delete('service-index/widefleet.json'); return Response.json(true); }
+    if(url.pathname === '/expire-index') { const object=await env.WIDEFLEET_PACKAGES.get('service-index/widefleet.json'); await env.WIDEFLEET_PACKAGES.put('service-index/widefleet.json',JSON.stringify({...await object.json(),builtAt:1})); return Response.json(true); }
     if(url.pathname === '/index') { const object=await env.WIDEFLEET_PACKAGES.get('service-index/widefleet.json'); return Response.json(object ? await object.json() : null); }
     if(url.pathname === '/foreign-routes') {
       const {count}=await request.json();
@@ -942,6 +943,18 @@ export default { async fetch(request, env, ctx) {
       });
 
       expect(await (await request("/index")).json()).not.toHaveProperty("scan");
+
+      // A daily rebuild keeps serving the previous index but is not complete
+      // until it has read every route.
+      await request("/expire-index");
+      const rebuilding = { services: [{ hostname: service.hostname }], complete: false };
+      expect(await inventorySearch()).toEqual(rebuilding);
+      expect(await inventorySearch()).toEqual(rebuilding);
+
+      expect(await inventorySearch()).toEqual({
+        services: [{ hostname: service.hostname }],
+        complete: true,
+      });
 
       const started = Date.now();
 

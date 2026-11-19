@@ -139,7 +139,7 @@ const scanStates = async (
 
 // Returns the services to search. While a rebuild is in progress, they are the
 // last complete index updated with every route scanned so far, and complete is
-// false; the first rebuild of a large installation spans several searches.
+// false: a lost refresh may still hide a service the rebuild has not reached.
 export const readServiceIndex = async (
   environment: ParentEnvironment,
   organizationId: string,
@@ -173,9 +173,10 @@ export const readServiceIndex = async (
   // A lost write only repeats this step on the next search.
   await write(environment, organizationId, next, current?.etag ?? null);
 
-  return next.scan
-    ? { services: { ...index.services, ...scanned }, complete: Boolean(index.builtAt) }
-    : { services: scanned, complete: true };
+  return {
+    services: next.scan ? { ...index.services, ...scanned } : scanned,
+    complete: !next.scan,
+  };
 };
 
 export const refreshServiceIndex = async (
