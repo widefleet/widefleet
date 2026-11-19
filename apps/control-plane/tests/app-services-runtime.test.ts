@@ -20,6 +20,7 @@ import {
   serviceDocumentation,
 } from "@platform/contracts";
 import { encodeConfiguration } from "@platform/auth-proxy/publication";
+import { verifyMcpCliLogin } from "@platform/auth-proxy/mcp-cli-login";
 import { runtimeIdentity } from "./runtime-identity.ts";
 import { hashAsset } from "../src/lib/server/asset-hash.ts";
 import { z } from "zod";
@@ -592,6 +593,23 @@ export default { async fetch(request, env, ctx) {
 
       expect((await rpc("skills", { name: "missing" })).isError).toBe(true);
 
+      const cliLogin = await rpc("cli_login", {});
+      expect(cliLogin.isError, cliLogin.content[0]?.text).not.toBe(true);
+
+      const { command } = z
+        .object({ command: z.string() })
+        .parse(JSON.parse(cliLogin.content[0]?.text ?? "null"));
+
+      const [, loginCode] =
+        /^widefleet login --url https:\/\/platform\.example\.test --code (\S+)$/.exec(command) ??
+        [];
+
+      expect(await verifyMcpCliLogin(token, z.string().parse(loginCode))).toMatchObject({
+        organizationId: "widefleet",
+        issuer: identityIssuer,
+        subject: "alice",
+      });
+
       const service = {
         hostname: `${targetId}.apps.example.test`,
         entrypoint: "Reader",
@@ -888,7 +906,7 @@ export default { async fetch(request, env, ctx) {
             ),
           { timeout: 8_000 },
         )
-        .toEqual(new Set(["skills", "search", "describe", "call", "execute"]));
+        .toEqual(new Set(["skills", "cli_login", "search", "describe", "call", "execute"]));
 
       const toolCalls = analytics.filter((event) => event.event.startsWith("$mcp_"));
 

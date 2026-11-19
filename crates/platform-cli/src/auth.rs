@@ -96,6 +96,9 @@ pub struct LoginOptions {
     /// API scopes to request, separated by spaces or commas. Replaces the defaults.
     #[arg(long = "scope", value_delimiter = ',', num_args = 1.., default_values = ["platform:read", "platform:write"])]
     scopes: Vec<String>,
+    /// Sign in with a one-time code from the Widefleet MCP server's cli_login tool instead of a browser.
+    #[arg(long, conflicts_with_all = ["email", "domain"])]
+    code: Option<String>,
 }
 
 const CLIENT_ID: &str = "platform-cli";

@@ -609,6 +609,9 @@ export const createSettingsService = (
 
   return {
     resolve: (organizationId = installationOrganizationId) => scoped(organizationId).resolve(),
+    // The edge holds the key that signs MCP CLI login codes; a hosted control plane does not.
+    verifyCliLogin: async (organizationId: string, code: string) =>
+      (await appSignIn(organizationId)?.verifyCliLogin(code)) ?? null,
 
     inspect: installed.inspect,
     createOwner: async (input: z.infer<typeof setupOwner>, bootstrapPending = false) => {

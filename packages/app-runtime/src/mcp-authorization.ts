@@ -24,7 +24,11 @@ export const verifyMcpToken = async (environment: ParentEnvironment, token: stri
     sub: verified.userId,
     scope: verified.scope.join(" "),
     exp: Math.min(verified.expiresAt, Math.floor(access.expiresAt / 1000)),
-    mcp: { organizationId: access.organizationId, identity: access.identity },
+    mcp: {
+      organizationId: access.organizationId,
+      identity: access.identity,
+      accountSubject: access.accountSubject,
+    },
   });
 };
 

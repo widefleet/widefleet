@@ -1,6 +1,7 @@
 import type { Configuration } from "./config.ts";
 import type { activationStatus, settingsPlan } from "@platform/contracts";
 import type { companyIdentity } from "./company-identity.ts";
+import type { mcpCliLogin } from "@platform/auth-proxy/mcp-cli-login";
 import type { z } from "zod";
 import { installationOrganizationId } from "../organization.ts";
 
@@ -21,6 +22,7 @@ export interface AppSignIn {
   ): Promise<string>;
   status(expectedRevision: string): Promise<z.infer<typeof activationStatus>>;
   plan(identity: z.infer<typeof companyIdentity> | null): Promise<z.infer<typeof settingsPlan>>;
+  verifyCliLogin(code: string): Promise<z.infer<typeof mcpCliLogin> | null>;
 }
 
 export const appCallbackUrl = (

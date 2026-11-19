@@ -5,6 +5,7 @@ export const mcpInstructions = [
   "Widefleet runs your organization's internal apps.",
   "Use search, describe, call and execute to use the APIs of running apps.",
   "Apps are built and deployed with the Widefleet CLI in your shell.",
+  "If the CLI has no session, run the command that cli_login returns instead of asking the user to sign in.",
   "Before building, changing or deploying an app, read the widefleet skill",
   '(the skills tool with name "widefleet", or skill://widefleet/SKILL.md).',
 ].join(" ");
