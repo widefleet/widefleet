@@ -6,6 +6,8 @@ import { appWorker } from "./worker.ts";
 import { invokeApp } from "./app-rpc.ts";
 import { signAppCaller } from "./app-caller.ts";
 import { executionOptions } from "./execution-limits.ts";
+import { rankServices, type SearchRequest } from "./mcp-search.ts";
+import { readServiceIndex } from "./service-index.ts";
 import type { ParentEnvironment } from "./types.ts";
 
 const target = async (
@@ -42,55 +44,52 @@ const target = async (
 export const searchMcpServices = async (
   environment: ParentEnvironment,
   claims: z.infer<typeof mcpClaims>,
-  query: string,
-  cursor?: string,
+  request: SearchRequest,
 ) => {
-  // At most 10 apps × 32 entrypoints with short excerpts fits the 1 MiB response
-  // limit even with JSON escaping. Search the full text; describe returns it.
-  const options: KVNamespaceListOptions = { prefix: "apps/", limit: 10 };
+  const { services, complete } = await readServiceIndex(environment, claims.mcp.organizationId);
 
-  if (cursor) options.cursor = cursor;
-  const page = await environment.AUTH_CONFIG.list(options);
-
-  const entries = await Promise.all(
-    page.keys.map(async ({ name }) => {
-      const hostname = name.slice("apps/".length);
-      const route = await serviceRoute(environment, hostname);
-
-      if (
-        !route ||
-        route.organizationId !== claims.mcp.organizationId ||
-        !hasAppAccess(route.access.groups, claims.mcp.identity.groups)
-      )
-        return [];
-
-      const app = await readApp(environment, `hosts/${hostname}.json`, {
-        appId: route.appId,
-        organizationId: route.organizationId,
-      });
-
-      if (!app || app.appId !== route.appId || app.organizationId !== route.organizationId)
-        return [];
-
-      const entrypoints = app.metadata.entrypoints ?? [];
-
-      if (!entrypoints.length) return [];
-      const docs = await readServiceDocumentation(environment, app);
-
-      return entrypoints.flatMap((entrypoint) => {
-        const documentation = docs?.entrypoints.find((entry) => entry.name === entrypoint);
-
-        const summary = documentation?.summary ?? "";
-
-        if (![hostname, entrypoint, summary].join(" ").toLowerCase().includes(query.toLowerCase()))
-          return [];
-
-        return [{ appId: app.appId, hostname, entrypoint, summary: summary.slice(0, 256) }];
-      });
-    }),
+  const permitted = Object.entries(services).flatMap(([hostname, service]) =>
+    hasAppAccess(service.access.groups, claims.mcp.identity.groups)
+      ? service.entrypoints.map((entrypoint) => ({
+          appId: service.appId,
+          hostname,
+          entrypoint: entrypoint.name,
+          summary: entrypoint.summary,
+          terms: entrypoint.terms,
+        }))
+      : [],
   );
 
-  return { services: entries.flat(), cursor: page.list_complete ? null : page.cursor };
+  const page = rankServices(permitted, request);
+
+  // The index can trail a failed refresh. Authorize each returned service against
+  // its current route; describe and call check it again.
+  const hostnames = [...new Set(page.services.map((service) => service.hostname))];
+
+  const allowed = new Set(
+    (
+      await Promise.all(
+        hostnames.map(async (hostname) => {
+          const route = await serviceRoute(environment, hostname);
+
+          return route &&
+            route.organizationId === claims.mcp.organizationId &&
+            route.appId === services[hostname]?.appId &&
+            hasAppAccess(route.access.groups, claims.mcp.identity.groups)
+            ? [hostname]
+            : [];
+        }),
+      )
+    ).flat(),
+  );
+
+  return {
+    ...page,
+    complete,
+    services: page.services.flatMap(({ appId, hostname, entrypoint, summary }) =>
+      allowed.has(hostname) ? [{ appId, hostname, entrypoint, summary }] : [],
+    ),
+  };
 };
 
 export const describeMcpService = async (

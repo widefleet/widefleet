@@ -5,6 +5,7 @@ import { encodeMcpLogin, mcpLoginKey } from "@platform/auth-proxy/mcp-login";
 import { appAccessSnapshot } from "@platform/contracts";
 import { mcpAuthorizationServer, readMcpOrganization } from "../src/mcp-oauth.ts";
 import { mcpLoginRequest } from "../src/mcp-login.ts";
+import { refreshServiceIndex } from "../src/service-index.ts";
 import type { ParentEnvironment } from "../src/types.ts";
 
 // Test-only grant issuer. Production completes these grants after company sign-in.
@@ -28,6 +29,8 @@ export const mcpFixture = async (
         access: input.access,
       }),
     );
+    // Publishers refresh the search index after changing access.
+    await refreshServiceIndex(environment, "widefleet", input.hostname);
 
     return Response.json(true);
   }

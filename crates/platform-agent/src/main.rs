@@ -238,6 +238,23 @@ async fn execute(
     if matches!(job.kind, JobKind::Delete) {
         execution::remove(configuration, job).await?;
     }
+    // Search reads a per-organization index. Refresh it once the route and
+    // publication are committed, including after deletion. Runtime-only jobs
+    // have no host. A failed refresh leaves the committed activation in place;
+    // the index's periodic rebuild repairs it.
+    if packages.runtime.search == Some(1)
+        && let Some(hostname) = job.hostname.as_deref()
+        && let Err(error) = docker::runtime_request(
+            docker,
+            &configuration.runtime_container,
+            &prepared.token,
+            "service-index",
+            &value!({ "organizationId": job.organization_id, "hostname": hostname }),
+        )
+        .await
+    {
+        tracing::warn!(job = %job.id, %error, "Could not refresh the service search index");
+    }
     Ok(None)
 }
 

@@ -343,6 +343,8 @@ export const runtimeRelease = z.strictObject({
   celld: z.enum(["0.6.2", "0.6.3-widefleet.1"]),
   workflows: z.literal(1).optional(),
   cloudflare: z.literal(1).optional(),
+  // The runtime accepts service-index refreshes from publishers.
+  search: z.literal(1).optional(),
   main: z.literal("loader.js"),
   modules: z
     .array(

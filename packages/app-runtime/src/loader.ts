@@ -25,11 +25,12 @@ import { publishedApp } from "@platform/contracts";
 import { z } from "zod";
 import { workflowJson } from "./workflow-json.ts";
 import { workflowCatalog } from "./workflow-catalog.ts";
-import { workflowRequest } from "@platform/contracts";
+import { organizationIdentifier, workflowRequest } from "@platform/contracts";
 import { appWorker, workerCode } from "./worker.ts";
 import { browserPolicy } from "./csp.ts";
 import { serveAsset } from "./assets.ts";
 import { readApp } from "./catalog.ts";
+import { refreshServiceIndex } from "./service-index.ts";
 import type { WorkflowRunner } from "./workflow-runner.ts";
 import type { Events } from "./events.ts";
 import type { ParentEnvironment, PublishedApp, Json } from "./types.ts";
@@ -296,6 +297,25 @@ const manageRuntime = async (
             );
 
       return Response.json({ result: workflowJson(result) });
+    } catch (error) {
+      return Response.json(
+        { error: error instanceof Error ? error.message : String(error) },
+        { status: 400 },
+      );
+    }
+  }
+
+  if (url.pathname === "/.well-known/widefleet/service-index") {
+    if (request.method !== "POST") return new Response(null, { status: 405 });
+
+    try {
+      const input = z
+        .strictObject({ organizationId: organizationIdentifier, hostname: z.string() })
+        .parse(await request.json());
+
+      await refreshServiceIndex(environment, input.organizationId, input.hostname);
+
+      return Response.json({ result: true });
     } catch (error) {
       return Response.json(
         { error: error instanceof Error ? error.message : String(error) },

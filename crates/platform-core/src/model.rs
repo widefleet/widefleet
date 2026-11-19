@@ -342,6 +342,8 @@ pub struct RuntimeRelease {
     pub workflows: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cloudflare: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search: Option<u32>,
     pub main: String,
     pub modules: Vec<ReleaseModule>,
 }

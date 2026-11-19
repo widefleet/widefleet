@@ -165,6 +165,16 @@ describe.runIf(process.env["RUN_SERVICE_TESTS"] === "1").each(["workerd", "celld
         | { availability: "blocked" | "clear" | "unavailable" }
         | { hostname: string; appId: string; access: z.infer<typeof appAccessSnapshot> }
         | { subject: string; groups: string[] }
+        | { hostname: string; refresh: boolean }
+        | {
+            hostname: string;
+            route: {
+              organizationId: string;
+              appId: string;
+              access: z.infer<typeof appAccessSnapshot>;
+            };
+          }
+        | { count: number }
         | { token: string },
       headers: Record<string, string> = {},
     ) =>
@@ -182,7 +192,7 @@ describe.runIf(process.env["RUN_SERVICE_TESTS"] === "1").each(["workerd", "celld
     ) => {
       const app = { ...snapshot(appId, code, version), ...changes };
       const response = await request("/seed", { app, source: code, assets });
-      expect(response.status).toBe(200);
+      expect(response.status, await response.clone().text()).toBe(200);
 
       return app;
     };
@@ -240,13 +250,30 @@ globalThis.fetch = (input, init) => {
 ${executionRecorder}
 export class AppService extends Service { constructor(ctx, env) { super(ctx, recordExecution(env)); } }
 export class UnconfiguredIdentity extends Identity { constructor(ctx, env) { super(ctx, {...env,WIDEFLEET_WORKLOAD_ISSUER:undefined}); } }
+const refreshIndex = (ctx, hostname) => ctx.exports.RuntimeManagement({props:{}}).fetch(new Request('https://runtime.internal/.well-known/widefleet/service-index',{method:'POST',body:JSON.stringify({organizationId:'widefleet',hostname})}));
+let publishDuringScan = null;
 export default { async fetch(request, env, ctx) {
   const url = new URL(request.url);
   try {
     const fixture = await mcpFixture(request,env,ctx); if(fixture) return fixture;
     if(url.pathname === '/mcp' || url.pathname.startsWith('/oauth/') || url.pathname === '/.well-known/oauth-protected-resource/mcp') {
       const loader={get:env.WIDEFLEET_LOADER.get.bind(env.WIDEFLEET_LOADER),load(){throw new Error('MCP must not create a dynamic worker for scripts');}};
-      return runtime.fetch(new Request('https://mcp.apps.example.test'+url.pathname,request),{...env,WIDEFLEET_LOADER:loader},ctx);
+      let routes=env.AUTH_CONFIG;
+      if(publishDuringScan) {
+        // Publishes and refreshes a route after the search has listed the routes.
+        const {hostname,route}=publishDuringScan; publishDuringScan=null;
+        routes={get:env.AUTH_CONFIG.get.bind(env.AUTH_CONFIG),async list(options){const page=await env.AUTH_CONFIG.list(options);await env.AUTH_CONFIG.put('apps/'+hostname,JSON.stringify(route));const indexed=await refreshIndex(ctx,hostname);if(!indexed.ok) throw new Error('refresh '+indexed.status);return page;}};
+      }
+      return runtime.fetch(new Request('https://mcp.apps.example.test'+url.pathname,request),{...env,WIDEFLEET_LOADER:loader,AUTH_CONFIG:routes},ctx);
+    }
+    if(url.pathname === '/publish-during-next-scan') { publishDuringScan=await request.json(); return Response.json(true); }
+    if(url.pathname === '/drop-index') { await env.WIDEFLEET_PACKAGES.delete('service-index/widefleet.json'); return Response.json(true); }
+    if(url.pathname === '/expire-index') { const object=await env.WIDEFLEET_PACKAGES.get('service-index/widefleet.json'); await env.WIDEFLEET_PACKAGES.put('service-index/widefleet.json',JSON.stringify({...await object.json(),builtAt:1})); return Response.json(true); }
+    if(url.pathname === '/index') { const object=await env.WIDEFLEET_PACKAGES.get('service-index/widefleet.json'); return Response.json(object ? await object.json() : null); }
+    if(url.pathname === '/foreign-routes') {
+      const {count}=await request.json();
+      for(let index=0;index<count;index++) await env.AUTH_CONFIG.put('apps/0-foreign-'+String(index).padStart(4,'0')+'.apps.example.test',JSON.stringify({organizationId:'other',appId:crypto.randomUUID(),access:{revision:1,groups:[]}}));
+      return Response.json(true);
     }
     if(url.pathname === '/workload-proof' || url.pathname === '/unconfigured-identity') {
       const {identity}=await request.json();
@@ -264,6 +291,14 @@ export default { async fetch(request, env, ctx) {
       await env.WIDEFLEET_PACKAGES.put('hosts/'+app.hostname+'.json',JSON.stringify(app));
       await env.AUTH_CONFIG.put('organizations/widefleet/configuration',${JSON.stringify(encrypted)});
       await env.AUTH_CONFIG.put('apps/'+app.hostname, JSON.stringify({organizationId:'widefleet',appId:app.appId,access:{revision:1,groups:[]}}));
+      const indexed=await refreshIndex(ctx,app.hostname);
+      if(!indexed.ok) return new Response(indexed.status+' '+await indexed.text(),{status:500});
+      return Response.json(true);
+    }
+    if(url.pathname === '/unpublish') {
+      const {hostname,refresh}=await request.json();
+      await env.AUTH_CONFIG.delete('apps/'+hostname);
+      if(refresh) await refreshIndex(ctx,hostname);
       return Response.json(true);
     }
     if(url.pathname === '/availability') { const {availability}=await request.json(); await env.AUTH_CONFIG.put('organizations/widefleet/http-availability',availability==='unavailable' ? 'invalid' : JSON.stringify({blocked:availability==='blocked'})); return Response.json(true); }
@@ -699,8 +734,13 @@ export default { async fetch(request, env, ctx) {
       );
 
       expect(denied.isError).toBe(true);
-      const hidden = await rpc("search", { query: service.hostname }, await issue("bob"));
-      expect(JSON.parse(hidden.content[0]?.text ?? "null")).toMatchObject({ services: [] });
+      const hidden = await rpc("search", { limit: 50 }, await issue("bob"));
+      expect(
+        z
+          .object({ services: z.array(z.object({ hostname: z.string() })) })
+          .parse(JSON.parse(hidden.content[0]?.text ?? "null"))
+          .services.map((entry) => entry.hostname),
+      ).not.toContain(service.hostname);
       expect(
         (
           await rpc(
@@ -806,19 +846,22 @@ export default { async fetch(request, env, ctx) {
         services: z.array(
           z.object({ hostname: z.string(), entrypoint: z.string(), summary: z.string() }),
         ),
-        cursor: z.string().nullable(),
+        remaining: z.number(),
+        next: z.object({ query: z.string(), limit: z.number(), offset: z.number() }).nullable(),
       });
 
       const found = new Set<string>();
-      let cursor: string | null = null;
+
+      let next: z.infer<typeof searchPage>["next"] = {
+        query: "search-pagination-marker",
+        limit: 50,
+        offset: 0,
+      };
+
       let pages = 0;
 
-      do {
-        const query = "search-pagination-marker";
-
-        const pageResult = await (cursor
-          ? rpc("search", { query, cursor })
-          : rpc("search", { query }));
+      while (next) {
+        const pageResult = await rpc("search", next);
 
         expect(pageResult.isError, pageResult.content[0]?.text).not.toBe(true);
         const page = searchPage.parse(JSON.parse(pageResult.content[0]?.text ?? "null"));
@@ -828,12 +871,90 @@ export default { async fetch(request, env, ctx) {
           found.add(`${entry.hostname}/${entry.entrypoint}`);
         }
 
-        cursor = page.cursor;
+        next = page.next;
         expect(++pages).toBeLessThan(10);
-      } while (cursor);
+      }
 
       expect(found.size).toBe(12 * 32);
       expect(pages).toBeGreaterThan(1);
+
+      const marker = async () =>
+        searchPage.parse(
+          JSON.parse(
+            (await rpc("search", { query: "search-pagination-marker", limit: 50 })).content[0]
+              ?.text ?? "null",
+          ),
+        );
+
+      const removed = z.string().parse([...found][0]?.split("/")[0]);
+      expect((await marker()).remaining).toBe(12 * 32 - 50);
+
+      // A publisher that could not refresh the index must not expose a removed route.
+      await request("/unpublish", { hostname: removed, refresh: false });
+      const unrefreshed = await marker();
+      expect(unrefreshed.services.map((entry) => entry.hostname)).not.toContain(removed);
+      expect(unrefreshed.remaining).toBe(12 * 32 - 50);
+
+      await request("/unpublish", { hostname: removed, refresh: true });
+      expect((await marker()).remaining).toBe(11 * 32 - 50);
+
+      // Other services must not push a distinctive match off the first page.
+      const inventory = await rpc("search", { query: "inventory" });
+      expect(JSON.parse(inventory.content[0]?.text ?? "null")).toMatchObject({
+        services: [{ hostname: service.hostname, entrypoint: service.entrypoint }],
+        remaining: 0,
+        next: null,
+      });
+
+      // A route published and refreshed while the first search scans the routes
+      // must survive that search's write.
+      await request("/drop-index");
+      await request("/publish-during-next-scan", {
+        hostname: removed,
+        route: {
+          organizationId: "widefleet",
+          appId: z.string().parse(removed.split(".")[0]),
+          access: { revision: 1, groups: [] },
+        },
+      });
+      expect((await marker()).remaining).toBe(11 * 32 - 50);
+      expect((await marker()).remaining).toBe(12 * 32 - 50);
+
+      const inventorySearch = async () =>
+        z
+          .object({
+            services: z.array(z.object({ hostname: z.string() })),
+            complete: z.boolean(),
+          })
+          .parse(
+            JSON.parse((await rpc("search", { query: "inventory" })).content[0]?.text ?? "null"),
+          );
+
+      // A rebuild reads a bounded number of routes per search. Routes of other
+      // organizations sort first, so the first rebuild spans several searches.
+      await request("/foreign-routes", { count: 450 });
+      await request("/drop-index");
+      expect(await inventorySearch()).toEqual({ services: [], complete: false });
+      expect(await inventorySearch()).toEqual({ services: [], complete: false });
+
+      expect(await inventorySearch()).toEqual({
+        services: [{ hostname: service.hostname }],
+        complete: true,
+      });
+
+      expect(await (await request("/index")).json()).not.toHaveProperty("scan");
+
+      // A daily rebuild keeps serving the previous index but is not complete
+      // until it has read every route.
+      await request("/expire-index");
+      const rebuilding = { services: [{ hostname: service.hostname }], complete: false };
+      expect(await inventorySearch()).toEqual(rebuilding);
+      expect(await inventorySearch()).toEqual(rebuilding);
+
+      expect(await inventorySearch()).toEqual({
+        services: [{ hostname: service.hostname }],
+        complete: true,
+      });
 
       const started = Date.now();
 
