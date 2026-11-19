@@ -208,9 +208,13 @@ test.each(["/docs/not-a-page", "/docs-missing", "/SKILL.md.bak", "/.well-known/a
   async (path) => {
     const route = await router.fetch(`https://widefleet.com${path}`, { redirect: "manual" });
 
+    // Miniflare wraps the body of an Undici Response that nothing else retains.
+    // Garbage collection during the next dispatch can cancel an unread body
+    // (https://github.com/cloudflare/workers-sdk/issues/16217).
+    assert.equal(await route.text(), "Docs route");
+
     const response = await server.fetch(`https://widefleet.com${path}`, { redirect: "manual" });
 
-    assert.equal(await route.text(), "Docs route");
     assert.equal(response.status, 404);
     assert.equal(await response.text(), "Docs not found");
   },
