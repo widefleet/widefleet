@@ -184,6 +184,8 @@ describe("Better Auth SSO provider integration", () => {
     expect(environment.authControl.read().configuration?.provider).toMatchObject({
       groupsClaim: "roles",
     });
+    // MCP sign-in may find the organization only through proven domains.
+    expect(environment.authControl.read().configuration?.emailDomains).toEqual(["example.test"]);
 
     const proof = await environment.settings.domainVerification(principal);
     const [alias, changed] = proof.records;
@@ -219,6 +221,10 @@ describe("Better Auth SSO provider integration", () => {
       { domain: "changed.example.test", verified: true },
     ]);
     expect(partial.ssoRequired).toBe(true);
+    expect(environment.authControl.read().configuration?.emailDomains?.toSorted()).toEqual([
+      "changed.example.test",
+      "example.test",
+    ]);
 
     const [stored] = await environment.database.db
       .select()
@@ -240,6 +246,11 @@ describe("Better Auth SSO provider integration", () => {
 
     expect(both?.domain).toBe("example.test,alias.example.test,changed.example.test");
     expect(both?.domainVerified).toBe(true);
+    expect(environment.authControl.read().configuration?.emailDomains?.toSorted()).toEqual([
+      "alias.example.test",
+      "changed.example.test",
+      "example.test",
+    ]);
   });
 
   it("adds and removes domains without interrupting required company SSO", async () => {
@@ -273,6 +284,7 @@ describe("Better Auth SSO provider integration", () => {
 
     for (const domain of ["new.example.test", "alias.example.test", "changed.example.test"])
       await environment.settings.removeDomain(principal, domain, false);
+    expect(environment.authControl.read().configuration?.emailDomains).toEqual(["example.test"]);
     await expect(
       environment.settings.removeDomain(principal, "example.test", false),
     ).rejects.toMatchObject({
@@ -288,6 +300,7 @@ describe("Better Auth SSO provider integration", () => {
       message: "Keep a verified email domain while company SSO is required",
     });
     expect((await environment.settings.read(principal)).ssoRequired).toBe(true);
+    expect(environment.authControl.read().configuration?.emailDomains).toEqual(["example.test"]);
   });
 
   it("keeps every domain verified by concurrent checks", async () => {

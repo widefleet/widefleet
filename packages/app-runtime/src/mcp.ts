@@ -7,6 +7,7 @@ import { verifyMcpToken } from "./mcp-authorization.ts";
 import { readMcpConfiguration } from "./mcp-oauth.ts";
 import { callMcpService, describeMcpService, searchMcpServices } from "./mcp-services.ts";
 import { executeMcpCode, mcpJson } from "./mcp-code.ts";
+import { createMcpCliLogin } from "./mcp-cli-login.ts";
 import { mcpInstructions, mcpSkillCatalog } from "./mcp-skills.ts";
 
 const resultSchema = mcpJson.transform((value) => ({
@@ -134,6 +135,21 @@ export const mcpRequest = async (
         },
         async ({ code }) =>
           result(await executeMcpCode(environment, context, token, code, request.signal)),
+      );
+      server.registerTool(
+        "cli_login",
+        {
+          description:
+            "Sign in the Widefleet CLI as the current user. Use it when the CLI reports that no session is stored, for example in a new sandbox. Returns a shell command with a one-time code that expires after two minutes.",
+          inputSchema: {},
+          annotations: {
+            readOnlyHint: false,
+            destructiveHint: false,
+            idempotentHint: false,
+            openWorldHint: false,
+          },
+        },
+        async () => result(await createMcpCliLogin(environment, token)),
       );
 
       instrumentAnalytics?.(server);

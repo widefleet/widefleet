@@ -90,25 +90,12 @@ export const readMcpCompanyConfiguration = async (
   organizationId: string,
   provider?: "google" | "microsoft",
 ) => {
-  const configuration = await readMcpOrganization(environment, organizationId);
-
-  if (!provider) return configuration;
-  const login = await readMcpLogin(environment);
-  const registration = login[provider];
-
-  if (
-    !registration ||
-    (provider === "google"
-      ? configuration.provider.type !== "google"
-      : configuration.provider.type !== "entra")
-  )
+  // Earlier releases completed some grants through Widefleet-owned Google and
+  // Microsoft registrations. Only the organization's registration is trusted now.
+  if (provider)
     throw new OAuthError("invalid_grant", { description: "Company sign-in has changed" });
 
-  return {
-    ...configuration,
-    ...registration,
-    redirectUrl: `${login.origin}/oauth/callback/${provider}`,
-  };
+  return readMcpOrganization(environment, organizationId);
 };
 
 const failure = z.object({ error: z.string().optional() });
@@ -198,6 +185,7 @@ export const mcpAuthorizationServer = (environment: ParentEnvironment) => {
             name: identity.name,
             groups: identity.groups,
           },
+          accountSubject: credential.authorization.subject,
           version: credential.version,
           expiresAt: credential.authorization.expiresAt,
         }),

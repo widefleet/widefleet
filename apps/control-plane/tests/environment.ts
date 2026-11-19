@@ -165,8 +165,6 @@ export const createTestEnvironment = async (
     migrationsFolder: fileURLToPath(new URL("../migrations", import.meta.url)),
   });
 
-  const auth = createAuthentication(configuration, database.db);
-
   await initializeOrganization(database.db);
   await initializeInstallation(database.db);
 
@@ -178,6 +176,8 @@ export const createTestEnvironment = async (
     environment.PLATFORM_ENCRYPTION_KEY,
     (organizationId) => createAppSignIn(configuration, cookieKey, organizationId),
   );
+
+  const auth = createAuthentication(configuration, database.db, { cliLoginSettings: settings });
 
   const owner = await createInstallationOwner(database.db, {
     name: "Setup Owner",

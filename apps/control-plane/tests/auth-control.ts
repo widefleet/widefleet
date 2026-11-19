@@ -6,6 +6,7 @@ import { z } from "zod";
 import { authConfiguration, type AuthConfiguration } from "@platform/auth-proxy";
 import { authControlPath, configurationRevision } from "@platform/auth-proxy/publication";
 import { mcpLoginConfiguration } from "@platform/auth-proxy/mcp-login";
+import { signMcpCliLogin, verifyMcpCliLogin } from "@platform/auth-proxy/mcp-cli-login";
 
 // Settings/API/browser fixtures exercise HTTP publication. Packaged tests use the real worker.
 export const createAuthControl = async (directory: string) => {
@@ -40,6 +41,21 @@ export const createAuthControl = async (directory: string) => {
       for await (const chunk of request) chunks.push(z.instanceof(Buffer).parse(chunk));
       mcpLogin = mcpLoginConfiguration.parse(JSON.parse(Buffer.concat(chunks).toString()));
       response.writeHead(204).end();
+
+      return;
+    }
+
+    if (request.url === `${authControlPath}/mcp/cli-login` && request.method === "POST") {
+      const chunks: Buffer[] = [];
+
+      for await (const chunk of request) chunks.push(z.instanceof(Buffer).parse(chunk));
+
+      const { code } = z
+        .object({ code: z.string() })
+        .parse(JSON.parse(Buffer.concat(chunks).toString()));
+
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({ login: await verifyMcpCliLogin(key, code) }));
 
       return;
     }
@@ -107,6 +123,8 @@ export const createAuthControl = async (directory: string) => {
     clearMcp: () => {
       mcpLogin = null;
     },
+    // Stands in for the MCP server's cli_login tool, which signs with the same edge key.
+    signCliLogin: (login: Parameters<typeof signMcpCliLogin>[1]) => signMcpCliLogin(key, login),
     close: () =>
       new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve())),

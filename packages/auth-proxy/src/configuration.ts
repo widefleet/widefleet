@@ -1,7 +1,9 @@
 import {
+  companyDomain,
   companyProvider,
   embeddingOrigins,
   googleGroupsScope,
+  maxCompanyDomains,
   organizationIdentifier,
 } from "@platform/contracts";
 import { base64url } from "jose";
@@ -26,6 +28,8 @@ export const authConfiguration = z
       ),
     domain: hostname,
     redirectUrl: z.url(),
+    // Company email domains the organization's SSO admits, for MCP organization discovery.
+    emailDomains: z.array(companyDomain).max(maxCompanyDomains).optional(),
     // Omitted unless configured, so existing publications keep their revision.
     embeddingOrigins: embeddingOrigins.min(1).optional(),
   })

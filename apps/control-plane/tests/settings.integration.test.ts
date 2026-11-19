@@ -289,6 +289,7 @@ describe("Platform setup and managed settings", () => {
           message: "Fixture",
         }),
       revision: (identity) => Promise.resolve(identity.management.clientId),
+      verifyCliLogin: () => Promise.resolve(null),
       publish: async (identity, secret) => {
         if (identity.management.clientId === "older-client") {
           const resumed = once(gate, "resume");
@@ -413,6 +414,7 @@ describe("Platform setup and managed settings", () => {
         return "fixture-revision";
       },
       status: (revision) => Promise.resolve({ revision, state: "active", message: "Fixture" }),
+      verifyCliLogin: () => Promise.resolve(null),
     };
 
     const service = createSettingsService(

@@ -14,7 +14,13 @@ export const mcpClaims = z.object({
   sub: z.string().min(1),
   scope: z.string(),
   exp: z.number().int(),
-  mcp: z.object({ organizationId: organizationIdentifier, identity: mcpIdentity }),
+  mcp: z.object({
+    organizationId: organizationIdentifier,
+    identity: mcpIdentity,
+    // The subject that the organization's registration issued. Control-plane
+    // accounts of company SSO store it; Entra app identities use the object ID.
+    accountSubject: z.string().min(1).optional(),
+  }),
 });
 
 export const mcpServiceCall = z.strictObject({

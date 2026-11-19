@@ -4,18 +4,29 @@ import { build } from "esbuild";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { authConfiguration } from "./configuration.ts";
-import { mcpOrganizationKey } from "./mcp-login.ts";
+import {
+  mcpDomainKeys,
+  mcpDomainPrefix,
+  mcpOrganizationKey,
+  mcpTenantPrefix,
+} from "./mcp-login.ts";
 import { createAuthHandler, manageAuthConfiguration } from "./worker.ts";
 import { authConfigurationKey, authControlPath } from "./publication.ts";
 
-const key = "local-auth-proxy-control-key-never-deploy";
+const controlKey = "local-auth-proxy-control-key-never-deploy";
 
 const startAuthWorker = async () => {
   const compiled = await build({
     stdin: {
+      // A test header makes writing or deleting one KV key fail, as a transient storage error would.
       contents: `import {createAuthHandler} from './worker.ts';
         export default {fetch(request,env){
-          return createAuthHandler(env,async()=>new Response('App')).fetch(request);
+          const failing=request.headers.get('x-test-failing-key');
+          const storage=failing ? new Proxy(env.AUTH_CONFIG,{get(target,name){
+            if(name==='put'||name==='delete') return async(key,...rest)=>{ if(key===failing) throw new Error('Synthetic KV failure'); return target[name](key,...rest); };
+            const value=target[name]; return typeof value==='function' ? value.bind(target) : value;
+          }}) : env.AUTH_CONFIG;
+          return createAuthHandler({...env,AUTH_CONFIG:storage},async()=>new Response('App')).fetch(request);
         }};`,
       resolveDir: fileURLToPath(new URL(".", import.meta.url)),
     },
@@ -46,18 +57,26 @@ const startAuthWorker = async () => {
           },
           env: {
             AUTH_CONFIG: { type: "kv", id: "auth" },
-            WIDEFLEET_CONTROL_TOKEN: { type: "json", value: key },
+            WIDEFLEET_CONTROL_TOKEN: { type: "json", value: controlKey },
           },
         },
       },
     ],
   });
 
-  const control = (path: string, method: string, body?: string, authorized = true) => {
-    const options: WorkerRequestInit = {
-      method,
-      headers: authorized ? { authorization: `Bearer ${key}` } : {},
-    };
+  const control = (
+    path: string,
+    method: string,
+    body?: string,
+    authorized = true,
+    failingKey?: string,
+  ) => {
+    const headers: Record<string, string> = {};
+
+    if (authorized) headers["authorization"] = `Bearer ${controlKey}`;
+
+    if (failingKey) headers["x-test-failing-key"] = failingKey;
+    const options: WorkerRequestInit = { method, headers };
 
     if (body !== undefined) options.body = body;
 
@@ -70,19 +89,21 @@ const startAuthWorker = async () => {
   return { runtime, control, storage: await runtime.getKVNamespace("AUTH_CONFIG") };
 };
 
-it("revokes only the selected organization's sign-in and MCP discovery entry", async () => {
+it("revokes only the selected organization's sign-in and MCP discovery entries", async () => {
   const { runtime, control, storage } = await startAuthWorker();
+  const tenantId = "00000000-0000-4000-8000-0000000000aa";
 
   try {
     for (const organizationId of ["revoked", "retained"]) {
       const configuration = authConfiguration.parse({
         organizationId,
-        provider: { type: "google", domain: "example.test" },
+        provider: { type: "entra", authority: "https://login.microsoftonline.com", tenantId },
         clientId: "synthetic-client",
         clientSecret: "synthetic-secret",
         cookieSecret: Buffer.alloc(32, 1).toString("base64url"),
         domain: "apps.example.test",
         redirectUrl: `https://auth.apps.example.test/oauth2/${organizationId}/callback`,
+        emailDomains: [`${organizationId}.example`, "shared.example"],
       });
 
       expect(
@@ -91,9 +112,47 @@ it("revokes only the selected organization's sign-in and MCP discovery entry", a
       ).toBe(204);
       const lookup = mcpOrganizationKey(configuration);
 
-      if (!lookup) throw new Error("Expected a Google organization lookup");
+      if (!lookup) throw new Error("Expected an Entra tenant lookup");
       expect(await storage.get(lookup)).toBe(organizationId);
+
+      for (const key of mcpDomainKeys(configuration))
+        expect(await storage.get(key)).toBe(organizationId);
     }
+
+    // Republishing without a domain removes only that organization's entry for it.
+    const narrowed = authConfiguration.parse({
+      organizationId: "retained",
+      provider: { type: "entra", authority: "https://login.microsoftonline.com", tenantId },
+      clientId: "synthetic-client",
+      clientSecret: "synthetic-secret",
+      cookieSecret: Buffer.alloc(32, 1).toString("base64url"),
+      domain: "apps.example.test",
+      redirectUrl: "https://auth.apps.example.test/oauth2/retained/callback",
+      emailDomains: ["retained.example"],
+    });
+
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const dropped = `${mcpDomainPrefix("shared.example")}retained`;
+
+    // The discovery list keeps a key whose removal failed, so the retry removes it.
+    expect(
+      (
+        await control(
+          authConfigurationKey("retained"),
+          "PUT",
+          JSON.stringify(narrowed),
+          true,
+          dropped,
+        )
+      ).status,
+    ).toBe(503);
+    expect(await storage.get(dropped)).toBe("retained");
+    expect(
+      (await control(authConfigurationKey("retained"), "PUT", JSON.stringify(narrowed))).status,
+    ).toBe(204);
+    expect(await storage.get(`${mcpDomainPrefix("shared.example")}retained`)).toBeNull();
+    expect(await storage.get(`${mcpDomainPrefix("shared.example")}revoked`)).toBe("revoked");
+    expect(await storage.get(`${mcpDomainPrefix("retained.example")}retained`)).toBe("retained");
 
     expect(
       (
@@ -111,12 +170,37 @@ it("revokes only the selected organization's sign-in and MCP discovery entry", a
     const configurationKey = authConfigurationKey("revoked");
     expect((await control(configurationKey, "DELETE", undefined, false)).status).toBe(403);
     expect(await storage.get(configurationKey)).not.toBeNull();
+    // Like an organization published before discovery lists existed.
+    await storage.delete("organizations/revoked/discovery");
+    expect(
+      (
+        await control(
+          configurationKey,
+          "DELETE",
+          undefined,
+          true,
+          `${mcpDomainPrefix("shared.example")}revoked`,
+        )
+      ).status,
+    ).toBe(503);
+    // Sign-in is revoked even though index cleanup failed; the retry removes the rest.
+    expect(await storage.get(configurationKey)).toBeNull();
+    expect((await runtime.dispatchFetch("https://ledger.apps.example.test/")).status).toBe(503);
+    expect(await storage.get(`${mcpDomainPrefix("shared.example")}revoked`)).toBe("revoked");
+    // Its derived list is gone with the configuration, so the remaining key is saved.
+    expect(
+      JSON.parse(z.string().parse(await storage.get("organizations/revoked/discovery"))),
+    ).toEqual([`${mcpDomainPrefix("shared.example")}revoked`]);
     expect((await control(configurationKey, "DELETE")).status).toBe(204);
+    expect(await storage.get("organizations/revoked/discovery")).toBeNull();
     expect((await control(configurationKey, "DELETE")).status).toBe(204);
     expect(await storage.get(configurationKey)).toBeNull();
-    expect(await storage.get("mcp/organizations/google/example.test/revoked")).toBeNull();
+    expect(await storage.get(`${mcpTenantPrefix(tenantId)}revoked`)).toBeNull();
     expect(await storage.get(authConfigurationKey("retained"))).not.toBeNull();
-    expect(await storage.get("mcp/organizations/google/example.test/retained")).toBe("retained");
+    expect(await storage.get(`${mcpTenantPrefix(tenantId)}retained`)).toBe("retained");
+    expect(await storage.get(`${mcpDomainPrefix("revoked.example")}revoked`)).toBeNull();
+    expect(await storage.get(`${mcpDomainPrefix("shared.example")}revoked`)).toBeNull();
+    expect(await storage.get(`${mcpDomainPrefix("retained.example")}retained`)).toBe("retained");
     expect(await (await control(configurationKey, "GET")).json()).toMatchObject({
       state: "waiting",
     });
@@ -127,6 +211,41 @@ it("revokes only the selected organization's sign-in and MCP discovery entry", a
         (await runtime.dispatchFetch(`https://auth.apps.example.test/oauth2/revoked/${action}`))
           .status,
       ).toBe(404);
+
+    // Keys from a failed first publication are listed before they are written,
+    // so revoking the organization removes them.
+    const stranded = authConfiguration.parse({
+      organizationId: "stranded",
+      provider: { type: "entra", authority: "https://login.microsoftonline.com", tenantId },
+      clientId: "synthetic-client",
+      clientSecret: "synthetic-secret",
+      cookieSecret: Buffer.alloc(32, 1).toString("base64url"),
+      domain: "apps.example.test",
+      redirectUrl: "https://auth.apps.example.test/oauth2/stranded/callback",
+      emailDomains: ["first.example", "second.example"],
+    });
+
+    const [written, failed] = mcpDomainKeys(stranded);
+
+    if (!written || !failed) throw new Error("Expected two domain keys");
+    expect(
+      (
+        await control(
+          authConfigurationKey("stranded"),
+          "PUT",
+          JSON.stringify(stranded),
+          true,
+          failed,
+        )
+      ).status,
+    ).toBe(503);
+    expect(await storage.get(written)).toBe("stranded");
+    expect((await control(authConfigurationKey("stranded"), "DELETE")).status).toBe(204);
+
+    for (const key of [written, failed, `${mcpTenantPrefix(tenantId)}stranded`])
+      expect(await storage.get(key)).toBeNull();
+    expect(await storage.get("organizations/stranded/discovery")).toBeNull();
+    error.mockRestore();
   } finally {
     await runtime.dispose();
   }

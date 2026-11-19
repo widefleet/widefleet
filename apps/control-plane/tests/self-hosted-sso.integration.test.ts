@@ -150,6 +150,11 @@ describe("Operator-trusted self-hosted SSO", () => {
         expect.objectContaining({ domain: "optional.example.test", verified: false }),
       ]),
     );
+    // Operator trust admits the optional domain, so MCP sign-in can find it too.
+    expect(environment.authControl.read().configuration?.emailDomains?.toSorted()).toEqual([
+      "optional.example.test",
+      "verified.example.test",
+    ]);
 
     const admission = createAuthenticationAdmission(
       environment.database.db,
@@ -165,6 +170,9 @@ describe("Operator-trusted self-hosted SSO", () => {
       ),
     ).toBeNull();
     await environment.settings.removeDomain(principal(), "verified.example.test", false);
+    expect(environment.authControl.read().configuration?.emailDomains).toEqual([
+      "optional.example.test",
+    ]);
     expect(await environment.settings.read(principal())).toMatchObject({
       ssoRequired: true,
       sso: { domainVerified: false },
@@ -183,6 +191,7 @@ describe("Operator-trusted self-hosted SSO", () => {
       activation: { state: "active" },
     });
     expect(await admission.signInProvider("person@optional.example.test")).toBeNull();
+    expect(environment.authControl.read().configuration?.emailDomains).toBeUndefined();
     expect((await login()).session?.user.id).toBeTruthy();
   });
 

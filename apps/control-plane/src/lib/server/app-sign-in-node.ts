@@ -31,7 +31,7 @@ export const createAppSignIn = (
         signal: AbortSignal.timeout(15_000),
       };
 
-      if (method === "PUT") options.body = body ?? null;
+      if (method === "PUT" || method === "POST") options.body = body ?? null;
 
       const response = await fetch(
         new URL(`${authControlPath}${path}`, configuration.PLATFORM_APP_RUNTIME_URL),

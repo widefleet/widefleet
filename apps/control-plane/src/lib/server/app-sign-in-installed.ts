@@ -1,6 +1,8 @@
 import { authConfiguration } from "@platform/auth-proxy";
 import { authConfigurationKey, configurationRevision } from "@platform/auth-proxy/publication";
 import { mcpLoginConfiguration } from "@platform/auth-proxy/mcp-login";
+import { mcpCliLogin } from "@platform/auth-proxy/mcp-cli-login";
+import { z } from "zod";
 import { activationStatus } from "@platform/contracts";
 import type { AppSignIn } from "./app-sign-in.ts";
 import { appCallbackUrl } from "./app-sign-in.ts";
@@ -12,7 +14,7 @@ export const createInstalledAppSignIn = (
   cookieSecret: string | undefined,
   request: (
     path: string,
-    method: "GET" | "PUT" | "DELETE",
+    method: "GET" | "PUT" | "POST" | "DELETE",
     body?: string,
   ) => Promise<{ text(): Promise<string> }>,
   propagation: "immediate" | "eventual",
@@ -22,6 +24,7 @@ export const createInstalledAppSignIn = (
     identity: Parameters<AppSignIn["publish"]>[0],
     clientSecret: string,
     organizationName?: string,
+    emailDomains: string[] = [],
   ) =>
     authConfiguration.parse({
       organizationId,
@@ -33,6 +36,7 @@ export const createInstalledAppSignIn = (
       cookieSecret,
       domain: configuration.APP_DOMAIN,
       redirectUrl: appCallbackUrl(configuration, organizationId),
+      emailDomains: emailDomains.length ? emailDomains : undefined,
       embeddingOrigins: identity.embeddingOrigins.length ? identity.embeddingOrigins : undefined,
     });
 
@@ -41,10 +45,10 @@ export const createInstalledAppSignIn = (
     revoke: async () => {
       await request(`/${authConfigurationKey(organizationId)}`, "DELETE");
     },
-    revision: (identity, clientSecret, organizationName) =>
-      configurationRevision(prepare(identity, clientSecret, organizationName)),
-    publish: async (identity, clientSecret, organizationName) => {
-      const input = prepare(identity, clientSecret, organizationName);
+    revision: (identity, clientSecret, organizationName, emailDomains) =>
+      configurationRevision(prepare(identity, clientSecret, organizationName, emailDomains)),
+    publish: async (identity, clientSecret, organizationName, emailDomains) => {
+      const input = prepare(identity, clientSecret, organizationName, emailDomains);
       const expectedRevision = await configurationRevision(input);
       const origin = new URL(input.redirectUrl);
       origin.hostname = `mcp.${configuration.APP_DOMAIN}`;
@@ -52,20 +56,6 @@ export const createInstalledAppSignIn = (
       const login = mcpLoginConfiguration.parse({
         origin: origin.origin,
         platformUrl: configuration.PLATFORM_URL,
-        google:
-          configuration.GOOGLE_CLIENT_ID && configuration.GOOGLE_CLIENT_SECRET
-            ? {
-                clientId: configuration.GOOGLE_CLIENT_ID,
-                clientSecret: configuration.GOOGLE_CLIENT_SECRET,
-              }
-            : undefined,
-        microsoft:
-          configuration.MICROSOFT_CLIENT_ID && configuration.MICROSOFT_CLIENT_SECRET
-            ? {
-                clientId: configuration.MICROSOFT_CLIENT_ID,
-                clientSecret: configuration.MICROSOFT_CLIENT_SECRET,
-              }
-            : undefined,
       });
 
       await request("/mcp/login", "PUT", JSON.stringify(login));
@@ -109,5 +99,13 @@ export const createInstalledAppSignIn = (
           (propagation === "eventual" ? "KV propagation can take 60 seconds or longer. " : "") +
           "Changing the identity provider or app client requires signing in again.",
       }),
+    verifyCliLogin: async (code) =>
+      z
+        .object({ login: mcpCliLogin.nullable() })
+        .parse(
+          JSON.parse(
+            await (await request("/mcp/cli-login", "POST", JSON.stringify({ code }))).text(),
+          ),
+        ).login,
   };
 };
