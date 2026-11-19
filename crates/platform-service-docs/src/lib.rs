@@ -81,7 +81,8 @@ pub fn extract(
             continue;
         };
         let original = if entry.is_some() {
-            original_declaration(compiled).filter(|node| app_source(*node, &sources.project))
+            original_declaration(compiled, &mut checker)
+                .filter(|node| app_source(*node, &sources.project))
         } else {
             sources.original(program, source, compiled, &lookup)
         };
@@ -243,16 +244,25 @@ fn app_source(node: P<Node>, project: &str) -> bool {
     })
 }
 
-/// Entry mode: the class or object literal an export declares, without the
-/// type assertions a bundle would have removed.
-fn original_declaration(mut node: P<Node>) -> Option<P<Node>> {
+/// Entry mode: the class or object literal an export declares. Type assertions
+/// a bundle would remove are unwrapped, and identifiers resolve to their
+/// declarations, as in `export default (handler satisfies Handler)`.
+fn original_declaration(mut node: P<Node>, checker: &mut Checker) -> Option<P<Node>> {
+    let mut seen = HashSet::new();
     loop {
+        if !seen.insert(node) {
+            return None;
+        }
         if ast::is_class_like(node) || node.kind() == Kind::ObjectLiteralExpression {
             return Some(node);
         }
         node = match node.kind() {
             Kind::SatisfiesExpression | Kind::AsExpression | Kind::ParenthesizedExpression => {
                 node.expression()?
+            }
+            Kind::Identifier => {
+                let symbol = checker.get_symbol_at_location_exported(node)?;
+                declaration(symbol, checker)?
             }
             _ => return None,
         };

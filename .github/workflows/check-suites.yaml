@@ -175,6 +175,7 @@ jobs:
           cargo build --workspace
           cargo clippy -p platform-service-docs-wasm --target wasm32-wasip1 -- -D warnings
           cargo build --profile wasm -p platform-service-docs-wasm --target wasm32-wasip1
+          RUN_WASM_TESTS=1 pnpm exec vitest run packages/service-docs
           RUN_CLI_TESTS=1 pnpm exec vitest run apps/control-plane/tests/cli.test.ts apps/control-plane/tests/network-cli.test.ts apps/control-plane/tests/access-cli.test.ts apps/control-plane/tests/app-services-cli.test.ts apps/control-plane/tests/service-documentation.test.ts apps/control-plane/tests/app-services.integration.test.ts apps/control-plane/tests/workflows-cli.test.ts apps/control-plane/tests/auth-cli.test.ts apps/control-plane/tests/configuration-cli.test.ts apps/control-plane/tests/discovery-cli.test.ts apps/control-plane/tests/auth-cli.integration.test.ts apps/control-plane/tests/organization-selection.integration.test.ts apps/control-plane/tests/organization-login.integration.test.ts apps/control-plane/tests/reporting-cli.test.ts
       - name: Test CLI login through the browser
         if: matrix.suite == 'rust-runtime'

@@ -118,8 +118,21 @@ impl<'a> Sources<'a> {
         options.no_emit = Tristate::True;
         config.parsed_config.compiler_options = Some(P::new(options));
         if let Some(entry) = entry {
-            // Entry mode: only the original entry module and what it imports.
-            config.parsed_config.file_names = vec![compiler_path(entry)];
+            // Entry mode: the original entry module, what it imports, and the
+            // app's own declaration files from tsconfig, such as global types.
+            let project = compiler_path(project);
+            let mut file_names = vec![compiler_path(entry)];
+            file_names.extend(config.parsed_config.file_names.iter().filter_map(|file| {
+                let file = compiler_path(file);
+                let path = Path::new(&file);
+                (tspath::is_declaration_file_name(&file)
+                    && path.starts_with(&project)
+                    && !path
+                        .components()
+                        .any(|part| part.as_os_str() == "node_modules"))
+                .then_some(file)
+            }));
+            config.parsed_config.file_names = file_names;
         } else {
             config.parsed_config.file_names.push(self.bundle.clone());
             config
