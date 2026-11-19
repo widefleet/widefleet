@@ -228,6 +228,7 @@ export const createAuthHandler = (
     appId: string,
     organizationId: string,
     caller: z.infer<typeof appCaller>,
+    frameAncestors: string[],
   ) => Promise<Response>,
 ) => ({
   async fetch(request: Request) {
@@ -266,9 +267,10 @@ export const createAuthHandler = (
 
       // App hostnames select their owner from the published route. Only the auth
       // host can dispatch by callback path; the proxy checks that host below.
-      const callback = /^\/oauth2\/([A-Za-z0-9_-]+)\/(?:start|callback|error|sign_out)$/.exec(
-        url.pathname,
-      );
+      const callback =
+        /^\/oauth2\/([A-Za-z0-9_-]+)\/(?:start|callback|error|sign_out|embedded(?:\/session)?)$/.exec(
+          url.pathname,
+        );
 
       const organizationId = route?.organizationId ?? callback?.[1];
 
@@ -294,7 +296,13 @@ export const createAuthHandler = (
           if (!route || route.organizationId !== organizationId) return reply(404, "Not found");
           phase = "app-runtime";
 
-          return runApp(forwarded, route.appId, route.organizationId, caller);
+          return runApp(
+            forwarded,
+            route.appId,
+            route.organizationId,
+            caller,
+            installed.configuration.embeddingOrigins ?? [],
+          );
         },
       });
 

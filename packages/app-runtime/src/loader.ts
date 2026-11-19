@@ -123,6 +123,7 @@ const dispatchApp = async (
     appId: string;
     organizationId: string;
     caller: z.infer<typeof appCaller>;
+    frameAncestors: string[];
   } | null,
 ) => {
   const url = new URL(request.url);
@@ -223,7 +224,8 @@ const dispatchApp = async (
   if (request.method === "GET" || request.method === "HEAD") {
     const asset = await serveAsset(request, environment, app);
 
-    if (asset.status !== 404) return browserPolicy(asset, app.network.policy.browser);
+    if (asset.status !== 404)
+      return browserPolicy(asset, app.network.policy.browser, authenticated?.frameAncestors);
   }
 
   const proof = authenticated
@@ -247,6 +249,7 @@ const dispatchApp = async (
         .fetch(request, { signal: request.signal }),
     ),
     app.network.policy.browser,
+    authenticated?.frameAncestors,
   );
 };
 
@@ -346,8 +349,15 @@ export default {
       return manageRuntime(request, environment, context);
     }
 
-    return createAuthHandler(environment, (authenticated, appId, organizationId, caller) =>
-      dispatchApp(authenticated, environment, context, { appId, organizationId, caller }),
+    return createAuthHandler(
+      environment,
+      (authenticated, appId, organizationId, caller, frameAncestors) =>
+        dispatchApp(authenticated, environment, context, {
+          appId,
+          organizationId,
+          caller,
+          frameAncestors,
+        }),
     ).fetch(request);
   },
   async scheduled(

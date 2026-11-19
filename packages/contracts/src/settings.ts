@@ -111,13 +111,36 @@ export const oidcProviderInput = z.strictObject({
   }),
 });
 
+// A page that may frame apps and supply a host sign-in token, such as a Microsoft
+// Teams tab. A leading `*.` matches subdomains, as in a CSP host source.
+export const embeddingOrigin = z
+  .string()
+  .trim()
+  .toLowerCase()
+  // Browsers omit the default port from origins, so compare without it.
+  .overwrite((value) => value.replace(/^(https:\/\/[^/]+):443$/, "$1"))
+  .regex(
+    /^https:\/\/(?:\*\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?(?::[0-9]{1,5})?$/,
+    "Use an HTTPS origin such as https://teams.microsoft.com or https://*.example.com",
+  );
+
+export const maxEmbeddingOrigins = 20;
+
+export const embeddingOrigins = z
+  .array(embeddingOrigin)
+  .max(maxEmbeddingOrigins)
+  .refine((origins) => new Set(origins).size === origins.length, "Enter each origin once");
+
 export const installationSettings = z.strictObject({
   directory: client.nullable().default(null),
   externallyManaged: z.boolean().default(false),
+  embeddingOrigins: embeddingOrigins.default([]),
 });
 
 export const settingsInput = installationSettings.extend({
   directory: clientInput.nullable().default(null),
+  // An omitted list preserves the saved origins, so older settings files keep them.
+  embeddingOrigins: embeddingOrigins.optional(),
   sso: oidcProviderInput.nullable(),
 });
 

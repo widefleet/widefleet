@@ -53,7 +53,9 @@
   });
 
   const useWidefleet = () =>
-    writer.save(() => settingsInput.parse({ ...view.settings, sso: null, directory: null }));
+    writer.save(() =>
+      settingsInput.parse({ ...view.settings, sso: null, directory: null, embeddingOrigins: [] }),
+    );
 
   const toggleExternal = async () => {
     busy = true;

@@ -107,6 +107,9 @@ const createOrganizationSettingsService = (
       if (sso && companySsoAvailable(configuration, sso) && sso.required) {
         identity = ssoRuntimeIdentity(sso);
 
+        if (identity.provider.type === "entra")
+          identity.embeddingOrigins = state.settings.embeddingOrigins;
+
         if (state.settings.directory)
           identity.directory = {
             clientId: state.settings.directory.clientId,
@@ -348,6 +351,16 @@ const createOrganizationSettingsService = (
         message: "Microsoft Graph directory search requires Entra app identity",
       });
 
+    const embedding =
+      next.embeddingOrigins ??
+      (await readOrganizationSettings(database, organizationId)).embeddingOrigins;
+
+    if (embedding.length && next.sso?.appIdentityType !== "entra")
+      throw new InvalidOperation({
+        code: "BAD_REQUEST",
+        message: "Embedding apps requires Microsoft Entra app identity",
+      });
+
     return appSignIn
       ? appSignIn.plan(null)
       : {
@@ -380,7 +393,10 @@ const createOrganizationSettingsService = (
       await lockSettings(transaction);
 
       const [current] = await transaction
-        .select({ directorySecret: organizationSettings.directorySecret })
+        .select({
+          directorySecret: organizationSettings.directorySecret,
+          settings: organizationSettings.settings,
+        })
         .from(organizationSettings)
         .where(eq(organizationSettings.organizationId, organizationId));
 
@@ -405,6 +421,9 @@ const createOrganizationSettingsService = (
           settings: installationSettings.parse({
             directory,
             externallyManaged: next.externallyManaged,
+            embeddingOrigins:
+              next.embeddingOrigins ??
+              installationSettings.parse(current?.settings ?? {}).embeddingOrigins,
           }),
         })
         .where(eq(organizationSettings.organizationId, organizationId));

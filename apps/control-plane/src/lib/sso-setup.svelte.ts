@@ -74,6 +74,9 @@ export type SsoDraft = Omit<z.infer<typeof settingsInput>, "sso"> & {
 
 export const ssoDraft = (view: View, organizationId: string): SsoDraft => ({
   ...structuredClone(view.settings),
+  // Embedding hosts change in their own section. Leaving them out of the
+  // connection draft keeps a connection save from restoring an older list.
+  embeddingOrigins: undefined,
   directory: view.settings.directory ? { ...view.settings.directory, clientSecret: "" } : null,
   sso: view.sso
     ? {

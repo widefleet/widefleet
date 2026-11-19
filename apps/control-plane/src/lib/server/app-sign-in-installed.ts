@@ -37,6 +37,7 @@ export const createInstalledAppSignIn = (
       domain: configuration.APP_DOMAIN,
       redirectUrl: appCallbackUrl(configuration, organizationId),
       emailDomains: emailDomains.length ? emailDomains : undefined,
+      embeddingOrigins: identity.embeddingOrigins.length ? identity.embeddingOrigins : undefined,
     });
 
   return {

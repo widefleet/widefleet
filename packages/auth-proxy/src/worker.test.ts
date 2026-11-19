@@ -13,10 +13,9 @@ import {
 import { createAuthHandler, manageAuthConfiguration } from "./worker.ts";
 import { authConfigurationKey, authControlPath } from "./publication.ts";
 
-it("revokes only the selected organization's sign-in and MCP discovery entries", async () => {
-  const key = "local-auth-proxy-control-key-never-deploy";
-  const tenantId = "00000000-0000-4000-8000-0000000000aa";
+const controlKey = "local-auth-proxy-control-key-never-deploy";
 
+const startAuthWorker = async () => {
   const compiled = await build({
     stdin: {
       // A test header makes writing or deleting one KV key fail, as a transient storage error would.
@@ -58,38 +57,43 @@ it("revokes only the selected organization's sign-in and MCP discovery entries",
           },
           env: {
             AUTH_CONFIG: { type: "kv", id: "auth" },
-            WIDEFLEET_CONTROL_TOKEN: { type: "json", value: key },
+            WIDEFLEET_CONTROL_TOKEN: { type: "json", value: controlKey },
           },
         },
       },
     ],
   });
 
+  const control = (
+    path: string,
+    method: string,
+    body?: string,
+    authorized = true,
+    failingKey?: string,
+  ) => {
+    const headers: Record<string, string> = {};
+
+    if (authorized) headers["authorization"] = `Bearer ${controlKey}`;
+
+    if (failingKey) headers["x-test-failing-key"] = failingKey;
+    const options: WorkerRequestInit = { method, headers };
+
+    if (body !== undefined) options.body = body;
+
+    return runtime.dispatchFetch(
+      `https://auth.apps.example.test${authControlPath}/${path}`,
+      options,
+    );
+  };
+
+  return { runtime, control, storage: await runtime.getKVNamespace("AUTH_CONFIG") };
+};
+
+it("revokes only the selected organization's sign-in and MCP discovery entries", async () => {
+  const { runtime, control, storage } = await startAuthWorker();
+  const tenantId = "00000000-0000-4000-8000-0000000000aa";
+
   try {
-    const storage = await runtime.getKVNamespace("AUTH_CONFIG");
-
-    const control = (
-      path: string,
-      method: string,
-      body?: string,
-      authorized = true,
-      failingKey?: string,
-    ) => {
-      const headers: Record<string, string> = {};
-
-      if (authorized) headers["authorization"] = `Bearer ${key}`;
-
-      if (failingKey) headers["x-test-failing-key"] = failingKey;
-      const options: WorkerRequestInit = { method, headers };
-
-      if (body !== undefined) options.body = body;
-
-      return runtime.dispatchFetch(
-        `https://auth.apps.example.test${authControlPath}/${path}`,
-        options,
-      );
-    };
-
     for (const organizationId of ["revoked", "retained"]) {
       const configuration = authConfiguration.parse({
         organizationId,
@@ -242,6 +246,52 @@ it("revokes only the selected organization's sign-in and MCP discovery entries",
       expect(await storage.get(key)).toBeNull();
     expect(await storage.get("organizations/stranded/discovery")).toBeNull();
     error.mockRestore();
+  } finally {
+    await runtime.dispose();
+  }
+});
+
+it("routes embedded sign-in on the auth host to its organization", async () => {
+  const { runtime, control } = await startAuthWorker();
+
+  try {
+    const configuration = authConfiguration.parse({
+      organizationId: "embedded",
+      provider: { type: "entra", tenantId: "00000000-0000-4000-8000-000000000001" },
+      clientId: "00000000-0000-4000-8000-000000000002",
+      clientSecret: "synthetic-secret",
+      cookieSecret: Buffer.alloc(32, 1).toString("base64url"),
+      domain: "apps.example.test",
+      redirectUrl: "https://auth.apps.example.test/oauth2/embedded/callback",
+      embeddingOrigins: ["https://portal.example.test"],
+    });
+
+    await control(authConfigurationKey("embedded"), "PUT", JSON.stringify(configuration));
+    await control(
+      "apps/ledger.apps.example.test",
+      "PUT",
+      JSON.stringify({
+        organizationId: "embedded",
+        appId: "00000000-0000-4000-8000-000000000003",
+        access: { revision: 1, groups: [] },
+      }),
+    );
+
+    const page = await runtime.dispatchFetch(
+      `https://auth.apps.example.test/oauth2/embedded/embedded?rd=${encodeURIComponent("https://ledger.apps.example.test/")}`,
+    );
+
+    expect(page.status).toBe(200);
+    expect(page.headers.get("content-security-policy")).toContain(
+      "frame-ancestors https://portal.example.test",
+    );
+    expect(
+      (
+        await runtime.dispatchFetch(
+          "https://auth.apps.example.test/oauth2/embedded/embedded/session",
+        )
+      ).status,
+    ).toBe(401);
   } finally {
     await runtime.dispose();
   }

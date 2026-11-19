@@ -126,6 +126,47 @@ test("configures self-hosted SSO without a company domain or DNS proof", async (
     await page.getByRole("button", { name: "Remove example.test", exact: true }).focus();
     await page.keyboard.press("Enter");
     await expect(page.getByText("No email domains", { exact: true })).toBeVisible();
+
+    await expect(page.getByText("No embedding hosts", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Add host", exact: true }).click();
+    await page.getByLabel("Origin", { exact: true }).fill("http://teams.example.test");
+    await page.getByRole("dialog").getByRole("button", { name: "Add host", exact: true }).click();
+    await expect(page.getByRole("dialog").getByRole("alert")).toContainText("Use an HTTPS origin");
+    await page.getByLabel("Origin", { exact: true }).fill("https://*.Teams.example.test");
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page.getByRole("list", { name: "Embedding hosts" })).toContainText(
+      "https://*.teams.example.test",
+    );
+
+    for (const theme of ["light", "dark"] as const) {
+      await page.emulateMedia({ colorScheme: theme });
+
+      for (const width of [1280, 390]) {
+        await page.setViewportSize({ width, height: 960 });
+        await page.screenshot({
+          path: `../../.local/sso-embedding-${theme}-${width}.png`,
+          fullPage: true,
+        });
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        ).toBe(true);
+      }
+    }
+
+    await page.setViewportSize({ width: 1280, height: 960 });
+    // Saving an open connection form must not restore a host removed meanwhile.
+    await page.getByRole("button", { name: "Edit configuration", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Remove https://*.teams.example.test", exact: true })
+      .focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByText("No embedding hosts", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(
+      page.getByRole("button", { name: "Edit configuration", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("No embedding hosts", { exact: true })).toBeVisible();
     // A completed company sign-in links the administrator, which activation requires.
     await linkCompanyAccount(environment.database.db, environment.owner.id);
     await page.goto("/settings/sso/setup?step=activate");

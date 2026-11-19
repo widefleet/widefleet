@@ -36,7 +36,7 @@ export const issuer = (provider: z.infer<typeof companyProvider>) =>
     ? `${provider.authority}/${provider.tenantId}/v2.0`
     : provider.issuer.replace(/\/$/, "");
 
-const graphGroups = async (accessToken: string) => {
+export const graphGroups = async (accessToken: string) => {
   const collected = new Set<string>();
   const visited = new Set<string>();
   let next: string | undefined = "https://graph.microsoft.com/v1.0/me/transitiveMemberOf";

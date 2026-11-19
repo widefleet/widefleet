@@ -1,6 +1,7 @@
 import {
   companyDomain,
   companyProvider,
+  embeddingOrigins,
   googleGroupsScope,
   maxCompanyDomains,
   organizationIdentifier,
@@ -29,8 +30,17 @@ export const authConfiguration = z
     redirectUrl: z.url(),
     // Company email domains the organization's SSO admits, for MCP organization discovery.
     emailDomains: z.array(companyDomain).max(maxCompanyDomains).optional(),
+    // Omitted unless configured, so existing publications keep their revision.
+    embeddingOrigins: embeddingOrigins.min(1).optional(),
   })
   .superRefine((configuration, context) => {
+    if (configuration.embeddingOrigins && configuration.provider.type !== "entra")
+      context.addIssue({
+        code: "custom",
+        path: ["embeddingOrigins"],
+        message: "Embedded sign-in requires Microsoft Entra app identity",
+      });
+
     if (!z.url().safeParse(configuration.redirectUrl).success) return;
     const url = new URL(configuration.redirectUrl);
 

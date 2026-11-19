@@ -393,6 +393,7 @@ describe("Organization login settings", () => {
     expect(first.settings).toEqual({
       directory: null,
       externallyManaged: false,
+      embeddingOrigins: [],
     });
     expect(first.error).toBeNull();
     await settings.publish(organizationId);
