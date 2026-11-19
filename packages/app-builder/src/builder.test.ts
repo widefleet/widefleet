@@ -463,15 +463,27 @@ describe.runIf(process.env["RUN_BUILDER_TESTS"] === "1")("app builder", () => {
     expect(dependency.status).toBe(422);
     expect(await failure(dependency)).toBe("Could not resolve left-pad");
 
-    const required = await post("/bundle", {
+    // Code that only mentions a require() call in a string builds.
+    const mentioned = await post("/bundle", {
       files: {
         ...project,
-        "src/app.ts": 'const pad = require("left-pad");\nexport default { pad };\n',
+        "src/app.ts": "export default { fetch: () => new Response(\"__require('left-pad')\") };\n",
       },
     });
 
-    expect(required.status).toBe(422);
-    expect(await failure(required)).toBe("Could not resolve left-pad");
+    expect(mentioned.status).toBe(200);
+
+    // As with the CLI's esbuild, a require() of a package that is not
+    // installed stays for run time, as optional dependencies use it.
+    const optional = await post("/bundle", {
+      files: {
+        ...project,
+        "src/app.ts":
+          'let pad;\ntry {\n  pad = require("left-pad");\n} catch {}\nexport default { pad };\n',
+      },
+    });
+
+    expect(optional.status).toBe(200);
   });
 
   it("reports project errors", async () => {
