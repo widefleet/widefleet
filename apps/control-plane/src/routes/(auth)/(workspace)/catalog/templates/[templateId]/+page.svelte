@@ -25,10 +25,10 @@
       <p class="text-muted-foreground mt-2 text-sm leading-6">{template.description}</p>
     </div>
     {#if template.installable}
-      <form {...installTemplate}>
+      <form {...installTemplate} class="w-full sm:w-auto">
         <OrganizationField field={installTemplate.fields.organizationId} />
         <input {...installTemplate.fields.templateId.as("hidden", template.id)} />
-        <Button type="submit" disabled={installTemplate.pending > 0}
+        <Button type="submit" class="w-full sm:w-auto" disabled={installTemplate.pending > 0}
           >{installTemplate.pending ? "Installing …" : "Install"}</Button
         >
       </form>
