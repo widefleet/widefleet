@@ -248,6 +248,67 @@ it("builds a template's sources and deploys them as the CLI would", async () => 
   expect(resumed.deployment).toMatchObject({ appId: empty.id, status: "queued" });
 });
 
+it("does not install over an app deployed while the template builds", async () => {
+  let duringBuild = async () => {};
+
+  const racing = createAppBuilder({
+    bundle: async () => {
+      await duringBuild();
+
+      return bundleResponse();
+    },
+    document: async () => Response.json({ documentation, warnings: [] }),
+  });
+
+  const runtime = await runtimeWith(racing);
+
+  const created = await createApi(runtime)(
+    new Request("http://localhost/api/v1/apps", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ slug: "mail-race", displayName: "mail-race" }),
+    }),
+  );
+
+  const app = contract.app.parse(await created.json());
+
+  const principal = (
+    await runtime.identity.authenticate(new Request("http://localhost"), "platform:write")
+  ).unwrap();
+
+  // Someone deploys their own code to the empty app during the build.
+  duringBuild = async () => {
+    const session = (await runtime.uploads.start(principal, app.id, {})).unwrap();
+
+    (
+      await runtime.uploads.publish(
+        principal,
+        app.id,
+        contract.workerMetadata.parse({
+          main_module: "worker.js",
+          compatibility_date: "2026-10-01",
+          bindings: [],
+          assets: { upload_session: session.id, binding: "ASSETS" },
+        }),
+        [{ name: "worker.js", type: "esm", bytes: new TextEncoder().encode(worker) }],
+        crypto.randomUUID(),
+      )
+    ).unwrap();
+  };
+
+  const response = await install(runtime, "gmail", { name: "mail-race" });
+
+  expect(response.status).toBe(409);
+  expect(await response.text()).toContain("An app named mail-race already exists");
+
+  const deployments = await environment.database.db.query.deployments.findMany({
+    where: (deployments, { eq }) => eq(deployments.appId, app.id),
+  });
+
+  // Only the concurrent deployment exists.
+  expect(deployments).toHaveLength(1);
+});
+
 it("reports build errors and missing templates", async () => {
   const runtime = await runtimeWith(builder);
 

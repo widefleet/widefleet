@@ -12,7 +12,7 @@ import type { createAppService } from "./apps.ts";
 import type { Configuration } from "./config.ts";
 import { InvalidOperation } from "./errors.ts";
 import type { Principal } from "./identity.ts";
-import type { createUploadService } from "./uploads.ts";
+import { appAlreadyDeployed, type createUploadService } from "./uploads.ts";
 
 const encoder = new TextEncoder();
 
@@ -105,9 +105,25 @@ export const createTemplateInstalls = (
           : []),
       ];
 
-      const deployment = yield* Result.await(
-        uploads.publish(principal, installed.id, metadata, modules, crypto.randomUUID()),
+      // Publishing checks again, under the app's lock, that the app was not
+      // deployed while the template was building.
+      const published = await uploads.publish(
+        principal,
+        installed.id,
+        metadata,
+        modules,
+        crypto.randomUUID(),
+        { firstDeployment: true },
       );
+
+      if (
+        published.isErr() &&
+        published.error instanceof InvalidOperation &&
+        published.error.message === appAlreadyDeployed
+      )
+        return yield* nameTaken();
+
+      const deployment = yield* published;
 
       return Result.ok(
         contract.templateInstall.parse({
