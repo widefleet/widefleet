@@ -1,7 +1,7 @@
 import type { KVNamespace } from "@cloudflare/workers-types";
 import { organizationIdentifier, type appCaller } from "@platform/contracts";
-import type { z } from "zod";
-import { authConfiguration } from "./configuration.ts";
+import { z } from "zod";
+import { authConfiguration, type AuthConfiguration } from "./configuration.ts";
 import {
   authControlPath,
   authConfigurationKey,
@@ -15,6 +15,7 @@ import {
   encodeMcpLogin,
   decodeMcpLogin,
   mcpLoginConfiguration,
+  mcpDomainKeys,
   mcpLoginKey,
   mcpOrganizationKey,
 } from "./mcp-login.ts";
@@ -29,6 +30,31 @@ const reply = (status: number, message: string) =>
     status,
     headers: { "cache-control": "no-store" },
   });
+
+// KV keys through which the MCP sign-in finds an organization without the control plane.
+const discoveryKeys = (configuration: AuthConfiguration) => [
+  ...new Set(
+    [mcpOrganizationKey(configuration), ...mcpDomainKeys(configuration)].filter(
+      (key) => key !== null,
+    ),
+  ),
+];
+
+const discoveryListKey = (organizationId: string) =>
+  `organizations/${organizationIdentifier.parse(organizationId)}/discovery`;
+
+const discoveryList = z.array(z.string().regex(/^mcp\/(?:organizations|domains)\//));
+
+// Every index key that may exist for the organization, including keys that a
+// failed publication wrote. Earlier releases kept no list; derive theirs.
+const listedDiscoveryKeys = async (environment: AuthEnvironment, organizationId: string) => {
+  const stored = await environment.AUTH_CONFIG.get(discoveryListKey(organizationId));
+
+  if (stored) return { stored: true, keys: discoveryList.parse(JSON.parse(stored)) };
+  const previous = await readAuthConfiguration(environment, organizationId);
+
+  return { stored: false, keys: previous ? discoveryKeys(previous.configuration) : [] };
+};
 
 export const readAuthConfiguration = async (
   environment: AuthEnvironment,
@@ -98,28 +124,54 @@ const control = async (request: Request, environment: AuthEnvironment) => {
 
       if (input.organizationId !== organizationId)
         return reply(400, "Organization does not match configuration");
-      const previous = await readAuthConfiguration(environment, organizationId);
+      const listed = await listedDiscoveryKeys(environment, organizationId);
+      const current = discoveryKeys(input);
+      const pending = [...new Set([...listed.keys, ...current])];
+      const listKey = discoveryListKey(organizationId);
+      // Record keys before writing them, so a failed publication leaves its cleanup
+      // to the next publication or revocation. KV accepts one write per key and
+      // second, so a list that only shrinks is written at the end instead.
+      const recorded = !listed.stored || pending.length !== listed.keys.length;
+
+      if (recorded) await environment.AUTH_CONFIG.put(listKey, JSON.stringify(pending));
+
       await environment.AUTH_CONFIG.put(
         authConfigurationKey(organizationId),
         await encodeConfiguration(environment.WIDEFLEET_CONTROL_TOKEN, input),
       );
-      const currentKey = mcpOrganizationKey(input);
-      const previousKey = previous ? mcpOrganizationKey(previous.configuration) : null;
 
-      if (currentKey) await environment.AUTH_CONFIG.put(currentKey, organizationId);
+      for (const key of current) await environment.AUTH_CONFIG.put(key, organizationId);
 
-      if (previousKey && previousKey !== currentKey)
-        await environment.AUTH_CONFIG.delete(previousKey);
+      for (const key of listed.keys)
+        if (!current.includes(key)) await environment.AUTH_CONFIG.delete(key);
+
+      if (!recorded && current.length !== listed.keys.length)
+        await environment.AUTH_CONFIG.put(listKey, JSON.stringify(current));
 
       return reply(204, "");
     }
 
     if (request.method === "DELETE") {
-      const previous = await readAuthConfiguration(environment, organizationId);
-      await environment.AUTH_CONFIG.delete(authConfigurationKey(organizationId));
-      const previousKey = previous ? mcpOrganizationKey(previous.configuration) : null;
+      const listed = await listedDiscoveryKeys(environment, organizationId);
+      const listKey = discoveryListKey(organizationId);
 
-      if (previousKey) await environment.AUTH_CONFIG.delete(previousKey);
+      // Revoke sign-in first, so index cleanup can never keep the provider trusted.
+      await environment.AUTH_CONFIG.delete(authConfigurationKey(organizationId));
+      const remaining = [...listed.keys];
+
+      try {
+        for (const key of listed.keys) {
+          await environment.AUTH_CONFIG.delete(key);
+          remaining.shift();
+        }
+      } catch (cause) {
+        // A list derived from the deleted configuration exists nowhere else. Save the
+        // keys that are left for the retry; one write, as KV allows per key and second.
+        if (!listed.stored) await environment.AUTH_CONFIG.put(listKey, JSON.stringify(remaining));
+        throw cause;
+      }
+
+      if (listed.stored) await environment.AUTH_CONFIG.delete(listKey);
 
       return reply(204, "");
     }

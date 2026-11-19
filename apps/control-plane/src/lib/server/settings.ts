@@ -1,4 +1,4 @@
-import { companySsoAvailable, ssoPolicy } from "./sso-policy.ts";
+import { companySsoAvailable, operatorTrustedSso, ssoPolicy } from "./sso-policy.ts";
 import {
   installationSettings,
   parseCompanyDomains,
@@ -167,9 +167,24 @@ const createOrganizationSettingsService = (
                 .from(organization)
                 .where(eq(organization.id, organizationId));
 
-              expectedRevision = await appSignIn.revision(identity, secret, company?.name);
+              // Only a company provider's admitted domains identify its users.
+              const emailDomains = current.identity
+                ? current.domains
+                    .filter(
+                      (entry) =>
+                        entry.verified || operatorTrustedSso(configuration, organizationId),
+                    )
+                    .map((entry) => entry.domain)
+                : [];
 
-              if (publish) await appSignIn.publish(identity, secret, company?.name);
+              expectedRevision = await appSignIn.revision(
+                identity,
+                secret,
+                company?.name,
+                emailDomains,
+              );
+
+              if (publish) await appSignIn.publish(identity, secret, company?.name, emailDomains);
             } else if (publish) {
               // With no admitted provider or fallback, remove any earlier grant.
               // Skipping publication would leave app sign-in using stale trust.
@@ -489,7 +504,8 @@ const createOrganizationSettingsService = (
         );
       });
 
-      return inspect();
+      // Operator-trusted SSO admits a new domain without DNS proof, so publish it now.
+      return inspect((await readSsoProvider(database, organizationId))?.required === true);
     },
     removeDomain: async (principal: Principal, domain: string, browser: boolean) => {
       requireAdmin(principal, organizationId);
@@ -515,7 +531,8 @@ const createOrganizationSettingsService = (
         );
       });
 
-      return inspect();
+      // A removed domain must stop leading MCP sign-in to this organization.
+      return inspect((await readSsoProvider(database, organizationId))?.required === true);
     },
     verifyDomain: async (principal: Principal, domain?: string) => {
       requireAdmin(principal, organizationId);

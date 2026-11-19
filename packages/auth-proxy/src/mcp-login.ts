@@ -40,3 +40,10 @@ export const mcpOrganizationKey = (configuration: AuthConfiguration) => {
 
   return null;
 };
+
+export const mcpDomainPrefix = (domain: string) => `mcp/domains/${encodeURIComponent(domain)}/`;
+
+export const mcpDomainKeys = (configuration: AuthConfiguration) =>
+  (configuration.emailDomains ?? []).map(
+    (domain) => `${mcpDomainPrefix(domain)}${configuration.organizationId}`,
+  );

@@ -49,7 +49,9 @@
   </h1>
   <p class="text-muted-foreground mt-2 text-sm">
     {data.organizations.length
-      ? "Choose where you want to work."
+      ? data.connecting
+        ? "Choose the organization whose apps you want to connect."
+        : "Choose where you want to work."
       : data.canCreateOrganization
         ? "Give your workspace a name. You can invite your team later."
         : "Your account has no available organizations. Ask your administrator to grant access."}

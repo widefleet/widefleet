@@ -22,6 +22,7 @@ export const createInstalledAppSignIn = (
     identity: Parameters<AppSignIn["publish"]>[0],
     clientSecret: string,
     organizationName?: string,
+    emailDomains: string[] = [],
   ) =>
     authConfiguration.parse({
       organizationId,
@@ -33,6 +34,7 @@ export const createInstalledAppSignIn = (
       cookieSecret,
       domain: configuration.APP_DOMAIN,
       redirectUrl: appCallbackUrl(configuration, organizationId),
+      emailDomains: emailDomains.length ? emailDomains : undefined,
     });
 
   return {
@@ -40,10 +42,10 @@ export const createInstalledAppSignIn = (
     revoke: async () => {
       await request(`/${authConfigurationKey(organizationId)}`, "DELETE");
     },
-    revision: (identity, clientSecret, organizationName) =>
-      configurationRevision(prepare(identity, clientSecret, organizationName)),
-    publish: async (identity, clientSecret, organizationName) => {
-      const input = prepare(identity, clientSecret, organizationName);
+    revision: (identity, clientSecret, organizationName, emailDomains) =>
+      configurationRevision(prepare(identity, clientSecret, organizationName, emailDomains)),
+    publish: async (identity, clientSecret, organizationName, emailDomains) => {
+      const input = prepare(identity, clientSecret, organizationName, emailDomains);
       const expectedRevision = await configurationRevision(input);
       const origin = new URL(input.redirectUrl);
       origin.hostname = `mcp.${configuration.APP_DOMAIN}`;

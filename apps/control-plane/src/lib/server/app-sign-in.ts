@@ -11,11 +11,13 @@ export interface AppSignIn {
     identity: z.infer<typeof companyIdentity>,
     clientSecret: string,
     organizationName?: string,
+    emailDomains?: string[],
   ): Promise<string>;
   revision(
     identity: z.infer<typeof companyIdentity>,
     clientSecret: string,
     organizationName?: string,
+    emailDomains?: string[],
   ): Promise<string>;
   status(expectedRevision: string): Promise<z.infer<typeof activationStatus>>;
   plan(identity: z.infer<typeof companyIdentity> | null): Promise<z.infer<typeof settingsPlan>>;
