@@ -81,6 +81,8 @@ const field = (name, schema, required) => {
     if (schema.default !== undefined) control.value = String(schema.default);
   }
 
+  // The value as the browser normalized it, to tell an unchanged default apart.
+  const initial = control.value;
   const label = element("label", { htmlFor: id, textContent: schema.title ?? name });
   const description = schema.description ? [element("small", { textContent: schema.description })] : [];
 
@@ -91,7 +93,11 @@ const field = (name, schema, required) => {
       if (schema.type === "boolean") return control.checked;
       if (control.value === "") return undefined;
       if (schema.type === "number" || schema.type === "integer") return Number(control.value);
-      if (schema.format === "date-time") return new Date(control.value).toISOString();
+      if (schema.format === "date-time")
+        // An unchanged default keeps its instant, even in the hour repeated when daylight saving ends.
+        return schema.default !== undefined && control.value === initial
+          ? schema.default
+          : new Date(control.value).toISOString();
       return control.value;
     },
   };
