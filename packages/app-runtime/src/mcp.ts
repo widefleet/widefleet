@@ -1,11 +1,27 @@
-import { createMcpHandler, inputRequired, McpServer } from "@modelcontextprotocol/server";
+import {
+  CLIENT_CAPABILITIES_META_KEY,
+  createMcpHandler,
+  inputRequired,
+  McpServer,
+} from "@modelcontextprotocol/server";
 import { inputAnswer, mcpServiceCall, mcpScopes, sealedInputRequired } from "@platform/contracts";
 import { z } from "zod";
 import type { ParentEnvironment } from "./types.ts";
 import { mcpAnalytics } from "./mcp-analytics.ts";
 import { verifyMcpToken } from "./mcp-authorization.ts";
 import { readMcpConfiguration } from "./mcp-oauth.ts";
-import { callMcpService, describeMcpService, searchMcpServices } from "./mcp-services.ts";
+import {
+  callMcpService,
+  describeMcpService,
+  formMcpInput,
+  searchMcpServices,
+} from "./mcp-services.ts";
+import {
+  inputFormHtml,
+  inputFormMetaKey,
+  inputFormMimeType,
+  inputFormUri,
+} from "./mcp-input-form.ts";
 import { executeMcpCode, mcpJson } from "./mcp-code.ts";
 import { createMcpCliLogin } from "./mcp-cli-login.ts";
 import { mcpInstructions, mcpSkillCatalog } from "./mcp-skills.ts";
@@ -15,6 +31,36 @@ const resultSchema = mcpJson.transform((value) => ({
 }));
 
 const result = resultSchema.parse.bind(resultSchema);
+
+const formExtension = "io.modelcontextprotocol/ui";
+
+const envelope = z
+  .looseObject({
+    [CLIENT_CAPABILITIES_META_KEY]: z
+      .looseObject({
+        elicitation: z.looseObject({ form: z.unknown(), url: z.unknown() }).partial().optional(),
+        extensions: z.record(z.string(), z.unknown()).optional(),
+      })
+      .catch({}),
+  })
+  .catch({ [CLIENT_CAPABILITIES_META_KEY]: {} });
+
+const formInput = {
+  ...mcpServiceCall.shape,
+  requestState: sealedInputRequired.shape.requestState,
+};
+
+// What the form needs to show a question and answer it.
+const formQuestion = (
+  service: z.infer<typeof mcpServiceCall>,
+  question: z.infer<typeof sealedInputRequired>,
+) => ({
+  [inputFormMetaKey]: {
+    call: service,
+    inputRequests: question.inputRequests,
+    requestState: question.requestState,
+  },
+});
 
 let skillCatalog: ReturnType<typeof mcpSkillCatalog> | undefined;
 
@@ -140,27 +186,106 @@ export const mcpRequest = async (
 
           if (!question.success) return result(value ?? null);
 
-          // Stateless 2025-era serving has no way back to the client for a dialog.
-          if (era !== "modern")
+          // 2026 clients declare capabilities per request. Stateless 2025-era serving
+          // sees none and has no way back to the client for a dialog.
+          const declared =
+            era === "modern"
+              ? envelope.parse(call.mcpReq.envelope)[CLIENT_CAPABILITIES_META_KEY]
+              : undefined;
+
+          // An empty elicitation capability means form elicitation.
+          const elicitation = declared?.elicitation;
+
+          if (elicitation && (elicitation.form !== undefined || elicitation.url === undefined))
+            return inputRequired({
+              inputRequests: Object.fromEntries(
+                Object.entries(question.data.inputRequests).map(([name, request]) => [
+                  name,
+                  inputRequired.elicit(request),
+                ]),
+              ),
+              requestState: question.data.requestState,
+            });
+
+          // 2025-era clients get the form unchecked: some render MCP Apps without
+          // declaring them on any request the gateway sees.
+          if (declared && declared.extensions?.[formExtension] === undefined)
             return {
               isError: true,
               content: [
                 {
                   type: "text" as const,
-                  text: "This method asks the user for input. Use an MCP client with protocol revision 2026-07-28 or later.",
+                  text: "This method asks the user for input, and this MCP client can show neither input dialogs nor MCP Apps forms.",
                 },
               ],
             };
 
-          return inputRequired({
-            inputRequests: Object.fromEntries(
-              Object.entries(question.data.inputRequests).map(([name, request]) => [
-                name,
-                inputRequired.elicit(request),
-              ]),
-            ),
-            requestState: question.data.requestState,
-          });
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `This method asks the user for input. Call the ask tool with the same hostname, entrypoint, method and arguments, and requestState ${JSON.stringify(question.data.requestState)}. It shows the user a form; their answer completes this call. Do not answer it yourself. If no form appears, this MCP client cannot show it.`,
+              },
+            ],
+          };
+        },
+      );
+      server.registerResource(
+        "input-form",
+        inputFormUri,
+        { mimeType: inputFormMimeType, description: "Form for questions from app services" },
+        async () => ({
+          contents: [{ uri: inputFormUri, mimeType: inputFormMimeType, text: inputFormHtml }],
+        }),
+      );
+      server.registerTool(
+        "ask",
+        {
+          description:
+            "Show the user a form for a service call that asks for input. Use it only when call says so; the user's answer completes the call.",
+          inputSchema: formInput,
+          _meta: { ui: { resourceUri: inputFormUri }, "ui/resourceUri": inputFormUri },
+        },
+        async ({ requestState, ...service }) => ({
+          content: [
+            {
+              type: "text" as const,
+              text: "The form is shown to the user. Wait for their answer.",
+            },
+          ],
+          _meta: formQuestion(
+            service,
+            await formMcpInput(environment, token, service, requestState),
+          ),
+        }),
+      );
+      server.registerTool(
+        "answer",
+        {
+          description: "Submit the user's answer from the input form. Only the form calls it.",
+          inputSchema: { ...formInput, inputResponses: inputAnswer.shape.inputResponses },
+          _meta: { ui: { visibility: ["app"] } },
+        },
+        async ({ requestState, inputResponses, ...service }) => {
+          const value = await callMcpService(
+            environment,
+            context,
+            token,
+            service,
+            { requestState, inputResponses },
+            "form",
+          );
+
+          const question = sealedInputRequired.safeParse(value);
+
+          // A follow-up question stays in the form.
+          if (question.success)
+            return {
+              content: [{ type: "text" as const, text: "The method asks the user again." }],
+              _meta: formQuestion(service, question.data),
+            };
+
+          return result(value ?? null);
         },
       );
       server.registerTool(

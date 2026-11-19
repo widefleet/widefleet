@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { openInput, requestedInput, sealInput } from "./service-input.ts";
+import { inputAnswer, sealedInputRequired } from "@platform/contracts";
+import { openInput, rebindInput, requestedInput, sealInput } from "./service-input.ts";
 
 const secret = "service-input-test-secret-never-deploy";
 
@@ -131,5 +132,136 @@ describe("Service input requests", () => {
     await expect(
       openInput(secret, binding, call, { requestState, inputResponses }),
     ).rejects.toThrow("Invalid or expired input request state");
+  });
+
+  it("hands a question to another channel without extending its lifetime", async () => {
+    const { requestState } = await sealed();
+    const form = JSON.stringify(["mcp-form", "org", "https://issuer.example.test", "alice"]);
+    const inputResponses = { confirm: { action: "decline" } };
+    const moved = await rebindInput(secret, binding, form, call, requestState);
+
+    expect(moved.inputRequests).toEqual(question?.inputRequests);
+    expect(
+      await openInput(secret, form, call, { requestState: moved.requestState, inputResponses }),
+    ).toEqual({ inputResponses, requestState: { text: "Offer text the person saw" } });
+
+    // State for one channel does not answer through the other.
+    await expect(
+      openInput(secret, binding, call, { requestState: moved.requestState, inputResponses }),
+    ).rejects.toThrow("Invalid or expired input request state");
+    await expect(openInput(secret, form, call, { requestState, inputResponses })).rejects.toThrow(
+      "Invalid or expired input request state",
+    );
+    await expect(
+      rebindInput(secret, binding, form, { ...call, args: [43] }, requestState),
+    ).rejects.toThrow("Invalid or expired input request state");
+
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now() + 24 * 60 * 60 * 1000 + 1);
+    await expect(
+      openInput(secret, form, call, { requestState: moved.requestState, inputResponses }),
+    ).rejects.toThrow("Invalid or expired input request state");
+  });
+
+  it("keeps argument types apart when matching the call", async () => {
+    const pairs = [
+      { asked: [42n], other: [{ $bigint: "42" }] },
+      { asked: [new Uint8Array([1, 255])], other: [new Int8Array([1, -1])] },
+      { asked: [new Map([["a", 1]])], other: [[["a", 1]]] },
+      { asked: [new Set([1])], other: [[1]] },
+      { asked: [Number.NaN], other: [null] },
+      { asked: [Infinity], other: [null] },
+      { asked: [0], other: [-0] },
+      { asked: [undefined], other: [null] },
+      { asked: [1], other: ["1"] },
+    ];
+
+    for (const { asked, other } of pairs) {
+      if (!question) throw new Error("Expected an input request");
+      const { requestState } = await sealInput(secret, binding, { ...call, args: asked }, question);
+      const inputResponses = { confirm: { action: "decline" } };
+
+      await expect(
+        openInput(secret, binding, { ...call, args: asked }, { requestState, inputResponses }),
+      ).resolves.toMatchObject({ inputResponses });
+      await expect(
+        openInput(secret, binding, { ...call, args: other }, { requestState, inputResponses }),
+      ).rejects.toThrow("Invalid or expired input request state");
+    }
+  });
+
+  it("checks string formats in accepted answers", async () => {
+    const formatted = requestedInput({
+      resultType: "input_required",
+      inputRequests: {
+        contact: {
+          message: "Who should receive it?",
+          requestedSchema: {
+            type: "object",
+            properties: {
+              email: { type: "string", format: "email" },
+              site: { type: "string", format: "uri" },
+              day: { type: "string", format: "date" },
+              at: { type: "string", format: "date-time" },
+            },
+          },
+        },
+      },
+    });
+
+    if (!formatted) throw new Error("Expected an input request");
+    const { requestState } = await sealInput(secret, binding, call, formatted);
+
+    const valid = {
+      email: "alice@example.com",
+      site: "https://example.com/offers",
+      day: "2026-11-19",
+      at: "2026-11-19T10:15:00Z",
+    };
+
+    expect(
+      await openInput(secret, binding, call, {
+        requestState,
+        inputResponses: { contact: { action: "accept", content: valid } },
+      }),
+    ).toMatchObject({ inputResponses: { contact: { action: "accept", content: valid } } });
+
+    for (const invalid of [
+      { email: "not-an-email" },
+      { site: "not a url" },
+      { day: "19.11.2026" },
+      { at: "tomorrow" },
+    ])
+      expect(
+        await openInput(secret, binding, call, {
+          requestState,
+          inputResponses: { contact: { action: "accept", content: invalid } },
+        }),
+      ).toEqual({ inputResponses: {}, requestState: null });
+  });
+
+  it("answers questions that use the full request and state limits", async () => {
+    const largest = requestedInput({
+      resultType: "input_required",
+      inputRequests: Object.fromEntries(
+        Array.from({ length: 4 }, (_, index) => [`q${index}`, { message: "x".repeat(4000) }]),
+      ),
+      requestState: "s".repeat(8 * 1024 - 2),
+    });
+
+    if (!largest) throw new Error("Expected an input request");
+
+    const sealedLargest = await sealInput(
+      secret,
+      JSON.stringify(["mcp", "org", `https://${"i".repeat(200)}.example.test`, "s".repeat(255)]),
+      call,
+      largest,
+    );
+
+    expect(sealedInputRequired.safeParse(sealedLargest).success).toBe(true);
+    expect(
+      inputAnswer.safeParse({ requestState: sealedLargest.requestState, inputResponses: {} })
+        .success,
+    ).toBe(true);
   });
 });

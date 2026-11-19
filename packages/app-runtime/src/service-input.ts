@@ -67,24 +67,92 @@ const key = async (secret: string) => {
   return crypto.subtle.importKey("raw", material, "AES-GCM", false, ["encrypt", "decrypt"]);
 };
 
-// Arguments may hold values JSON cannot express; describe them deterministically.
-const describe = (_name: string, value: AppValue): AppValue => {
-  const big = z.bigint().safeParse(value);
+type Canonical = string | Canonical[];
 
-  if (big.success) return { $bigint: big.data.toString() };
+const scalar = z.union([
+  z.boolean().transform((value): Canonical => ["boolean", String(value)]),
+  // Zod numbers exclude NaN and infinities, which service RPC still carries.
+  z
+    .union([z.number(), z.nan(), z.literal([Infinity, -Infinity])])
+    .transform((value): Canonical => ["number", Object.is(value, -0) ? "-0" : String(value)]),
+  z.bigint().transform((value): Canonical => ["bigint", value.toString()]),
+  z.string().transform((value): Canonical => ["string", value]),
+]);
 
-  if (value instanceof Map) return { $map: [...value.entries()] };
+const appValue = z.custom<AppValue>();
 
-  if (value instanceof Set) return { $set: [...value.values()] };
+const list = z.array(appValue);
 
-  if (ArrayBuffer.isView(value))
-    return { $bytes: base64url(new Uint8Array(value.buffer, value.byteOffset, value.byteLength)) };
+const map = z.map(appValue, appValue);
 
-  return value;
+const set = z.set(appValue);
+
+const record = z.record(z.string(), appValue);
+
+// Describe arguments with their types, so values that JSON would render alike,
+// such as 42n and { $bigint: "42" } or typed arrays over the same bytes, differ.
+const canonical = (value: AppValue, path = new Set<AppValue>()): Canonical => {
+  if (value === null) return ["null"];
+
+  if (value === undefined) return ["undefined"];
+  const primitive = scalar.safeParse(value);
+
+  if (primitive.success) return primitive.data;
+
+  if (path.has(value))
+    throw new Error("Arguments of a call that asks for input must not be cyclic");
+  path.add(value);
+
+  try {
+    const items = list.safeParse(value);
+
+    if (items.success) return ["array", ...items.data.map((item) => canonical(item, path))];
+    const entries = map.safeParse(value);
+
+    if (entries.success)
+      return [
+        "map",
+        ...Array.from(entries.data, ([name, entry]) => [
+          canonical(name, path),
+          canonical(entry, path),
+        ]),
+      ];
+    const members = set.safeParse(value);
+
+    if (members.success)
+      return ["set", ...Array.from(members.data, (item) => canonical(item, path))];
+
+    if (ArrayBuffer.isView(value))
+      return [
+        "view",
+        value.constructor.name,
+        base64url(new Uint8Array(value.buffer, value.byteOffset, value.byteLength)),
+      ];
+
+    if (value instanceof ArrayBuffer) return ["buffer", base64url(new Uint8Array(value))];
+
+    if (value instanceof Date) return ["date", String(value.getTime())];
+
+    if (value instanceof RegExp) return ["regexp", String(value)];
+
+    if (value instanceof Error) return ["error", value.name, value.message];
+
+    const fields = record.safeParse(value);
+
+    // Service RPC carries no other objects: structured clone drops class prototypes.
+    if (!fields.success) throw new Error("Unsupported argument in a call that asks for input");
+
+    return [
+      "object",
+      ...Object.entries(fields.data).map(([name, entry]) => [name, canonical(entry, path)]),
+    ];
+  } finally {
+    path.delete(value);
+  }
 };
 
 const fingerprint = async ({ appId, entrypoint, method, args }: InputTarget) => {
-  const described = JSON.stringify([appId, entrypoint, method, args], describe);
+  const described = JSON.stringify(canonical([appId, entrypoint, method, args]));
   const digest = await crypto.subtle.digest("SHA-256", encoder.encode(described));
 
   return base64url(new Uint8Array(digest));
@@ -108,22 +176,7 @@ export const requestedInput = (value: AppValue) => {
   return parsed.data;
 };
 
-// Seal the provider's state for the caller that received the question.
-export const sealInput = async (
-  secret: string,
-  binding: string,
-  target: InputTarget,
-  question: z.infer<typeof inputRequired>,
-) => {
-  const payload: z.infer<typeof sealed> = {
-    version: 1,
-    expiresAt: Date.now() + lifetimeMs,
-    binding,
-    target: await fingerprint(target),
-    requests: question.inputRequests,
-  };
-
-  if (question.requestState !== undefined) payload.state = question.requestState;
+const seal = async (secret: string, payload: z.infer<typeof sealed>) => {
   const iv = crypto.getRandomValues(new Uint8Array(12));
 
   const ciphertext = new Uint8Array(
@@ -140,9 +193,73 @@ export const sealInput = async (
 
   return {
     resultType: "input_required" as const,
-    inputRequests: question.inputRequests,
+    inputRequests: payload.requests,
     requestState: base64url(token),
   };
+};
+
+// Seal the provider's state for the caller that received the question.
+export const sealInput = async (
+  secret: string,
+  binding: string,
+  target: InputTarget,
+  question: z.infer<typeof inputRequired>,
+) => {
+  const payload: z.infer<typeof sealed> = {
+    version: 1,
+    expiresAt: Date.now() + lifetimeMs,
+    binding,
+    target: await fingerprint(target),
+    requests: question.inputRequests,
+  };
+
+  if (question.requestState !== undefined) payload.state = question.requestState;
+
+  return seal(secret, payload);
+};
+
+const unseal = async (secret: string, binding: string, target: InputTarget, state: string) => {
+  let payload;
+
+  try {
+    const token = unbase64url(state);
+
+    const plaintext = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: token.slice(0, 12) },
+      await key(secret),
+      token.slice(12),
+    );
+
+    payload = sealed.parse(JSON.parse(new TextDecoder().decode(plaintext)));
+  } catch (cause) {
+    throw invalid(cause instanceof Error ? cause : undefined);
+  }
+
+  if (
+    payload.expiresAt <= Date.now() ||
+    payload.binding !== binding ||
+    payload.target !== (await fingerprint(target))
+  )
+    throw invalid();
+
+  return payload;
+};
+
+// Hand a question to another answering channel of the same caller, such as
+// a form that the caller's client shows. The original lifetime still applies.
+export const rebindInput = async (
+  secret: string,
+  from: string,
+  to: string,
+  target: InputTarget,
+  state: string,
+) => seal(secret, { ...(await unseal(secret, from, target, state)), binding: to });
+
+const formats = {
+  email: z.email(),
+  uri: z.url(),
+  date: z.iso.date(),
+  "date-time": z.iso.datetime({ offset: true }),
 };
 
 const fieldValue = (field: InputField) => {
@@ -153,6 +270,11 @@ const fieldValue = (field: InputField) => {
       if (field.minLength !== undefined) value = value.min(field.minLength);
 
       if (field.maxLength !== undefined) value = value.max(field.maxLength);
+
+      if (field.format) {
+        const format = formats[field.format];
+        value = value.refine((entry) => format.safeParse(entry).success);
+      }
 
       return field.enum ? value.refine((entry) => field.enum?.includes(entry)) : value;
     }
@@ -218,28 +340,7 @@ export const openInput = async (
   const parsed = inputAnswer.safeParse(input);
 
   if (!parsed.success) throw invalid();
-  let payload;
-
-  try {
-    const token = unbase64url(parsed.data.requestState);
-
-    const plaintext = await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv: token.slice(0, 12) },
-      await key(secret),
-      token.slice(12),
-    );
-
-    payload = sealed.parse(JSON.parse(new TextDecoder().decode(plaintext)));
-  } catch (cause) {
-    throw invalid(cause instanceof Error ? cause : undefined);
-  }
-
-  if (
-    payload.expiresAt <= Date.now() ||
-    payload.binding !== binding ||
-    payload.target !== (await fingerprint(target))
-  )
-    throw invalid();
+  const payload = await unseal(secret, binding, target, parsed.data.requestState);
 
   const inputResponses: Record<string, InputResponse> = {};
 

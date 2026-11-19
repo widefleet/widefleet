@@ -238,8 +238,8 @@ export class Offers extends WorkerEntrypoint<Env, { input?: Input }> {
 The method is called again with the same arguments, and `ctx.props.input` holds
 the answers and the `requestState` it returned:
 
-- [MCP clients](/guides/mcp) on protocol revision 2026-07-28 show each request as
-  a form and send the answers back on their own.
+- [MCP clients](/guides/mcp) show the question to the person and send the answers
+  back on their own. The agent cannot answer in their place.
 - A calling app receives the question as the method's result, shows it in its own
   interface and sends the answers with `withInput`:
 

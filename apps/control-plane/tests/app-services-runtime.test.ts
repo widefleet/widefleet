@@ -748,6 +748,7 @@ export default { async fetch(request, env, ctx) {
       const modern = async (
         retry: { requestState?: string; inputResponses?: z.infer<ReturnType<typeof z.json>> },
         bearer = accessToken,
+        capabilities: z.infer<ReturnType<typeof z.json>> = { elicitation: { form: {} } },
       ) => {
         const response = await (harness ? harness.fetch : fetch)(`${origin}/mcp`, {
           method: "POST",
@@ -769,7 +770,7 @@ export default { async fetch(request, env, ctx) {
               ...retry,
               _meta: {
                 "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-                "io.modelcontextprotocol/clientCapabilities": { elicitation: { form: {} } },
+                "io.modelcontextprotocol/clientCapabilities": capabilities,
                 "io.modelcontextprotocol/clientInfo": { name: "test", version: "1" },
               },
             },
@@ -831,9 +832,92 @@ export default { async fetch(request, env, ctx) {
         ),
       ).toContain("Invalid or expired input request state");
 
-      const legacy = await rpc("call", ask);
-      expect(legacy.isError).toBe(true);
-      expect(legacy.content[0]?.text).toContain("2026-07-28");
+      // Clients without their own dialog get a form through the ask tool.
+      const relayed = await rpc("call", ask);
+      expect(relayed.isError).not.toBe(true);
+
+      const relayedState = z
+        .string()
+        .parse(JSON.parse(relayed.content[0]?.text.match(/requestState ("[^"]+")/)?.[1] ?? "null"));
+
+      const apps = {
+        extensions: { "io.modelcontextprotocol/ui": { mimeTypes: ["text/html;profile=mcp-app"] } },
+      };
+
+      expect(JSON.stringify(await modern({}, accessToken, apps))).toContain("Call the ask tool");
+      expect(JSON.stringify(await modern({}, accessToken, {}))).toContain(
+        "can show neither input dialogs nor MCP Apps forms",
+      );
+
+      const formTools = z
+        .object({
+          result: z.object({
+            tools: z.array(z.object({ name: z.string(), _meta: z.json().optional() })),
+          }),
+        })
+        .parse(await send("tools/list", {})).result.tools;
+
+      expect(formTools.find((tool) => tool.name === "ask")?._meta).toMatchObject({
+        ui: { resourceUri: "ui://widefleet/input-form.html" },
+      });
+      expect(formTools.find((tool) => tool.name === "answer")?._meta).toEqual({
+        ui: { visibility: ["app"] },
+      });
+      expect(await send("resources/read", { uri: "ui://widefleet/input-form.html" })).toMatchObject(
+        {
+          result: {
+            contents: [
+              { uri: "ui://widefleet/input-form.html", mimeType: "text/html;profile=mcp-app" },
+            ],
+          },
+        },
+      );
+
+      const tool = async (name: string, args: z.infer<ReturnType<typeof z.json>>) =>
+        z
+          .object({
+            result: z.object({
+              isError: z.boolean().optional(),
+              content: z.array(z.object({ text: z.string() })),
+              _meta: z
+                .object({
+                  "widefleet/input": z.object({
+                    call: z.json(),
+                    inputRequests: z.object({ confirm: z.object({ message: z.string() }) }),
+                    requestState: z.string(),
+                  }),
+                })
+                .optional(),
+            }),
+          })
+          .parse(await send("tools/call", { name, arguments: args })).result;
+
+      const form = (await tool("ask", { ...ask, requestState: relayedState }))._meta?.[
+        "widefleet/input"
+      ];
+
+      expect(form?.call).toEqual(ask);
+      expect(form?.inputRequests.confirm.message).toBe("Send offer-42?");
+      expect(form?.requestState).not.toContain("private-offer-text");
+
+      const inputResponses = { confirm: { action: "accept", content: { note: "ok" } } };
+
+      const answered = await tool("answer", {
+        ...ask,
+        requestState: form?.requestState ?? "",
+        inputResponses,
+      });
+
+      expect(JSON.parse(answered.content[0]?.text ?? "null")).toEqual({
+        offerId: "offer-42",
+        input: { inputResponses, requestState: { seen: "private-offer-text" } },
+        caller: "alice",
+      });
+
+      // The state an agent sees in the call result does not answer through the form.
+      const forged = await rpc("answer", { ...ask, requestState: relayedState, inputResponses });
+      expect(forged.isError).toBe(true);
+      expect(forged.content[0]?.text).toContain("Invalid or expired input request state");
 
       const executed = await rpc("execute", {
         code: `const first = await tools.call(${JSON.stringify(service)}); return {version:first.version, credentials:typeof process};`,
@@ -1007,7 +1091,18 @@ export default { async fetch(request, env, ctx) {
             ),
           { timeout: 8_000 },
         )
-        .toEqual(new Set(["skills", "cli_login", "search", "describe", "call", "execute"]));
+        .toEqual(
+          new Set([
+            "skills",
+            "cli_login",
+            "search",
+            "describe",
+            "call",
+            "ask",
+            "answer",
+            "execute",
+          ]),
+        );
 
       const toolCalls = analytics.filter((event) => event.event.startsWith("$mcp_"));
 

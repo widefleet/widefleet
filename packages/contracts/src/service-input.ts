@@ -74,14 +74,17 @@ export const inputRequired = z.strictObject({
     .optional(),
 });
 
+// Sealed state carries the requests and the provider's state, encrypted and base64 encoded.
+const sealedState = z
+  .string()
+  .min(1)
+  .max(64 * 1024);
+
 // The same result after the platform sealed its state, as callers receive it.
 export const sealedInputRequired = z.strictObject({
   resultType: z.literal("input_required"),
   inputRequests: requests,
-  requestState: z
-    .string()
-    .min(1)
-    .max(32 * 1024),
+  requestState: sealedState,
 });
 
 const content = z.record(z.string(), z.union([z.string(), z.number(), z.boolean()]));
@@ -98,10 +101,7 @@ export type InputResponse = z.infer<typeof inputResponse>;
 // What a caller supplies with its retry.
 export const inputAnswer = z.strictObject({
   inputResponses: z.record(z.string(), z.json()),
-  requestState: z
-    .string()
-    .min(1)
-    .max(32 * 1024),
+  requestState: sealedState,
 });
 
 export type InputAnswer = z.infer<typeof inputAnswer>;

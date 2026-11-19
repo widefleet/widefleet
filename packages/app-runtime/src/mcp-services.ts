@@ -9,7 +9,7 @@ import { readApp, readServiceDocumentation } from "./catalog.ts";
 import { serviceRoute, verifyMcpToken } from "./mcp-authorization.ts";
 import { appWorker } from "./worker.ts";
 import { invokeApp } from "./app-rpc.ts";
-import { openInput, requestedInput, sealInput } from "./service-input.ts";
+import { openInput, rebindInput, requestedInput, sealInput } from "./service-input.ts";
 import { signAppCaller } from "./app-caller.ts";
 import { executionOptions } from "./execution-limits.ts";
 import type { ParentEnvironment } from "./types.ts";
@@ -117,13 +117,16 @@ export const describeMcpService = async (
   };
 };
 
-// `answer` carries the client's responses when it retries a call that asked for input.
-export const callMcpService = async (
+// A question is answered either through the MCP client's own dialog or through
+// the form the gateway shows in the client. State minted for one channel never
+// answers through the other, so the agent cannot use the form's answer path
+// with state it relays from a call result.
+export type McpInputChannel = "client" | "form";
+
+const authorizeCall = async (
   environment: ParentEnvironment,
-  context: ExecutionContext,
   token: string,
   input: z.infer<typeof mcpServiceCall>,
-  answer?: InputAnswer,
 ) => {
   // Recheck the published policy on every subcall, including calls from code mode.
   const claims = await verifyMcpToken(environment, token);
@@ -135,6 +138,38 @@ export const callMcpService = async (
     name: claims.mcp.identity.name,
   };
 
+  return {
+    claims,
+    app,
+    caller,
+    // Answers belong to the signed-in person and to this exact call.
+    binding: (channel: McpInputChannel) =>
+      JSON.stringify([
+        channel === "client" ? "mcp" : "mcp-form",
+        claims.mcp.organizationId,
+        caller.issuer,
+        caller.subject,
+      ]),
+    call: {
+      appId: app.appId,
+      entrypoint: input.entrypoint,
+      method: input.method,
+      args: input.arguments,
+    },
+  };
+};
+
+// `answer` carries the responses when a call that asked for input is retried.
+export const callMcpService = async (
+  environment: ParentEnvironment,
+  context: ExecutionContext,
+  token: string,
+  input: z.infer<typeof mcpServiceCall>,
+  answer?: InputAnswer,
+  channel: McpInputChannel = "client",
+) => {
+  const { claims, app, caller, binding, call } = await authorizeCall(environment, token, input);
+
   const proof = await signAppCaller(
     environment.WIDEFLEET_CONTROL_TOKEN,
     app.appId,
@@ -143,22 +178,16 @@ export const callMcpService = async (
     claims.exp * 1000,
   );
 
-  // Answers belong to the signed-in person and to this exact call.
-  const binding = JSON.stringify(["mcp", claims.mcp.organizationId, caller.issuer, caller.subject]);
-
-  const call = {
-    appId: app.appId,
-    entrypoint: input.entrypoint,
-    method: input.method,
-    args: input.arguments,
-  };
-
   const secret = environment.WIDEFLEET_CONTROL_TOKEN;
 
   const props =
     answer === undefined
       ? { caller, appCaller: proof }
-      : { caller, appCaller: proof, input: await openInput(secret, binding, call, answer) };
+      : {
+          caller,
+          appCaller: proof,
+          input: await openInput(secret, binding(channel), call, answer),
+        };
 
   const worker = await appWorker(app, environment, context);
 
@@ -173,5 +202,23 @@ export const callMcpService = async (
 
   const question = requestedInput(value);
 
-  return question ? sealInput(secret, binding, call, question) : value;
+  return question ? sealInput(secret, binding(channel), call, question) : value;
+};
+
+// Move a question from a call result to the form, which only the person answers.
+export const formMcpInput = async (
+  environment: ParentEnvironment,
+  token: string,
+  input: z.infer<typeof mcpServiceCall>,
+  requestState: string,
+) => {
+  const { binding, call } = await authorizeCall(environment, token, input);
+
+  return rebindInput(
+    environment.WIDEFLEET_CONTROL_TOKEN,
+    binding("client"),
+    binding("form"),
+    call,
+    requestState,
+  );
 };
