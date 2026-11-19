@@ -1828,8 +1828,8 @@ dependencies = [
  "clap",
  "jsonc-parser",
  "keyring",
- "oxc_sourcemap",
  "platform-core",
+ "platform-service-docs",
  "reqwest",
  "rustix",
  "serde",
@@ -1837,12 +1837,6 @@ dependencies = [
  "system-resolver",
  "tempfile",
  "tokio",
- "tsrs_ast",
- "tsrs_checker",
- "tsrs_compiler",
- "tsrs_core",
- "tsrs_scanner",
- "tsrs_tsoptions",
  "tsrs_vfs",
  "uuid",
 ]
@@ -1859,6 +1853,33 @@ dependencies = [
  "sha2",
  "thiserror",
  "uuid",
+]
+
+[[package]]
+name = "platform-service-docs"
+version = "0.7.12"
+dependencies = [
+ "oxc_sourcemap",
+ "serde",
+ "serde_json",
+ "tsrs_ast",
+ "tsrs_checker",
+ "tsrs_compiler",
+ "tsrs_core",
+ "tsrs_scanner",
+ "tsrs_tsoptions",
+ "tsrs_vfs",
+ "url",
+]
+
+[[package]]
+name = "platform-service-docs-wasm"
+version = "0.7.12"
+dependencies = [
+ "platform-service-docs",
+ "tsrs_compiler",
+ "tsrs_core",
+ "tsrs_vfs",
 ]
 
 [[package]]
