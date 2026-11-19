@@ -1091,9 +1091,13 @@ test("requires company SSO and links the matching verified company email without
   await environment.database.db.update(ssoProvider).set({ domainVerified: true });
 
   try {
+    // The signed-in member continues to company SSO without another click.
+    const authorization = page.waitForRequest(
+      (request) => new URL(request.url()).searchParams.get("login_hint") === "sso@example.test",
+    );
+
     await page.goto("/account");
-    await expect(page).toHaveURL(/sign-in.*organization=widefleet/);
-    await page.getByRole("button", { name: "Sign in with Microsoft" }).click();
+    await authorization;
     await page.getByRole("button", { name: /sso@example.test/ }).click();
     await expect(page.getByText("You are signed in with your company account.")).toBeVisible();
     expect(await (await page.request.get("/api/v1/me")).json()).toMatchObject({
@@ -1106,6 +1110,93 @@ test("requires company SSO and links the matching verified company email without
     await environment.database.db.delete(account).where(eq(account.userId, person.id));
     await environment.database.db.delete(member).where(eq(member.userId, person.id));
     await environment.database.db.delete(user).where(eq(user.id, person.id));
+  }
+});
+
+test("waits for a choice when company SSO just failed or the visitor has no relationship to it", async ({
+  browser,
+}) => {
+  const people = [
+    { name: "SSO Member", email: "returning@example.test", member: true },
+    { name: "SSO Stranger", email: "stranger@example.test", member: false },
+  ].map((fixture) => ({
+    fixture,
+    person: environment.users.createUser({
+      name: fixture.name,
+      email: fixture.email,
+      emailVerified: true,
+    }),
+  }));
+
+  for (const { fixture, person } of people) {
+    await environment.users.saveUser(person);
+
+    if (fixture.member)
+      await environment.database.db.insert(member).values({
+        id: crypto.randomUUID(),
+        organizationId: "widefleet",
+        userId: person.id,
+        role: "member",
+        createdAt: new Date(),
+      });
+  }
+
+  await environment.database.db.update(ssoProvider).set({ domainVerified: true });
+
+  const open = async (userId: string, path: string, recentlyStarted = false) => {
+    const context = await browser.newContext();
+    const login = await environment.users.login({ userId });
+
+    await context.addCookies(
+      login.cookies.map((cookie) => ({
+        ...cookie,
+        domain: "localhost",
+        sameSite: "Lax" as const,
+        secure: false,
+      })),
+    );
+
+    const page = await context.newPage();
+    const starts: string[] = [];
+
+    // Record company sign-in starts without following the identity provider.
+    await page.route("**/api/auth/sign-in/sso", async (route) => {
+      starts.push(route.request().postData() ?? "");
+      await route.abort();
+    });
+
+    if (recentlyStarted)
+      await page.addInitScript(() =>
+        sessionStorage.setItem("widefleet.company-sign-in:widefleet", String(Date.now())),
+      );
+    await page.goto(path);
+    await page.waitForLoadState("networkidle");
+
+    return { context, page, starts };
+  };
+
+  const [returning, stranger] = people.map(({ person }) => person.id);
+
+  try {
+    for (const visit of [
+      // A provider error returns here; starting again would send the browser straight back.
+      await open(z.string().parse(returning), "/sign-in?organization=widefleet&error=sso"),
+      // So does a sign-in that returned within a minute of starting automatically.
+      await open(z.string().parse(returning), "/sign-in?organization=widefleet", true),
+      // Linking a signed-in stranger here must not share their address with this provider.
+      await open(z.string().parse(stranger), "/sign-in?organization=widefleet"),
+    ]) {
+      expect(visit.starts).toEqual([]);
+      await visit.page.getByRole("button", { name: "Sign in with Microsoft" }).click();
+      await expect.poll(() => visit.starts.length).toBe(1);
+      await visit.context.close();
+    }
+  } finally {
+    for (const { person } of people) {
+      await environment.database.db.delete(member).where(eq(member.userId, person.id));
+      await environment.database.db.delete(authSession).where(eq(authSession.userId, person.id));
+      await environment.database.db.delete(user).where(eq(user.id, person.id));
+    }
   }
 });
 

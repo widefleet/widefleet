@@ -24,8 +24,29 @@
 
   let sentTo = $state<string | null>(null);
 
+  // Fall back to the button if the company sign-in returned here right away.
+  const automaticStart = $derived(`widefleet.company-sign-in:${data.organizationSlug ?? ""}`);
+
+  const recentlyStarted = () => {
+    try {
+      return Date.now() - Number(sessionStorage.getItem(automaticStart) ?? 0) < 60_000;
+    } catch {
+      return true;
+    }
+  };
+
   onMount(() => {
     lastUsed = authClient.getLastUsedLoginMethod();
+
+    if (data.continueAs && !recentlyStarted()) {
+      try {
+        sessionStorage.setItem(automaticStart, String(Date.now()));
+      } catch {
+        return;
+      }
+
+      void signIn();
+    }
   });
 
   const signIn = async () => {
@@ -34,7 +55,12 @@
     message = "";
 
     try {
-      const input = { providerId: data.provider, callbackURL: data.next };
+      const input: Parameters<typeof authClient.signIn.sso>[0] = {
+        providerId: data.provider,
+        callbackURL: data.next,
+      };
+
+      if (data.continueAs) input.loginHint = data.continueAs;
 
       const result = await authClient.signIn.sso(input);
 
