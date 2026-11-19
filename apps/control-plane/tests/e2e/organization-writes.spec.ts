@@ -211,6 +211,9 @@ test("asks which organization an MCP client connects, despite an active one", as
 
     const page = await context.newPage();
     await page.goto(signIn);
+    await expect(
+      page.getByText("Choose the organization whose apps you want to connect."),
+    ).toBeVisible();
 
     // Routes do not intercept redirected requests; observe the data-plane request instead.
     const reached = page.waitForRequest((request) =>
