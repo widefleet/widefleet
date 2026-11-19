@@ -21,6 +21,7 @@ x-local: &local
     PLATFORM_STATE_DIRECTORY: /data/platform
     PLATFORM_RUNTIME_DIRECTORY: /data/platform/auth
     PLATFORM_APP_RUNTIME_URL: http://runtime:8080
+    PLATFORM_APP_BUILDER_URL: http://builder:8080
     CLICKHOUSE_URL: http://clickhouse:8123
     CLICKHOUSE_USER: widefleet_reader
     CLICKHOUSE_PASSWORD: local-reader-only
@@ -124,6 +125,29 @@ services:
       timeout: 3s
       retries: 30
     stop_grace_period: 45s
+  builder:
+    image: app-platform-runtime:0.1.0
+    entrypoint:
+      [
+        /usr/local/bin/celld,
+        dev,
+        /opt/widefleet-builder,
+        --host,
+        0.0.0.0,
+        --port,
+        "8080",
+        --no-watch,
+      ]
+    environment:
+      CELLD_ASSET_CACHE_DIR: /opt/widefleet-builder/.celld/assets
+    read_only: true
+    tmpfs:
+      - /opt/widefleet-builder/.celld:uid=1000,gid=1000
+    healthcheck:
+      test: [CMD, curl, --silent, --output, /dev/null, http://127.0.0.1:8080/]
+      interval: 1s
+      timeout: 3s
+      retries: 30
   agent:
     <<: *local
     network_mode: service:proxy

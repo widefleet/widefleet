@@ -16,6 +16,7 @@ x-control-plane: &control-plane
     PLATFORM_CONFIG_DIRECTORY: /var/lib/widefleet/edge
     PLATFORM_RUNTIME_DIRECTORY: /var/lib/widefleet/runtime
     PLATFORM_ENCRYPTION_KEY: ${PLATFORM_ENCRYPTION_KEY:-}
+    PLATFORM_APP_BUILDER_URL: http://builder:8080
   volumes:
     - platform-state:/var/lib/widefleet
     - edge-config:/var/lib/widefleet/edge
@@ -30,6 +31,7 @@ services:
   control-plane:
     <<: *control-plane
     restart: unless-stopped
+    networks: [management, edge, builder]
     depends_on:
       runtime: { condition: service_healthy }
     healthcheck:
@@ -65,6 +67,37 @@ services:
     tmpfs: ["/tmp:rw,nosuid,nodev,noexec,size=64m"]
     healthcheck:
       test: [CMD, curl, --fail, --silent, http://127.0.0.1:8081/state]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # Builds template installs in isolates. It reaches only the control plane
+  # and the npm registry, and keeps no state.
+  builder:
+    image: ${PLATFORM_RUNTIME_IMAGE:?Load the release images environment file}
+    restart: unless-stopped
+    entrypoint:
+      [
+        /usr/local/bin/celld,
+        dev,
+        /opt/widefleet-builder,
+        --host,
+        0.0.0.0,
+        --port,
+        "8080",
+        --no-watch,
+      ]
+    environment:
+      CELLD_ASSET_CACHE_DIR: /opt/widefleet-builder/.celld/assets
+    networks: [builder]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /opt/widefleet-builder/.celld:rw,nosuid,nodev,noexec,size=64m,uid=1000,gid=1000
+      - /tmp:rw,nosuid,nodev,noexec,size=64m
+    healthcheck:
+      test: [CMD, curl, --silent, --output, /dev/null, http://127.0.0.1:8080/]
       interval: 5s
       timeout: 3s
       retries: 12
@@ -113,6 +146,7 @@ services:
 networks:
   management:
   edge:
+  builder:
 
 volumes:
   platform-state:

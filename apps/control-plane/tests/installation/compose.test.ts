@@ -124,6 +124,31 @@ describe.runIf(process.env["RUN_INSTALLATION_TESTS"] === "1")(
         expect(services[name]?.environment).not.toHaveProperty("GITHUB_TOKEN");
     });
 
+    it("runs the app builder on a network shared only with the control plane", async () => {
+      const { services } = await render(["compose.base", "compose.azure", "compose.telemetry"], {
+        ...installationSettings,
+        CLICKHOUSE_READ_PASSWORD: "fixture-reader-only",
+        CLICKHOUSE_INGEST_PASSWORD: "fixture-ingest-only",
+      });
+
+      const control = serviceSchema.parse(services["control-plane"]);
+      const builder = serviceSchema.parse(services["builder"]);
+
+      expect(configurationSchema.parse(control.environment).PLATFORM_APP_BUILDER_URL).toBe(
+        "http://builder:8080",
+      );
+      expect(Object.keys(builder.networks)).toEqual(["builder"]);
+      expect(builder.ports).toEqual([]);
+      expect(builder.volumes).toEqual([]);
+      expect(Object.keys(builder.environment)).toEqual(["CELLD_ASSET_CACHE_DIR"]);
+      expect(
+        Object.entries(services)
+          .filter(([, service]) => Object.hasOwn(service.networks, "builder"))
+          .map(([name]) => name)
+          .sort(),
+      ).toEqual(["builder", "control-plane"]);
+    });
+
     it.each(matrix)(
       "renders $database PostgreSQL, $storage storage and $tls TLS",
       async ({ database, storage, tls }) => {
@@ -204,7 +229,12 @@ describe.runIf(process.env["RUN_INSTALLATION_TESTS"] === "1")(
 
       const control = serviceSchema.parse(services["control-plane"]);
 
-      expect(Object.keys(control.networks).sort()).toEqual(["edge", "management", "telemetry"]);
+      expect(Object.keys(control.networks).sort()).toEqual([
+        "builder",
+        "edge",
+        "management",
+        "telemetry",
+      ]);
       expect(control.environment["CLICKHOUSE_PASSWORD"]).toBe("fixture-reader-only");
       expect(control.environment["CLICKHOUSE_INGEST_PASSWORD"]).toBeUndefined();
 
