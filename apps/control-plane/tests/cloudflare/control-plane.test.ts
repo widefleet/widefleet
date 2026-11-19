@@ -411,38 +411,43 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
       maxRedirects: 0,
     });
 
-    const navigate = (path: string) =>
-      browser.get(path, { headers: { accept: "text/html", "sec-fetch-mode": "navigate" } });
+    try {
+      const navigate = (path: string) =>
+        browser.get(path, { headers: { accept: "text/html", "sec-fetch-mode": "navigate" } });
 
-    const redirectUri = appCallbackUrl(environment.configuration, installationOrganizationId);
+      const redirectUri = appCallbackUrl(environment.configuration, installationOrganizationId);
 
-    const authorization = await navigate(
-      `/api/auth/oauth2/authorize?${new URLSearchParams({
-        response_type: "code",
-        client_id: appLoginClientId(installationOrganizationId),
-        redirect_uri: redirectUri,
-        scope: "openid profile email offline_access",
-        state: "synthetic-app-state",
-        code_challenge: "zMTu4U_d3LvcnIJF0MLJksW3cZ-uah6k4pEKpX9Ay6s",
-        code_challenge_method: "S256",
-      })}`,
-    );
+      const authorization = await navigate(
+        `/api/auth/oauth2/authorize?${new URLSearchParams({
+          response_type: "code",
+          client_id: appLoginClientId(installationOrganizationId),
+          redirect_uri: redirectUri,
+          scope: "openid profile email offline_access",
+          state: "synthetic-app-state",
+          code_challenge: "zMTu4U_d3LvcnIJF0MLJksW3cZ-uah6k4pEKpX9Ay6s",
+          code_challenge_method: "S256",
+        })}`,
+      );
 
-    const login = new URL(z.string().parse(authorization.headers()["location"]), origin);
-    expect(login.pathname).toBe("/sign-in");
+      const login = new URL(z.string().parse(authorization.headers()["location"]), origin);
+      expect(login.pathname).toBe("/sign-in");
 
-    return {
-      browser,
-      // The sign-in page sends this through the OAuth provider client plugin.
-      oauthQuery: login.search.slice(1),
-      expectResumed: async (callbackPath: string) => {
-        const callback = await navigate(callbackPath);
-        const destination = new URL(z.string().parse(callback.headers()["location"]), origin);
-        expect(destination.origin + destination.pathname).toBe(redirectUri);
-        expect(destination.searchParams.get("state")).toBe("synthetic-app-state");
-        expect(destination.searchParams.get("code")).toBeTruthy();
-      },
-    };
+      return {
+        browser,
+        // The sign-in page sends this through the OAuth provider client plugin.
+        oauthQuery: login.search.slice(1),
+        expectResumed: async (callbackPath: string) => {
+          const callback = await navigate(callbackPath);
+          const destination = new URL(z.string().parse(callback.headers()["location"]), origin);
+          expect(destination.origin + destination.pathname).toBe(redirectUri);
+          expect(destination.searchParams.get("state")).toBe("synthetic-app-state");
+          expect(destination.searchParams.get("code")).toBeTruthy();
+        },
+      };
+    } catch (cause) {
+      await browser.dispose();
+      throw cause;
+    }
   };
 
   it("resumes a pending app sign-in after a new user signs in with Microsoft", async () => {
@@ -469,45 +474,48 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
       experimental: { disableExperimentalWarning: true, disableDevRegistry: true, watch: false },
     });
 
-    const app = await startAppSignIn(`http://127.0.0.1:${social.port}`);
-
     try {
-      const started = await app.browser.post("/api/auth/sign-in/social", {
-        data: {
-          provider: "widefleet-microsoft",
-          callbackURL: "/",
-          newUserCallbackURL: "/organizations?next=%2Fwelcome",
-          disableRedirect: true,
-          oauth_query: app.oauthQuery,
-        },
-      });
+      const app = await startAppSignIn(`http://127.0.0.1:${social.port}`);
 
-      expect(started.status(), await started.text()).toBe(200);
-      const provider = new URL(z.object({ url: z.string() }).parse(await started.json()).url);
-      const { privateKey } = await generateKeyPair("RS256");
+      try {
+        const started = await app.browser.post("/api/auth/sign-in/social", {
+          data: {
+            provider: "widefleet-microsoft",
+            callbackURL: "/",
+            newUserCallbackURL: "/organizations?next=%2Fwelcome",
+            disableRedirect: true,
+            oauth_query: app.oauthQuery,
+          },
+        });
 
-      const idToken = await new SignJWT({
-        name: "Invited member",
-        email,
-        xms_edov: true,
-        oid: crypto.randomUUID(),
-        tid: crypto.randomUUID(),
-      })
-        .setProtectedHeader({ alg: "RS256" })
-        .setSubject(crypto.randomUUID())
-        .setAudience("synthetic-microsoft")
-        .setIssuedAt()
-        .setExpirationTime("5m")
-        .sign(privateKey);
+        expect(started.status(), await started.text()).toBe(200);
+        const provider = new URL(z.object({ url: z.string() }).parse(await started.json()).url);
+        const { privateKey } = await generateKeyPair("RS256");
 
-      await app.expectResumed(
-        `/api/auth/callback/widefleet-microsoft?${new URLSearchParams({
-          state: z.string().parse(provider.searchParams.get("state")),
-          code: idToken,
-        })}`,
-      );
+        const idToken = await new SignJWT({
+          name: "Invited member",
+          email,
+          xms_edov: true,
+          oid: crypto.randomUUID(),
+          tid: crypto.randomUUID(),
+        })
+          .setProtectedHeader({ alg: "RS256" })
+          .setSubject(crypto.randomUUID())
+          .setAudience("synthetic-microsoft")
+          .setIssuedAt()
+          .setExpirationTime("5m")
+          .sign(privateKey);
+
+        await app.expectResumed(
+          `/api/auth/callback/widefleet-microsoft?${new URLSearchParams({
+            state: z.string().parse(provider.searchParams.get("state")),
+            code: idToken,
+          })}`,
+        );
+      } finally {
+        await app.browser.dispose();
+      }
     } finally {
-      await app.browser.dispose();
       await social.stop();
     }
   }, 30_000);
