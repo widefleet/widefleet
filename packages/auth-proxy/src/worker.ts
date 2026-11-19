@@ -205,9 +205,10 @@ export const createAuthHandler = (
 
       // App hostnames select their owner from the published route. Only the auth
       // host can dispatch by callback path; the proxy checks that host below.
-      const callback = /^\/oauth2\/([A-Za-z0-9_-]+)\/(?:start|callback|error|sign_out)$/.exec(
-        url.pathname,
-      );
+      const callback =
+        /^\/oauth2\/([A-Za-z0-9_-]+)\/(?:start|callback|error|sign_out|embedded(?:\/session)?)$/.exec(
+          url.pathname,
+        );
 
       const organizationId = route?.organizationId ?? callback?.[1];
 

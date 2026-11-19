@@ -25,7 +25,11 @@ export const embeddedPath = (organizationId: string) => `/oauth2/${organizationI
 export class EmbeddedSignInFailure extends Error {
   readonly status: 401 | 403 | 503;
 
-  readonly code: "invalid_token" | "consent_required" | "temporarily_unavailable";
+  readonly code:
+    | "invalid_token"
+    | "consent_required"
+    | "temporarily_unavailable"
+    | "session_too_large";
 
   readonly retryAfter: string | undefined;
 
@@ -76,6 +80,7 @@ const graphProfile = z.object({
   id: z.uuid(),
   displayName: z.string().nullish(),
   mail: z.string().nullish(),
+  userPrincipalName: z.string().nullish(),
 });
 
 // The token's audience is the client that also signs users in to apps, so it
@@ -166,7 +171,7 @@ const entraIdentity = async (configuration: AuthConfiguration, token: string) =>
     .parse(await exchanged.json()).access_token;
 
   const profileResponse = await fetch(
-    "https://graph.microsoft.com/v1.0/me?$select=id,displayName,mail",
+    "https://graph.microsoft.com/v1.0/me?$select=id,displayName,mail,userPrincipalName",
     {
       headers: { authorization: `Bearer ${accessToken}` },
       redirect: "manual",
@@ -191,7 +196,9 @@ const entraIdentity = async (configuration: AuthConfiguration, token: string) =>
   const identity = proxyIdentity.safeParse({
     id: claims.oid,
     name: profile.displayName ?? "",
-    email: profile.mail,
+    // Accounts without a mailbox have no mail address; their sign-in name is
+    // the address colleagues know them by.
+    email: profile.mail ?? profile.userPrincipalName,
     groups,
   });
 
@@ -231,10 +238,47 @@ const embeddedSession = z.object({
 const cookieAttributes = (configuration: AuthConfiguration, maxAge: number) =>
   `Domain=${configuration.domain}; Path=/; Max-Age=${maxAge}; Secure; HttpOnly; SameSite=None; Partitioned`;
 
-export const clearEmbeddedSession = (configuration: AuthConfiguration) =>
-  `${embeddedSessionCookie(configuration)}=; ${cookieAttributes(configuration, 0)}`;
+// Like regular sessions, a value above Safari's ~4 KB per-cookie floor spans
+// numbered cookies, so identities with many groups still fit.
+const maxCookieValue = 3_800;
 
-export const signInEmbedded = async (configuration: AuthConfiguration, token: string) => {
+const maxCookieChunks = 20;
+
+const requestCookies = (headers: Headers) =>
+  (headers.get("cookie") ?? "").split(";").map((cookie) => {
+    const separator = cookie.indexOf("=");
+
+    return separator < 0
+      ? { name: cookie.trim(), value: "" }
+      : { name: cookie.slice(0, separator).trim(), value: cookie.slice(separator + 1).trim() };
+  });
+
+const sessionPart = (name: string, candidate: string) =>
+  candidate === name ||
+  (candidate.startsWith(`${name}.`) &&
+    /^(?:0|[1-9][0-9]?)$/.test(candidate.slice(name.length + 1)));
+
+const expire = (configuration: AuthConfiguration, name: string) =>
+  `${name}=; ${cookieAttributes(configuration, 0)}`;
+
+export const clearEmbeddedSession = (configuration: AuthConfiguration, headers: Headers) => {
+  const name = embeddedSessionCookie(configuration);
+
+  return [
+    ...new Set([
+      name,
+      ...requestCookies(headers)
+        .map((cookie) => cookie.name)
+        .filter((candidate) => sessionPart(name, candidate)),
+    ]),
+  ].map((part) => expire(configuration, part));
+};
+
+export const signInEmbedded = async (
+  configuration: AuthConfiguration,
+  token: string,
+  headers: Headers,
+) => {
   const { identity, expiresAt } = await entraIdentity(configuration, token);
   const callback = new URL(configuration.redirectUrl);
 
@@ -249,23 +293,61 @@ export const signInEmbedded = async (configuration: AuthConfiguration, token: st
     .setExpirationTime(Math.floor(expiresAt / 1000))
     .encrypt(await sessionKey(configuration));
 
-  return `${embeddedSessionCookie(configuration)}=${value}; ${cookieAttributes(
-    configuration,
-    Math.floor((expiresAt - Date.now()) / 1000),
-  )}`;
+  const name = embeddedSessionCookie(configuration);
+  const count = Math.ceil(value.length / maxCookieValue);
+
+  if (count > maxCookieChunks) {
+    console.error("Embedded sign-in failed", { stage: "session", groups: identity.groups.length });
+    throw new EmbeddedSignInFailure(403, "session_too_large");
+  }
+
+  const parts =
+    count === 1
+      ? [{ name, value }]
+      : Array.from({ length: count }, (_, index) => ({
+          name: `${name}.${index}`,
+          value: value.slice(index * maxCookieValue, (index + 1) * maxCookieValue),
+        }));
+
+  const attributes = cookieAttributes(configuration, Math.floor((expiresAt - Date.now()) / 1000));
+  const written = new Set(parts.map((part) => part.name));
+
+  return [
+    ...parts.map((part) => `${part.name}=${part.value}; ${attributes}`),
+    // A shorter session must not leave chunks of the previous one behind.
+    ...requestCookies(headers)
+      .map((cookie) => cookie.name)
+      .filter((candidate) => sessionPart(name, candidate) && !written.has(candidate))
+      .map((stale) => expire(configuration, stale)),
+  ];
 };
 
-const cookieValue = (headers: Headers, name: string) => {
-  const values = (headers.get("cookie") ?? "")
-    .split(";")
-    .map((cookie) => cookie.trim())
-    .filter((cookie) => cookie.startsWith(`${name}=`));
+const sessionValue = (headers: Headers, name: string) => {
+  const cookies = requestCookies(headers);
 
-  return values.length === 1 ? values[0]?.slice(name.length + 1) : undefined;
+  const single = (candidate: string) => {
+    const matches = cookies.filter((cookie) => cookie.name === candidate);
+
+    return matches.length === 1 ? matches[0]?.value : undefined;
+  };
+
+  const whole = single(name);
+
+  if (whole) return whole;
+  const parts: string[] = [];
+
+  for (let index = 0; index < maxCookieChunks; index++) {
+    const part = single(`${name}.${index}`);
+
+    if (!part) break;
+    parts.push(part);
+  }
+
+  return parts.length ? parts.join("") : undefined;
 };
 
 export const embeddedIdentity = async (configuration: AuthConfiguration, headers: Headers) => {
-  const value = cookieValue(headers, embeddedSessionCookie(configuration));
+  const value = sessionValue(headers, embeddedSessionCookie(configuration));
 
   if (!value) return null;
 

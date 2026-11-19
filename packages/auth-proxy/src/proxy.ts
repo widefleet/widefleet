@@ -120,12 +120,12 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
     if (!input.success) return Response.json({ error: "invalid_token" }, { status: 400 });
 
     try {
-      const cookie = await signInEmbedded(configuration, input.data.token);
+      const headers = new Headers({ "cache-control": "no-store" });
 
-      return new Response(null, {
-        status: 204,
-        headers: { "cache-control": "no-store", "set-cookie": cookie },
-      });
+      for (const cookie of await signInEmbedded(configuration, input.data.token, request.headers))
+        headers.append("set-cookie", cookie);
+
+      return new Response(null, { status: 204, headers });
     } catch (cause) {
       if (!(cause instanceof EmbeddedSignInFailure)) throw cause;
       const headers = new Headers({ "cache-control": "no-store" });
@@ -195,7 +195,8 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
       if (!configuration.embeddingOrigins) return result;
       const signedOut = new Response(result.body, result);
 
-      signedOut.headers.append("set-cookie", clearEmbeddedSession(configuration));
+      for (const cookie of clearEmbeddedSession(configuration, request.headers))
+        signedOut.headers.append("set-cookie", cookie);
 
       return signedOut;
     }

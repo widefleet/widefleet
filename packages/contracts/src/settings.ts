@@ -117,6 +117,8 @@ export const embeddingOrigin = z
   .string()
   .trim()
   .toLowerCase()
+  // Browsers omit the default port from origins, so compare without it.
+  .overwrite((value) => value.replace(/^(https:\/\/[^/]+):443$/, "$1"))
   .regex(
     /^https:\/\/(?:\*\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?(?::[0-9]{1,5})?$/,
     "Use an HTTPS origin such as https://teams.microsoft.com or https://*.example.com",

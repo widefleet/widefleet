@@ -43,7 +43,7 @@
           if (draft.sso.appIdentityType !== "entra") {
             draft.directory = null;
             draft.embeddingOrigins = [];
-          }
+          } else draft.embeddingOrigins = undefined;
         }}
       >
         {#each Object.entries(ssoProviders) as [id, provider] (id)}

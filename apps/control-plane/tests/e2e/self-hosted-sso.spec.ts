@@ -155,10 +155,17 @@ test("configures self-hosted SSO without a company domain or DNS proof", async (
     }
 
     await page.setViewportSize({ width: 1280, height: 960 });
+    // Saving an open connection form must not restore a host removed meanwhile.
+    await page.getByRole("button", { name: "Edit configuration", exact: true }).click();
     await page
       .getByRole("button", { name: "Remove https://*.teams.example.test", exact: true })
       .focus();
     await page.keyboard.press("Enter");
+    await expect(page.getByText("No embedding hosts", { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(
+      page.getByRole("button", { name: "Edit configuration", exact: true }),
+    ).toBeVisible();
     await expect(page.getByText("No embedding hosts", { exact: true })).toBeVisible();
     // A completed company sign-in links the administrator, which activation requires.
     await linkCompanyAccount(environment.database.db, environment.owner.id);

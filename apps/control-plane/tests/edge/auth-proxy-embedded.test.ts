@@ -1,4 +1,5 @@
 import { authConfiguration, createAuthProxy } from "@platform/auth-proxy";
+import { embeddingOrigin } from "@platform/contracts";
 import { chromium } from "@playwright/test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -53,6 +54,8 @@ describe("embedded app sign-in", () => {
   let publicKey: JWK;
   let allowedGroups: string[];
   let exchange: z.infer<typeof providerReply>;
+  let memberships: string[];
+  let mailbox: string | null;
   const exchanges: URLSearchParams[] = [];
 
   const apps = {
@@ -88,8 +91,13 @@ describe("embedded app sign-in", () => {
       }),
     );
 
+  // The cookies a browser keeps from a response, as one request header.
   const sessionCookie = (response: Response) =>
-    z.string().parse(response.headers.get("set-cookie")).split(";")[0] ?? "";
+    response.headers
+      .getSetCookie()
+      .filter((cookie) => !cookie.includes("Max-Age=0"))
+      .map((cookie) => cookie.split(";")[0] ?? "")
+      .join("; ");
 
   const framed = (cookie = "") =>
     proxy().fetch(
@@ -107,6 +115,8 @@ describe("embedded app sign-in", () => {
 
   beforeEach(() => {
     allowedGroups = [];
+    memberships = ["00000000-0000-4000-8000-0000000000aa"];
+    mailbox = "user@example.test";
     exchanges.length = 0;
     exchange = { status: 200, body: { access_token: "graph-access-token" } };
 
@@ -129,11 +139,12 @@ describe("embedded app sign-in", () => {
         return Response.json({
           id: userId,
           displayName: "Embedded User",
-          mail: "user@example.test",
+          mail: mailbox,
+          userPrincipalName: "user@tenant.example.test",
         });
 
       if (url.pathname === "/v1.0/me/transitiveMemberOf")
-        return Response.json({ value: [{ id: "00000000-0000-4000-8000-0000000000aa" }] });
+        return Response.json({ value: memberships.map((id) => ({ id })) });
 
       return new Response(null, { status: 404 });
     });
@@ -223,6 +234,61 @@ describe("embedded app sign-in", () => {
     expect(forwarded["x-auth-request-email"]).toBe("user@example.test");
     expect(forwarded["x-auth-request-groups"]).toBe("00000000-0000-4000-8000-0000000000aa");
     expect(forwarded["cookie"]).toBeUndefined();
+  });
+
+  it("splits sessions with many groups across cookies and replaces them cleanly", async () => {
+    memberships = Array.from(
+      { length: 300 },
+      (_, index) => `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+    );
+    allowedGroups = [memberships.at(-1) ?? ""];
+    const large = await submit(await hostToken());
+    const names = large.headers.getSetCookie().map((cookie) => cookie.split("=")[0]);
+
+    expect(names.length).toBeGreaterThan(2);
+    expect(names[0]).toBe("__Secure-platform_sso_widefleet.embedded_session.0");
+    expect(large.headers.getSetCookie().every((cookie) => cookie.length < 4_050)).toBe(true);
+    expect((await framed(sessionCookie(large))).status).toBe(200);
+
+    memberships = [];
+    allowedGroups = [];
+
+    const small = await proxy().fetch(
+      new Request(signIn, {
+        method: "POST",
+        headers: {
+          origin: "https://auth.apps.example.test",
+          "content-type": "application/json",
+          cookie: sessionCookie(large),
+        },
+        body: JSON.stringify({ token: await hostToken() }),
+      }),
+    );
+
+    const expired = small.headers.getSetCookie().filter((cookie) => cookie.includes("Max-Age=0"));
+
+    expect(expired).toHaveLength(names.length);
+    expect(sessionCookie(small)).toMatch(/^__Secure-platform_sso_widefleet\.embedded_session=/);
+  });
+
+  it("uses the sign-in name of accounts without a mailbox", async () => {
+    mailbox = null;
+    const signedIn = await submit(await hostToken());
+
+    const forwarded = z
+      .record(z.string(), z.string())
+      .parse(await (await framed(sessionCookie(signedIn))).json());
+
+    expect(forwarded["x-auth-request-email"]).toBe("user@tenant.example.test");
+  });
+
+  it("compares embedding origins without the default port", () => {
+    expect(embeddingOrigin.parse("https://Portal.example.test:443")).toBe(
+      "https://portal.example.test",
+    );
+    expect(embeddingOrigin.parse("https://portal.example.test:8443")).toBe(
+      "https://portal.example.test:8443",
+    );
   });
 
   it("applies app access rules to embedded sessions", async () => {
