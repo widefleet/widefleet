@@ -34,6 +34,7 @@ services:
     networks: [management, edge, builder]
     depends_on:
       runtime: { condition: service_healthy }
+      builder: { condition: service_healthy }
     healthcheck:
       test:
         [

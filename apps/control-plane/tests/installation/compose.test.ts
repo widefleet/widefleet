@@ -137,6 +137,8 @@ describe.runIf(process.env["RUN_INSTALLATION_TESTS"] === "1")(
       expect(configurationSchema.parse(control.environment).PLATFORM_APP_BUILDER_URL).toBe(
         "http://builder:8080",
       );
+      // Starting the control plane, as the installation guide does, starts the builder.
+      expect(control.depends_on).toHaveProperty("builder");
       expect(Object.keys(builder.networks)).toEqual(["builder"]);
       expect(builder.ports).toEqual([]);
       expect(builder.volumes).toEqual([]);
