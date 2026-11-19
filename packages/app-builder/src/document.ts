@@ -6,7 +6,7 @@ import { documentResult, type documentRequest } from "@platform/contracts/builds
 import { DocumentationError, documentServices } from "@platform/service-docs";
 import { z } from "zod";
 import serviceDocs from "./service-docs.wasm";
-import { BuildError, parseJson } from "./configuration.ts";
+import { BuildError, parseJson, parseJsonc } from "./configuration.ts";
 
 const manifest = z.looseObject({
   dependencies: z.record(z.string(), z.string()).default({}),
@@ -64,7 +64,7 @@ const developmentDeclarations = (
   }
 
   const configuration = tsconfig.safeParse(
-    parseJson(files["tsconfig.json"] ?? "{}", "tsconfig.json"),
+    parseJsonc(files["tsconfig.json"] ?? "{}", "tsconfig.json"),
   );
 
   if (configuration.success) {

@@ -93,7 +93,7 @@ export const readConfiguration = (files: Readonly<Record<string, string>>) => {
   if (source === undefined)
     throw new BuildError("The project has no wrangler.jsonc or wrangler.json");
 
-  const parsed = wranglerConfiguration.safeParse(parseJson(stripJsonc(source), "wrangler.jsonc"));
+  const parsed = wranglerConfiguration.safeParse(parseJsonc(source, "wrangler.jsonc"));
 
   if (!parsed.success)
     throw new BuildError(`Invalid Wrangler configuration: ${z.prettifyError(parsed.error)}`);
@@ -105,6 +105,9 @@ export const readConfiguration = (files: Readonly<Record<string, string>>) => {
 };
 
 export class BuildError extends Error {}
+
+/** Parses JSONC, as Wrangler and TypeScript accept it, reporting invalid input as a build error. */
+export const parseJsonc = (text: string, file: string) => parseJson(stripJsonc(text), file);
 
 /** Parses a project file as JSON, reporting invalid JSON as a build error. */
 export const parseJson = (text: string, file: string) => {

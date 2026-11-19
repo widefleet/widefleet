@@ -166,15 +166,17 @@ const project = {
     },
     devDependencies: { "shape-types": "2.0.0" },
   }),
-  "tsconfig.json": JSON.stringify({
-    compilerOptions: {
-      strict: true,
-      target: "ES2022",
-      module: "ESNext",
-      moduleResolution: "Bundler",
-    },
-    include: ["src"],
-  }),
+  "tsconfig.json": `{
+  // TypeScript accepts comments and trailing commas.
+  "compilerOptions": {
+    "strict": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+  },
+  "include": ["src"],
+}
+`,
   "src/app.ts": `import "empty-module";
 import { greet } from "greeting";
 import { license } from "licensed";
