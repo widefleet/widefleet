@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -137,6 +138,14 @@ const { default: bundled } = await import("@platform/app-runtime/release", {
 const release = runtimeRelease.parse(bundled);
 
 validateCloudflareRuntime(release);
+
+const builderBuild = new URL("../../../packages/app-builder/dist/", import.meta.url);
+
+for (const file of ["builder.js", "esbuild.wasm", "service-docs.wasm"])
+  if (!existsSync(new URL(file, builderBuild)))
+    throw new Error(
+      "Build the app builder first: cargo build --profile wasm -p platform-service-docs-wasm --target wasm32-wasip1, then pnpm --filter @platform/app-builder build",
+    );
 
 const controlDirectory = fileURLToPath(new URL("../", import.meta.url));
 
@@ -344,6 +353,20 @@ try {
     WIDEFLEET_INITIALIZE_SECRETS_FILE: controlSecrets,
     PLATFORM_BOOTSTRAP_FILE: bootstrapFile,
   });
+
+  // The control plane binds both builder Workers, so they deploy first.
+  for (const [file, config] of [
+    ["builder.json", configs.builder],
+    ["documenter.json", configs.documenter],
+  ] as const)
+    await run("pnpm", [
+      "exec",
+      "wrangler",
+      "deploy",
+      "--config",
+      await write(file, JSON.stringify(config)),
+    ]);
+
   await run("pnpm", [
     "exec",
     "wrangler",

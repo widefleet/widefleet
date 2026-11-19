@@ -389,6 +389,9 @@ importers:
       miniflare:
         specifier: 5.20261001.0-alpha
         version: 5.20261001.0-alpha(patch_hash=14a20cb93d5b33de95aab0b33f8ba5c91a75a9c1eb4438753b017be53fb04f73)(@types/node@26.6.4)
+      wrangler:
+        specifier: 4.147.0
+        version: 4.147.0(@cloudflare/workers-types@5.20261003.1)(@types/node@26.6.4)
 
   packages/app-runtime:
     dependencies:

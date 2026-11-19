@@ -42,6 +42,27 @@ const configuration = {
 };
 
 describe("Hosted resource provisioning", () => {
+  it("deploys the app builder once per build phase, reachable only through service bindings", async () => {
+    const configs = await hostedConfigurations(installation, ids);
+
+    for (const [config, name] of [
+      [configs.builder, "fixture-app-builder"],
+      [configs.documenter, "fixture-app-documenter"],
+    ] as const) {
+      expect(config).toMatchObject({
+        name,
+        account_id: ids.account,
+        no_bundle: true,
+        workers_dev: false,
+        preview_urls: false,
+        rules: [{ type: "CompiledWasm", globs: ["**/*.wasm"] }],
+      });
+      expect(config.main).toMatch(/packages\/app-builder\/dist\/builder\.js$/);
+      expect(config.base_dir).toMatch(/packages\/app-builder\/dist$/);
+      expect(config).not.toHaveProperty("routes");
+    }
+  });
+
   it("configures the workload issuer on the runtime without adding a control-plane schedule", async () => {
     const configs = await hostedConfigurations(installation, ids, "email", {
       vars: { WIDEFLEET_WORKLOAD_ISSUER: "https://stale.example.test/workload" },
@@ -354,6 +375,8 @@ describe("Hosted resource provisioning", () => {
           service: configuration.runtimeName,
           entrypoint: "RuntimeManagement",
         },
+        { binding: "APP_BUILDER", service: "fixture-app-builder" },
+        { binding: "APP_DOCUMENTER", service: "fixture-app-documenter" },
       ]);
       expect(configs.controlPlane.vars["APP_RUNTIME_NAME"]).toBe(configuration.runtimeName);
       expect(configs.controlPlane.hyperdrive).toEqual([
