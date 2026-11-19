@@ -950,6 +950,9 @@ describe("MCP OAuth in the data plane", () => {
     expect(reset.status).toBe(204);
     const storage = await runtime.getKVNamespace("AUTH_CONFIG");
 
+    for (const { name } of (await storage.list({ prefix: `grant:${owner}:` })).keys)
+      await storage.delete(name);
+
     for (const { name, value, expiration, metadata } of grants)
       await storage.put(name, value, { expiration: z.number().parse(expiration), metadata });
   };
@@ -1027,6 +1030,36 @@ describe("MCP OAuth in the data plane", () => {
 
     expect(await storage.get(grantKey(token))).not.toBeNull();
     expect((await refreshWith(connection.client, token)).status).toBe(400);
+  });
+
+  it("takes the KV record when the migration window ends without a read", async () => {
+    const connection = await connect();
+    const owner = grantOwner(connection.refresh_token);
+    const stale = await storedGrants(owner);
+    const refreshed = await refreshWith(connection.client, connection.refresh_token);
+    expect(refreshed.status).toBe(200);
+
+    const { refresh_token: token } = z
+      .object({ refresh_token: z.string() })
+      .parse(await refreshed.json());
+
+    const current = await storedGrants(owner);
+    await storeInKv(owner, stale);
+    expect(await storedGrants(owner)).toEqual(stale);
+    const storage = await runtime.getKVNamespace("AUTH_CONFIG");
+
+    for (const { name, value, expiration, metadata } of current)
+      await storage.put(name, value, { expiration: z.number().parse(expiration), metadata });
+
+    // No refresh arrives before the window ends.
+    const finished = await send(`/fixture/grants/finish?owner=${encodeURIComponent(owner)}`, {
+      method: "POST",
+    });
+
+    expect(finished.status).toBe(204);
+    expect((await storage.list({ prefix: `grant:${owner}:` })).keys).toEqual([]);
+    const response = await refreshWith(connection.client, token);
+    expect(response.status, await response.clone().text()).toBe(200);
   });
 
   it("does not return expired grants", async () => {

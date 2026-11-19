@@ -197,10 +197,12 @@ export class McpGrants extends DurableObject<ParentEnvironment> {
     const migration = await this.ctx.storage.get<Migration>(migrationKey);
 
     if (migration && migration.deleteAt <= Date.now()) {
-      // Stop following KV before deleting from it: a deleted KV copy must not
-      // read as a revoked grant.
+      // An imported grant that was not read during the window takes its KV
+      // record now: the window outlasts KV's location cache, so this read is
+      // current. Then it stops following KV before the copies are deleted, so a
+      // deleted KV copy cannot read as a revoked grant.
       for (const name of migration.names) {
-        const entry = await this.ctx.storage.get<Entry>(name);
+        const entry = await this.current(name);
 
         if (entry?.copied)
           await this.ctx.storage.put<Entry>(name, {
