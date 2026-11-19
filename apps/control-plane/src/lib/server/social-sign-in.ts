@@ -123,12 +123,52 @@ export const validateSocialUser =
     )
       return undefined;
     const local = user.id ? await context.context.internalAdapter.findUserById(user.id) : null;
+    let linkSession: "none" | "unqualified" | undefined;
 
-    if (local && allowUser && !(await allowUser(local.id))) return { error: "sign_in_not_allowed" };
+    // The callback only reports the error code. Record which proof was missing,
+    // without addresses, so rejected provider sign-ins can be diagnosed.
+    const reject = (error: "sign_in_not_allowed" | "email_verification_required") => {
+      const claims = z
+        .looseObject({
+          email_verified: z.union([
+            z.boolean(),
+            z.undefined().transform(() => "missing" as const),
+            z.unknown().transform(() => "invalid" as const),
+          ]),
+          hd: z
+            .string()
+            .min(1)
+            .transform(() => true)
+            .catch(false),
+        })
+        .catch({ email_verified: "missing" as const, hd: false })
+        .parse(source.oauth?.profile);
+
+      context.context.logger.warn("Social sign-in rejected", {
+        provider,
+        action: source.action,
+        error,
+        localUser: !user.id
+          ? "none"
+          : !local
+            ? "not_found"
+            : local.emailVerified
+              ? "verified"
+              : "unverified",
+        providerEmailVerified: user.emailVerified === true,
+        emailVerifiedClaim: claims.email_verified,
+        hostedDomainClaim: claims.hd,
+        linkSession,
+      });
+
+      return { error };
+    };
+
+    if (local && allowUser && !(await allowUser(local.id))) return reject("sign_in_not_allowed");
     const email = source.action === "sign-in" ? local?.email : user.email;
 
     if (!email || !allowEmail || !(await allowEmail(email.toLowerCase())))
-      return { error: "sign_in_not_allowed" };
+      return reject("sign_in_not_allowed");
 
     // Returning identities are bound to their provider ID, even if the provider's
     // email or proof has changed. Keep the local, verified address unchanged.
@@ -154,10 +194,12 @@ export const validateSocialUser =
         return undefined;
       }
 
-      if (!local?.emailVerified) return { error: "email_verification_required" };
+      linkSession = session ? "unqualified" : "none";
+
+      if (!local?.emailVerified) return reject("email_verification_required");
     }
 
-    if (user.emailVerified !== true) return { error: "email_verification_required" };
+    if (user.emailVerified !== true) return reject("email_verification_required");
 
     return undefined;
   };

@@ -49,6 +49,7 @@ describe("personal social sign-in", () => {
   } = {}) => {
     let otp = "";
     let active = true;
+    const logs: { level: string; message: string; args: unknown[] }[] = [];
 
     const options = authenticationOptions(configuration, {
       allowEmail: async () => admitted,
@@ -84,7 +85,7 @@ describe("personal social sign-in", () => {
         jwks: [],
         oauthResource: [],
       }),
-      logger: { disabled: true },
+      logger: { log: (level, message, ...args) => logs.push({ level, message, args }) },
     });
 
     const { internalAdapter } = await auth.$context;
@@ -203,6 +204,7 @@ describe("personal social sign-in", () => {
       complete,
       signIn,
       cookies,
+      logs,
       block: () => {
         active = false;
       },
@@ -325,6 +327,44 @@ describe("personal social sign-in", () => {
     expect((await f.signIn("microsoft", { xms_edov: true })).headers.get("location")).toContain(
       "error=email_verification_required",
     );
+    expect(f.logs).toEqual([
+      expect.objectContaining({
+        args: [
+          expect.objectContaining({
+            action: "link-account",
+            localUser: "unverified",
+            providerEmailVerified: true,
+            linkSession: "none",
+          }),
+        ],
+      }),
+    ]);
+  });
+
+  it("records which proof a rejected sign-in lacked without its address", async () => {
+    const f = await fixture({ existing: false });
+    expect((await f.signIn("google", { email_verified: true })).headers.get("location")).toContain(
+      "error=email_verification_required",
+    );
+    expect(f.logs).toEqual([
+      {
+        level: "warn",
+        message: "Social sign-in rejected",
+        args: [
+          {
+            provider: "widefleet-google",
+            action: "create-user",
+            error: "email_verification_required",
+            localUser: "none",
+            providerEmailVerified: false,
+            emailVerifiedClaim: true,
+            hostedDomainClaim: false,
+            linkSession: undefined,
+          },
+        ],
+      },
+    ]);
+    expect(JSON.stringify(f.logs)).not.toContain("@");
   });
 
   it("uses a Microsoft login name only as an unverified email hint", async () => {
