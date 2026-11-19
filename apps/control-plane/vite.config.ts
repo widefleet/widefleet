@@ -30,6 +30,10 @@ if (clientExtension) aliases["#auth-client-extension"] = clientExtension;
 export const controlPlaneConfig = (target: "node" | "cloudflare") =>
   defineConfig({
     resolve: { alias: aliases },
+    // vite-plugin-svelte inlines better-auth because it has a Svelte peer, while its
+    // plugins stay external. They then load a second better-auth with separate request
+    // state, which loses the pending OAuth request across social sign-in.
+    ssr: { external: ["better-auth"] },
     define: { "process.env.WIDEFLEET_BUILD_VERSION": JSON.stringify(release.version) },
     build: { sourcemap: target === "cloudflare" ? true : "hidden" },
     plugins: [
