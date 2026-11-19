@@ -20,12 +20,14 @@
   "durable_objects": {
     "bindings": [
       { "name": "WIDEFLEET_WORKFLOW_CATALOG", "class_name": "CloudflareWorkflowCatalog" },
+      { "name": "WIDEFLEET_MCP_GRANTS", "class_name": "McpGrants" },
     ],
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["CloudflareWorkflowCatalog"] },
     { "tag": "v2", "new_sqlite_classes": ["ConnectorCatalog", "ConnectorSupervisor"] },
     { "tag": "v3", "deleted_classes": ["ConnectorCatalog", "ConnectorSupervisor"] },
+    { "tag": "v4", "new_sqlite_classes": ["McpGrants"] },
   ],
   "workflows": [
     {
