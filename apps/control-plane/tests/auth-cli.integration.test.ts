@@ -34,6 +34,7 @@ import { createRuntimeReleaseService } from "../src/lib/server/runtime-releases.
 import { createStorage } from "../src/lib/server/storage.ts";
 import { createTelemetry } from "../src/lib/server/telemetry.ts";
 import { createUploadService } from "../src/lib/server/uploads.ts";
+import { createTemplateInstalls } from "../src/lib/server/template-installs.ts";
 import { createTestEnvironment } from "./environment.ts";
 
 const execute = promisify(execFile);
@@ -173,6 +174,11 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1" && process.platform !== "win
         ),
         releases: createRuntimeReleaseService(database, storage),
         uploads: createUploadService(database, storage, configuration),
+        templates: createTemplateInstalls(
+          configuration,
+          createAppService(database, configuration),
+          createUploadService(database, storage, configuration),
+        ),
         telemetry: createTelemetry(database, storage, configuration),
       });
       const user = environment.users.createUser({ email: "headless@example.test" });

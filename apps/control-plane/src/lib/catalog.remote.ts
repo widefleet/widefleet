@@ -2,7 +2,13 @@ import MarkdownIt from "markdown-it";
 import { templateCatalog, readTemplate } from "#server/app-templates";
 import { form, getRequestEvent, query } from "$app/server";
 import { redirect } from "@sveltejs/kit";
-import { appPath, organizationSelection, templatePath, templateSearch } from "@platform/contracts";
+import {
+  appPath,
+  appSlug,
+  organizationSelection,
+  templatePath,
+  templateSearch,
+} from "@platform/contracts";
 import { z } from "zod";
 import { getAppDetails } from "#lib/apps.remote";
 import { formValue, queryValue, remoteContext } from "#server/remote-support";
@@ -38,10 +44,37 @@ export const getTemplates = query(templateSearch, async ({ search }) => {
   return queryValue(await templateCatalog(principal, runtime.configuration, search));
 });
 
+export const installTemplate = form(
+  templatePath.extend({
+    ...organizationSelection.shape,
+    // An empty field keeps the template ID as the app name.
+    name: z
+      .string()
+      .trim()
+      .default("")
+      .refine(
+        (value) => value === "" || appSlug.safeParse(value).success,
+        "Use up to 48 lowercase letters, numbers and hyphens; start with a letter and end with a letter or number.",
+      ),
+  }),
+  async ({ organizationId, templateId, name }) => {
+    const { runtime, principal } = await remoteContext({ organizationId });
+
+    const result = formValue(
+      await runtime.templates.install(principal, name ? { templateId, name } : { templateId }),
+    );
+
+    // The deployment page shows the build's progress through activation.
+    redirect(303, `/apps/${result.app.id}/deployments`);
+  },
+);
+
 export const getTemplate = query(templatePath, async ({ templateId }) => {
   const { runtime, principal } = await remoteContext();
 
-  const template = queryValue(await readTemplate(principal, runtime.configuration, templateId));
+  const template = queryValue(
+    await readTemplate(principal, runtime.configuration, templateId, runtime.templates.available),
+  );
 
   return { ...template, html: new MarkdownIt({ html: false }).render(template.markdown) };
 });

@@ -62,6 +62,8 @@ export const runtimeConfigurationSchema = z.object({
   GITHUB_TOKEN: z.string().trim().optional(),
   PLATFORM_STATE_DIRECTORY: z.string().min(1).default("/var/lib/widefleet"),
   PLATFORM_APP_RUNTIME_URL: telemetryUrl.default("http://runtime:8080"),
+  // The app builder for one-click template installs, on a private network.
+  PLATFORM_APP_BUILDER_URL: telemetryUrl.optional(),
   PLATFORM_RUNTIME_DIRECTORY: z.string().min(1).default("/var/lib/widefleet/runtime"),
   PLATFORM_CONFIG_DIRECTORY: z.string().min(1).optional(),
   TLS_MODE: z.enum(["provided", "cloudflare"]).default("provided"),

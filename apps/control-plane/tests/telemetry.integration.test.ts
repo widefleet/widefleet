@@ -28,6 +28,7 @@ import { createIdentityService } from "../src/lib/server/identity.ts";
 import { createJobService } from "../src/lib/server/jobs.ts";
 import { createStorage } from "../src/lib/server/storage.ts";
 import { createUploadService } from "../src/lib/server/uploads.ts";
+import { createTemplateInstalls } from "../src/lib/server/template-installs.ts";
 import { createTelemetry } from "../src/lib/server/telemetry.ts";
 import { agents, artifacts, deployments } from "../src/lib/server/schema.ts";
 
@@ -219,6 +220,11 @@ describe.runIf(process.env["RUN_TELEMETRY_TESTS"] === "1")(
         ),
         releases: createRuntimeReleaseService(environment.database.db, storage),
         uploads: createUploadService(environment.database.db, storage, configuration),
+        templates: createTemplateInstalls(
+          configuration,
+          createAppService(environment.database.db, configuration),
+          createUploadService(environment.database.db, storage, configuration),
+        ),
       });
       const admin = environment.users.createUser({ email: "telemetry-admin@example.test" });
       adminId = admin.id;

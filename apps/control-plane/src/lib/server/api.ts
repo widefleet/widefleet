@@ -650,7 +650,21 @@ export const createApi = (runtime: Runtime) => {
       .input(contract.templatePath)
       .output(contract.appTemplate)
       .handler(async ({ context, input }) =>
-        unwrap(await readTemplate(context.principal, runtime.configuration, input.templateId)),
+        unwrap(
+          await readTemplate(
+            context.principal,
+            runtime.configuration,
+            input.templateId,
+            runtime.templates.available,
+          ),
+        ),
+      ),
+    installTemplate: write
+      .route({ method: "POST", path: "/catalog/templates/{templateId}/install" })
+      .input(contract.templateInstallInput)
+      .output(contract.templateInstall)
+      .handler(async ({ context, input }) =>
+        unwrap(await runtime.templates.install(context.principal, input)),
       ),
     setCatalogListing: write
       .route({ method: "PUT", path: "/apps/{appId}/catalog" })

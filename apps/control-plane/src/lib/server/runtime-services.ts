@@ -18,6 +18,8 @@ import { createNetworkService } from "./network.ts";
 import { createWorkflowService } from "./workflows.ts";
 import { createMigrationService } from "./migrations.ts";
 import { createJobService } from "./jobs.ts";
+import { createTemplateInstalls } from "./template-installs.ts";
+import type { AppBuilder } from "./app-builder.ts";
 import { createUploadService } from "./uploads.ts";
 import type { createCloudflareLogs } from "./cloudflare-logs.ts";
 import { createTelemetry } from "./telemetry.ts";
@@ -54,6 +56,7 @@ export const createRuntime = ({
   authentication,
   source,
   discoveryTransport = "node",
+  builder,
 }: {
   configuration: Configuration & { BETTER_AUTH_SECRET: string };
   database: ReturnType<typeof createDatabase>;
@@ -73,6 +76,7 @@ export const createRuntime = ({
   authCookies?: ReturnType<typeof sveltekitCookies>;
   hostedLogs?: ReturnType<typeof createCloudflareLogs>;
   discoveryTransport?: "node" | "cloudflare";
+  builder?: AppBuilder;
 }) => {
   const publicSignup = Boolean(createOrganization);
 
@@ -111,6 +115,16 @@ export const createRuntime = ({
   if (organizationAccess) authOptions.organizationAccess = organizationAccess;
   const auth = createAuthentication(configuration, database.db, authOptions);
 
+  const apps = createAppService(
+    database.db,
+    configuration,
+    execution,
+    observation,
+    Boolean(source),
+  );
+
+  const uploads = createUploadService(database.db, storage, configuration, execution, source);
+
   const runtime = {
     auth,
     publicSignup,
@@ -144,7 +158,7 @@ export const createRuntime = ({
     discoverPlatform: (domain: string) => discoverPlatform(domain, discoveryTransport),
     cliLogin: createCliLogin(database.db, configuration),
     source: createAppSource(database.db, source),
-    apps: createAppService(database.db, configuration, execution, observation, Boolean(source)),
+    apps,
     agents: createAgentService(database.db),
     jobs: createJobService(
       database.db,
@@ -161,7 +175,8 @@ export const createRuntime = ({
     connections: createConnectionService(database.db, execution),
     appSecrets: createAppSecrets(database.db, encryptionKey, execution),
     releases: createRuntimeReleaseService(database.db, storage, execution),
-    uploads: createUploadService(database.db, storage, configuration, execution, source),
+    uploads,
+    templates: createTemplateInstalls(configuration, apps, uploads, builder),
     telemetry: createTelemetry(database.db, storage, configuration, hostedLogs),
   };
 
