@@ -860,7 +860,7 @@ export default { async fetch(request, env, ctx) {
       expect(formTools.find((tool) => tool.name === "ask")?._meta).toMatchObject({
         ui: { resourceUri: "ui://widefleet/input-form.html" },
       });
-      expect(formTools.find((tool) => tool.name === "answer")?._meta).toEqual({
+      expect(formTools.find((tool) => tool.name === "answer")?._meta).toMatchObject({
         ui: { visibility: ["app"] },
       });
       expect(await send("resources/read", { uri: "ui://widefleet/input-form.html" })).toMatchObject(

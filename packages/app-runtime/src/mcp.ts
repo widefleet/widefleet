@@ -4,7 +4,14 @@ import {
   inputRequired,
   McpServer,
 } from "@modelcontextprotocol/server";
+import {
+  EXTENSION_ID,
+  RESOURCE_MIME_TYPE,
+  registerAppResource,
+  registerAppTool,
+} from "@modelcontextprotocol/ext-apps/server";
 import { inputAnswer, mcpServiceCall, mcpScopes, sealedInputRequired } from "@platform/contracts";
+import { inputFormHtml } from "#mcp-input-form";
 import { z } from "zod";
 import type { ParentEnvironment } from "./types.ts";
 import { mcpAnalytics } from "./mcp-analytics.ts";
@@ -16,12 +23,7 @@ import {
   formMcpInput,
   searchMcpServices,
 } from "./mcp-services.ts";
-import {
-  inputFormHtml,
-  inputFormMetaKey,
-  inputFormMimeType,
-  inputFormUri,
-} from "./mcp-input-form.ts";
+import { inputFormMeta, inputFormUri } from "./mcp-input-form.ts";
 import { executeMcpCode, mcpJson } from "./mcp-code.ts";
 import { createMcpCliLogin } from "./mcp-cli-login.ts";
 import { mcpInstructions, mcpSkillCatalog } from "./mcp-skills.ts";
@@ -31,8 +33,6 @@ const resultSchema = mcpJson.transform((value) => ({
 }));
 
 const result = resultSchema.parse.bind(resultSchema);
-
-const formExtension = "io.modelcontextprotocol/ui";
 
 const envelope = z
   .looseObject({
@@ -45,21 +45,8 @@ const envelope = z
   })
   .catch({ [CLIENT_CAPABILITIES_META_KEY]: {} });
 
-const formInput = {
-  ...mcpServiceCall.shape,
+const formInput = mcpServiceCall.extend({
   requestState: sealedInputRequired.shape.requestState,
-};
-
-// What the form needs to show a question and answer it.
-const formQuestion = (
-  service: z.infer<typeof mcpServiceCall>,
-  question: z.infer<typeof sealedInputRequired>,
-) => ({
-  [inputFormMetaKey]: {
-    call: service,
-    inputRequests: question.inputRequests,
-    requestState: question.requestState,
-  },
 });
 
 let skillCatalog: ReturnType<typeof mcpSkillCatalog> | undefined;
@@ -209,7 +196,7 @@ export const mcpRequest = async (
 
           // 2025-era clients get the form unchecked: some render MCP Apps without
           // declaring them on any request the gateway sees.
-          if (declared && declared.extensions?.[formExtension] === undefined)
+          if (declared && declared.extensions?.[EXTENSION_ID] === undefined)
             return {
               isError: true,
               content: [
@@ -230,41 +217,49 @@ export const mcpRequest = async (
           };
         },
       );
-      server.registerResource(
+      registerAppResource(
+        server,
         "input-form",
         inputFormUri,
-        { mimeType: inputFormMimeType, description: "Form for questions from app services" },
+        { description: "Form for questions from app services" },
         async () => ({
-          contents: [{ uri: inputFormUri, mimeType: inputFormMimeType, text: inputFormHtml }],
+          contents: [{ uri: inputFormUri, mimeType: RESOURCE_MIME_TYPE, text: inputFormHtml }],
         }),
       );
-      server.registerTool(
+      registerAppTool(
+        server,
         "ask",
         {
           description:
             "Show the user a form for a service call that asks for input. Use it only when call says so; the user's answer completes the call.",
           inputSchema: formInput,
-          _meta: { ui: { resourceUri: inputFormUri }, "ui/resourceUri": inputFormUri },
+          _meta: { ui: { resourceUri: inputFormUri } },
         },
-        async ({ requestState, ...service }) => ({
-          content: [
-            {
-              type: "text" as const,
-              text: "The form is shown to the user. Wait for their answer.",
-            },
-          ],
-          _meta: formQuestion(
-            service,
-            await formMcpInput(environment, token, service, requestState),
-          ),
-        }),
+        async ({ requestState, ...service }) => {
+          const question = await formMcpInput(environment, token, service, requestState);
+
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: "The form is shown to the user. Wait for their answer.",
+              },
+            ],
+            _meta: inputFormMeta({
+              call: service,
+              inputRequests: question.inputRequests,
+              requestState: question.requestState,
+            }),
+          };
+        },
       );
-      server.registerTool(
+      registerAppTool(
+        server,
         "answer",
         {
           description: "Submit the user's answer from the input form. Only the form calls it.",
-          inputSchema: { ...formInput, inputResponses: inputAnswer.shape.inputResponses },
-          _meta: { ui: { visibility: ["app"] } },
+          inputSchema: formInput.extend({ inputResponses: inputAnswer.shape.inputResponses }),
+          _meta: { ui: { resourceUri: inputFormUri, visibility: ["app"] } },
         },
         async ({ requestState, inputResponses, ...service }) => {
           const value = await callMcpService(
@@ -282,7 +277,11 @@ export const mcpRequest = async (
           if (question.success)
             return {
               content: [{ type: "text" as const, text: "The method asks the user again." }],
-              _meta: formQuestion(service, question.data),
+              _meta: inputFormMeta({
+                call: service,
+                inputRequests: question.data.inputRequests,
+                requestState: question.data.requestState,
+              }),
             };
 
           return result(value ?? null);
