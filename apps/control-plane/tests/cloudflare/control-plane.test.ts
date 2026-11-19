@@ -395,16 +395,59 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
     });
   });
 
-  it("resumes a pending app sign-in after a new user signs in with Microsoft", async () => {
-    const { unstable_dev } = await import("wrangler");
-    const email = `invited-${crypto.randomUUID()}@social.example`;
-    const encryptionKey = z.string().parse(environment.configuration.PLATFORM_ENCRYPTION_KEY);
+  // Starts an app authorization while signed out, as the app sign-in proxy does.
+  const startAppSignIn = async (baseURL: string) => {
     await registerAppLogin(
       environment.database.db,
       environment.configuration,
-      encryptionKey,
+      z.string().parse(environment.configuration.PLATFORM_ENCRYPTION_KEY),
       installationOrganizationId,
     );
+
+    // Node's fetch replaces Sec-Fetch-Mode, so drive the browser navigation with Playwright.
+    const browser = await request.newContext({
+      baseURL,
+      extraHTTPHeaders: { origin },
+      maxRedirects: 0,
+    });
+
+    const navigate = (path: string) =>
+      browser.get(path, { headers: { accept: "text/html", "sec-fetch-mode": "navigate" } });
+
+    const redirectUri = appCallbackUrl(environment.configuration, installationOrganizationId);
+
+    const authorization = await navigate(
+      `/api/auth/oauth2/authorize?${new URLSearchParams({
+        response_type: "code",
+        client_id: appLoginClientId(installationOrganizationId),
+        redirect_uri: redirectUri,
+        scope: "openid profile email offline_access",
+        state: "synthetic-app-state",
+        code_challenge: "zMTu4U_d3LvcnIJF0MLJksW3cZ-uah6k4pEKpX9Ay6s",
+        code_challenge_method: "S256",
+      })}`,
+    );
+
+    const login = new URL(z.string().parse(authorization.headers()["location"]), origin);
+    expect(login.pathname).toBe("/sign-in");
+
+    return {
+      browser,
+      // The sign-in page sends this through the OAuth provider client plugin.
+      oauthQuery: login.search.slice(1),
+      expectResumed: async (callbackPath: string) => {
+        const callback = await navigate(callbackPath);
+        const destination = new URL(z.string().parse(callback.headers()["location"]), origin);
+        expect(destination.origin + destination.pathname).toBe(redirectUri);
+        expect(destination.searchParams.get("state")).toBe("synthetic-app-state");
+        expect(destination.searchParams.get("code")).toBeTruthy();
+      },
+    };
+  };
+
+  it("resumes a pending app sign-in after a new user signs in with Microsoft", async () => {
+    const { unstable_dev } = await import("wrangler");
+    const email = `invited-${crypto.randomUUID()}@social.example`;
     await environment.database.db.insert(invitation).values({
       id: crypto.randomUUID(),
       organizationId: installationOrganizationId,
@@ -426,42 +469,16 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
       experimental: { disableExperimentalWarning: true, disableDevRegistry: true, watch: false },
     });
 
-    // Node's fetch replaces Sec-Fetch-Mode, so drive the browser navigation with Playwright.
-    const browser = await request.newContext({
-      baseURL: `http://127.0.0.1:${social.port}`,
-      extraHTTPHeaders: { origin },
-      maxRedirects: 0,
-    });
+    const app = await startAppSignIn(`http://127.0.0.1:${social.port}`);
 
     try {
-      const navigate = (path: string) =>
-        browser.get(path, { headers: { accept: "text/html", "sec-fetch-mode": "navigate" } });
-
-      const redirectUri = appCallbackUrl(environment.configuration, installationOrganizationId);
-
-      const authorization = await navigate(
-        `/api/auth/oauth2/authorize?${new URLSearchParams({
-          response_type: "code",
-          client_id: appLoginClientId(installationOrganizationId),
-          redirect_uri: redirectUri,
-          scope: "openid profile email offline_access",
-          state: "synthetic-app-state",
-          code_challenge: "zMTu4U_d3LvcnIJF0MLJksW3cZ-uah6k4pEKpX9Ay6s",
-          code_challenge_method: "S256",
-        })}`,
-      );
-
-      const login = new URL(z.string().parse(authorization.headers()["location"]), origin);
-      expect(login.pathname).toBe("/sign-in");
-
-      // The sign-in page sends the same body through the OAuth provider client plugin.
-      const started = await browser.post("/api/auth/sign-in/social", {
+      const started = await app.browser.post("/api/auth/sign-in/social", {
         data: {
           provider: "widefleet-microsoft",
           callbackURL: "/",
           newUserCallbackURL: "/organizations?next=%2Fwelcome",
           disableRedirect: true,
-          oauth_query: login.search.slice(1),
+          oauth_query: app.oauthQuery,
         },
       });
 
@@ -483,20 +500,51 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
         .setExpirationTime("5m")
         .sign(privateKey);
 
-      const callback = await navigate(
+      await app.expectResumed(
         `/api/auth/callback/widefleet-microsoft?${new URLSearchParams({
           state: z.string().parse(provider.searchParams.get("state")),
           code: idToken,
         })}`,
       );
-
-      const destination = new URL(z.string().parse(callback.headers()["location"]), origin);
-      expect(destination.origin + destination.pathname).toBe(redirectUri);
-      expect(destination.searchParams.get("state")).toBe("synthetic-app-state");
-      expect(destination.searchParams.get("code")).toBeTruthy();
     } finally {
-      await browser.dispose();
+      await app.browser.dispose();
       await social.stop();
+    }
+  }, 30_000);
+
+  it("resumes a pending app sign-in after company SSO", async () => {
+    const [company] = await environment.database.db
+      .select({ providerId: ssoProvider.providerId })
+      .from(ssoProvider)
+      .where(eq(ssoProvider.organizationId, installationOrganizationId));
+
+    if (!company) throw new Error("Expected the installation SSO provider");
+    const app = await startAppSignIn(origin);
+
+    try {
+      const started = await app.browser.post("/api/auth/sign-in/sso", {
+        data: { providerId: company.providerId, callbackURL: "/", oauth_query: app.oauthQuery },
+      });
+
+      expect(started.status(), await started.text()).toBe(200);
+      const { url } = z.object({ url: z.url() }).parse(await started.json());
+      const authorization = new URL(url);
+
+      // Choose the seeded user on the test identity provider's account picker.
+      const authorized = await fetch(new URL("/oauth2/v2.0/authorize/callback", authorization), {
+        method: "POST",
+        redirect: "manual",
+        body: new URLSearchParams({
+          ...Object.fromEntries(authorization.searchParams),
+          email: "sso@example.test",
+        }),
+      });
+
+      const callback = new URL(z.url().parse(authorized.headers.get("location")));
+
+      await app.expectResumed(callback.pathname + callback.search);
+    } finally {
+      await app.browser.dispose();
     }
   }, 30_000);
 

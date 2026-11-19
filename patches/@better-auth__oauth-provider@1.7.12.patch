@@ -1,3 +1,16 @@
+diff --git a/dist/authorize-D_jy3s-1.mjs b/dist/authorize-D_jy3s-1.mjs
+index e57ce0de3788c48444a39ef19671cf7d8fdd8569..09d98f75b2ff4a8c17f0481598204ec603264083 100644
+--- a/dist/authorize-D_jy3s-1.mjs
++++ b/dist/authorize-D_jy3s-1.mjs
+@@ -4596,7 +4596,7 @@ const oauthProvider = (options) => {
+ 						signedQueryIssuedAt: signedQueryIssuedAt ?? void 0,
+ 						postLoginClearedForSession
+ 					});
+-					if (ctx.path === "/sign-in/social") await addOAuthServerContext({
++					if (ctx.path === "/sign-in/social" || ctx.path === "/sign-in/sso") await addOAuthServerContext({
+ 						query: queryParams.toString(),
+ 						...signedQueryIssuedAt ? { [signedQueryIssuedAtMsKey]: signedQueryIssuedAt.getTime() } : {}
+ 					});
 diff --git a/dist/index.mjs b/dist/index.mjs
 index fe835f5da671e85cf70afc501e8b9988cac33006..d5d918f6b49ce6333cca473b41052bbdc2c54f78 100644
 --- a/dist/index.mjs
