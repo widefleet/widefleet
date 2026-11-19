@@ -64,7 +64,10 @@ const tarball = (files: Readonly<Record<string, string>>) => {
 const packages = {
   greeting: {
     "package.json": JSON.stringify({ name: "greeting", version: "1.0.0", main: "index.js" }),
-    "index.js": "export const greet = (name) => `Hello ${name}`;\n",
+    // Published with a source map, which the build does not install.
+    "index.js":
+      "export const greet = (name) => `Hello ${name}`;\n//# sourceMappingURL=index.js.map\n",
+    "index.js.map": JSON.stringify({ version: 3, sources: ["index.ts"], names: [], mappings: "" }),
     "index.d.ts": "export declare const greet: (name: string) => string;\n",
     "README.md": "# greeting\n",
   },
@@ -255,6 +258,7 @@ describe.runIf(process.env["RUN_BUILDER_TESTS"] === "1")("app builder", () => {
     const result = bundleResult.parse(await bundled.json());
 
     expect(result.entry).toBe("src/app.ts");
+    expect(result.warnings).toEqual([]);
     expect(result.metadata).toMatchObject({
       main_module: "worker.js",
       compatibility_date: "2026-10-01",

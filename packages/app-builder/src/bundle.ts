@@ -55,6 +55,11 @@ const requireBuiltin = `var require = (specifier) => {
   throw Object.assign(new Error(\`Cannot find module '\${specifier}'\`), { code: "MODULE_NOT_FOUND" });
 };`;
 
+// Dependencies install without their source maps, which keeps the build's
+// memory low, so esbuild cannot read the maps their modules reference. Stack
+// traces then point into the package's published code.
+const packageSourceMap = /^Cannot read file "node_modules\/[^"]+\.map": /;
+
 const inlineMap = /\n\/\/# sourceMappingURL=data:application\/json;base64,([A-Za-z0-9+/=]+)\s*$/;
 
 const sourceMap = z.looseObject({ sources: z.array(z.string()), mappings: z.string() });
@@ -189,6 +194,9 @@ export const bundle = async (files: Readonly<Record<string, string>>, registry: 
         source_maps: sourceMaps,
       },
     ),
-    warnings: [...installed.warnings, ...(bundled.warnings ?? [])],
+    warnings: [
+      ...installed.warnings,
+      ...(bundled.warnings ?? []).filter((warning) => !packageSourceMap.test(warning)),
+    ],
   });
 };
