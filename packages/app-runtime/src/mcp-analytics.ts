@@ -6,12 +6,12 @@ import type { BeforeSendFn } from "@posthog/mcp";
 import { PostHog } from "posthog-node";
 import type { ParentEnvironment } from "./types.ts";
 
-// Arguments, results and app errors of `call` and `execute` carry customer app data.
+// Arguments, results and app errors of service calls carry customer app data.
 const redact: BeforeSendFn = (event) => {
   delete event.properties["$mcp_parameters"];
   delete event.properties["$mcp_response"];
 
-  if (["call", "execute"].includes(String(event.properties["$mcp_tool_name"])))
+  if (["call", "execute", "ask", "answer"].includes(String(event.properties["$mcp_tool_name"])))
     delete event.properties["$mcp_error_message"];
 
   return event;

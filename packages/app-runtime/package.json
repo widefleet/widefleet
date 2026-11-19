@@ -13,6 +13,10 @@
     "#mcp-ui": {
       "types": "./src/ui/render.ts",
       "default": "./dist/mcp-ui/index.js"
+    },
+    "#mcp-input-form": {
+      "types": "./src/ui/input-form/resource.d.ts",
+      "default": "./dist/mcp-input-form/index.js"
     }
   },
   "exports": {
@@ -30,6 +34,7 @@
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "1.2.4",
+    "@modelcontextprotocol/ext-apps": "2.1.0",
     "@modelcontextprotocol/server": "2.4.0",
     "@opencode/codemode": "2.3.0",
     "@platform/auth-proxy": "workspace:*",
@@ -43,6 +48,8 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20261003.1",
+    "@modelcontextprotocol/client": "2.4.0",
+    "@modelcontextprotocol/core": "2.4.0",
     "@sveltejs/vite-plugin-svelte": "7.3.1",
     "@tailwindcss/vite": "4.3.3",
     "svelte": "5.57.1",

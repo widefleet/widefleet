@@ -60,6 +60,14 @@ service's [TSDoc comments](/guides/app-services#document-service-methods) and is
 published with every deployment. Each call carries your identity, so the service
 can apply its own permissions to individual records.
 
+A service can [ask you to confirm](/guides/app-services#ask-the-user-before-continuing)
+an action or fill in a short form before it continues. Clients on protocol revision
+2026-07-28 that support input dialogs, such as Claude Code and claude.ai,
+show the question in their own dialog. Clients that render MCP Apps, such as
+ChatGPT and Microsoft 365 Copilot, show it as a form in the conversation. The
+agent cannot answer in your place: the answer comes only from the dialog or the
+form. Other clients report that the service needs input they cannot ask for.
+
 ### Combine calls
 
 `execute` runs a script that calls several services and returns one result. This

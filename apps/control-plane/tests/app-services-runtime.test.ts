@@ -84,6 +84,9 @@ export default class Source extends WorkerEntrypoint {
   slow() { return this.env.TARGET.slow(); }
   fetch(request) { return this.env.TARGET.fetch(request); }
   secret() { return this.env.WIDEFLEET_SECRETS.get('TOKEN'); }
+  ask() { return this.env.TARGET.ask('offer-42'); }
+  async answer() { const question=await this.env.TARGET.ask('offer-42'); return this.env.TARGET.withInput({inputResponses:{confirm:{action:'accept',content:{note:'ok'}}},requestState:question.requestState}).ask('offer-42'); }
+  async misdirect() { const question=await this.env.TARGET.ask('offer-42'); return this.env.TARGET.withInput({inputResponses:{confirm:{action:'accept',content:{note:'ok'}}},requestState:question.requestState}).ask('offer-43'); }
   root() { return this.env.WIDEFLEET_SECRETS_KEY ?? null; }
   async identity() { return {own: await this.env.WIDEFLEET_IDENTITY.getToken('data-api', {appId: '${targetId}', organizationId: 'forged'}), target: await this.env.TARGET.identity(), key: this.env.WIDEFLEET_CONTROL_TOKEN ?? null}; }
 }`;
@@ -92,6 +95,11 @@ const target = (version: string) => `import {WorkerEntrypoint} from 'cloudflare:
 export class Reader extends WorkerEntrypoint {
   identity() { return this.env.WIDEFLEET_IDENTITY.getToken('other-api'); }
   async read() { return {version:${JSON.stringify(version)}, secret:await this.env.WIDEFLEET_SECRETS.get('TOKEN')}; }
+  ask(offerId) {
+    const input=this.ctx.props.input;
+    if(!input) return {resultType:'input_required',inputRequests:{confirm:{message:'Send '+offerId+'?',requestedSchema:{type:'object',properties:{note:{type:'string'}},required:['note']}}},requestState:{seen:'private-offer-text'}};
+    return {offerId,input,caller:this.ctx.props.caller?.subject ?? null};
+  }
   async slow() { await this.env.KV.put('started','yes'); while (!await this.env.KV.get('release')) await new Promise(resolve=>setTimeout(resolve,10)); return this.read(); }
   fetch() { return new Response(new ReadableStream({start(controller){controller.enqueue(new TextEncoder().encode(${JSON.stringify(version)}));controller.close();}})); }
 }
@@ -774,6 +782,183 @@ export default { async fetch(request, env, ctx) {
       expect(called.isError).not.toBe(true);
       expect(JSON.parse(called.content[0]?.text ?? "null")).toMatchObject({ version: "v1" });
 
+      // Protocol revision 2026-07-28 asks through input_required and a retry of the same call.
+      const ask = { ...service, method: "ask", arguments: ["offer-42"] };
+
+      const modern = async (
+        retry: { requestState?: string; inputResponses?: z.infer<ReturnType<typeof z.json>> },
+        bearer = accessToken,
+        capabilities: z.infer<ReturnType<typeof z.json>> = { elicitation: { form: {} } },
+      ) => {
+        const response = await (harness ? harness.fetch : fetch)(`${origin}/mcp`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${bearer}`,
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+            "mcp-protocol-version": "2026-07-28",
+            "mcp-method": "tools/call",
+            "mcp-name": "call",
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: {
+              name: "call",
+              arguments: ask,
+              ...retry,
+              _meta: {
+                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientCapabilities": capabilities,
+                "io.modelcontextprotocol/clientInfo": { name: "test", version: "1" },
+              },
+            },
+          }),
+        });
+
+        const body = await response.text();
+        const line = body.split("\n").find((entry) => entry.startsWith("data: "));
+
+        return z.json().parse(JSON.parse(line ? line.slice(6) : body));
+      };
+
+      const elicited = z
+        .object({
+          result: z.object({
+            resultType: z.literal("input_required"),
+            inputRequests: z.object({
+              confirm: z.object({
+                method: z.literal("elicitation/create"),
+                params: z.object({ message: z.string() }).loose(),
+              }),
+            }),
+            requestState: z.string(),
+          }),
+        })
+        .parse(await modern({})).result;
+
+      expect(elicited.inputRequests.confirm.params.message).toBe("Send offer-42?");
+      expect(elicited.requestState).not.toContain("private-offer-text");
+
+      const confirmed = z
+        .object({ result: z.object({ content: z.array(z.object({ text: z.string() })) }) })
+        .parse(
+          await modern({
+            requestState: elicited.requestState,
+            inputResponses: { confirm: { action: "accept", content: { note: "ok" } } },
+          }),
+        ).result;
+
+      expect(JSON.parse(confirmed.content[0]?.text ?? "null")).toEqual({
+        offerId: "offer-42",
+        input: {
+          inputResponses: { confirm: { action: "accept", content: { note: "ok" } } },
+          requestState: { seen: "private-offer-text" },
+        },
+        caller: "alice",
+      });
+
+      // State minted for alice does not answer for bob.
+      expect(
+        JSON.stringify(
+          await modern(
+            {
+              requestState: elicited.requestState,
+              inputResponses: { confirm: { action: "accept", content: { note: "ok" } } },
+            },
+            await issue("bob", ["readers"]),
+          ),
+        ),
+      ).toContain("Invalid or expired input request state");
+
+      // Clients without their own dialog get a form through the ask tool.
+      const relayed = await rpc("call", ask);
+      expect(relayed.isError).not.toBe(true);
+
+      const relayedState = z
+        .string()
+        .parse(JSON.parse(relayed.content[0]?.text.match(/requestState ("[^"]+")/)?.[1] ?? "null"));
+
+      const apps = {
+        extensions: { "io.modelcontextprotocol/ui": { mimeTypes: ["text/html;profile=mcp-app"] } },
+      };
+
+      expect(JSON.stringify(await modern({}, accessToken, apps))).toContain("Call the ask tool");
+      expect(JSON.stringify(await modern({}, accessToken, {}))).toContain(
+        "can show neither input dialogs nor MCP Apps forms",
+      );
+
+      const formTools = z
+        .object({
+          result: z.object({
+            tools: z.array(z.object({ name: z.string(), _meta: z.json().optional() })),
+          }),
+        })
+        .parse(await send("tools/list", {})).result.tools;
+
+      expect(formTools.find((tool) => tool.name === "ask")?._meta).toMatchObject({
+        ui: { resourceUri: "ui://widefleet/input-form.html" },
+      });
+      expect(formTools.find((tool) => tool.name === "answer")?._meta).toMatchObject({
+        ui: { visibility: ["app"] },
+      });
+      expect(await send("resources/read", { uri: "ui://widefleet/input-form.html" })).toMatchObject(
+        {
+          result: {
+            contents: [
+              { uri: "ui://widefleet/input-form.html", mimeType: "text/html;profile=mcp-app" },
+            ],
+          },
+        },
+      );
+
+      const tool = async (name: string, args: z.infer<ReturnType<typeof z.json>>) =>
+        z
+          .object({
+            result: z.object({
+              isError: z.boolean().optional(),
+              content: z.array(z.object({ text: z.string() })),
+              _meta: z
+                .object({
+                  "widefleet/input": z.object({
+                    call: z.json(),
+                    inputRequests: z.object({ confirm: z.object({ message: z.string() }) }),
+                    requestState: z.string(),
+                  }),
+                })
+                .optional(),
+            }),
+          })
+          .parse(await send("tools/call", { name, arguments: args })).result;
+
+      const form = (await tool("ask", { ...ask, requestState: relayedState }))._meta?.[
+        "widefleet/input"
+      ];
+
+      expect(form?.call).toEqual(ask);
+      expect(form?.inputRequests.confirm.message).toBe("Send offer-42?");
+      expect(form?.requestState).not.toContain("private-offer-text");
+
+      const inputResponses = { confirm: { action: "accept", content: { note: "ok" } } };
+
+      const answered = await tool("answer", {
+        ...ask,
+        requestState: form?.requestState ?? "",
+        inputResponses,
+      });
+
+      expect(JSON.parse(answered.content[0]?.text ?? "null")).toEqual({
+        offerId: "offer-42",
+        input: { inputResponses, requestState: { seen: "private-offer-text" } },
+        caller: "alice",
+      });
+
+      // The state an agent sees in the call result does not answer through the form.
+      const forged = await rpc("answer", { ...ask, requestState: relayedState, inputResponses });
+      expect(forged.isError).toBe(true);
+      expect(forged.content[0]?.text).toContain("Invalid or expired input request state");
+
       const executed = await rpc("execute", {
         code: `const first = await tools.call(${JSON.stringify(service)}); return {version:first.version, credentials:typeof process};`,
       });
@@ -1027,7 +1212,18 @@ export default { async fetch(request, env, ctx) {
             ),
           { timeout: 8_000 },
         )
-        .toEqual(new Set(["skills", "cli_login", "search", "describe", "call", "execute"]));
+        .toEqual(
+          new Set([
+            "skills",
+            "cli_login",
+            "search",
+            "describe",
+            "call",
+            "ask",
+            "answer",
+            "execute",
+          ]),
+        );
 
       const toolCalls = analytics.filter((event) => event.event.startsWith("$mcp_"));
 
@@ -1232,6 +1428,34 @@ export default { async fetch(request, env, ctx) {
       expect(await (await request("/root")).json()).toBeNull();
       expect(await (await request("/stored")).text()).not.toContain("synthetic-one");
     });
+    it("lets a calling app answer a provider's input request with withInput", async () => {
+      const asked = await request("/ask");
+      const question = await asked.text();
+      expect(asked.status, question).toBe(200);
+      expect(JSON.parse(question)).toMatchObject({
+        resultType: "input_required",
+        inputRequests: { confirm: { message: "Send offer-42?" } },
+      });
+      // The calling app relays the provider's state without reading it.
+      expect(question).not.toContain("private-offer-text");
+
+      const answered = await request("/answer");
+      expect(answered.status, await answered.clone().text()).toBe(200);
+      expect(await answered.json()).toEqual({
+        offerId: "offer-42",
+        input: {
+          inputResponses: { confirm: { action: "accept", content: { note: "ok" } } },
+          requestState: { seen: "private-offer-text" },
+        },
+        caller: null,
+      });
+
+      // Answers are delivered only to the call that asked.
+      const misdirected = await request("/misdirect");
+      expect(misdirected.status).toBe(409);
+      expect(await misdirected.text()).toContain("Invalid or expired input request state");
+    });
+
     it("pins in-flight code and secrets while new calls switch to the active version", async () => {
       const pending = request("/slow");
       await vi.waitFor(async () => expect(await (await request("/started")).json()).toBe("yes"));

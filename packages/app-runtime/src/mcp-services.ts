@@ -1,9 +1,15 @@
-import { mcpServiceCall, hasAppAccess, type mcpClaims } from "@platform/contracts";
+import {
+  mcpServiceCall,
+  hasAppAccess,
+  type InputAnswer,
+  type mcpClaims,
+} from "@platform/contracts";
 import type { z } from "zod";
 import { readApp, readServiceDocumentation } from "./catalog.ts";
 import { serviceRoute, verifyMcpToken } from "./mcp-authorization.ts";
 import { appWorker } from "./worker.ts";
 import { invokeApp } from "./app-rpc.ts";
+import { openInput, rebindInput, requestedInput, sealInput } from "./service-input.ts";
 import { signAppCaller } from "./app-caller.ts";
 import { executionOptions } from "./execution-limits.ts";
 import { rankServices, type SearchRequest } from "./mcp-search.ts";
@@ -110,9 +116,14 @@ export const describeMcpService = async (
   };
 };
 
-export const callMcpService = async (
+// A question is answered either through the MCP client's own dialog or through
+// the form the gateway shows in the client. State minted for one channel never
+// answers through the other, so the agent cannot use the form's answer path
+// with state it relays from a call result.
+export type McpInputChannel = "client" | "form";
+
+const authorizeCall = async (
   environment: ParentEnvironment,
-  context: ExecutionContext,
   token: string,
   input: z.infer<typeof mcpServiceCall>,
 ) => {
@@ -126,6 +137,38 @@ export const callMcpService = async (
     name: claims.mcp.identity.name,
   };
 
+  return {
+    claims,
+    app,
+    caller,
+    // Answers belong to the signed-in person and to this exact call.
+    binding: (channel: McpInputChannel) =>
+      JSON.stringify([
+        channel === "client" ? "mcp" : "mcp-form",
+        claims.mcp.organizationId,
+        caller.issuer,
+        caller.subject,
+      ]),
+    call: {
+      appId: app.appId,
+      entrypoint: input.entrypoint,
+      method: input.method,
+      args: input.arguments,
+    },
+  };
+};
+
+// `answer` carries the responses when a call that asked for input is retried.
+export const callMcpService = async (
+  environment: ParentEnvironment,
+  context: ExecutionContext,
+  token: string,
+  input: z.infer<typeof mcpServiceCall>,
+  answer?: InputAnswer,
+  channel: McpInputChannel = "client",
+) => {
+  const { claims, app, caller, binding, call } = await authorizeCall(environment, token, input);
+
   const proof = await signAppCaller(
     environment.WIDEFLEET_CONTROL_TOKEN,
     app.appId,
@@ -134,14 +177,47 @@ export const callMcpService = async (
     claims.exp * 1000,
   );
 
+  const secret = environment.WIDEFLEET_CONTROL_TOKEN;
+
+  const props =
+    answer === undefined
+      ? { caller, appCaller: proof }
+      : {
+          caller,
+          appCaller: proof,
+          input: await openInput(secret, binding(channel), call, answer),
+        };
+
   const worker = await appWorker(app, environment, context);
 
-  return invokeApp(
+  const value = await invokeApp(
     worker.getEntrypoint(input.entrypoint === "default" ? undefined : input.entrypoint, {
       ...executionOptions(environment.WIDEFLEET_EXECUTION_LIMITS, "service"),
-      props: { caller, appCaller: proof },
+      props,
     }),
     input.method,
     input.arguments,
+  );
+
+  const question = requestedInput(value);
+
+  return question ? sealInput(secret, binding(channel), call, question) : value;
+};
+
+// Move a question from a call result to the form, which only the person answers.
+export const formMcpInput = async (
+  environment: ParentEnvironment,
+  token: string,
+  input: z.infer<typeof mcpServiceCall>,
+  requestState: string,
+) => {
+  const { binding, call } = await authorizeCall(environment, token, input);
+
+  return rebindInput(
+    environment.WIDEFLEET_CONTROL_TOKEN,
+    binding("client"),
+    binding("form"),
+    call,
+    requestState,
   );
 };

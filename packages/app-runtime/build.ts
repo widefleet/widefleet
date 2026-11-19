@@ -3,10 +3,12 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
-import { buildMcpUi } from "./build-ui.ts";
+import { buildInputForm, buildMcpUi } from "./build-ui.ts";
 import { mcpSkillCatalog } from "./src/mcp-skills.ts";
 
 await buildMcpUi();
+
+await buildInputForm();
 
 const license = [
   await readFile(new URL("../../LICENSE", import.meta.url), "utf8"),

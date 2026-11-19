@@ -1,0 +1,20 @@
+/* Only scan the form's sources; fixtures and build output differ between release builds. */
+@import "@platform/ui/styles.css" source(none);
+@source "./";
+
+/* The host reports its theme; the form follows it instead of the device setting. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+:root {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  @apply theme-dark;
+}
+
+body {
+  min-width: 0;
+  font-family: var(--font-sans, inherit);
+}
