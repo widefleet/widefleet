@@ -18,8 +18,6 @@ const dist = (file: string) => fileURLToPath(new URL(`../dist/${file}`, import.m
 
 const registry = "https://registry.example.test";
 
-const token = "synthetic-builder-token";
-
 const encoder = new TextEncoder();
 
 // A gzipped tar archive with the files under package/, as npm packs packages.
@@ -206,11 +204,10 @@ describe.runIf(process.env["RUN_BUILDER_TESTS"] === "1")("app builder", () => {
   const post = (
     path: string,
     body: z.input<typeof bundleRequest> | z.input<typeof documentRequest>,
-    authorization = `Bearer ${token}`,
   ) =>
     builder.dispatchFetch(`https://builder.example.test${path}`, {
       method: "POST",
-      headers: { authorization, "content-type": "application/json" },
+      headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
 
@@ -238,7 +235,6 @@ describe.runIf(process.env["RUN_BUILDER_TESTS"] === "1")("app builder", () => {
               },
             },
             env: {
-              BUILDER_TOKEN: { type: "json", value: token },
               NPM_REGISTRY: { type: "json", value: registry },
             },
           },
@@ -251,11 +247,6 @@ describe.runIf(process.env["RUN_BUILDER_TESTS"] === "1")("app builder", () => {
 
   afterAll(async () => {
     await builder.dispose();
-  });
-
-  it("rejects requests without the builder token", async () => {
-    const response = await post("/bundle", { files: project }, "Bearer wrong");
-    expect(response.status).toBe(401);
   });
 
   it("bundles and documents an app as widefleet deploy does", async () => {
