@@ -1,0 +1,23 @@
+{
+  "name": "@platform/app-builder",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "node build.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cloudflare/worker-bundler": "0.2.6",
+    "@platform/contracts": "workspace:*",
+    "@platform/service-docs": "workspace:*",
+    "es-module-lexer": "2.3.2",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261003.1",
+    "esbuild": "0.28.2",
+    "miniflare": "5.20261001.0-alpha"
+  }
+}

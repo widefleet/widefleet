@@ -1,0 +1,323 @@
+diff --git a/dist/index.js b/dist/index.js
+index 4e453e9..528e8a1 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -50,6 +50,7 @@ function resolveRelative(specifier, importer, files, extensions) {
+ * Resolve a package specifier
+ */
+ function resolvePackage(specifier, files, conditions, extensions) {
++	const browser = !conditions.includes("node");
+ 	const { packageName, subpath } = parsePackageSpecifier(specifier);
+ 	const packageJsonPath = `node_modules/${packageName}/package.json`;
+ 	const packageJson = files.read(packageJsonPath);
+@@ -66,7 +67,7 @@ function resolvePackage(specifier, files, conditions, extensions) {
+ 	}
+ 	const entrySubpath = subpath ? `./${subpath}` : ".";
+ 	try {
+-		const resolved = resolveExports.resolve(pkg, entrySubpath, { conditions });
++		const resolved = resolveExports.resolve(pkg, entrySubpath, { conditions, browser });
+ 		if (resolved && resolved.length > 0) {
+ 			const resolvedPath = resolved[0];
+ 			if (resolvedPath) {
+@@ -78,7 +79,7 @@ function resolvePackage(specifier, files, conditions, extensions) {
+ 			}
+ 		}
+ 	} catch {}
+-	const legacyEntry = resolveExports.legacy(pkg, { fields: ["module", "main"] });
++	const legacyEntry = resolveExports.legacy(pkg, { fields: ["module", "main"], browser });
+ 	if (!subpath && legacyEntry && typeof legacyEntry === "string") {
+ 		const fullPath = `node_modules/${packageName}/${normalizeRelativePath(legacyEntry)}`;
+ 		if (files.read(fullPath) !== null) return {
+@@ -235,8 +236,25 @@ function bundlerOnlyOptionsWarning(opts) {
+ /**
+ * Bundle files using esbuild-wasm
+ */
++let activeEsbuildBuilds = 0;
+ async function bundleWithEsbuild(options) {
+-	const { files, entryPoint, externals, target, minify, sourcemap, nodejsCompat, jsx, jsxImportSource, define, loader: loaderOverrides, conditions, virtualModules, plugins: extraPlugins = [] } = options;
++	// esbuild's Go heap grows to the largest build and never shrinks. Stop the
++	// service when no build uses it, so the next build starts from a fresh
++	// instance of the already compiled module.
++	activeEsbuildBuilds++;
++	try {
++		return await bundleWithRunningEsbuild(options);
++	} finally {
++		activeEsbuildBuilds--;
++		if (activeEsbuildBuilds === 0 && esbuildInitialized) {
++			esbuildInitialized = false;
++			esbuildInitializePromise = null;
++			await esbuild.stop();
++		}
++	}
++}
++async function bundleWithRunningEsbuild(options) {
++	const { files, entryPoint, externals, target, minify, sourcemap, sourcesContent, nodejsCompat, jsx, jsxImportSource, define, loader: loaderOverrides, conditions, virtualModules, plugins: extraPlugins = [] } = options;
+ 	await initializeEsbuild();
+ 	const virtualFsPlugin = {
+ 		name: "virtual-fs",
+@@ -254,12 +272,15 @@ async function bundleWithEsbuild(options) {
+ 					};
+ 				}
+ 				if (!args.path.startsWith("/") && !args.path.startsWith(".")) {
+-					if (externals.includes(args.path) || externals.some((e) => args.path.startsWith(`${e}/`) || args.path.startsWith(e))) return {
++					if (externals.some((e) => args.path === e || args.path.startsWith(`${e}/`) || e.endsWith(":") && args.path.startsWith(e))) return {
+ 						path: args.path,
+ 						external: true
+ 					};
+ 					try {
+-						const result = resolveModule(args.path, { files });
++						const result = resolveModule(args.path, {
++							files,
++							conditions: ["import", ...nodejsCompat ? ["node"] : ["browser"], ...conditions ?? []]
++						});
+ 						if (!result.external) return {
+ 							path: result.path,
+ 							namespace: "virtual"
+@@ -329,6 +350,7 @@ async function bundleWithEsbuild(options) {
+ 		target,
+ 		minify,
+ 		sourcemap: sourcemap ? "inline" : false,
++		...sourcesContent !== void 0 ? { sourcesContent } : {},
+ 		plugins: [
+ 			...userPlugins,
+ 			...virtualModulePlugin ? [virtualModulePlugin] : [],
+@@ -1623,7 +1645,7 @@ async function createApp(options) {
+ */
+ async function createWorker(options) {
+ 	showExperimentalWarning("createWorker");
+-	let { files, bundle = true, externals = [], target = "es2022", minify = false, sourcemap = false, registry, jsx, jsxImportSource, define, loader, conditions, virtualModules, __dangerouslyUseEsBuildPluginsDoNotUseOrYouWillBeFired: plugins } = options;
++	let { files, bundle = true, externals = [], target = "es2022", minify = false, sourcemap = false, sourcesContent, registry, jsx, jsxImportSource, define, loader, conditions, virtualModules, __dangerouslyUseEsBuildPluginsDoNotUseOrYouWillBeFired: plugins } = options;
+ 	let fileSystem;
+ 	if (isFileSystem(files)) fileSystem = files;
+ 	else fileSystem = new InMemoryFileSystem(files);
+@@ -1663,6 +1685,7 @@ async function createWorker(options) {
+ 			target,
+ 			minify,
+ 			sourcemap,
++			sourcesContent,
+ 			nodejsCompat,
+ 			jsx,
+ 			jsxImportSource,
+diff --git a/dist/index.d.ts b/dist/index.d.ts
+index 53dd55f..eab70db 100644
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -100,6 +100,10 @@ interface CreateWorkerOptions {
+    * @default false
+    */
+   sourcemap?: boolean;
++  /**
++   * Embed the original sources in the source map (default: true, as esbuild).
++   */
++  sourcesContent?: boolean;
+   /**
+    * npm registry URL for fetching packages.
+    * @default 'https://registry.npmjs.org'
+@@ -507,6 +511,11 @@ interface InstallOptions {
+    * Registry URL (default: https://registry.npmjs.org)
+    */
+   registry?: string;
++  /**
++   * Package files to keep: every text file (default), only files a bundle
++   * reads, or only manifests, JSON and declarations for type checking.
++   */
++  files?: "all" | "build" | "declarations";
+ }
+ /**
+  * Install npm dependencies into a virtual file system.
+diff --git a/dist/installer-Dzd--DQ7.js b/dist/installer-Dzd--DQ7.js
+index b670cba..78132f5 100644
+--- a/dist/installer-Dzd--DQ7.js
++++ b/dist/installer-Dzd--DQ7.js
+@@ -46,6 +46,30 @@ function isTextFile(path) {
+ 	return textExtensions.some((ext) => path.toLowerCase().endsWith(ext));
+ }
+ /**
++* Package files a bundle can read: text files without source maps,
++* declarations and documentation.
++*/
++function isBuildInput(path) {
++	const lower = path.toLowerCase();
++	const fileName = (path.split("/").pop() ?? "").toUpperCase();
++	if ([".map", ".d.ts", ".d.mts", ".d.cts", ".md"].some((ext) => lower.endsWith(ext))) return false;
++	if (["LICENSE", "README", "CHANGELOG"].some((name) => fileName.startsWith(name))) return false;
++	return isTextFile(path);
++}
++/**
++* Package files type checking reads: manifests, JSON (including shared
++* tsconfig bases) and declarations.
++*/
++function isDeclarationInput(path) {
++	const lower = path.toLowerCase();
++	return [".json", ".d.ts", ".d.mts", ".d.cts"].some((ext) => lower.endsWith(ext));
++}
++const PACKAGE_FILE_FILTERS = {
++	all: isTextFile,
++	build: isBuildInput,
++	declarations: isDeclarationInput
++};
++/**
+ * Fetch with a timeout.
+ * Throws an error if the request takes longer than the specified timeout.
+ */
+@@ -382,7 +406,9 @@ const NPM_REGISTRY = "https://registry.npmjs.org";
+ * @returns Metadata about the installation
+ */
+ async function installDependencies(fileSystem, options = {}) {
+-	const { dev = false, registry = NPM_REGISTRY } = options;
++	const { dev = false, registry = NPM_REGISTRY, files: fileFilter = "all" } = options;
++	const keep = PACKAGE_FILE_FILTERS[fileFilter];
++	if (!keep) throw new Error(`Unknown package file filter: ${fileFilter}`);
+ 	const result = {
+ 		installed: [],
+ 		warnings: []
+@@ -408,14 +434,14 @@ async function installDependencies(fileSystem, options = {}) {
+ 		if (Object.keys(depsToInstall).length === 0) return result;
+ 		const installedPackages = /* @__PURE__ */ new Set();
+ 		const inProgress = /* @__PURE__ */ new Map();
+-		await Promise.all(Object.entries(depsToInstall).map(([name, versionRange]) => installPackage(name, versionRange, result, fileSystem, installedPackages, inProgress, registry)));
++		await Promise.all(Object.entries(depsToInstall).map(([name, versionRange]) => installPackage(name, versionRange, result, fileSystem, installedPackages, inProgress, registry, keep)));
+ 	} else if (pyprojectTomlContent) return await installDependenciesPython(fileSystem, pyprojectTomlContent);
+ 	return result;
+ }
+ /**
+ * Install a single package and its dependencies recursively.
+ */
+-async function installPackage(name, versionRange, result, fileSystem, installedPackages, inProgress, registry) {
++async function installPackage(name, versionRange, result, fileSystem, installedPackages, inProgress, registry, keep = isTextFile) {
+ 	if (installedPackages.has(name)) return;
+ 	if (fileSystem.read(`node_modules/${name}/package.json`) !== null) {
+ 		installedPackages.add(name);
+@@ -438,10 +464,10 @@ async function installPackage(name, versionRange, result, fileSystem, installedP
+ 			}
+ 			installedPackages.add(name);
+ 			result.installed.push(`${name}@${version}`);
+-			const packageFiles = await fetchPackageFiles(name, versionMetadata);
++			const packageFiles = await extractLimited(() => fetchPackageFiles(name, versionMetadata, keep));
+ 			for (const [filePath, content] of Object.entries(packageFiles)) fileSystem.write(`node_modules/${name}/${filePath}`, content);
+ 			const deps = versionMetadata.dependencies ?? {};
+-			await Promise.all(Object.entries(deps).map(([depName, depVersion]) => installPackage(depName, depVersion, result, fileSystem, installedPackages, inProgress, registry)));
++			await Promise.all(Object.entries(deps).map(([depName, depVersion]) => installPackage(depName, depVersion, result, fileSystem, installedPackages, inProgress, registry, keep)));
+ 		} catch (error) {
+ 			const message = error instanceof Error ? error.message : String(error);
+ 			result.warnings.push(`Failed to install ${name}: ${message}`);
+@@ -455,6 +481,23 @@ async function installPackage(name, versionRange, result, fileSystem, installedP
+ 	}
+ }
+ /**
++* Tarballs unpacked at once. Metadata requests stay parallel; this bounds the
++* package contents held while archives stream.
++*/
++const TARBALL_EXTRACT_CONCURRENCY = 3;
++let activeExtractions = 0;
++const waitingExtractions = [];
++async function extractLimited(task) {
++	if (activeExtractions >= TARBALL_EXTRACT_CONCURRENCY) await new Promise((resolve) => waitingExtractions.push(resolve));
++	activeExtractions++;
++	try {
++		return await task();
++	} finally {
++		activeExtractions--;
++		waitingExtractions.shift()?.();
++	}
++}
++/**
+ * Fetch package metadata from npm registry.
+ */
+ async function fetchPackageMetadata(name, registry) {
+@@ -479,13 +522,92 @@ function resolveVersion(range, metadata) {
+ /**
+ * Fetch and extract package files from npm tarball.
+ */
+-async function fetchPackageFiles(name, metadata) {
++async function fetchPackageFiles(name, metadata, keep = isTextFile) {
+ 	const tarballUrl = metadata.dist?.tarball;
+ 	if (!tarballUrl) throw new Error(`Registry metadata for ${name}@${metadata.version} is missing \`dist.tarball\` — the registry response is likely malformed or the version was unpublished.`);
+ 	const response = await fetchWithTimeout(tarballUrl, {}, DEFAULT_TIMEOUT_MS * 2);
+ 	if (!response.ok) throw new Error(`Failed to fetch tarball for ${name}@${metadata.version}: ${response.status} ${response.statusText} (${tarballUrl})`);
+-	const buffer = await response.arrayBuffer();
+-	return extractTarball(new Uint8Array(buffer));
++	if (response.body === null) throw new Error(`Tarball for ${name}@${metadata.version} has no body (${tarballUrl})`);
++	return parseTarStream(response.body.pipeThrough(new DecompressionStream("gzip")), keep);
++}
++/**
++* Parse a gzip-decompressed tar stream entry by entry. Neither the compressed
++* nor the unpacked archive is held whole; only kept text files are buffered.
++* Same entries and root handling as parseTar.
++*/
++async function parseTarStream(stream, keep) {
++	const reader = stream.getReader();
++	const textDecoder = new TextDecoder();
++	const regularFilePaths = [];
++	const textFiles = /* @__PURE__ */ new Map();
++	let pending = [];
++	let pendingLength = 0;
++	let done = false;
++	const fill = async (length) => {
++		while (pendingLength < length && !done) {
++			const chunk = await reader.read();
++			if (chunk.done) done = true;
++			else if (chunk.value.length > 0) {
++				pending.push(chunk.value);
++				pendingLength += chunk.value.length;
++			}
++		}
++		return pendingLength >= length;
++	};
++	const take = (length, keep) => {
++		const result = keep ? new Uint8Array(length) : null;
++		let offset = 0;
++		while (offset < length) {
++			const head = pending[0];
++			const count = Math.min(head.length, length - offset);
++			if (result) result.set(head.subarray(0, count), offset);
++			offset += count;
++			pendingLength -= count;
++			if (count === head.length) pending.shift();
++			else pending[0] = head.subarray(count);
++		}
++		return result;
++	};
++	// Skipped content is read in blocks, so a large binary is never buffered whole.
++	const skip = async (length) => {
++		let remaining = length;
++		while (remaining > 0) {
++			const step = Math.min(remaining, 65536);
++			if (!await fill(step)) throw new Error("Truncated tarball");
++			take(step, false);
++			remaining -= step;
++		}
++	};
++	try {
++		while (await fill(512)) {
++			const header = take(512, true);
++			if (header.every((b) => b === 0)) break;
++			const filePath = normalizeTarEntryPath(readTarEntryPath(header));
++			const sizeStr = readString(header, 124, 12);
++			const typeFlag = header[156];
++			const size = parseInt(sizeStr.trim(), 8) || 0;
++			const padded = Math.ceil(size / 512) * 512;
++			const isRegularFile = typeFlag === 48 || typeFlag === 0;
++			if (isRegularFile && filePath !== "") regularFilePaths.push(filePath);
++			if (isRegularFile && size > 0 && keep(filePath)) {
++				if (!await fill(size)) throw new Error("Truncated tarball");
++				const content = take(size, true);
++				try {
++					textFiles.set(filePath, textDecoder.decode(content));
++				} catch {}
++				await skip(padded - size);
++			} else await skip(padded);
++		}
++	} finally {
++		reader.cancel().catch(() => {});
++	}
++	const archiveRoot = findSharedTarRootDirectory(regularFilePaths);
++	const files = {};
++	for (const [filePath, content] of textFiles) {
++		const packagePath = archiveRoot ? filePath.slice(archiveRoot.length) : filePath;
++		files[packagePath] = content;
++	}
++	return files;
+ }
+ /**
+ * Extract files from a gzipped tarball.
