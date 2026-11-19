@@ -512,8 +512,11 @@ export const createAppService = (
         ),
       });
     }),
-  /** Whether an app of the organization, visible to the caller or not, has this name. */
-  nameInUse: (principal: Principal, slug: string) =>
+  /**
+   * The organization's app of this name, visible to the caller or not, and
+   * whether it was ever deployed.
+   */
+  named: (principal: Principal, slug: string) =>
     transact(database, async (transaction) => {
       const [existing] = await transaction
         .select({ id: apps.id })
@@ -527,7 +530,15 @@ export const createAppService = (
         )
         .limit(1);
 
-      return Result.ok(existing !== undefined);
+      if (!existing) return Result.ok(null);
+
+      const [deployment] = await transaction
+        .select({ id: deployments.id })
+        .from(deployments)
+        .where(eq(deployments.appId, existing.id))
+        .limit(1);
+
+      return Result.ok({ id: existing.id, deployed: deployment !== undefined });
     }),
   create: (principal: Principal, input: z.infer<typeof contract.createAppInput>) =>
     provisionApp(database, configuration, principal, input, "create", observation),

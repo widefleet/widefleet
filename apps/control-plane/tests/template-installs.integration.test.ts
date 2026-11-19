@@ -226,6 +226,26 @@ it("builds a template's sources and deploys them as the CLI would", async () => 
 
   expect(renamed.app.id).not.toBe(result.app.id);
   expect(renamed.app.slug).toBe("mail-reader-2");
+
+  // An app that never received a deployment, such as one left by an install
+  // that failed to publish, takes the install.
+  const draft = await createApi(runtime)(
+    new Request("http://localhost/api/v1/apps", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ slug: "mail-draft", displayName: "mail-draft" }),
+    }),
+  );
+
+  expect(draft.status).toBe(200);
+  const empty = contract.app.parse(await draft.json());
+
+  const resumed = contract.templateInstall.parse(
+    await (await install(runtime, "gmail", { name: "mail-draft" })).json(),
+  );
+
+  expect(resumed.app.id).toBe(empty.id);
+  expect(resumed.deployment).toMatchObject({ appId: empty.id, status: "queued" });
 });
 
 it("reports build errors and missing templates", async () => {

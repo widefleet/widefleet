@@ -1,7 +1,8 @@
 // One-click template installs: the builder builds a template's sources at the
 // current commit, and the result is published through the same upload path as
-// `widefleet deploy`, under the caller's authorization. An install creates a
-// new app; it never replaces an existing app of the same name.
+// `widefleet deploy`, under the caller's authorization. An install never
+// replaces a deployed app: it creates the app, or continues an earlier install
+// whose app never received a deployment.
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
 import { z } from "zod";
@@ -17,7 +18,7 @@ const encoder = new TextEncoder();
 
 export const createTemplateInstalls = (
   configuration: Pick<Configuration, "GITHUB_TOKEN">,
-  apps: Pick<ReturnType<typeof createAppService>, "nameInUse" | "create">,
+  apps: Pick<ReturnType<typeof createAppService>, "named" | "create" | "resolve">,
   uploads: Pick<ReturnType<typeof createUploadService>, "start" | "publish">,
   builder?: AppBuilder,
 ) => ({
@@ -56,7 +57,9 @@ export const createTemplateInstalls = (
           message: "App creator permission is required",
         });
 
-      if (yield* Result.await(apps.nameInUse(principal, name))) return yield* nameTaken();
+      const existing = yield* Result.await(apps.named(principal, name));
+
+      if (existing?.deployed) return yield* nameTaken();
 
       const { files } = yield* Result.await(templateSources(configuration, input.templateId));
       const built = yield* Result.await(builder.bundle(files));
@@ -72,8 +75,11 @@ export const createTemplateInstalls = (
       );
 
       // The app exists only once its build succeeded, so a failed build leaves
-      // the name free for another attempt.
-      const created = await apps.create(principal, appInput.data);
+      // the name free. An app without deployments is an earlier install that
+      // failed to publish, which this one completes.
+      const created = await (existing
+        ? apps.resolve(principal, name)
+        : apps.create(principal, appInput.data));
 
       if (
         created.isErr() &&
