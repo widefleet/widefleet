@@ -102,7 +102,7 @@ describe.runIf(process.env["RUN_ENTRA_TESTS"] === "1")(
         .where(eq(account.userId, session.user.id));
 
       expect(linked?.providerId).toBe("microsoft");
-      expect(linked?.accountId).toBe(decodeJwt(z.string().parse(linked?.idToken)).sub);
+      expect(linked?.accountId).toBe(decodeJwt(z.string().parse(linked?.idToken))["oid"]);
       const accessToken = z.string().parse(issued.at(-1));
       expect(linked?.accessToken).not.toBe(accessToken);
       expect(

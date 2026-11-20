@@ -27,7 +27,6 @@ export const verifyMcpToken = async (environment: ParentEnvironment, token: stri
     mcp: {
       organizationId: access.organizationId,
       identity: access.identity,
-      accountSubject: access.accountSubject,
     },
   });
 };

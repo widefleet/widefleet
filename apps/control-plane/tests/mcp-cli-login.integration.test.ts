@@ -8,7 +8,7 @@ import { account, ssoProvider, verification } from "../src/lib/server/auth-schem
 import { createMcpCliLogin } from "../src/lib/server/mcp-cli-login.ts";
 import { enrollCompanyUser } from "../src/lib/server/organization.ts";
 import { organizationSettings } from "../src/lib/server/schema.ts";
-import { createIdentityProvider } from "./edge/auth-proxy-idp.ts";
+import { createIdentityProvider, objectId as entraObjectId } from "./edge/auth-proxy-idp.ts";
 import { createTestEnvironment, linkCompanyAccount } from "./environment.ts";
 
 const origin = "https://platform.example.test";
@@ -283,7 +283,7 @@ describe("Entra company SSO sign-in for MCP CLI logins", () => {
     await environment?.close();
   });
 
-  it("signs in the CLI with the subject that company SSO stored", async () => {
+  it("signs in the CLI with the app identity's subject that company SSO stored", async () => {
     const started = await environment.auth.handler(
       new Request(`${origin}/api/auth/sign-in/sso`, {
         method: "POST",
@@ -308,13 +308,14 @@ describe("Entra company SSO sign-in for MCP CLI logins", () => {
 
     const userId = z.string().parse(session?.user.id);
 
-    // Company SSO keys the account by the registration's subject, not the object ID.
+    // Company SSO keys Entra accounts by object ID, the subject app sign-in issues,
+    // not by the registration's pairwise `sub`.
     const [stored] = await environment.database.db
       .select({ accountId: account.accountId })
       .from(account)
       .where(eq(account.userId, userId));
 
-    expect(stored).toEqual({ accountId: "pairwise-subject" });
+    expect(stored).toEqual({ accountId: entraObjectId });
 
     const created = await environment.auth.handler(
       new Request(`${origin}/api/auth/device/code`, {
@@ -333,7 +334,7 @@ describe("Entra company SSO sign-in for MCP CLI logins", () => {
     const code = await environment.authControl.signCliLogin({
       organizationId: "widefleet",
       issuer,
-      subject: "pairwise-subject",
+      subject: entraObjectId,
     });
 
     const redeemed = await environment.auth.handler(

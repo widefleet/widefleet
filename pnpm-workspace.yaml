@@ -27,6 +27,8 @@ patchedDependencies:
   # Persist terminal workflow failures and prevent steps from starting after pause
   # so local pause/resume and replay match the native workflow contract.
   miniflare@5.20261001.0-alpha: patches/miniflare@5.20261001.0-alpha.patch
+  # Let SSO sign-in key Entra accounts by object ID, as app sign-in does.
+  "@better-auth/sso@1.7.27": patches/@better-auth__sso@1.7.27.patch
 
 allowBuilds:
   core-js: false

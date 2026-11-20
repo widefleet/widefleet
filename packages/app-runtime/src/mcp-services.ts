@@ -1,3 +1,4 @@
+import { serviceTarget } from "./service-target.ts";
 import {
   mcpServiceCall,
   hasAppAccess,
@@ -5,7 +6,7 @@ import {
   type mcpClaims,
 } from "@platform/contracts";
 import type { z } from "zod";
-import { readApp, readServiceDocumentation } from "./catalog.ts";
+import { readServiceDocumentation } from "./catalog.ts";
 import { serviceRoute, verifyMcpToken } from "./mcp-authorization.ts";
 import { appWorker } from "./worker.ts";
 import { invokeApp } from "./app-rpc.ts";
@@ -22,27 +23,15 @@ const target = async (
   hostname: string,
   entrypoint: string,
 ) => {
-  const route = await serviceRoute(environment, hostname);
+  const app = await serviceTarget(
+    environment,
+    claims.mcp.organizationId,
+    claims.mcp.identity,
+    hostname,
+    entrypoint,
+  );
 
-  if (
-    !route ||
-    route.organizationId !== claims.mcp.organizationId ||
-    !hasAppAccess(route.access.groups, claims.mcp.identity.groups)
-  )
-    throw new Error("Service is unavailable or not permitted");
-
-  const app = await readApp(environment, `hosts/${hostname}.json`, {
-    appId: route.appId,
-    organizationId: route.organizationId,
-  });
-
-  if (
-    !app ||
-    app.appId !== route.appId ||
-    app.organizationId !== route.organizationId ||
-    !app.metadata.entrypoints?.includes(entrypoint)
-  )
-    throw new Error("Service is unavailable or not permitted");
+  if (!app) throw new Error("Service is unavailable or not permitted");
 
   return app;
 };

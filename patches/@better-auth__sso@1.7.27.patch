@@ -1,0 +1,38 @@
+diff --git a/dist/index-CndkJEsk.d.mts b/dist/index-CndkJEsk.d.mts
+index f81f3bac4368d1c6b9a5360fd54994f0b7e0831c..e7da52a478675d3fb9fdf2b8f43f93be1fc6427d 100644
+--- a/dist/index-CndkJEsk.d.mts
++++ b/dist/index-CndkJEsk.d.mts
+@@ -373,6 +373,15 @@ interface SSOOptions {
+    * @default false
+    */
+   provisionUserOnEveryLogin?: boolean;
++  /**
++   * The provider account identifier of a verified OIDC sign-in. Defaults to the
++   * ID token's `sub`. Return another verified claim for providers whose `sub`
++   * is not stable, such as Microsoft Entra's `oid`.
++   */
++  accountSubject?: ((input: {
++    provider: SSOProvider<SSOOptions>;
++    claims: Record<string, unknown>;
++  }) => string | undefined) | undefined;
+   /**
+    * Organization provisioning options
+    */
+diff --git a/dist/index.mjs b/dist/index.mjs
+index 58aaa297620a82100aea099ed93369b00680537d..aceb447ae11e6f9bae9545e1219a663d61d7a23c 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -3922,7 +3922,12 @@ async function handleOIDCCallback(ctx, options, providerId, stateData, parsedPro
+ 	} else return redirectOIDCError("invalid_provider", "user_info_endpoint_not_found");
+ 	if (!userInfo.email || !userInfo.id) return redirectOIDCError("invalid_provider", "missing_user_info");
+ 	const userInfoEmail = userInfo.email;
+-	const userInfoId = userInfo.id;
++	const accountSubject = verifiedIdToken && options?.accountSubject ? options.accountSubject({
++		provider,
++		claims: verifiedIdToken.payload
++	}) : void 0;
++	if (accountSubject !== void 0 && (typeof accountSubject !== "string" || accountSubject.length === 0)) return redirectOIDCError("invalid_provider", "account_subject_invalid");
++	const userInfoId = accountSubject ?? userInfo.id;
+ 	const providerUser = {
+ 		...Object.fromEntries(Object.entries(userInfo).filter(([key]) => key !== "id")),
+ 		email: userInfoEmail,
