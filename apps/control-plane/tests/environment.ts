@@ -222,12 +222,7 @@ export const createTestEnvironment = async (
     userConnections: createUserConnections(
       database.db,
       configuration,
-      createAppUserIdentity(
-        database.db,
-        configuration,
-        settings,
-        environment.PLATFORM_ENCRYPTION_KEY,
-      ),
+      createAppUserIdentity(database.db, configuration, settings),
     ),
     source: createAppSource(database.db),
     configuration,

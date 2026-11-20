@@ -97,7 +97,6 @@ describe("Personal connector accounts", () => {
       environment.database.db,
       environment.configuration,
       environment.settings,
-      environment.environment.PLATFORM_ENCRYPTION_KEY,
     );
     await registerAppLogin(
       environment.database.db,
@@ -140,7 +139,6 @@ describe("Personal connector accounts", () => {
       issuer: `${environment.configuration.PLATFORM_URL}/api/auth`,
       subject: environment.owner.id,
       name: "Member",
-      groups: [],
     });
     const prepared = await service().prepare(principal(), visible.id);
     expect(new URL(prepared.url).hostname).toBe(visible.hostname);
@@ -162,17 +160,35 @@ describe("Personal connector accounts", () => {
     expect(calls).toHaveLength(count);
   });
 
-  it("asks for a new company sign-in before asserting an unrecorded company identity", async () => {
+  it("names the company account as the identity and refuses members without one", async () => {
     const app = await deploy("company");
     await environment.database.db.update(organizationSettings).set({ ssoRequired: true });
     await environment.database.db.update(ssoProvider).set({ domainVerified: true });
 
+    const member = environment.users.createUser({
+      name: "Company member",
+      email: "company-member@example.test",
+    });
+
+    await environment.users.saveUser(member);
+    const companyMember = { ...principal(), id: member.id, name: "Company member" };
+
     try {
-      await expect(service().list(principal())).rejects.toMatchObject({ statusCode: 401 });
-      await expect(service().prepare(principal(), app.id)).rejects.toMatchObject({
-        statusCode: 401,
+      // A recovery session can reach the workspace without a company account.
+      await expect(service().list(companyMember)).rejects.toMatchObject({ statusCode: 403 });
+      await expect(service().prepare(companyMember, app.id)).rejects.toMatchObject({
+        statusCode: 403,
       });
       expect(calls).toEqual([]);
+
+      const objectId = crypto.randomUUID();
+      await environment.linkMicrosoftUser(member.id, objectId);
+      await service().list(companyMember);
+      expect(calls[0]?.identity).toEqual({
+        issuer: `${environment.environment.ENTRA_AUTHORITY}/${environment.environment.ENTRA_TENANT_ID}/v2.0`,
+        subject: objectId,
+        name: "Company member",
+      });
     } finally {
       await environment.database.db.update(ssoProvider).set({ domainVerified: false });
     }
@@ -180,16 +196,6 @@ describe("Personal connector accounts", () => {
 
   it("omits inaccessible connectors and distinguishes outages from disconnected accounts", async () => {
     const app = await deploy("visible");
-    const restricted = await deploy("restricted");
-    await environment.database.db
-      .update(apps)
-      .set({ accessGroups: ["restricted-group"] })
-      .where(eq(apps.id, restricted.id));
-    expect((await service().list(principal())).map((entry) => entry.appId)).toEqual([app.id]);
-    await expect(service().prepare(principal(), restricted.id)).rejects.toMatchObject({
-      code: "NOT_FOUND",
-    });
-    expect(calls.map((call) => call.appId)).toEqual([app.id]);
     status = 404;
     expect(await service().list(principal())).toEqual([]);
     status = 503;

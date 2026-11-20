@@ -22,9 +22,7 @@ import {
   deployments,
   jobs,
   organizationSettings,
-  appUserIdentities,
 } from "../../src/lib/server/schema.ts";
-import { graphGroup } from "./graph.fixture.ts";
 import { apiResource, cliClientId } from "../../src/lib/server/auth-options.ts";
 import { createTestEnvironment } from "../environment.ts";
 import { authConfiguration, createAuthProxy } from "@platform/auth-proxy";
@@ -63,13 +61,7 @@ test.beforeAll(async () => {
   await once(edge, "listening");
   server = spawn(
     process.execPath,
-    [
-      "--import",
-      fileURLToPath(new URL("./templates.fixture.ts", import.meta.url)),
-      "--import",
-      fileURLToPath(new URL("./graph.fixture.ts", import.meta.url)),
-      "build",
-    ],
+    ["--import", fileURLToPath(new URL("./templates.fixture.ts", import.meta.url)), "build"],
     {
       cwd: fileURLToPath(new URL("../../", import.meta.url)),
       env: {
@@ -3579,10 +3571,10 @@ for (const javaScriptEnabled of [true, false])
       await expect(page.getByText("personal-github.apps.localhost", { exact: true })).toBeVisible();
       await expect(page.getByText("personal-gmail.apps.localhost", { exact: true })).toBeVisible();
       // Incomplete setup remains visible when opening connection management.
-      // Connectors the member cannot access are not listed.
+      // Connectors without a web deployment are not listed.
       await environment.database.db
         .update(apps)
-        .set({ accessGroups: ["restricted-group"] })
+        .set({ webEnabled: false })
         .where(inArray(apps.id, [github, files]));
       await page.goto("/");
       await expect(page).toHaveURL(environment.configuration.PLATFORM_URL + "/");
@@ -3590,7 +3582,7 @@ for (const javaScriptEnabled of [true, false])
       await expect(page.getByText("Awaiting administrator setup")).toBeVisible();
       await environment.database.db
         .update(apps)
-        .set({ accessGroups: ["restricted-group"] })
+        .set({ webEnabled: false })
         .where(inArray(apps.id, appIds));
       await page.reload();
       await expect(page.getByText("No personal connections available")).toBeVisible();
@@ -3609,7 +3601,7 @@ for (const javaScriptEnabled of [true, false])
     }
   });
 
-test("personal connections assert the identity of the latest company sign-in", async ({ page }) => {
+test("personal connections assert the company account as the app identity", async ({ page }) => {
   const [provider] = await environment.database.db.select().from(ssoProvider);
   const appId = crypto.randomUUID();
   const artifactId = crypto.randomUUID();
@@ -3670,31 +3662,16 @@ test("personal connections assert the identity of the latest company sign-in", a
         ),
       );
 
+    // Entra accounts are keyed by object ID, the subject app sign-in issues.
+    expect(z.uuid().safeParse(signedIn?.subject).success).toBe(true);
+
     const expected = {
       issuer: `${environment.environment.ENTRA_AUTHORITY}/${environment.environment.ENTRA_TENANT_ID}/v2.0`,
       subject: z.string().parse(signedIn?.subject),
       name: "SSO Test User",
-      groups: [graphGroup],
     };
 
     await page.goto("/connections");
-    await expect(page.getByRole("heading", { name: "Company GitHub", exact: true })).toBeVisible();
-    expect(identities.at(-1)).toEqual(expected);
-
-    // Without a recorded identity, the member signs in again and returns here.
-    await environment.database.db
-      .delete(appUserIdentities)
-      .where(eq(appUserIdentities.userId, z.string().parse(signedIn?.userId)));
-    const before = identities.length;
-    await page.reload();
-    await expect(
-      page.getByText("Sign in with your company account again to check your connections."),
-    ).toBeVisible();
-    expect(identities).toHaveLength(before);
-    await page.getByRole("link", { name: "Sign in", exact: true }).click();
-    await page.getByRole("button", { name: "Sign in with Microsoft" }).click();
-    await page.getByRole("button", { name: /sso@example.test/ }).click();
-    await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}/connections`);
     await expect(page.getByRole("heading", { name: "Company GitHub", exact: true })).toBeVisible();
     expect(identities.at(-1)).toEqual(expected);
   } finally {

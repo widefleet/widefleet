@@ -2,7 +2,6 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { APIError } from "better-auth/api";
 import { z } from "zod";
 import {
-  hasAppAccess,
   userConnectionStatus,
   userConnectionLaunch,
   userConnectionInvocation,
@@ -31,12 +30,7 @@ export const createUserConnections = (
 ) => {
   const candidates = (principal: Principal) =>
     database
-      .select({
-        appId: apps.id,
-        displayName: apps.displayName,
-        hostname: apps.hostname,
-        accessGroups: apps.accessGroups,
-      })
+      .select({ appId: apps.id, displayName: apps.displayName, hostname: apps.hostname })
       .from(apps)
       .innerJoin(deployments, eq(deployments.id, apps.activeDeploymentId))
       .innerJoin(artifacts, eq(artifacts.id, deployments.artifactId))
@@ -52,21 +46,9 @@ export const createUserConnections = (
       )
       .orderBy(apps.displayName, apps.id);
 
-  // The runtime checks access again; this keeps inaccessible connectors off the
-  // list even when their status check does not finish in time.
-  const accessible = (
-    records: Awaited<ReturnType<typeof candidates>>,
-    identity: Awaited<ReturnType<typeof identify>>,
-  ) =>
-    records
-      .filter((record) =>
-        hasAppAccess(z.array(z.string()).parse(record.accessGroups), identity.identity.groups),
-      )
-      .map(({ appId, displayName, hostname }) => ({ appId, displayName, hostname }));
-
   const call = async (
     principal: Principal,
-    target: ReturnType<typeof accessible>[number],
+    target: Awaited<ReturnType<typeof candidates>>[number],
     identity: Awaited<ReturnType<typeof identify>>,
     operation: z.infer<typeof userConnectionAction>,
     signal?: AbortSignal,
@@ -81,7 +63,7 @@ export const createUserConnections = (
         organizationId: principal.application.organizationId,
         appId: target.appId,
         hostname: target.hostname,
-        ...identity,
+        identity,
         operation,
       }),
       signal,
@@ -91,7 +73,7 @@ export const createUserConnections = (
 
     if (response.status === 409)
       throw new APIError("SERVICE_UNAVAILABLE", {
-        message: "Company sign-in settings are still being applied. Try again.",
+        message: "App sign-in settings are still being applied. Try again.",
       });
 
     if (response.status !== 200)
@@ -109,24 +91,19 @@ export const createUserConnections = (
         message: "This personal connection is unavailable",
       });
 
-    const records = (await candidates(principal)).filter((record) => record.appId === appId);
-
-    if (!records.length) throw unavailable();
-    const identity = await identify(principal);
-    const [record] = accessible(records, identity);
+    const record = (await candidates(principal)).find((candidate) => candidate.appId === appId);
 
     if (!record) throw unavailable();
 
-    return { record, identity };
+    return { record, identity: await identify(principal) };
   };
 
   return {
     list: async (principal: Principal) => {
-      const listed = await candidates(principal);
+      const records = await candidates(principal);
 
-      if (!listed.length) return [];
+      if (!records.length) return [];
       const identity = await identify(principal);
-      const records = accessible(listed, identity);
 
       const results: (z.infer<typeof userConnectionEntry> | null)[] = records.map((record) => ({
         ...record,

@@ -12,10 +12,15 @@ export const getUserConnections = query(async () => {
   try {
     return { connections: await runtime.userConnections.list(principal), error: null };
   } catch (cause) {
+    // A refused identity, such as a recovery session without a company account,
+    // explains itself; other failures are temporary.
     if (cause instanceof APIError)
       return {
         connections: [],
-        error: cause.statusCode === 401 ? ("sign_in" as const) : ("unavailable" as const),
+        error:
+          cause.statusCode === 403
+            ? { kind: "refused" as const, message: cause.message }
+            : { kind: "unavailable" as const, message: null },
       };
     throw cause;
   }

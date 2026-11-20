@@ -11,12 +11,6 @@
 
   const connections = $derived(result.connections);
 
-  const organization = $derived(
-    page.data.organizations?.find(
-      (item) => item.id === page.data.principal?.application.organizationId,
-    ),
-  );
-
   let refreshing = $state(false);
 
   let refreshFailed = $state(false);
@@ -47,12 +41,8 @@
   {#if refreshFailed}<p role="alert" class="text-destructive text-sm">
       Could not refresh. The last checked status is still shown.
     </p>{/if}
-  {#if result.error === "sign_in"}
-    <p class="text-sm">Sign in with your company account again to check your connections.</p>
-    <Button
-      href={`/sign-in?${new URLSearchParams({ next: "/connections", ...(organization ? { organization: organization.slug } : {}) })}`}
-      >Sign in</Button
-    >
+  {#if result.error?.kind === "refused"}
+    <p role="alert" class="text-sm">{result.error.message}</p>
   {:else if result.error}
     <p role="alert" class="text-sm">
       Could not load your connections. Your saved accounts have not changed.
@@ -77,7 +67,7 @@
       {/each}
     </ul>
   {/if}
-  {#if refreshFailed || (result.error && result.error !== "sign_in") || connections.some((connection) => connection.unavailable)}
+  {#if refreshFailed || result.error?.kind === "unavailable" || connections.some((connection) => connection.unavailable)}
     <Button href="/connections" onclick={refresh} variant="outline" size="sm" disabled={refreshing}>
       {refreshing ? "Retrying…" : "Try again"}
     </Button>

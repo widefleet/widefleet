@@ -136,7 +136,7 @@ export const createRuntime = ({
     userConnections: createUserConnections(
       database.db,
       configuration,
-      createAppUserIdentity(database.db, configuration, settings, encryptionKey),
+      createAppUserIdentity(database.db, configuration, settings),
       userConnectionRequest,
       reportException,
     ),
