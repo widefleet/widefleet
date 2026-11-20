@@ -210,7 +210,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
 
           if (!(module instanceof File)) throw new Error("Missing runtime module");
           expect(module.type).toBe("application/javascript+module");
-          const version = (await module.text()).match(/runtimeVersion: "([0-9.]+)"/)?.[1];
+          const version = (await module.text()).match(/runtimeVersion: "([0-9A-Za-z.+-]+)"/)?.[1];
 
           if (!version) throw new Error("Runtime module has no version");
           runtimeUploads++;
@@ -3294,6 +3294,29 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         JSON.stringify({ bindings: [...settings], schedules, queues: [...queues], bindingTag }),
       ).toBe(before);
       expect((await runtimeStatus()).versions).toContain(next.version);
+    }, 20000);
+
+    it("updates and rolls back to runtime builds named with build metadata", async () => {
+      const build = runtimeRelease("99.1.0+fixture.1");
+      await selectRuntime(build);
+      await expect
+        .poll(runtimeStatus, { timeout: 15000 })
+        .toMatchObject({ activeVersion: build.version, state: "succeeded" });
+      expect(runtimeVersion).toBe(build.version);
+
+      await selectRuntime({ version: release.version });
+      await expect
+        .poll(runtimeStatus, { timeout: 15000 })
+        .toMatchObject({ activeVersion: release.version, state: "succeeded" });
+
+      await selectRuntime({ version: build.version });
+      await expect
+        .poll(runtimeStatus, { timeout: 15000 })
+        .toMatchObject({ activeVersion: build.version, state: "succeeded" });
+      expect(runtimeVersion).toBe(build.version);
+      expect((await runtimeStatus()).versions).toEqual(
+        expect.arrayContaining(["99.1.0", build.version]),
+      );
     }, 20000);
 
     it("confirms a runtime upload with a lost response without uploading it again", async () => {
