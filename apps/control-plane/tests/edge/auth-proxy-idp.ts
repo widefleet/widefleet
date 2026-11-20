@@ -11,6 +11,7 @@ const authorization = z.object({
   nonce: z.string().min(1).optional(),
   code_challenge: z.string().min(1),
   code_challenge_method: z.literal("S256"),
+  access_type: z.string().optional(),
 });
 
 export const tenantId = "00000000-0000-4000-8000-000000000001";
@@ -34,6 +35,7 @@ export const createIdentityProvider = async (
     available: true,
     failure: "",
     entra: false,
+    entraAuthority: "",
     google: false,
     workspaceDomain: "example.test",
     groups: ["accounting"],
@@ -44,6 +46,7 @@ export const createIdentityProvider = async (
     issuerSuffix: "",
     refreshFailure: "",
     rotateRefreshTokens: false,
+    refreshReplaySeconds: 30,
     issueRefreshToken: true,
     omitRefreshIdToken: false,
     grantedScopes: "",
@@ -61,7 +64,7 @@ export const createIdentityProvider = async (
       const issuer = settings.google
         ? "https://accounts.google.com"
         : settings.entra
-          ? `${origin}/${tenantId}/v2.0`
+          ? `${settings.entraAuthority || origin}/${tenantId}/v2.0`
           : origin + settings.issuerSuffix;
 
       response.setHeader("content-type", "application/json");
@@ -167,11 +170,12 @@ export const createIdentityProvider = async (
           if (settings.refreshFailure) {
             response
               .writeHead(
-                settings.refreshFailure === "invalid_grant"
-                  ? 400
-                  : settings.refreshFailure === "access_denied"
-                    ? 403
-                    : 503,
+                new Map([
+                  ["invalid_grant", 400],
+                  ["invalid_request", 400],
+                  ["invalid_client", 401],
+                  ["access_denied", 403],
+                ]).get(settings.refreshFailure) ?? 503,
               )
               .end(JSON.stringify({ error: settings.refreshFailure }));
 
@@ -244,7 +248,10 @@ export const createIdentityProvider = async (
 
         const result = JSON.stringify({
           access_token: "fixture-access-token",
-          refresh_token: settings.issueRefreshToken ? refreshToken : undefined,
+          refresh_token:
+            settings.issueRefreshToken && (!settings.google || parameters.access_type === "offline")
+              ? refreshToken
+              : undefined,
           token_type: "Bearer",
           scope:
             refreshing && settings.omitRefreshScopes
@@ -259,7 +266,10 @@ export const createIdentityProvider = async (
 
         if (refreshing && settings.rotateRefreshTokens) {
           refreshes.delete(credential);
-          replays.set(credential, { response: result, expiresAt: Date.now() + 30_000 });
+          replays.set(credential, {
+            response: result,
+            expiresAt: Date.now() + settings.refreshReplaySeconds * 1000,
+          });
         }
 
         response.end(result);

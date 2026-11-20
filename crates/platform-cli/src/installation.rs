@@ -209,7 +209,9 @@ fn project_name(directory: &Path) -> String {
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>()
         .join("-");
-    if !name.starts_with(|character: char| character.is_ascii_lowercase()) || name == "auth" {
+    if !name.starts_with(|character: char| character.is_ascii_lowercase())
+        || matches!(name.as_str(), "auth" | "mcp")
+    {
         name = format!("app-{name}");
     }
     name.truncate(48);
@@ -385,6 +387,7 @@ mod tests {
         assert_eq!(project_name(Path::new("My App")), "my-app");
         assert_eq!(project_name(Path::new("42-notes")), "app-42-notes");
         assert_eq!(project_name(Path::new("auth")), "app-auth");
+        assert_eq!(project_name(Path::new("mcp")), "app-mcp");
         assert_eq!(project_name(Path::new("---")), "app");
         assert_eq!(project_name(Path::new(&"a".repeat(60))).len(), 48);
     }

@@ -1,0 +1,34 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "widefleet",
+  "version": "0.1.0",
+  "description": "Build, deploy and use internal apps on Widefleet with company sign-in, databases, file storage and controlled access to company systems.",
+  "author": {
+    "name": "Widefleet",
+    "url": "https://widefleet.com"
+  },
+  "homepage": "https://widefleet.com",
+  "repository": "https://github.com/widefleet/widefleet",
+  "license": "MIT",
+  "keywords": ["apps", "deployment", "internal tools", "mcp"],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Widefleet",
+        "shortDescription": "Build, deploy and use your company's apps",
+        "longDescription": "Create internal apps from a description, deploy them to Widefleet with company sign-in, and call the APIs of apps your organization already runs.",
+        "developerName": "Widefleet",
+        "category": "Developer Tools",
+        "websiteURL": "https://widefleet.com",
+        "supportURL": "https://github.com/widefleet/widefleet/issues",
+        "defaultPrompt": [
+          "Build and deploy an app for my team",
+          "Show me which app services I can use"
+        ],
+        "logo": "./assets/logo.svg",
+        "logoDark": "./assets/logo-dark.svg",
+        "privacyPolicyURL": "https://widefleet.com/privacy"
+      }
+    }
+  }
+}

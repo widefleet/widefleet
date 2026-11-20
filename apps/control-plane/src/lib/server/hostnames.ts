@@ -15,10 +15,10 @@ export const requireAvailableHostname = async (
       message: "The hostname is invalid or exceeds DNS length limits",
     });
 
-  if (hostname === `auth.${domain}`)
+  if ([`auth.${domain}`, `mcp.${domain}`].includes(hostname))
     throw new InvalidOperation({
       code: "CONFLICT",
-      message: "The auth hostname is reserved for SSO",
+      message: "The auth and mcp hostnames are reserved for platform services",
     });
 
   // The organization lock alone cannot serialize equal hostnames in different organizations.

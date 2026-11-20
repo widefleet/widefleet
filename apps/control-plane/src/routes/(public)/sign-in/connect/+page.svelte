@@ -1,9 +1,9 @@
 <script lang="ts">
   import { authClient } from "#lib/auth-client";
-  import AuthLayout from "#shadcn/components/AuthLayout.svelte";
+  import AuthLayout from "@platform/ui/auth-layout";
   import EmailCodeForm from "#shadcn/components/EmailCodeForm.svelte";
   import Feedback from "#shadcn/components/Feedback.svelte";
-  import { Button } from "#shadcn/components/ui/button/index.js";
+  import { Button } from "@platform/ui/button";
   import type { PageData } from "./$types";
 
   let { data }: { data: PageData } = $props();

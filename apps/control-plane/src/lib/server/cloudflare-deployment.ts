@@ -37,6 +37,7 @@ import {
 import { createR2Storage } from "./storage/r2.ts";
 import { transact } from "./transactions.ts";
 import { publishAuthRoute } from "./cloudflare-auth-proxy.ts";
+import { refreshCloudflareServiceIndex } from "./cloudflare-service-index.ts";
 
 const deploymentConfiguration = z.object({
   CLOUDFLARE_ACCOUNT_ID: z.string().regex(/^[a-f0-9]{32}$/),
@@ -339,6 +340,11 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
               ),
             };
 
+            if (metadata.service_documentation)
+              await immutable(
+                `apps/${app.id}/service-documentation/${record.id}.json`,
+                JSON.stringify(metadata.service_documentation),
+              );
             await immutable(`versions/${app.id}/${version}.json`, body, customMetadata);
 
             const response = await runtime.fetch(
@@ -645,10 +651,20 @@ export const executeCloudflareDeployment = async (
       retryable(() => runner.provision(admitted)),
     );
 
-    for (const target of registration.targets)
+    for (const target of registration.targets) {
       await step.do(`activate-${target.appId}`, options, () =>
         retryable(() => runner.activate(admitted, target, registration.sequence, nativeBindings)),
       );
+      // A failed refresh leaves the activation in place; the index's periodic
+      // rebuild repairs it.
+      await step
+        .do(`index-${target.appId}`, options, () =>
+          retryable(() => refreshCloudflareServiceIndex(bindings, target.appId)),
+        )
+        .catch((cause: unknown) =>
+          console.error("The service search index could not be refreshed", cause),
+        );
+    }
 
     await step.do("record-completion", options, () =>
       retryable(() => runner.finish(command, null)),

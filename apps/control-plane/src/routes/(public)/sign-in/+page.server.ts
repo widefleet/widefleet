@@ -1,10 +1,11 @@
+import { companySsoAvailableSql, operatorTrustedSso } from "#server/sso-policy";
 import type { PageServerLoad } from "./$types";
 import { redirect } from "@sveltejs/kit";
-import { eq } from "drizzle-orm";
+import { and, eq, exists, gt, or } from "drizzle-orm";
 import { getRuntime } from "#server/runtime";
 import { readInstallation } from "#server/installation-store";
 
-import { organization, ssoProvider } from "#server/auth-schema";
+import { invitation, member, organization, ssoProvider } from "#server/auth-schema";
 import { organizationSettings } from "#server/schema";
 import { localDestination } from "#server/navigation";
 import { installationOrganizationId } from "#lib/organization";
@@ -23,7 +24,7 @@ export const load: PageServerLoad = async ({ locals, url, setHeaders }) => {
       name: organization.name,
       providerId: ssoProvider.providerId,
       appIdentityType: ssoProvider.appIdentityType,
-      verified: ssoProvider.domainVerified,
+      verified: companySsoAvailableSql(runtime.configuration),
       required: organizationSettings.ssoRequired,
     })
     .from(organization)
@@ -33,10 +34,67 @@ export const load: PageServerLoad = async ({ locals, url, setHeaders }) => {
 
   const provider = target?.verified ? target.providerId : null;
 
+  const companyOnly =
+    provider && target?.required && (slug || operatorTrustedSso(runtime.configuration, target?.id));
+
+  // A signed-in member or invitee reaches this page when an organization requires its own
+  // SSO. Only then is their address shared with that organization's provider without a click;
+  // anyone can link a signed-in visitor to an arbitrary organization's page.
+  const candidate =
+    companyOnly &&
+    slug &&
+    target &&
+    locals.user &&
+    locals.session?.identityOrganizationId !== target.id &&
+    !url.searchParams.has("error")
+      ? { organizationId: target.id, userId: locals.user.id, email: locals.user.email }
+      : null;
+
+  const database = runtime.database.db;
+
+  const related = candidate
+    ? await database
+        .select({ id: organization.id })
+        .from(organization)
+        .where(
+          and(
+            eq(organization.id, candidate.organizationId),
+            or(
+              exists(
+                database
+                  .select()
+                  .from(member)
+                  .where(
+                    and(
+                      eq(member.organizationId, candidate.organizationId),
+                      eq(member.userId, candidate.userId),
+                    ),
+                  ),
+              ),
+              exists(
+                database
+                  .select()
+                  .from(invitation)
+                  .where(
+                    and(
+                      eq(invitation.organizationId, candidate.organizationId),
+                      eq(invitation.email, candidate.email.toLowerCase()),
+                      eq(invitation.status, "pending"),
+                      gt(invitation.expiresAt, new Date()),
+                    ),
+                  ),
+              ),
+            ),
+          ),
+        )
+    : [];
+
+  const continueAs = candidate && related.length ? candidate.email : null;
+
   return {
     signedOut: !locals.session,
-    socialProviders:
-      slug && provider && target?.required ? [] : availableSocialProviders(runtime.configuration),
+    continueAs,
+    socialProviders: companyOnly ? [] : availableSocialProviders(runtime.configuration),
     error: url.searchParams.has("error"),
     provider,
     publicSignup: runtime.publicSignup && !slug,
@@ -50,7 +108,7 @@ export const load: PageServerLoad = async ({ locals, url, setHeaders }) => {
         : (target?.name ?? "your company"),
     organizationSlug: slug,
     organizationName: target?.name ?? null,
-    emailSignIn: runtime.emailSignIn && !(slug && provider && target?.required),
+    emailSignIn: runtime.emailSignIn && !companyOnly,
     email: url.searchParams.get("email") ?? "",
     codeDelivery: runtime.configuration.LOGIN_CODE_DELIVERY,
     next: localDestination(url.searchParams.get("next")),

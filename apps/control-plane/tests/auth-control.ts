@@ -5,11 +5,14 @@ import { join } from "node:path";
 import { z } from "zod";
 import { authConfiguration, type AuthConfiguration } from "@platform/auth-proxy";
 import { authControlPath, configurationRevision } from "@platform/auth-proxy/publication";
+import { mcpLoginConfiguration } from "@platform/auth-proxy/mcp-login";
+import { signMcpCliLogin, verifyMcpCliLogin } from "@platform/auth-proxy/mcp-cli-login";
 
 // Settings/API/browser fixtures exercise HTTP publication. Packaged tests use the real worker.
 export const createAuthControl = async (directory: string) => {
   const key = "local-auth-control-key-never-deploy";
   const configurations = new Map<string, { configuration: AuthConfiguration; revision: string }>();
+  let mcpLogin: z.infer<typeof mcpLoginConfiguration> | null = null;
   let available = true;
   let publications = 0;
 
@@ -32,6 +35,31 @@ export const createAuthControl = async (directory: string) => {
       return;
     }
 
+    if (request.url === `${authControlPath}/mcp/login` && request.method === "PUT") {
+      const chunks: Buffer[] = [];
+
+      for await (const chunk of request) chunks.push(z.instanceof(Buffer).parse(chunk));
+      mcpLogin = mcpLoginConfiguration.parse(JSON.parse(Buffer.concat(chunks).toString()));
+      response.writeHead(204).end();
+
+      return;
+    }
+
+    if (request.url === `${authControlPath}/mcp/cli-login` && request.method === "POST") {
+      const chunks: Buffer[] = [];
+
+      for await (const chunk of request) chunks.push(z.instanceof(Buffer).parse(chunk));
+
+      const { code } = z
+        .object({ code: z.string() })
+        .parse(JSON.parse(Buffer.concat(chunks).toString()));
+
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({ login: await verifyMcpCliLogin(key, code) }));
+
+      return;
+    }
+
     const organizationId = request.url?.match(
       new RegExp(`^${authControlPath}/organizations/([a-zA-Z0-9_-]+)/configuration$`),
     )?.[1];
@@ -50,6 +78,9 @@ export const createAuthControl = async (directory: string) => {
       const revision = await configurationRevision(configuration);
       configurations.set(organizationId, { configuration, revision });
       publications++;
+      response.writeHead(204).end();
+    } else if (request.method === "DELETE") {
+      configurations.delete(organizationId);
       response.writeHead(204).end();
     } else {
       const { configuration, revision } = configurations.get(organizationId) ?? {
@@ -84,10 +115,16 @@ export const createAuthControl = async (directory: string) => {
       configuration: configurations.get(organizationId)?.configuration ?? null,
       revision: configurations.get(organizationId)?.revision ?? "",
       publications,
+      mcpLogin,
     }),
     available: (value: boolean) => {
       available = value;
     },
+    clearMcp: () => {
+      mcpLogin = null;
+    },
+    // Stands in for the MCP server's cli_login tool, which signs with the same edge key.
+    signCliLogin: (login: Parameters<typeof signMcpCliLogin>[1]) => signMcpCliLogin(key, login),
     close: () =>
       new Promise<void>((resolve, reject) =>
         server.close((error) => (error ? reject(error) : resolve())),

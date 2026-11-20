@@ -26,14 +26,17 @@ import {
 } from "../src/lib/server/installation-store.ts";
 import { createAuthentication, registerCli } from "../src/lib/server/auth.ts";
 import { configurationSchema } from "../src/lib/server/config.ts";
-import { createDatabase } from "../src/lib/server/database.ts";
-import { account, member, session } from "../src/lib/server/auth-schema.ts";
+import { createDatabase, type DatabaseExecutor } from "../src/lib/server/database.ts";
+import { account, member, session, ssoProvider } from "../src/lib/server/auth-schema.ts";
 import { enrollCompanyUser, initializeOrganization } from "../src/lib/server/organization.ts";
 import { companyAccountProvider, companyIdentity } from "../src/lib/server/company-identity.ts";
 
 export const createTestEnvironment = async (
   platformUrl = "http://localhost:25430",
   provider: "entra" | "oidc" = "entra",
+  ssoPolicy: { trustProvider: boolean; allowEmailAccountLinking?: boolean } = {
+    trustProvider: false,
+  },
 ) => {
   const name = `test_${crypto.randomUUID().replaceAll("-", "")}`;
   const tenantId = "00000000-0000-4000-8000-000000000001";
@@ -107,6 +110,8 @@ export const createTestEnvironment = async (
   const ownerSubject = "00000000-0000-4000-8000-000000000003";
 
   const environment = {
+    PLATFORM_SSO_TRUST_PROVIDER: String(ssoPolicy.trustProvider),
+    PLATFORM_SSO_ALLOW_EMAIL_ACCOUNT_LINKING: String(ssoPolicy.allowEmailAccountLinking ?? false),
     PLATFORM_USAGE_REPORTING: "false",
     PLATFORM_CRASH_REPORTING: "false",
     PLATFORM_STATE_DIRECTORY: directory,
@@ -160,8 +165,6 @@ export const createTestEnvironment = async (
     migrationsFolder: fileURLToPath(new URL("../migrations", import.meta.url)),
   });
 
-  const auth = createAuthentication(configuration, database.db);
-
   await initializeOrganization(database.db);
   await initializeInstallation(database.db);
 
@@ -173,6 +176,8 @@ export const createTestEnvironment = async (
     environment.PLATFORM_ENCRYPTION_KEY,
     (organizationId) => createAppSignIn(configuration, cookieKey, organizationId),
   );
+
+  const auth = createAuthentication(configuration, database.db, { cliLoginSettings: settings });
 
   const owner = await createInstallationOwner(database.db, {
     name: "Setup Owner",
@@ -223,7 +228,8 @@ export const createTestEnvironment = async (
     emailSignIn: false,
     publicSignup: false,
     onboarding: createOnboardingService(database.db, settings),
-    signInProvider: createAuthenticationAdmission(database.db).signInProvider,
+    signInProvider: createAuthenticationAdmission(database.db, undefined, false, configuration)
+      .signInProvider,
     discoverPlatform,
     cliLogin: createCliLogin(database.db, configuration),
     reporting: createReporting(configuration, database.db),
@@ -281,4 +287,27 @@ export const organizationCredential = async (
     .where(eq(session.id, current.session.id));
 
   return { auth, headers };
+};
+
+// Activating required SSO needs the administrator's account linked to the provider,
+// as a completed company sign-in would leave it.
+export const linkCompanyAccount = async (
+  database: DatabaseExecutor,
+  userId: string,
+  organizationId = "widefleet",
+) => {
+  const [provider] = await database
+    .select({ providerId: ssoProvider.providerId })
+    .from(ssoProvider)
+    .where(eq(ssoProvider.organizationId, organizationId));
+
+  if (!provider) throw new Error("The organization has no company SSO provider");
+  await database.insert(account).values({
+    id: crypto.randomUUID(),
+    accountId: `${userId}-company`,
+    providerId: provider.providerId,
+    userId,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
 };

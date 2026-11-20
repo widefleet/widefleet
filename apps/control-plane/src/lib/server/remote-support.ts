@@ -4,7 +4,7 @@ import { error, invalid } from "@sveltejs/kit";
 import type { Result } from "better-result";
 import { DatabaseUnavailable, InvalidOperation, StorageUnavailable } from "./errors.ts";
 import { getUserSession, pageFailure } from "./page-auth.ts";
-import { getRuntime } from "./runtime.ts";
+import { getRuntime, reportRequestException } from "./runtime.ts";
 
 export const remoteContext = async (write?: { organizationId: string }) => {
   const { request } = getRequestEvent();
@@ -15,6 +15,7 @@ export const remoteContext = async (write?: { organizationId: string }) => {
     user.id,
     session.activeOrganizationId ?? null,
     session.identityOrganizationId ?? null,
+    session.id,
   );
 
   if (principal.isErr()) {
@@ -28,6 +29,7 @@ export const remoteContext = async (write?: { organizationId: string }) => {
     error(409, "Your organization selection changed. Reload this page before making changes.");
 
   runtime.reporting.active(principal.value.id);
+  session.activeOrganizationId = principal.value.application.organizationId;
 
   return { runtime, principal: principal.value, request };
 };
@@ -59,7 +61,7 @@ export const remoteOperation = async <T>(operation: () => Promise<T>) => {
     if (cause instanceof InvalidOperation) pageFailure(cause);
 
     if (cause instanceof APIError) {
-      if (cause.statusCode >= 500) (await getRuntime()).reporting.exception(cause);
+      if (cause.statusCode >= 500) await reportRequestException(cause);
       error(cause.statusCode, cause.message);
     }
 

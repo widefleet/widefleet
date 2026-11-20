@@ -2,7 +2,7 @@
   import type { Snippet } from "svelte";
   import { page } from "$app/state";
   import { getAppContext } from "#lib/app-context";
-  import { Button } from "#shadcn/components/ui/button/index.js";
+  import { Button } from "@platform/ui/button";
 
   let { children }: { children: Snippet } = $props();
 

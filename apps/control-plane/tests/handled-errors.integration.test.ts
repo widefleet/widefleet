@@ -11,6 +11,7 @@ import * as runtimeModule from "../src/lib/server/runtime.ts";
 import { pageFailure } from "../src/lib/server/page-auth.ts";
 import { organizationOperation } from "../src/lib/server/organization-operations.ts";
 import { remoteOperation } from "../src/lib/server/remote-support.ts";
+import type { Observation } from "../src/lib/server/observation.ts";
 import {
   DatabaseUnavailable,
   StorageUnavailable,
@@ -21,7 +22,11 @@ let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
 
 let runtime: Runtime;
 
-const exception = vi.fn();
+let requestLocals: App.Locals;
+
+const reportRequestException = runtimeModule.reportRequestException;
+
+const exception = vi.fn<NonNullable<Observation["exception"]>>();
 
 beforeAll(async () => {
   environment = await createTestEnvironment();
@@ -34,11 +39,26 @@ beforeAll(async () => {
     observation: { capture: () => {}, exception, close: async () => {} },
     encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
   })();
+  const credential = await environment.users.login({ userId: environment.owner.id });
+  const current = await runtime.auth.api.getSession({ headers: credential.headers });
+
+  if (!current) throw new Error("Missing fixture session");
+  requestLocals = {
+    ...current,
+    session: { ...current.session, activeOrganizationId: environment.application.organizationId },
+    analytics: null,
+    runtime: async () => runtime,
+  };
 });
 
 beforeEach(() => {
+  if (requestLocals.session)
+    requestLocals.session.activeOrganizationId = environment.application.organizationId;
   exception.mockClear();
   vi.spyOn(runtimeModule, "getRuntime").mockResolvedValue(runtime);
+  vi.spyOn(runtimeModule, "reportRequestException").mockImplementation((error) =>
+    reportRequestException(error, requestLocals),
+  );
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -58,6 +78,8 @@ it.each(["GET", "PUT"])("reports database errors once for %s API requests", asyn
   expect(response.status).toBe(503);
   expect(exception).toHaveBeenCalledOnce();
   expect(exception.mock.calls[0]?.[0]).toBe(error);
+  expect(exception.mock.calls[0]?.[1]).toBeUndefined();
+  expect(exception.mock.calls[0]?.[2]).toEqual({ $groups: undefined });
   exception.mockClear();
   vi.spyOn(runtime.identity, "authenticate").mockResolvedValue(
     Result.err(new AuthenticationFailed({ code: "UNAUTHORIZED", message: "Sign in" })),
@@ -138,6 +160,53 @@ it("captures a binary upload's storage error and preserves its cause", async () 
   expect(response.status).toBe(503);
   expect(exception).toHaveBeenCalledOnce();
   expect(exception.mock.calls[0]?.[0]).toBe(error);
+  expect(exception.mock.calls[0]?.slice(1)).toEqual([
+    `user:${environment.owner.id}`,
+    { $groups: { organization: environment.application.organizationId } },
+  ]);
+});
+
+it("keeps concurrent API failures attached to their authenticated principals", async () => {
+  const entered = vi.fn();
+  let release: (() => void) | undefined;
+
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  vi.spyOn(runtime.identity, "authenticate").mockImplementation(async (request) =>
+    Result.ok({
+      ...environment.owner,
+      id: new URL(request.url).searchParams.get("actor") ?? "second",
+      role: "owner",
+      admin: false,
+      creator: true,
+      application: {
+        organizationId: new URL(request.url).searchParams.get("actor") ?? "second",
+        admin: false,
+      },
+    }),
+  );
+  vi.spyOn(runtime.apps, "list").mockImplementation(async (principal) => {
+    if (principal.id === "first") {
+      entered();
+      await pending;
+    }
+
+    throw new Error(`Failure for ${principal.id}`);
+  });
+  const api = createApi(runtime);
+  const first = api(new Request("http://localhost/api/v1/apps?actor=first"));
+  await vi.waitFor(() => expect(entered).toHaveBeenCalledOnce());
+  expect((await api(new Request("http://localhost/api/v1/apps?actor=second"))).status).toBe(500);
+  release?.();
+  expect((await first).status).toBe(500);
+  expect(exception).toHaveBeenNthCalledWith(1, new Error("Failure for second"), "user:second", {
+    $groups: { organization: "second" },
+  });
+  expect(exception).toHaveBeenNthCalledWith(2, new Error("Failure for first"), "user:first", {
+    $groups: { organization: "first" },
+  });
 });
 
 it.each(["database", "storage"])(
@@ -167,8 +236,44 @@ it.each(["database", "storage"])(
 
     await vi.waitFor(() => expect(exception).toHaveBeenCalledOnce());
     expect(exception.mock.calls[0]?.[0]).toBe(original);
+    expect(exception.mock.calls[0]?.slice(1)).toEqual([
+      `user:${environment.owner.id}`,
+      { $groups: { organization: environment.application.organizationId } },
+    ]);
   },
 );
+
+it("does not retain a page identity after its session is gone", async () => {
+  const error = new Error("Signed-out page failed");
+  await reportRequestException(error, { ...requestLocals, user: null, session: null });
+  expect(exception).toHaveBeenCalledExactlyOnceWith(error, undefined, { $groups: undefined });
+});
+
+it("uses the session's persisted automatic organization selection", async () => {
+  const credential = await environment.users.login({ userId: environment.owner.id });
+  const current = await runtime.auth.api.getSession({ headers: credential.headers });
+
+  if (!current) throw new Error("Missing fixture session");
+  expect(current.session.activeOrganizationId).toBeNull();
+
+  const principal = await runtime.identity.principal(
+    current.user.id,
+    null,
+    null,
+    current.session.id,
+  );
+
+  if (principal.isErr()) throw principal.error;
+  const selected = await runtime.auth.api.getSession({ headers: credential.headers });
+
+  if (!selected) throw new Error("Missing fixture session");
+  expect(selected.session.activeOrganizationId).toBe(environment.application.organizationId);
+  const cause = new Error("Failure after organization selection");
+  await reportRequestException(cause, { ...requestLocals, ...selected });
+  expect(exception).toHaveBeenCalledExactlyOnceWith(cause, `user:${environment.owner.id}`, {
+    $groups: { organization: environment.application.organizationId },
+  });
+});
 
 it("reports server APIErrors in remote operations and skips expected client errors", async () => {
   const cause = new APIError("SERVICE_UNAVAILABLE", {

@@ -73,6 +73,8 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
 
   const clientEnvironment = {
     ...process.env,
+    // CPU-heavy documentation must not starve the CLI's HTTP connection tasks.
+    TOKIO_WORKER_THREADS: "1",
     PATH: (process.env["PATH"] ?? "")
       .split(delimiter)
       .filter((entry) => !entry.startsWith(root))
@@ -711,7 +713,7 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
     const pointer = await before.Body?.transformToString();
     await manageRuntime("/runtime", runtime);
     await expect(agent(undefined, undefined, binary)).rejects.toThrow(
-      "Publisher binary requires celld 0.6.2",
+      "Publisher binary requires celld 0.6.3-widefleet.1",
     );
 
     const after = await s3.send(
@@ -868,7 +870,21 @@ describe.runIf(runRuntime)("CLI, agent and celld with persistent D1/R2", () => {
       maxBuffer: 8 * 1024 * 1024,
     });
 
-    await cli("deploy", "--no-wait");
+    // Exercise connection closure during type analysis without racing the
+    // one-second status polling used by other deployment and migration commands.
+    const keepAliveTimeout = proxy.keepAliveTimeout;
+    const keepAliveTimeoutBuffer = proxy.keepAliveTimeoutBuffer;
+    proxy.keepAliveTimeout = 1000;
+    proxy.keepAliveTimeoutBuffer = 0;
+
+    try {
+      await cli("deploy", "--no-wait");
+    } finally {
+      proxy.keepAliveTimeout = keepAliveTimeout;
+      proxy.keepAliveTimeoutBuffer = keepAliveTimeoutBuffer;
+      proxy.closeIdleConnections();
+    }
+
     const apps = z.array(contract.app).parse(JSON.parse((await cli("apps")).stdout));
     expect(apps).toHaveLength(1);
     const app = contract.app.parse(apps[0]);

@@ -1,12 +1,14 @@
+import { companySsoAvailableSql, operatorTrustedSso } from "./sso-policy.ts";
 import type { OAuthClaimExtensionInput } from "@better-auth/oauth-provider";
 import { readAuthenticationReference } from "./authentication-context.ts";
+import type { Configuration } from "./config.ts";
 import { APIError } from "better-auth/api";
-import { and, eq, gt } from "drizzle-orm";
+import { and, eq, exists, gt, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { organizationIdentifier } from "@platform/contracts";
 import type { OrganizationAccess } from "./application-context.ts";
 import type { DatabaseExecutor } from "./database.ts";
-import { organizationSettings } from "./schema.ts";
+import { organizationSettings, ssoDomains } from "./schema.ts";
 import { invitation, member, user, ssoProvider } from "./auth-schema.ts";
 import { installationOrganizationId } from "../organization.ts";
 import { InvalidOperation } from "./errors.ts";
@@ -16,6 +18,7 @@ export const createAuthenticationAdmission = (
   database: DatabaseExecutor,
   access: OrganizationAccess = { filterOrganizations: async () => [installationOrganizationId] },
   publicSignup = false,
+  configuration?: Configuration,
 ) => ({
   signInProvider: async (email: string) => {
     const domain = email.trim().toLowerCase().split("@")[1];
@@ -25,7 +28,31 @@ export const createAuthenticationAdmission = (
     const candidates = await database
       .select({ id: ssoProvider.organizationId, providerId: ssoProvider.providerId })
       .from(ssoProvider)
-      .where(and(eq(ssoProvider.domain, domain), eq(ssoProvider.domainVerified, true)));
+      .where(
+        and(
+          companySsoAvailableSql(configuration),
+          or(
+            // Better Auth mirrors verified domains once any DNS proof exists.
+            sql`${domain} = any(string_to_array(${ssoProvider.domain}, ','))`,
+            operatorTrustedSso(configuration)
+              ? and(
+                  eq(ssoProvider.organizationId, installationOrganizationId),
+                  exists(
+                    database
+                      .select()
+                      .from(ssoDomains)
+                      .where(
+                        and(
+                          eq(ssoDomains.organizationId, ssoProvider.organizationId),
+                          eq(ssoDomains.domain, domain),
+                        ),
+                      ),
+                  ),
+                )
+              : undefined,
+          ),
+        ),
+      );
 
     const allowed = new Set(await access.filterOrganizations(candidates));
     const providers = candidates.filter((candidate) => allowed.has(candidate.id));
@@ -91,7 +118,7 @@ export const createAuthenticationAdmission = (
       !(await access.filterOrganizations([{ id: organizationId }])).includes(organizationId) ||
       (
         await database
-          .select({ verified: ssoProvider.domainVerified })
+          .select({ verified: companySsoAvailableSql(configuration) })
           .from(ssoProvider)
           .innerJoin(
             organizationSettings,

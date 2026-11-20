@@ -2,7 +2,8 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "lib": ["ES2023", "ESNext.Disposable"],
-    "types": ["@cloudflare/workers-types", "node"]
+    "types": ["@cloudflare/workers-types", "node", "svelte", "vite/client"]
   },
-  "include": ["src", "fixtures"]
+  "include": ["src", "fixtures"],
+  "exclude": ["src/ui/input-form"]
 }

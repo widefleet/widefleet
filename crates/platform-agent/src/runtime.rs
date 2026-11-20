@@ -52,6 +52,11 @@ pub async fn secrets_key(store: &dyn ObjectStore, organization_id: &str) -> Resu
     Ok(value)
 }
 
+pub fn supports_celld(version: &str) -> bool {
+    // The fork adds Web Crypto operations without changing the runtime protocol.
+    matches!(version, "0.6.2" | "0.6.3-widefleet.1")
+}
+
 pub fn configuration(
     release: &RuntimeRelease,
     token: &str,
@@ -59,7 +64,7 @@ pub fn configuration(
     app_domain: Option<&str>,
     app_https_port: u16,
 ) -> Result<Value> {
-    if release.protocol != 3 || release.auth != 1 || release.celld != "0.6.2" {
+    if release.protocol != 3 || release.auth != 1 || !supports_celld(&release.celld) {
         return Err(Error::invalid(
             "Unsupported runtime installation protocol or celld version".into(),
         ));
@@ -83,6 +88,7 @@ pub fn configuration(
         };
         config["vars"]["WIDEFLEET_WORKLOAD_ISSUER"] =
             json!(format!("https://auth.{domain}{port}/workload"));
+        config["vars"]["WIDEFLEET_MCP_ORIGIN"] = json!(format!("https://mcp.{domain}{port}"));
     }
     if release.workflows == Some(1) {
         config["services"] = json!([{ "binding": "WIDEFLEET_WORKFLOW_SESSIONS", "service": "widefleet", "entrypoint": "WorkflowSessions" }]);
@@ -97,13 +103,14 @@ mod tests {
     #[test]
     fn deployments_keep_the_configured_workload_issuer_and_custom_port() -> platform_core::Result<()>
     {
-        let release = platform_core::model::RuntimeRelease {
+        let mut release = platform_core::model::RuntimeRelease {
             auth: 1,
             protocol: 3,
             version: "1.0.0".into(),
-            celld: "0.6.2".into(),
+            celld: "0.6.3-widefleet.1".into(),
             workflows: None,
             cloudflare: None,
+            search: None,
             main: "loader.js".into(),
             modules: vec![],
         };
@@ -120,6 +127,11 @@ mod tests {
             )?;
             assert_eq!(configured["vars"]["WIDEFLEET_WORKLOAD_ISSUER"], issuer);
         }
+        release.celld = "0.6.2".into();
+        assert!(super::configuration(&release, "control", "secrets", None, 443).is_ok());
+        release.celld = "0.5.0".into();
+        assert!(super::configuration(&release, "control", "secrets", None, 443).is_err());
+        release.celld = "0.6.3-widefleet.1".into();
         let unconfigured = super::configuration(&release, "control", "secrets", None, 443)?;
         assert!(
             unconfigured["vars"]

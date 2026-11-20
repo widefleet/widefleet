@@ -17,6 +17,7 @@ import {
 import { initializeCloudflareRuntime } from "../src/lib/server/organization-runtime.ts";
 import { initializeOrganization } from "../src/lib/server/organization.ts";
 import { z } from "zod";
+import { configuredAppSignInOrganizations } from "../src/lib/server/settings.ts";
 import { connectCloudflareSettings } from "./cloudflare-settings.ts";
 import { loadRuntimeExtension } from "./runtime-extension.ts";
 
@@ -40,74 +41,81 @@ try {
 
   const state = await readInstallation(database.db);
 
+  let bootstrap: z.infer<typeof bootstrapConfiguration> | undefined;
+
   if (!state.ownerId || state.bootstrapPending) {
     if (!configuration.PLATFORM_BOOTSTRAP_FILE)
       throw new Error("PLATFORM_BOOTSTRAP_FILE must provide the first hosted administrator");
-
-    const bootstrap = bootstrapConfiguration.parse(
+    bootstrap = bootstrapConfiguration.parse(
       JSON.parse(await readFile(configuration.PLATFORM_BOOTSTRAP_FILE, "utf8")),
     );
+  }
 
-    const configPath =
-      process.env["WIDEFLEET_INITIALIZE_CONFIG"] ??
-      fileURLToPath(new URL("../wrangler.initialize.jsonc", import.meta.url));
+  const configPath =
+    process.env["WIDEFLEET_INITIALIZE_CONFIG"] ??
+    fileURLToPath(new URL("../wrangler.initialize.jsonc", import.meta.url));
 
-    const worker = z
-      .object({
-        send_email: z.array(z.object({ name: z.string() })),
-        vars: z.record(z.string(), z.unknown()),
-      })
-      .parse(unstable_readConfig({ config: configPath }));
+  const worker = z
+    .object({
+      send_email: z.array(z.object({ name: z.string() })),
+      vars: z.record(z.string(), z.unknown()),
+    })
+    .parse(unstable_readConfig({ config: configPath }));
 
-    const secretsPath = process.env["WIDEFLEET_INITIALIZE_SECRETS_FILE"];
+  const secretsPath = process.env["WIDEFLEET_INITIALIZE_SECRETS_FILE"];
 
-    const bindings = {
-      ...process.env,
-      ...worker.vars,
-      ...z
-        .record(z.string(), z.string())
-        .parse(secretsPath ? JSON.parse(await readFile(secretsPath, "utf8")) : {}),
-    };
+  const bindings = {
+    ...process.env,
+    ...worker.vars,
+    ...z
+      .record(z.string(), z.string())
+      .parse(secretsPath ? JSON.parse(await readFile(secretsPath, "utf8")) : {}),
+  };
 
-    const extension = await loadRuntimeExtension({
+  const extension = await loadRuntimeExtension({
+    configuration,
+    database: database.db,
+    observation,
+    binding: (name, schema) => schema.parse(bindings[name]),
+  });
+
+  const emailSignIn =
+    configuration.LOGIN_CODE_DELIVERY === "console" ||
+    Boolean(extension.sendEmail) ||
+    worker.send_email.some((binding) => binding.name === "EMAIL") ||
+    Boolean(worker.vars["EMAIL_FROM"]);
+
+  const publish = bootstrap
+    ? Boolean(bootstrap.settings || emailSignIn || state.bootstrapPending)
+    : (await configuredAppSignInOrganizations(database.db)).length > 0;
+
+  if (publish) {
+    const secrets = z.object({ APP_COOKIE_SECRET: z.string().min(1) }).parse(bindings);
+
+    const services = await connectCloudflareSettings(
       configuration,
-      database: database.db,
+      database.db,
+      configuration.PLATFORM_ENCRYPTION_KEY,
+      secrets.APP_COOKIE_SECRET,
+      configPath,
+      extension,
       observation,
-      binding: (name, schema) => schema.parse(bindings[name]),
-    });
+    );
 
-    const emailSignIn =
-      configuration.LOGIN_CODE_DELIVERY === "console" ||
-      Boolean(extension.sendEmail) ||
-      worker.send_email.some((binding) => binding.name === "EMAIL") ||
-      Boolean(worker.vars["EMAIL_FROM"]);
-
-    if (bootstrap.settings || emailSignIn || state.bootstrapPending) {
-      const secrets = z.object({ APP_COOKIE_SECRET: z.string().min(1) }).parse(process.env);
-
-      const services = await connectCloudflareSettings(
-        configuration,
-        database.db,
-        configuration.PLATFORM_ENCRYPTION_KEY,
-        secrets.APP_COOKIE_SECRET,
-        configPath,
-        extension,
-        observation,
-      );
-
-      try {
+    try {
+      if (bootstrap)
         await initializeBootstrap(
           services.settings,
           createAuthentication(configuration, database.db, { ...extension, observation }),
           database.db,
           bootstrap,
         );
-      } finally {
-        await services.close();
-      }
-    } else {
-      await createInstallationOwner(database.db, bootstrap.owner, false, observation);
+      else await services.settings.republish();
+    } finally {
+      await services.close();
     }
+  } else if (bootstrap) {
+    await createInstallationOwner(database.db, bootstrap.owner, false, observation);
   }
 
   console.info("Hosted installation initialized");

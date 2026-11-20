@@ -1,5 +1,8 @@
 import { authConfiguration } from "@platform/auth-proxy";
-import { configurationRevision } from "@platform/auth-proxy/publication";
+import { authConfigurationKey, configurationRevision } from "@platform/auth-proxy/publication";
+import { mcpLoginConfiguration } from "@platform/auth-proxy/mcp-login";
+import { mcpCliLogin } from "@platform/auth-proxy/mcp-cli-login";
+import { z } from "zod";
 import { activationStatus } from "@platform/contracts";
 import type { AppSignIn } from "./app-sign-in.ts";
 import { appCallbackUrl } from "./app-sign-in.ts";
@@ -9,13 +12,23 @@ import { installationOrganizationId } from "../organization.ts";
 export const createInstalledAppSignIn = (
   configuration: Configuration,
   cookieSecret: string | undefined,
-  request: (method: "GET" | "PUT", body?: string) => Promise<{ text(): Promise<string> }>,
+  request: (
+    path: string,
+    method: "GET" | "PUT" | "POST" | "DELETE",
+    body?: string,
+  ) => Promise<{ text(): Promise<string> }>,
   propagation: "immediate" | "eventual",
   organizationId = installationOrganizationId,
 ): AppSignIn => {
-  const prepare = (identity: Parameters<AppSignIn["publish"]>[0], clientSecret: string) =>
+  const prepare = (
+    identity: Parameters<AppSignIn["publish"]>[0],
+    clientSecret: string,
+    organizationName?: string,
+    emailDomains: string[] = [],
+  ) =>
     authConfiguration.parse({
       organizationId,
+      organizationName,
       provider: identity.provider,
       scopes: identity.scopes,
       clientId: identity.management.clientId,
@@ -23,21 +36,40 @@ export const createInstalledAppSignIn = (
       cookieSecret,
       domain: configuration.APP_DOMAIN,
       redirectUrl: appCallbackUrl(configuration, organizationId),
+      emailDomains: emailDomains.length ? emailDomains : undefined,
+      embeddingOrigins: identity.embeddingOrigins.length ? identity.embeddingOrigins : undefined,
     });
 
   return {
     callbackUrl: appCallbackUrl(configuration, organizationId),
-    revision: (identity, clientSecret) => configurationRevision(prepare(identity, clientSecret)),
-    publish: async (identity, clientSecret) => {
-      const input = prepare(identity, clientSecret);
+    revoke: async () => {
+      await request(`/${authConfigurationKey(organizationId)}`, "DELETE");
+    },
+    revision: (identity, clientSecret, organizationName, emailDomains) =>
+      configurationRevision(prepare(identity, clientSecret, organizationName, emailDomains)),
+    publish: async (identity, clientSecret, organizationName, emailDomains) => {
+      const input = prepare(identity, clientSecret, organizationName, emailDomains);
       const expectedRevision = await configurationRevision(input);
-      await request("PUT", JSON.stringify(input));
+      const origin = new URL(input.redirectUrl);
+      origin.hostname = `mcp.${configuration.APP_DOMAIN}`;
+
+      const login = mcpLoginConfiguration.parse({
+        origin: origin.origin,
+        platformUrl: configuration.PLATFORM_URL,
+      });
+
+      await request("/mcp/login", "PUT", JSON.stringify(login));
+      await request(`/${authConfigurationKey(organizationId)}`, "PUT", JSON.stringify(input));
 
       return expectedRevision;
     },
     status: async (expectedRevision) => {
       try {
-        const current = activationStatus.parse(JSON.parse(await (await request("GET")).text()));
+        const current = activationStatus.parse(
+          JSON.parse(
+            await (await request(`/${authConfigurationKey(organizationId)}`, "GET")).text(),
+          ),
+        );
 
         if (
           propagation === "immediate" &&
@@ -67,5 +99,13 @@ export const createInstalledAppSignIn = (
           (propagation === "eventual" ? "KV propagation can take 60 seconds or longer. " : "") +
           "Changing the identity provider or app client requires signing in again.",
       }),
+    verifyCliLogin: async (code) =>
+      z
+        .object({ login: mcpCliLogin.nullable() })
+        .parse(
+          JSON.parse(
+            await (await request("/mcp/cli-login", "POST", JSON.stringify({ code }))).text(),
+          ),
+        ).login,
   };
 };

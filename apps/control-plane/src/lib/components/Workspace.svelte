@@ -19,9 +19,9 @@
   import { resetClientContext } from "#lib/analytics-client";
   import { authClient } from "#lib/auth-client";
   import { setWorkspaceContext } from "#lib/workspace-context";
-  import { Button } from "#shadcn/components/ui/button/index.js";
-  import * as DropdownMenu from "#shadcn/components/ui/dropdown-menu/index.js";
-  import Brand from "./Brand.svelte";
+  import { Button } from "@platform/ui/button";
+  import * as DropdownMenu from "@platform/ui/dropdown-menu";
+  import Brand from "@platform/ui/brand";
   import Feedback from "./Feedback.svelte";
 
   let {

@@ -15,7 +15,11 @@ import { z } from "zod";
 import { createAuthentication } from "../../src/lib/server/auth.ts";
 import { apiResource, cliClientId } from "../../src/lib/server/auth-options.ts";
 import { hashAsset } from "../../src/lib/server/asset-hash.ts";
-import { ssoProvider, session } from "../../src/lib/server/auth-schema.ts";
+import { invitation, ssoProvider, session } from "../../src/lib/server/auth-schema.ts";
+import { appLoginClientId, registerAppLogin } from "../../src/lib/server/app-login-client.ts";
+import { appCallbackUrl } from "../../src/lib/server/app-sign-in.ts";
+import { installationOrganizationId } from "../../src/lib/organization.ts";
+import { generateKeyPair, SignJWT } from "jose";
 import { eq, sql } from "drizzle-orm";
 import { installation } from "../../src/lib/server/schema.ts";
 import { installationId, readInstallation } from "../../src/lib/server/installation-store.ts";
@@ -76,7 +80,27 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
       export class AcceptedDeployment extends WorkflowEntrypoint {
         async run(event, step) { await step.sleep('pending', '1 day'); }
       }
-      export default application;
+      const events = [];
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async (input, options) => {
+        const request = new Request(input, options);
+        // The synthetic authorization code is the ID token Microsoft would return.
+        if (request.url === 'https://login.microsoftonline.com/common/oauth2/v2.0/token') {
+          const code = new URLSearchParams(await request.text()).get('code');
+          return Response.json({ access_token: 'synthetic', id_token: code, token_type: 'Bearer', expires_in: 300 });
+        }
+        if (new URL(request.url).origin === 'https://eu.i.posthog.com') {
+          const body = request.headers.get('content-encoding') === 'gzip'
+            ? request.body.pipeThrough(new DecompressionStream('gzip')) : request.body;
+          events.push(...(await new Response(body).json()).batch);
+          return new Response('{}', {status:503});
+        }
+        return originalFetch(request);
+      };
+      export default {...application, fetch(request, env, ctx) {
+        if (new URL(request.url).pathname === '/fixture-exceptions') return Response.json(events);
+        return application.fetch(request, env, ctx);
+      }};
     `,
     );
     const path = join(directory, "wrangler.json");
@@ -163,6 +187,41 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
 
     if (directory) await rm(directory, { recursive: true, force: true });
   });
+
+  it("reports initialization errors without an available request runtime", async () => {
+    const { unstable_dev } = await import("wrangler");
+
+    const broken = await unstable_dev(join(directory, "fixture.ts"), {
+      config: join(directory, "wrangler.json"),
+      local: true,
+      persist: false,
+      ip: "127.0.0.1",
+      port: 0,
+      inspectorPort: 0,
+      logLevel: "error",
+      vars: {
+        BETTER_AUTH_SECRET: "too-short",
+        POSTHOG_PROJECT_TOKEN: "phc_synthetic",
+        POSTHOG_ORIGIN: origin,
+      },
+      experimental: { disableExperimentalWarning: true, disableDevRegistry: true, watch: false },
+    });
+
+    try {
+      expect((await broken.fetch(`${origin}/healthz`)).status).toBe(500);
+      await expect
+        .poll(async () => {
+          const response = await broken.fetch(`${origin}/fixture-exceptions`);
+
+          return z
+            .array(z.object({ event: z.string(), distinct_id: z.string() }))
+            .parse(await response.json());
+        })
+        .toEqual([{ event: "$exception", distinct_id: "installation:control-plane" }]);
+    } finally {
+      await broken.stop();
+    }
+  }, 30000);
 
   it("serves management requests from workerd through the local Hyperdrive binding", async () => {
     const response = await fetch(`${origin}/healthz`);
@@ -335,6 +394,167 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
       activation: result.activation,
     });
   });
+
+  // Starts an app authorization while signed out, as the app sign-in proxy does.
+  const startAppSignIn = async (baseURL: string) => {
+    await registerAppLogin(
+      environment.database.db,
+      environment.configuration,
+      z.string().parse(environment.configuration.PLATFORM_ENCRYPTION_KEY),
+      installationOrganizationId,
+    );
+
+    // Node's fetch replaces Sec-Fetch-Mode, so drive the browser navigation with Playwright.
+    const browser = await request.newContext({
+      baseURL,
+      extraHTTPHeaders: { origin },
+      maxRedirects: 0,
+    });
+
+    try {
+      const navigate = (path: string) =>
+        browser.get(path, { headers: { accept: "text/html", "sec-fetch-mode": "navigate" } });
+
+      const redirectUri = appCallbackUrl(environment.configuration, installationOrganizationId);
+
+      const authorization = await navigate(
+        `/api/auth/oauth2/authorize?${new URLSearchParams({
+          response_type: "code",
+          client_id: appLoginClientId(installationOrganizationId),
+          redirect_uri: redirectUri,
+          scope: "openid profile email offline_access",
+          state: "synthetic-app-state",
+          code_challenge: "zMTu4U_d3LvcnIJF0MLJksW3cZ-uah6k4pEKpX9Ay6s",
+          code_challenge_method: "S256",
+        })}`,
+      );
+
+      const login = new URL(z.string().parse(authorization.headers()["location"]), origin);
+      expect(login.pathname).toBe("/sign-in");
+
+      return {
+        browser,
+        // The sign-in page sends this through the OAuth provider client plugin.
+        oauthQuery: login.search.slice(1),
+        expectResumed: async (callbackPath: string) => {
+          const callback = await navigate(callbackPath);
+          const destination = new URL(z.string().parse(callback.headers()["location"]), origin);
+          expect(destination.origin + destination.pathname).toBe(redirectUri);
+          expect(destination.searchParams.get("state")).toBe("synthetic-app-state");
+          expect(destination.searchParams.get("code")).toBeTruthy();
+        },
+      };
+    } catch (cause) {
+      await browser.dispose();
+      throw cause;
+    }
+  };
+
+  it("resumes a pending app sign-in after a new user signs in with Microsoft", async () => {
+    const { unstable_dev } = await import("wrangler");
+    const email = `invited-${crypto.randomUUID()}@social.example`;
+    await environment.database.db.insert(invitation).values({
+      id: crypto.randomUUID(),
+      organizationId: installationOrganizationId,
+      email,
+      role: "member",
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      inviterId: environment.owner.id,
+    });
+
+    const social = await unstable_dev(join(directory, "fixture.ts"), {
+      config: join(directory, "wrangler.json"),
+      vars: { MICROSOFT_CLIENT_ID: "synthetic-microsoft", MICROSOFT_CLIENT_SECRET: "synthetic" },
+      local: true,
+      persist: false,
+      ip: "127.0.0.1",
+      port: 0,
+      inspectorPort: 0,
+      logLevel: "error",
+      experimental: { disableExperimentalWarning: true, disableDevRegistry: true, watch: false },
+    });
+
+    try {
+      const app = await startAppSignIn(`http://127.0.0.1:${social.port}`);
+
+      try {
+        const started = await app.browser.post("/api/auth/sign-in/social", {
+          data: {
+            provider: "widefleet-microsoft",
+            callbackURL: "/",
+            newUserCallbackURL: "/organizations?next=%2Fwelcome",
+            disableRedirect: true,
+            oauth_query: app.oauthQuery,
+          },
+        });
+
+        expect(started.status(), await started.text()).toBe(200);
+        const provider = new URL(z.object({ url: z.string() }).parse(await started.json()).url);
+        const { privateKey } = await generateKeyPair("RS256");
+
+        const idToken = await new SignJWT({
+          name: "Invited member",
+          email,
+          xms_edov: true,
+          oid: crypto.randomUUID(),
+          tid: crypto.randomUUID(),
+        })
+          .setProtectedHeader({ alg: "RS256" })
+          .setSubject(crypto.randomUUID())
+          .setAudience("synthetic-microsoft")
+          .setIssuedAt()
+          .setExpirationTime("5m")
+          .sign(privateKey);
+
+        await app.expectResumed(
+          `/api/auth/callback/widefleet-microsoft?${new URLSearchParams({
+            state: z.string().parse(provider.searchParams.get("state")),
+            code: idToken,
+          })}`,
+        );
+      } finally {
+        await app.browser.dispose();
+      }
+    } finally {
+      await social.stop();
+    }
+  }, 30_000);
+
+  it("resumes a pending app sign-in after company SSO", async () => {
+    const [company] = await environment.database.db
+      .select({ providerId: ssoProvider.providerId })
+      .from(ssoProvider)
+      .where(eq(ssoProvider.organizationId, installationOrganizationId));
+
+    if (!company) throw new Error("Expected the installation SSO provider");
+    const app = await startAppSignIn(origin);
+
+    try {
+      const started = await app.browser.post("/api/auth/sign-in/sso", {
+        data: { providerId: company.providerId, callbackURL: "/", oauth_query: app.oauthQuery },
+      });
+
+      expect(started.status(), await started.text()).toBe(200);
+      const { url } = z.object({ url: z.url() }).parse(await started.json());
+      const authorization = new URL(url);
+
+      // Choose the seeded user on the test identity provider's account picker.
+      const authorized = await fetch(new URL("/oauth2/v2.0/authorize/callback", authorization), {
+        method: "POST",
+        redirect: "manual",
+        body: new URLSearchParams({
+          ...Object.fromEntries(authorization.searchParams),
+          email: "sso@example.test",
+        }),
+      });
+
+      const callback = new URL(z.url().parse(authorized.headers.get("location")));
+
+      await app.expectResumed(callback.pathname + callback.search);
+    } finally {
+      await app.browser.dispose();
+    }
+  }, 30_000);
 
   it("keeps sessions and PostgreSQL connections scoped correctly across concurrent requests", async () => {
     const responses = await Promise.all(

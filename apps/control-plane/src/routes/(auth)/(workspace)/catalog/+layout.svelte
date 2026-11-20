@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
   import { page } from "$app/state";
-  import { Button } from "#shadcn/components/ui/button/index.js";
+  import { Button } from "@platform/ui/button";
   import PageHeading from "#shadcn/components/PageHeading.svelte";
 
   let { children }: { children: Snippet } = $props();

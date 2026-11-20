@@ -3,8 +3,13 @@ import type { ParentEnvironment } from "./types.ts";
 import type { Start } from "./workflow-protocol.ts";
 
 export const workflowApp = async (start: Start, environment: ParentEnvironment) => {
-  const current = await readApp(environment, `hosts/${start.hostname}.json`);
-  const pinned = await readApp(environment, `versions/${start.appId}/${start.version}.json`);
+  const current = await readApp(environment, `hosts/${start.hostname}.json`, {
+    appId: start.appId,
+  });
+
+  const pinned = await readApp(environment, `versions/${start.appId}/${start.version}.json`, {
+    appId: start.appId,
+  });
 
   if (!current || current.appId !== start.appId || !pinned || pinned.appId !== start.appId)
     throw new Error("Workflow app is no longer published");

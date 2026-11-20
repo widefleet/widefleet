@@ -1,4 +1,7 @@
 import { workloadDiscovery } from "./workload-identity.ts";
+import { mcpRequest } from "./mcp.ts";
+import { mcpLoginRequest } from "./mcp-login.ts";
+
 import { prepareAppSecrets } from "./app-secrets.ts";
 import { oauthAppAvailable } from "./app-oauth.ts";
 import { managedOAuth } from "./oauth.ts";
@@ -22,11 +25,12 @@ import { publishedApp } from "@platform/contracts";
 import { z } from "zod";
 import { workflowJson } from "./workflow-json.ts";
 import { workflowCatalog } from "./workflow-catalog.ts";
-import { workflowRequest } from "@platform/contracts";
+import { organizationIdentifier, workflowRequest } from "@platform/contracts";
 import { appWorker, workerCode } from "./worker.ts";
 import { browserPolicy } from "./csp.ts";
 import { serveAsset } from "./assets.ts";
 import { readApp } from "./catalog.ts";
+import { refreshServiceIndex } from "./service-index.ts";
 import type { WorkflowRunner } from "./workflow-runner.ts";
 import type { Events } from "./events.ts";
 import type { ParentEnvironment, PublishedApp, Json } from "./types.ts";
@@ -49,6 +53,8 @@ export {
   WorkflowBinding,
   WorkflowCatalog as WidefleetWorkflowCatalog,
 } from "./workflow-catalog.ts";
+
+export { McpGrants } from "./mcp-grants.ts";
 
 export { Telemetry } from "./telemetry.ts";
 
@@ -120,6 +126,7 @@ const dispatchApp = async (
     appId: string;
     organizationId: string;
     caller: z.infer<typeof appCaller>;
+    frameAncestors: string[];
   } | null,
 ) => {
   const url = new URL(request.url);
@@ -138,7 +145,16 @@ const dispatchApp = async (
   }
 
   const [app, availability] = await Promise.all([
-    readApp(environment, key),
+    readApp(
+      environment,
+      key,
+      authenticated
+        ? {
+            appId: authenticated.appId,
+            organizationId: authenticated.organizationId,
+          }
+        : {},
+    ),
     authenticated
       ? readOrganizationAvailability(environment, authenticated.organizationId)
       : { blocked: false },
@@ -211,7 +227,8 @@ const dispatchApp = async (
   if (request.method === "GET" || request.method === "HEAD") {
     const asset = await serveAsset(request, environment, app);
 
-    if (asset.status !== 404) return browserPolicy(asset, app.network.policy.browser);
+    if (asset.status !== 404)
+      return browserPolicy(asset, app.network.policy.browser, authenticated?.frameAncestors);
   }
 
   const proof = authenticated
@@ -235,6 +252,7 @@ const dispatchApp = async (
         .fetch(request, { signal: request.signal }),
     ),
     app.network.policy.browser,
+    authenticated?.frameAncestors,
   );
 };
 
@@ -289,6 +307,25 @@ const manageRuntime = async (
     }
   }
 
+  if (url.pathname === "/.well-known/widefleet/service-index") {
+    if (request.method !== "POST") return new Response(null, { status: 405 });
+
+    try {
+      const input = z
+        .strictObject({ organizationId: organizationIdentifier, hostname: z.string() })
+        .parse(await request.json());
+
+      await refreshServiceIndex(environment, input.organizationId, input.hostname);
+
+      return Response.json({ result: true });
+    } catch (error) {
+      return Response.json(
+        { error: error instanceof Error ? error.message : String(error) },
+        { status: 400 },
+      );
+    }
+  }
+
   if (url.pathname === "/.well-known/widefleet/ready") {
     return dispatchApp(request, environment, context, null);
   }
@@ -307,6 +344,12 @@ export class RuntimeManagement extends WorkerEntrypoint<ParentEnvironment> {
 
 export default {
   async fetch(request: Request, environment: ParentEnvironment, context: ExecutionContext) {
+    const login = await mcpLoginRequest(request, environment, context);
+
+    if (login) return login;
+    const mcp = await mcpRequest(request, environment, context);
+
+    if (mcp) return mcp;
     const discovery = await workloadDiscovery(request, environment);
 
     if (discovery) return discovery;
@@ -328,8 +371,15 @@ export default {
       return manageRuntime(request, environment, context);
     }
 
-    return createAuthHandler(environment, (authenticated, appId, organizationId, caller) =>
-      dispatchApp(authenticated, environment, context, { appId, organizationId, caller }),
+    return createAuthHandler(
+      environment,
+      (authenticated, appId, organizationId, caller, frameAncestors) =>
+        dispatchApp(authenticated, environment, context, {
+          appId,
+          organizationId,
+          caller,
+          frameAncestors,
+        }),
     ).fetch(request);
   },
   async scheduled(

@@ -1,10 +1,10 @@
 <script lang="ts">
   import type { PageData } from "./$types";
   import { acceptInvitation } from "#lib/invitations.remote";
-  import AuthLayout from "#shadcn/components/AuthLayout.svelte";
+  import AuthLayout from "@platform/ui/auth-layout";
   import Feedback from "#shadcn/components/Feedback.svelte";
   import FormIssues from "#shadcn/FormIssues.svelte";
-  import { Button } from "#shadcn/components/ui/button/index.js";
+  import { Button } from "@platform/ui/button";
 
   let { data }: { data: PageData } = $props();
 </script>

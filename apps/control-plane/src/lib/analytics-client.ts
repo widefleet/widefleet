@@ -8,16 +8,19 @@ export interface ClientContext {
   analytics: AnalyticsConfiguration | null;
 }
 
-let initialized = false;
+let configuration: AnalyticsConfiguration | undefined;
 
 export const resetClientContext = () => {
-  if (initialized && posthog.get_distinct_id().startsWith("user:")) posthog.reset();
+  if (configuration && posthog.get_distinct_id().startsWith("user:")) {
+    posthog.reset();
+    posthog.register({ scope: configuration.scope });
+  }
 };
 
 export const updateClientContext = ({ user, organization, role, analytics }: ClientContext) => {
   if (!analytics || window.location.origin !== analytics.origin) return;
 
-  if (!initialized) {
+  if (!configuration) {
     posthog.init(analytics.projectToken, {
       api_host: analytics.proxyPath,
       ui_host: analytics.uiOrigin,
@@ -25,9 +28,9 @@ export const updateClientContext = ({ user, organization, role, analytics }: Cli
       capture_exceptions: true,
       capture_performance: { web_vitals: true },
       disable_session_recording: !analytics.sessionReplay,
+      loaded: (client) => client.register({ scope: analytics.scope }),
     });
-    posthog.register({ scope: analytics.scope });
-    initialized = true;
+    configuration = analytics;
   }
 
   if (!user || !organization) return;
@@ -43,5 +46,5 @@ export const updateClientContext = ({ user, organization, role, analytics }: Cli
 };
 
 export const captureBrowserException = (error: Error) => {
-  if (initialized) posthog.captureException(error);
+  if (configuration) posthog.captureException(error);
 };

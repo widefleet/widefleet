@@ -4,7 +4,7 @@ import { z } from "zod";
 import { InvalidOperation } from "./errors.ts";
 import type { WorkerModule } from "./worker-modules.ts";
 
-export const readBody = (request: Request, limit: number) =>
+export const readBody = (request: Request | Response, limit: number) =>
   Result.tryPromise({
     try: async () => {
       if (!request.body) return new Uint8Array();

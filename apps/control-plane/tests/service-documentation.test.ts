@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, expect, it } from "vitest";
 import { executionWorkerMetadata, serviceDocumentation, workerMetadata } from "@platform/contracts";
 import { extractServiceDocumentation } from "./service-documentation-fixture.ts";
-import { renderServiceDocumentation } from "../src/lib/server/service-documentation.ts";
+import { presentServiceDocumentation } from "../src/lib/server/service-documentation.ts";
 
 const native = it.runIf(process.env["RUN_CLI_TESTS"] === "1");
 
@@ -210,6 +210,18 @@ native(
     ]);
   },
 );
+
+native("keeps the TSDoc comment of an HTTP-only default object handler", async () => {
+  const root = await project(`/** Export orders as CSV over HTTP. */
+  export default {
+    fetch(request: Request) { return new Response(request.url); }
+  };`);
+
+  const result = await extractServiceDocumentation(root, await bundle(root), ["default"]);
+  expect(result.documentation.entrypoints).toMatchObject([
+    { name: "default", summary: "Export orders as CSV over HTTP.", http: true, methods: [] },
+  ]);
+});
 
 native("resolves Zod input types without requiring an app documentation dependency", async () => {
   const root = await project(`import {WorkerEntrypoint} from "cloudflare:workers";
@@ -591,9 +603,11 @@ native(
     expect(result.documentation.types.find((type) => type.name === "Item")?.definition).toContain(
       "id: string",
     );
-    expect(renderServiceDocumentation(result.documentation)).toContain(
-      "read&lt;T extends { id: string; }&gt;(input: T): Promise&lt;T&gt;",
-    );
+    expect(
+      presentServiceDocumentation(result.documentation)
+        .entrypoints.flatMap((entry) => entry.methods)
+        .find((method) => method.name === "read")?.signatures[0]?.code,
+    ).toBe("read<T extends { id: string; }>(input: T): Promise<T>");
   },
 );
 
@@ -687,14 +701,14 @@ native(
   },
 );
 
-it("renders replacement advice and examples on referenced types", () => {
+it("renders replacement advice, examples and short names on referenced types", () => {
   const docs = serviceDocumentation.parse({
     format: 1,
     entrypoints: [],
     types: [
       {
-        name: "Query",
-        definition: "type Query = { id: string };",
+        name: 'import("./src/query").Query',
+        definition: 'type Query = { id: string; next?: import("./src/query").Query };',
         summary: "Select one item.",
         remarks: "Identifiers are case-sensitive.",
         deprecated: "Use ItemQuery for new integrations.",
@@ -703,10 +717,97 @@ it("renders replacement advice and examples on referenced types", () => {
     ],
   });
 
-  const html = renderServiceDocumentation(docs);
-  expect(html).toContain("Deprecated: Use ItemQuery for new integrations.");
-  expect(html).toContain("<strong>Example</strong>");
-  expect(html).toContain("const query: Query = { id: &quot;one&quot; };");
+  const [type] = presentServiceDocumentation(docs).types;
+  expect(type?.name).toBe("Query");
+  expect(type?.definition).toBe("type Query = { id: string; next?: Query };");
+  expect(type?.description).toContain("Deprecated: Use ItemQuery for new integrations.");
+  expect(type?.examples).toContain("const query: Query = { id: &quot;one&quot; };");
+});
+
+it("shortens only unambiguous documented type references", () => {
+  const docs = serviceDocumentation.parse({
+    format: 1,
+    entrypoints: [
+      {
+        name: "Reader",
+        summary: "",
+        remarks: "",
+        examples: [],
+        http: false,
+        methods: [
+          {
+            name: "read",
+            summary: "",
+            remarks: "",
+            examples: [],
+            throws: ["Missing items.", "Missing items."],
+            signatures: [
+              {
+                typeParameters: [
+                  'T extends import("./app/query").Query = import("./app/query").Query',
+                ],
+                parameters: [
+                  {
+                    name: "query",
+                    type: 'T | `import("./app/query").Query:${import("./app/query").Query}`',
+                    description: "Filters:\n\n- by item\n- by owner",
+                    optional: false,
+                    rest: false,
+                  },
+                ],
+                returns: {
+                  type: 'Promise<[import("./app/model").Item, import("./shared/model").Item, import("./app/page").Page<import("./app/query").Query>]>',
+                  description: "Matching items.\n\n```ts\nconst [item] = result;\n```",
+                },
+              },
+            ],
+          },
+        ],
+      },
+    ],
+    types: [
+      {
+        name: 'import("./app/query").Query',
+        definition:
+          '{ /** Use "import(\\"./x\\").Y" literally. */ id: "import(\\"./app/query\\").Query" }',
+        summary: "",
+        remarks: "",
+        examples: [],
+      },
+      {
+        name: 'import("./app/page").Page<import("./app/query").Query>',
+        definition: '{ items: import("./app/query").Query[] }',
+        summary: "",
+        remarks: "",
+        examples: [],
+      },
+      ...["app", "shared"].map((folder) => ({
+        name: `import("./${folder}/model").Item`,
+        definition: "{ id: string }",
+        summary: "",
+        remarks: "",
+        examples: [],
+      })),
+    ],
+  });
+
+  const reference = presentServiceDocumentation(docs);
+  const [signature] = reference.entrypoints[0]?.methods[0]?.signatures ?? [];
+
+  expect(reference.types.map((type) => type.name)).toEqual([
+    "Query",
+    "Page<Query>",
+    'import("./app/model").Item',
+    'import("./shared/model").Item',
+  ]);
+  expect(signature?.code).toBe(
+    'read<T extends Query = Query>(query: T | `import("./app/query").Query:${Query}`): ' +
+      'Promise<[import("./app/model").Item, import("./shared/model").Item, Page<Query>]>',
+  );
+  expect(reference.types[0]?.definition).toBe(docs.types[0]?.definition);
+  expect(signature?.parameters[0]?.description).toContain("<li>by owner</li>");
+  expect(signature?.returns.description).toContain("<pre><code");
+  expect(reference.entrypoints[0]?.methods[0]?.throws).toHaveLength(2);
 });
 
 it("rejects oversized and mismatched artifact documentation and renders authored HTML as text", () => {
@@ -742,7 +843,9 @@ it("rejects oversized and mismatched artifact documentation and renders authored
       ],
     }).success,
   ).toBe(false);
-  expect(renderServiceDocumentation(serviceDocumentation.parse(docs))).not.toContain("<script>");
+  expect(
+    presentServiceDocumentation(serviceDocumentation.parse(docs)).entrypoints[0]?.description,
+  ).not.toContain("<script>");
 
   const metadata = workerMetadata.parse({
     main_module: "worker.js",

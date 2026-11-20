@@ -5,7 +5,7 @@ use platform_core::{
     Error, Result,
     model::{
         Artifact, Binding, Job, JobKind, Module, ModuleType, PublishedApp, PublishedCapability,
-        ReleaseModule, RuntimePackages,
+        PublishedServiceDocumentation, ReleaseModule, RuntimePackages,
     },
     sha256,
 };
@@ -181,6 +181,47 @@ async fn put(store: &Arc<dyn ObjectStore>, key: &str, bytes: Vec<u8>) -> Result<
         .map_err(storage_error)?;
     Ok(())
 }
+async fn publish_service_documentation(
+    store: &Arc<dyn ObjectStore>,
+    root: &str,
+    app_id: uuid::Uuid,
+    artifact_id: uuid::Uuid,
+    documentation: &PublishedServiceDocumentation,
+) -> Result<()> {
+    if documentation.artifact_id != artifact_id {
+        return Err(Error::invalid(
+            "Service documentation does not match the app artifact".into(),
+        ));
+    }
+    let key = ObjectPath::from(format!(
+        "{root}apps/{app_id}/service-documentation/{artifact_id}.json"
+    ));
+    let bytes = serde_json::to_vec(&documentation.documentation)?;
+    match store
+        .put_opts(
+            &key,
+            bytes.clone().into(),
+            PutOptions {
+                mode: PutMode::Create,
+                ..Default::default()
+            },
+        )
+        .await
+    {
+        Ok(_) => Ok(()),
+        Err(object_store::Error::AlreadyExists { .. }) => {
+            if read(store, key.as_ref()).await?.as_deref() == Some(bytes.as_slice()) {
+                Ok(())
+            } else {
+                Err(Error::invalid(
+                    "The immutable service documentation contains different data".into(),
+                ))
+            }
+        }
+        Err(error) => Err(storage_error(error)),
+    }
+}
+
 async fn remove_key(store: &Arc<dyn ObjectStore>, key: &str) -> Result<()> {
     match store.delete(&ObjectPath::from(key)).await {
         Ok(()) | Err(object_store::Error::NotFound { .. }) => Ok(()),
@@ -207,7 +248,7 @@ pub async fn prepare(
 ) -> Result<Prepared> {
     if packages.runtime.protocol != 3
         || packages.runtime.auth != 1
-        || packages.runtime.celld != crate::native::VERSION
+        || !platform_agent::runtime::supports_celld(&packages.runtime.celld)
     {
         return Err(Error::invalid(
             "Unsupported runtime installation protocol or celld version".into(),
@@ -531,6 +572,16 @@ pub async fn prepare(
         .as_deref()
         != Some(digest.as_bytes());
     if let Some(app) = &candidate {
+        if let Some(documentation) = &packages.service_documentation {
+            publish_service_documentation(
+                &store,
+                &package_key(job, ""),
+                app.artifact.app_id,
+                app.artifact.id,
+                documentation,
+            )
+            .await?;
+        }
         put(
             &store,
             &package_key(
@@ -556,6 +607,7 @@ pub async fn prepare(
         digest,
         packages: RuntimePackages {
             app_secrets: None,
+            service_documentation: None,
             ..packages.clone()
         },
     })
@@ -1001,6 +1053,50 @@ pub async fn workflow_control(configuration: &Configuration, job: &Job) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn service_documentation_is_bound_to_immutable_app_artifacts() -> Result<()> {
+        let store: Arc<dyn ObjectStore> = Arc::new(object_store::memory::InMemory::new());
+        let root = "organizations/fixture/r2/widefleet-packages/";
+        let app = uuid::Uuid::new_v4();
+        let first = PublishedServiceDocumentation {
+            artifact_id: uuid::Uuid::new_v4(),
+            documentation: json!({"format":1,"entrypoints":[],"types":[]}),
+        };
+        let mut next = PublishedServiceDocumentation {
+            artifact_id: uuid::Uuid::new_v4(),
+            documentation: json!({"format":1,"entrypoints":[],"types":[{"name":"Changed"}]}),
+        };
+        for document in [&first, &next, &first] {
+            publish_service_documentation(&store, root, app, document.artifact_id, document)
+                .await?;
+            let bytes = read(
+                &store,
+                &format!(
+                    "{root}apps/{app}/service-documentation/{}.json",
+                    document.artifact_id
+                ),
+            )
+            .await?
+            .ok_or_else(|| Error::invalid("Missing service documentation".into()))?;
+            assert_eq!(
+                serde_json::from_slice::<Value>(&bytes)?,
+                document.documentation
+            );
+        }
+        assert!(
+            publish_service_documentation(&store, root, app, first.artifact_id, &next)
+                .await
+                .is_err()
+        );
+        next.documentation = json!({"changed":true});
+        assert!(
+            publish_service_documentation(&store, root, app, next.artifact_id, &next)
+                .await
+                .is_err()
+        );
+        Ok(())
+    }
 
     #[tokio::test]
     async fn cuts_over_legacy_publications_once_without_changing_app_grants() -> Result<()> {

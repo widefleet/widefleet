@@ -3,10 +3,10 @@
   import { tick } from "svelte";
   import { getAgents, disableAgent } from "#lib/agents.remote";
   import { registerAgent } from "#lib/apps.remote";
-  import { Button } from "#shadcn/components/ui/button/index.js";
-  import { Input } from "#shadcn/components/ui/input/index.js";
-  import { Label } from "#shadcn/components/ui/label/index.js";
-  import { Badge } from "#shadcn/components/ui/badge/index.js";
+  import { Button } from "@platform/ui/button";
+  import { Input } from "@platform/ui/input";
+  import { Label } from "@platform/ui/label";
+  import { Badge } from "@platform/ui/badge";
   import Server from "@lucide/svelte/icons/server";
   import Plus from "@lucide/svelte/icons/plus";
   import KeyRound from "@lucide/svelte/icons/key-round";

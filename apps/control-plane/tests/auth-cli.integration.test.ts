@@ -34,6 +34,7 @@ import { createRuntimeReleaseService } from "../src/lib/server/runtime-releases.
 import { createStorage } from "../src/lib/server/storage.ts";
 import { createTelemetry } from "../src/lib/server/telemetry.ts";
 import { createUploadService } from "../src/lib/server/uploads.ts";
+import { createTemplateInstalls } from "../src/lib/server/template-installs.ts";
 import { createTestEnvironment } from "./environment.ts";
 
 const execute = promisify(execFile);
@@ -61,6 +62,8 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1" && process.platform !== "win
     let failRevocation = false;
     let omitRefreshToken = false;
     let externalAccessToken: string | undefined;
+    let approveInBrowser = true;
+    let userId: string;
 
     const requests: { path: string; body: URLSearchParams; origin: string; contentType: string }[] =
       [];
@@ -90,7 +93,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1" && process.platform !== "win
       if (!path.startsWith("/api/auth/")) return api(request);
       const response = await environment.auth.handler(request);
 
-      if (path === "/api/auth/device/code" && response.ok) {
+      if (path === "/api/auth/device/code" && response.ok && approveInBrowser) {
         const device = z.object({ user_code: z.string() }).parse(await response.clone().json());
 
         const claimed = await environment.auth.handler(
@@ -171,11 +174,17 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1" && process.platform !== "win
         ),
         releases: createRuntimeReleaseService(database, storage),
         uploads: createUploadService(database, storage, configuration),
+        templates: createTemplateInstalls(
+          configuration,
+          createAppService(database, configuration),
+          createUploadService(database, storage, configuration),
+        ),
         telemetry: createTelemetry(database, storage, configuration),
       });
       const user = environment.users.createUser({ email: "headless@example.test" });
       await environment.users.saveUser(user);
       await environment.linkMicrosoftUser(user.id, environment.ownerSubject);
+      userId = user.id;
       approvalHeaders = new Headers((await environment.users.login({ userId: user.id })).headers);
       approvalHeaders.set("origin", origin);
       approvalHeaders.set("content-type", "application/json");
@@ -187,6 +196,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1" && process.platform !== "win
       failRevocation = false;
       omitRefreshToken = false;
       externalAccessToken = undefined;
+      approveInBrowser = true;
     });
 
     afterAll(async () => {
@@ -236,6 +246,26 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1" && process.platform !== "win
 
     const readSession = async () =>
       storedSession.parse(JSON.parse(await readFile(sessionFile, "utf8")));
+
+    it("signs in with a one-time code from the MCP server instead of a browser", async () => {
+      approveInBrowser = false;
+
+      // Widefleet is this fixture's app identity provider, so MCP subjects are user IDs.
+      const code = await environment.authControl.signCliLogin({
+        organizationId: "widefleet",
+        issuer: `${origin}/api/auth`,
+        subject: userId,
+      });
+
+      const login = await cli("login", "--code", code);
+      expect(login.stdout).not.toContain("verify code");
+      expect(login.stdout).toContain(`Connected to ${origin}.`);
+      expect(login.stdout + login.stderr).not.toContain(code);
+      expect(JSON.parse((await cli("whoami")).stdout)).toMatchObject({
+        email: "headless@example.test",
+      });
+      expect((await failure(cli("login", "--code", code))).stderr).toContain("already used");
+    });
 
     it("logs in, calls the API, serializes refresh across processes and revokes the saved session", async () => {
       const login = await cli("login", "--scope", "platform:read");

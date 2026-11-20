@@ -99,6 +99,9 @@ pub struct LoginOptions {
     /// API scopes to request, separated by spaces or commas. Replaces the defaults.
     #[arg(long = "scope", value_delimiter = ',', num_args = 1.., default_values = ["platform:read", "platform:write"])]
     scopes: Vec<String>,
+    /// Sign in with a one-time code from the Widefleet MCP server's cli_login tool instead of a browser.
+    #[arg(long, conflicts_with_all = ["email", "domain"])]
+    code: Option<String>,
 }
 
 const CLIENT_ID: &str = "platform-cli";
@@ -186,7 +189,16 @@ async fn read_session(origin: String, credentials: &Credentials) -> Result<Sessi
                 "No session is stored in this file. Run widefleet login with the same --session-file or PLATFORM_SESSION_FILE".into(),
             ).with_reason(FailureReason::LoginRequired));
         }
-        let entry = credential_entry(&origin)?;
+        // Without a credential store, Unix logins use the private file checked above.
+        let entry = credential_entry(&origin).map_err(|error| {
+            if cfg!(unix) {
+                Error::credentials(format!(
+                    "No session is stored for {origin}. Run widefleet login first. If this environment discards files outside the working directory between commands, set PLATFORM_SESSION_FILE to a file there, outside the app project, before logging in. For noninteractive use, set PLATFORM_ACCESS_TOKEN"
+                )).with_reason(FailureReason::CredentialStoreUnavailable)
+            } else {
+                error
+            }
+        })?;
         let value = entry
             .get_password()
             .map_err(|error| {

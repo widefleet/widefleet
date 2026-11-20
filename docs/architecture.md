@@ -34,6 +34,8 @@ Management membership and app usage are separate. Signing into a published app m
 
 Traefik removes client-supplied identity headers and forwards only the identity established by app SSO. App code must not receive login tokens or SSO cookies. Per-app OAuth cookies remain host-scoped. The runtime signs the verified SSO caller for the invoking app, verifies its app and organization at each service boundary, then rebinds it to the target without extending its expiry. AsyncLocalStorage carries this proof per invocation; never store a caller in a worker-global variable or accept a caller object from RPC arguments. The [edge tests](../apps/control-plane/tests/edge/sso.test.ts) verify this boundary across proxy and runtime changes.
 
+Embedded apps cannot use the provider's sign-in page, which refuses to render in frames, or the regular `SameSite=Lax` session. Their embedding page obtains a token from its host, such as Microsoft Teams, and posts it only to the auth host's sign-in page, never to the app frame. The token must be issued to the organization's app sign-in client, so it proves the same identity as a regular sign-in. The resulting session is a separate partitioned cookie: it exists only under the embedding top-level site, expires with the host token and holds no refresh credential, so access is checked again with each new host token. Frame ancestors come from the organization's settings, never from app code. See [embedded sign-in](../packages/auth-proxy/src/embedded.ts).
+
 ## Activation is serialized per organization
 
 Apps share celld configuration, so jobs are serialized per organization, not per app or agent. Leases fence stale acknowledgments and retries retain their ordering. Changing [job scheduling](../apps/control-plane/src/lib/server/jobs.ts) requires preserving this constraint even when two jobs target different apps.
@@ -51,3 +53,9 @@ Previews have independent app resources within the same organization. Long-runni
 Backend network enforcement lives in the trusted loader outside app code, while browser restrictions depend on response CSP. See [backend egress](../packages/app-runtime/src/egress.ts), [browser policy](../packages/app-runtime/src/csp.ts) and the public [network guide](https://widefleet.com/docs/guides/network).
 
 The JavaScript runtime and agent share the product version. Runtime activation can happen independently, but the package protocol and celld version must match the agent's supported contract. Contract changes require a matching agent release. Before upgrading celld, review the [native runtime pitfalls](runtime-implementation.md).
+
+## MCP search reads a derived index
+
+MCP `search` reads one [service index](../packages/app-runtime/src/service-index.ts) per organization instead of every route, publication and documentation object. Route keys are shared across organizations, so without the index each search would grow with the whole installation.
+
+The index is derived state, never authorization. Every publisher must ask the runtime to refresh a host after its route and publication are committed, including after removal: the [Cloudflare deployment](../apps/control-plane/src/lib/server/cloudflare-deployment.ts), [Cloudflare removal](../apps/control-plane/src/lib/server/cloudflare-removal.ts) and the [agent](../crates/platform-agent/src/main.rs) do. A new write path that changes routes, access or service documentation needs the same refresh. Search rechecks the returned routes, and `describe` and `call` authorize independently, so a missed refresh can only hide a new service or keep stale text until the index is rebuilt.

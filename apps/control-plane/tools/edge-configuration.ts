@@ -101,6 +101,13 @@ export const edgeRoutes = (configuration: z.infer<typeof edgeInfrastructure>) =>
           service: "app-sso",
           tls: {},
         },
+        mcp: {
+          rule: `Host(\`mcp.${configuration.APP_DOMAIN}\`) && ${publicAppRequest}`,
+          priority: 10000,
+          entryPoints: ["websecure"],
+          service: "app-sso",
+          tls: {},
+        },
       },
       services: {
         management: { loadBalancer: { servers: [{ url: "http://control-plane:3000" }] } },

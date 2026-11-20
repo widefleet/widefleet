@@ -229,7 +229,7 @@ for (const javaScriptEnabled of [true, false]) {
       await page.goto("/services");
       await expect(page.getByText("Manage availability", { exact: true })).toHaveCount(0);
       await expect(page.getByLabel("Binding name in your code")).toHaveCount(0);
-      await page.getByRole("link", { name: `Set up connection to ${target.displayName}` }).focus();
+      await page.getByRole("link", { name: `Connect to ${target.displayName}` }).focus();
       await page.keyboard.press("Enter");
       await expect(page.getByLabel("Binding name in your code")).toHaveCount(0);
       await page.getByLabel("Your app", { exact: true }).selectOption(source.id);
@@ -266,7 +266,7 @@ for (const javaScriptEnabled of [true, false]) {
       await adminPage.goto("/services/requests");
 
       const review = adminPage
-        .getByRole("region", {
+        .getByRole("listitem", {
           name: `${source.displayName} to ${target.displayName}`,
           exact: true,
         })
@@ -353,7 +353,7 @@ for (const javaScriptEnabled of [true, false]) {
         ]),
       );
       await page.goto(`/services?app=${source.id}`);
-      await page.getByRole("link", { name: `Set up connection to ${target.displayName}` }).click();
+      await page.getByRole("link", { name: `Connect to ${target.displayName}` }).click();
       await expect(page.getByLabel("Your app", { exact: true })).toHaveCount(0);
       await page.getByLabel("Binding name in your code").fill("FREE");
 
@@ -526,12 +526,13 @@ test("shows versioned service documentation through authenticated API and access
     documentation: metadata.service_documentation,
   });
   await page.goto("/services");
-  await page.getByRole("link", { name: "View API documentation", exact: true }).click();
-  await expect(
-    page.getByRole("heading", { name: "Inventory service API", exact: true }),
-  ).toBeVisible();
+  await page
+    .getByRole("link", { name: "Inventory service API documentation", exact: true })
+    .click();
+  await expect(page.getByRole("heading", { name: "Inventory service", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "findItems", exact: true })).toBeVisible();
   await expect(page.getByText("Words to search for.", { exact: false })).toBeVisible();
+  await page.getByText("InventoryItem", { exact: true }).click();
   await expect(page.getByText("Deprecated: Use CatalogItem when migrating callers.")).toBeVisible();
   await expect(
     page.getByText('const item: InventoryItem = { id: "one", displayName: "Spare part" };'),
@@ -1090,9 +1091,13 @@ test("requires company SSO and links the matching verified company email without
   await environment.database.db.update(ssoProvider).set({ domainVerified: true });
 
   try {
+    // The signed-in member continues to company SSO without another click.
+    const authorization = page.waitForRequest(
+      (request) => new URL(request.url()).searchParams.get("login_hint") === "sso@example.test",
+    );
+
     await page.goto("/account");
-    await expect(page).toHaveURL(/sign-in.*organization=widefleet/);
-    await page.getByRole("button", { name: "Sign in with Microsoft" }).click();
+    await authorization;
     await page.getByRole("button", { name: /sso@example.test/ }).click();
     await expect(page.getByText("You are signed in with your company account.")).toBeVisible();
     expect(await (await page.request.get("/api/v1/me")).json()).toMatchObject({
@@ -1105,6 +1110,93 @@ test("requires company SSO and links the matching verified company email without
     await environment.database.db.delete(account).where(eq(account.userId, person.id));
     await environment.database.db.delete(member).where(eq(member.userId, person.id));
     await environment.database.db.delete(user).where(eq(user.id, person.id));
+  }
+});
+
+test("waits for a choice when company SSO just failed or the visitor has no relationship to it", async ({
+  browser,
+}) => {
+  const people = [
+    { name: "SSO Member", email: "returning@example.test", member: true },
+    { name: "SSO Stranger", email: "stranger@example.test", member: false },
+  ].map((fixture) => ({
+    fixture,
+    person: environment.users.createUser({
+      name: fixture.name,
+      email: fixture.email,
+      emailVerified: true,
+    }),
+  }));
+
+  for (const { fixture, person } of people) {
+    await environment.users.saveUser(person);
+
+    if (fixture.member)
+      await environment.database.db.insert(member).values({
+        id: crypto.randomUUID(),
+        organizationId: "widefleet",
+        userId: person.id,
+        role: "member",
+        createdAt: new Date(),
+      });
+  }
+
+  await environment.database.db.update(ssoProvider).set({ domainVerified: true });
+
+  const open = async (userId: string, path: string, recentlyStarted = false) => {
+    const context = await browser.newContext();
+    const login = await environment.users.login({ userId });
+
+    await context.addCookies(
+      login.cookies.map((cookie) => ({
+        ...cookie,
+        domain: "localhost",
+        sameSite: "Lax" as const,
+        secure: false,
+      })),
+    );
+
+    const page = await context.newPage();
+    const starts: string[] = [];
+
+    // Record company sign-in starts without following the identity provider.
+    await page.route("**/api/auth/sign-in/sso", async (route) => {
+      starts.push(route.request().postData() ?? "");
+      await route.abort();
+    });
+
+    if (recentlyStarted)
+      await page.addInitScript(() =>
+        sessionStorage.setItem("widefleet.company-sign-in:widefleet", String(Date.now())),
+      );
+    await page.goto(path);
+    await page.waitForLoadState("networkidle");
+
+    return { context, page, starts };
+  };
+
+  const [returning, stranger] = people.map(({ person }) => person.id);
+
+  try {
+    for (const visit of [
+      // A provider error returns here; starting again would send the browser straight back.
+      await open(z.string().parse(returning), "/sign-in?organization=widefleet&error=sso"),
+      // So does a sign-in that returned within a minute of starting automatically.
+      await open(z.string().parse(returning), "/sign-in?organization=widefleet", true),
+      // Linking a signed-in stranger here must not share their address with this provider.
+      await open(z.string().parse(stranger), "/sign-in?organization=widefleet"),
+    ]) {
+      expect(visit.starts).toEqual([]);
+      await visit.page.getByRole("button", { name: "Sign in with Microsoft" }).click();
+      await expect.poll(() => visit.starts.length).toBe(1);
+      await visit.context.close();
+    }
+  } finally {
+    for (const { person } of people) {
+      await environment.database.db.delete(member).where(eq(member.userId, person.id));
+      await environment.database.db.delete(authSession).where(eq(authSession.userId, person.id));
+      await environment.database.db.delete(user).where(eq(user.id, person.id));
+    }
   }
 });
 
@@ -1160,6 +1252,37 @@ test("offers Google and Microsoft alongside email and highlights the last succes
   ).toHaveAccessibleDescription("Last used");
   await expect(page.getByRole("button", { name: /^Continue with Microsoft/ })).toBeVisible();
   await expect(page.getByLabel("Email", { exact: true })).toBeVisible();
+
+  for (const colorScheme of ["light", "dark"] as const) {
+    await page.emulateMedia({ colorScheme });
+
+    for (const width of [390, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+        true,
+      );
+      expect(
+        await page
+          .locator("img")
+          .evaluateAll((images) =>
+            images.every(
+              (image) =>
+                image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0,
+            ),
+          ),
+      ).toBe(true);
+      await page.screenshot({
+        path: fileURLToPath(
+          new URL(
+            `../../../../.local/playwright/shared-sign-in-${colorScheme}-${width}.png`,
+            import.meta.url,
+          ),
+        ),
+        fullPage: true,
+      });
+    }
+  }
+
   await page.route("**/api/auth/sign-in/social", async (route) => {
     expect(route.request().postDataJSON()).toMatchObject({
       provider: "widefleet-microsoft",
@@ -1852,10 +1975,16 @@ test("validates remote forms and creates apps without JavaScript", async ({ brow
     expect(response?.headers()["cache-control"]).toBe("private, no-store");
     await page.getByRole("link", { name: "Create app", exact: true }).click();
     await page.getByLabel("App name", { exact: true }).fill("Native Form App");
-    await page.getByLabel("URL slug").fill("auth");
-    await page.getByRole("button", { name: "Create app" }).click();
-    await expect(page.getByRole("alert")).toContainText("The auth hostname is reserved for SSO");
-    await expect(page.getByLabel("App name", { exact: true })).toHaveValue("Native Form App");
+
+    for (const slug of ["auth", "mcp"]) {
+      await page.getByLabel("URL slug").fill(slug);
+      await page.getByRole("button", { name: "Create app" }).click();
+      await expect(page.getByRole("alert")).toContainText(
+        "The auth and mcp hostnames are reserved for platform services",
+      );
+      await expect(page.getByLabel("App name", { exact: true })).toHaveValue("Native Form App");
+    }
+
     await page.getByLabel("URL slug").fill("native-form-app");
     await page.getByRole("button", { name: "Create app" }).click();
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("Native Form App");

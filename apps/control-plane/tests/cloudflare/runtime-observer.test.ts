@@ -6,6 +6,7 @@ import { createServer, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gunzipSync } from "node:zlib";
 import { z } from "zod";
 
 const observation = z.object({
@@ -22,6 +23,22 @@ const keyValueObservation = z.strictObject({
     operation: z.enum(["read", "write", "delete", "list"]),
     count: z.number(),
     outcome: z.enum(["ok", "error"]),
+  }),
+});
+
+const exception = z.object({
+  event: z.literal("$exception"),
+  distinct_id: z.string(),
+  properties: z.object({
+    scope: z.string(),
+    service: z.literal("app-runtime"),
+    operation: z.string(),
+    app_id: z.string().optional(),
+    deployment_id: z.string().optional(),
+    build_id: z.string().nullable().optional(),
+    $groups: z.object({ organization: z.string() }).optional(),
+    $process_person_profile: z.literal(false),
+    $exception_list: z.array(z.object({ type: z.string(), value: z.string() })),
   }),
 });
 
@@ -45,15 +62,34 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Runtime observer in
     const errors: Error[] = [];
     const keyValues: z.infer<typeof keyValueObservation>[] = [];
     const pending: ServerResponse[] = [];
+    const exceptions: z.infer<typeof exception>[] = [];
+    let exceptionStatus = 503;
 
     const collector = createServer((request, response) => {
       const handle = async () => {
         const chunks: Uint8Array[] = [];
 
         for await (const chunk of request) chunks.push(z.instanceof(Uint8Array).parse(chunk));
-        const body = z.json().parse(JSON.parse(Buffer.concat(chunks).toString()));
+        const bytes = Buffer.concat(chunks);
 
-        if (request.url === "/key-value") {
+        const body = z
+          .json()
+          .parse(
+            JSON.parse(
+              (request.headers["content-encoding"] === "gzip"
+                ? gunzipSync(bytes)
+                : bytes
+              ).toString(),
+            ),
+          );
+
+        if (request.url === "/exception") {
+          exceptions.push(...z.object({ batch: z.array(exception) }).parse(body).batch);
+          // Reporting failure must not change the platform failure or fallback response.
+          response.writeHead(exceptionStatus).end("{}");
+
+          return;
+        } else if (request.url === "/key-value") {
           keyValues.push(keyValueObservation.parse(body));
           pending.push(response);
 
@@ -94,6 +130,7 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Runtime observer in
           bundle: true,
           format: "esm",
           platform: "browser",
+          conditions: ["workerd"],
           external: ["cloudflare:*", "node:*", "./__widefleet_app.js"],
           // Even when aliased, the child import graph must not reach the extension.
           alias: { "#runtime-extension": extension, "widefleet:app": "./__widefleet_app.js" },
@@ -104,12 +141,27 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Runtime observer in
       };
 
       const bindingsSource = await child("bindings");
+      const fixture = join(directory, "fixture.ts");
+      await writeFile(
+        fixture,
+        `
+        export * from ${JSON.stringify(fileURLToPath(new URL("../fixtures/observer.ts", runtime)))};
+        export { default } from ${JSON.stringify(fileURLToPath(new URL("../fixtures/observer.ts", runtime)))};
+        const originalFetch = globalThis.fetch;
+        globalThis.fetch = (input, options) => {
+          const request = new Request(input, options);
+          return originalFetch(new URL(request.url).origin === 'https://eu.i.posthog.com'
+            ? new Request('http://127.0.0.1:${port}/exception', request) : request);
+        };
+      `,
+      );
       await build({
-        entryPoints: [fileURLToPath(new URL("../fixtures/observer.ts", runtime))],
+        entryPoints: [fixture],
         outfile: main,
         bundle: true,
         format: "esm",
         platform: "browser",
+        conditions: ["workerd"],
         external: ["cloudflare:*", "node:*"],
         alias: { "#runtime-extension": extension },
         define: {
@@ -132,6 +184,8 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Runtime observer in
           vars: {
             OBSERVER_ORIGIN: `http://127.0.0.1:${port}`,
             OBSERVER_LABEL: "parent-only-fixture",
+            POSTHOG_PROJECT_TOKEN: "phc_synthetic_fixture",
+            POSTHOG_SCOPE: "fixture",
           },
         }),
       );
@@ -282,10 +336,77 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Runtime observer in
         ),
       );
       expect(bindingsSource).not.toContain("OBSERVER_LABEL");
+      expect(bindingsSource).not.toContain("POSTHOG_PROJECT_TOKEN");
 
       // A rejected observer request must not change the already successful KV results.
       for (const response of pending) response.writeHead(503).end();
       pending.length = 0;
+      expect(errors).toEqual([]);
+
+      const preparation = await worker.fetch("http://fixture/platform-error/preparation");
+      expect(preparation.status).toBe(500);
+      expect(await preparation.text()).toBe("Worker resource is not installed");
+      expect((await worker.fetch("http://fixture/platform-error/catalog")).status).toBe(500);
+      expect((await worker.fetch("http://fixture/platform-error/availability")).status).toBe(503);
+      await expect.poll(() => exceptions.length, { timeout: 8_000 }).toBe(3);
+      expect(
+        exceptions.find(({ properties }) => properties.operation === "prepare_worker"),
+      ).toMatchObject({
+        event: "$exception",
+        distinct_id: "fixture:app-runtime",
+        properties: {
+          scope: "fixture",
+          service: "app-runtime",
+          $process_person_profile: false,
+          $exception_list: [{ type: "Error", value: "Worker resource is not installed" }],
+          operation: "prepare_worker",
+          $groups: { organization: "observer-fixture" },
+          app_id: "a0000000-0000-4000-8000-000000000004",
+          deployment_id: "a0000000-0000-4000-8000-000000000003",
+          build_id: null,
+        },
+      });
+
+      const catalogException = exceptions.find(
+        ({ properties }) => properties.operation === "read_app",
+      );
+
+      expect(catalogException).toBeDefined();
+      expect(catalogException?.properties.app_id).toBeUndefined();
+      expect(catalogException?.properties.$groups).toBeUndefined();
+      expect(
+        exceptions.find(({ properties }) => properties.operation === "read_availability")
+          ?.properties,
+      ).toMatchObject({
+        operation: "read_availability",
+        $groups: { organization: "observer-fixture" },
+      });
+      expect((await worker.fetch("http://fixture/platform-error/catalog-context")).status).toBe(
+        500,
+      );
+      await expect.poll(() => exceptions.length, { timeout: 8_000 }).toBe(4);
+      expect(
+        exceptions.find(
+          ({ properties }) => properties.operation === "read_app" && properties.app_id,
+        )?.properties,
+      ).toMatchObject({
+        operation: "read_app",
+        app_id: "a0000000-0000-4000-8000-000000000004",
+        $groups: { organization: "observer-fixture" },
+      });
+      expect(
+        (await worker.fetch("http://fixture/platform-error/catalog?unconfigured")).status,
+      ).toBe(500);
+      expect((await worker.fetch("http://fixture/customer-error")).status).toBe(500);
+      expect(exceptions).toHaveLength(4);
+      exceptionStatus = 200;
+      expect(
+        (await worker.fetch("http://fixture/platform-error/preparation?default-scope")).status,
+      ).toBe(500);
+      await expect.poll(() => exceptions.length, { timeout: 8_000 }).toBe(5);
+      expect(
+        exceptions.find(({ properties }) => properties.scope === "installation")?.distinct_id,
+      ).toBe("installation:app-runtime");
       expect(errors).toEqual([]);
     } finally {
       for (const response of pending) response.writeHead(503).end();

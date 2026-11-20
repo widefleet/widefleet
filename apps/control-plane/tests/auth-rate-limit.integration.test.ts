@@ -78,6 +78,7 @@ describe.each(["memory", "cloudflare"] as const)("Authentication rate limits: %s
       sendEmail: async (message) => {
         delivered.push(message);
       },
+      cliLoginSettings: environment.settings,
     });
 
   const request = (path: string, body: Record<string, string>, ip: string) =>

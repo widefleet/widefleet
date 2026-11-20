@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "widefleet": {
+      "type": "http",
+      "url": "https://mcp.widefleet.app/mcp"
+    }
+  }
+}

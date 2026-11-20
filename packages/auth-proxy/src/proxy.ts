@@ -1,9 +1,17 @@
-import { appAccessSnapshot, appCaller } from "@platform/contracts";
+import { appAccessSnapshot, appCaller, hasAppAccess } from "@platform/contracts";
 import { z } from "zod";
 import { companyCookie, createAuthentication, cookiePrefix } from "./authentication.ts";
 import { authConfiguration, type AuthConfiguration } from "./configuration.ts";
+import {
+  clearEmbeddedSession,
+  EmbeddedSignInFailure,
+  embeddedIdentity,
+  embeddedPage,
+  embeddedPath,
+  signInEmbedded,
+} from "./embedded.ts";
 import { issuer, proxyIdentity } from "./identity.ts";
-import { authorization } from "./renewal.ts";
+import { authorization, failureSummary } from "./renewal.ts";
 
 interface Apps {
   resolve: (hostname: string) => Promise<z.infer<typeof appAccessSnapshot> | null>;
@@ -69,7 +77,72 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
     return target.href;
   };
 
+  const embedded = embeddedPath(configuration.organizationId);
+
+  // Identity providers refuse to render their sign-in pages in frames, so a
+  // framed app asks its embedding page for a host token instead.
+  const embeddedLoginUrl = (url: URL) => {
+    const target = new URL(embedded, callback);
+
+    target.searchParams.set("rd", url.href);
+
+    return target.href;
+  };
+
+  const embeddedSignIn = async (request: Request, url: URL) => {
+    if (url.pathname === embedded && request.method === "GET") {
+      const target = await returnUrl(url.searchParams.get("rd"));
+
+      return target
+        ? embeddedPage(configuration, target)
+        : response(400, "Choose a registered app to sign in.");
+    }
+
+    if (url.pathname === `${embedded}/session` && request.method === "GET")
+      return (await embeddedIdentity(configuration, request.headers))
+        ? new Response(null, { status: 204, headers: { "cache-control": "no-store" } })
+        : response(401, "Sign in to access this app.");
+
+    if (url.pathname !== embedded || request.method !== "POST") return response(404, "Not found");
+
+    // Only the sign-in page itself submits tokens. A JSON body also requires
+    // a CORS preflight that this endpoint never grants.
+    if (
+      request.headers.get("origin") !== callback.origin ||
+      !request.headers.get("content-type")?.startsWith("application/json")
+    )
+      return response(403, "Forbidden");
+
+    const input = z
+      .object({ token: z.string().min(1).max(16_384) })
+      .safeParse(await request.json().catch(() => null));
+
+    if (!input.success) return Response.json({ error: "invalid_token" }, { status: 400 });
+
+    try {
+      const headers = new Headers({ "cache-control": "no-store" });
+
+      for (const cookie of await signInEmbedded(configuration, input.data.token, request.headers))
+        headers.append("set-cookie", cookie);
+
+      return new Response(null, { status: 204, headers });
+    } catch (cause) {
+      if (!(cause instanceof EmbeddedSignInFailure)) throw cause;
+      const headers = new Headers({ "cache-control": "no-store" });
+
+      if (cause.retryAfter) headers.set("retry-after", cause.retryAfter);
+
+      return Response.json({ error: cause.code }, { status: cause.status, headers });
+    }
+  };
+
   const authentication = async (request: Request, url: URL) => {
+    if (
+      configuration.embeddingOrigins &&
+      (url.pathname === embedded || url.pathname.startsWith(`${embedded}/`))
+    )
+      return embeddedSignIn(request, url);
+
     if (url.pathname === `${basePath}/error`)
       return response(401, "Company sign-in failed. Return to the app and try again.");
 
@@ -117,7 +190,15 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
 
       internal.pathname = `${basePath}/sign-out`;
 
-      return auth.handler(new Request(internal, request));
+      const result = await auth.handler(new Request(internal, request));
+
+      if (!configuration.embeddingOrigins) return result;
+      const signedOut = new Response(result.body, result);
+
+      for (const cookie of clearEmbeddedSession(configuration, request.headers))
+        signedOut.headers.append("set-cookie", cookie);
+
+      return signedOut;
     }
 
     return response(404, "Not found");
@@ -188,20 +269,34 @@ export const createAuthProxy = (input: AuthConfiguration, apps: Apps) => {
 
             return finish(unavailable);
           } else user = proxyIdentity.safeParse(await renewed.json());
-        } catch {
+        } catch (cause) {
+          console.error("App session renewal failed", {
+            stage: "proxy",
+            ...failureSummary(cause),
+          });
+
           return finish(response(503, "Company sign-in is temporarily unavailable."));
         }
       }
 
+      // Embedded sessions have no refresh credential; the embedding page supplies
+      // a new host token after they expire.
+      if (!user.success && configuration.embeddingOrigins)
+        user = proxyIdentity.safeParse(await embeddedIdentity(configuration, request.headers));
+
       if (!user.success) {
         return finish(
           request.headers.get("accept")?.includes("text/html")
-            ? redirect(loginUrl(url))
+            ? redirect(
+                configuration.embeddingOrigins && request.headers.get("sec-fetch-dest") === "iframe"
+                  ? embeddedLoginUrl(url)
+                  : loginUrl(url),
+              )
             : response(401, "Sign in to access this app."),
         );
       }
 
-      if (access.groups.length && !access.groups.some((group) => user.data.groups.includes(group)))
+      if (!hasAppAccess(access.groups, user.data.groups))
         return finish(response(403, "You do not have access to this app."));
 
       const headers = new Headers(request.headers);

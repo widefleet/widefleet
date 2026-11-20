@@ -261,19 +261,28 @@ async fn is_ancestor(project: &Path, ancestor: &str, descendant: &str) -> Result
 }
 
 fn copy_index(source: &Path, destination: &Path) -> std::io::Result<()> {
-    // Git uses the index mtime to decide whether cached file stats are racy.
-    // Giving a copied index a newer timestamp can hide same-size source edits.
+    // Git uses the index mtime to detect same-size edits within the filesystem's
+    // timestamp resolution. A newer copy would make stale stat entries look safe.
     let modified = std::fs::metadata(source)?.modified()?;
     std::fs::copy(source, destination)?;
-    std::fs::OpenOptions::new()
+    std::fs::File::options()
         .write(true)
         .open(destination)?
-        .set_times(std::fs::FileTimes::new().set_modified(modified))
+        .set_modified(modified)
+}
+
+// Agent sandboxes may not provide a usable system temporary directory, so Git
+// scratch files stay inside the repository's Git directory.
+async fn scratch(project: &Path) -> Result<tempfile::TempDir> {
+    let directory = output(git(project).args(["rev-parse", "--absolute-git-dir"])).await?;
+    Ok(tempfile::Builder::new()
+        .prefix("widefleet-")
+        .tempdir_in(directory)?)
 }
 
 // An alternate index checks all files Git would add, without changing the user's staging area.
 async fn tree(project: &Path) -> Result<String> {
-    let temporary = tempfile::tempdir()?;
+    let temporary = scratch(project).await?;
     let index = temporary.path().join("index");
     let local_index =
         output(git(project).args(["rev-parse", "--path-format=absolute", "--git-path", "index"]))
@@ -291,33 +300,8 @@ async fn tree(project: &Path) -> Result<String> {
 }
 
 pub async fn snapshot(project: &Path) -> Result<String> {
-    let probe = git(project)
-        .args(["rev-parse", "--show-toplevel"])
-        .output()
-        .await?;
-    if probe.status.success() {
-        let root = PathBuf::from(String::from_utf8_lossy(&probe.stdout).trim_end());
-        return tree(&root).await;
-    }
-
-    // Check Git's file selection without initializing the project before a build
-    // succeeds or requiring source storage on the target installation.
-    let temporary = tempfile::tempdir()?;
-    output(git(project).args(["init", "--bare"]).arg(temporary.path())).await?;
-    output(
-        git(project)
-            .env("GIT_DIR", temporary.path())
-            .env("GIT_WORK_TREE", project)
-            .args(["add", "--all", "--", "."]),
-    )
-    .await?;
-    output(
-        git(project)
-            .env("GIT_DIR", temporary.path())
-            .env("GIT_WORK_TREE", project)
-            .arg("write-tree"),
-    )
-    .await
+    // Saving the source initializes the repository anyway, so it can exist before the build.
+    tree(&root(project).await?).await
 }
 
 async fn commit_all(project: &Path, branch: &str) -> Result<String> {
@@ -334,7 +318,7 @@ async fn commit_all(project: &Path, branch: &str) -> Result<String> {
         ))
     })?;
     let lock = tempfile::TempPath::try_from_path(lock_path)?;
-    let temporary = tempfile::tempdir()?;
+    let temporary = scratch(project).await?;
     let pending = temporary.path().join("index");
     match copy_index(Path::new(&index), &pending) {
         Ok(_) => (),
@@ -953,41 +937,44 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn captures_same_size_edits_with_racy_index_timestamps() -> Result<()> {
+    async fn detects_same_size_edits_with_racy_index_timestamps() -> Result<()> {
         let fixture = Fixture::new().await?;
-        let app = fixture.project.join("app.ts");
-        let timestamp = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000);
-        let times = std::fs::FileTimes::new().set_modified(timestamp);
-        std::fs::write(&app, "first!")?;
-        std::fs::OpenOptions::new()
-            .write(true)
-            .open(&app)?
-            .set_times(times)?;
-        fixture.save("main").await?;
+        root(&fixture.project).await?;
         output(git(&fixture.project).args(["config", "core.trustctime", "false"])).await?;
-        let before = snapshot(&fixture.project).await?;
-        let index = fixture.project.join(".git/index");
-        std::fs::write(&app, "second")?;
-        std::fs::OpenOptions::new()
+        let file = fixture.project.join("app.ts");
+        let modified = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000);
+        std::fs::write(&file, "before")?;
+        std::fs::File::options()
             .write(true)
-            .open(&app)?
-            .set_times(times)?;
-        // Simulate an edit within the index timestamp's resolution. Git must
-        // rehash the contents even though size and cached mtime still match.
-        std::fs::OpenOptions::new()
+            .open(&file)?
+            .set_modified(modified)?;
+        commit_all(&fixture.project, "main").await?;
+
+        // Model an equal-size edit within the filesystem's timestamp resolution.
+        // Git must re-read the content when the index and file timestamps match.
+        let index = fixture.project.join(".git/index");
+        std::fs::File::options()
             .write(true)
             .open(&index)?
-            .set_times(times)?;
-        let staging = std::fs::read(&index)?;
-        let after = snapshot(&fixture.project).await?;
-        assert_ne!(after, before);
-        assert_eq!(std::fs::read(&index)?, staging);
-        let saved =
-            save_repository(&fixture.project, fixture.repository("main"), "", &after).await?;
+            .set_modified(modified)?;
+        std::fs::write(&file, "after!")?;
+        std::fs::File::options()
+            .write(true)
+            .open(&file)?
+            .set_modified(modified)?;
+        let staged = std::fs::read(&index)?;
+        let source = snapshot(&fixture.project).await?;
         assert_eq!(
-            output(git(&fixture.project).args(["show", &format!("{}:app.ts", saved.commit)]))
-                .await?,
-            "second"
+            output(git(&fixture.project).args(["show", &format!("{source}:app.ts")])).await?,
+            "after!"
+        );
+        assert_eq!(std::fs::read(&index)?, staged);
+        assert_eq!(std::fs::metadata(&index)?.modified()?, modified);
+
+        let commit = commit_all(&fixture.project, "main").await?;
+        assert_eq!(
+            output(git(&fixture.project).args(["show", &format!("{commit}:app.ts")])).await?,
+            "after!"
         );
         Ok(())
     }
@@ -1080,7 +1067,8 @@ mod tests {
         let fixture = Fixture::new().await?;
         std::fs::write(fixture.project.join("app.ts"), "before build")?;
         let before = snapshot(&fixture.project).await?;
-        assert!(!fixture.project.join(".git").exists());
+        // The snapshot initializes the repository but commits nothing.
+        assert_eq!(revision(&fixture.project, "HEAD").await?, None);
         std::fs::write(fixture.project.join("app.ts"), "after build")?;
         let error = save_repository(&fixture.project, fixture.repository("main"), "", &before)
             .await

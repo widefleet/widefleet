@@ -32,6 +32,9 @@ export const hostedResourceNames = (installation: z.infer<typeof hostedInstallat
   controlPlane: `${installation.name}-control-plane`,
   artifacts: `${installation.name}-artifacts`,
   auth: `${installation.name}-auth`,
+  // The app builder runs once per build phase, so each phase has its own isolate.
+  builder: `${installation.name}-app-builder`,
+  documenter: `${installation.name}-app-documenter`,
 });
 
 export const hostedResourceIds = z.object({
@@ -90,9 +93,10 @@ const readWorkerConfiguration = async (directory: string) => {
     .looseObject({
       main: z.string(),
       compatibility_date: z.string(),
-      vars: z.record(z.string(), z.string()),
+      vars: z.record(z.string(), z.string()).default({}),
       assets: z.looseObject({ directory: z.string() }).optional(),
-      workflows: z.array(z.looseObject({ name: z.string() })),
+      workflows: z.array(z.looseObject({ name: z.string() })).default([]),
+      base_dir: z.string().optional(),
       ratelimits: z
         .array(
           z.object({
@@ -108,7 +112,12 @@ const readWorkerConfiguration = async (directory: string) => {
     })
     .parse(parsed.config);
 
-  return { ...config, main: resolve(directory, config.main), $schema: undefined };
+  return {
+    ...config,
+    main: resolve(directory, config.main),
+    base_dir: config.base_dir && resolve(directory, config.base_dir),
+    $schema: undefined,
+  };
 };
 
 export const hostedConfigurations = async (
@@ -125,8 +134,13 @@ export const hostedConfigurations = async (
     new URL("../../../packages/app-runtime/", import.meta.url),
   );
 
+  const builderDirectory = fileURLToPath(
+    new URL("../../../packages/app-builder/", import.meta.url),
+  );
+
   const runtime = await readWorkerConfiguration(runtimeDirectory);
   const control = await readWorkerConfiguration(controlDirectory);
+  const builder = await readWorkerConfiguration(builderDirectory);
 
   const workflows = (base: typeof runtime) =>
     base.workflows.map((workflow) => ({
@@ -145,6 +159,7 @@ export const hostedConfigurations = async (
   const executionVariables: Record<string, string> = {};
   executionVariables["WIDEFLEET_WORKLOAD_ISSUER"] =
     `https://auth.${installation.appDomain}/workload`;
+  executionVariables["WIDEFLEET_MCP_ORIGIN"] = `https://mcp.${installation.appDomain}`;
 
   if (installation.executionLimits)
     executionVariables["WIDEFLEET_EXECUTION_LIMITS"] = JSON.stringify(installation.executionLimits);
@@ -208,7 +223,11 @@ export const hostedConfigurations = async (
           16,
         ).toString(),
       })),
-      services: [service],
+      services: [
+        service,
+        { binding: "APP_BUILDER", service: names.builder },
+        { binding: "APP_DOCUMENTER", service: names.documenter },
+      ],
       ...emailBindings,
       hyperdrive: [{ binding: "HYPERDRIVE", id: installation.hyperdriveId }],
       kv_namespaces: [{ binding: "AUTH_CONFIG", id: ids.auth }],
@@ -226,6 +245,8 @@ export const hostedConfigurations = async (
         ...z.record(z.string(), z.json()).optional().parse(controlOverrides["vars"]),
       },
     },
+    builder: { ...builder, account_id: ids.account, name: names.builder },
+    documenter: { ...builder, account_id: ids.account, name: names.documenter },
     initialize: await hostedInitializationConfiguration(installation, ids.account),
   };
 };

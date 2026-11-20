@@ -17,7 +17,11 @@ import * as encryption from "../src/lib/server/secret-encryption.ts";
 import { createSettingsService } from "../src/lib/server/settings.ts";
 import { cliClientId } from "../src/lib/server/auth-options.ts";
 import { readAppLogin, appLoginClientId } from "../src/lib/server/app-login-client.ts";
-import { createTestEnvironment, organizationCredential } from "./environment.ts";
+import {
+  createTestEnvironment,
+  organizationCredential,
+  linkCompanyAccount,
+} from "./environment.ts";
 
 describe("Organization login settings", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
@@ -82,7 +86,10 @@ describe("Organization login settings", () => {
       .set({ domainVerified: true })
       .where(eq(ssoProvider.organizationId, organizationId));
 
+    await linkCompanyAccount(environment.database.db, principal.id, organizationId);
     await settings.activateSso(principal);
+    // The fixture link only satisfies activation; these tests manage the provider itself.
+    await environment.database.db.delete(account).where(eq(account.userId, principal.id));
 
     return { organizationId, principal, input };
   };
@@ -151,6 +158,25 @@ describe("Organization login settings", () => {
     expect(identity?.provider.type).toBe("google");
     expect(identity?.scopes).toContain(googleGroupsScope);
     expect(identity?.directory).toBeNull();
+
+    const multiDomain = settingsInput.parse({
+      ...input,
+      sso: { ...input.sso, domain: `${input.sso?.domain},alias.example.test` },
+    });
+
+    await expect(settings.plan(target.principal, multiDomain)).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+      message: "Google Workspace app identity supports one company email domain",
+    });
+    await expect(
+      settings.plan(
+        target.principal,
+        settingsInput.parse({
+          ...multiDomain,
+          sso: { ...multiDomain.sso, appIdentityType: "oidc" },
+        }),
+      ),
+    ).resolves.toBeDefined();
   });
 
   it("disables the built-in app client for company SSO and restores the encrypted secret on return", async () => {
@@ -202,6 +228,7 @@ describe("Organization login settings", () => {
       .update(ssoProvider)
       .set({ domainVerified: true })
       .where(eq(ssoProvider.organizationId, target.organizationId));
+    await linkCompanyAccount(environment.database.db, target.principal.id, target.organizationId);
     await settings.activateSso(target.principal);
     expect(await disabled()).toBe(true);
     await settings.update(
@@ -366,6 +393,7 @@ describe("Organization login settings", () => {
     expect(first.settings).toEqual({
       directory: null,
       externallyManaged: false,
+      embeddingOrigins: [],
     });
     expect(first.error).toBeNull();
     await settings.publish(organizationId);

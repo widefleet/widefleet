@@ -65,6 +65,7 @@ it.each(["entra", "oidc"] as const)(
     expect(saved?.settings).toEqual({
       externallyManaged: true,
       directory,
+      embeddingOrigins: [],
     });
     expect(await decryptSecret(key, saved?.directorySecret ?? "")).toBe("directory-secret");
     await migrateSsoSettings(database, key);

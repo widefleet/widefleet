@@ -1,0 +1,71 @@
+{
+  "entrypoints": [
+    {
+      "examples": [],
+      "http": false,
+      "methods": [
+        {
+          "examples": [],
+          "name": "greet",
+          "remarks": "",
+          "signatures": [
+            {
+              "parameters": [
+                {
+                  "description": "Who to greet.",
+                  "name": "name",
+                  "optional": false,
+                  "rest": false,
+                  "type": "string"
+                }
+              ],
+              "returns": {
+                "description": "The greeting.",
+                "type": "Promise<string>"
+              }
+            }
+          ],
+          "summary": "Greet a person.",
+          "throws": []
+        },
+        {
+          "examples": [],
+          "name": "find",
+          "remarks": "",
+          "signatures": [
+            {
+              "parameters": [
+                {
+                  "description": "",
+                  "name": "query",
+                  "optional": false,
+                  "rest": false,
+                  "type": "Query"
+                }
+              ],
+              "returns": {
+                "description": "",
+                "type": "Promise<{ matches: string[]; }>"
+              }
+            }
+          ],
+          "summary": "Find entries that match a query.",
+          "throws": []
+        }
+      ],
+      "name": "default",
+      "remarks": "",
+      "summary": ""
+    }
+  ],
+  "format": 1,
+  "types": [
+    {
+      "definition": "{\n    text: string;\n    limit?: number | undefined;\n}\n/** text: Text to search for. */\n/** limit: Maximum number of matches. */",
+      "examples": [],
+      "name": "Query",
+      "remarks": "",
+      "summary": "A search request."
+    }
+  ]
+}

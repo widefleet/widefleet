@@ -14,6 +14,7 @@ import { createCloudflareLogs } from "./cloudflare-logs.ts";
 import { createCloudflareExecution } from "./cloudflare-execution.ts";
 import { createCloudflareAppSignIn } from "./app-sign-in-cloudflare.ts";
 import { cloudflareAuthRateLimit } from "./auth-rate-limit-cloudflare.ts";
+import { bindingAppBuilder } from "./app-builder.ts";
 
 export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
   // Hyperdrive exposes its connection string only inside a request handler.
@@ -21,6 +22,7 @@ export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
   // A pool belongs to this request only; Hyperdrive owns pooling between requests.
   const database = createDatabase(configuration, 5);
   const observation = createProductAnalytics(configuration);
+  database.db.$client.on("error", (error) => observation.exception(error));
   const reporting = createReporting(configuration, database.db);
 
   const extension = createRuntimeExtension({
@@ -61,6 +63,9 @@ export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
   };
 
   if (sendEmail) options.sendEmail = sendEmail;
+
+  if (bindings.APP_BUILDER && bindings.APP_DOCUMENTER)
+    options.builder = bindingAppBuilder(bindings.APP_BUILDER, bindings.APP_DOCUMENTER);
 
   const get = createRequestRuntime(createRuntime(options));
 

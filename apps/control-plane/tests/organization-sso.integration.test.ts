@@ -821,7 +821,10 @@ describe("Organization SSO authority across browser and CLI sessions", () => {
       }),
     ).rejects.toMatchObject({ statusCode: 403 });
     await expect(
-      auth.api.requestDomainVerification({ headers, body: { providerId: "company-bravo" } }),
+      auth.api.updateSSOProvider({
+        headers,
+        body: { providerId: "company-bravo", domain: "example.test" },
+      }),
     ).rejects.toMatchObject({ statusCode: 403 });
     expect(await environment.database.db.select({ id: session.id }).from(session)).toEqual(
       sessionsBefore,

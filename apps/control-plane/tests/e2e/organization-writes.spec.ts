@@ -185,6 +185,75 @@ test("opens organization settings without installation reporting privileges", as
   }
 });
 
+// The redirect is server-side; without JavaScript this test loads no client modules, which
+// would make Vite optimize dependencies while the next browser test starts.
+test("asks which organization an MCP client connects, despite an active one", async ({
+  browser,
+}) => {
+  const { person, alpha, beta, context } = await organizationSession(browser, false);
+
+  try {
+    // The active organization may be left over from earlier work in another tab.
+    await environment.database.db
+      .update(session)
+      .set({ activeOrganizationId: alpha })
+      .where(eq(session.userId, person.id));
+    const state = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
+    const signIn = `/mcp/sign-in?${new URLSearchParams({ state })}`;
+
+    const response = await context.request.get(signIn, { maxRedirects: 0 });
+    expect(response.status()).toBe(303);
+    const chooser = new URL(response.headers()["location"] ?? "invalid", "http://localhost");
+    expect(chooser.pathname).toBe("/organizations");
+    expect(chooser.searchParams.get("next")).toBe(
+      `/mcp/sign-in?${new URLSearchParams({ state, chosen: "1" })}`,
+    );
+
+    const page = await context.newPage();
+    await page.goto(signIn);
+    await expect(
+      page.getByText("Choose the organization whose apps you want to connect."),
+    ).toBeVisible();
+
+    // Routes do not intercept redirected requests; observe the data-plane request instead.
+    const reached = page.waitForRequest((request) =>
+      request.url().startsWith("https://mcp.apps.localhost/"),
+    );
+
+    await page.getByRole("button", { name: /Beta/ }).click();
+
+    const target = new URL((await reached).url());
+    expect(target.pathname).toBe("/oauth/organization");
+    expect(Object.fromEntries(target.searchParams)).toEqual({ state, organization: beta });
+  } finally {
+    await context.close();
+  }
+});
+
+test("returns MCP sign-in directly for a person with one organization", async ({ browser }) => {
+  const { person, alpha, beta, context } = await organizationSession(browser, false);
+
+  try {
+    await environment.database.db
+      .delete(member)
+      .where(and(eq(member.userId, person.id), eq(member.organizationId, beta)));
+    const state = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
+
+    const response = await context.request.get(`/mcp/sign-in?${new URLSearchParams({ state })}`, {
+      maxRedirects: 0,
+    });
+
+    expect(response.status()).toBe(303);
+    const target = new URL(response.headers()["location"] ?? "invalid");
+    expect(target.origin).toBe("https://mcp.apps.localhost");
+    expect(target.pathname).toBe("/oauth/organization");
+    expect(target.searchParams.get("state")).toBe(state);
+    expect(target.searchParams.get("organization")).toBe(alpha);
+  } finally {
+    await context.close();
+  }
+});
+
 for (const javaScriptEnabled of [true, false]) {
   test(`preserves multiline secrets and offers failed disconnection retries (JavaScript ${javaScriptEnabled})`, async ({
     browser,
@@ -275,11 +344,29 @@ for (const javaScriptEnabled of [true, false]) {
       await page.goto("/apps/new");
       await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}/apps/new`);
       await expect(page.getByRole("link", { name: "Choose organization: Alpha" })).toBeVisible();
+      expect(
+        await environment.database.db
+          .select({ organizationId: session.activeOrganizationId })
+          .from(session)
+          .where(eq(session.userId, person.id)),
+      ).toEqual([{ organizationId: alpha }]);
+      // Remote forms must also repair existing sessions without a saved selection.
+      await environment.database.db
+        .update(session)
+        .set({ activeOrganizationId: null })
+        .where(eq(session.userId, person.id));
       await page.getByLabel("App name", { exact: true }).fill("Automatic organization");
       const slug = `automatic-${javaScriptEnabled}`;
       await page.getByLabel("URL slug").fill(slug);
       await page.getByRole("button", { name: "Create app", exact: true }).click();
       await expect(page).toHaveURL(/\/apps\/[a-f0-9-]+$/);
+
+      expect(
+        await environment.database.db
+          .select({ organizationId: session.activeOrganizationId })
+          .from(session)
+          .where(eq(session.userId, person.id)),
+      ).toEqual([{ organizationId: alpha }]);
 
       const records = await environment.database.db
         .select({ organizationId: organizationRuntimes.organizationId })

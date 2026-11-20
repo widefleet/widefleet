@@ -280,6 +280,8 @@ export const installedAuth = async () => {
       "--volume",
       `${volume}:/state`,
       "--env",
+      `APP_DOMAIN=${configuration.domain}`,
+      "--env",
       `FLEET_S3_BUCKET=${name}`,
       "--env",
       "FLEET_S3_ENDPOINT=http://rustfs:9000",

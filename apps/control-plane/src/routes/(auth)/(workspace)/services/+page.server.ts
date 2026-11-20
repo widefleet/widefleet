@@ -1,6 +1,6 @@
 import { error } from "@sveltejs/kit";
 import { identifier } from "@platform/contracts";
-import { getAppServices } from "#lib/services.remote";
+import { getAppServices, getConnectionRequests } from "#lib/services.remote";
 import { getAppDetails, getApps } from "#lib/apps.remote";
 import { getAppConnections } from "#lib/connections.remote";
 import type { PageServerLoad } from "./$types";
@@ -8,6 +8,7 @@ import type { PageServerLoad } from "./$types";
 export const load: PageServerLoad = async ({ url, setHeaders }) => {
   setHeaders({ "cache-control": "private, no-store" });
   await getAppServices();
+  await getConnectionRequests();
   await getApps();
   const selected = url.searchParams.get("app");
 

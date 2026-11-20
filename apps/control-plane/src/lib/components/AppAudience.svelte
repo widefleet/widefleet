@@ -4,11 +4,11 @@
   import { changeAppAccess, getAppAccess, searchAccessGroups } from "#lib/app-access.remote";
   import { warnBeforeLeaving } from "#lib/unsaved-changes";
   import FormIssues from "#shadcn/FormIssues.svelte";
-  import { Button } from "#shadcn/components/ui/button/index.js";
-  import { Input } from "#shadcn/components/ui/input/index.js";
-  import { Textarea } from "#shadcn/components/ui/textarea/index.js";
-  import { Label } from "#shadcn/components/ui/label/index.js";
-  import { Badge } from "#shadcn/components/ui/badge/index.js";
+  import { Button } from "@platform/ui/button";
+  import { Input } from "@platform/ui/input";
+  import { Textarea } from "@platform/ui/textarea";
+  import { Label } from "@platform/ui/label";
+  import { Badge } from "@platform/ui/badge";
   import Feedback from "./Feedback.svelte";
   import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";

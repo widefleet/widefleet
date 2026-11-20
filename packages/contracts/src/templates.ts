@@ -20,6 +20,8 @@ export const appTemplate = appTemplateSummary.extend({
   source: z.url(),
   markdown: z.string(),
   prompt: z.string(),
+  /** Whether this installation builds templates for one-click installs. */
+  installable: z.boolean(),
 });
 
 export const appTemplateCatalog = z.strictObject({

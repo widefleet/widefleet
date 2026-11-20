@@ -145,10 +145,10 @@ jobs:
           cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'type=gha,scope=check-auth-runtime-v1,mode=max' || '' }}
       - name: Test packaged runtime and authentication
         if: matrix.suite == 'packaged-runtime'
-        run: RUN_PACKAGED_EDGE_TESTS=1 pnpm exec vitest run apps/control-plane/tests/installation/packaged-edge.test.ts apps/control-plane/tests/installation/auth-container.test.ts apps/control-plane/tests/installation/sso-tls.test.ts apps/control-plane/tests/installation/startup.test.ts apps/control-plane/tests/edge/sso.test.ts
+        run: RUN_PACKAGED_EDGE_TESTS=1 pnpm exec vitest run apps/control-plane/tests/installation/packaged-edge.test.ts apps/control-plane/tests/installation/auth-container.test.ts apps/control-plane/tests/installation/builder-container.test.ts apps/control-plane/tests/installation/sso-tls.test.ts apps/control-plane/tests/installation/startup.test.ts apps/control-plane/tests/edge/sso.test.ts
       - name: Install Rust toolchain
         if: matrix.suite == 'rust-runtime'
-        run: rustup toolchain install 1.99.0 --profile minimal --component clippy,rustfmt
+        run: rustup toolchain install 1.99.0 --profile minimal --component clippy,rustfmt --target wasm32-wasip1
       - name: Restore Cargo dependencies and build outputs
         if: matrix.suite == 'rust-runtime'
         id: cargo-cache
@@ -173,6 +173,12 @@ jobs:
           cargo clippy --workspace --all-targets -- -D warnings
           cargo test --workspace
           cargo build --workspace
+          cargo clippy -p platform-service-docs-wasm --target wasm32-wasip1 -- -D warnings
+          cargo build --profile wasm -p platform-service-docs-wasm --target wasm32-wasip1
+          RUN_WASM_TESTS=1 pnpm exec vitest run packages/service-docs
+          pnpm --filter @platform/app-builder build
+          pnpm --filter @platform/app-builder exec wrangler deploy --dry-run --outdir "$RUNNER_TEMP/app-builder"
+          RUN_BUILDER_TESTS=1 pnpm exec vitest run packages/app-builder
           RUN_CLI_TESTS=1 pnpm exec vitest run apps/control-plane/tests/cli.test.ts apps/control-plane/tests/network-cli.test.ts apps/control-plane/tests/access-cli.test.ts apps/control-plane/tests/app-services-cli.test.ts apps/control-plane/tests/service-documentation.test.ts apps/control-plane/tests/app-services.integration.test.ts apps/control-plane/tests/workflows-cli.test.ts apps/control-plane/tests/auth-cli.test.ts apps/control-plane/tests/configuration-cli.test.ts apps/control-plane/tests/discovery-cli.test.ts apps/control-plane/tests/auth-cli.integration.test.ts apps/control-plane/tests/organization-selection.integration.test.ts apps/control-plane/tests/organization-login.integration.test.ts apps/control-plane/tests/reporting-cli.test.ts
       - name: Test CLI login through the browser
         if: matrix.suite == 'rust-runtime'

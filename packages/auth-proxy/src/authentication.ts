@@ -74,8 +74,14 @@ const authenticationOptions = async (configuration: AuthConfiguration) =>
     },
   }) satisfies BetterAuthOptions;
 
-export const createAuthentication = async (configuration: AuthConfiguration, login: boolean) => {
+export const createAuthentication = async (
+  configuration: AuthConfiguration,
+  login: boolean,
+  onVerified?: (value: z.infer<typeof authorization>) => void,
+) => {
   const options = await authenticationOptions(configuration);
+  // Google's refresh-token requirements also apply to generic OIDC connections.
+  const google = issuer(configuration.provider) === "https://accounts.google.com";
   let verified: z.infer<typeof authorization> | undefined;
 
   // A new instance per request keeps Better Auth's temporary in-memory records
@@ -103,23 +109,20 @@ export const createAuthentication = async (configuration: AuthConfiguration, log
                   requireIdTokenVerification: true,
                   redirectURI: configuration.redirectUrl,
                   disableProviderLogout: true,
+                  accessType: google ? "offline" : undefined,
+                  prompt: google ? "consent" : undefined,
                   authorizationUrlParams:
                     configuration.provider.type === "google"
-                      ? {
-                          access_type: "offline",
-                          prompt: "consent",
-                          hd: configuration.provider.domain,
-                        }
+                      ? { hd: configuration.provider.domain }
                       : undefined,
                   scopes: [
                     ...new Set([
                       "openid",
                       "profile",
                       "email",
-                      ...(configuration.provider.type === "google" ? [] : ["offline_access"]),
+                      ...(google ? [] : ["offline_access"]),
                       ...(configuration.scopes ?? []).filter(
-                        (scope) =>
-                          configuration.provider.type !== "google" || scope !== "offline_access",
+                        (scope) => !google || scope !== "offline_access",
                       ),
                       ...(configuration.provider.type === "entra" ? ["User.Read"] : []),
                     ]),
@@ -148,6 +151,7 @@ export const createAuthentication = async (configuration: AuthConfiguration, log
                       nonce: result.claims["nonce"],
                       expiresAt,
                     });
+                    onVerified?.(verified);
 
                     return {
                       ...result.claims,

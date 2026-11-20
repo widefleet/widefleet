@@ -92,6 +92,7 @@ export const readTemplate = (
   principal: Principal,
   configuration: Pick<Configuration, "PLATFORM_URL">,
   id: string,
+  installable: boolean,
 ) =>
   Result.gen(async function* () {
     const template = yield* Result.await(
@@ -112,6 +113,109 @@ export const readTemplate = (
       appTemplate.parse({
         ...template,
         prompt: `Set up the ${template.name} app on Widefleet. Read https://widefleet.com/SKILL.md, then run ${cli(principal, configuration)} catalog templates show ${id} and follow its template instructions. Reuse a suitable existing app where possible. Help me finish setup and report its URL and any steps that still need my attention.`,
+        installable,
       }),
     );
+  });
+
+const api = "https://api.github.com/repos/widefleet/widefleet";
+
+const raw = "https://raw.githubusercontent.com/widefleet/widefleet";
+
+const githubHeaders = (configuration: Pick<Configuration, "GITHUB_TOKEN">) => {
+  const headers = new Headers({ accept: "application/vnd.github+json", "user-agent": "Widefleet" });
+
+  if (configuration.GITHUB_TOKEN)
+    headers.set("authorization", `Bearer ${configuration.GITHUB_TOKEN}`);
+
+  return headers;
+};
+
+const github = async <T>(url: string, schema: z.ZodType<T>, headers: Headers) => {
+  const response = await fetch(url, { headers, signal: AbortSignal.timeout(10_000) });
+
+  if (!response.ok) throw new Error(`GitHub returned HTTP ${response.status}`);
+
+  return schema.parse(await response.json());
+};
+
+// Tests, in test directories or beside the code, are not part of the deployed app.
+const testFile = /(?:^|\/)(?:tests|__tests__)\/|\.(?:test|spec)\.[cm]?[jt]sx?$/;
+
+/**
+ * A template's source files at the current commit, by path relative to its
+ * directory, without tests.
+ */
+export const templateSources = (configuration: Pick<Configuration, "GITHUB_TOKEN">, id: string) =>
+  Result.gen(async function* () {
+    const headers = githubHeaders(configuration);
+
+    const tree = yield* Result.await(
+      Result.tryPromise({
+        try: async () => {
+          const { sha } = await github(
+            `${api}/commits/main`,
+            z.object({ sha: z.string() }),
+            headers,
+          );
+
+          const listing = await github(
+            `${api}/git/trees/${sha}?recursive=1`,
+            z.object({
+              truncated: z.boolean().optional(),
+              tree: z.array(z.object({ path: z.string(), type: z.string() })),
+            }),
+            headers,
+          );
+
+          if (listing.truncated) throw new Error("GitHub truncated the repository tree");
+
+          return { commit: sha, entries: listing.tree };
+        },
+        catch: (cause) =>
+          new StorageUnavailable({
+            message: "App templates are unavailable. Try again later.",
+            cause,
+          }),
+      }),
+    );
+
+    const prefix = `templates/${id}/`;
+
+    const paths = tree.entries.flatMap((entry) =>
+      entry.type === "blob" && entry.path.startsWith(prefix)
+        ? [entry.path.slice(prefix.length)]
+        : [],
+    );
+
+    if (!paths.includes("template.md"))
+      return yield* new InvalidOperation({ code: "NOT_FOUND", message: "App template not found" });
+
+    const files = yield* Result.await(
+      Result.tryPromise({
+        try: async () =>
+          Object.fromEntries(
+            await Promise.all(
+              paths
+                .filter((path) => !testFile.test(path))
+                .map(async (path) => {
+                  const response = await fetch(`${raw}/${tree.commit}/${prefix}${path}`, {
+                    signal: AbortSignal.timeout(10_000),
+                  });
+
+                  if (!response.ok) throw new Error(`GitHub returned HTTP ${response.status}`);
+
+                  return [path, await response.text()] as const;
+                }),
+            ),
+          ),
+        catch: (cause) =>
+          new StorageUnavailable({
+            message: "App templates are unavailable. Try again later.",
+            cause,
+          }),
+      }),
+    );
+
+    return Result.ok({ commit: tree.commit, files });
   });

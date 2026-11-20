@@ -3,7 +3,7 @@ use platform_core::{Error, Result};
 use std::time::Duration;
 use tokio::process::Command;
 
-pub const VERSION: &str = "0.6.2";
+pub const VERSION: &str = "0.6.3-widefleet.1";
 
 pub fn verify(output: &[u8], source: &str) -> Result<()> {
     let actual = String::from_utf8_lossy(output);

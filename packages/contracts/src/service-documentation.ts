@@ -8,6 +8,8 @@ const reserved = new Set([
   "catch",
   "finally",
   "fetch",
+  // App bindings use it to retry a call with answers to its input requests.
+  "withInput",
   "connect",
   "scheduled",
   "queue",

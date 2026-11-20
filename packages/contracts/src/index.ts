@@ -8,11 +8,15 @@ import { z } from "zod";
 import { appSourceSummary, gitBranch, sourceRevision } from "./source.ts";
 
 import { serviceDocumentation } from "./service-documentation.ts";
+
+export * from "./mcp.ts";
+
 import { organizationIdentifier } from "./organizations.ts";
 import { appAccessSnapshot } from "./app-access.ts";
 import { networkSnapshot } from "./network.ts";
 import { migrationEntry } from "./migrations.ts";
 import { workflowName, workflowRequest } from "./workflows.ts";
+import { templatePath } from "./templates.ts";
 
 export * from "./migrations.ts";
 
@@ -32,6 +36,8 @@ export * from "./reporting.ts";
 
 export * from "./templates.ts";
 
+export * from "./service-input.ts";
+
 export const protocolVersion = 1;
 
 export const identifier = z.uuid();
@@ -43,7 +49,10 @@ export const appSlug = z
   .regex(/^[a-z](?:[a-z0-9-]*[a-z0-9])?$/);
 
 export const createAppInput = z.strictObject({
-  slug: appSlug.refine((value) => value !== "auth", "The auth hostname is reserved for SSO"),
+  slug: appSlug.refine(
+    (value) => !["auth", "mcp"].includes(value),
+    "The auth and mcp hostnames are reserved for platform services",
+  ),
   displayName: z.string().trim().min(1).max(120),
   parentId: identifier.nullable().default(null),
   previewBranch: gitBranch.optional(),
@@ -79,6 +88,18 @@ export const deployment = z.strictObject({
   createdAt: z.iso.datetime(),
   finishedAt: z.iso.datetime().nullable(),
   message: z.string().nullable(),
+});
+
+export const templateInstallInput = templatePath.extend({
+  /** The new app's name; the template ID by default. */
+  name: appSlug.optional(),
+});
+
+export const templateInstall = z.strictObject({
+  app,
+  deployment,
+  /** Build notes, such as dependencies whose types could not be installed. */
+  warnings: z.array(z.string()),
 });
 
 export const deploymentEvent = z.strictObject({
@@ -299,8 +320,8 @@ export const workerMetadata = workerConfiguration
     }
   });
 
-// Documentation belongs to the control plane. Existing runtime releases validate
-// metadata strictly, so keep these build-time additions out of execution snapshots.
+// Existing runtimes validate metadata strictly. Publish documentation separately
+// from execution snapshots, and retain source provenance in the control plane.
 export function executionWorkerMetadata(value: z.infer<typeof workerMetadata>) {
   const metadata = { ...value };
   delete metadata.service_documentation;
@@ -334,9 +355,11 @@ export const runtimeRelease = z.strictObject({
   protocol: z.literal(3),
   auth: z.literal(1),
   version: z.string().regex(/^[0-9]+\.[0-9]+\.[0-9]+$/),
-  celld: z.literal("0.6.2"),
+  celld: z.enum(["0.6.2", "0.6.3-widefleet.1"]),
   workflows: z.literal(1).optional(),
   cloudflare: z.literal(1).optional(),
+  // The runtime accepts service-index refreshes from publishers.
+  search: z.literal(1).optional(),
   main: z.literal("loader.js"),
   modules: z
     .array(
@@ -349,11 +372,7 @@ export const runtimeRelease = z.strictObject({
     .min(1),
 });
 
-export const appCaller = z.strictObject({
-  issuer: z.url(),
-  subject: z.string().min(1),
-  name: z.string(),
-});
+export { appCaller } from "./app-caller.ts";
 
 const appSecretMaxBytes = 5_000;
 
@@ -472,6 +491,12 @@ export const connectionRequest = z.strictObject({
 export const runtimePackages = z.strictObject({
   runtime: runtimeRelease,
   appSecrets: appSecretPreparation.optional(),
+  serviceDocumentation: z
+    .strictObject({
+      artifactId: identifier,
+      documentation: serviceDocumentation,
+    })
+    .optional(),
 });
 
 export const runtimeVersion = runtimeRelease.shape.version;

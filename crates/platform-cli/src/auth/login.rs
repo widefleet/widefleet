@@ -89,6 +89,12 @@ pub async fn login(
     automatic: bool,
 ) -> Result<String> {
     let scope = login_scope(&options)?;
+    if options.code.is_some() && automatic {
+        return Err(Error::invalid(
+            "--code needs the platform URL. Run the complete command that cli_login returned"
+                .into(),
+        ));
+    }
     let (routing, target) = if automatic {
         let (routing, target) = Routing::discover().await?;
         (Some(routing), target)
@@ -127,15 +133,32 @@ pub async fn login(
     verification
         .query_pairs_mut()
         .append_pair("user_code", &device.user_code);
-    println!("Open {verification} and verify code: {}", device.user_code);
-    println!("Approve only the request you started in your terminal or coding assistant.");
+    if let Some(code) = &options.code {
+        // The code proves the MCP user's sign-in; it approves only this CLI's device request.
+        let _: serde_json::Value = json(
+            target
+                .request(Method::POST, "/api/auth/mcp/cli-login")
+                .json(&serde_json::json!({ "code": code, "user_code": device.user_code }))
+                .send()
+                .await?,
+        )
+        .await?;
+    } else {
+        println!("Open {verification} and verify code: {}", device.user_code);
+        println!("Approve only the request you started in your terminal or coding assistant.");
+    }
     if let Some(routing) = routing {
         routing.ready(&device.user_code).await?;
     }
     let deadline = Instant::now() + Duration::from_secs(device.expires_in.min(1800));
     let mut interval = device.interval.max(1);
+    // A login code approves the request before the first poll.
+    let mut wait = options.code.is_none();
     loop {
-        tokio::time::sleep(Duration::from_secs(interval)).await;
+        if wait {
+            tokio::time::sleep(Duration::from_secs(interval)).await;
+        }
+        wait = true;
         if Instant::now() >= deadline {
             return Err(
                 Error::invalid("Device login expired. Run widefleet login again".into())

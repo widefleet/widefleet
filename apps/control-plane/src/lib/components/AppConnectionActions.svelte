@@ -4,7 +4,7 @@
   import type { z } from "zod";
   import OrganizationField from "#shadcn/OrganizationField.svelte";
   import FormIssues from "#shadcn/FormIssues.svelte";
-  import { Button } from "#shadcn/components/ui/button/index.js";
+  import { Button } from "@platform/ui/button";
 
   let {
     appId,

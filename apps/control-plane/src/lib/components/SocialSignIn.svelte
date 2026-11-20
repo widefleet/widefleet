@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { authClient } from "#lib/auth-client";
-  import { Button } from "#shadcn/components/ui/button/index.js";
+  import SocialButton from "@platform/ui/social-button";
   import Feedback from "#shadcn/components/Feedback.svelte";
 
   let {
@@ -58,24 +58,18 @@
   <div class={compact ? "mt-6 grid grid-cols-2 items-start gap-2.5" : "mt-6 space-y-3"}>
     {#each providers as provider (provider)}
       <div class={compact && providers.length === 1 ? "col-span-2" : undefined}>
-        <Button
-          variant="outline"
-          class={compact ? "h-11 w-full gap-2 px-2 text-sm" : "h-10 w-full"}
-          aria-label={`Continue with ${provider === "google" ? "Google" : "Microsoft"}`}
+        <SocialButton
+          {provider}
+          {compact}
+          busy={busy === provider}
           aria-describedby={compact && lastUsed === provider ? `last-used-${provider}` : undefined}
           disabled={busy !== null}
           onclick={() => signIn(provider)}
         >
-          <img src={`/brand/${provider}.svg`} class="size-4" width="16" height="16" alt="" />
-          {busy === provider
-            ? compact
-              ? "Opening …"
-              : "Opening sign-in …"
-            : `${compact ? "" : "Continue with "}${provider === "google" ? "Google" : "Microsoft"}`}
           {#if lastUsed === provider && !compact}<span
               class="text-muted-foreground ml-auto text-xs font-normal">Last used</span
             >{/if}
-        </Button>
+        </SocialButton>
         {#if compact && lastUsed === provider}<p
             id={`last-used-${provider}`}
             class="text-muted-foreground mt-1.5 text-center text-xs"

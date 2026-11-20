@@ -73,7 +73,7 @@ describe("Google Workspace app identity", () => {
         calls.push(url);
         expect(url.pathname).toBe("/v1/groups/-/memberships:searchDirectGroups");
         expect(request.headers.get("authorization")).toBe("Bearer fixture-access-token");
-        expect(request.redirect).toBe("error");
+        expect(request.redirect).toBe("manual");
 
         if (directoryStatus !== 200)
           return new Response(null, { status: directoryStatus, headers: { "retry-after": "7" } });

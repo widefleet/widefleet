@@ -62,6 +62,8 @@ export const runtimeConfigurationSchema = z.object({
   GITHUB_TOKEN: z.string().trim().optional(),
   PLATFORM_STATE_DIRECTORY: z.string().min(1).default("/var/lib/widefleet"),
   PLATFORM_APP_RUNTIME_URL: telemetryUrl.default("http://runtime:8080"),
+  // The app builder for one-click template installs, on a private network.
+  PLATFORM_APP_BUILDER_URL: telemetryUrl.optional(),
   PLATFORM_RUNTIME_DIRECTORY: z.string().min(1).default("/var/lib/widefleet/runtime"),
   PLATFORM_CONFIG_DIRECTORY: z.string().min(1).optional(),
   TLS_MODE: z.enum(["provided", "cloudflare"]).default("provided"),
@@ -73,6 +75,14 @@ export const runtimeConfigurationSchema = z.object({
     .optional()
     .transform((value) => value || undefined),
   PLATFORM_ENCRYPTION_KEY_FILE: z.string().min(1).optional(),
+  PLATFORM_SSO_TRUST_PROVIDER: z
+    .enum(["true", "false", ""])
+    .default("false")
+    .transform((value) => value === "true"),
+  PLATFORM_SSO_ALLOW_EMAIL_ACCOUNT_LINKING: z
+    .enum(["true", "false", ""])
+    .default("false")
+    .transform((value) => value === "true"),
   LOGIN_CODE_DELIVERY: z.enum(["email", "console"]).default("email"),
 });
 

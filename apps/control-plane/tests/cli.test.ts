@@ -62,6 +62,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     const organizations: (string | string[] | undefined)[] = [];
     let requiredOrganization: string | undefined;
     const catalogUpdates: z.infer<typeof contract.catalogListing>[] = [];
+    const templateInstalls: z.infer<ReturnType<typeof z.json>>[] = [];
     const createdPreviews: z.infer<typeof contract.createAppInput>[] = [];
     let storedPreview: z.infer<typeof contract.app> | null = null;
     let parent = app;
@@ -129,6 +130,25 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
             expiresAt: "2027-01-01T00:00:00.000Z",
           }),
         );
+
+        return;
+      }
+
+      if (request.method === "POST" && request.url === "/api/v1/catalog/templates/gmail/install") {
+        let body = "";
+        request.setEncoding("utf8").on("data", (chunk: string) => {
+          body += chunk;
+        });
+        request.on("end", () => {
+          templateInstalls.push(z.json().parse(JSON.parse(body)));
+          response.end(
+            JSON.stringify({
+              app: { slug: "mail-reader" },
+              deployment: { status: "queued" },
+              warnings: [],
+            }),
+          );
+        });
 
         return;
       }
@@ -682,6 +702,49 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       expect(requests).toEqual(["POST /api/v1/apps/source-target"]);
     });
 
+    it("saves source of a new project without a usable system temporary directory", async () => {
+      const project = join(state, "project with spaces");
+      const remote = join(state, "sandbox-source.git");
+      sourceTarget = { supported: true, branch: "main", preview: false };
+      sourceRepository = {
+        url: "https://git.example.test/apps/source.git",
+        branch: "main",
+        commit: null,
+      };
+      await execute("git", ["init", "--bare", remote]);
+      // Agent sandboxes can lack /tmp; the project has no Git repository yet.
+      vi.stubEnv("TMPDIR", join(state, "missing-temporary-directory"));
+      vi.stubEnv("GIT_CONFIG_COUNT", "1");
+      vi.stubEnv("GIT_CONFIG_KEY_0", `url.${pathToFileURL(remote).href}.insteadOf`);
+      vi.stubEnv("GIT_CONFIG_VALUE_0", sourceRepository.url);
+
+      try {
+        const { source: saved } = z
+          .object({ source: contract.sourceRevision })
+          .parse(JSON.parse((await cli("--no-wait", "--json")).stdout));
+
+        const files = await execute("git", [
+          "--git-dir",
+          remote,
+          "ls-tree",
+          "-r",
+          "--name-only",
+          saved.commit,
+        ]);
+
+        expect(files.stdout).toContain("wrangler.jsonc");
+        expect(files.stdout).not.toContain(".widefleet-");
+        expect(
+          (await execute("git", ["-C", project, "status", "--porcelain", "--ignored"])).stdout,
+        ).not.toContain(".widefleet-");
+        expect(requests).toContain(`PUT /api/v1/apps/${app.id}/worker`);
+      } finally {
+        vi.unstubAllEnvs();
+        await rm(join(project, ".git"), { recursive: true, force: true });
+        await rm(remote, { recursive: true, force: true });
+      }
+    });
+
     it("does not require branch confirmation without source storage or with --no-source", async () => {
       const project = join(state, "project with spaces");
       await execute("git", ["init", "--initial-branch=feature", project]);
@@ -847,16 +910,35 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         id: "gmail",
         markdown: "Deploy this synthetic template",
       });
+
+      const installed = await execute(
+        binary,
+        [...prefix, "install", "gmail", "--name", "mail-reader"],
+        options,
+      );
+
+      expect(JSON.parse(installed.stdout)).toEqual({
+        app: { slug: "mail-reader" },
+        deployment: { status: "queued" },
+        warnings: [],
+      });
+      expect(templateInstalls).toEqual([{ name: "mail-reader" }]);
       expect(requests).toEqual([
         "GET /api/v1/catalog/templates?search=mail+%26+files",
         "GET /api/v1/catalog/templates/gmail",
+        "POST /api/v1/catalog/templates/gmail/install",
       ]);
-      await expect(execute(binary, [...prefix, "show", "../apps"], options)).rejects.toMatchObject({
-        code: 1,
-        stdout: "",
-        stderr: "Use a template ID from catalog templates list\n",
-      });
-      expect(requests).toHaveLength(2);
+
+      for (const command of ["show", "install"])
+        await expect(
+          execute(binary, [...prefix, command, "../apps"], options),
+        ).rejects.toMatchObject({
+          code: 1,
+          stdout: "",
+          stderr: "Use a template ID from catalog templates list\n",
+        });
+
+      expect(requests).toHaveLength(3);
     });
 
     it("preserves catalog listing in app list JSON", async () => {

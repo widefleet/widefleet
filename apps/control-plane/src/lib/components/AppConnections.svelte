@@ -3,9 +3,9 @@
   import type { z } from "zod";
   import { getAppConnections } from "#lib/connections.remote";
   import { connectApp, disconnectApp } from "#lib/services.remote";
-  import { Button } from "#shadcn/components/ui/button/index.js";
-  import { Badge } from "#shadcn/components/ui/badge/index.js";
-  import * as Accordion from "#shadcn/components/ui/accordion/index.js";
+  import { Button } from "@platform/ui/button";
+  import { Badge } from "@platform/ui/badge";
+  import * as Accordion from "@platform/ui/accordion";
   import Globe from "@lucide/svelte/icons/globe";
   import Box from "@lucide/svelte/icons/box";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";

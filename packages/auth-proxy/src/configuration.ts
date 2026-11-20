@@ -1,4 +1,11 @@
-import { companyProvider, googleGroupsScope, organizationIdentifier } from "@platform/contracts";
+import {
+  companyDomain,
+  companyProvider,
+  embeddingOrigins,
+  googleGroupsScope,
+  maxCompanyDomains,
+  organizationIdentifier,
+} from "@platform/contracts";
 import { base64url } from "jose";
 import { z } from "zod";
 
@@ -7,6 +14,7 @@ const hostname = z.string().regex(/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{
 export const authConfiguration = z
   .strictObject({
     organizationId: organizationIdentifier,
+    organizationName: z.string().min(1).max(256).optional(),
     provider: companyProvider,
     scopes: z.array(z.string()).optional(),
     clientId: z.string().min(1).max(512),
@@ -20,8 +28,19 @@ export const authConfiguration = z
       ),
     domain: hostname,
     redirectUrl: z.url(),
+    // Company email domains the organization's SSO admits, for MCP organization discovery.
+    emailDomains: z.array(companyDomain).max(maxCompanyDomains).optional(),
+    // Omitted unless configured, so existing publications keep their revision.
+    embeddingOrigins: embeddingOrigins.min(1).optional(),
   })
   .superRefine((configuration, context) => {
+    if (configuration.embeddingOrigins && configuration.provider.type !== "entra")
+      context.addIssue({
+        code: "custom",
+        path: ["embeddingOrigins"],
+        message: "Embedded sign-in requires Microsoft Entra app identity",
+      });
+
     if (!z.url().safeParse(configuration.redirectUrl).success) return;
     const url = new URL(configuration.redirectUrl);
 

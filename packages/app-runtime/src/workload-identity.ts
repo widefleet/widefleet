@@ -46,7 +46,7 @@ export class WorkloadIdentity extends WorkerEntrypoint<
     const { appId, organizationId, hostname } = this.ctx.props;
     await requireOrganizationAvailability(this.env, organizationId);
 
-    const app = await readApp(this.env, `hosts/${hostname}.json`);
+    const app = await readApp(this.env, `hosts/${hostname}.json`, { appId, organizationId });
 
     if (!app || app.appId !== appId || app.organizationId !== organizationId)
       throw new Error("Workload is not available");

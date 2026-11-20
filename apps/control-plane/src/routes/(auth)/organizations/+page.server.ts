@@ -7,6 +7,7 @@ export const load: PageServerLoad = async ({ url, setHeaders }) => {
   setHeaders({ "cache-control": "private, no-store" });
   const runtime = await getRuntime();
   const { user, session } = getUserSession();
+  const next = localDestination(url.searchParams.get("next"));
 
   return {
     organizations: await pageOrganizations(),
@@ -14,6 +15,8 @@ export const load: PageServerLoad = async ({ url, setHeaders }) => {
       userId: user.id,
       identityOrganizationId: session.identityOrganizationId ?? null,
     }),
-    next: localDestination(url.searchParams.get("next")),
+    next,
+    // MCP sign-in sends people here to pick the organization a client connects to.
+    connecting: new URL(next, "https://navigation.invalid").pathname === "/mcp/sign-in",
   };
 };

@@ -1,6 +1,11 @@
 // The trusted parent applies the policy to both assets and Worker responses.
 // Browser origins share one list; backend grants never widen this header.
-export const browserPolicy = (response: Response, origins: string[]) => {
+// Frame ancestors come from the organization's embedding configuration, not the app.
+export const browserPolicy = (
+  response: Response,
+  origins: string[],
+  frameAncestors: string[] = [],
+) => {
   const allowed = ["'self'", ...origins].join(" ");
 
   const policy = [
@@ -16,7 +21,7 @@ export const browserPolicy = (response: Response, origins: string[]) => {
     "frame-src 'none'",
     "object-src 'none'",
     "base-uri 'self'",
-    "frame-ancestors 'self'",
+    `frame-ancestors ${["'self'", ...frameAncestors].join(" ")}`,
   ].join("; ");
 
   const guarded = new Response(response.body, response);

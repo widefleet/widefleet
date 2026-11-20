@@ -4,7 +4,11 @@ import { eq } from "drizzle-orm";
 import { settingsInput } from "@platform/contracts";
 import { createAuthProxy } from "@platform/auth-proxy";
 import { ssoProvider } from "../src/lib/server/auth-schema.ts";
-import { createTestEnvironment, organizationCredential } from "./environment.ts";
+import {
+  createTestEnvironment,
+  organizationCredential,
+  linkCompanyAccount,
+} from "./environment.ts";
 import { createIdentityProvider } from "./edge/auth-proxy-idp.ts";
 import { editableSettings } from "./settings-input.ts";
 import { EventEmitter, once } from "node:events";
@@ -16,129 +20,135 @@ const cookies = (response: Response) =>
     .map((cookie) => cookie.split(";")[0])
     .join("; ");
 
-it("uses one native registration for company control-plane and independent app sign-in", async () => {
-  const environment = await createTestEnvironment();
-  const origin = environment.configuration.PLATFORM_URL;
-  const appCallback = "https://auth.apps.localhost/oauth2/widefleet/callback";
+it.each([false, true])(
+  "uses one native registration for management and app sign-in (operator trust: %s)",
+  async (trustProvider) => {
+    const environment = await createTestEnvironment(undefined, undefined, { trustProvider });
+    const origin = environment.configuration.PLATFORM_URL;
+    const appCallback = "https://auth.apps.localhost/oauth2/widefleet/callback";
 
-  const provider = await createIdentityProvider(
-    [`${origin}/api/auth/sso/callback/shared-company`, appCallback],
-    false,
-  );
+    const provider = await createIdentityProvider(
+      [`${origin}/api/auth/sso/callback/shared-company`, appCallback],
+      false,
+    );
 
-  try {
-    await environment.database.db.delete(ssoProvider);
-    const { headers } = await environment.users.login({ userId: environment.owner.id });
-    await environment.settings.initialize(
-      settingsInput.parse({
-        sso: {
-          providerId: "shared-company",
-          issuer: provider.origin,
-          domain: "example.test",
-          oidcConfig: {
-            clientId: "app-login",
-            clientSecret: "synthetic-client-secret",
-            scopes: ["openid", "profile", "email", "groups"],
-            mapping: { name: "display_name", email: "mail", extraFields: { groups: "roles" } },
+    try {
+      await environment.database.db.delete(ssoProvider);
+      const { headers } = await environment.users.login({ userId: environment.owner.id });
+      await environment.settings.initialize(
+        settingsInput.parse({
+          sso: {
+            providerId: "shared-company",
+            issuer: provider.origin,
+            domain: trustProvider ? "" : "example.test",
+            oidcConfig: {
+              clientId: "app-login",
+              clientSecret: "synthetic-client-secret",
+              scopes: ["openid", "profile", "email", "groups"],
+              mapping: { name: "display_name", email: "mail", extraFields: { groups: "roles" } },
+            },
           },
-        },
-      }),
-      "widefleet",
-      { auth: environment.auth, headers },
-    );
-    // DNS verification has its own native integration test. This fixture starts
-    // with a verified company and exercises both actual authorization-code flows.
-    await environment.database.db
-      .update(ssoProvider)
-      .set({ domainVerified: true })
-      .where(eq(ssoProvider.organizationId, "widefleet"));
-    await environment.settings.activateSso({
-      ...environment.owner,
-      role: "owner",
-      admin: true,
-      creator: true,
-      application: { organizationId: "widefleet", admin: true },
-    });
+        }),
+        "widefleet",
+        { auth: environment.auth, headers },
+      );
 
-    const started = await environment.auth.handler(
-      new Request(`${origin}/api/auth/sign-in/sso`, {
-        method: "POST",
-        headers: { origin, "content-type": "application/json" },
-        body: JSON.stringify({ providerId: "shared-company", callbackURL: "/apps" }),
-      }),
-    );
+      // DNS verification has its own native integration test. This fixture starts
+      // with a verified company and exercises both actual authorization-code flows.
+      if (!trustProvider)
+        await environment.database.db
+          .update(ssoProvider)
+          .set({ domainVerified: true })
+          .where(eq(ssoProvider.organizationId, "widefleet"));
+      await linkCompanyAccount(environment.database.db, environment.owner.id);
+      await environment.settings.activateSso({
+        ...environment.owner,
+        role: "owner",
+        admin: true,
+        creator: true,
+        application: { organizationId: "widefleet", admin: true },
+      });
 
-    expect(started.status).toBe(200);
-    const { url } = z.object({ url: z.url() }).parse(await started.json());
-    expect(new URL(url).searchParams.get("client_id")).toBe("app-login");
-    expect(new URL(url).searchParams.get("scope")?.split(" ")).toContain("groups");
-    const authorized = await fetch(url, { redirect: "manual" });
+      const started = await environment.auth.handler(
+        new Request(`${origin}/api/auth/sign-in/sso`, {
+          method: "POST",
+          headers: { origin, "content-type": "application/json" },
+          body: JSON.stringify({ providerId: "shared-company", callbackURL: "/apps" }),
+        }),
+      );
 
-    const completed = await environment.auth.handler(
-      new Request(z.url().parse(authorized.headers.get("location")), {
-        headers: { cookie: cookies(started) },
-      }),
-    );
+      expect(started.status).toBe(200);
+      const { url } = z.object({ url: z.url() }).parse(await started.json());
+      expect(new URL(url).searchParams.get("client_id")).toBe("app-login");
+      expect(new URL(url).searchParams.get("scope")?.split(" ")).toContain("groups");
+      const authorized = await fetch(url, { redirect: "manual" });
 
-    expect(completed.headers.get("location")).toBe("/apps");
-    expect(
-      (
-        await environment.auth.api.getSession({
-          headers: new Headers({ cookie: cookies(completed) }),
-        })
-      )?.session.identityOrganizationId,
-    ).toBe("widefleet");
+      const completed = await environment.auth.handler(
+        new Request(z.url().parse(authorized.headers.get("location")), {
+          headers: { cookie: cookies(started) },
+        }),
+      );
 
-    const configuration = environment.authControl.read().configuration;
+      expect(completed.headers.get("location")).toBe("/apps");
+      expect(
+        (
+          await environment.auth.api.getSession({
+            headers: new Headers({ cookie: cookies(completed) }),
+          })
+        )?.session.identityOrganizationId,
+      ).toBe("widefleet");
 
-    if (!configuration) throw new Error("Missing published app configuration");
-    expect(configuration.clientId).toBe("app-login");
-    expect(configuration.clientSecret).toBe("synthetic-client-secret");
-    expect(configuration.provider).toMatchObject({
-      nameClaim: "display_name",
-      emailClaim: "mail",
-      groupsClaim: "roles",
-    });
-    const appUrl = "https://ledger.apps.localhost/";
+      const configuration = environment.authControl.read().configuration;
 
-    const proxy = createAuthProxy(configuration, {
-      resolve: async (hostname) =>
-        hostname === "ledger.apps.localhost" ? { revision: 1, groups: ["accounting"] } : null,
-      fetch: async () => new Response("Company app"),
-    });
+      if (!configuration) throw new Error("Missing published app configuration");
+      expect(configuration.clientId).toBe("app-login");
+      expect(configuration.clientSecret).toBe("synthetic-client-secret");
+      expect(configuration.provider).toMatchObject({
+        nameClaim: "display_name",
+        emailClaim: "mail",
+        groupsClaim: "roles",
+      });
+      const appUrl = "https://ledger.apps.localhost/";
 
-    // The proxy receives only the published configuration; there is no control-plane request.
-    const appStart = await proxy.fetch(
-      new Request(
-        `https://auth.apps.localhost/oauth2/widefleet/start?rd=${encodeURIComponent(appUrl)}`,
-      ),
-    );
+      const proxy = createAuthProxy(configuration, {
+        resolve: async (hostname) =>
+          hostname === "ledger.apps.localhost" ? { revision: 1, groups: ["accounting"] } : null,
+        fetch: async () => new Response("Company app"),
+      });
 
-    expect(appStart.status).toBe(302);
-    const appAuthorization = z.url().parse(appStart.headers.get("location"));
-    expect(new URL(appAuthorization).searchParams.get("client_id")).toBe("app-login");
-    expect(new URL(appAuthorization).searchParams.get("scope")?.split(" ")).toContain("groups");
-    const appAuthorized = await fetch(appAuthorization, { redirect: "manual" });
+      // The proxy receives only the published configuration; there is no control-plane request.
+      const appStart = await proxy.fetch(
+        new Request(
+          `https://auth.apps.localhost/oauth2/widefleet/start?rd=${encodeURIComponent(appUrl)}`,
+        ),
+      );
 
-    const appCompleted = await proxy.fetch(
-      new Request(z.url().parse(appAuthorized.headers.get("location")), {
-        headers: { cookie: cookies(appStart) },
-      }),
-    );
+      expect(appStart.status).toBe(302);
+      const appAuthorization = z.url().parse(appStart.headers.get("location"));
+      expect(new URL(appAuthorization).searchParams.get("client_id")).toBe("app-login");
+      expect(new URL(appAuthorization).searchParams.get("scope")?.split(" ")).toContain("groups");
+      const appAuthorized = await fetch(appAuthorization, { redirect: "manual" });
 
-    expect(appCompleted.headers.get("location")).toBe(appUrl);
+      const appCompleted = await proxy.fetch(
+        new Request(z.url().parse(appAuthorized.headers.get("location")), {
+          headers: { cookie: cookies(appStart) },
+        }),
+      );
 
-    const app = await proxy.fetch(
-      new Request(appUrl, { headers: { cookie: cookies(appCompleted) } }),
-    );
+      expect(appCompleted.headers.get("location")).toBe(appUrl);
 
-    expect(app.status).toBe(200);
-    expect(await app.text()).toBe("Company app");
-  } finally {
-    await provider.stop();
-    await environment.close();
-  }
-});
+      const app = await proxy.fetch(
+        new Request(appUrl, { headers: { cookie: cookies(appCompleted) } }),
+      );
+
+      expect(app.status).toBe(200);
+      expect(await app.text()).toBe("Company app");
+    } finally {
+      await provider.stop();
+      await environment.close();
+    }
+  },
+);
 
 it("keeps the native provider and app claims together when settings saves overlap", async () => {
   const environment = await createTestEnvironment();

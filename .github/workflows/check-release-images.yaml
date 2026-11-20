@@ -23,11 +23,14 @@ on:
       - tsconfig*.json
       - vitest.config.ts
       - "!**/*.md"
+      # The app runtime embeds the plugin skill served by its MCP server.
+      - plugins/widefleet/skills/**
   push:
     branches: [main]
     paths:
       - "**"
       - "!**/*.md"
+      - plugins/widefleet/skills/**
       - "!docs/**"
       - "!apps/docs/**"
       # The control-plane deployment reads this workspace package manifest.

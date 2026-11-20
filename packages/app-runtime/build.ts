@@ -3,6 +3,12 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
+import { buildInputForm, buildMcpUi } from "./build-ui.ts";
+import { mcpSkillCatalog } from "./src/mcp-skills.ts";
+
+await buildMcpUi();
+
+await buildInputForm();
 
 const license = [
   await readFile(new URL("../../LICENSE", import.meta.url), "utf8"),
@@ -14,6 +20,10 @@ const { version } = z
   .parse(JSON.parse(await readFile(new URL("../../package.json", import.meta.url), "utf8")));
 
 const extension = process.env["WIDEFLEET_APP_RUNTIME_EXTENSION"];
+
+const directory = new URL("dist/", import.meta.url);
+
+await mkdir(directory, { recursive: true });
 
 if (extension && !isAbsolute(extension))
   throw new Error("WIDEFLEET_APP_RUNTIME_EXTENSION must be an absolute module path");
@@ -29,9 +39,14 @@ const compile = async (entry: string, define: Record<string, string>) => {
 
   const result = await build({
     entryPoints: [new URL(`src/${entry}.ts`, import.meta.url).pathname],
+    outfile: new URL(`${entry}.js`, directory).pathname,
+    sourcemap: entry === "loader" ? "linked" : false,
     bundle: true,
     format: "esm",
     platform: "neutral",
+    // The runtime only runs in Workers runtimes (workerd and celld), so dependencies resolve their workerd builds.
+    conditions: ["workerd"],
+    mainFields: ["module", "main"],
     target: "es2023",
     external: [
       "cloudflare:workers",
@@ -47,12 +62,23 @@ const compile = async (entry: string, define: Record<string, string>) => {
     legalComments: "eof",
   });
 
-  const output = result.outputFiles[0];
+  const output = result.outputFiles.find((file) => file.path.endsWith(".js"));
+  const sourceMap = result.outputFiles.find((file) => file.path.endsWith(".js.map"));
 
   if (!output) throw new Error("Runtime build produced no module");
 
+  if (sourceMap) await writeFile(sourceMap.path, sourceMap.contents);
+
   return output.text;
 };
+
+const skill = await readFile(
+  new URL("../../plugins/widefleet/skills/widefleet/SKILL.md", import.meta.url),
+  "utf8",
+);
+
+// Markdown-only changes skip CI, so an invalid skill must fail the build instead of every MCP request.
+await mcpSkillCatalog({ widefleet: skill }).read();
 
 const source = await compile("loader", {
   WIDEFLEET_BINDINGS_SOURCE: JSON.stringify(await compile("bindings", {})),
@@ -62,11 +88,8 @@ const source = await compile("loader", {
   ),
   WIDEFLEET_EVENTS_SOURCE: JSON.stringify(await compile("events", {})),
   WIDEFLEET_RUNTIME_VERSION: JSON.stringify(version),
+  WIDEFLEET_SKILL_SOURCE: JSON.stringify(skill),
 });
-
-const directory = new URL("dist/", import.meta.url);
-
-await mkdir(directory, { recursive: true });
 
 await writeFile(new URL("loader.js", directory), source);
 
@@ -76,9 +99,10 @@ await writeFile(
     protocol: 3,
     auth: 1,
     version,
-    celld: "0.6.2",
+    celld: "0.6.3-widefleet.1",
     workflows: 1,
     cloudflare: 1,
+    search: 1,
     main: "loader.js",
     modules: [
       { name: "loader.js", source, sha256: createHash("sha256").update(source).digest("hex") },

@@ -1,7 +1,7 @@
 ---
 title: Connect apps
 description: Expose app APIs, connect callers and keep provider secrets private.
-lastModified: 2026-11-16
+lastModified: 2026-11-18
 ---
 
 An app can expose exported Worker entrypoints to other apps in its organization.
@@ -12,6 +12,8 @@ Use Widefleet platform, CLI and runtime **0.7.1 or newer**. Publishing requires 
 creation or collaboration permissions. To connect a caller, you must
 manage that app. The provider and caller must belong to the same organization.
 Organization administrators decide whether each API needs approval.
+
+People can also call published services from AI clients through [MCP](/guides/mcp).
 
 ## Publish a service
 
@@ -70,6 +72,11 @@ An app with only named service exports and no static assets has no browser launc
 link and returns `404` for browser requests. Named service entrypoints still support
 RPC and `fetch()`. A default export or configured static assets enables the app URL;
 web apps can expose named service entrypoints alongside their browser UI.
+**App APIs** and `widefleet services` list named entrypoints. They list a default export
+when it has RPC methods or a TSDoc comment. A default export with only an undocumented
+`fetch()` handler serves the app itself and is not listed; `widefleet connect` can still
+bind it explicitly. To publish an HTTP API, describe it in a TSDoc comment on the default
+export or export it as a named `WorkerEntrypoint`.
 No Widefleet-specific properties belong in `wrangler.jsonc`.
 
 ## Document service methods
@@ -116,7 +123,7 @@ widefleet connections
 ```
 
 Use `--app CALLER` to select a caller by slug or UUID outside its project. The
-target accepts a service catalog slug or UUID. Bindings default to the `default`
+target accepts an app slug or UUID, including apps that the catalog does not list. Bindings default to the `default`
 entrypoint; the provider must export a default Worker handler or `WorkerEntrypoint` class.
 
 In the UI, open **App APIs** and choose **Set up connection** for the provider.
@@ -187,6 +194,75 @@ user checks and CSRF protection in the app.
 
 Find ready-made integrations in [App templates](/guides/app-templates), then
 connect the deployed app using the same flow.
+
+## Ask the user before continuing
+
+A service method can ask the person behind a call to confirm an action or fill in
+a short form, then continue with the answer. Requires an app runtime released
+after 0.7.7.
+
+Return the question instead of a result. `requestState` holds values the method
+needs again, such as text the person is about to approve:
+
+```ts
+import { WorkerEntrypoint } from "cloudflare:workers";
+
+type Answer = { action: "accept" | "decline" | "cancel"; content?: { note?: string } };
+type Input = { inputResponses: { confirm?: Answer }; requestState: { text: string } };
+
+export class Offers extends WorkerEntrypoint<Env, { input?: Input }> {
+  async send(offerId: string) {
+    const input = this.ctx.props.input;
+
+    if (!input) {
+      const text = await this.writeOffer(offerId);
+      return {
+        resultType: "input_required",
+        inputRequests: {
+          confirm: {
+            message: `Send this offer?\n\n${text}`,
+            requestedSchema: { type: "object", properties: { note: { type: "string" } } },
+          },
+        },
+        requestState: { text },
+      };
+    }
+
+    if (input.inputResponses.confirm?.action !== "accept") return { sent: false };
+    await this.deliver(offerId, input.requestState.text);
+    return { sent: true };
+  }
+}
+```
+
+The method is called again with the same arguments, and `ctx.props.input` holds
+the answers and the `requestState` it returned:
+
+- [MCP clients](/guides/mcp) show the question to the person and send the answers
+  back on their own. The agent cannot answer in their place.
+- A calling app receives the question as the method's result, shows it in its own
+  interface and sends the answers with `withInput`:
+
+```ts
+const result = await env.OFFERS.send(offerId);
+
+if (result.resultType === "input_required") {
+  // Show result.inputRequests, then call again with the answers:
+  return env.OFFERS.withInput({ inputResponses, requestState: result.requestState }).send(offerId);
+}
+```
+
+The calling app passes `requestState` back unchanged; Widefleet keeps its contents
+private to the service. Answers reach only the same method with the same
+arguments, for the same caller, within 24 hours, and accepted content matches the
+requested form. Make the confirmed action idempotent, for example by recording
+that the offer was sent, so a repeated answer has no second effect.
+
+- A call asks up to 8 questions. Each form has up to 32 `string`, `number`,
+  `integer` or `boolean` fields, the primitive subset of MCP form elicitation.
+  Strings support `enum`, `format`, length limits and defaults.
+- Questions take up to 16 KiB and `requestState` up to 8 KiB of JSON.
+- `withInput` is reserved on app bindings, so it cannot be a service method name.
 
 ## API availability and connection requests
 

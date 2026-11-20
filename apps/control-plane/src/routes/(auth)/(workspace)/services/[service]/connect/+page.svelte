@@ -3,10 +3,10 @@
   import PageHeading from "#shadcn/components/PageHeading.svelte";
   import OrganizationField from "#shadcn/OrganizationField.svelte";
   import FormIssues from "#shadcn/FormIssues.svelte";
-  import { Button } from "#shadcn/components/ui/button/index.js";
-  import { Input } from "#shadcn/components/ui/input/index.js";
-  import { Label } from "#shadcn/components/ui/label/index.js";
-  import { NativeSelect } from "#shadcn/components/ui/native-select/index.js";
+  import { Button } from "@platform/ui/button";
+  import { Input } from "@platform/ui/input";
+  import { Label } from "@platform/ui/label";
+  import { NativeSelect } from "@platform/ui/native-select";
   import type { PageData } from "./$types";
 
   let { data }: { data: PageData } = $props();

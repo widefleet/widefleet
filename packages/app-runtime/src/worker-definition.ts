@@ -4,6 +4,7 @@ import type { ParentEnvironment } from "./types.ts";
 import { loadModules } from "./worker-modules.ts";
 import { runtimeExtension } from "#runtime-extension";
 import type { WorkerIdentity } from "./runtime-extension.ts";
+import { reportRuntimeException } from "./runtime-errors.ts";
 
 type Definition = {
   scope: string;
@@ -15,6 +16,19 @@ type Definition = {
 };
 
 export const workerDefinition = async (
+  input: Definition,
+  environment: ParentEnvironment,
+  context: Pick<ExecutionContext, "exports">,
+) => {
+  try {
+    return await prepareWorkerDefinition(input, environment, context);
+  } catch (cause) {
+    reportRuntimeException(cause, environment, { operation: "prepare_worker", ...input.identity });
+    throw cause;
+  }
+};
+
+const prepareWorkerDefinition = async (
   input: Definition,
   environment: ParentEnvironment,
   context: Pick<ExecutionContext, "exports">,

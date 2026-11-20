@@ -13,7 +13,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
-import { organization, user } from "./auth-schema.ts";
+import { organization, ssoProvider, user } from "./auth-schema.ts";
 
 export const organizationRuntimes = pgTable(
   "organization_runtime",
@@ -327,3 +327,19 @@ export const organizationSettings = pgTable("organization_settings", {
   directorySecret: text("directory_secret"),
   ssoRequired: boolean("sso_required").notNull().default(false),
 });
+
+// Each company email domain is proven separately. Verified domains are mirrored into
+// sso_provider.domain, which Better Auth reads for its own SSO decisions.
+export const ssoDomains = pgTable(
+  "sso_domain",
+  {
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => ssoProvider.organizationId, { onDelete: "cascade" }),
+    domain: text("domain").notNull(),
+    verificationToken: text("verification_token").notNull(),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.organizationId, table.domain] })],
+);

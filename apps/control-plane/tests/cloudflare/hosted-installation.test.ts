@@ -42,6 +42,27 @@ const configuration = {
 };
 
 describe("Hosted resource provisioning", () => {
+  it("deploys the app builder once per build phase, reachable only through service bindings", async () => {
+    const configs = await hostedConfigurations(installation, ids);
+
+    for (const [config, name] of [
+      [configs.builder, "fixture-app-builder"],
+      [configs.documenter, "fixture-app-documenter"],
+    ] as const) {
+      expect(config).toMatchObject({
+        name,
+        account_id: ids.account,
+        no_bundle: true,
+        workers_dev: false,
+        preview_urls: false,
+        rules: [{ type: "CompiledWasm", globs: ["**/*.wasm"] }],
+      });
+      expect(config.main).toMatch(/packages\/app-builder\/dist\/builder\.js$/);
+      expect(config.base_dir).toMatch(/packages\/app-builder\/dist$/);
+      expect(config).not.toHaveProperty("routes");
+    }
+  });
+
   it("configures the workload issuer on the runtime without adding a control-plane schedule", async () => {
     const configs = await hostedConfigurations(installation, ids, "email", {
       vars: { WIDEFLEET_WORKLOAD_ISSUER: "https://stale.example.test/workload" },
@@ -301,6 +322,7 @@ describe("Hosted resource provisioning", () => {
     expect(configs.runtime.vars).toEqual({
       WIDEFLEET_CONFIGURATION: JSON.stringify({ source: "r2" }),
       WIDEFLEET_LOGS: "cloudflare",
+      WIDEFLEET_MCP_ORIGIN: "https://mcp.apps.example.test",
       WIDEFLEET_WORKLOAD_ISSUER: "https://auth.apps.example.test/workload",
       OBSERVER_LABEL: "installation-fixture",
     });
@@ -353,6 +375,8 @@ describe("Hosted resource provisioning", () => {
           service: configuration.runtimeName,
           entrypoint: "RuntimeManagement",
         },
+        { binding: "APP_BUILDER", service: "fixture-app-builder" },
+        { binding: "APP_DOCUMENTER", service: "fixture-app-documenter" },
       ]);
       expect(configs.controlPlane.vars["APP_RUNTIME_NAME"]).toBe(configuration.runtimeName);
       expect(configs.controlPlane.hyperdrive).toEqual([
@@ -426,7 +450,7 @@ describe("Hosted infrastructure deployment coordination", () => {
     auth: 1,
     workflows: 1,
     cloudflare: 1,
-    celld: "0.6.2",
+    celld: "0.6.3-widefleet.1",
     version: "99.0.0",
     main: "loader.js",
     modules: [

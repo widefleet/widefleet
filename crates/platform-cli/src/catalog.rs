@@ -5,6 +5,7 @@ use platform_core::{
 };
 use reqwest::Method;
 use serde_json::{Value, json as value};
+use std::time::Duration;
 use uuid::Uuid;
 
 #[derive(Args)]
@@ -37,6 +38,27 @@ enum TemplateCommand {
     },
     /// Show a template's source, Markdown instructions and setup prompt as JSON.
     Show { template: String },
+    /// Build and deploy a template as an app, then print the app and deployment as JSON.
+    Install {
+        template: String,
+        /// The new app's name; the template ID by default. An existing app is never replaced.
+        #[arg(long)]
+        name: Option<String>,
+    },
+}
+
+fn template_id(template: &str) -> Result<&str> {
+    if template.len() > 64
+        || !template.starts_with(|c: char| c.is_ascii_lowercase())
+        || !template
+            .bytes()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
+    {
+        return Err(Error::invalid(
+            "Use a template ID from catalog templates list".into(),
+        ));
+    }
+    Ok(template)
 }
 
 pub async fn run(api: &Api, token: &str, options: Options) -> Result<()> {
@@ -47,23 +69,23 @@ pub async fn run(api: &Api, token: &str, options: Options) -> Result<()> {
             TemplateCommand::List { search } => api
                 .authenticated(Method::GET, "/catalog/templates", token)
                 .query(&[("search", search.as_deref().unwrap_or_default())]),
-            TemplateCommand::Show { template } => {
-                if template.len() > 64
-                    || !template.starts_with(|c: char| c.is_ascii_lowercase())
-                    || !template
-                        .bytes()
-                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'-')
-                {
-                    return Err(Error::invalid(
-                        "Use a template ID from catalog templates list".into(),
-                    ));
-                }
-                api.authenticated(
-                    Method::GET,
-                    &format!("/catalog/templates/{template}"),
+            TemplateCommand::Show { template } => api.authenticated(
+                Method::GET,
+                &format!("/catalog/templates/{}", template_id(&template)?),
+                token,
+            ),
+            TemplateCommand::Install { template, name } => api
+                .authenticated(
+                    Method::POST,
+                    &format!("/catalog/templates/{}/install", template_id(&template)?),
                     token,
                 )
-            }
+                .json(&match name {
+                    Some(name) => value!({ "name": name }),
+                    None => value!({}),
+                })
+                // The installation builds the template before it answers.
+                .timeout(Duration::from_secs(10 * 60)),
         },
         Command::Publish { app } | Command::Unpublish { app } => api
             .authenticated(Method::PUT, &format!("/apps/{app}/catalog"), token)

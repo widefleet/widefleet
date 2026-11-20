@@ -11,6 +11,7 @@ export const companyIdentity = z.object({
   scopes: z.array(z.string()).optional(),
   management: credentials,
   directory: credentials.nullable().default(null),
+  embeddingOrigins: z.array(z.string()).default([]),
 });
 
 export { companyAccountProvider, providerIssuer } from "../company-identity.ts";

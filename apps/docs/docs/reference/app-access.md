@@ -1,13 +1,16 @@
 ---
 title: App access
 description: Group rules, permissions, activation and the app access API.
-lastModified: 2026-11-15
+lastModified: 2026-11-18
 ---
 
 Open an app in management and choose **Access → App access** to select which company
 groups may open it. App owners and organization administrators can change these
 rules. Management collaborators can inspect them but cannot change them.
 Management permissions do not bypass the running app's access rules.
+
+The same rules apply to [MCP clients](/guides/mcp): everyone who may open an app
+can use its published service methods.
 
 Platform 0.4.0 applies these rules to the app's organization.
 Without a company IdP, Widefleet admits verified organization members and supplies no

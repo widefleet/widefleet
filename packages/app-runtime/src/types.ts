@@ -20,6 +20,7 @@ export type ParentEnvironment = {
     import("./workflow-catalog.ts").WorkflowCatalog
   >;
   WIDEFLEET_WORKFLOWS: Workflow<import("./workflow-protocol.ts").Start>;
+  WIDEFLEET_MCP_GRANTS?: DurableObjectNamespace<import("./mcp-grants.ts").McpGrants>;
   WIDEFLEET_LOADER: WorkerLoader;
   WIDEFLEET_PACKAGES: R2Bucket;
   WIDEFLEET_CONTROL_TOKEN: string;
@@ -27,7 +28,10 @@ export type ParentEnvironment = {
   WIDEFLEET_CONFIGURATION: string;
   WIDEFLEET_EXECUTION_LIMITS?: string;
   WIDEFLEET_WORKLOAD_ISSUER?: string;
+  WIDEFLEET_MCP_ORIGIN?: string;
   WIDEFLEET_OAUTH?: string;
+  POSTHOG_PROJECT_TOKEN?: string;
+  POSTHOG_SCOPE?: string;
   [name: string]:
     | undefined
     | NativeBindings[keyof NativeBindings]
@@ -35,7 +39,8 @@ export type ParentEnvironment = {
     | Fetcher
     | WorkerLoader
     | Workflow<import("./workflow-protocol.ts").Start>
-    | DurableObjectNamespace<import("./workflow-catalog.ts").WorkflowCatalog>;
+    | DurableObjectNamespace<import("./workflow-catalog.ts").WorkflowCatalog>
+    | DurableObjectNamespace<import("./mcp-grants.ts").McpGrants>;
 };
 
 export type BindingProperties = { name: string };

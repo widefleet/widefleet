@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import { authConfigurationKey, authControlPath } from "@platform/auth-proxy/publication";
+import { authControlPath } from "@platform/auth-proxy/publication";
 import { createInstalledAppSignIn } from "./app-sign-in-installed.ts";
 import type { Configuration } from "./config.ts";
 import { installationOrganizationId } from "../organization.ts";
@@ -14,7 +14,7 @@ export const createAppSignIn = (
   createInstalledAppSignIn(
     configuration,
     cookieSecret,
-    async (method, body) => {
+    async (path, method, body) => {
       const key = z
         .string()
         .min(32)
@@ -31,13 +31,10 @@ export const createAppSignIn = (
         signal: AbortSignal.timeout(15_000),
       };
 
-      if (method === "PUT") options.body = body ?? null;
+      if (method === "PUT" || method === "POST") options.body = body ?? null;
 
       const response = await fetch(
-        new URL(
-          `${authControlPath}/${authConfigurationKey(organizationId)}`,
-          configuration.PLATFORM_APP_RUNTIME_URL,
-        ),
+        new URL(`${authControlPath}${path}`, configuration.PLATFORM_APP_RUNTIME_URL),
         options,
       );
 

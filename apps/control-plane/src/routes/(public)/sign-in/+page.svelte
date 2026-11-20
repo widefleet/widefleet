@@ -2,9 +2,9 @@
   import { authClient } from "#lib/auth-client";
   import { resetClientContext } from "#lib/analytics-client";
   import EmailCodeForm from "#shadcn/components/EmailCodeForm.svelte";
-  import AuthLayout from "#shadcn/components/AuthLayout.svelte";
+  import AuthLayout from "@platform/ui/auth-layout";
   import Feedback from "#shadcn/components/Feedback.svelte";
-  import { Button } from "#shadcn/components/ui/button/index.js";
+  import { Button } from "@platform/ui/button";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
   import type { PageData } from "./$types";
   import { onMount } from "svelte";
@@ -24,8 +24,29 @@
 
   let sentTo = $state<string | null>(null);
 
+  // Fall back to the button if the company sign-in returned here right away.
+  const automaticStart = $derived(`widefleet.company-sign-in:${data.organizationSlug ?? ""}`);
+
+  const recentlyStarted = () => {
+    try {
+      return Date.now() - Number(sessionStorage.getItem(automaticStart) ?? 0) < 60_000;
+    } catch {
+      return true;
+    }
+  };
+
   onMount(() => {
     lastUsed = authClient.getLastUsedLoginMethod();
+
+    if (data.continueAs && !recentlyStarted()) {
+      try {
+        sessionStorage.setItem(automaticStart, String(Date.now()));
+      } catch {
+        return;
+      }
+
+      void signIn();
+    }
   });
 
   const signIn = async () => {
@@ -34,7 +55,12 @@
     message = "";
 
     try {
-      const input = { providerId: data.provider, callbackURL: data.next };
+      const input: Parameters<typeof authClient.signIn.sso>[0] = {
+        providerId: data.provider,
+        callbackURL: data.next,
+      };
+
+      if (data.continueAs) input.loginHint = data.continueAs;
 
       const result = await authClient.signIn.sso(input);
 

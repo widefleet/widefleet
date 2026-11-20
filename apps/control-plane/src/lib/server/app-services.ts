@@ -75,11 +75,8 @@ export const checkServiceConsumers = async (
       );
 };
 
-export const serviceEntrypoints = async (
-  transaction: Transaction,
-  app: typeof apps.$inferSelect,
-) => {
-  if (!app.activeDeploymentId || app.state === "deleting") return [];
+const deployedEntrypoints = async (transaction: Transaction, app: typeof apps.$inferSelect) => {
+  if (!app.activeDeploymentId || app.state === "deleting") return null;
 
   const [active] = await transaction
     .select({ metadata: artifacts.metadata })
@@ -87,7 +84,7 @@ export const serviceEntrypoints = async (
     .innerJoin(artifacts, eq(artifacts.id, deployments.artifactId))
     .where(and(eq(deployments.appId, app.id), eq(deployments.id, app.activeDeploymentId)));
 
-  if (!active) return [];
+  if (!active) return null;
 
   const pending = await transaction
     .select({ metadata: artifacts.metadata })
@@ -95,10 +92,47 @@ export const serviceEntrypoints = async (
     .innerJoin(artifacts, eq(artifacts.id, deployments.artifactId))
     .where(and(eq(deployments.appId, app.id), inArray(deployments.status, ["queued", "running"])));
 
-  return (contract.workerMetadata.parse(active.metadata).entrypoints ?? []).filter((name) =>
-    pending.every((record) =>
-      contract.workerMetadata.parse(record.metadata).entrypoints?.includes(name),
+  const metadata = contract.workerMetadata.parse(active.metadata);
+
+  return {
+    metadata,
+    entrypoints: (metadata.entrypoints ?? []).filter((name) =>
+      pending.every((record) =>
+        contract.workerMetadata.parse(record.metadata).entrypoints?.includes(name),
+      ),
     ),
+  };
+};
+
+export const serviceEntrypoints = async (transaction: Transaction, app: typeof apps.$inferSelect) =>
+  (await deployedEntrypoints(transaction, app))?.entrypoints ?? [];
+
+/**
+ * Lists the entrypoints the app publishes as an API. Every web app has a default handler for its
+ * own HTTP routes, so the catalog lists the default entrypoint only when it has RPC methods or a
+ * TSDoc comment that documents it as an API. Callers can still bind any entrypoint explicitly.
+ */
+export const catalogEntrypoints = async (
+  transaction: Transaction,
+  app: typeof apps.$inferSelect,
+) => {
+  const deployed = await deployedEntrypoints(transaction, app);
+
+  if (!deployed) return [];
+  const documented = deployed.metadata.service_documentation?.entrypoints;
+
+  return deployed.entrypoints.filter(
+    (name) =>
+      name !== "default" ||
+      !documented?.some(
+        (entry) =>
+          entry.name === name &&
+          entry.methods.length === 0 &&
+          !entry.summary &&
+          !entry.remarks &&
+          entry.examples.length === 0 &&
+          !entry.deprecated,
+      ),
   );
 };
 

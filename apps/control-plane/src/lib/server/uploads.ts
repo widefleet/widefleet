@@ -43,6 +43,9 @@ const getSession = async (
   return Result.ok({ ...session, manifest: contract.assetManifest.parse(session.manifest) });
 };
 
+/** The conflict of a first deployment to an app that was deployed meanwhile. */
+export const appAlreadyDeployed = "The app already has a deployment";
+
 export const createUploadService = (
   database: Database,
   storage: ArtifactStorage,
@@ -127,6 +130,7 @@ export const createUploadService = (
     metadata: z.infer<typeof contract.workerMetadata>,
     modules: WorkerModule[],
     requestId: string,
+    options: { firstDeployment?: boolean } = {},
   ) => {
     const prepared = await transact(database, (transaction) =>
       Result.gen(async function* () {
@@ -134,6 +138,19 @@ export const createUploadService = (
 
         if (record.state === "deleting")
           return yield* new InvalidOperation({ code: "CONFLICT", message: "App is being deleted" });
+
+        // managedApp holds the app's row lock until the deployment is queued, so
+        // no other publish can deploy the app between this check and the queue.
+        if (options.firstDeployment) {
+          const [deployed] = await transaction
+            .select({ id: deployments.id })
+            .from(deployments)
+            .where(eq(deployments.appId, appId))
+            .limit(1);
+
+          if (deployed)
+            return yield* new InvalidOperation({ code: "CONFLICT", message: appAlreadyDeployed });
+        }
 
         if (
           metadata.source &&

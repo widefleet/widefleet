@@ -42,6 +42,9 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
 
   let catalog = [service];
 
+  // Deployed apps that the catalog omits, such as a web app with an undocumented default handler.
+  let unlisted: (typeof service)[] = [];
+
   const requests: {
     path: string;
     method: string;
@@ -79,22 +82,35 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
       if (request.url === "/api/v1/apps/by-name/inventory") response.end(JSON.stringify(app));
       else if (request.url === "/api/v1/app-services") {
         response.end(JSON.stringify(catalog));
-      } else if (request.url === "/api/v1/app-services/erp-app") {
-        response.end(
-          JSON.stringify({
-            appId: app.id,
-            slug: "erp-app",
-            deploymentId: app.activeDeploymentId,
-            documentation: {
-              format: 1,
-              entrypoints: [{ name: "Reader", summary: "Read inventory" }],
-              types: [],
-            },
-          }),
-        );
+      } else if (request.method === "GET" && request.url?.startsWith("/api/v1/app-services/")) {
+        // Mirror the service description lookup: an app ID wins over a UUID-shaped slug.
+        const target = decodeURIComponent(request.url.slice("/api/v1/app-services/".length));
+        const deployed = [...catalog, ...unlisted];
+
+        const entry =
+          deployed.find((candidate) => candidate.appId === target.toLowerCase()) ??
+          deployed.find((candidate) => candidate.slug === target);
+
+        if (!entry) {
+          response.statusCode = 404;
+          response.end(JSON.stringify({ message: "App service not found" }));
+        } else
+          response.end(
+            JSON.stringify({
+              ...entry,
+              deploymentId: app.activeDeploymentId,
+              documentation: {
+                format: 1,
+                entrypoints: [{ name: "Reader", summary: "Read inventory" }],
+                types: [],
+              },
+            }),
+          );
       } else if (
         request.method === "PUT" &&
-        catalog.some((entry) => request.url === `/api/v1/app-services/${entry.appId}/access`)
+        [...catalog, ...unlisted].some(
+          (entry) => request.url === `/api/v1/app-services/${entry.appId}/access`,
+        )
       ) {
         response.end(body);
       } else if (request.url?.startsWith("/api/v1/connection-requests")) {
@@ -234,6 +250,7 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
   beforeEach(() => {
     requests.length = 0;
     catalog = [service];
+    unlisted = [];
     outcome = "active";
     rejected = false;
     superseded = false;
@@ -375,11 +392,27 @@ describeCli("App services CLI", { timeout: 30_000 }, () => {
   it("does not change availability when the requested API is absent", async () => {
     await expect(
       command("services", "access", "missing-api", "--mode", "organization"),
-    ).rejects.toHaveProperty(
-      "stderr",
-      expect.stringContaining("Target app has no available service API"),
-    );
+    ).rejects.toHaveProperty("stderr", expect.stringContaining("App service not found"));
     expect(requests.filter((entry) => entry.method !== "GET")).toEqual([]);
+  });
+
+  it("connects an explicit entrypoint of an app that the catalog omits", async () => {
+    const web = {
+      ...service,
+      appId: "00000000-0000-4000-8000-000000000101",
+      slug: "web-app",
+      entrypoints: ["default"],
+    };
+
+    unlisted = [web];
+    expect(JSON.parse((await command("services")).stdout)).toEqual(catalog);
+    await command("connect", "web-app", "--app", "inventory", "--as", "WEB", "--no-wait");
+    const connected = requests.findLast((entry) => entry.path.endsWith("/bindings/WEB"));
+    expect(connected?.method).toBe("PUT");
+    expect(JSON.parse(connected?.body ?? "null")).toEqual({
+      app: web.appId,
+      entrypoint: "default",
+    });
   });
 
   it.each([
