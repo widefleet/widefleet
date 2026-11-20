@@ -1,7 +1,7 @@
 ---
 title: API and uploads
 description: Authentication, app publication and the Worker upload contract.
-lastModified: 2026-11-16
+lastModified: 2026-11-20
 ---
 
 Authenticated clients can fetch `/api/v1/openapi.json`. The document covers management operations, agent jobs, binary assets and multipart Workers.
@@ -80,6 +80,23 @@ Use [CLI organization selection](/reference/cli-configuration#select-an-organiza
 for equivalent CLI commands. If a browser selection becomes unavailable, the
 workspace returns to organization selection. With no available memberships, ask
 an administrator to grant access.
+
+## Personal connector accounts
+
+These operations act on your own connector accounts in the selected organization.
+Reads require `platform:read` and writes `platform:write`. Access to the connector
+app is enough; managing it is not required.
+
+| Endpoint                                        | Result                                                       |
+| ----------------------------------------------- | ------------------------------------------------------------ |
+| `GET /api/v1/user-connections`                  | `[{ appId, displayName, hostname, status, unavailable }]`    |
+| `POST /api/v1/user-connections/{appId}/connect` | `{ url, expiresAt }`, a single-use link to open in a browser |
+| `DELETE /api/v1/user-connections/{appId}`       | `{ disconnected: true }`                                     |
+
+Send `{}` as the connect body. `status` has the shape described in
+[personal connections](/guides/personal-connections#add-support-to-your-own-connector).
+A connector that cannot be reached has `status: null` and `unavailable: true`.
+A `401` means you need to [sign in again](/guides/personal-connections#sign-in-again).
 
 ## App templates
 
