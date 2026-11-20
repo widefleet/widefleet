@@ -1,7 +1,7 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import app from "widefleet:app";
 import type { QueueInput, ScheduledInput, Settlement } from "./types.ts";
-import { withEnvProperties } from "./env-properties.ts";
+import { withBindings } from "widefleet:bindings";
 
 const background = (context: ExecutionContext) => {
   const pending: Promise<void>[] = [];
@@ -57,7 +57,7 @@ export class Events extends WorkerEntrypoint {
             noRetry = true;
           },
         },
-        withEnvProperties(this.env),
+        withBindings(this.env),
         work.ctx,
       );
     } catch (cause) {
@@ -102,7 +102,7 @@ export class Events extends WorkerEntrypoint {
             for (const message of messages) message.retry(options);
           },
         },
-        withEnvProperties(this.env),
+        withBindings(this.env),
         work.ctx,
       );
     } catch (cause) {

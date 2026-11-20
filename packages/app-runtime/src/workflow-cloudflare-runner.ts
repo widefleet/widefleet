@@ -21,7 +21,7 @@ import {
   type WorkflowResult,
 } from "./workflow-cloudflare-errors.ts";
 import type { CloudflareWorkflowSteps } from "./workflow-cloudflare.ts";
-import { withEnvProperties } from "./env-properties.ts";
+import { withBindings } from "widefleet:bindings";
 
 const restoredStepErrors = new WeakSet<Error>();
 
@@ -69,7 +69,7 @@ export class WorkflowRunner extends WorkerEntrypoint<Record<string, WorkflowValu
     return captureApp(async () => {
       this.ready();
 
-      return new ApplicationWorkflow(this.ctx, withEnvProperties(this.env)).run(event, {
+      return new ApplicationWorkflow(this.ctx, withBindings(this.env)).run(event, {
         do(
           name: string,
           config: StepConfig | Callback,
