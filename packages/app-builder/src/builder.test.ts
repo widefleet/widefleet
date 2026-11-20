@@ -135,6 +135,9 @@ const packages = {
   "shape-types": {
     "package.json": JSON.stringify({ name: "shape-types", version: "2.0.0", types: "index.d.ts" }),
     "index.d.ts": "/** A shape to measure. */\nexport interface Shape {\n  size: number;\n}\n",
+    // Published, but not named as the types until a patch changes the manifest.
+    "src/published.ts":
+      "/** A shape from its published source. */\nexport interface Shape {\n  size: number;\n}\n",
   },
 };
 
@@ -523,5 +526,224 @@ describe.runIf(process.env["RUN_BUILDER_TESTS"] === "1")("app builder", () => {
 
     expect(entry.status).toBe(422);
     expect(await failure(entry)).toBe("The Worker entry src/app.ts is missing");
+
+    const unknown = await post("/bundle", {
+      files: {
+        ...project,
+        "wrangler.jsonc": JSON.stringify({
+          main: "src/app.ts",
+          compatibility_date: "2026-10-01",
+          network: { backend: ["https://api.example.test"] },
+        }),
+      },
+    });
+
+    expect(unknown.status).toBe(422);
+    expect(await failure(unknown)).toContain("network");
+  });
+
+  // As pnpm-workspace.yaml declares them for `pnpm install`.
+  const patched = (patches: Record<string, string>, files: Record<string, string> = {}) => ({
+    ...project,
+    "pnpm-workspace.yaml": `patchedDependencies:\n${Object.entries(patches)
+      .map(([dependency, path]) => `  "${dependency}": ${path}\n`)
+      .join("")}`,
+    ...files,
+  });
+
+  const greetingPatch = [
+    "diff --git a/index.js b/index.js",
+    "index 0000000..1111111 100644",
+    "--- a/index.js",
+    "+++ b/index.js",
+    "@@ -1,2 +1,2 @@",
+    "-export const greet = (name) => `Hello ${name}`;",
+    "+export const greet = (name) => `Patched hello ${name}`;",
+    " //# sourceMappingURL=index.js.map",
+    "",
+  ].join("\n");
+
+  // Changes a declaration, which bundles do not install, and adds a file.
+  const declarationPatch = [
+    "diff --git a/index.d.ts b/index.d.ts",
+    "--- a/index.d.ts",
+    "+++ b/index.d.ts",
+    "@@ -1,4 +1,4 @@",
+    "-/** A shape to measure. */",
+    "+/** A patched shape. */",
+    " export interface Shape {",
+    "   size: number;",
+    " }",
+    "diff --git a/added.d.ts b/added.d.ts",
+    "new file mode 100644",
+    "--- /dev/null",
+    "+++ b/added.d.ts",
+    "@@ -0,0 +1 @@",
+    "+export {};",
+    "\\ No newline at end of file",
+    "",
+  ].join("\n");
+
+  it("applies the dependency patches the project declares for pnpm", async () => {
+    const files = patched(
+      { "greeting@1.0.0": "patches/greeting@1.0.0.patch", "shape-types": "./patches/shape.patch" },
+      { "patches/greeting@1.0.0.patch": greetingPatch, "patches/shape.patch": declarationPatch },
+    );
+
+    const bundled = await post("/bundle", { files });
+
+    expect(bundled.status, await bundled.clone().text()).toBe(200);
+    const result = bundleResult.parse(await bundled.json());
+
+    expect(result.worker).toContain("Patched hello");
+    expect(result.worker).not.toContain("`Hello ");
+
+    const documented = await post("/document", {
+      files,
+      worker: result.worker,
+      map: result.map,
+      entry: result.entry,
+      entrypoints: result.metadata.entrypoints,
+    });
+
+    expect(documented.status, await documented.clone().text()).toBe(200);
+    const { documentation } = documentResult.parse(await documented.json());
+
+    expect(documentation.types).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'import("./node_modules/shape-types/index").Shape',
+          summary: "A patched shape.",
+        }),
+      ]),
+    );
+  });
+
+  it("keeps type sources a patched manifest names", async () => {
+    const manifest = JSON.stringify({ name: "shape-types", version: "2.0.0", types: "index.d.ts" });
+
+    const sourcePatch = [
+      "diff --git a/package.json b/package.json",
+      "--- a/package.json",
+      "+++ b/package.json",
+      "@@ -1 +1 @@",
+      `-${manifest}`,
+      "\\ No newline at end of file",
+      `+${manifest.replace("index.d.ts", "src/shape.ts")}`,
+      "\\ No newline at end of file",
+      "diff --git a/src/shape.ts b/src/shape.ts",
+      "new file mode 100644",
+      "--- /dev/null",
+      "+++ b/src/shape.ts",
+      "@@ -0,0 +1,4 @@",
+      "+/** A shape from its source. */",
+      "+export interface Shape {",
+      "+  size: number;",
+      "+}",
+      "",
+    ].join("\n");
+
+    const files = patched(
+      { "shape-types@2.0.0": "patches/shape.patch" },
+      { "patches/shape.patch": sourcePatch },
+    );
+
+    const bundled = await post("/bundle", { files });
+
+    expect(bundled.status, await bundled.clone().text()).toBe(200);
+    const result = bundleResult.parse(await bundled.json());
+
+    const documented = await post("/document", {
+      files,
+      worker: result.worker,
+      map: result.map,
+      entry: result.entry,
+      entrypoints: result.metadata.entrypoints,
+    });
+
+    expect(documented.status, await documented.clone().text()).toBe(200);
+    expect(documentResult.parse(await documented.json()).documentation.types).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'import("./node_modules/shape-types/src/shape").Shape',
+          summary: "A shape from its source.",
+        }),
+      ]),
+    );
+  });
+
+  it("keeps published type sources that only the patched manifest names", async () => {
+    const manifest = JSON.stringify({ name: "shape-types", version: "2.0.0", types: "index.d.ts" });
+
+    const manifestPatch = [
+      "diff --git a/package.json b/package.json",
+      "--- a/package.json",
+      "+++ b/package.json",
+      "@@ -1 +1 @@",
+      `-${manifest}`,
+      "\\ No newline at end of file",
+      `+${manifest.replace("index.d.ts", "src/published.ts")}`,
+      "\\ No newline at end of file",
+      "",
+    ].join("\n");
+
+    const files = patched(
+      { "shape-types@2.0.0": "patches/shape.patch" },
+      { "patches/shape.patch": manifestPatch },
+    );
+
+    const bundled = await post("/bundle", { files });
+
+    expect(bundled.status, await bundled.clone().text()).toBe(200);
+    const result = bundleResult.parse(await bundled.json());
+
+    const documented = await post("/document", {
+      files,
+      worker: result.worker,
+      map: result.map,
+      entry: result.entry,
+      entrypoints: result.metadata.entrypoints,
+    });
+
+    expect(documented.status, await documented.clone().text()).toBe(200);
+    expect(documentResult.parse(await documented.json()).documentation.types).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'import("./node_modules/shape-types/src/published").Shape',
+          summary: "A shape from its published source.",
+        }),
+      ]),
+    );
+  });
+
+  it("fails builds whose dependency patches do not apply", async () => {
+    const context = await post("/bundle", {
+      files: patched(
+        { "greeting@1.0.0": "patches/greeting.patch" },
+        { "patches/greeting.patch": greetingPatch.replace("`Hello ${name}`", "`Hi ${name}`") },
+      ),
+    });
+
+    expect(context.status).toBe(422);
+    expect(await failure(context)).toBe("The patch greeting@1.0.0 does not apply to index.js");
+
+    const version = await post("/bundle", {
+      files: patched(
+        { "greeting@2.0.0": "patches/greeting.patch" },
+        { "patches/greeting.patch": greetingPatch },
+      ),
+    });
+
+    expect(version.status).toBe(422);
+    expect(await failure(version)).toBe(
+      "No installed package matches the patched dependency greeting@2.0.0",
+    );
+
+    const missing = await post("/bundle", {
+      files: patched({ "greeting@1.0.0": "patches/greeting.patch" }),
+    });
+
+    expect(missing.status).toBe(422);
+    expect(await failure(missing)).toBe("The patch file patches/greeting.patch is missing");
   });
 });

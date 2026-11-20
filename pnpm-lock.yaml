@@ -165,7 +165,7 @@ settings:
 patchedDependencies:
   '@better-auth/core@1.7.27': df3fd13c3c380b21fd696cba502c776211ce9769de5a09f7205dfb05da2f5c08
   '@better-auth/oauth-provider@1.7.27': 1fa00c5288c642c073533be7b2a2adea08379e47074e11af892d94c7738caddd
-  '@cloudflare/worker-bundler@0.2.6': 354a50f9c00e7a8b0f06d52b4aa332a1ab30fd8da42d5b16594e9d7987286262
+  '@cloudflare/worker-bundler@0.2.6': 0eb0808184ef590337ab61d84c78de641ce65a713d7c6dc1ba070b0ac664cb99
   '@cloudflare/workers-oauth-provider@1.2.4': f21d52790d10f0313efdc1b0a03895a0f63f54f7dfd6b6bd51c889c69415b5d5
   '@opencode/codemode@2.3.0': 74a3d62cb776da99648b8b8841dac898697a072918fc2c1b31477eb2273c744a
   better-auth@1.7.27: ad6f718a892b57ba00226dda8a09421a163c2e76b4126401b720b4b6f33344b1
@@ -366,7 +366,7 @@ importers:
     dependencies:
       '@cloudflare/worker-bundler':
         specifier: 0.2.6
-        version: 0.2.6(patch_hash=354a50f9c00e7a8b0f06d52b4aa332a1ab30fd8da42d5b16594e9d7987286262)(supports-color@10.2.2)
+        version: 0.2.6(patch_hash=0eb0808184ef590337ab61d84c78de641ce65a713d7c6dc1ba070b0ac664cb99)(supports-color@10.2.2)
       '@platform/contracts':
         specifier: workspace:*
         version: link:../contracts
@@ -376,6 +376,9 @@ importers:
       es-module-lexer:
         specifier: 2.3.2
         version: 2.3.2
+      yaml:
+        specifier: 2.9.1
+        version: 2.9.1
       zod:
         specifier: 4.6.5
         version: 4.6.5
@@ -8041,7 +8044,7 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@cloudflare/worker-bundler@0.2.6(patch_hash=354a50f9c00e7a8b0f06d52b4aa332a1ab30fd8da42d5b16594e9d7987286262)(supports-color@10.2.2)':
+  '@cloudflare/worker-bundler@0.2.6(patch_hash=0eb0808184ef590337ab61d84c78de641ce65a713d7c6dc1ba070b0ac664cb99)(supports-color@10.2.2)':
     dependencies:
       '@typescript/vfs': 1.6.5(supports-color@10.2.2)(typescript@6.0.3)
       es-module-lexer: 2.3.2

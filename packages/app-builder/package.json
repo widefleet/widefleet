@@ -13,6 +13,7 @@
     "@platform/contracts": "workspace:*",
     "@platform/service-docs": "workspace:*",
     "es-module-lexer": "2.3.2",
+    "yaml": "2.9.1",
     "zod": "4.6.5"
   },
   "devDependencies": {
