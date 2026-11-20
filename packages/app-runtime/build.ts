@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { z } from "zod";
+import { runtimeVersion } from "@platform/contracts";
 import { buildInputForm, buildMcpUi } from "./build-ui.ts";
 import { mcpSkillCatalog } from "./src/mcp-skills.ts";
 
@@ -15,9 +16,17 @@ const license = [
   await readFile(new URL("NOTICE", import.meta.url), "utf8"),
 ].join("\n");
 
-const { version } = z
+const { version: productVersion } = z
   .object({ version: z.string() })
   .parse(JSON.parse(await readFile(new URL("../../package.json", import.meta.url), "utf8")));
+
+// Runtime versions are immutable, so an installation that deploys several builds
+// of one product version names each build, for example by its commit.
+const buildMetadata = process.env["WIDEFLEET_RUNTIME_BUILD"] || undefined;
+
+const version = runtimeVersion.parse(
+  buildMetadata ? `${productVersion}+${buildMetadata}` : productVersion,
+);
 
 const extension = process.env["WIDEFLEET_APP_RUNTIME_EXTENSION"];
 

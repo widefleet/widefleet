@@ -363,7 +363,12 @@ export const artifact = z.strictObject({
 export const runtimeRelease = z.strictObject({
   protocol: z.literal(3),
   auth: z.literal(1),
-  version: z.string().regex(/^[0-9]+\.[0-9]+\.[0-9]+$/),
+  // Build metadata names one of several builds of a product version, for example
+  // each hosted deployment. Published releases carry the plain product version.
+  version: z
+    .string()
+    .max(64)
+    .regex(/^[0-9]+\.[0-9]+\.[0-9]+(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/),
   celld: z.enum(["0.6.2", "0.6.3-widefleet.1"]),
   workflows: z.literal(1).optional(),
   cloudflare: z.literal(1).optional(),

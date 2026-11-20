@@ -5,8 +5,24 @@ import {
   appSecretValue,
   appSecretPreparation,
   capabilityGrant,
+  runtimeVersion,
   workerMetadata,
 } from "./index.ts";
+
+describe("runtime versions", () => {
+  it.each([
+    { value: "0.7.20", accepted: true },
+    { value: "0.7.20+5f67a8c3d2e1", accepted: true },
+    { value: "0.7.20+build.12", accepted: true },
+    { value: "0.7.20-rc.1", accepted: false },
+    { value: "0.7.20+", accepted: false },
+    { value: "0.7.20+a..b", accepted: false },
+    { value: "0.7.20+a/b", accepted: false },
+    { value: `0.7.20+${"a".repeat(58)}`, accepted: false },
+  ])("$value: $accepted", ({ value, accepted }) => {
+    expect(runtimeVersion.safeParse(value).success).toBe(accepted);
+  });
+});
 
 describe("app secret contracts", () => {
   it.each([
