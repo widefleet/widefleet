@@ -361,7 +361,7 @@ export default {
 
     if (discovery) return discovery;
 
-    const oauthResponse = await managedOAuth(environment).callback(request, (identity) =>
+    const oauthResponse = await managedOAuth(environment).handle(request, (identity) =>
       oauthAppAvailable(environment, identity),
     );
 

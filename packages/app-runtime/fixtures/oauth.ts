@@ -77,7 +77,7 @@ export default class Host extends WorkerEntrypoint<ParentEnvironment> {
     }
 
     return (
-      (await managedOAuth(this.env).callback(request, (identity) =>
+      (await managedOAuth(this.env).handle(request, (identity) =>
         oauthAppAvailable(this.env, identity),
       )) ?? new Response(null, { status: 404 })
     );

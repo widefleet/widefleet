@@ -1,15 +1,25 @@
 import { runWithEndpointContext } from "@better-auth/core/context";
 import { createLogger } from "@better-auth/core/env";
-import type { OAuth2Tokens, OAuthProvider, ProviderOptions } from "@better-auth/core/oauth2";
+import {
+  createAuthorizationURL,
+  refreshAccessToken,
+  validateAuthorizationCode,
+  type OAuth2Tokens,
+  type OAuthProvider,
+  type ProviderOptions,
+} from "@better-auth/core/oauth2";
 import { socialProviders } from "@better-auth/core/social-providers";
 import { appCaller } from "@platform/contracts";
 import { z } from "zod";
 import { decryptText, encryptText } from "./secrets.ts";
 import {
+  clientMetadataDocumentPath,
   managedOAuthConfiguration,
   oauthRequest,
   type managedOAuthClient,
+  type metadataDocumentOAuthClient,
   type OAuthRequest,
+  type registeredOAuthClient,
 } from "./oauth-protocol.ts";
 
 // The operator's client secret is shared by every organization, so it is only
@@ -48,7 +58,21 @@ type Environment = { WIDEFLEET_SECRETS_KEY: string; WIDEFLEET_OAUTH?: string };
 
 type Client = z.infer<typeof managedOAuthClient>;
 
+type Configuration = z.infer<typeof managedOAuthConfiguration>;
+
+type MetadataDocumentClient = z.infer<typeof metadataDocumentOAuthClient>;
+
 export type OAuthIdentity = Omit<z.infer<typeof ownership>, "client" | "clientId">;
+
+const isMetadataDocumentClient = (client: Client): client is MetadataDocumentClient =>
+  "registration" in client;
+
+const metadataDocumentUrl = (config: Configuration) =>
+  `${config.origin}${clientMetadataDocumentPath}`;
+
+// The client ID the authorization server knows this client by.
+const clientIdOf = (config: Configuration, client: Client) =>
+  isMetadataDocumentClient(client) ? metadataDocumentUrl(config) : client.clientId;
 
 const configuration = (environment: Environment) => {
   if (!environment.WIDEFLEET_OAUTH) return null;
@@ -85,7 +109,12 @@ const quietly = <T>(operation: () => Promise<T>) =>
     operation,
   );
 
-const provider = (client: Client) =>
+type Flow = Pick<
+  OAuthProvider,
+  "createAuthorizationURL" | "validateAuthorizationCode" | "refreshAccessToken"
+>;
+
+const provider = (client: z.infer<typeof registeredOAuthClient>): Flow =>
   // SAFETY: Every social provider takes the shared provider options; provider-specific
   // options come from the operator's configuration.
   (socialProviders[client.provider] as (options: ProviderOptions) => OAuthProvider)({
@@ -93,6 +122,75 @@ const provider = (client: Client) =>
     clientId: client.clientId,
     clientSecret: client.clientSecret,
   });
+
+// A public client identified by the installation's metadata document. PKCE
+// stands in for a client secret, and every request names the resource.
+const metadataDocumentFlow = (config: Configuration, client: MetadataDocumentClient): Flow => {
+  const options = { clientId: metadataDocumentUrl(config) };
+  const tokenEndpointAuth = { method: "none" } as const;
+  const { resource } = client;
+
+  return {
+    createAuthorizationURL: async ({ state, codeVerifier, scopes, redirectURI }) => {
+      const additionalParams: Record<string, string> = {};
+
+      if (resource) additionalParams["resource"] = resource;
+
+      return createAuthorizationURL({
+        id: "client-id-metadata-document",
+        options,
+        authorizationEndpoint: client.authorizationUrl,
+        state,
+        codeVerifier,
+        scopes,
+        redirectURI,
+        additionalParams,
+      });
+    },
+    validateAuthorizationCode: async ({ code, codeVerifier, redirectURI }) =>
+      validateAuthorizationCode({
+        code,
+        codeVerifier,
+        redirectURI,
+        options,
+        tokenEndpoint: client.tokenUrl,
+        tokenEndpointAuth,
+        resource,
+      }),
+    refreshAccessToken: async (refreshToken) =>
+      refreshAccessToken({
+        refreshToken,
+        options,
+        tokenEndpoint: client.tokenUrl,
+        tokenEndpointAuth,
+        resource,
+      }),
+  };
+};
+
+const flow = (config: Configuration, client: Client) =>
+  isMetadataDocumentClient(client) ? metadataDocumentFlow(config, client) : provider(client);
+
+// Authorization servers fetch this document to learn the client's name and the
+// redirect URIs they may send its users to. It names the callbacks of every
+// metadata document client and nothing that differs between organizations.
+const metadataDocument = (config: Configuration) => {
+  const callbacks = Object.entries(config.clients)
+    .filter(([, client]) => isMetadataDocumentClient(client))
+    .map(([name]) => `${config.origin}${callbackPath(name)}`)
+    .sort();
+
+  if (callbacks.length === 0) return null;
+
+  return {
+    client_id: metadataDocumentUrl(config),
+    client_name: config.clientName,
+    redirect_uris: callbacks,
+    grant_types: ["authorization_code", "refresh_token"],
+    response_types: ["code"],
+    token_endpoint_auth_method: "none",
+  };
+};
 
 // RFC 6749 separates scopes with spaces; GitHub reports them with commas.
 const scopeList = (value: string | null | undefined) =>
@@ -135,16 +233,15 @@ const issuerMatches = (expected: string, actual: string) => {
   );
 };
 
-const revoke = async (client: Client, token: string) => {
+const revoke = async (config: Configuration, client: Client, token: string) => {
   if (!client.revocationUrl) return false;
+  const body = new URLSearchParams({ token, client_id: clientIdOf(config, client) });
+
+  if (!isMetadataDocumentClient(client)) body.set("client_secret", client.clientSecret);
 
   const response = await fetch(client.revocationUrl, {
     method: "POST",
-    body: new URLSearchParams({
-      token,
-      client_id: client.clientId,
-      client_secret: client.clientSecret,
-    }),
+    body,
     headers: { accept: "application/json" },
     redirect: "manual",
     signal: AbortSignal.timeout(15000),
@@ -191,32 +288,58 @@ export const openAccessToken = async (
 
 export const isAccessTokenPlaceholder = (value: string) => value.startsWith(accessTokenPrefix);
 
+const metadataDocumentResponse = (environment: Environment, request: Request) => {
+  let config;
+
+  try {
+    config = configuration(environment);
+  } catch {
+    // An optional OAuth configuration must not prevent normal app routing.
+    return null;
+  }
+
+  const document =
+    config && new URL(request.url).origin === config.origin && metadataDocument(config);
+
+  if (!document) return null;
+
+  if (request.method !== "GET" && request.method !== "HEAD")
+    return new Response(null, { status: 405, headers: { allow: "GET, HEAD" } });
+
+  // Authorization servers cache the document by these headers; a short lifetime
+  // lets added clients and their callbacks take effect promptly.
+  return Response.json(document, { headers: { "cache-control": "public, max-age=300" } });
+};
+
 export const managedOAuth = (environment: Environment) => ({
   async request(identity: OAuthIdentity, input: OAuthRequest) {
     const request = oauthRequest.parse(input);
     const config = configuration(environment);
     const client = config?.clients[request.client];
 
-    if (request.action === "configuration")
-      return client ? { clientId: client.clientId, scopes: client.scopes } : null;
+    if (!client || !config) {
+      if (request.action === "configuration") return null;
+      throw new Error("Managed OAuth client is not configured");
+    }
 
-    if (!client || !config) throw new Error("Managed OAuth client is not configured");
+    if (request.action === "configuration")
+      return { clientId: clientIdOf(config, client), scopes: client.scopes };
 
     const owner = ownership.parse({
       ...identity,
       client: request.client,
-      clientId: client.clientId,
+      clientId: clientIdOf(config, client),
     });
 
     const redirectURI = `${config.origin}${callbackPath(request.client)}`;
-    const oauth = provider(client);
+    const oauth = flow(config, client);
 
     const present = async (tokens: OAuth2Tokens | null, previousRefreshToken?: string) => {
       if (!tokens?.accessToken) throw new Error("OAuth provider returned no usable token");
       const granted = (tokens.scopes ?? []).flatMap((scope) => scopeList(scope));
 
       if (disallowed(client, granted).length > 0) {
-        await revoke(client, tokens.refreshToken ?? tokens.accessToken).catch(() => false);
+        await revoke(config, client, tokens.refreshToken ?? tokens.accessToken).catch(() => false);
         throw new Error("OAuth provider granted scopes this client does not allow");
       }
 
@@ -335,18 +458,26 @@ export const managedOAuth = (environment: Environment) => ({
       )
         throw new Error("OAuth grant belongs to another app or registration");
 
-      return { revoked: await revoke(client, grant.token) };
+      return { revoked: await revoke(config, client, grant.token) };
     }
 
     const grant = refreshGrant.parse(JSON.parse(await open(environment, "refresh", request.token)));
 
     requireOwner(grant, owner);
 
-    return { revoked: await revoke(client, grant.token) };
+    return { revoked: await revoke(config, client, grant.token) };
   },
 
-  async callback(request: Request, available: (identity: OAuthIdentity) => Promise<boolean>) {
+  /**
+   * The managed OAuth origin's public routes: provider callbacks and the client
+   * metadata document. Both are served before app authentication; any other
+   * request returns null.
+   */
+  async handle(request: Request, available: (identity: OAuthIdentity) => Promise<boolean>) {
     const url = new URL(request.url);
+
+    if (url.pathname === clientMetadataDocumentPath)
+      return metadataDocumentResponse(environment, request);
 
     if (!url.pathname.startsWith("/oauth/callback/")) return null;
     let config;
@@ -373,7 +504,7 @@ export const managedOAuth = (environment: Environment) => ({
         !client ||
         url.pathname !== callbackPath(pending.client) ||
         pending.expiresAt <= Date.now() ||
-        client.clientId !== pending.clientId ||
+        clientIdOf(config, client) !== pending.clientId ||
         !(await available(pending))
       )
         throw new Error("OAuth transaction is not available");
@@ -381,7 +512,14 @@ export const managedOAuth = (environment: Environment) => ({
 
       if (issuer && client.issuer && !issuerMatches(client.issuer, issuer))
         throw new Error("Unexpected OAuth issuer");
-      const target = new URL(`/auth/callback/${client.provider}`, pending.origin);
+
+      // A registered client returns to its Better Auth provider's callback; a
+      // metadata document client has no provider and returns to its own name.
+      const target = new URL(
+        `/auth/callback/${isMetadataDocumentClient(client) ? pending.client : client.provider}`,
+        pending.origin,
+      );
+
       target.searchParams.set("state", pending.state);
       target.searchParams.set("managed_state", ticket);
 

@@ -142,7 +142,7 @@ describe("managed OAuth broker", () => {
     expect(url.href).not.toContain("test-secret");
     expect(url.href).not.toContain(verifier);
 
-    const response = await broker.callback(
+    const response = await broker.handle(
       new Request(
         `https://oauth.example.test/oauth/callback/google?state=${encodeURIComponent(ticket)}&code=one-time-code&iss=https://accounts.google.com`,
       ),
@@ -310,15 +310,15 @@ describe("managed OAuth broker", () => {
         `https://oauth.example.test/oauth/callback/google?state=${encodeURIComponent(state)}&code=code`,
       );
 
-    expect((await broker.callback(callback(), async () => false))?.status).toBe(400);
+    expect((await broker.handle(callback(), async () => false))?.status).toBe(400);
     // The encrypted ticket may already start with X; always change the IV bytes.
     const tampered = `${ticket.startsWith("X") ? "Y" : "X"}${ticket.slice(1)}`;
 
-    expect((await broker.callback(callback(tampered), async () => true))?.status).toBe(400);
+    expect((await broker.handle(callback(tampered), async () => true))?.status).toBe(400);
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(Date.now() + 601000);
     await expect(broker.request(identity, exchange)).rejects.toThrow("expired");
-    expect((await broker.callback(callback(), async () => true))?.status).toBe(400);
+    expect((await broker.handle(callback(), async () => true))?.status).toBe(400);
     expect(requests).toHaveLength(0);
   });
 
@@ -395,7 +395,7 @@ describe("managed OAuth broker", () => {
 
     await expect(broker.request(identity, input)).rejects.toThrow();
     expect(
-      await broker.callback(
+      await broker.handle(
         new Request("https://wrong.example.test/oauth/callback/google"),
         async () => true,
       ),
@@ -407,16 +407,16 @@ describe("managed OAuth broker", () => {
     const callback = new URL("https://oauth.example.test/oauth/callback/google");
     callback.searchParams.set("state", ticket);
     callback.searchParams.set("error", "access_denied");
-    const cancelled = await broker.callback(new Request(callback), async () => true);
+    const cancelled = await broker.handle(new Request(callback), async () => true);
     const destination = new URL(z.string().parse(cancelled?.headers.get("location")));
 
     expect(destination.searchParams.get("error")).toBe("access_denied");
     expect(destination.searchParams.has("code")).toBe(false);
     callback.searchParams.set("iss", "https://attacker.example.test");
-    expect((await broker.callback(new Request(callback), async () => true))?.status).toBe(400);
+    expect((await broker.handle(new Request(callback), async () => true))?.status).toBe(400);
     callback.searchParams.delete("iss");
     callback.pathname = "/oauth/callback/github";
-    expect((await broker.callback(new Request(callback), async () => true))?.status).toBe(400);
+    expect((await broker.handle(new Request(callback), async () => true))?.status).toBe(400);
   });
 
   it.each([
@@ -431,7 +431,7 @@ describe("managed OAuth broker", () => {
     const broker = managedOAuth({ ...environment, WIDEFLEET_OAUTH: value });
 
     for (const path of ["/", "/api/data", "/oauth/callback/google"])
-      expect(await broker.callback(new Request(`${identity.origin}${path}`), available)).toBeNull();
+      expect(await broker.handle(new Request(`${identity.origin}${path}`), available)).toBeNull();
     expect(available).not.toHaveBeenCalled();
     await expect(
       broker.request(identity, { action: "configuration", client: "google" }),
@@ -469,4 +469,288 @@ describe("managed OAuth broker", () => {
     logged.mockRestore();
     warned.mockRestore();
   });
+});
+
+describe("managed OAuth with a Client ID Metadata Document", () => {
+  const documentUrl = "https://oauth.example.test/oauth/client-metadata.json";
+
+  const metadataEnvironment = {
+    WIDEFLEET_SECRETS_KEY: environment.WIDEFLEET_SECRETS_KEY,
+    WIDEFLEET_OAUTH: JSON.stringify({
+      origin: "https://oauth.example.test",
+      clients: {
+        github: {
+          provider: "github",
+          clientId: "test-github",
+          clientSecret: "test-github-secret",
+          scopes: ["read:user"],
+          hosts: ["https://api.github.com"],
+        },
+        tracker: {
+          registration: "client-id-metadata-document",
+          authorizationUrl: "https://auth.tracker.example.test/authorize",
+          tokenUrl: "https://auth.tracker.example.test/token",
+          resource: "https://mcp.tracker.example.test/mcp",
+          issuer: "https://auth.tracker.example.test",
+          revocationUrl: "https://auth.tracker.example.test/revoke",
+          scopes: ["read", "write"],
+          hosts: ["https://mcp.tracker.example.test"],
+        },
+        notes: {
+          registration: "client-id-metadata-document",
+          authorizationUrl: "https://notes.example.test/oauth/authorize",
+          tokenUrl: "https://notes.example.test/oauth/token",
+          scopes: ["notes"],
+          hosts: ["https://notes.example.test"],
+        },
+      },
+    }),
+  };
+
+  const authorizeTracker = async (broker = managedOAuth(metadataEnvironment)) => {
+    const result = z.object({ url: z.url() }).parse(
+      await broker.request(identity, {
+        action: "authorize",
+        client: "tracker",
+        scopes: ["read"],
+        state: "local-state",
+        codeVerifier: verifier,
+      }),
+    );
+
+    const url = new URL(result.url);
+
+    return { broker, url, ticket: z.string().parse(url.searchParams.get("state")) };
+  };
+
+  it("publishes one document naming the callbacks of its metadata document clients", async () => {
+    const broker = managedOAuth(metadataEnvironment);
+    const response = await broker.handle(new Request(documentUrl), async () => true);
+
+    expect(response?.status).toBe(200);
+    expect(response?.headers.get("cache-control")).toBe("public, max-age=300");
+    expect(await response?.json()).toEqual({
+      client_id: documentUrl,
+      client_name: "Widefleet",
+      redirect_uris: [
+        "https://oauth.example.test/oauth/callback/notes",
+        "https://oauth.example.test/oauth/callback/tracker",
+      ],
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    });
+    expect(
+      (await broker.handle(new Request(documentUrl, { method: "POST" }), async () => true))?.status,
+    ).toBe(405);
+    expect(
+      await broker.handle(
+        new Request(`${identity.origin}/oauth/client-metadata.json`),
+        async () => true,
+      ),
+    ).toBeNull();
+
+    const named = managedOAuth({
+      ...metadataEnvironment,
+      WIDEFLEET_OAUTH: JSON.stringify({
+        ...managedOAuthConfiguration.parse(JSON.parse(metadataEnvironment.WIDEFLEET_OAUTH)),
+        clientName: "Example Apps",
+      }),
+    });
+
+    expect(
+      await (await named.handle(new Request(documentUrl), async () => true))?.json(),
+    ).toMatchObject({ client_name: "Example Apps" });
+
+    // Registered clients alone publish no document.
+    expect(
+      await managedOAuth(environment).handle(new Request(documentUrl), async () => true),
+    ).toBeNull();
+  });
+
+  it("identifies itself by the document URL and never sends a client secret", async () => {
+    const { broker, url, ticket } = await authorizeTracker();
+
+    expect(await broker.request(identity, { action: "configuration", client: "tracker" })).toEqual({
+      clientId: documentUrl,
+      scopes: ["read", "write"],
+    });
+    expect(`${url.origin}${url.pathname}`).toBe("https://auth.tracker.example.test/authorize");
+    expect(url.searchParams.get("client_id")).toBe(documentUrl);
+    expect(url.searchParams.get("redirect_uri")).toBe(
+      "https://oauth.example.test/oauth/callback/tracker",
+    );
+    expect(url.searchParams.get("resource")).toBe("https://mcp.tracker.example.test/mcp");
+    expect(url.searchParams.get("scope")).toBe("read");
+    expect(url.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(url.searchParams.get("code_challenge")).toBe(
+      createHash("sha256").update(verifier).digest("base64url"),
+    );
+
+    const callback = await broker.handle(
+      new Request(
+        `https://oauth.example.test/oauth/callback/tracker?state=${encodeURIComponent(ticket)}&code=one-time-code&iss=https://auth.tracker.example.test`,
+      ),
+      async () => true,
+    );
+
+    const destination = new URL(z.string().parse(callback?.headers.get("location")));
+
+    expect(destination.origin).toBe(identity.origin);
+    expect(destination.pathname).toBe("/auth/callback/tracker");
+    expect(destination.searchParams.get("managed_state")).toBe(ticket);
+
+    tokenResponse = () =>
+      Response.json({
+        access_token: "tracker-access",
+        refresh_token: "tracker-refresh",
+        expires_in: 3600,
+        scope: "read",
+        token_type: "Bearer",
+      });
+
+    const granted = tokens.parse(
+      await broker.request(identity, {
+        action: "exchange",
+        client: "tracker",
+        ticket,
+        code: "one-time-code",
+        codeVerifier: verifier,
+      }),
+    );
+
+    const exchange = requests.at(-1);
+
+    expect(exchange?.url).toBe("https://auth.tracker.example.test/token");
+    expect(Object.fromEntries(exchange?.body ?? [])).toEqual({
+      grant_type: "authorization_code",
+      code: "one-time-code",
+      code_verifier: verifier,
+      redirect_uri: "https://oauth.example.test/oauth/callback/tracker",
+      resource: "https://mcp.tracker.example.test/mcp",
+      client_id: documentUrl,
+    });
+    expect(granted.accessToken).not.toContain("tracker-access");
+    expect(
+      await openAccessToken(
+        metadataEnvironment,
+        identity.appId,
+        granted.accessToken,
+        new URL("https://mcp.tracker.example.test/mcp"),
+      ),
+    ).toBe("tracker-access");
+    expect(
+      await openAccessToken(
+        metadataEnvironment,
+        identity.appId,
+        granted.accessToken,
+        new URL("https://notes.example.test/api"),
+      ),
+    ).toBeNull();
+
+    await broker.request(identity, {
+      action: "refresh",
+      client: "tracker",
+      refreshToken: granted.refreshToken,
+    });
+    expect(Object.fromEntries(requests.at(-1)?.body ?? [])).toMatchObject({
+      grant_type: "refresh_token",
+      refresh_token: "tracker-refresh",
+      resource: "https://mcp.tracker.example.test/mcp",
+      client_id: documentUrl,
+    });
+
+    expect(
+      await broker.request(identity, {
+        action: "revoke",
+        client: "tracker",
+        token: granted.refreshToken,
+      }),
+    ).toEqual({ revoked: true });
+    expect(requests.at(-1)?.url).toBe("https://auth.tracker.example.test/revoke");
+    expect(Object.fromEntries(requests.at(-1)?.body ?? [])).toEqual({
+      token: "tracker-refresh",
+      client_id: documentUrl,
+    });
+    expect(JSON.stringify(requests.map(({ body }) => [...body]))).not.toContain("secret");
+  });
+
+  it("does not expose or log the authorization server's error responses", async () => {
+    const { broker, ticket } = await authorizeTracker();
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    tokenResponse = () =>
+      Response.json(
+        { error: "invalid_grant", error_description: "provider-secret-response" },
+        { status: 400 },
+      );
+
+    await expect(
+      broker.request(identity, {
+        action: "exchange",
+        client: "tracker",
+        ticket,
+        code: "code",
+        codeVerifier: verifier,
+      }),
+    ).rejects.not.toThrow("provider-secret-response");
+    expect(JSON.stringify([logged.mock.calls, warned.mock.calls])).not.toContain(
+      "provider-secret-response",
+    );
+    logged.mockRestore();
+    warned.mockRestore();
+  });
+
+  it("omits the resource when the client names none and keeps its callback separate", async () => {
+    const broker = managedOAuth(metadataEnvironment);
+
+    const result = z.object({ url: z.url() }).parse(
+      await broker.request(identity, {
+        action: "authorize",
+        client: "notes",
+        scopes: ["notes"],
+        state: "local-state",
+        codeVerifier: verifier,
+      }),
+    );
+
+    const url = new URL(result.url);
+
+    expect(url.searchParams.has("resource")).toBe(false);
+    const ticket = z.string().parse(url.searchParams.get("state"));
+
+    // A ticket issued for one metadata document client is refused on another's callback.
+    expect(
+      (
+        await broker.handle(
+          new Request(
+            `https://oauth.example.test/oauth/callback/tracker?state=${encodeURIComponent(ticket)}&code=code`,
+          ),
+          async () => true,
+        )
+      )?.status,
+    ).toBe(400);
+  });
+
+  it.each([
+    { clientSecret: "secret" },
+    { clientId: "registered-id" },
+    { authorizationUrl: "http://auth.tracker.example.test/authorize" },
+    { hosts: ["https://mcp.tracker.example.test/mcp"] },
+  ])(
+    "rejects metadata document clients with registration credentials or invalid URLs (%o)",
+    (change) => {
+      const configured = managedOAuthConfiguration.parse(
+        JSON.parse(metadataEnvironment.WIDEFLEET_OAUTH),
+      );
+
+      expect(
+        managedOAuthConfiguration.safeParse({
+          ...configured,
+          clients: { tracker: { ...configured.clients["tracker"], ...change } },
+        }).success,
+      ).toBe(false);
+    },
+  );
 });
