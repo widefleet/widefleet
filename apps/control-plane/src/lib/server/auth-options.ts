@@ -222,6 +222,10 @@ export const authenticationOptions = (
       }),
     },
     account: {
+      // Better Auth encrypts provider access and refresh tokens with the
+      // authentication secret. Tokens saved before stay readable and are
+      // replaced at the next sign-in.
+      encryptOAuthTokens: true,
       accountLinking: {
         enabled: true,
         // The SSO plugin grants linking trust only after verified domain ownership.
