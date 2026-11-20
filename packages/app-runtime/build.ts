@@ -32,6 +32,7 @@ const compile = async (entry: string, define: Record<string, string>) => {
   const alias = new Map([
     ["widefleet:app", "./__widefleet_app.js"],
     ["widefleet:workflow", "./__widefleet_workflow.js"],
+    ["widefleet:bindings", "./__widefleet_bindings.js"],
   ]);
 
   // Runtime extensions belong to the parent, never to embedded child modules.
@@ -53,6 +54,7 @@ const compile = async (entry: string, define: Record<string, string>) => {
       "cloudflare:workflows",
       "./__widefleet_app.js",
       "./__widefleet_workflow.js",
+      "./__widefleet_bindings.js",
       "node:*",
     ],
     alias: Object.fromEntries(alias),

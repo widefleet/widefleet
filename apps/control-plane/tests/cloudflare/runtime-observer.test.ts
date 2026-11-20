@@ -131,9 +131,13 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Runtime observer in
           format: "esm",
           platform: "browser",
           conditions: ["workerd"],
-          external: ["cloudflare:*", "node:*", "./__widefleet_app.js"],
+          external: ["cloudflare:*", "node:*", "./__widefleet_app.js", "./__widefleet_bindings.js"],
           // Even when aliased, the child import graph must not reach the extension.
-          alias: { "#runtime-extension": extension, "widefleet:app": "./__widefleet_app.js" },
+          alias: {
+            "#runtime-extension": extension,
+            "widefleet:app": "./__widefleet_app.js",
+            "widefleet:bindings": "./__widefleet_bindings.js",
+          },
           write: false,
         });
 

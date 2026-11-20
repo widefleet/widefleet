@@ -1,6 +1,6 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { withAppCaller } from "./app-context.ts";
-import { withEnvProperties } from "./env-properties.ts";
+import { withBindings } from "./platform-bindings.ts";
 import { z } from "zod";
 import type { AppValue } from "./app-rpc.ts";
 
@@ -44,7 +44,7 @@ export const callerEntrypoint = (application: Entrypoint | Handler) => {
         ...descriptor,
         value(arg: AppValue, env: Environment, ctx: ExecutionContext<Properties>) {
           return withAppCaller(ctx.props.appCaller, () =>
-            method.call(application, arg, withEnvProperties(env), ctx),
+            method.call(application, arg, withBindings(env), ctx),
           );
         },
       });
@@ -61,7 +61,7 @@ export const callerEntrypoint = (application: Entrypoint | Handler) => {
 
   class ScopedEntrypoint extends constructor.data {
     constructor(ctx: ExecutionContext<Properties>, env: Environment) {
-      super(ctx, withEnvProperties(env));
+      super(ctx, withBindings(env));
       contexts.set(this, ctx);
     }
   }

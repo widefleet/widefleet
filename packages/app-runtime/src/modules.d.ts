@@ -9,6 +9,10 @@ declare namespace Cloudflare {
   }
 }
 
+declare module "widefleet:bindings" {
+  export const withBindings: typeof import("./platform-bindings.ts").withBindings;
+}
+
 declare module "widefleet:workflow" {
   const workflow: new (
     context: ExecutionContext,

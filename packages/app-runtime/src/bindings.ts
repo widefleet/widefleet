@@ -4,8 +4,11 @@ import type { WorkflowBinding, InstanceInput } from "./workflow-catalog.ts";
 import { installFetch } from "./fetch.ts";
 import { env } from "cloudflare:workers";
 import "./app-bindings.ts";
+import { platformBindings } from "./platform-bindings.ts";
 
 export { callerEntrypoint } from "./app-entrypoint.ts";
+
+export { withBindings } from "./platform-bindings.ts";
 
 import { config } from "./config.ts";
 import * as z from "zod";
@@ -503,8 +506,9 @@ class WorkflowFacade {
   }
 }
 
-// Install facades before evaluating the app. Native service handles themselves
-// are resolved lazily: celld initializes env after module evaluation.
+// Define facades before evaluating the app. Native service handles themselves
+// are resolved lazily from the current environment: celld initializes env
+// after module evaluation.
 for (const descriptor of config.metadata.bindings) {
   let facade;
 
@@ -539,12 +543,11 @@ for (const descriptor of config.metadata.bindings) {
       continue;
   }
 
-  Object.defineProperty(env, descriptor.name, {
-    value: facade,
-    enumerable: true,
-    writable: true,
-    configurable: true,
-  });
+  platformBindings.define(descriptor.name, facade);
 }
+
+// Apps that read bindings while their modules load see them here; every
+// invocation adds them again to its own environment.
+platformBindings.install(env);
 
 installFetch();

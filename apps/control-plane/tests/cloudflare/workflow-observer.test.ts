@@ -96,11 +96,13 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
               "node:*",
               "./__widefleet_app.js",
               "./__widefleet_workflow.js",
+              "./__widefleet_bindings.js",
             ],
             alias: {
               "#runtime-extension": extension,
               "widefleet:app": "./__widefleet_app.js",
               "widefleet:workflow": "./__widefleet_workflow.js",
+              "widefleet:bindings": "./__widefleet_bindings.js",
             },
           });
 

@@ -5,24 +5,25 @@ import type { AppService } from "./app-service.ts";
 import { currentAppCaller } from "./app-context.ts";
 import type { AppOAuth } from "./app-oauth.ts";
 import type { OAuthRequest } from "./oauth-protocol.ts";
+import { platformBindings } from "./platform-bindings.ts";
 
-if ("WIDEFLEET_OAUTH_SERVICE" in env)
-  Object.defineProperty(env, "WIDEFLEET_OAUTH", {
-    value: {
-      async request(input: OAuthRequest) {
-        // SAFETY: The trusted loader binds this service to the current app and organization.
-        const binding = (env as Record<string, AppOAuth>)["WIDEFLEET_OAUTH_SERVICE"];
+platformBindings.define(
+  "WIDEFLEET_OAUTH",
+  {
+    async request(input: OAuthRequest) {
+      // SAFETY: The trusted loader binds this service to the current app and organization.
+      const binding = (env as Record<string, AppOAuth>)["WIDEFLEET_OAUTH_SERVICE"];
 
-        if (!binding) {
-          if (input.action === "configuration") return null;
-          throw new Error("Managed OAuth is not configured");
-        }
+      if (!binding) {
+        if (input.action === "configuration") return null;
+        throw new Error("Managed OAuth is not configured");
+      }
 
-        return binding.request(input, currentAppCaller());
-      },
+      return binding.request(input, currentAppCaller());
     },
-    enumerable: true,
-  });
+  },
+  "WIDEFLEET_OAUTH_SERVICE",
+);
 
 const service = (name: string) => {
   // SAFETY: Only the trusted loader supplies these scoped bindings.
@@ -34,8 +35,9 @@ const service = (name: string) => {
 };
 
 for (const name of config.capabilities ?? [])
-  Object.defineProperty(env, name, {
-    value: appProxy(
+  platformBindings.define(
+    name,
+    appProxy(
       (method, args, answer) => service(name).invoke(method, args, currentAppCaller(), answer),
       (request) => {
         const headers = new Headers(request.headers);
@@ -47,7 +49,4 @@ for (const name of config.capabilities ?? [])
         return service(name).fetch(new Request(request, { headers }));
       },
     ),
-    enumerable: true,
-    writable: true,
-    configurable: true,
-  });
+  );
