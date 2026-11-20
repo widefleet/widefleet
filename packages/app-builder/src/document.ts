@@ -7,6 +7,7 @@ import { DocumentationError, documentServices } from "@platform/service-docs";
 import { z } from "zod";
 import serviceDocs from "./service-docs.wasm";
 import { BuildError, parseJson, parseJsonc } from "./configuration.ts";
+import { dependencyPatches, projectPatches } from "./patches.ts";
 
 const manifest = z.looseObject({
   dependencies: z.record(z.string(), z.string()).default({}),
@@ -98,7 +99,15 @@ export const document = async (request: z.infer<typeof documentRequest>, registr
     }),
   });
 
-  const installed = await installDependencies(declarations, { files: "declarations", registry });
+  const patches = dependencyPatches(projectPatches(request.files));
+
+  const installed = await installDependencies(declarations, {
+    files: "declarations",
+    registry,
+    patchPackage: patches.patchPackage,
+  });
+
+  patches.verify(installed.installed);
   const files = new Map<string, string>();
 
   for (const path of declarations.list()) {

@@ -7,6 +7,7 @@ import { bundleResult } from "@platform/contracts/builds";
 import { parse } from "es-module-lexer/js";
 import { z } from "zod";
 import { BuildError, readConfiguration, workerMetadata } from "./configuration.ts";
+import { dependencyPatches, projectPatches } from "./patches.ts";
 
 const builtins = [
   "assert",
@@ -127,8 +128,16 @@ export const bundle = async (files: Readonly<Record<string, string>>, registry: 
     ),
   );
 
+  const patches = dependencyPatches(projectPatches(files));
+
   // Installs only files a bundle reads; createWorker then finds the packages.
-  const installed = await installDependencies(project, { files: "build", registry });
+  const installed = await installDependencies(project, {
+    files: "build",
+    registry,
+    patchPackage: patches.patchPackage,
+  });
+
+  patches.verify(installed.installed);
 
   const externals = [
     "cloudflare:workers",

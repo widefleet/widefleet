@@ -22,7 +22,9 @@ const queueConsumer = z.strictObject({
   dead_letter_queue: z.string().optional(),
 });
 
-export const wranglerConfiguration = z.object({
+// As the CLI, unknown keys are errors: a misspelled key must not be ignored.
+export const wranglerConfiguration = z.strictObject({
+  $schema: z.string().optional(),
   name: z.string().optional(),
   main: z.string(),
   compatibility_date: z.string(),
@@ -50,6 +52,7 @@ export const wranglerConfiguration = z.object({
   workflows: z
     .array(z.strictObject({ binding: z.string(), name: z.string(), class_name: z.string() }))
     .default([]),
+  no_bundle: z.boolean().optional(),
 });
 
 export type WranglerConfiguration = z.infer<typeof wranglerConfiguration>;

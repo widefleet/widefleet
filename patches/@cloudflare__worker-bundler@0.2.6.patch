@@ -1,5 +1,5 @@
 diff --git a/dist/index.d.ts b/dist/index.d.ts
-index 53dd55f4cd0292a11050505c4824afe0cac15d33..eab70db345e44712dad31e6020682cb0a39138cb 100644
+index 53dd55f4cd0292a11050505c4824afe0cac15d33..03ea94bde091ac6821e468b7c59da36dbf5202b2 100644
 --- a/dist/index.d.ts
 +++ b/dist/index.d.ts
 @@ -100,6 +100,10 @@ interface CreateWorkerOptions {
@@ -13,7 +13,7 @@ index 53dd55f4cd0292a11050505c4824afe0cac15d33..eab70db345e44712dad31e6020682cb0
    /**
     * npm registry URL for fetching packages.
     * @default 'https://registry.npmjs.org'
-@@ -507,6 +511,11 @@ interface InstallOptions {
+@@ -507,6 +511,25 @@ interface InstallOptions {
     * Registry URL (default: https://registry.npmjs.org)
     */
    registry?: string;
@@ -22,6 +22,20 @@ index 53dd55f4cd0292a11050505c4824afe0cac15d33..eab70db345e44712dad31e6020682cb0
 +   * reads, or only manifests, JSON and declarations for type checking.
 +   */
 +  files?: "all" | "build" | "declarations";
++  /**
++   * Changes an installed package before its files are filtered, as package
++   * manager patches do. Return the paths the change reads and writes, and a
++   * function from the package's files to its changed files.
++   */
++  patchPackage?: (
++    name: string,
++    version: string,
++  ) =>
++    | {
++        files: readonly string[];
++        apply(files: Readonly<Record<string, string>>): Record<string, string>;
++      }
++    | undefined;
  }
  /**
   * Install npm dependencies into a virtual file system.
@@ -133,7 +147,7 @@ index 4e453e9f6c48c9c7d13c8560ca49be3ae895898f..84a3efc1295fd29c800457caafb39a30
  			jsx,
  			jsxImportSource,
 diff --git a/dist/installer-Dzd--DQ7.js b/dist/installer-Dzd--DQ7.js
-index b670cbab9fb33d5e7019cc62698c200f96befc06..9e2c28b01149a3bf1d6ec305bc4c2c45bdf6073a 100644
+index b670cbab9fb33d5e7019cc62698c200f96befc06..dd330a4cafb67c46a082dcdd1444a76df04d597f 100644
 --- a/dist/installer-Dzd--DQ7.js
 +++ b/dist/installer-Dzd--DQ7.js
 @@ -46,6 +46,54 @@ function isTextFile(path) {
@@ -196,7 +210,7 @@ index b670cbab9fb33d5e7019cc62698c200f96befc06..9e2c28b01149a3bf1d6ec305bc4c2c45
  */
  async function installDependencies(fileSystem, options = {}) {
 -	const { dev = false, registry = NPM_REGISTRY } = options;
-+	const { dev = false, registry = NPM_REGISTRY, files: fileFilter = "all" } = options;
++	const { dev = false, registry = NPM_REGISTRY, files: fileFilter = "all", patchPackage } = options;
 +	const keep = PACKAGE_FILE_FILTERS[fileFilter];
 +	if (!keep) throw new Error(`Unknown package file filter: ${fileFilter}`);
  	const result = {
@@ -207,7 +221,7 @@ index b670cbab9fb33d5e7019cc62698c200f96befc06..9e2c28b01149a3bf1d6ec305bc4c2c45
  		const installedPackages = /* @__PURE__ */ new Set();
  		const inProgress = /* @__PURE__ */ new Map();
 -		await Promise.all(Object.entries(depsToInstall).map(([name, versionRange]) => installPackage(name, versionRange, result, fileSystem, installedPackages, inProgress, registry)));
-+		await Promise.all(Object.entries(depsToInstall).map(([name, versionRange]) => installPackage(name, versionRange, result, fileSystem, installedPackages, inProgress, registry, keep)));
++		await Promise.all(Object.entries(depsToInstall).map(([name, versionRange]) => installPackage(name, versionRange, result, fileSystem, installedPackages, inProgress, registry, keep, patchPackage)));
  	} else if (pyprojectTomlContent) return await installDependenciesPython(fileSystem, pyprojectTomlContent);
  	return result;
  }
@@ -215,25 +229,36 @@ index b670cbab9fb33d5e7019cc62698c200f96befc06..9e2c28b01149a3bf1d6ec305bc4c2c45
  * Install a single package and its dependencies recursively.
  */
 -async function installPackage(name, versionRange, result, fileSystem, installedPackages, inProgress, registry) {
-+async function installPackage(name, versionRange, result, fileSystem, installedPackages, inProgress, registry, keep = isTextFile) {
++async function installPackage(name, versionRange, result, fileSystem, installedPackages, inProgress, registry, keep = isTextFile, patchPackage) {
  	if (installedPackages.has(name)) return;
  	if (fileSystem.read(`node_modules/${name}/package.json`) !== null) {
  		installedPackages.add(name);
-@@ -438,10 +488,11 @@ async function installPackage(name, versionRange, result, fileSystem, installedP
+@@ -438,10 +488,21 @@ async function installPackage(name, versionRange, result, fileSystem, installedP
  			}
  			installedPackages.add(name);
  			result.installed.push(`${name}@${version}`);
 -			const packageFiles = await fetchPackageFiles(name, versionMetadata);
+-			for (const [filePath, content] of Object.entries(packageFiles)) fileSystem.write(`node_modules/${name}/${filePath}`, content);
 +			const packageKeep = keep === isDeclarationInput && hasSourceTypes(versionMetadata) ? isSourceTypeInput : keep;
-+			const packageFiles = await extractLimited(() => fetchPackageFiles(name, versionMetadata, packageKeep));
- 			for (const [filePath, content] of Object.entries(packageFiles)) fileSystem.write(`node_modules/${name}/${filePath}`, content);
++			// A patch reads files the filter drops, such as declarations; keep them
++			// until the patch has been applied, then filter the patched package.
++			// The archive's root directory is not known while it streams.
++			const patch = patchPackage?.(name, version);
++			// A patched manifest can name TypeScript sources as the package's types,
++			// so a declarations install keeps them until the patched manifest decides.
++			const manifestPatched = patch?.files.includes("package.json") && keep === isDeclarationInput;
++			const extracted = await extractLimited(() => fetchPackageFiles(name, versionMetadata, patch ? (path) => packageKeep(path) || (manifestPatched && isSourceTypeInput(path)) || patch.files.some((file) => path.endsWith(`/${file}`)) : packageKeep));
++			const packageFiles = patch ? patch.apply(extracted) : extracted;
++			// A patched manifest can change whether the package's types are sources.
++			const patchedKeep = patch && keep === isDeclarationInput && packageFiles["package.json"] !== void 0 && hasSourceTypes(JSON.parse(packageFiles["package.json"])) ? isSourceTypeInput : packageKeep;
++			for (const [filePath, content] of Object.entries(packageFiles)) if (!patch || patchedKeep(filePath)) fileSystem.write(`node_modules/${name}/${filePath}`, content);
  			const deps = versionMetadata.dependencies ?? {};
 -			await Promise.all(Object.entries(deps).map(([depName, depVersion]) => installPackage(depName, depVersion, result, fileSystem, installedPackages, inProgress, registry)));
-+			await Promise.all(Object.entries(deps).map(([depName, depVersion]) => installPackage(depName, depVersion, result, fileSystem, installedPackages, inProgress, registry, keep)));
++			await Promise.all(Object.entries(deps).map(([depName, depVersion]) => installPackage(depName, depVersion, result, fileSystem, installedPackages, inProgress, registry, keep, patchPackage)));
  		} catch (error) {
  			const message = error instanceof Error ? error.message : String(error);
  			result.warnings.push(`Failed to install ${name}: ${message}`);
-@@ -455,6 +506,23 @@ async function installPackage(name, versionRange, result, fileSystem, installedP
+@@ -455,6 +516,23 @@ async function installPackage(name, versionRange, result, fileSystem, installedP
  	}
  }
  /**
@@ -257,7 +282,7 @@ index b670cbab9fb33d5e7019cc62698c200f96befc06..9e2c28b01149a3bf1d6ec305bc4c2c45
  * Fetch package metadata from npm registry.
  */
  async function fetchPackageMetadata(name, registry) {
-@@ -479,13 +547,93 @@ function resolveVersion(range, metadata) {
+@@ -479,13 +557,93 @@ function resolveVersion(range, metadata) {
  /**
  * Fetch and extract package files from npm tarball.
  */
