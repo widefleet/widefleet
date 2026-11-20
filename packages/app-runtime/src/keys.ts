@@ -69,14 +69,34 @@ const wrappingKey = async (environment: Environment, appId: string) =>
     ["wrapKey", "unwrapKey"],
   );
 
+export type KeyOwner = { appId: string; hostname: string };
+
+const publishedHost = z.union([
+  z.looseObject({ deleted: z.literal(true) }),
+  z.looseObject({ appId: z.string() }),
+]);
+
+// Removal unpublishes an app before it deletes its keys. A request still running
+// then must not create a key that the finished removal would leave behind.
+const requirePublished = async (environment: Environment, owner: KeyOwner) => {
+  const host = await environment.WIDEFLEET_PACKAGES.get(`hosts/${owner.hostname}.json`);
+  const entry = host ? publishedHost.parse(await host.json()) : null;
+
+  if (!entry || "deleted" in entry || entry.appId !== owner.appId)
+    throw new Error("The app is not published");
+};
+
 // Two concurrent first uses must agree on one key: only one conditional write
 // succeeds, and the other request reads the stored key.
-const loadKey = async (environment: Environment, appId: string, name: string) => {
+const loadKey = async (environment: Environment, owner: KeyOwner, name: string) => {
+  const { appId } = owner;
   const path = keyPath(appId, name);
   const kek = await wrappingKey(environment, appId);
   let stored = await environment.WIDEFLEET_PACKAGES.get(path);
 
   if (!stored) {
+    await requirePublished(environment, owner);
+
     const material = await crypto.subtle.importKey(
       "raw",
       crypto.getRandomValues(new Uint8Array(32)),
@@ -115,33 +135,48 @@ const purpose = (name: "encrypt" | "sign") => ({
   info: encoder.encode(`widefleet app key ${name} v1`),
 });
 
+// Derived keys for recently used app keys. Older entries are evicted and load
+// again from storage, so apps that use many key names cannot grow it unbounded.
+const cacheLimit = 1000;
+
 const derived = new Map<string, Promise<{ encryption: CryptoKey; signing: CryptoKey }>>();
 
-const appKey = (environment: Environment, appId: string, name: string) => {
+const appKey = (environment: Environment, owner: KeyOwner, name: string) => {
   appKeyName.parse(name);
-  const id = `${appId}/${name}`;
+  const id = `${owner.appId}/${name}`;
   let keys = derived.get(id);
 
-  if (!keys) {
-    keys = loadKey(environment, appId, name).then(async (base) => ({
-      encryption: await crypto.subtle.deriveKey(
-        purpose("encrypt"),
-        base,
-        { name: "AES-GCM", length: 256 },
-        false,
-        ["encrypt", "decrypt"],
-      ),
-      signing: await crypto.subtle.deriveKey(
-        purpose("sign"),
-        base,
-        { name: "HMAC", hash: "SHA-256", length: 256 },
-        false,
-        ["sign", "verify"],
-      ),
-    }));
-    // A failed load, such as an unavailable bucket, must not stay cached.
-    keys.catch(() => derived.delete(id));
+  if (keys) {
+    // Mark the entry as recently used.
+    derived.delete(id);
     derived.set(id, keys);
+
+    return keys;
+  }
+
+  keys = loadKey(environment, owner, name).then(async (base) => ({
+    encryption: await crypto.subtle.deriveKey(
+      purpose("encrypt"),
+      base,
+      { name: "AES-GCM", length: 256 },
+      false,
+      ["encrypt", "decrypt"],
+    ),
+    signing: await crypto.subtle.deriveKey(
+      purpose("sign"),
+      base,
+      { name: "HMAC", hash: "SHA-256", length: 256 },
+      false,
+      ["sign", "verify"],
+    ),
+  }));
+  // A failed load, such as an unavailable bucket, must not stay cached.
+  keys.catch(() => derived.delete(id));
+  derived.set(id, keys);
+
+  for (const oldest of derived.keys()) {
+    if (derived.size <= cacheLimit) break;
+    derived.delete(oldest);
   }
 
   return keys;
@@ -152,62 +187,67 @@ const appKey = (environment: Environment, appId: string, name: string) => {
 const context = (appId: string, name: string, additionalData: KeyData = "") =>
   new Uint8Array([...encoder.encode(`${appId}\n${name}\n`), ...bytes(additionalData)]);
 
-export const appKeys = (environment: Environment, appId: string) => ({
-  async encrypt(name: string, data: KeyData, additionalData?: KeyData) {
-    const { encryption } = await appKey(environment, appId, name);
-    const iv = crypto.getRandomValues(new Uint8Array(12));
+export const appKeys = (environment: Environment, owner: KeyOwner) => {
+  const { appId } = owner;
 
-    const sealed = new Uint8Array(
-      await crypto.subtle.encrypt(
-        { name: "AES-GCM", iv, additionalData: context(appId, name, additionalData) },
-        encryption,
-        bytes(data),
-      ),
-    );
+  return {
+    async encrypt(name: string, data: KeyData, additionalData?: KeyData) {
+      const { encryption } = await appKey(environment, owner, name);
+      const iv = crypto.getRandomValues(new Uint8Array(12));
 
-    return `${ciphertextPrefix}${base64url(new Uint8Array([...iv, ...sealed]))}`;
-  },
-
-  async decrypt(name: string, ciphertext: string, additionalData?: KeyData) {
-    if (!ciphertext.startsWith(ciphertextPrefix)) throw new Error("Unsupported app key ciphertext");
-    const { encryption } = await appKey(environment, appId, name);
-    const sealed = unbase64url(ciphertext.slice(ciphertextPrefix.length));
-
-    try {
-      return new Uint8Array(
-        await crypto.subtle.decrypt(
-          {
-            name: "AES-GCM",
-            iv: sealed.slice(0, 12),
-            additionalData: context(appId, name, additionalData),
-          },
+      const sealed = new Uint8Array(
+        await crypto.subtle.encrypt(
+          { name: "AES-GCM", iv, additionalData: context(appId, name, additionalData) },
           encryption,
-          sealed.slice(12),
+          bytes(data),
         ),
       );
-    } catch {
-      throw new Error("App key ciphertext is invalid");
-    }
-  },
 
-  async sign(name: string, data: KeyData) {
-    const { signing } = await appKey(environment, appId, name);
+      return `${ciphertextPrefix}${base64url(new Uint8Array([...iv, ...sealed]))}`;
+    },
 
-    return base64url(
-      new Uint8Array(await crypto.subtle.sign("HMAC", signing, context(appId, name, data))),
-    );
-  },
+    async decrypt(name: string, ciphertext: string, additionalData?: KeyData) {
+      if (!ciphertext.startsWith(ciphertextPrefix))
+        throw new Error("Unsupported app key ciphertext");
+      const { encryption } = await appKey(environment, owner, name);
+      const sealed = unbase64url(ciphertext.slice(ciphertextPrefix.length));
 
-  async verify(name: string, data: KeyData, signature: string) {
-    const { signing } = await appKey(environment, appId, name);
-    let decoded;
+      try {
+        return new Uint8Array(
+          await crypto.subtle.decrypt(
+            {
+              name: "AES-GCM",
+              iv: sealed.slice(0, 12),
+              additionalData: context(appId, name, additionalData),
+            },
+            encryption,
+            sealed.slice(12),
+          ),
+        );
+      } catch {
+        throw new Error("App key ciphertext is invalid");
+      }
+    },
 
-    try {
-      decoded = unbase64url(signature);
-    } catch {
-      return false;
-    }
+    async sign(name: string, data: KeyData) {
+      const { signing } = await appKey(environment, owner, name);
 
-    return crypto.subtle.verify("HMAC", signing, decoded, context(appId, name, data));
-  },
-});
+      return base64url(
+        new Uint8Array(await crypto.subtle.sign("HMAC", signing, context(appId, name, data))),
+      );
+    },
+
+    async verify(name: string, data: KeyData, signature: string) {
+      const { signing } = await appKey(environment, owner, name);
+      let decoded;
+
+      try {
+        decoded = unbase64url(signature);
+      } catch {
+        return false;
+      }
+
+      return crypto.subtle.verify("HMAC", signing, decoded, context(appId, name, data));
+    },
+  };
+};
