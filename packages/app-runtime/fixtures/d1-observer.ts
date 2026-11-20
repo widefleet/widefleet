@@ -9,6 +9,8 @@ import type { ParentEnvironment } from "../src/types.ts";
 
 export { Database } from "../src/storage.ts";
 
+export { AppKeys } from "../src/app-keys.ts";
+
 export { AppSecrets } from "../src/app-secrets.ts";
 
 export { WorkloadIdentity } from "../src/workload-identity.ts";

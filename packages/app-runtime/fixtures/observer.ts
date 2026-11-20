@@ -15,6 +15,8 @@ export { Telemetry } from "../src/telemetry.ts";
 
 export { CloudflareTelemetry } from "../src/telemetry-cloudflare.ts";
 
+export { AppKeys } from "../src/app-keys.ts";
+
 export { AppSecrets } from "../src/app-secrets.ts";
 
 export { WorkloadIdentity } from "../src/workload-identity.ts";

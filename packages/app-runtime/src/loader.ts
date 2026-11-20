@@ -13,6 +13,8 @@ export { AppOAuth } from "./app-oauth.ts";
 import { signAppCaller } from "./app-caller.ts";
 import type { appCaller } from "@platform/contracts";
 
+export { AppKeys } from "./app-keys.ts";
+
 export { AppSecrets } from "./app-secrets.ts";
 
 export { AppService } from "./app-service.ts";
