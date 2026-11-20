@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { decodeJwt } from "jose";
+import { symmetricDecrypt } from "better-auth/crypto";
 import { account, ssoProvider, user } from "../../src/lib/server/auth-schema.ts";
 import { createTestEnvironment } from "../environment.ts";
 
@@ -51,6 +52,21 @@ describe.runIf(process.env["RUN_ENTRA_TESTS"] === "1")(
 
     it("accepts a signed company identity, persists its OIDC subject and ends the session on logout", async () => {
       const context = await browser.newContext();
+      const issued: string[] = [];
+      const network = globalThis.fetch;
+
+      // Saved provider tokens are encrypted; compare them with the token response.
+      const tokens = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+        const response = await network(input, init);
+
+        if (new Request(input, init).url.endsWith("/token") && response.ok)
+          issued.push(
+            z.object({ access_token: z.string() }).parse(await response.clone().json())
+              .access_token,
+          );
+
+        return response;
+      });
 
       const start = await context.request.post(`${platformUrl}/api/auth/sign-in/sso`, {
         headers: { origin: platformUrl },
@@ -63,6 +79,7 @@ describe.runIf(process.env["RUN_ENTRA_TESTS"] === "1")(
       await page.goto(authorization.url);
       await page.getByRole("button", { name: /sso@example.test/ }).click();
       await vi.waitFor(() => expect(page.url()).toBe(`${platformUrl}/done`));
+      tokens.mockRestore();
 
       const session = z
         .object({
@@ -86,6 +103,14 @@ describe.runIf(process.env["RUN_ENTRA_TESTS"] === "1")(
 
       expect(linked?.providerId).toBe("microsoft");
       expect(linked?.accountId).toBe(decodeJwt(z.string().parse(linked?.idToken)).sub);
+      const accessToken = z.string().parse(issued.at(-1));
+      expect(linked?.accessToken).not.toBe(accessToken);
+      expect(
+        await symmetricDecrypt({
+          key: environment.environment.BETTER_AUTH_SECRET,
+          data: z.string().parse(linked?.accessToken),
+        }),
+      ).toBe(accessToken);
       expect(linked?.userId).toBe(session.user.id);
       expect(saved?.id).toBe(session.user.id);
       const cookies = await context.cookies();
