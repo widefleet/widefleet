@@ -204,6 +204,68 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       },
     );
 
+    it.each([
+      { httpStatus: 404, code: "NOT_FOUND", category: "usage", errorCode: "api_rejected" },
+      { httpStatus: 403, code: "FORBIDDEN", category: "usage", errorCode: "api_rejected" },
+      {
+        httpStatus: 404,
+        code: "ROUTE_NOT_FOUND",
+        category: "technical",
+        errorCode: "api_route_not_found",
+      },
+      {
+        httpStatus: 400,
+        code: "INVALID_REQUEST",
+        category: "technical",
+        errorCode: "api_invalid_request",
+      },
+      { httpStatus: 404, code: "private value", category: "unknown", errorCode: "api_rejected" },
+    ])(
+      "classifies HTTP $httpStatus with server code $code as $category",
+      async ({ httpStatus, code, category, errorCode }) => {
+        await execute(binary, ["telemetry", "enable"], { env: environment() });
+
+        const server = createServer((request, response) => {
+          request.resume();
+          response.writeHead(httpStatus, { "content-type": "application/json" });
+          response.end(JSON.stringify({ code, message: "private-response-never-log" }));
+        });
+
+        server.listen(0, "127.0.0.1");
+        await once(server, "listening");
+
+        try {
+          const { port } = z.object({ port: z.number() }).parse(server.address());
+
+          const failed = await execute(binary, ["--url", `http://127.0.0.1:${port}`, "whoami"], {
+            env: { ...environment(), PLATFORM_ACCESS_TOKEN: "synthetic-telemetry-test-token" },
+            timeout: 10_000,
+          }).then(
+            () => null,
+            (cause: unknown) => z.object({ code: z.number(), stderr: z.string() }).parse(cause),
+          );
+
+          const telemetry = z
+            .string()
+            .parse(failed?.stderr)
+            .split("\n")
+            .filter((line) => line.startsWith("[widefleet telemetry] "))
+            .join("\n");
+
+          expect(failed?.code).toBe(1);
+          expect(telemetry).toContain(`"error_code":"${errorCode}"`);
+          expect(telemetry).toContain(`"error_category":"${category}"`);
+          expect(telemetry.includes('"api_error_code"')).toBe(category !== "unknown");
+          expect(telemetry.includes('"event":"$exception"')).toBe(category !== "usage");
+          expect(telemetry).not.toContain("private");
+        } finally {
+          const closed = once(server, "close");
+          server.close();
+          await closed;
+        }
+      },
+    );
+
     it("preserves both opt-outs when preference updates run concurrently", async () => {
       for (let attempt = 0; attempt < 5; attempt += 1) {
         await execute(binary, ["telemetry", "enable"], { env: environment() });

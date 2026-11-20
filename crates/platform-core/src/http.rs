@@ -81,15 +81,29 @@ pub async fn json<T: DeserializeOwned>(response: Response) -> Result<T> {
     if !status.is_success() {
         #[derive(serde::Deserialize)]
         struct Failure {
+            code: Option<String>,
             message: Option<String>,
             error_description: Option<String>,
             error: Option<String>,
         }
-        let message = serde_json::from_slice::<Failure>(&bytes)
-            .ok()
+        let body = serde_json::from_slice::<Failure>(&bytes).ok();
+        // Codes are reported in telemetry, so accept only constant identifiers.
+        let code = body
+            .as_ref()
+            .and_then(|body| body.code.clone())
+            .filter(|code| {
+                code.len() <= 64
+                    && code.starts_with(|character: char| character.is_ascii_uppercase())
+                    && code.chars().all(|character| {
+                        character.is_ascii_uppercase()
+                            || character.is_ascii_digit()
+                            || character == '_'
+                    })
+            });
+        let message = body
             .and_then(|body| body.message.or(body.error_description).or(body.error))
             .unwrap_or_else(|| status.canonical_reason().unwrap_or("Request failed").into());
-        return Err(Error::api(status.as_u16(), message));
+        return Err(Error::api(status.as_u16(), code, message));
     }
     Ok(serde_json::from_slice(&bytes)?)
 }

@@ -1,7 +1,7 @@
 import { APIError } from "better-auth/api";
 import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { OpenAPIGenerator } from "@orpc/openapi";
-import { ORPCError, os } from "@orpc/server";
+import { ORPCError, ValidationError, onError, os } from "@orpc/server";
 import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
 import * as contract from "@platform/contracts";
 import type { Result } from "better-result";
@@ -922,7 +922,25 @@ export const createApi = (runtime: Runtime) => {
       }),
   };
 
-  const handler = new OpenAPIHandler(router);
+  // Domain checks also reject user input as BAD_REQUEST. A distinct code lets
+  // clients tell requests that do not match the API contract apart from them.
+  const handler = new OpenAPIHandler(router, {
+    clientInterceptors: [
+      onError((error) => {
+        if (
+          error instanceof ORPCError &&
+          error.code === "BAD_REQUEST" &&
+          error.cause instanceof ValidationError
+        )
+          throw new ORPCError("INVALID_REQUEST", {
+            status: 400,
+            message: error.message,
+            cause: error.cause,
+          });
+      }),
+    ],
+  });
+
   const generator = new OpenAPIGenerator({ schemaConverters: [new ZodToJsonSchemaConverter()] });
 
   const dispatch = async (request: Request) => {
@@ -1096,7 +1114,9 @@ export const createApi = (runtime: Runtime) => {
 
     const response = await handler.handle(request, { prefix: "/api/v1", context: { request } });
 
-    return response.matched ? response.response : new Response("Not found", { status: 404 });
+    return response.matched
+      ? response.response
+      : Response.json({ code: "ROUTE_NOT_FOUND", message: "Not found" }, { status: 404 });
   };
 
   return async (request: Request) => {
@@ -1118,7 +1138,7 @@ export const createApi = (runtime: Runtime) => {
 
       if (cause instanceof z.ZodError)
         return Response.json(
-          { code: "BAD_REQUEST", message: "Invalid request parameters" },
+          { code: "INVALID_REQUEST", message: "Invalid request parameters" },
           { status: 400 },
         );
       console.error("Request failed", cause);

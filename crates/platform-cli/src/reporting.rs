@@ -173,6 +173,9 @@ fn events(
         if let Some(status) = failure.http_status {
             diagnostic["http_status"] = json!(status);
         }
+        if let Some(code) = &failure.api_code {
+            diagnostic["api_error_code"] = json!(code);
+        }
     }
     if preferences.usage {
         let mut properties = diagnostic.clone();
@@ -212,9 +215,16 @@ fn events(
             .map(|frame| frame.filename.as_str())
             .collect();
         let fingerprint = platform_core::sha256(
-            json!(["cli-v2", command, failure.code, failure.http_status, files])
-                .to_string()
-                .as_bytes(),
+            json!([
+                "cli-v2",
+                command,
+                failure.code,
+                failure.http_status,
+                failure.api_code,
+                files
+            ])
+            .to_string()
+            .as_bytes(),
         );
         let mut properties = diagnostic;
         properties["command"] = json!(command);

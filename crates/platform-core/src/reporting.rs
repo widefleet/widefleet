@@ -213,7 +213,11 @@ mod tests {
 
     #[test]
     fn error_messages_are_never_serialized() -> Result<(), serde_json::Error> {
-        let report = error(&Error::api(500, "secret-token user@example.test".into()));
+        let report = error(&Error::api(
+            500,
+            None,
+            "secret-token user@example.test".into(),
+        ));
         let serialized = serde_json::to_string(&report)?;
         assert!(!serialized.contains("secret-token"));
         assert!(!serialized.contains("example.test"));

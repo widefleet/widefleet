@@ -8,6 +8,7 @@ pub struct Failure {
     pub(super) code: &'static str,
     pub(super) summary: String,
     pub(super) http_status: Option<u16>,
+    pub(super) api_code: Option<String>,
     pub(super) category: FailureCategory,
 }
 
@@ -29,6 +30,29 @@ impl Failure {
                     "Credential operation failed",
                     FailureCategory::Unknown,
                 ),
+                // The server names a code only for its own decisions. A missing
+                // code means another component, such as a proxy, answered.
+                ErrorKind::Api {
+                    status,
+                    code: Some(code),
+                    ..
+                } if (400..500).contains(status) => match code.as_str() {
+                    "INVALID_REQUEST" => (
+                        "api_invalid_request",
+                        "Request does not match the API contract",
+                        FailureCategory::Technical,
+                    ),
+                    "ROUTE_NOT_FOUND" => (
+                        "api_route_not_found",
+                        "API route does not exist",
+                        FailureCategory::Technical,
+                    ),
+                    _ => (
+                        "api_rejected",
+                        "API rejected the request",
+                        FailureCategory::Usage,
+                    ),
+                },
                 ErrorKind::Api { status, .. } if (400..500).contains(status) => (
                     "api_rejected",
                     "API rejected the request",
@@ -113,6 +137,10 @@ impl Failure {
             ErrorKind::Http(error) => error.status().map(|status| status.as_u16()),
             _ => None,
         };
+        let api_code = match error.kind() {
+            ErrorKind::Api { code, .. } => code.clone(),
+            _ => None,
+        };
         Self {
             report: reporting::error(error),
             code,
@@ -121,6 +149,7 @@ impl Failure {
                 None => summary.into(),
             },
             http_status,
+            api_code,
             category,
         }
     }
@@ -131,6 +160,7 @@ impl Failure {
             code: "panic",
             summary: "CLI panicked".into(),
             http_status: None,
+            api_code: None,
             category: FailureCategory::Technical,
         }
     }

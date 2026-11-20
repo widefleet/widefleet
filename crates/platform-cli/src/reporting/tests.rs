@@ -23,8 +23,8 @@ fn broad_error_kinds_never_suppress_unknown_failures() {
     let failures = [
         Error::invalid("private input".into()),
         Error::credentials("private credential path".into()),
-        Error::api(401, "private response".into()),
-        Error::api(429, "private response".into()),
+        Error::api(401, None, "private response".into()),
+        Error::api(429, None, "private response".into()),
         std::io::Error::new(std::io::ErrorKind::NotFound, "private file").into(),
         std::io::Error::new(std::io::ErrorKind::PermissionDenied, "private file").into(),
         std::io::Error::new(std::io::ErrorKind::AlreadyExists, "private file").into(),
@@ -244,7 +244,7 @@ async fn http_status_errors_classify_rejections_without_hiding_server_failures()
 
 #[test]
 fn returned_errors_are_handled_and_respect_each_reporting_preference() {
-    let error = Error::api(503, "secret-token user@example.test".into());
+    let error = Error::api(503, None, "secret-token user@example.test".into());
     for usage in [true, false] {
         for crashes in [true, false] {
             let events = capture(Failure::error(&error), Preferences { usage, crashes });
@@ -281,13 +281,55 @@ fn returned_errors_are_handled_and_respect_each_reporting_preference() {
 fn different_api_statuses_do_not_share_an_issue() {
     let fingerprint = |status| {
         let events = capture(
-            Failure::error(&Error::api(status, "private".into())),
+            Failure::error(&Error::api(status, None, "private".into())),
             Preferences::default(),
         );
         events[1]["properties"]["$exception_fingerprint"].clone()
     };
     assert_eq!(fingerprint(503), fingerprint(503));
     assert_ne!(fingerprint(500), fingerprint(503));
+}
+
+#[test]
+fn server_decisions_are_usage_but_contract_mismatches_remain_issues() {
+    let capture_api = |status, code: &str| {
+        capture(
+            Failure::error(&Error::api(status, Some(code.into()), "private".into())),
+            Preferences::default(),
+        )
+    };
+    for (status, code) in [
+        (401, "UNAUTHORIZED"),
+        (403, "FORBIDDEN"),
+        (404, "NOT_FOUND"),
+        (409, "CONFLICT"),
+        (400, "BAD_REQUEST"),
+    ] {
+        let events = capture_api(status, code);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0]["properties"]["error_code"], "api_rejected");
+        assert_eq!(events[0]["properties"]["error_category"], "usage");
+        assert_eq!(events[0]["properties"]["api_error_code"], code);
+        assert_eq!(events[0]["properties"]["http_status"], status);
+    }
+    for (status, code, error_code) in [
+        (400, "INVALID_REQUEST", "api_invalid_request"),
+        (404, "ROUTE_NOT_FOUND", "api_route_not_found"),
+    ] {
+        let events = capture_api(status, code);
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0]["properties"]["error_category"], "technical");
+        assert_eq!(events[1]["event"], "$exception");
+        assert_eq!(events[1]["properties"]["error_code"], error_code);
+    }
+    let events = capture_api(500, "INTERNAL_SERVER_ERROR");
+    assert_eq!(events[1]["event"], "$exception");
+    assert_eq!(events[1]["properties"]["error_code"], "api_failure");
+    assert!(
+        !events
+            .iter()
+            .any(|event| event.to_string().contains("private"))
+    );
 }
 
 #[test]
