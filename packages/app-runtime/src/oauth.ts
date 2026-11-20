@@ -1,69 +1,54 @@
+import { runWithEndpointContext } from "@better-auth/core/context";
+import { createLogger } from "@better-auth/core/env";
+import type { OAuth2Tokens, OAuthProvider, ProviderOptions } from "@better-auth/core/oauth2";
+import { socialProviders } from "@better-auth/core/social-providers";
 import { appCaller } from "@platform/contracts";
 import { z } from "zod";
-import { decryptSecrets, encryptSecrets } from "./secrets.ts";
+import { decryptText, encryptText } from "./secrets.ts";
 import {
   managedOAuthConfiguration,
-  oauthProvider,
-  oauthProfile,
   oauthRequest,
+  type managedOAuthClient,
   type OAuthRequest,
 } from "./oauth-protocol.ts";
 
-const profiles = {
-  "gmail-readonly": {
-    provider: "google",
-    authorize: "https://accounts.google.com/o/oauth2/v2/auth",
-    token: "https://oauth2.googleapis.com/token",
-    issuer: /^https:\/\/accounts\.google\.com$/,
-    scopes: ["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.readonly"],
-  },
-  "github-repo": {
-    provider: "github",
-    authorize: "https://github.com/login/oauth/authorize",
-    token: "https://github.com/login/oauth/access_token",
-    issuer: /^https:\/\/github\.com$/,
-    scopes: ["read:user", "user:email", "repo"],
-  },
-  "onedrive-read": {
-    provider: "microsoft",
-    authorize: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
-    token: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
-    issuer: /^https:\/\/login\.microsoftonline\.com\/(?:common|[a-f0-9-]{36})\/v2\.0$/i,
-    scopes: ["openid", "profile", "email", "offline_access", "User.Read", "Files.Read"],
-  },
-} as const;
+// The operator's client secret is shared by every organization, so it is only
+// sent in requests this broker builds from the operator's configuration. Apps
+// receive sealed refresh tokens bound to app and caller, and access tokens as
+// placeholders that the network gateway substitutes for the operator's hosts.
 
 const ownership = z.object({
   appId: z.uuid(),
   organizationId: z.string().min(1),
   origin: z.url(),
   caller: appCaller.pick({ issuer: true, subject: true }).strip(),
-  provider: oauthProvider,
-  profile: oauthProfile,
+  client: z.string(),
   clientId: z.string(),
 });
 
 const transaction = ownership.extend({
   state: z.string(),
-  codeChallenge: z.string(),
+  codeVerifier: z.string(),
   expiresAt: z.number(),
 });
 
 const refreshGrant = ownership.extend({ token: z.string().min(1).max(3000) });
 
-const tokenResponse = z.object({
-  access_token: z.string().min(1).max(20000),
-  refresh_token: z.string().min(1).max(3000).optional(),
-  id_token: z.string().max(20000).optional(),
-  expires_in: z.number().positive().optional(),
-  refresh_token_expires_in: z.number().positive().optional(),
-  scope: z.string().max(4000).optional(),
-  token_type: z.string().optional(),
+const accessGrant = z.object({
+  appId: z.uuid(),
+  organizationId: z.string().min(1),
+  client: z.string(),
+  hosts: z.array(z.string()),
+  token: z.string().min(1).max(20000),
 });
+
+const accessTokenPrefix = "wft1.";
 
 type Environment = { WIDEFLEET_SECRETS_KEY: string; WIDEFLEET_OAUTH?: string };
 
-export type OAuthIdentity = Omit<z.infer<typeof ownership>, "provider" | "profile" | "clientId">;
+type Client = z.infer<typeof managedOAuthClient>;
+
+export type OAuthIdentity = Omit<z.infer<typeof ownership>, "client" | "clientId">;
 
 const configuration = (environment: Environment) => {
   if (!environment.WIDEFLEET_OAUTH) return null;
@@ -76,34 +61,52 @@ const configuration = (environment: Environment) => {
   }
 };
 
-const callbackPath = (provider: z.infer<typeof oauthProvider>) => `/oauth/callback/${provider}`;
+const callbackPath = (client: string) => `/oauth/callback/${client}`;
 
-const challenge = async (verifier: string) =>
-  btoa(
-    String.fromCharCode(
-      ...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))),
-    ),
-  )
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replace(/=+$/, "");
-
+// Sealed values keep their earlier encoding. They hold provider tokens, so they
+// are not limited to the size of an app secret.
 const seal = (environment: Environment, purpose: string, payload: string) =>
-  encryptSecrets(environment, `managed-oauth/${purpose}/v1`, { payload });
+  encryptText(environment, `managed-oauth/${purpose}/v1`, JSON.stringify({ payload }));
 
-const open = async (environment: Environment, purpose: string, value: string) => {
-  const data = await decryptSecrets(environment, `managed-oauth/${purpose}/v1`, value);
+const open = async (environment: Environment, purpose: string, value: string) =>
+  z
+    .object({ payload: z.string() })
+    .parse(JSON.parse(await decryptText(environment, `managed-oauth/${purpose}/v1`, value)))
+    .payload;
 
-  return z.string().parse(data["payload"]);
-};
+// Provider modules log token endpoint failures with the provider's response,
+// whose descriptions can contain credentials.
+const silent = createLogger({ disabled: true });
+
+const quietly = <T>(operation: () => Promise<T>) =>
+  runWithEndpointContext(
+    // SAFETY: Better Auth's provider modules read only the logger from this context.
+    { context: { logger: silent } } as Parameters<typeof runWithEndpointContext>[0],
+    operation,
+  );
+
+const provider = (client: Client) =>
+  // SAFETY: Every social provider takes the shared provider options; provider-specific
+  // options come from the operator's configuration.
+  (socialProviders[client.provider] as (options: ProviderOptions) => OAuthProvider)({
+    ...client.options,
+    clientId: client.clientId,
+    clientSecret: client.clientSecret,
+  });
+
+// RFC 6749 separates scopes with spaces; GitHub reports them with commas.
+const scopeList = (value: string | null | undefined) =>
+  (value ?? "").split(/[\s,]+/).filter(Boolean);
+
+const disallowed = (client: Client, scopes: readonly string[]) =>
+  scopes.filter((scope) => !client.scopes.includes(scope));
 
 const requireOwner = (actual: z.infer<typeof ownership>, expected: z.infer<typeof ownership>) => {
   if (
     actual.appId !== expected.appId ||
     actual.organizationId !== expected.organizationId ||
     actual.origin !== expected.origin ||
-    actual.provider !== expected.provider ||
-    actual.profile !== expected.profile ||
+    actual.client !== expected.client ||
     actual.clientId !== expected.clientId ||
     actual.caller.issuer !== expected.caller.issuer ||
     actual.caller.subject !== expected.caller.subject
@@ -111,27 +114,147 @@ const requireOwner = (actual: z.infer<typeof ownership>, expected: z.infer<typeo
     throw new Error("OAuth grant belongs to another app, user or registration");
 };
 
-export const managedOAuth = (environment: Environment, transport: typeof fetch = fetch) => ({
+const sameText = async (left: string, right: string) => {
+  const digest = async (value: string) =>
+    new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)));
+
+  const [a, b] = await Promise.all([digest(left), digest(right)]);
+
+  return a.every((byte, index) => byte === b[index]);
+};
+
+const issuerMatches = (expected: string, actual: string) => {
+  const [prefix, suffix, ...rest] = expected.split("{tenantid}");
+
+  if (suffix === undefined || rest.length > 0) return actual === expected;
+
+  return (
+    actual.startsWith(prefix ?? "") &&
+    actual.endsWith(suffix) &&
+    /^[A-Za-z0-9._-]+$/.test(actual.slice((prefix ?? "").length, actual.length - suffix.length))
+  );
+};
+
+const revoke = async (client: Client, token: string) => {
+  if (!client.revocationUrl) return false;
+
+  const response = await fetch(client.revocationUrl, {
+    method: "POST",
+    body: new URLSearchParams({
+      token,
+      client_id: client.clientId,
+      client_secret: client.clientSecret,
+    }),
+    headers: { accept: "application/json" },
+    redirect: "manual",
+    signal: AbortSignal.timeout(15000),
+  });
+
+  await response.body?.cancel();
+
+  return response.ok;
+};
+
+/**
+ * The real access token behind a placeholder, when the placeholder belongs to
+ * this app and the request goes to one of its client's hosts.
+ */
+export const openAccessToken = async (
+  environment: Environment,
+  appId: string,
+  placeholder: string,
+  target: URL,
+) => {
+  if (!placeholder.startsWith(accessTokenPrefix)) return null;
+  let grant;
+
+  try {
+    grant = accessGrant.parse(
+      JSON.parse(await open(environment, "access", placeholder.slice(accessTokenPrefix.length))),
+    );
+  } catch {
+    return null;
+  }
+
+  if (grant.appId !== appId || !grant.hosts.includes(target.origin)) return null;
+  let client;
+
+  try {
+    client = configuration(environment)?.clients[grant.client];
+  } catch {
+    return null;
+  }
+
+  // The operator can withdraw a client or a host from tokens it already issued.
+  return client?.hosts.includes(target.origin) ? grant.token : null;
+};
+
+export const isAccessTokenPlaceholder = (value: string) => value.startsWith(accessTokenPrefix);
+
+export const managedOAuth = (environment: Environment) => ({
   async request(identity: OAuthIdentity, input: OAuthRequest) {
     const request = oauthRequest.parse(input);
-    const profile = profiles[request.profile];
     const config = configuration(environment);
-    const client = config?.providers[profile.provider];
+    const client = config?.clients[request.client];
 
-    if (request.action === "configuration") return client ? { clientId: client.clientId } : null;
+    if (request.action === "configuration")
+      return client ? { clientId: client.clientId, scopes: client.scopes } : null;
 
-    if (!client || !config) throw new Error("Managed OAuth provider is not configured");
+    if (!client || !config) throw new Error("Managed OAuth client is not configured");
 
     const owner = ownership.parse({
       ...identity,
-      provider: profile.provider,
-      profile: request.profile,
+      client: request.client,
       clientId: client.clientId,
     });
 
-    const redirect = `${config.origin}${callbackPath(profile.provider)}`;
+    const redirectURI = `${config.origin}${callbackPath(request.client)}`;
+    const oauth = provider(client);
+
+    const present = async (tokens: OAuth2Tokens | null, previousRefreshToken?: string) => {
+      if (!tokens?.accessToken) throw new Error("OAuth provider returned no usable token");
+      const granted = (tokens.scopes ?? []).flatMap((scope) => scopeList(scope));
+
+      if (disallowed(client, granted).length > 0) {
+        await revoke(client, tokens.refreshToken ?? tokens.accessToken).catch(() => false);
+        throw new Error("OAuth provider granted scopes this client does not allow");
+      }
+
+      const accessToken = await seal(
+        environment,
+        "access",
+        JSON.stringify(
+          accessGrant.parse({
+            appId: owner.appId,
+            organizationId: owner.organizationId,
+            client: owner.client,
+            hosts: client.hosts,
+            token: tokens.accessToken,
+          }),
+        ),
+      );
+
+      return {
+        accessToken: `${accessTokenPrefix}${accessToken}`,
+        refreshToken: tokens.refreshToken
+          ? await seal(
+              environment,
+              "refresh",
+              JSON.stringify(refreshGrant.parse({ ...owner, token: tokens.refreshToken })),
+            )
+          : previousRefreshToken,
+        idToken: tokens.idToken,
+        accessTokenExpiresAt: tokens.accessTokenExpiresAt,
+        refreshTokenExpiresAt: tokens.refreshTokenExpiresAt,
+        scopes: granted,
+        tokenType: tokens.tokenType ?? "Bearer",
+      };
+    };
 
     if (request.action === "authorize") {
+      if (disallowed(client, request.scopes).length > 0)
+        throw new Error("The requested scopes are not allowed for this client");
+
       const ticket = await seal(
         environment,
         "state",
@@ -139,35 +262,27 @@ export const managedOAuth = (environment: Environment, transport: typeof fetch =
           transaction.parse({
             ...owner,
             state: request.state,
-            codeChallenge: request.codeChallenge,
+            codeVerifier: request.codeVerifier,
             expiresAt: Date.now() + 600_000,
           }),
         ),
       );
 
-      const url = new URL(profile.authorize);
-      url.search = new URLSearchParams({
-        client_id: client.clientId,
-        redirect_uri: redirect,
-        response_type: "code",
-        scope: profile.scopes.join(" "),
-        state: ticket,
-        code_challenge: request.codeChallenge,
-        code_challenge_method: "S256",
-      }).toString();
+      const url = await quietly(async () =>
+        oauth.createAuthorizationURL({
+          state: ticket,
+          codeVerifier: request.codeVerifier,
+          scopes: request.scopes,
+          redirectURI,
+        }),
+      );
 
-      if (profile.provider === "google") {
-        url.searchParams.set("access_type", "offline");
-        url.searchParams.set("prompt", "select_account consent");
-      }
+      // Providers add their default scopes; the operator must allow those too.
+      if (disallowed(client, scopeList(url.searchParams.get("scope"))).length > 0)
+        throw new Error("The provider requests scopes this client does not allow");
 
       return { url: url.href };
     }
-
-    const body = new URLSearchParams({
-      client_id: client.clientId,
-      client_secret: client.clientSecret,
-    });
 
     if (request.action === "exchange") {
       const pending = transaction.parse(
@@ -178,61 +293,56 @@ export const managedOAuth = (environment: Environment, transport: typeof fetch =
 
       if (
         pending.expiresAt <= Date.now() ||
-        (await challenge(request.codeVerifier)) !== pending.codeChallenge
+        !(await sameText(request.codeVerifier, pending.codeVerifier))
       )
         throw new Error("OAuth transaction expired or PKCE verifier does not match");
-      body.set("grant_type", "authorization_code");
-      body.set("code", request.code);
-      body.set("code_verifier", request.codeVerifier);
-      body.set("redirect_uri", redirect);
-    } else {
+
+      return present(
+        await quietly(() =>
+          oauth.validateAuthorizationCode({
+            code: request.code,
+            codeVerifier: pending.codeVerifier,
+            redirectURI,
+          }),
+        ),
+      );
+    }
+
+    if (request.action === "refresh") {
       const grant = refreshGrant.parse(
         JSON.parse(await open(environment, "refresh", request.refreshToken)),
       );
 
       requireOwner(grant, owner);
-      body.set("grant_type", "refresh_token");
-      body.set("refresh_token", grant.token);
+      const refresh = oauth.refreshAccessToken;
+
+      if (!refresh) throw new Error("This OAuth provider does not refresh access tokens");
+
+      return present(await quietly(() => refresh(grant.token)), request.refreshToken);
     }
 
-    const response = await transport(profile.token, {
-      method: "POST",
-      body,
-      headers: { accept: "application/json" },
-      redirect: "manual",
-      signal: AbortSignal.timeout(15000),
-    });
+    if (isAccessTokenPlaceholder(request.token)) {
+      const grant = accessGrant.parse(
+        JSON.parse(
+          await open(environment, "access", request.token.slice(accessTokenPrefix.length)),
+        ),
+      );
 
-    if (!response.ok) throw new Error("OAuth provider token request failed");
-    const result = tokenResponse.safeParse(await response.json().catch(() => null));
+      if (
+        grant.appId !== owner.appId ||
+        grant.organizationId !== owner.organizationId ||
+        grant.client !== owner.client
+      )
+        throw new Error("OAuth grant belongs to another app or registration");
 
-    // Provider error descriptions can contain credentials. Never expose them to logs or callers.
-    if (!result.success) throw new Error("OAuth provider returned no usable token");
-    const tokens = result.data;
+      return { revoked: await revoke(client, grant.token) };
+    }
 
-    const refreshToken = tokens.refresh_token
-      ? await seal(
-          environment,
-          "refresh",
-          JSON.stringify(refreshGrant.parse({ ...owner, token: tokens.refresh_token })),
-        )
-      : request.action === "refresh"
-        ? request.refreshToken
-        : undefined;
+    const grant = refreshGrant.parse(JSON.parse(await open(environment, "refresh", request.token)));
 
-    return {
-      accessToken: tokens.access_token,
-      refreshToken,
-      idToken: tokens.id_token,
-      accessTokenExpiresAt: tokens.expires_in
-        ? new Date(Date.now() + tokens.expires_in * 1000)
-        : undefined,
-      refreshTokenExpiresAt: tokens.refresh_token_expires_in
-        ? new Date(Date.now() + tokens.refresh_token_expires_in * 1000)
-        : undefined,
-      scopes: tokens.scope?.split(/[ ,]+/).filter(Boolean) ?? profile.scopes,
-      tokenType: tokens.token_type ?? "Bearer",
-    };
+    requireOwner(grant, owner);
+
+    return { revoked: await revoke(client, grant.token) };
   },
 
   async callback(request: Request, available: (identity: OAuthIdentity) => Promise<boolean>) {
@@ -257,19 +367,21 @@ export const managedOAuth = (environment: Environment, transport: typeof fetch =
     try {
       const ticket = z.string().min(1).max(12000).parse(url.searchParams.get("state"));
       const pending = transaction.parse(JSON.parse(await open(environment, "state", ticket)));
+      const client = config.clients[pending.client];
 
       if (
-        url.pathname !== callbackPath(pending.provider) ||
+        !client ||
+        url.pathname !== callbackPath(pending.client) ||
         pending.expiresAt <= Date.now() ||
-        config.providers[pending.provider]?.clientId !== pending.clientId ||
+        client.clientId !== pending.clientId ||
         !(await available(pending))
       )
         throw new Error("OAuth transaction is not available");
       const issuer = url.searchParams.get("iss");
 
-      if (issuer && !profiles[pending.profile].issuer.test(issuer))
+      if (issuer && client.issuer && !issuerMatches(client.issuer, issuer))
         throw new Error("Unexpected OAuth issuer");
-      const target = new URL(`/auth/callback/${pending.provider}`, pending.origin);
+      const target = new URL(`/auth/callback/${client.provider}`, pending.origin);
       target.searchParams.set("state", pending.state);
       target.searchParams.set("managed_state", ticket);
 

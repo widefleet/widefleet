@@ -20,18 +20,15 @@ const key = (environment: Environment) =>
     ["encrypt", "decrypt"],
   );
 
-export const encryptSecrets = async (
-  environment: Environment,
-  scope: string,
-  secrets: z.infer<typeof appSecretPreparation>["values"],
-) => {
+/** Encrypts text with the runtime key, bound to `scope` as additional data. */
+export const encryptText = async (environment: Environment, scope: string, text: string) => {
   const iv = crypto.getRandomValues(new Uint8Array(12));
 
   const encrypted = new Uint8Array(
     await crypto.subtle.encrypt(
       { name: "AES-GCM", iv, additionalData: new TextEncoder().encode(scope) },
       await key(environment),
-      new TextEncoder().encode(JSON.stringify(secrets)),
+      new TextEncoder().encode(text),
     ),
   );
 
@@ -41,11 +38,7 @@ export const encryptSecrets = async (
   );
 };
 
-export const decryptSecrets = async (
-  environment: Environment,
-  scope: string,
-  ciphertext: string,
-) => {
+export const decryptText = async (environment: Environment, scope: string, ciphertext: string) => {
   const bytes = Uint8Array.from(atob(ciphertext), (character) => character.charCodeAt(0));
 
   const data = await crypto.subtle.decrypt(
@@ -54,5 +47,16 @@ export const decryptSecrets = async (
     bytes.slice(12),
   );
 
-  return appSecretPreparation.shape.values.parse(JSON.parse(new TextDecoder().decode(data)));
+  return new TextDecoder().decode(data);
 };
+
+export const encryptSecrets = (
+  environment: Environment,
+  scope: string,
+  secrets: z.infer<typeof appSecretPreparation>["values"],
+) => encryptText(environment, scope, JSON.stringify(secrets));
+
+export const decryptSecrets = async (environment: Environment, scope: string, ciphertext: string) =>
+  appSecretPreparation.shape.values.parse(
+    JSON.parse(await decryptText(environment, scope, ciphertext)),
+  );

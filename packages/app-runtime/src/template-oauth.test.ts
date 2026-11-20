@@ -24,10 +24,45 @@ const compile = async (file: string) => {
   return z.string().parse(result.outputFiles[0]?.text);
 };
 
-for (const [template, kind, prefix, profile] of [
-  ["gmail", "google", "GOOGLE", "gmail-readonly"],
-  ["github", "github", "GITHUB", "github-repo"],
-  ["onedrive", "microsoft", "MICROSOFT", "onedrive-read"],
+// The operator clients a hosted installation configures for the templates.
+const clients = {
+  google: {
+    provider: "google",
+    scopes: ["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.readonly"],
+    hosts: ["https://gmail.googleapis.com"],
+    options: { accessType: "offline", prompt: "select_account consent" },
+    issuer: "https://accounts.google.com",
+    revocationUrl: "https://oauth2.googleapis.com/revoke",
+  },
+  github: {
+    provider: "github",
+    scopes: ["read:user", "user:email", "repo"],
+    hosts: ["https://api.github.com"],
+  },
+  microsoft: {
+    provider: "microsoft",
+    scopes: ["openid", "profile", "email", "offline_access", "User.Read", "Files.Read"],
+    hosts: ["https://graph.microsoft.com"],
+    issuer: "https://login.microsoftonline.com/{tenantid}/v2.0",
+  },
+};
+
+// Origins the synthetic providers serve, as an app's network policy allows them.
+const origins = [
+  "https://accounts.google.com",
+  "https://oauth2.googleapis.com",
+  "https://www.googleapis.com",
+  "https://gmail.googleapis.com",
+  "https://github.com",
+  "https://api.github.com",
+  "https://login.microsoftonline.com",
+  "https://graph.microsoft.com",
+];
+
+for (const [template, kind, prefix] of [
+  ["gmail", "google", "GOOGLE"],
+  ["github", "github", "GITHUB"],
+  ["onedrive", "microsoft", "MICROSOFT"],
 ] as const)
   describe(`${template} managed OAuth`, () => {
     const origin = `https://${template}.example.test:25453`;
@@ -69,7 +104,7 @@ for (const [template, kind, prefix, profile] of [
                 },
               },
             },
-            dev: { outboundService: { type: "fetcher", handler: upstream.fetch } },
+            dev: { outboundService: { type: "worker", worker: "relay", exportName: "TestEgress" } },
           },
           {
             config: {
@@ -82,6 +117,7 @@ for (const [template, kind, prefix, profile] of [
               },
               env: {
                 TEST_ORIGIN: { type: "json", value: origin },
+                TEST_ORIGINS: { type: "json", value: JSON.stringify(origins) },
                 WIDEFLEET_PACKAGES: { type: "r2", name: "catalog" },
                 WIDEFLEET_CONTROL_TOKEN: {
                   type: "json",
@@ -93,8 +129,9 @@ for (const [template, kind, prefix, profile] of [
                   value: managed
                     ? JSON.stringify({
                         origin: "https://oauth.example.test:25453",
-                        providers: {
+                        clients: {
                           [kind]: {
+                            ...clients[kind],
                             clientId: `test-${kind}-client`,
                             clientSecret: `test-${kind}-secret`,
                           },
@@ -263,6 +300,8 @@ for (const [template, kind, prefix, profile] of [
       });
       await alice.request("/disconnect", "POST");
       expect(await db.prepare("SELECT COUNT(*) AS count FROM account").first("count")).toBe(0);
+      // Disconnecting revokes the grant where the provider supports RFC 7009.
+      expect(upstream.state.revocations).toBe(kind === "google" ? 1 : 0);
     });
     it("keeps custom credentials preferred and switches registrations after disconnecting", async () => {
       await runtime.setOptions(configuration("complete"));
@@ -301,7 +340,7 @@ for (const [template, kind, prefix, profile] of [
             await relay.fetch("https://oauth.example.test:25453/binding", {
               method: "POST",
               headers: { "test-proof": proof },
-              body: JSON.stringify({ action: "configuration", profile }),
+              body: JSON.stringify({ action: "configuration", client: kind }),
             })
           ).status,
         ).toBe(403);

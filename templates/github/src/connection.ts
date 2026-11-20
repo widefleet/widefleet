@@ -1,4 +1,4 @@
-import { oauthCredentials } from "./oauth.ts";
+import { oauthCredentials, revokeManagedGrant } from "./oauth.ts";
 import { z } from "zod";
 import { authentication } from "./auth.ts";
 import { caller, callerId, type Environment, type Properties } from "./context.ts";
@@ -36,6 +36,38 @@ export const accountConnection = (environment: Environment, properties: Properti
       .first();
 
     return row ? linkedAccount.parse(row) : null;
+  };
+
+  // Disconnecting revokes a managed grant at the provider when it supports
+  // revocation. The saved tokens are removed either way.
+  const revoke = async (id: string) => {
+    const binding = environment.WIDEFLEET_OAUTH;
+
+    const saved = z
+      .object({ accessToken: z.string().nullable(), refreshToken: z.string().nullable() })
+      .nullable()
+      .parse(
+        await environment.DB.prepare(
+          "SELECT accessToken, refreshToken FROM account WHERE userId = ? AND providerId = ?",
+        )
+          .bind(id, "github")
+          .first(),
+      );
+
+    const stored = saved?.refreshToken ?? saved?.accessToken;
+
+    if (!binding || !stored) return;
+
+    try {
+      const token = new TextDecoder().decode(
+        await environment.WIDEFLEET_KEYS.decrypt("tokens", stored),
+      );
+
+      await revokeManagedGrant(binding, "github", token);
+    } catch {
+      // A grant from the operator's earlier client or a provider outage must
+      // not prevent disconnecting.
+    }
   };
 
   const configuration = async () => {
@@ -189,6 +221,7 @@ export const accountConnection = (environment: Environment, properties: Properti
           return new Response("Invalid origin", { status: 403 });
 
         if (url.pathname === "/disconnect") {
+          await revoke(id);
           await environment.DB.batch([
             environment.DB.prepare("DELETE FROM account WHERE userId = ? AND providerId = ?").bind(
               id,

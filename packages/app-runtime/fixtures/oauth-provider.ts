@@ -15,7 +15,7 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft") => {
   const codes = new Map<string, { user: string; challenge: string; redirect: string }>();
   const access = new Map<string, string>();
   const refresh = new Map<string, string>();
-  const state = { refreshes: 0, exchanges: 0, unavailable: false, expiring: true };
+  const state = { refreshes: 0, exchanges: 0, revocations: 0, unavailable: false, expiring: true };
   const keys = generateKeyPairSync("rsa", { modulusLength: 2048 });
 
   const jwk = {
@@ -111,6 +111,22 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft") => {
 
       if (url.pathname.endsWith("/certs") || url.pathname.endsWith("/keys"))
         return Response.json({ keys: [jwk] });
+
+      // RFC 7009 revocation, as Google offers it.
+      if (url.href === "https://oauth2.googleapis.com/revoke") {
+        const form = new URLSearchParams(await request.text());
+        const token = form.get("token") ?? "";
+
+        if (
+          form.get("client_id") !== `test-${kind}-client` ||
+          form.get("client_secret") !== `test-${kind}-secret` ||
+          !(refresh.delete(token) || access.delete(token))
+        )
+          return Response.json({ error: "invalid_token" }, { status: 400 });
+        state.revocations++;
+
+        return new Response(null);
+      }
 
       if (url.href === tokenURLs[kind]) {
         const form = request.headers.get("content-type")?.includes("application/json")

@@ -9,9 +9,27 @@ import type { ParentEnvironment } from "../src/types.ts";
 
 export { AppOAuth } from "../src/app-oauth.ts";
 
+export { Gateway } from "../src/egress.ts";
+
 const appId = "00000000-0000-4000-8000-000000000001";
 
 const organizationId = "test-org";
+
+// Template requests leave through the runtime's network gateway, as loaded apps do.
+export class TestEgress extends WorkerEntrypoint<ParentEnvironment> {
+  override fetch(request: Request) {
+    return this.ctx.exports
+      .Gateway({
+        props: {
+          origins: z
+            .array(z.string())
+            .parse(JSON.parse(z.string().parse(this.env["TEST_ORIGINS"]))),
+          appId,
+        },
+      })
+      .fetch(request);
+  }
+}
 
 // The test host supplies the same identity that production verifies before entering an app.
 export class TestOAuth extends WorkerEntrypoint<ParentEnvironment> {
