@@ -1,3 +1,5 @@
+import { createUserConnections, type UserConnectionRequest } from "./user-connections.ts";
+import { createAppUserIdentity } from "./app-user-identity.ts";
 import { createAppSource } from "./app-source.ts";
 import type { SourceBackend } from "./source-backend.ts";
 import type { AuthenticationExtension } from "./runtime-extension.ts";
@@ -47,6 +49,7 @@ export const createRuntime = ({
   encryptionKey,
   execution,
   hostedLogs,
+  userConnectionRequest,
   organizationAccess: extensionOrganizationAccess,
   sendEmail,
   authRateLimit,
@@ -75,6 +78,7 @@ export const createRuntime = ({
   authIpAddressHeaders?: string[];
   authCookies?: ReturnType<typeof sveltekitCookies>;
   hostedLogs?: ReturnType<typeof createCloudflareLogs>;
+  userConnectionRequest?: UserConnectionRequest;
   discoveryTransport?: "node" | "cloudflare";
   builder?: AppBuilder;
 }) => {
@@ -129,6 +133,12 @@ export const createRuntime = ({
 
   const runtime = {
     auth,
+    userConnections: createUserConnections(
+      database.db,
+      configuration,
+      createAppUserIdentity(database.db, configuration, settings, encryptionKey),
+      userConnectionRequest,
+    ),
     publicSignup,
     onboarding: createOnboardingService(database.db, settings, createOrganization, observation),
     identity: createIdentityService(

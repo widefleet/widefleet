@@ -1,3 +1,4 @@
+import { userConnectionControlPath, userConnectionInvocation } from "@platform/contracts";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -16,6 +17,10 @@ export const createAuthControl = async (directory: string) => {
   let available = true;
   let publications = 0;
 
+  let connection:
+    | ((input: z.infer<typeof userConnectionInvocation>) => Response | Promise<Response>)
+    | undefined;
+
   await mkdir(directory, { recursive: true });
   await writeFile(join(directory, "control-token"), key, { mode: 0o600 });
 
@@ -31,6 +36,21 @@ export const createAuthControl = async (directory: string) => {
 
     if (!available) {
       response.writeHead(503).end();
+
+      return;
+    }
+
+    if (request.url === userConnectionControlPath && request.method === "POST" && connection) {
+      const chunks: Buffer[] = [];
+
+      for await (const chunk of request) chunks.push(z.instanceof(Buffer).parse(chunk));
+
+      const result = await connection(
+        userConnectionInvocation.parse(JSON.parse(Buffer.concat(chunks).toString())),
+      );
+
+      response.setHeader("content-type", "application/json");
+      response.writeHead(result.status).end(await result.text());
 
       return;
     }
@@ -117,6 +137,9 @@ export const createAuthControl = async (directory: string) => {
       publications,
       mcpLogin,
     }),
+    userConnection: (handler: typeof connection) => {
+      connection = handler;
+    },
     available: (value: boolean) => {
       available = value;
     },

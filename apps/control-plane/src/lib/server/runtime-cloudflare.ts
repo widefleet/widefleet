@@ -1,3 +1,4 @@
+import { userConnectionControlPath } from "@platform/contracts";
 import { createProductAnalytics } from "./analytics.ts";
 import { getRequestEvent } from "$app/server";
 import { sveltekitCookies } from "better-auth/svelte-kit";
@@ -46,6 +47,18 @@ export const createCloudflareRuntime = (bindings: CloudflareBindings) => {
   const storage = createArtifactStorage(createR2Storage(bindings.ARTIFACTS));
 
   const options: Parameters<typeof createRuntime>[0] = {
+    userConnectionRequest: async (input, signal) => {
+      if (!bindings.APP_RUNTIME) throw new Error("App runtime management binding is missing");
+
+      return bindings.APP_RUNTIME.fetch(`https://runtime.invalid${userConnectionControlPath}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(input),
+        // SAFETY: Both environments provide the Web AbortSignal implementation.
+        signal: (signal ??
+          AbortSignal.timeout(15_000)) as import("@cloudflare/workers-types").AbortSignal,
+      });
+    },
     discoveryTransport: "cloudflare",
     ...extension,
     observation,
