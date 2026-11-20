@@ -1,4 +1,6 @@
 [toolchain]
 channel = "1.99.0"
 components = ["clippy", "rustfmt"]
+# The service documentation module is built for WebAssembly.
+targets = ["wasm32-wasip1"]
 profile = "minimal"

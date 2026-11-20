@@ -1,0 +1,28 @@
+[package]
+name = "platform-service-docs"
+version.workspace = true
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+url.workspace = true
+
+oxc_sourcemap.workspace = true
+tsrs_ast.workspace = true
+tsrs_checker.workspace = true
+tsrs_compiler.workspace = true
+tsrs_core.workspace = true
+tsrs_scanner.workspace = true
+tsrs_tsoptions.workspace = true
+tsrs_vfs.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tsrs_vfs.workspace = true

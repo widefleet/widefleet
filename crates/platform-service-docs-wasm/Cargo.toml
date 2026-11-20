@@ -1,0 +1,20 @@
+[package]
+name = "platform-service-docs-wasm"
+version.workspace = true
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+# Service documentation as a wasm32-wasip1 module over a host file system.
+# The ABI and host protocol match tsrs's `tsrs_wasm`, so its JavaScript host
+# (`@tsrs/wasm/core`) runs this module.
+# The exported ABI and host imports need `unsafe`, which the workspace lints forbid.
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+platform-service-docs.workspace = true
+tsrs_compiler.workspace = true
+tsrs_core.workspace = true
+tsrs_vfs.workspace = true

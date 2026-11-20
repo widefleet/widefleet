@@ -1,5 +1,11 @@
 [workspace]
-members = ["crates/platform-core", "crates/platform-cli", "crates/platform-agent"]
+members = [
+  "crates/platform-core",
+  "crates/platform-cli",
+  "crates/platform-agent",
+  "crates/platform-service-docs",
+  "crates/platform-service-docs-wasm",
+]
 resolver = "3"
 
 [workspace.package]
@@ -10,6 +16,7 @@ rust-version = "1.99"
 
 [workspace.dependencies]
 platform-core = { path = "crates/platform-core" }
+platform-service-docs = { path = "crates/platform-service-docs" }
 tokio = { version = "=1.53.2", features = [
   "macros",
   "rt-multi-thread",
@@ -41,6 +48,7 @@ bollard = "=0.21.1"
 object_store = { version = "=0.14.2", features = ["aws", "azure", "gcp"] }
 
 oxc_sourcemap = "=10.0.0"
+url = "=2.5.8"
 tsrs_ast = { git = "https://github.com/oxc-project/tsrs", rev = "cbbce5e33a2b57b44360f3aebd6f951011f67671" }
 tsrs_checker = { git = "https://github.com/oxc-project/tsrs", rev = "cbbce5e33a2b57b44360f3aebd6f951011f67671" }
 tsrs_compiler = { git = "https://github.com/oxc-project/tsrs", rev = "cbbce5e33a2b57b44360f3aebd6f951011f67671" }
@@ -59,3 +67,13 @@ expect_used = "deny"
 # Preserve source locations for sanitized native panic reports.
 [profile.release]
 debug = "line-tables-only"
+
+# The service documentation WebAssembly module, sized as tsrs ships its own.
+[profile.wasm]
+inherits = "release"
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = false
+strip = "debuginfo"

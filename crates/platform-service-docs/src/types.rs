@@ -15,9 +15,9 @@ pub struct Types {
 }
 
 impl Types {
-    pub fn new(project: &std::path::Path) -> Self {
+    pub fn new(project: &str) -> Self {
         Self {
-            project: super::sources::compiler_path(&project.to_string_lossy()),
+            project: super::sources::compiler_path(project),
             external_imports: HashMap::new(),
             pending: VecDeque::new(),
             seen: HashSet::new(),
@@ -240,7 +240,6 @@ impl Types {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
 
     #[test]
     fn import_paths_are_relative_inside_and_outside_the_project() {
@@ -263,7 +262,7 @@ mod tests {
             ),
             ("/workspace/app", "/workspace/quo\"ted/ö", "../quo\"ted/ö"),
         ] {
-            let mut types = Types::new(Path::new(project));
+            let mut types = Types::new(project);
             assert_eq!(
                 types.relative_imports(format!("import({}).Item", json!(module))),
                 format!("import({}).Item", json!(expected))
@@ -273,7 +272,7 @@ mod tests {
 
     #[test]
     fn imports_on_other_volumes_keep_distinct_repeatable_identities() {
-        let mut types = Types::new(Path::new("C:/workspace/app"));
+        let mut types = Types::new("C:/workspace/app");
         let first = types.relative_imports(r#"import("D:/private/one/model").Item"#.into());
         let second = types.relative_imports(r#"import("D:/private/two/model").Item"#.into());
         assert_eq!(first, r#"import("widefleet:external/1").Item"#);
@@ -286,7 +285,7 @@ mod tests {
 
     #[test]
     fn import_rewriting_preserves_literal_types_and_package_names() {
-        let mut types = Types::new(Path::new("/workspace/app"));
+        let mut types = Types::new("/workspace/app");
         let literal = r#"["import(\"/workspace/app/model\").Item", `import("/workspace/app/model").Item`, import("package").Item]"#;
         assert_eq!(types.relative_imports(literal.into()), literal);
         assert_eq!(

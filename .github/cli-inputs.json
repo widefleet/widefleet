@@ -3,6 +3,7 @@
   ".github/workflows/cli-platforms.yaml",
   "crates/platform-cli/**",
   "crates/platform-core/**",
+  "crates/platform-service-docs/**",
   "crates/platform-agent/Cargo.toml",
   "Cargo.toml",
   "Cargo.lock",

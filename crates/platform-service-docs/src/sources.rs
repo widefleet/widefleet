@@ -1,11 +1,11 @@
+use crate::{Error, Result};
 use oxc_sourcemap::SourceMap;
-use platform_core::{Error, Result};
 use std::{collections::BTreeMap, path::Path, sync::Arc};
 use tsrs_ast::{self as ast, Kind, Node, SourceFile};
 use tsrs_compiler::{Program, ProgramOptions, new_compiler_host, new_program};
 use tsrs_core::{ModuleKind, ModuleResolutionKind, P, ScriptTarget, Tristate, tspath};
 use tsrs_tsoptions::{ParseConfigHost, ParsedCommandLine};
-use tsrs_vfs::{FS, bundled, osvfs, wrapvfs};
+use tsrs_vfs::{FS, bundled, wrapvfs};
 
 struct ConfigHost {
     fs: Arc<dyn FS>,
@@ -22,16 +22,17 @@ impl ParseConfigHost for ConfigHost {
 
 pub struct Sources<'a> {
     pub map: SourceMap<'a>,
+    pub project: String,
     pub originals: Arc<BTreeMap<String, String>>,
     pub bundle: String,
 }
 
 impl<'a> Sources<'a> {
-    pub fn new(project: &Path, bundle: &Path, map: &'a str) -> Result<Self> {
+    pub fn new(project: &str, bundle: &str, map: &'a str) -> Result<Self> {
         let map = SourceMap::from_json_string(map)
-            .map_err(|error| Error::invalid(format!("Cannot read API source map: {error}")))?;
-        let project = compiler_path(&project.to_string_lossy());
-        let bundle = compiler_path(&bundle.to_string_lossy());
+            .map_err(|error| Error(format!("Cannot read API source map: {error}")))?;
+        let project = compiler_path(project);
+        let bundle = compiler_path(bundle);
         let mut originals = BTreeMap::new();
         for (source, content) in map.get_sources().zip(map.get_source_contents()) {
             if let (Some(source), Some(content)) = (source, content) {
@@ -47,41 +48,43 @@ impl<'a> Sources<'a> {
         }
         Ok(Self {
             map,
+            project,
             originals: Arc::new(originals),
             bundle,
         })
     }
 
-    pub fn program(&self, project: &Path) -> &'static Program {
+    pub fn program(
+        &self,
+        base: &'static dyn FS,
+        project: &str,
+        entry: Option<&str>,
+    ) -> &'static Program {
         let reads = self.originals.clone();
         let exists = self.originals.clone();
         let fs: Arc<dyn FS> = Arc::new(bundled::wrap_fs(wrapvfs::wrap(
-            osvfs::fs(),
+            base,
             wrapvfs::Replacements {
                 read_file: Some(Box::new(move |file| {
                     reads
                         .get(&tspath::normalize_path(file))
                         .cloned()
-                        .or_else(|| osvfs::fs().read_file(file))
+                        .or_else(|| base.read_file(file))
                 })),
                 file_exists: Some(Box::new(move |file| {
-                    exists.contains_key(&tspath::normalize_path(file))
-                        || osvfs::fs().file_exists(file)
+                    exists.contains_key(&tspath::normalize_path(file)) || base.file_exists(file)
                 })),
                 ..Default::default()
             },
         )));
         let host = ConfigHost {
             fs: fs.clone(),
-            directory: compiler_path(&project.to_string_lossy()),
+            directory: compiler_path(project),
         };
-        let config_path = project
-            .ancestors()
-            .map(|directory| directory.join("tsconfig.json"))
-            .find(|file| file.is_file());
+        let config_path = config_file(base, &host.directory);
         let mut config = if let Some(config_path) = config_path {
             tsrs_tsoptions::get_parsed_command_line_of_config_file(
-                &compiler_path(&config_path.to_string_lossy()),
+                &config_path,
                 None,
                 None,
                 &host,
@@ -114,11 +117,29 @@ impl<'a> Sources<'a> {
         options.check_js = Tristate::False;
         options.no_emit = Tristate::True;
         config.parsed_config.compiler_options = Some(P::new(options));
-        config.parsed_config.file_names.push(self.bundle.clone());
-        config
-            .parsed_config
-            .file_names
-            .extend(self.originals.keys().cloned());
+        if let Some(entry) = entry {
+            // Entry mode: the original entry module, what it imports, and the
+            // app's own declaration files from tsconfig, such as global types.
+            let project = compiler_path(project);
+            let mut file_names = vec![compiler_path(entry)];
+            file_names.extend(config.parsed_config.file_names.iter().filter_map(|file| {
+                let file = compiler_path(file);
+                let path = Path::new(&file);
+                (tspath::is_declaration_file_name(&file)
+                    && path.starts_with(&project)
+                    && !path
+                        .components()
+                        .any(|part| part.as_os_str() == "node_modules"))
+                .then_some(file)
+            }));
+            config.parsed_config.file_names = file_names;
+        } else {
+            config.parsed_config.file_names.push(self.bundle.clone());
+            config
+                .parsed_config
+                .file_names
+                .extend(self.originals.keys().cloned());
+        }
         config.parsed_config.file_names.sort();
         config.parsed_config.file_names.dedup();
         let compiler_host =
@@ -172,8 +193,24 @@ impl<'a> Sources<'a> {
     }
 }
 
+/// The nearest tsconfig.json at or above the project directory.
+fn config_file(fs: &dyn FS, project: &str) -> Option<String> {
+    let mut directory = project.to_owned();
+    loop {
+        let file = tspath::combine_paths(&directory, &["tsconfig.json"]);
+        if fs.file_exists(&file) {
+            return Some(file);
+        }
+        let parent = tspath::get_directory_path(&directory);
+        if parent == directory {
+            return None;
+        }
+        directory = parent;
+    }
+}
+
 fn source_path(bundle: &str, map: &SourceMap<'_>, source: &str) -> String {
-    if let Ok(url) = reqwest::Url::parse(source)
+    if let Ok(url) = url::Url::parse(source)
         && let Ok(file) = url.to_file_path()
     {
         return compiler_path(&file.to_string_lossy());
@@ -187,7 +224,7 @@ fn source_path(bundle: &str, map: &SourceMap<'_>, source: &str) -> String {
     )
 }
 
-pub(super) fn compiler_path(path: &str) -> String {
+pub fn compiler_path(path: &str) -> String {
     let path = tspath::normalize_slashes(path);
     // Rust canonicalizes local Windows paths as \\?\C:\..., which tsrs's
     // filesystem rejects as a device/network path. Preserve the local drive.
@@ -245,7 +282,7 @@ mod tests {
                 "C:/apps/docs project",
             ),
         ] {
-            let sources = Sources::new(Path::new(project), Path::new(bundle), &map)?;
+            let sources = Sources::new(project, bundle, &map)?;
             assert_eq!(sources.bundle, format!("{expected}/build/worker.js"));
             assert!(!tspath::is_network_path(&sources.bundle));
             assert_eq!(sources.originals.len(), 1);
