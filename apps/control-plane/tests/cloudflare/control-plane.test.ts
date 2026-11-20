@@ -229,6 +229,13 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
     expect(response.status).toBe(200);
   });
 
+  it("asks search engines not to index Worker pages and API responses", async () => {
+    for (const path of ["/sign-in", "/healthz", "/api/v1/apps"]) {
+      const response = await fetch(`${origin}${path}`, { redirect: "manual" });
+      expect(response.headers.get("x-robots-tag"), path).toBe("noindex");
+    }
+  });
+
   it("renews browser session cookies through the Worker page response", async () => {
     const state = await administrator.storageState();
 
