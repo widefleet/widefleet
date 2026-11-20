@@ -10,7 +10,7 @@ import { createApi } from "../src/lib/server/api.ts";
 import { createRuntime } from "../src/lib/server/runtime-services.ts";
 import { createStorage } from "../src/lib/server/storage.ts";
 import { registerAppLogin } from "../src/lib/server/app-login-client.ts";
-import { ssoProvider } from "../src/lib/server/auth-schema.ts";
+import { ssoProvider, user } from "../src/lib/server/auth-schema.ts";
 import { apps, artifacts, deployments, organizationSettings } from "../src/lib/server/schema.ts";
 
 const disconnected = { setup: "ready", connection: "disconnected", account: null };
@@ -105,6 +105,11 @@ describe("Personal connector accounts", () => {
       environment.environment.PLATFORM_ENCRYPTION_KEY,
       "widefleet",
     );
+    // App sign-in through Widefleet admits members with a verified email.
+    await environment.database.db
+      .update(user)
+      .set({ emailVerified: true })
+      .where(eq(user.id, environment.owner.id));
   });
   beforeEach(async () => {
     await environment.database.db.delete(apps);
