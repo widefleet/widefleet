@@ -88,12 +88,14 @@ export default class Source extends WorkerEntrypoint {
   async answer() { const question=await this.env.TARGET.ask('offer-42'); return this.env.TARGET.withInput({inputResponses:{confirm:{action:'accept',content:{note:'ok'}}},requestState:question.requestState}).ask('offer-42'); }
   async misdirect() { const question=await this.env.TARGET.ask('offer-42'); return this.env.TARGET.withInput({inputResponses:{confirm:{action:'accept',content:{note:'ok'}}},requestState:question.requestState}).ask('offer-43'); }
   root() { return this.env.WIDEFLEET_SECRETS_KEY ?? null; }
+  async keys() { const keys=this.env.WIDEFLEET_KEYS; const sealed=await keys.encrypt('tokens','provider-access'); const signature=await keys.sign('cookies','session'); return {prefix:sealed.slice(0,3), opened:new TextDecoder().decode(await keys.decrypt('tokens',sealed)), verified:await keys.verify('cookies','session',signature), forged:await keys.verify('cookies','other',signature), foreign:await this.env.TARGET.open(sealed)}; }
   async identity() { return {own: await this.env.WIDEFLEET_IDENTITY.getToken('data-api', {appId: '${targetId}', organizationId: 'forged'}), target: await this.env.TARGET.identity(), key: this.env.WIDEFLEET_CONTROL_TOKEN ?? null}; }
 }`;
 
 const target = (version: string) => `import {WorkerEntrypoint} from 'cloudflare:workers';
 export class Reader extends WorkerEntrypoint {
   identity() { return this.env.WIDEFLEET_IDENTITY.getToken('other-api'); }
+  async open(sealed) { try { await this.env.WIDEFLEET_KEYS.decrypt('tokens', sealed); return 'opened'; } catch { return 'rejected'; } }
   async read() { return {version:${JSON.stringify(version)}, secret:await this.env.WIDEFLEET_SECRETS.get('TOKEN')}; }
   ask(offerId) {
     const input=this.ctx.props.input;
@@ -314,6 +316,7 @@ export default { async fetch(request, env, ctx) {
     if(url.pathname === '/ready') return ctx.exports.RuntimeManagement({props:{}}).fetch(new Request('https://${identitySourceId}.apps.example.test/.well-known/widefleet/ready'));
     if(url.pathname === '/signal') { const input=await request.json(); await env.STATE.put(input.key,'yes'); return Response.json(true); }
     if(url.pathname === '/started') return Response.json(await env.STATE.get('started'));
+    if(url.pathname === '/stored-keys') {const result=[];for(const object of (await env.WIDEFLEET_PACKAGES.list({prefix:'app-keys/'})).objects) result.push({key:object.key,value:await (await env.WIDEFLEET_PACKAGES.get(object.key)).json()}); return Response.json(result);}
     if(url.pathname === '/stored') {const result=[];for(const object of (await env.WIDEFLEET_PACKAGES.list({prefix:'app-secrets/'})).objects) result.push(await (await env.WIDEFLEET_PACKAGES.get(object.key)).text()); return Response.json(result);}
     if(url.pathname === '/web') {const headers=new Headers({cookie:${JSON.stringify(identity.cookie)}}); return runtime.fetch(new Request('https://${targetId}.apps.example.test/',{headers}),env,ctx);}
     if(url.pathname.startsWith('/identity/')) {
@@ -1422,6 +1425,36 @@ export default { async fetch(request, env, ctx) {
 
       for (const execution of executions)
         expect(execution.limits).toEqual(executionProfiles.service);
+    });
+    it("gives each app keys it can use but not read", async () => {
+      const used = await request("/keys");
+      expect(used.status, await used.clone().text()).toBe(200);
+      expect(await used.json()).toEqual({
+        prefix: "v1.",
+        opened: "provider-access",
+        verified: true,
+        forged: false,
+        foreign: "rejected",
+      });
+
+      const stored = z
+        .array(
+          z.strictObject({
+            key: z.string(),
+            value: z.strictObject({
+              version: z.literal(1),
+              wrapped: z.string().regex(/^[A-Za-z0-9_-]{54}$/),
+            }),
+          }),
+        )
+        .parse(await (await request("/stored-keys")).json());
+
+      expect(stored.map((entry) => entry.key)).toEqual(
+        expect.arrayContaining([
+          `app-keys/${sourceId}/tokens.json`,
+          `app-keys/${sourceId}/cookies.json`,
+        ]),
+      );
     });
     it("does not expose provider or platform secrets to the consumer", async () => {
       expect((await request("/secret")).status).toBe(409);

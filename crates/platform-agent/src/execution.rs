@@ -994,6 +994,7 @@ pub async fn remove(configuration: &Configuration, job: &Job) -> Result<()> {
     let mut prefixes = BTreeSet::from([
         package_key(job, &format!("apps/{}/", job.app_id()?)),
         package_key(job, &format!("app-secrets/{}/", job.app_id()?)),
+        package_key(job, &format!("app-keys/{}/", job.app_id()?)),
         package_key(job, &format!("workflow-versions/{}/", job.app_id()?)),
     ]);
     for object in versions {

@@ -2979,6 +2979,10 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
           method: "PUT",
           body: JSON.stringify({ ciphertext: "synthetic-encrypted-value" }),
         });
+        await worker.fetch(`http://fixture/storage?key=app-keys/${entry.appId}/tokens.json`, {
+          method: "PUT",
+          body: JSON.stringify({ version: 1, wrapped: "synthetic-wrapped-key" }),
+        });
       }
 
       expect((await remove(root.appId)).status).toBe(200);
@@ -3006,6 +3010,11 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         expect(
           await (
             await worker.fetch(`http://fixture/storage?prefix=app-secrets/${entry.appId}/`)
+          ).json(),
+        ).toEqual([]);
+        expect(
+          await (
+            await worker.fetch(`http://fixture/storage?prefix=app-keys/${entry.appId}/`)
           ).json(),
         ).toEqual([]);
         expect((await authenticatedFetch(`https://${entry.hostname}/`)).status).toBe(404);

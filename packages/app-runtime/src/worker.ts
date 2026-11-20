@@ -81,6 +81,7 @@ export const workerCode = async (
         },
       }),
     );
+  bindings.set("WIDEFLEET_KEYS", context.exports.AppKeys({ props: { appId: app.appId } }));
   bindings.set(
     "WIDEFLEET_SECRETS",
     context.exports.AppSecrets({ props: { appId: app.appId, revision: app.secretRevision ?? 0 } }),
