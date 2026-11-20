@@ -1,0 +1,17 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "widefleet-app-builder",
+  // Built by build.ts with its WebAssembly modules beside it.
+  "main": "dist/builder.js",
+  "no_bundle": true,
+  "find_additional_modules": true,
+  "base_dir": "dist",
+  "rules": [{ "type": "CompiledWasm", "globs": ["**/*.wasm"] }],
+  "compatibility_date": "2026-10-01",
+  // Only the control plane reaches the builder, through service bindings.
+  "workers_dev": false,
+  "preview_urls": false,
+  // A template build takes seconds of CPU; installing large dependency graphs takes longer.
+  "limits": { "cpu_ms": 120000 },
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+}
