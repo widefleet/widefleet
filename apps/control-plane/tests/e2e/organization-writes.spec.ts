@@ -310,11 +310,22 @@ for (const javaScriptEnabled of [true, false]) {
         })
         .where(eq(apps.id, id));
       await page.goto(`/apps/${id}/connections`);
+
+      if (javaScriptEnabled) await page.waitForLoadState("networkidle");
       await page.locator("summary").filter({ hasText: "API" }).click();
       await page.getByRole("button", { name: "Retry disconnection", exact: true }).click();
       await expect(page).toHaveURL(
         `${environment.configuration.PLATFORM_URL}/apps/${id}/connections`,
       );
+      // The URL is unchanged by this form. Wait for the mutation's result before
+      // reloading, otherwise navigation can cancel the enhanced form request.
+      await expect(
+        page.getByRole("button", {
+          name: "Removal pending",
+          exact: true,
+          includeHidden: true,
+        }),
+      ).toBeDisabled();
       await page.reload();
       await page.locator("summary").filter({ hasText: "API" }).click();
       await expect(
