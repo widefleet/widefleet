@@ -49,7 +49,9 @@ export const connectionLaunch = (database: D1Database, userId: string, origin: s
   return {
     prepare: async (input: { completionUrl: string }) => {
       const { completionUrl } = z.strictObject({ completionUrl: z.url() }).parse(input);
-      const saved = await save("launch", completionUrl, 120_000);
+      // The link may first pass through the app's own company sign-in. Widefleet
+      // accepts launch links that expire within five minutes.
+      const saved = await save("launch", completionUrl, 240_000);
 
       return { url: `${origin}/connect/start?ticket=${saved.ticket}`, expiresAt: saved.expiresAt };
     },
