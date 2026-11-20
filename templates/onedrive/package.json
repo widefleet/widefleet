@@ -10,7 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "better-auth": "1.7.12",
+    "better-auth": "1.7.27",
     "zod": "4.6.5"
   },
   "devDependencies": {
