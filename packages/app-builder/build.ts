@@ -2,8 +2,10 @@
 // imports. The service documentation module comes from
 // `cargo build --profile wasm -p platform-service-docs-wasm --target wasm32-wasip1`.
 import { build } from "esbuild";
-import { copyFile, mkdir } from "node:fs/promises";
+import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { z } from "zod";
+import { parseJsonc } from "./src/configuration.ts";
 
 const directory = new URL("dist/", import.meta.url);
 
@@ -40,3 +42,19 @@ await Promise.all([
     path("service-docs.wasm"),
   ),
 ]);
+
+// Self-hosted installations run dist/ as a celld project. celld accepts only
+// the keys it implements, so it gets the Worker's name and compatibility.
+const worker = z
+  .object({ name: z.string(), compatibility_date: z.string() })
+  .parse(
+    parseJsonc(
+      await readFile(fileURLToPath(new URL("wrangler.jsonc", import.meta.url).href), "utf8"),
+      "wrangler.jsonc",
+    ),
+  );
+
+await writeFile(
+  path("wrangler.json"),
+  `${JSON.stringify({ ...worker, main: "builder.js", no_bundle: true }, null, 2)}\n`,
+);

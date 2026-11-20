@@ -32,7 +32,7 @@ case "${1:-up}" in
     "${compose[@]}" up -d --wait postgres storage proxy identity clickhouse otel-collector
     "${compose[@]}" run --rm -T --no-deps tools node --env-file=/data/identity.env tools/prepare-installation.ts
     "${compose[@]}" run --rm -T --no-deps tools node --env-file=/data/identity.env tools/initialize-storage.ts
-    "${compose[@]}" up -d --wait runtime
+    "${compose[@]}" up -d --wait runtime builder
     "${compose[@]}" up -d --wait control-plane
     local_tool seed
     "${compose[@]}" up -d agent
