@@ -11,6 +11,7 @@ import {
 import { activity, insideStep } from "./workflow-activity.ts";
 import { stepCallback, stepConfig } from "./workflow-step-config.ts";
 import ApplicationWorkflow from "widefleet:workflow";
+import { withEnvProperties } from "./env-properties.ts";
 import {
   fault,
   restore,
@@ -147,7 +148,9 @@ export class WorkflowRunner extends WorkerEntrypoint<Record<string, WorkflowValu
     started = true;
     activity.install((operation) => this.ctx.waitUntil(operation));
     void Promise.resolve()
-      .then(() => new ApplicationWorkflow(this.ctx, this.env).run(event, workflowSteps))
+      .then(() =>
+        new ApplicationWorkflow(this.ctx, withEnvProperties(this.env)).run(event, workflowSteps),
+      )
       .then(
         (value) => {
           commands.push({ kind: "complete", value });
