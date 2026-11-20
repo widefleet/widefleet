@@ -11,26 +11,35 @@ const tokens = z.object({
   tokenType: z.string(),
 });
 
-const profiles = {
-  google: "gmail-readonly",
-  github: "github-repo",
-  microsoft: "onedrive-read",
+// The operator's managed client for each provider and the scopes this
+// connector requests from it.
+const clients = {
+  google: {
+    client: "google",
+    scopes: ["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.readonly"],
+  },
+  github: { client: "github", scopes: ["read:user", "user:email", "repo"] },
+  microsoft: {
+    client: "microsoft",
+    scopes: ["openid", "profile", "email", "offline_access", "User.Read", "Files.Read"],
+  },
 } as const;
 
-type Provider = keyof typeof profiles;
-
-type Profile = (typeof profiles)[Provider];
+type Provider = keyof typeof clients;
 
 type Request =
-  | { action: "configuration"; profile: Profile }
-  | { action: "authorize"; profile: Profile; state: string; codeChallenge: string }
-  | { action: "exchange"; profile: Profile; ticket: string; code: string; codeVerifier: string }
-  | { action: "refresh"; profile: Profile; refreshToken: string };
+  | { action: "configuration"; client: string }
+  | { action: "authorize"; client: string; scopes: string[]; state: string; codeVerifier: string }
+  | { action: "exchange"; client: string; ticket: string; code: string; codeVerifier: string }
+  | { action: "refresh"; client: string; refreshToken: string }
+  | { action: "revoke"; client: string; token: string };
 
 export type OAuthBinding = {
   request(
     input: Request,
-  ): Promise<{ clientId: string } | { url: string } | z.infer<typeof tokens> | null>;
+  ): Promise<
+    { clientId: string } | { url: string } | z.infer<typeof tokens> | { revoked: boolean } | null
+  >;
 };
 
 export type OAuthCredentials = {
@@ -76,7 +85,7 @@ export const oauthCredentials = async (
   const managed = environment.WIDEFLEET_OAUTH
     ? await environment.WIDEFLEET_OAUTH.request({
         action: "configuration",
-        profile: profiles[provider],
+        client: clients[provider].client,
       })
     : null;
 
@@ -94,6 +103,11 @@ export const oauthCredentials = async (
   return { missing, credentials: { clientId, clientSecret, managed: false } };
 };
 
+/** Revokes a managed grant at the provider, when its client supports revocation. */
+export const revokeManagedGrant = async (binding: OAuthBinding, id: Provider, token: string) => {
+  await binding.request({ action: "revoke", client: clients[id].client, token });
+};
+
 // Kept inside each standalone template so copying its directory needs no workspace package.
 export const managedOAuthPlugin = (
   binding: OAuthBinding,
@@ -105,21 +119,15 @@ export const managedOAuthPlugin = (
     const provider = context.socialProviders.find((candidate) => candidate.id === id);
 
     if (!provider) throw new Error("OAuth provider is not initialized");
+    // Managed access tokens are placeholders; the Widefleet network gateway
+    // sends the real token only to the operator's API hosts.
     provider.createAuthorizationURL = async ({ state, codeVerifier }) => {
-      const digest = new Uint8Array(
-        await crypto.subtle.digest("SHA-256", new TextEncoder().encode(codeVerifier)),
-      );
-
-      const codeChallenge = btoa(String.fromCharCode(...digest))
-        .replaceAll("+", "-")
-        .replaceAll("/", "_")
-        .replace(/=+$/, "");
-
       const result = await binding.request({
         action: "authorize",
-        profile: profiles[id],
+        client: clients[id].client,
+        scopes: [...clients[id].scopes],
         state,
-        codeChallenge,
+        codeVerifier,
       });
 
       return new URL(z.object({ url: z.url() }).parse(result).url);
@@ -132,7 +140,7 @@ export const managedOAuthPlugin = (
       return tokens.parse(
         await binding.request({
           action: "exchange",
-          profile: profiles[id],
+          client: clients[id].client,
           ticket,
           code,
           codeVerifier,
@@ -142,7 +150,7 @@ export const managedOAuthPlugin = (
 
     provider.refreshAccessToken = async (refreshToken) =>
       tokens.parse(
-        await binding.request({ action: "refresh", profile: profiles[id], refreshToken }),
+        await binding.request({ action: "refresh", client: clients[id].client, refreshToken }),
       );
   },
 });

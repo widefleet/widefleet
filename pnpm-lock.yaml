@@ -398,6 +398,9 @@ importers:
 
   packages/app-runtime:
     dependencies:
+      '@better-auth/core':
+        specifier: 1.7.27
+        version: 1.7.27(patch_hash=d0a8d40c08c14702f534a902327f1f3c3aaee4ad8db58cedb10184e06add1d3e)(@better-auth/utils@0.5.1)(@better-fetch/fetch@1.3.3)(better-call@1.4.6(zod@4.6.5))(jose@6.2.10)(kysely@0.29.6)(nanostores@1.5.4)
       '@cloudflare/workers-oauth-provider':
         specifier: 1.2.4
         version: 1.2.4(patch_hash=f21d52790d10f0313efdc1b0a03895a0f63f54f7dfd6b6bd51c889c69415b5d5)

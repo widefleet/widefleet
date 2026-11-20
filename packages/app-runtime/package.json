@@ -33,6 +33,7 @@
     "build": "node build.ts"
   },
   "dependencies": {
+    "@better-auth/core": "1.7.27",
     "@cloudflare/workers-oauth-provider": "1.2.4",
     "@modelcontextprotocol/ext-apps": "2.1.0",
     "@modelcontextprotocol/server": "2.4.0",

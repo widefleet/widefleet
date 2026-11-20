@@ -98,7 +98,7 @@ it("connects through the real loader and refreshes OAuth through a consuming app
 export default class Consumer extends WorkerEntrypoint {
   async fetch(request) {
     if (new URL(request.url).pathname === '/configuration') return Response.json({
-      provider: await this.env.WIDEFLEET_OAUTH.request({action:'configuration',profile:'github-repo'}),
+      provider: await this.env.WIDEFLEET_OAUTH.request({action:'configuration',client:'github'}),
       controlToken: this.env.WIDEFLEET_CONTROL_TOKEN ?? null,
       encryptionKey: this.env.WIDEFLEET_SECRETS_KEY ?? null,
     });
@@ -133,18 +133,19 @@ export default class Consumer extends WorkerEntrypoint {
             NATIVE_DB: { type: "d1", id: "github" },
             WIDEFLEET_CONTROL_TOKEN: { type: "json", value: controlToken },
             WIDEFLEET_SECRETS_KEY: { type: "json", value: "ab".repeat(32) },
-            // The existing private management endpoint is used only to seed app secrets.
-            WIDEFLEET_MANAGEMENT_HTTP: { type: "json", value: "true" },
             WIDEFLEET_HTTP_AVAILABILITY: { type: "json", value: "kv" },
             WIDEFLEET_CONFIGURATION: { type: "json", value: '{"crons":{},"queues":{}}' },
             WIDEFLEET_OAUTH: {
               type: "json",
               value: JSON.stringify({
                 origin: relayOrigin,
-                providers: {
+                clients: {
                   github: {
+                    provider: "github",
                     clientId: "synthetic-github-client",
                     clientSecret: "synthetic-github-secret",
+                    scopes: ["read:user", "user:email", "repo"],
+                    hosts: ["https://api.github.com"],
                   },
                 },
               }),
@@ -177,7 +178,6 @@ export default class Consumer extends WorkerEntrypoint {
         deploymentId: crypto.randomUUID(),
         hostname: new URL(appOrigin).hostname,
         origin: appOrigin,
-        secretRevision: 1,
         metadata: {
           main_module: "app.js",
           compatibility_date: "2026-10-01",
@@ -223,18 +223,6 @@ export default class Consumer extends WorkerEntrypoint {
       );
     }
 
-    const seeded = await runtime.dispatchFetch(`${origin}/.well-known/widefleet/app-secrets`, {
-      method: "POST",
-      headers: { authorization: `Bearer ${controlToken}` },
-      body: JSON.stringify({
-        appId,
-        revision: 1,
-        values: { AUTH_SECRET: "synthetic-app-secret-at-least-32-characters" },
-      }),
-    });
-
-    expect(seeded.status, await seeded.text()).toBe(200);
-
     const cookies = new Map<string, string>();
 
     const browser = async (url: string, method = "GET") => {
@@ -261,7 +249,10 @@ export default class Consumer extends WorkerEntrypoint {
     const config = await browser(`${consumerOrigin}/configuration`);
     expect(config.status, await config.clone().text()).toBe(200);
     expect(await config.json()).toEqual({
-      provider: { clientId: "synthetic-github-client" },
+      provider: {
+        clientId: "synthetic-github-client",
+        scopes: ["read:user", "user:email", "repo"],
+      },
       controlToken: null,
       encryptionKey: null,
     });
@@ -313,6 +304,13 @@ export default class Consumer extends WorkerEntrypoint {
 
     expect(exchanges).toBe(1);
     expect(refreshes).toBe(2);
+
+    // The template stores only placeholders, which reach the provider as real tokens.
+    const stored = z
+      .object({ accessToken: z.string(), refreshToken: z.string() })
+      .parse(await db.prepare("SELECT accessToken, refreshToken FROM account").first());
+
+    expect(JSON.stringify(stored)).not.toContain("synthetic-");
 
     const bob = await runtime.dispatchFetch(consumerOrigin, {
       headers: { cookie: z.string().parse(identity.otherCookie), "x-auth-request-user": "alice" },

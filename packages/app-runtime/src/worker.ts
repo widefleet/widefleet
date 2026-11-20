@@ -157,7 +157,9 @@ ${(app.metadata.entrypoints ?? [])
     mainModule: "__widefleet_bootstrap.js",
     modules: Object.fromEntries(modules),
     env: Object.fromEntries(bindings),
-    globalOutbound: context.exports.Gateway({ props: { origins: app.network.policy.backend } }),
+    globalOutbound: context.exports.Gateway({
+      props: { origins: app.network.policy.backend, appId: app.appId },
+    }),
     tails: workerTails(
       environment,
       context,
