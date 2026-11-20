@@ -1804,7 +1804,7 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
 name = "platform-agent"
-version = "0.7.18"
+version = "0.7.19"
 dependencies = [
  "bollard",
  "clap",
@@ -1823,7 +1823,7 @@ dependencies = [
 
 [[package]]
 name = "platform-cli"
-version = "0.7.18"
+version = "0.7.19"
 dependencies = [
  "clap",
  "jsonc-parser",
@@ -1843,7 +1843,7 @@ dependencies = [
 
 [[package]]
 name = "platform-core"
-version = "0.7.18"
+version = "0.7.19"
 dependencies = [
  "base64 0.23.1",
  "blake3",
@@ -1857,7 +1857,7 @@ dependencies = [
 
 [[package]]
 name = "platform-service-docs"
-version = "0.7.18"
+version = "0.7.19"
 dependencies = [
  "oxc_sourcemap",
  "serde",
@@ -1874,7 +1874,7 @@ dependencies = [
 
 [[package]]
 name = "platform-service-docs-wasm"
-version = "0.7.18"
+version = "0.7.19"
 dependencies = [
  "platform-service-docs",
  "tsrs_compiler",
