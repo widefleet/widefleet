@@ -11,7 +11,9 @@ export function esbuildBinary() {
   return require.resolve(`@esbuild/${process.platform}-${process.arch}/${executable}`);
 }
 
-export function runPnpm(args: string[], cwd: string, env = process.env) {
+export function runPnpm(args: string[], cwd: string, env = process.env, signal?: AbortSignal) {
+  signal?.throwIfAborted();
+
   const executable =
     process.env["npm_execpath"] ?? (process.platform === "win32" ? undefined : "pnpm");
 
@@ -26,5 +28,6 @@ export function runPnpm(args: string[], cwd: string, env = process.env) {
     cwd,
     env,
     maxBuffer: 16 * 1024 * 1024,
+    signal,
   });
 }
