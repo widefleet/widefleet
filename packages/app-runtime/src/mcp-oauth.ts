@@ -186,7 +186,6 @@ export const mcpAuthorizationServer = (environment: ParentEnvironment) => {
             name: identity.name,
             groups: identity.groups,
           },
-          accountSubject: credential.authorization.subject,
           version: credential.version,
           expiresAt: credential.authorization.expiresAt,
         }),

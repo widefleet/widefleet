@@ -17,9 +17,6 @@ export const mcpClaims = z.object({
   mcp: z.object({
     organizationId: organizationIdentifier,
     identity: mcpIdentity,
-    // The subject that the organization's registration issued. Control-plane
-    // accounts of company SSO store it; Entra app identities use the object ID.
-    accountSubject: z.string().min(1).optional(),
   }),
 });
 

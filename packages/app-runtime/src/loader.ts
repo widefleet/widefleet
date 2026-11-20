@@ -1,3 +1,5 @@
+import { manageUserConnection } from "./user-connections.ts";
+import { userConnectionControlPath } from "@platform/contracts";
 import { workloadDiscovery } from "./workload-identity.ts";
 import { mcpRequest } from "./mcp.ts";
 import { mcpLoginRequest } from "./mcp-login.ts";
@@ -268,6 +270,9 @@ const manageRuntime = async (
   context: ExecutionContext,
 ) => {
   const url = new URL(request.url);
+
+  if (url.pathname === userConnectionControlPath)
+    return manageUserConnection(request, environment, context);
 
   if (url.pathname === "/.well-known/widefleet/runtime") {
     return Response.json({ runtimeVersion: WIDEFLEET_RUNTIME_VERSION });

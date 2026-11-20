@@ -8,14 +8,11 @@ export const createMcpCliLogin = async (environment: ParentEnvironment, token: s
   const claims = await verifyMcpToken(environment, token);
   const { platformUrl } = await readMcpLogin(environment);
 
-  // Tokens issued before connections carried the account subject renew within minutes.
-  if (!claims.mcp.accountSubject)
-    throw new Error("Try again in a few minutes, or reconnect Widefleet in your client.");
-
+  // Management keys company accounts by the app identity's subject.
   const code = await signMcpCliLogin(environment.WIDEFLEET_CONTROL_TOKEN, {
     organizationId: claims.mcp.organizationId,
     issuer: claims.mcp.identity.issuer,
-    subject: claims.mcp.accountSubject,
+    subject: claims.mcp.identity.subject,
   });
 
   return {

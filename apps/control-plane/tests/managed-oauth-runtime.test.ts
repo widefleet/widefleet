@@ -3,7 +3,11 @@ import { Miniflare, Request as WorkerRequest, Response as WorkerResponse } from 
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { publishedApp } from "@platform/contracts";
+import {
+  publishedApp,
+  userConnectionControlPath,
+  type userConnectionAction,
+} from "@platform/contracts";
 import { encodeConfiguration } from "@platform/auth-proxy/publication";
 import { expect, it } from "vitest";
 import { z } from "zod";
@@ -13,7 +17,7 @@ const root = new URL("../../../", import.meta.url);
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 
-it("connects through the real loader and refreshes OAuth through a consuming app's binding", async () => {
+const verifyRuntimeConnection = async (flow: "standalone" | "personal") => {
   const identity = await runtimeIdentity("apps.example.test", [], [], "bob");
   const controlToken = "synthetic-runtime-control-token-for-oauth-tests";
   const appId = crypto.randomUUID();
@@ -132,6 +136,8 @@ export default class Consumer extends WorkerEntrypoint {
             AUTH_CONFIG: { type: "kv", id: "auth" },
             NATIVE_DB: { type: "d1", id: "github" },
             WIDEFLEET_CONTROL_TOKEN: { type: "json", value: controlToken },
+            // The native listener's token-authenticated management, as the agent configures it.
+            WIDEFLEET_MANAGEMENT_HTTP: { type: "json", value: "true" },
             WIDEFLEET_SECRETS_KEY: { type: "json", value: "ab".repeat(32) },
             WIDEFLEET_HTTP_AVAILABILITY: { type: "json", value: "kv" },
             WIDEFLEET_CONFIGURATION: { type: "json", value: '{"crons":{},"queues":{}}' },
@@ -183,7 +189,7 @@ export default class Consumer extends WorkerEntrypoint {
           compatibility_date: "2026-10-01",
           compatibility_flags: ["nodejs_compat"],
           web: true,
-          entrypoints: ["default"],
+          entrypoints: id === appId ? ["default", "UserConnection"] : ["default"],
           assets: { binding: "ASSETS", upload_session: crypto.randomUUID() },
           bindings: id === appId ? [{ type: "d1", name: "DB", database_name: "github" }] : [],
         },
@@ -259,7 +265,86 @@ export default class Consumer extends WorkerEntrypoint {
     expect(await (await browser(consumerOrigin)).json()).toMatchObject({
       status: "connection_required",
     });
-    const started = await browser(`${origin}/connect`, "POST");
+
+    const invocation = {
+      organizationId: "widefleet",
+      appId,
+      hostname: new URL(origin).hostname,
+      identity: {
+        issuer: z.object({ issuer: z.string() }).parse(identity.configuration.provider).issuer,
+        subject: "pairwise-subject",
+        name: "Example User",
+      },
+    };
+
+    const manage = (operation: z.infer<typeof userConnectionAction>, override = {}) =>
+      runtime.dispatchFetch(`${origin}${userConnectionControlPath}`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${controlToken}` },
+        body: JSON.stringify({ ...invocation, operation, ...override }),
+      });
+
+    expect(
+      (
+        await runtime.dispatchFetch(`${origin}${userConnectionControlPath}`, {
+          method: "POST",
+          body: JSON.stringify({ ...invocation, operation: { action: "status" } }),
+        })
+      ).status,
+    ).toBe(403);
+
+    for (const body of ["", "{"])
+      expect(
+        (
+          await runtime.dispatchFetch(`${origin}${userConnectionControlPath}`, {
+            method: "POST",
+            headers: { authorization: `Bearer ${controlToken}` },
+            body,
+          })
+        ).status,
+      ).toBe(400);
+    // An identity from another provider than app sign-in's is refused.
+    expect(
+      (
+        await manage(
+          { action: "status" },
+          { identity: { ...invocation.identity, issuer: "https://other.example.test" } },
+        )
+      ).status,
+    ).toBe(409);
+    expect((await manage({ action: "status" }, { appId: consumerId })).status).toBe(404);
+    // Members manage their own account even where the app's access groups exclude them.
+    await auth.put(
+      `apps/${new URL(origin).hostname}`,
+      JSON.stringify({
+        organizationId: "widefleet",
+        appId,
+        access: { revision: 2, groups: ["restricted"] },
+      }),
+    );
+    expect((await manage({ action: "status" })).status).toBe(200);
+    await auth.put(
+      `apps/${new URL(origin).hostname}`,
+      JSON.stringify({ organizationId: "widefleet", appId, access: { revision: 3, groups: [] } }),
+    );
+    expect(await (await manage({ action: "status" })).json()).toEqual({
+      setup: "ready",
+      connection: "disconnected",
+      account: null,
+    });
+    let launch = `${origin}/connect`;
+
+    if (flow === "personal") {
+      const prepared = await manage({
+        action: "prepare",
+        completionUrl: "https://widefleet.example.test/connections?completed=example",
+      });
+
+      expect(prepared.status, await prepared.clone().text()).toBe(200);
+      launch = z.object({ url: z.url() }).parse(await prepared.json()).url;
+    }
+
+    const started = await browser(launch, flow === "personal" ? "GET" : "POST");
     const page = await started.text();
     expect(started.status, page).toBe(200);
 
@@ -284,7 +369,18 @@ export default class Consumer extends WorkerEntrypoint {
     const relayed = await browser(callback.href);
     expect(relayed.status).toBe(303);
     const returned = await browser(z.string().parse(relayed.headers.get("location")));
-    expect(returned.headers.get("location"), await returned.text()).toBe(`${origin}/`);
+    const completion = z.string().parse(returned.headers.get("location"));
+
+    if (flow === "personal")
+      expect((await browser(completion)).headers.get("location")).toBe(
+        "https://widefleet.example.test/connections?completed=example",
+      );
+    else expect(completion, await returned.text()).toBe(`${origin}/`);
+    expect(await (await manage({ action: "status" })).json()).toEqual({
+      setup: "ready",
+      connection: "connected",
+      account: { id: "101", label: "alice@example.test" },
+    });
     expect(await (await browser(consumerOrigin)).json()).toMatchObject({
       status: "connected",
       repositories: [],
@@ -324,8 +420,25 @@ export default class Consumer extends WorkerEntrypoint {
     });
 
     expect(anonymous.status).toBe(401);
+    await manage(
+      { action: "disconnect" },
+      { identity: { ...invocation.identity, subject: "bob" } },
+    );
+    expect(await (await manage({ action: "status" })).json()).toMatchObject({
+      connection: "connected",
+    });
+    expect(await (await manage({ action: "disconnect" })).json()).toEqual({ disconnected: true });
+    expect(await (await browser(consumerOrigin)).json()).toMatchObject({
+      status: "connection_required",
+    });
     expect(refreshes).toBe(2);
   } finally {
     await runtime.dispose();
   }
-}, 30000);
+};
+
+it.each(["standalone", "personal"] as const)(
+  "links and refreshes through the real loader (%s)",
+  verifyRuntimeConnection,
+  30000,
+);

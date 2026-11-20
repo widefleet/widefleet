@@ -49,8 +49,8 @@ export const createMcpCliLogin = (
 
     if (!sso || providerIssuer(identity.provider) !== login.issuer) return null;
 
-    // Company SSO keys accounts by the subject of the organization's registration,
-    // the same registration that signed in the MCP connection.
+    // Company SSO keys accounts by the app identity's subject: the `sub`, or
+    // Entra's object ID.
     const users = await database
       .select({ userId: account.userId })
       .from(account)

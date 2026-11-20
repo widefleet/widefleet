@@ -165,6 +165,7 @@ settings:
 patchedDependencies:
   '@better-auth/core@1.7.27': d0a8d40c08c14702f534a902327f1f3c3aaee4ad8db58cedb10184e06add1d3e
   '@better-auth/oauth-provider@1.7.27': 1fa00c5288c642c073533be7b2a2adea08379e47074e11af892d94c7738caddd
+  '@better-auth/sso@1.7.27': 39273684973460350196805b0573cd78655d590c5515361cdc9c71f5c60cfa3f
   '@cloudflare/worker-bundler@0.2.6': 0eb0808184ef590337ab61d84c78de641ce65a713d7c6dc1ba070b0ac664cb99
   '@cloudflare/workers-oauth-provider@1.2.4': f21d52790d10f0313efdc1b0a03895a0f63f54f7dfd6b6bd51c889c69415b5d5
   '@opencode/codemode@2.3.0': 74a3d62cb776da99648b8b8841dac898697a072918fc2c1b31477eb2273c744a
@@ -235,7 +236,7 @@ importers:
         version: 1.7.27(patch_hash=1fa00c5288c642c073533be7b2a2adea08379e47074e11af892d94c7738caddd)(bcbf92be8604636c74c228b10e1132b4)
       '@better-auth/sso':
         specifier: 1.7.27
-        version: 1.7.27(bcbf92be8604636c74c228b10e1132b4)
+        version: 1.7.27(patch_hash=39273684973460350196805b0573cd78655d590c5515361cdc9c71f5c60cfa3f)(bcbf92be8604636c74c228b10e1132b4)
       '@google-cloud/storage':
         specifier: 8.2.0
         version: 8.2.0(supports-color@10.2.2)
@@ -7923,7 +7924,7 @@ snapshots:
       '@better-auth/core': 1.7.27(patch_hash=d0a8d40c08c14702f534a902327f1f3c3aaee4ad8db58cedb10184e06add1d3e)(@better-auth/utils@0.5.1)(@better-fetch/fetch@1.3.3)(better-call@1.4.6(zod@4.6.5))(jose@6.2.10)(kysely@0.29.6)(nanostores@1.5.4)
       '@better-auth/utils': 0.5.1
 
-  '@better-auth/sso@1.7.27(bcbf92be8604636c74c228b10e1132b4)':
+  '@better-auth/sso@1.7.27(patch_hash=39273684973460350196805b0573cd78655d590c5515361cdc9c71f5c60cfa3f)(bcbf92be8604636c74c228b10e1132b4)':
     dependencies:
       '@better-auth/core': 1.7.27(patch_hash=d0a8d40c08c14702f534a902327f1f3c3aaee4ad8db58cedb10184e06add1d3e)(@better-auth/utils@0.5.1)(@better-fetch/fetch@1.3.3)(better-call@1.4.6(zod@4.6.5))(jose@6.2.10)(kysely@0.29.6)(nanostores@1.5.4)
       '@better-auth/utils': 0.5.1

@@ -124,6 +124,21 @@ export const companySsoPlugin = (
 
       return { action: "continue" };
     },
+    // App sign-in identifies Entra users by object ID; the management account
+    // uses the same key, so it names the person's app identity. Entra's `sub`
+    // is pairwise per app registration.
+    accountSubject: ({ provider, claims }) => {
+      const entra = z
+        .object({ appIdentityType: z.literal("entra"), issuer: z.url() })
+        .safeParse(provider);
+
+      if (!entra.success) return undefined;
+      const tenant = new URL(entra.data.issuer).pathname.match(/^\/([^/]+)\/v2\.0\/?$/)?.[1];
+      const identity = z.object({ oid: z.uuid(), tid: z.uuid() }).safeParse(claims);
+
+      // An empty subject rejects the sign-in.
+      return identity.success && identity.data.tid === tenant ? identity.data.oid : "";
+    },
     provisionUserOnEveryLogin: true,
     provisionUser: async ({ user: subject, userInfo, provider }) => {
       if (
