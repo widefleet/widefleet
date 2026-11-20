@@ -1,6 +1,8 @@
 // Wrangler configuration as `widefleet deploy` reads it
 // (crates/platform-cli/src/deploy.rs and worker.rs), and the Worker metadata
 // it produces.
+import { appDeclaration } from "@platform/contracts";
+import { stripJsonc } from "@platform/contracts/jsonc";
 import { builtWorker } from "@platform/contracts/builds";
 import { z } from "zod";
 
@@ -57,39 +59,6 @@ export const wranglerConfiguration = z.strictObject({
 
 export type WranglerConfiguration = z.infer<typeof wranglerConfiguration>;
 
-// JSONC as Wrangler accepts it: line and block comments and trailing commas.
-const stripJsonc = (text: string) => {
-  let output = "";
-  let index = 0;
-
-  while (index < text.length) {
-    const character = text.charAt(index);
-    const next = text.charAt(index + 1);
-
-    if (character === '"') {
-      const start = index;
-      index++;
-
-      while (index < text.length && text.charAt(index) !== '"')
-        index += text.charAt(index) === "\\" ? 2 : 1;
-      output += text.slice(start, index + 1);
-      index++;
-    } else if (character === "/" && next === "/") {
-      while (index < text.length && text.charAt(index) !== "\n") index++;
-    } else if (character === "/" && next === "*") {
-      const end = text.indexOf("*/", index + 2);
-      index = end === -1 ? text.length : end + 2;
-    } else {
-      // A comma before a closing bracket, outside strings, is a trailing comma.
-      if (character === "}" || character === "]") output = output.replace(/,(\s*)$/, "$1");
-      output += character;
-      index++;
-    }
-  }
-
-  return output;
-};
-
 export const readConfiguration = (files: Readonly<Record<string, string>>) => {
   const source = files["wrangler.jsonc"] ?? files["wrangler.json"];
 
@@ -122,8 +91,22 @@ export const parseJson = (text: string, file: string) => {
 };
 
 /** Worker metadata in the order `widefleet deploy` writes bindings. */
+/** widefleet.jsonc beside the Wrangler configuration, as `widefleet deploy` reads it. */
+export const readDeclaration = (files: Readonly<Record<string, string>>) => {
+  const source = files["widefleet.jsonc"];
+
+  if (source === undefined) return {};
+  const parsed = appDeclaration.safeParse(parseJsonc(source, "widefleet.jsonc"));
+
+  if (!parsed.success)
+    throw new BuildError(`Invalid widefleet.jsonc: ${z.prettifyError(parsed.error)}`);
+
+  return parsed.data;
+};
+
 export const workerMetadata = (
   configuration: WranglerConfiguration,
+  declaration: ReturnType<typeof readDeclaration>,
   exports: readonly string[],
   debug: { build_id: string; source_maps: Record<string, string> },
 ) =>
@@ -173,4 +156,5 @@ export const workerMetadata = (
     ),
     crons: configuration.triggers.crons,
     queue_consumers: configuration.queues.consumers,
+    network: declaration.network,
   });

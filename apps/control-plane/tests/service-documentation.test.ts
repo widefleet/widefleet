@@ -852,9 +852,13 @@ it("rejects oversized and mismatched artifact documentation and renders authored
     compatibility_date: "2026-10-01",
     entrypoints: ["Reader"],
     service_documentation: docs,
+    network: { backend: ["https://api.example.test"] },
     assets: { upload_session: crypto.randomUUID() },
   });
 
   expect(executionWorkerMetadata(metadata)).not.toHaveProperty("service_documentation");
+  // Runtimes of earlier releases accept no declared origins in their snapshots.
+  expect(executionWorkerMetadata(metadata)).not.toHaveProperty("network");
   expect(metadata.service_documentation).toEqual(docs);
+  expect(metadata.network).toEqual({ backend: ["https://api.example.test"], browser: [] });
 });

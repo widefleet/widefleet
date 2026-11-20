@@ -542,6 +542,35 @@ describe.runIf(process.env["RUN_BUILDER_TESTS"] === "1")("app builder", () => {
     expect(await failure(unknown)).toContain("network");
   });
 
+  it("adds the network origins widefleet.jsonc declares, as widefleet deploy does", async () => {
+    const declared = await post("/bundle", {
+      files: {
+        ...project,
+        "widefleet.jsonc": `{
+  // Comments and trailing commas, as in wrangler.jsonc.
+  "network": { "backend": ["https://api.example.test"], },
+}
+`,
+      },
+    });
+
+    expect(declared.status, await declared.clone().text()).toBe(200);
+    expect(bundleResult.parse(await declared.json()).metadata.network).toEqual({
+      backend: ["https://api.example.test"],
+      browser: [],
+    });
+
+    const invalid = await post("/bundle", {
+      files: {
+        ...project,
+        "widefleet.jsonc": '{ "network": { "backend": ["http://api.example.test/path"] } }',
+      },
+    });
+
+    expect(invalid.status).toBe(422);
+    expect(await failure(invalid)).toContain("Invalid widefleet.jsonc");
+  });
+
   // As pnpm-workspace.yaml declares them for `pnpm install`.
   const patched = (patches: Record<string, string>, files: Record<string, string> = {}) => ({
     ...project,

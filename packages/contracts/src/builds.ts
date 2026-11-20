@@ -3,6 +3,7 @@
 // `widefleet deploy` would upload them.
 import { z } from "zod";
 import { bindingName, queueConsumer, serviceDocumentation, workerConfiguration } from "./index.ts";
+import { networkDeclaration } from "./network.ts";
 
 const maximumSourceBytes = 16 * 1024 * 1024;
 
@@ -39,6 +40,7 @@ export const builtWorker = workerConfiguration.extend({
   entrypoints: z.array(bindingName).max(32),
   crons: z.array(z.string().min(1)),
   queue_consumers: z.array(queueConsumer),
+  network: networkDeclaration.optional(),
 });
 
 export const bundleResult = z.strictObject({

@@ -137,6 +137,9 @@ pub async fn run(
         {
             println!("{url}");
         }
+        if let Some(requested) = &result.requested_network {
+            crate::network::print_requested(api, result.deployment.app_id, requested);
+        }
     }
     Ok(())
 }
@@ -239,6 +242,9 @@ pub struct DeploymentResult {
     pub deployment: Deployment,
     pub url: Option<String>,
     pub source: Option<platform_core::model::SourceRevision>,
+    /// Declared origins the app is not allowed to reach yet.
+    #[serde(rename = "requestedNetwork", skip_serializing_if = "Option::is_none")]
+    pub requested_network: Option<platform_core::model::NetworkPolicy>,
 }
 
 async fn publish(
@@ -538,6 +544,7 @@ async fn publish(
         entrypoints,
         service_documentation: Some(service_documentation),
         source: saved,
+        network: declaration(project)?.network,
         crons: configuration.triggers.crons,
         queue_consumers: configuration.queues.consumers,
         worker: worker_metadata,
@@ -562,11 +569,45 @@ async fn publish(
         &modules,
     )
     .await?;
+    let requested_network = match metadata.network {
+        Some(_) => crate::network::requested(api, credentials, app).await,
+        None => None,
+    };
     Ok(DeploymentResult {
         deployment,
         url: (metadata.web != Some(false)).then_some(app_url),
         source: metadata.source,
+        requested_network,
     })
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Declaration {
+    #[serde(rename = "$schema")]
+    _schema: Option<String>,
+    network: Option<platform_core::model::NetworkDeclaration>,
+}
+
+// widefleet.jsonc beside wrangler.jsonc declares what the app needs from
+// Widefleet; Wrangler's configuration stays Cloudflare's format.
+fn declaration(project: &Path) -> Result<Declaration> {
+    let path = project.join("widefleet.jsonc");
+    if !path.exists() {
+        return Ok(Declaration {
+            _schema: None,
+            network: None,
+        });
+    }
+    jsonc_parser::parse_to_serde_value(
+        &std::fs::read_to_string(&path)?,
+        &jsonc_parser::ParseOptions {
+            allow_comments: true,
+            allow_trailing_commas: true,
+            ..Default::default()
+        },
+    )
+    .map_err(|error| Error::invalid(format!("Invalid widefleet.jsonc: {error}")))
 }
 
 pub(crate) struct SourceMaps {
@@ -839,6 +880,25 @@ fn build_version(assets_root: &Path) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn widefleet_declarations_are_optional_jsonc_without_unknown_keys() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        let root = directory.path();
+        assert!(declaration(root)?.network.is_none());
+        std::fs::write(
+            root.join("widefleet.jsonc"),
+            "{\n  // Requested origins\n  \"network\": { \"backend\": [\"https://api.example.test\"], },\n}\n",
+        )?;
+        let network = declaration(root)?
+            .network
+            .ok_or_else(|| Error::invalid("Missing network declaration".into()))?;
+        assert_eq!(network.backend, ["https://api.example.test"]);
+        assert!(network.browser.is_empty());
+        std::fs::write(root.join("widefleet.jsonc"), r#"{"networks":{}}"#)?;
+        assert!(declaration(root).is_err());
+        Ok(())
+    }
 
     #[test]
     fn build_versions_preserve_framework_metadata_and_reject_invalid_manifests() -> Result<()> {

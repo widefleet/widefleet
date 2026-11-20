@@ -34,6 +34,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     let origin: string;
     let rejection = false;
     let outcome = "active";
+    let declared = false;
 
     const server = createServer((request, response) => {
       let body = "";
@@ -71,16 +72,22 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
             response
               .writeHead(403)
               .end(JSON.stringify({ message: "The token lacks network:manage" }));
-          else
-            response.end(
-              JSON.stringify({
-                policy: { backend: ["https://api.example.test"], browser: [] },
-                revision: 4,
-                appliedRevision: request.method === "PATCH" || outcome !== "active" ? 3 : 4,
-                state: request.method === "PATCH" ? "pending" : outcome,
-                error: outcome === "failed" ? "Synthetic activation failure" : null,
-              }),
-            );
+          else {
+            const state = contract.networkState.parse({
+              policy: { backend: ["https://api.example.test"], browser: [] },
+              revision: 4,
+              appliedRevision: request.method === "PATCH" || outcome !== "active" ? 3 : 4,
+              state: request.method === "PATCH" ? "pending" : outcome,
+              error: outcome === "failed" ? "Synthetic activation failure" : null,
+            });
+
+            if (declared) {
+              state.requested = { backend: ["https://other.example.test"], browser: [] };
+              state.undeclared = { backend: ["https://api.example.test"], browser: [] };
+            }
+
+            response.end(JSON.stringify(state));
+          }
         } else response.writeHead(404).end();
       });
     });
@@ -96,6 +103,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       requests.length = 0;
       rejection = false;
       outcome = "active";
+      declared = false;
     });
     afterAll(async () => {
       await new Promise<void>((resolve, reject) =>
@@ -128,6 +136,16 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
           },
         },
       );
+
+    it("reports origins the current version requests or no longer declares", async () => {
+      declared = true;
+      const result = await cli("network");
+
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        requested: { backend: ["https://other.example.test"], browser: [] },
+        undeclared: { backend: ["https://api.example.test"], browser: [] },
+      });
+    });
 
     it("resolves project context and waits for an incremental change using the ordinary credential", async () => {
       const result = await cli("network", "allow", "https://api.example.test");

@@ -58,6 +58,14 @@ impl Api {
         self.origin.origin().ascii_serialization()
     }
 
+    /// The organization this client selects, when one was chosen.
+    pub fn organization_text(&self) -> Option<String> {
+        self.organization
+            .as_ref()
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned)
+    }
+
     pub fn request(&self, method: Method, path: &str) -> RequestBuilder {
         self.client
             .request(method, format!("{}{path}", self.origin_text()))

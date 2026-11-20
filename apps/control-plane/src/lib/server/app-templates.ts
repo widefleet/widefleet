@@ -1,10 +1,12 @@
 import {
+  appDeclaration,
   appTemplate,
   appTemplateCatalog,
   appTemplateSummary,
   templateId,
 } from "@platform/contracts";
 import { Result } from "better-result";
+import { parseJsonc } from "@platform/contracts/jsonc";
 import { parse } from "yaml";
 import { z } from "zod";
 import type { Principal } from "./identity.ts";
@@ -37,6 +39,20 @@ const loadTemplate = async (id: string) => {
   const metadata = appTemplateSummary.omit({ id: true }).parse(parse(parts[1] ?? ""));
 
   return { id, ...metadata, source: `${repository}/${id}`, markdown: parts[2] ?? "" };
+};
+
+// The origins a template declares in widefleet.jsonc, which an install grants.
+const loadNetwork = async (id: string) => {
+  const response = await fetch(`${files}/${id}/widefleet.jsonc`, {
+    signal: AbortSignal.timeout(10_000),
+  });
+
+  if (response.status === 404) return undefined;
+
+  if (!response.ok) throw new Error(`GitHub returned HTTP ${response.status}`);
+  const network = appDeclaration.parse(parseJsonc(await response.text())).network;
+
+  return network && { backend: network.backend, browser: network.browser };
 };
 
 export const templateCatalog = (
@@ -97,7 +113,11 @@ export const readTemplate = (
   Result.gen(async function* () {
     const template = yield* Result.await(
       Result.tryPromise({
-        try: () => loadTemplate(id),
+        try: async () => {
+          const [template, network] = await Promise.all([loadTemplate(id), loadNetwork(id)]);
+
+          return template && { ...template, network };
+        },
         catch: (cause) =>
           new StorageUnavailable({
             message: "App templates are unavailable. Try again later.",

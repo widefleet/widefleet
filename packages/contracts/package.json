@@ -6,7 +6,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./builds": "./src/builds.ts"
+    "./builds": "./src/builds.ts",
+    "./jsonc": "./src/jsonc.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

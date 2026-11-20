@@ -168,6 +168,10 @@ pub struct WorkerMetadata {
     pub service_documentation: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<SourceRevision>,
+    /// Origins the app declares in widefleet.jsonc. Deploying requests them;
+    /// the app's owner or an administrator grants them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub network: Option<NetworkDeclaration>,
     #[serde(flatten)]
     pub worker: WorkerConfiguration,
     #[serde(default)]
@@ -266,6 +270,15 @@ pub struct AppAccessSnapshot {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct NetworkPolicy {
     pub backend: Vec<String>,
+    pub browser: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct NetworkDeclaration {
+    #[serde(default)]
+    pub backend: Vec<String>,
+    #[serde(default)]
     pub browser: Vec<String>,
 }
 

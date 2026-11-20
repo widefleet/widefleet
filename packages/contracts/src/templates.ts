@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { networkPolicy } from "./network.ts";
 
 export const templateId = z
   .string()
@@ -22,6 +23,8 @@ export const appTemplate = appTemplateSummary.extend({
   prompt: z.string(),
   /** Whether this installation builds templates for one-click installs. */
   installable: z.boolean(),
+  /** Origins the template declares in widefleet.jsonc; installing from its page grants them. */
+  network: networkPolicy.optional(),
 });
 
 export const appTemplateCatalog = z.strictObject({

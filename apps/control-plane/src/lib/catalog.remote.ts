@@ -4,6 +4,7 @@ import { form, getRequestEvent, query } from "$app/server";
 import { invalid, redirect } from "@sveltejs/kit";
 import {
   appPath,
+  networkPolicy,
   organizationSelection,
   templateInstallInput,
   templatePath,
@@ -12,6 +13,7 @@ import {
 import { z } from "zod";
 import { getAppDetails } from "#lib/apps.remote";
 import { InvalidOperation } from "#server/errors";
+import { templateNetworkChanged } from "#server/template-installs";
 import { formValue, queryValue, remoteContext } from "#server/remote-support";
 
 export const getCatalog = query(async () => {
@@ -46,10 +48,36 @@ export const getTemplates = query(templateSearch, async ({ search }) => {
 });
 
 export const installTemplate = form(
-  templateInstallInput.extend(organizationSelection.shape),
-  async ({ organizationId, templateId, name }, issue) => {
+  templateInstallInput.extend(organizationSelection.shape).extend({
+    // The origins the page showed next to the install button, as JSON.
+    network: z.string().transform((value, context) => {
+      let parsed;
+
+      try {
+        parsed = networkPolicy.safeParse(JSON.parse(value));
+      } catch {
+        parsed = networkPolicy.safeParse(null);
+      }
+
+      if (parsed.success) return parsed.data;
+      context.addIssue({ code: "custom", message: "Reload the template and install again." });
+
+      return z.NEVER;
+    }),
+  }),
+  async ({ organizationId, templateId, name, network }, issue) => {
     const { runtime, principal } = await remoteContext({ organizationId });
-    const installed = await runtime.templates.install(principal, { templateId, name });
+
+    const installed = await runtime.templates.install(
+      principal,
+      { templateId, name },
+      { consentedNetwork: network },
+    );
+
+    if (installed.isErr() && installed.error.message === templateNetworkChanged) {
+      await getTemplate({ templateId }).refresh();
+      invalid(templateNetworkChanged);
+    }
 
     // A taken name is an issue of the name field, which the page then shows.
     if (

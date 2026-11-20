@@ -13,7 +13,7 @@ export * from "./mcp.ts";
 
 import { organizationIdentifier } from "./organizations.ts";
 import { appAccessSnapshot } from "./app-access.ts";
-import { networkSnapshot } from "./network.ts";
+import { networkDeclaration, networkPolicy, networkSnapshot } from "./network.ts";
 import { migrationEntry } from "./migrations.ts";
 import { workflowName, workflowRequest } from "./workflows.ts";
 import { templatePath } from "./templates.ts";
@@ -100,6 +100,8 @@ export const templateInstall = z.strictObject({
   deployment,
   /** Build notes, such as dependencies whose types could not be installed. */
   warnings: z.array(z.string()),
+  /** Origins the template declares that the app is not allowed to reach yet. */
+  requestedNetwork: networkPolicy.optional(),
 });
 
 export const deploymentEvent = z.strictObject({
@@ -271,6 +273,8 @@ export const workerMetadata = workerConfiguration
     source: sourceRevision.optional(),
     web: z.boolean().optional(),
     service_documentation: serviceDocumentation.optional(),
+    // Origins the app declares in widefleet.jsonc; see networkDeclaration.
+    network: networkDeclaration.optional(),
     entrypoints: z
       .array(bindingName)
       .max(32)
@@ -326,6 +330,9 @@ export function executionWorkerMetadata(value: z.infer<typeof workerMetadata>) {
   const metadata = { ...value };
   delete metadata.service_documentation;
   delete metadata.source;
+  // Declared origins are a control-plane request; runtimes enforce the granted
+  // policy and reject metadata fields they do not know.
+  delete metadata.network;
 
   return metadata;
 }

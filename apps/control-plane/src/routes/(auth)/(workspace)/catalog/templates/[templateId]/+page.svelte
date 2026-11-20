@@ -34,6 +34,12 @@
       <form {...installTemplate} class="flex w-full gap-2 sm:w-auto">
         <OrganizationField field={installTemplate.fields.organizationId} />
         <input {...installTemplate.fields.templateId.as("hidden", template.id)} />
+        <input
+          {...installTemplate.fields.network.as(
+            "hidden",
+            JSON.stringify(template.network ?? { backend: [], browser: [] }),
+          )}
+        />
         {#if naming}
           <Input
             {...installTemplate.fields.name.as("text")}
@@ -56,6 +62,14 @@
     {/if}
   </div>
   <FormIssues issues={installTemplate.fields.allIssues()} />
+  {#if template.installable && template.network && template.network.backend.length + template.network.browser.length > 0}
+    <p class="text-muted-foreground mt-3 text-sm leading-6">
+      Installing allows the app to connect to
+      {#each [...new Set( [...template.network.backend, ...template.network.browser] )] as origin, index (origin)}
+        {index > 0 ? ", " : ""}<code class="text-foreground">{new URL(origin).host}</code>
+      {/each}.
+    </p>
+  {/if}
   <section class="mt-8" aria-labelledby="setup-heading">
     <h3 id="setup-heading" class="text-sm font-semibold">Set up with your agent</h3>
     <p class="text-muted-foreground mt-2 mb-4 text-sm leading-6">

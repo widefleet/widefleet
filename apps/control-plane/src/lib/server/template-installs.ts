@@ -12,18 +12,34 @@ import type { createAppService } from "./apps.ts";
 import type { Configuration } from "./config.ts";
 import { InvalidOperation } from "./errors.ts";
 import type { Principal } from "./identity.ts";
+import type { createNetworkService } from "./network.ts";
 import { appAlreadyDeployed, type createUploadService } from "./uploads.ts";
 
 const encoder = new TextEncoder();
+
+export const templateNetworkChanged =
+  "The template's network access changed. Review it and install again.";
 
 export const createTemplateInstalls = (
   configuration: Pick<Configuration, "GITHUB_TOKEN">,
   apps: Pick<ReturnType<typeof createAppService>, "named" | "create" | "resolve">,
   uploads: Pick<ReturnType<typeof createUploadService>, "start" | "publish">,
+  network: Pick<ReturnType<typeof createNetworkService>, "change" | "read">,
   builder?: AppBuilder,
 ) => ({
   available: Boolean(builder),
-  install: (principal: Principal, input: z.infer<typeof contract.templateInstallInput>) =>
+  /**
+   * Installs a template. The template's page lists the declared origins next
+   * to its install button, and that click grants exactly those
+   * (`consentedNetwork`). A caller allowed to manage network permissions grants
+   * whatever the template declares (`"declared"`). Other installs leave them
+   * requested for the app's owner or an administrator.
+   */
+  install: (
+    principal: Principal,
+    input: z.infer<typeof contract.templateInstallInput>,
+    options: { consentedNetwork?: z.infer<typeof contract.networkPolicy> | "declared" },
+  ) =>
     Result.gen(async function* () {
       if (!builder)
         return yield* new InvalidOperation({
@@ -63,6 +79,27 @@ export const createTemplateInstalls = (
 
       const { files } = yield* Result.await(templateSources(configuration, input.templateId));
       const built = yield* Result.await(builder.bundle(files));
+
+      const declared = contract.networkPolicy.parse({
+        backend: built.metadata.network?.backend ?? [],
+        browser: built.metadata.network?.browser ?? [],
+      });
+
+      // The template can change after its page was shown; never grant more
+      // than the person saw.
+      const consented =
+        options.consentedNetwork === "declared" ? declared : options.consentedNetwork;
+
+      if (
+        consented &&
+        (["backend", "browser"] as const).some((target) =>
+          declared[target].some((origin) => !consented[target].includes(origin)),
+        )
+      )
+        return yield* new InvalidOperation({
+          code: "CONFLICT",
+          message: templateNetworkChanged,
+        });
 
       const documented = yield* Result.await(
         builder.document({
@@ -125,11 +162,35 @@ export const createTemplateInstalls = (
 
       const deployment = yield* published;
 
+      // Granted only once this install owns the app's first deployment, so a
+      // rejected install leaves permissions unchanged. The app is installed by
+      // then: a grant that fails stays requested for the owner to allow.
+      const notes: string[] = [];
+
+      if (consented)
+        for (const target of ["backend", "browser"] as const)
+          if (declared[target].length > 0) {
+            const granted = await network.change(principal, installed.id, {
+              target,
+              action: "allow",
+              origins: declared[target],
+            });
+
+            if (granted.isErr())
+              notes.push(`Network access could not be allowed yet: ${granted.error.message}`);
+          }
+
+      const { requested } = yield* Result.await(network.read(principal, installed.id));
+
       return Result.ok(
         contract.templateInstall.parse({
           app: installed,
           deployment,
-          warnings: [...built.warnings, ...documented.warnings],
+          warnings: [...built.warnings, ...documented.warnings, ...notes],
+          requestedNetwork:
+            requested && (requested.backend.length > 0 || requested.browser.length > 0)
+              ? requested
+              : undefined,
         }),
       );
     }),

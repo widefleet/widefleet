@@ -135,9 +135,10 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
           templateInstalls.push(z.json().parse(JSON.parse(body)));
           response.end(
             JSON.stringify({
-              app: { slug: "mail-reader" },
+              app: { id: "00000000-0000-4000-8000-0000000000aa", slug: "mail-reader" },
               deployment: { status: "queued" },
               warnings: [],
+              requestedNetwork: { backend: ["https://gmail.googleapis.com"], browser: [] },
             }),
           );
         });
@@ -857,10 +858,15 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       );
 
       expect(JSON.parse(installed.stdout)).toEqual({
-        app: { slug: "mail-reader" },
+        app: { id: "00000000-0000-4000-8000-0000000000aa", slug: "mail-reader" },
         deployment: { status: "queued" },
         warnings: [],
+        requestedNetwork: { backend: ["https://gmail.googleapis.com"], browser: [] },
       });
+      // Without network:manage, the CLI prints how to allow what stays requested.
+      expect(installed.stderr).toContain(
+        "network allow --app 00000000-0000-4000-8000-0000000000aa 'https://gmail.googleapis.com'",
+      );
       expect(templateInstalls).toEqual([{ name: "mail-reader" }]);
       expect(requests).toEqual([
         "GET /api/v1/catalog/templates?search=mail+%26+files",
