@@ -84,8 +84,8 @@ an administrator to grant access.
 ## Personal connector accounts
 
 These operations act on your own connector accounts in the selected organization.
-Reads require `platform:read` and writes `platform:write`. Access to the connector
-app is enough; managing it is not required.
+Reads require `platform:read` and writes `platform:write`. Managing the connector
+app is not required.
 
 | Endpoint                                        | Result                                                       |
 | ----------------------------------------------- | ------------------------------------------------------------ |
@@ -96,7 +96,8 @@ app is enough; managing it is not required.
 Send `{}` as the connect body. `status` has the shape described in
 [personal connections](/guides/personal-connections#add-support-to-your-own-connector).
 A connector that cannot be reached has `status: null` and `unavailable: true`.
-A `401` means you need to [sign in again](/guides/personal-connections#sign-in-again).
+In an organization that requires company sign-in, the operations need a session
+from that sign-in.
 
 ## App templates
 

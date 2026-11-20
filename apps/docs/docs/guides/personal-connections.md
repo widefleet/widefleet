@@ -8,7 +8,8 @@ lastModified: 2026-11-20
 own provider account, such as GitHub, Gmail or OneDrive. Connect your account
 once; every app that uses the connector then acts as you.
 
-You need access to the connector app. Managing its deployment is not required.
+Every member of the organization can manage their own accounts here. Managing
+the connector's deployment is not required.
 
 ## Connect an account
 
@@ -27,8 +28,10 @@ the connector then stop acting as you.
 
 Deploy the current [GitHub, Gmail or OneDrive template](/guides/app-templates)
 and finish its provider setup. It then appears in **My connections** for every
-member its [app access rules](/reference/app-access) admit. Copies deployed from earlier template versions appear after you deploy
-the current code; their saved accounts stay connected.
+member. Who can use the apps built on it is still decided by their
+[app access rules](/reference/app-access). Copies deployed from earlier template
+versions appear after you deploy the current code; their saved accounts stay
+connected.
 
 Until provider credentials are set up, the connector shows **Awaiting
 administrator setup**.
@@ -64,18 +67,11 @@ issues the links, and `connection.ts` shares sign-in with the app's own page.
 ## Use the CLI or API
 
 ```sh
-widefleet accounts list
-widefleet accounts connect APP_UUID
-widefleet accounts disconnect APP_UUID
+widefleet my-connections list
+widefleet my-connections connect APP_UUID
+widefleet my-connections disconnect APP_UUID
 ```
 
 `connect` prints a link to open in a browser where you are signed in. The
 [API reference](/reference/api#personal-connector-accounts) lists the matching
 endpoints.
-
-## Sign in again
-
-With company sign-in, **My connections** uses the identity and groups from your
-latest company sign-in for seven days. When it asks you to sign in again, choose
-**Sign in** and continue with your company account. Your connected accounts stay
-as they are.

@@ -87,9 +87,9 @@ IDs with `widefleet apps` and deployment IDs and artifact IDs with `widefleet hi
 | `widefleet catalog list`                             | List published app launch URLs.                                        |
 | `widefleet catalog templates list [--search TEXT]`   | Find available app templates and a prompt for creating your own app.   |
 | `widefleet catalog templates show ID`                | Read a template's source, Markdown instructions and setup prompt.      |
-| `widefleet accounts list`                            | List your personal connector accounts and their status.                |
-| `widefleet accounts connect APP_UUID`                | Print a link that connects your account to a connector.                |
-| `widefleet accounts disconnect APP_UUID`             | Disconnect your account from a connector.                              |
+| `widefleet my-connections list`                      | List your personal connector accounts and their status.                |
+| `widefleet my-connections connect APP_UUID`          | Print a link that connects your account to a connector.                |
+| `widefleet my-connections disconnect APP_UUID`       | Disconnect your account from a connector.                              |
 | `widefleet delete APP_UUID --yes`                    | Request removal of an app and all its previews.                        |
 
 The target is the selected platform URL, organization context and `name` in `wrangler.jsonc`. The first deploy creates that app; subsequent deploys update it after checking the user's app permissions. A changed name selects a different app. The server assigns the host, and existing apps keep their host and data.

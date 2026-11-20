@@ -1,7 +1,7 @@
 ---
 title: Company sign-in settings
 description: Configure company sign-in through the CLI or API, manage credentials and check OpenID Connect requirements.
-lastModified: 2026-11-20
+lastModified: 2026-11-15
 ---
 
 For setup through the browser, follow [Set up company sign-in](/guides/company-sign-in).
@@ -80,9 +80,6 @@ different company provider requires its own company sign-in.
 | `entra`           | `https://login.microsoftonline.com/TENANT_ID/v2.0` | Microsoft Graph, including nested groups                              |
 | `google`          | `https://accounts.google.com`                      | Cloud Identity API with optional user consent, direct membership only |
 | `oidc` (default)  | Your provider's issuer URL                         | The ID-token field named by `oidcConfig.mapping.extraFields.groups`   |
-
-Workspace sign-in requests the same scopes as app sign-in, so [My connections](/guides/personal-connections)
-receives the same identity and groups that apps do.
 
 `domain` is the company email domain, without a URL or wildcard. For Google it
 must match the user's Workspace domain. For generic OIDC, the default name, email
