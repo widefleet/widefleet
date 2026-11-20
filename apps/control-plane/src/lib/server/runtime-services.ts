@@ -138,6 +138,7 @@ export const createRuntime = ({
       configuration,
       createAppUserIdentity(database.db, configuration, settings, encryptionKey),
       userConnectionRequest,
+      reportException,
     ),
     publicSignup,
     onboarding: createOnboardingService(database.db, settings, createOrganization, observation),

@@ -20,6 +20,7 @@ describe("Personal connector accounts", () => {
   let identify: ReturnType<typeof createAppUserIdentity>;
   const calls: z.infer<typeof userConnectionInvocation>[] = [];
   let status = 200;
+  const reports: unknown[] = [];
 
   const principal = () => ({
     id: environment.owner.id,
@@ -52,6 +53,9 @@ describe("Personal connector accounts", () => {
           case "disconnect":
             return Response.json({ disconnected: true });
         }
+      },
+      (_error, _distinctId, properties) => {
+        reports.push(properties);
       },
     );
 
@@ -106,6 +110,7 @@ describe("Personal connector accounts", () => {
     await environment.database.db.delete(apps);
     await environment.database.db.update(organizationSettings).set({ ssoRequired: false });
     calls.length = 0;
+    reports.length = 0;
     status = 200;
   });
   afterAll(async () => {
@@ -169,6 +174,16 @@ describe("Personal connector accounts", () => {
 
   it("omits inaccessible connectors and distinguishes outages from disconnected accounts", async () => {
     const app = await deploy("visible");
+    const restricted = await deploy("restricted");
+    await environment.database.db
+      .update(apps)
+      .set({ accessGroups: ["restricted-group"] })
+      .where(eq(apps.id, restricted.id));
+    expect((await service().list(principal())).map((entry) => entry.appId)).toEqual([app.id]);
+    await expect(service().prepare(principal(), restricted.id)).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    expect(calls.map((call) => call.appId)).toEqual([app.id]);
     status = 404;
     expect(await service().list(principal())).toEqual([]);
     status = 503;
@@ -180,6 +195,10 @@ describe("Personal connector accounts", () => {
         status: null,
         unavailable: true,
       },
+    ]);
+    // Unexpected failures are reported by kind, without connector responses.
+    expect(reports).toEqual([
+      { appId: app.id, organizationId: environment.application.organizationId, failure: "runtime" },
     ]);
     await expect(service().disconnect(principal(), app.id)).rejects.toMatchObject({
       statusCode: 503,
@@ -289,6 +308,9 @@ describe("Personal connector accounts", () => {
           active--;
         }
       },
+      (_error, _distinctId, properties) => {
+        reports.push(properties);
+      },
     );
 
     const results = await connections.list(principal());
@@ -299,5 +321,7 @@ describe("Personal connector accounts", () => {
     expect(peak).toBeLessThanOrEqual(4);
     expect(started).toBeLessThan(7);
     expect(active).toBe(0);
+    // Checks cut off by the shared deadline are expected and not reported.
+    expect(reports).toEqual([]);
   }, 10_000);
 });

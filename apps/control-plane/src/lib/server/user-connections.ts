@@ -2,6 +2,7 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { APIError } from "better-auth/api";
 import { z } from "zod";
 import {
+  hasAppAccess,
   userConnectionStatus,
   userConnectionLaunch,
   userConnectionInvocation,
@@ -14,6 +15,7 @@ import type { Configuration } from "./config.ts";
 import type { Principal } from "./identity.ts";
 import type { createAppUserIdentity } from "./app-user-identity.ts";
 import { InvalidOperation } from "./errors.ts";
+import type { Observation } from "./observation.ts";
 
 export type UserConnectionRequest = (
   input: z.infer<typeof userConnectionInvocation>,
@@ -25,10 +27,16 @@ export const createUserConnections = (
   configuration: Configuration,
   identify: ReturnType<typeof createAppUserIdentity>,
   request?: UserConnectionRequest,
+  reportException?: Observation["exception"],
 ) => {
   const candidates = (principal: Principal) =>
     database
-      .select({ appId: apps.id, displayName: apps.displayName, hostname: apps.hostname })
+      .select({
+        appId: apps.id,
+        displayName: apps.displayName,
+        hostname: apps.hostname,
+        accessGroups: apps.accessGroups,
+      })
       .from(apps)
       .innerJoin(deployments, eq(deployments.id, apps.activeDeploymentId))
       .innerJoin(artifacts, eq(artifacts.id, deployments.artifactId))
@@ -45,9 +53,21 @@ export const createUserConnections = (
       )
       .orderBy(apps.displayName, apps.id);
 
+  // The runtime checks access again; this keeps inaccessible connectors off the
+  // list even when their status check does not finish in time.
+  const accessible = (
+    records: Awaited<ReturnType<typeof candidates>>,
+    identity: Awaited<ReturnType<typeof identify>>,
+  ) =>
+    records
+      .filter((record) =>
+        hasAppAccess(z.array(z.string()).parse(record.accessGroups), identity.identity.groups),
+      )
+      .map(({ appId, displayName, hostname }) => ({ appId, displayName, hostname }));
+
   const call = async (
     principal: Principal,
-    target: Awaited<ReturnType<typeof candidates>>[number],
+    target: ReturnType<typeof accessible>[number],
     identity: Awaited<ReturnType<typeof identify>>,
     operation: z.infer<typeof userConnectionAction>,
     signal?: AbortSignal,
@@ -84,23 +104,30 @@ export const createUserConnections = (
   };
 
   const target = async (principal: Principal, appId: string) => {
-    const record = (await candidates(principal)).find((candidate) => candidate.appId === appId);
-
-    if (!record)
-      throw new InvalidOperation({
+    const unavailable = () =>
+      new InvalidOperation({
         code: "NOT_FOUND",
         message: "This personal connection is unavailable",
       });
 
-    return record;
+    const records = (await candidates(principal)).filter((record) => record.appId === appId);
+
+    if (!records.length) throw unavailable();
+    const identity = await identify(principal);
+    const [record] = accessible(records, identity);
+
+    if (!record) throw unavailable();
+
+    return { record, identity };
   };
 
   return {
     list: async (principal: Principal) => {
-      const records = await candidates(principal);
+      const listed = await candidates(principal);
 
-      if (!records.length) return [];
+      if (!listed.length) return [];
       const identity = await identify(principal);
+      const records = accessible(listed, identity);
 
       const results: (z.infer<typeof userConnectionEntry> | null)[] = records.map((record) => ({
         ...record,
@@ -138,8 +165,24 @@ export const createUserConnections = (
                       status: userConnectionStatus.parse(result),
                       unavailable: false,
                     };
-            } catch {
-              // Preserve the unavailable result, including for aborted requests.
+            } catch (cause) {
+              // The row stays unavailable. Report unexpected failures by kind only:
+              // connector responses can contain provider data.
+              if (!deadline.aborted)
+                void reportException?.(
+                  new Error("A personal connection status check failed"),
+                  undefined,
+                  {
+                    appId: record.appId,
+                    organizationId: principal.application.organizationId,
+                    failure:
+                      cause instanceof APIError
+                        ? "runtime"
+                        : cause instanceof z.ZodError || cause instanceof SyntaxError
+                          ? "response"
+                          : "request",
+                  },
+                );
             }
           }
         }),
@@ -148,11 +191,11 @@ export const createUserConnections = (
       return results.filter((result) => result !== null);
     },
     prepare: async (principal: Principal, appId: string) => {
-      const record = await target(principal, appId);
+      const { record, identity } = await target(principal, appId);
       const completion = new URL("/connections", configuration.PLATFORM_URL);
       completion.searchParams.set("completed", appId);
 
-      const result = await call(principal, record, await identify(principal), {
+      const result = await call(principal, record, identity, {
         action: "prepare",
         completionUrl: completion.href,
       });
@@ -166,9 +209,9 @@ export const createUserConnections = (
       return userConnectionLaunch.parse(result);
     },
     disconnect: async (principal: Principal, appId: string) => {
-      const record = await target(principal, appId);
+      const { record, identity } = await target(principal, appId);
 
-      const result = await call(principal, record, await identify(principal), {
+      const result = await call(principal, record, identity, {
         action: "disconnect",
       });
 
