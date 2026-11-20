@@ -25,10 +25,9 @@ the connector then stop acting as you.
 
 ## Make a connector available
 
-Deploy the current [GitHub, Gmail or OneDrive template](/guides/app-templates),
-finish its provider setup and list it in the app catalog. It then appears in
-**My connections** for every member its [app access rules](/reference/app-access)
-admit. Copies deployed from earlier template versions appear after you deploy
+Deploy the current [GitHub, Gmail or OneDrive template](/guides/app-templates)
+and finish its provider setup. It then appears in **My connections** for every
+member its [app access rules](/reference/app-access) admit. Copies deployed from earlier template versions appear after you deploy
 the current code; their saved accounts stay connected.
 
 Until provider credentials are set up, the connector shows **Awaiting
