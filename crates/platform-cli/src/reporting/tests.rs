@@ -291,6 +291,30 @@ fn different_api_statuses_do_not_share_an_issue() {
 }
 
 #[test]
+fn fingerprints_survive_line_changes_but_separate_files() {
+    let fingerprint = |filename: &str, lineno| {
+        let events = capture(
+            Failure::panic(Report {
+                kind: "Panic".into(),
+                frames: vec![Frame {
+                    filename: filename.into(),
+                    lineno,
+                    colno: Some(1),
+                }],
+            }),
+            Preferences::default(),
+        );
+        events[1]["properties"]["$exception_fingerprint"].clone()
+    };
+    let main = "crates/platform-cli/src/main.rs";
+    assert_eq!(fingerprint(main, 100), fingerprint(main, 140));
+    assert_ne!(
+        fingerprint(main, 100),
+        fingerprint("crates/platform-cli/src/deploy.rs", 100)
+    );
+}
+
+#[test]
 fn panics_remain_unhandled_exceptions() {
     let events = capture(
         Failure::panic(Report {

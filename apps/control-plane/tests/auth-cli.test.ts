@@ -80,9 +80,9 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("CLI authentication diagnos
       expect(result.stderr).toContain("PLATFORM_ACCESS_TOKEN");
       expect(result.stderr).not.toContain("zbus");
       expect(result.stderr).not.toContain("No default store has been set");
-      expect(result.stderr).toContain('"error_code":"credential_store_unavailable"');
-      expect(result.stderr).toContain('"error_category":"technical"');
-      expect(result.stderr).toContain('"event":"$exception"');
+      expect(result.stderr).toContain('"error_code":"login_required"');
+      expect(result.stderr).toContain('"error_category":"usage"');
+      expect(result.stderr).not.toContain('"event":"$exception"');
     },
   );
 

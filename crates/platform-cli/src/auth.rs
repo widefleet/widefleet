@@ -189,12 +189,13 @@ async fn read_session(origin: String, credentials: &Credentials) -> Result<Sessi
                 "No session is stored in this file. Run widefleet login with the same --session-file or PLATFORM_SESSION_FILE".into(),
             ).with_reason(FailureReason::LoginRequired));
         }
-        // Without a credential store, Unix logins use the private file checked above.
+        // Without a credential store, Unix logins use the private file checked
+        // above. Its absence therefore means no login, not a store failure.
         let entry = credential_entry(&origin).map_err(|error| {
             if cfg!(unix) {
                 Error::credentials(format!(
                     "No session is stored for {origin}. Run widefleet login first. If this environment discards files outside the working directory between commands, set PLATFORM_SESSION_FILE to a file there, outside the app project, before logging in. For noninteractive use, set PLATFORM_ACCESS_TOKEN"
-                )).with_reason(FailureReason::CredentialStoreUnavailable)
+                )).with_reason(FailureReason::LoginRequired)
             } else {
                 error
             }

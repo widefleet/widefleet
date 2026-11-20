@@ -203,17 +203,18 @@ fn events(
         let handled = failure.code != "panic";
         let title = format!("{command}: {}", failure.summary);
         // Separate statuses and commands that otherwise all share http.rs's
-        // error construction site. Keep source locations to separate call sites.
+        // error construction site. Source files separate call sites; line and
+        // column numbers would split one failure into a new issue per release.
+        let files: Vec<_> = failure
+            .report
+            .frames
+            .iter()
+            .map(|frame| frame.filename.as_str())
+            .collect();
         let fingerprint = platform_core::sha256(
-            json!([
-                "cli-v2",
-                command,
-                failure.code,
-                failure.http_status,
-                failure.report.frames
-            ])
-            .to_string()
-            .as_bytes(),
+            json!(["cli-v2", command, failure.code, failure.http_status, files])
+                .to_string()
+                .as_bytes(),
         );
         let mut properties = diagnostic;
         properties["command"] = json!(command);
