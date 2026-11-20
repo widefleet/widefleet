@@ -1012,6 +1012,15 @@ test("keeps public pages, service health and API authentication outside page log
   expect((await request.get("/nonexistent", { maxRedirects: 0 })).status()).toBe(404);
 });
 
+test("asks search engines not to index control-plane pages and API responses", async ({
+  request,
+}) => {
+  for (const path of ["/sign-in", "/recover", "/healthz", "/api/v1/apps", "/nonexistent"]) {
+    const response = await request.get(path, { maxRedirects: 0 });
+    expect(response.headers()["x-robots-tag"], path).toBe("noindex");
+  }
+});
+
 test("redirects anonymous device requests to login and preserves the code and email", async ({
   page,
 }) => {

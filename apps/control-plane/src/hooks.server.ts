@@ -23,6 +23,8 @@ export const handle: Handle = async ({ event, resolve }) => {
   const analyticsResponse = await proxyAnalyticsRequest(event.request, event.locals.analytics);
 
   if (analyticsResponse) return analyticsResponse;
+  // The control plane is a signed-in management UI; keep all of its pages out of search results.
+  event.setHeaders({ "x-robots-tag": "noindex" });
   event.locals.runtime = createRequestRuntime(getRuntime);
 
   return handleSession({ event, resolve });
