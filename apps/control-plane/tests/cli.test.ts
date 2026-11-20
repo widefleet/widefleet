@@ -154,6 +154,31 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         return;
       }
 
+      if (request.url?.startsWith("/api/v1/user-connections")) {
+        response.end(
+          JSON.stringify(
+            request.method === "GET"
+              ? [
+                  {
+                    appId: app.id,
+                    displayName: app.displayName,
+                    hostname: app.hostname,
+                    status: { setup: "ready", connection: "disconnected", account: null },
+                    unavailable: false,
+                  },
+                ]
+              : request.method === "DELETE"
+                ? { disconnected: true }
+                : {
+                    url: `${app.url}connect/start?ticket=synthetic`,
+                    expiresAt: "2027-01-01T00:00:00.000Z",
+                  },
+          ),
+        );
+
+        return;
+      }
+
       if (request.method === "GET" && request.url?.startsWith("/api/v1/catalog/templates")) {
         response.end(
           JSON.stringify(
@@ -853,6 +878,32 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         });
         expect(requests).toEqual([`GET /api/v1/apps/${app.id}/logs?since=1h&limit=100`]);
       }
+    });
+
+    it("lists and manages personal accounts in the selected organization", async () => {
+      requiredOrganization = app.organizationId;
+
+      const options = {
+        env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken },
+      };
+
+      const binary = join(state, "installation", executableName);
+      const prefix = ["--organization", app.organizationId, "my-connections"];
+      const listed = await execute(binary, [...prefix, "list"], options);
+      expect(z.array(contract.userConnectionEntry).parse(JSON.parse(listed.stdout))[0]?.appId).toBe(
+        app.id,
+      );
+      const prepared = await execute(binary, [...prefix, "connect", app.id], options);
+      expect(contract.userConnectionLaunch.parse(JSON.parse(prepared.stdout)).url).toContain(
+        "connect/start?ticket=",
+      );
+      const disconnected = await execute(binary, [...prefix, "disconnect", app.id], options);
+      expect(JSON.parse(disconnected.stdout)).toEqual({ disconnected: true });
+      expect(requests).toEqual([
+        "GET /api/v1/user-connections",
+        `POST /api/v1/user-connections/${app.id}/connect`,
+        `DELETE /api/v1/user-connections/${app.id}`,
+      ]);
     });
 
     it("lists, publishes and withdraws catalog entries through the API", async () => {
