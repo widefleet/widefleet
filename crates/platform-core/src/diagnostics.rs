@@ -18,6 +18,7 @@ pub enum FailureReason {
     LoginExpired,
     DiscoveryExpired,
     LoginRequired,
+    SessionUnreachable,
     InvalidLoginScope,
     PlatformNotConfigured,
     EmptyAccessToken,
@@ -57,6 +58,11 @@ impl FailureReason {
             Self::LoginExpired => ("login_expired", "Device login expired", Usage),
             Self::DiscoveryExpired => ("discovery_expired", "Company discovery expired", Usage),
             Self::LoginRequired => ("login_required", "No saved login is available", Usage),
+            Self::SessionUnreachable => (
+                "session_unreachable",
+                "No session file and the credential store is unavailable",
+                Usage,
+            ),
             Self::InvalidLoginScope => (
                 "invalid_login_scope",
                 "Login scope format is invalid",
