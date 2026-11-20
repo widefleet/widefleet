@@ -1,3 +1,4 @@
+import { mkdir } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 import { spawn } from "node:child_process";
 import { createServer, request as httpRequest } from "node:http";
@@ -5,7 +6,7 @@ import { EventEmitter, once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { app, artifact, workerMetadata } from "@platform/contracts";
+import { app, artifact, workerMetadata, type userConnectionInvocation } from "@platform/contracts";
 import {
   account,
   member,
@@ -20,11 +21,13 @@ import {
   artifacts,
   deployments,
   jobs,
+  organizationSettings,
 } from "../../src/lib/server/schema.ts";
 import { apiResource, cliClientId } from "../../src/lib/server/auth-options.ts";
 import { createTestEnvironment } from "../environment.ts";
 import { authConfiguration, createAuthProxy } from "@platform/auth-proxy";
 import { registerAppLogin, readAppLogin } from "../../src/lib/server/app-login-client.ts";
+import { prepareOrganizationInvitation } from "../../src/lib/server/members.ts";
 
 let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
 
@@ -3265,3 +3268,417 @@ for (const javaScriptEnabled of [true, false]) {
     });
   });
 }
+
+for (const javaScriptEnabled of [true, false])
+  test(`personal connections account controls and workspace entry (javascript=${javaScriptEnabled})`, async ({
+    browser,
+  }) => {
+    const person = environment.users.createUser({
+      name: "Taylor Example",
+      email: `personal-${javaScriptEnabled}@example.test`,
+    });
+
+    await environment.users.saveUser(person);
+    await environment.database.db.update(organizationSettings).set({ ssoRequired: false });
+    await registerAppLogin(
+      environment.database.db,
+      environment.configuration,
+      environment.environment.PLATFORM_ENCRYPTION_KEY,
+      "widefleet",
+    );
+    const appIds: string[] = [];
+    const connected = new Set<string>();
+    let unavailable = false;
+    let denied = false;
+    let expectedUser = person.id;
+    let launches = 0;
+    let statusReads = 0;
+    let completion = "";
+
+    // Stands in for the connector's origin, which completes authorization and
+    // returns the browser to its completion URL.
+    const connectorServer = createServer((_request, response) => {
+      response.writeHead(303, { location: completion }).end();
+    });
+
+    connectorServer.listen(0, "127.0.0.1");
+    await once(connectorServer, "listening");
+    const connector = `http://127.0.0.1:${z.object({ port: z.number() }).parse(connectorServer.address()).port}`;
+
+    const context = await browser.newContext({
+      javaScriptEnabled,
+      baseURL: environment.configuration.PLATFORM_URL,
+      extraHTTPHeaders: { "x-forwarded-proto": "http" },
+    });
+
+    const signInAs = async (userId: string) => {
+      expectedUser = userId;
+      const login = await environment.users.login({ userId });
+      await context.addCookies(
+        login.cookies.map((cookie) => ({
+          ...cookie,
+          domain: "localhost",
+          secure: false,
+          sameSite: "Lax" as const,
+        })),
+      );
+    };
+
+    await signInAs(person.id);
+
+    try {
+      for (const [slug, displayName] of [
+        ["personal-github", "GitHub"],
+        ["personal-files", "Microsoft OneDrive — Finance and Operations"],
+        ["personal-gmail", "Gmail"],
+      ] as const) {
+        const appId = crypto.randomUUID();
+        const artifactId = crypto.randomUUID();
+        const deploymentId = crypto.randomUUID();
+        appIds.push(appId);
+        await environment.database.db.insert(apps).values({
+          id: appId,
+          slug,
+          displayName,
+          hostname: `${slug}.apps.localhost`,
+          ownerId: environment.owner.id,
+          organizationId: "widefleet",
+          state: "active",
+          catalogListed: true,
+        });
+        await environment.database.db.insert(artifacts).values({
+          id: artifactId,
+          appId,
+          metadata: { entrypoints: ["default", "UserConnection"] },
+          modules: [],
+          manifest: {},
+        });
+        await environment.database.db.insert(deployments).values({
+          id: deploymentId,
+          appId,
+          artifactId,
+          status: "succeeded",
+          requestId: crypto.randomUUID(),
+        });
+        await environment.database.db
+          .update(apps)
+          .set({ activeDeploymentId: deploymentId })
+          .where(eq(apps.id, appId));
+      }
+
+      const github = z.string().parse(appIds[0]);
+      const files = z.string().parse(appIds[1]);
+      const gmail = z.string().parse(appIds[2]);
+      connected.add(files);
+      environment.authControl.userConnection((input) => {
+        expect(input.identity.subject).toBe(expectedUser);
+
+        if (denied) return new Response(null, { status: 404 });
+
+        if (unavailable && input.appId === files) return new Response(null, { status: 503 });
+
+        if (input.operation.action === "status") {
+          statusReads++;
+
+          return Response.json({
+            setup: input.appId === gmail ? "required" : "ready",
+            connection: connected.has(input.appId) ? "connected" : "disconnected",
+            account: connected.has(input.appId)
+              ? { id: "example-account", label: "taylor@example.test" }
+              : null,
+          });
+        }
+
+        if (input.operation.action === "disconnect") {
+          connected.delete(input.appId);
+
+          return Response.json({ disconnected: true });
+        }
+
+        launches++;
+        connected.add(input.appId);
+        completion = input.operation.completionUrl;
+
+        // Runtime and provider redirect correctness is covered with the real loader.
+        // The launch link is on another origin, as real connectors return it.
+        return Response.json({
+          url: `${connector}/connect/start?ticket=synthetic`,
+          expiresAt: new Date(Date.now() + 120_000).toISOString(),
+        });
+      });
+      const page = await context.newPage();
+
+      const invitation = await environment.database.db.transaction((transaction) =>
+        prepareOrganizationInvitation(transaction, "widefleet", environment.owner.id, {
+          email: person.email,
+          role: "member",
+        }),
+      );
+
+      await page.goto(`/invitations/${invitation.invitation.id}`);
+      await page.getByRole("button", { name: "Accept invitation" }).click();
+      await expect(page).toHaveURL(environment.configuration.PLATFORM_URL + "/");
+      expect(statusReads).toBe(0);
+
+      if (javaScriptEnabled) {
+        await mkdir("../../.local/personal-connections", { recursive: true });
+
+        for (const [name, width, height, colorScheme] of [
+          ["desktop-light", 1440, 1000, "light"],
+          ["desktop-dark", 1440, 1000, "dark"],
+          ["mobile-dark", 390, 844, "dark"],
+          ["mobile-light", 390, 844, "light"],
+        ] as const) {
+          await page.setViewportSize({ width, height });
+          await page.emulateMedia({ colorScheme });
+          await page.screenshot({
+            path: `../../.local/personal-connections/workspace-${name}.png`,
+            fullPage: true,
+          });
+        }
+      }
+
+      if (javaScriptEnabled) await page.getByText("Menu", { exact: true }).click();
+      await page.getByRole("link", { name: "My connections", exact: true }).click();
+      await expect(
+        page.getByRole("heading", { name: "My connections", exact: true }),
+      ).toBeVisible();
+      await expect(page.getByRole("button", { name: "Continue to apps" })).toHaveCount(0);
+      await expect(page.getByText("Not connected", { exact: true })).toHaveCount(0);
+      await expect(page.getByText("personal-github.apps.localhost", { exact: true })).toHaveCount(
+        0,
+      );
+      await expect(page.getByRole("link", { name: "Refresh", exact: true })).toHaveCount(0);
+      await expect(page.getByText("taylor@example.test", { exact: false })).toBeVisible();
+
+      await expect(page.getByText("Awaiting administrator setup")).toBeVisible();
+
+      if (javaScriptEnabled) {
+        await mkdir("../../.local/personal-connections", { recursive: true });
+
+        for (const [name, width, height, colorScheme] of [
+          ["desktop-light", 1440, 1000, "light"],
+          ["desktop-dark", 1440, 1000, "dark"],
+          ["mobile-dark", 390, 844, "dark"],
+          ["mobile-light", 390, 844, "light"],
+        ] as const) {
+          await page.setViewportSize({ width, height });
+          await page.emulateMedia({ colorScheme });
+          await page.screenshot({
+            path: `../../.local/personal-connections/accounts-${name}.png`,
+            fullPage: true,
+          });
+          expect(
+            await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+          ).toBe(true);
+        }
+      }
+
+      const githubRow = page
+        .locator("li")
+        .filter({ has: page.getByRole("heading", { name: "GitHub", exact: true }) });
+
+      await githubRow.getByRole("button", { name: "Connect GitHub" }).focus();
+      await page.keyboard.press("Enter");
+      await expect(githubRow.getByText("taylor@example.test", { exact: false })).toBeVisible();
+      expect(connected.has(github)).toBe(true);
+      await expect(githubRow.getByRole("button", { name: "Reconnect GitHub" })).toBeHidden();
+      const options = githubRow.getByLabel("Account options for GitHub");
+      await options.focus();
+      await page.keyboard.press("Enter");
+      await expect(githubRow.getByRole("button", { name: "Reconnect GitHub" })).toBeVisible();
+
+      if (javaScriptEnabled) {
+        await page.keyboard.press("Escape");
+        await expect(githubRow.getByRole("button", { name: "Reconnect GitHub" })).toBeHidden();
+        await expect(options).toBeFocused();
+        await page.keyboard.press("Enter");
+        await page.getByRole("heading", { name: "My connections", exact: true }).click();
+        await expect(githubRow.getByRole("button", { name: "Reconnect GitHub" })).toBeHidden();
+        await options.click();
+        await page.screenshot({
+          path: "../../.local/personal-connections/mobile-account-menu.png",
+          fullPage: true,
+        });
+      }
+
+      await githubRow.getByRole("button", { name: "Reconnect GitHub" }).click();
+      await expect.poll(() => launches).toBe(2);
+      await expect(githubRow.getByText("taylor@example.test", { exact: false })).toBeVisible();
+      expect(connected.has(github)).toBe(true);
+      // A fresh page also verifies the native disclosure without relying on client state.
+      await page.reload();
+      await options.click();
+      await githubRow.getByRole("link", { name: "Disconnect GitHub" }).click();
+      await expect(githubRow.getByRole("button", { name: "Disconnect account" })).toBeVisible();
+
+      if (javaScriptEnabled)
+        await page.screenshot({
+          path: "../../.local/personal-connections/mobile-disconnect.png",
+          fullPage: true,
+        });
+      await githubRow.getByRole("link", { name: "Cancel", exact: true }).click();
+      await expect(githubRow.getByRole("button", { name: "Disconnect account" })).toBeHidden();
+      expect(connected.has(github)).toBe(true);
+      await options.click();
+      await githubRow.getByRole("link", { name: "Disconnect GitHub" }).click();
+      await githubRow.getByRole("button", { name: "Disconnect account" }).click();
+      await expect(githubRow.getByRole("button", { name: "Connect GitHub" })).toBeVisible();
+      expect(connected.has(files)).toBe(true);
+      unavailable = true;
+      await page.reload();
+      await expect(page.getByText("Could not check this account.")).toBeVisible();
+
+      if (javaScriptEnabled)
+        await page.screenshot({
+          path: "../../.local/personal-connections/mobile-unavailable.png",
+          fullPage: true,
+        });
+      unavailable = false;
+      await page.getByRole("link", { name: "Try again", exact: true }).click();
+      await expect(page.getByText("Could not check this account.")).toBeHidden();
+      await expect(page.getByRole("link", { name: "Try again", exact: true })).toBeHidden();
+      await page.goto("/");
+      await expect(page).toHaveURL(environment.configuration.PLATFORM_URL + "/");
+
+      const other = environment.users.createUser({
+        name: "Other member",
+        email: `other-personal-${javaScriptEnabled}@example.test`,
+      });
+
+      await environment.users.saveUser(other);
+      await environment.linkMicrosoftUser(other.id);
+      await signInAs(other.id);
+      await page.goto("/");
+      await expect(page).toHaveURL(environment.configuration.PLATFORM_URL + "/");
+
+      if (javaScriptEnabled) await page.getByText("Menu", { exact: true }).click();
+      await page.getByRole("link", { name: "My connections", exact: true }).click();
+      await expect(githubRow.getByRole("button", { name: "Connect GitHub" })).toBeVisible();
+      await signInAs(person.id);
+      denied = true;
+      await page.goto("/connections");
+      await expect(page.getByText("No personal connections available")).toBeVisible();
+      denied = false;
+      await page.goto("/connections?success=true");
+      await expect(githubRow.getByRole("button", { name: "Connect GitHub" })).toBeVisible();
+      // Duplicate names retain the hostnames needed to distinguish deployments.
+      await environment.database.db
+        .update(apps)
+        .set({ displayName: "GitHub" })
+        .where(eq(apps.id, gmail));
+      await page.reload();
+      await expect(page.getByText("personal-github.apps.localhost", { exact: true })).toBeVisible();
+      await expect(page.getByText("personal-gmail.apps.localhost", { exact: true })).toBeVisible();
+      // Incomplete setup remains visible when opening connection management.
+      // Connectors without a web deployment are not listed.
+      await environment.database.db
+        .update(apps)
+        .set({ webEnabled: false })
+        .where(inArray(apps.id, [github, files]));
+      await page.goto("/");
+      await expect(page).toHaveURL(environment.configuration.PLATFORM_URL + "/");
+      await page.goto("/connections");
+      await expect(page.getByText("Awaiting administrator setup")).toBeVisible();
+      await environment.database.db
+        .update(apps)
+        .set({ webEnabled: false })
+        .where(inArray(apps.id, appIds));
+      await page.reload();
+      await expect(page.getByText("No personal connections available")).toBeVisible();
+
+      if (javaScriptEnabled)
+        await page.screenshot({
+          path: "../../.local/personal-connections/mobile-empty.png",
+          fullPage: true,
+        });
+    } finally {
+      environment.authControl.userConnection(undefined);
+      connectorServer.close();
+      await context.close();
+      await environment.database.db.delete(apps).where(inArray(apps.id, appIds));
+      await environment.database.db.update(organizationSettings).set({ ssoRequired: true });
+    }
+  });
+
+test("personal connections assert the company account as the app identity", async ({ page }) => {
+  const [provider] = await environment.database.db.select().from(ssoProvider);
+  const appId = crypto.randomUUID();
+  const artifactId = crypto.randomUUID();
+  const deploymentId = crypto.randomUUID();
+  const identities: z.infer<typeof userConnectionInvocation>["identity"][] = [];
+
+  await environment.database.db.update(ssoProvider).set({ domainVerified: true });
+  await environment.database.db.insert(apps).values({
+    id: appId,
+    slug: "company-github",
+    displayName: "Company GitHub",
+    hostname: "company-github.apps.localhost",
+    ownerId: environment.owner.id,
+    organizationId: "widefleet",
+    state: "active",
+    catalogListed: true,
+  });
+  await environment.database.db.insert(artifacts).values({
+    id: artifactId,
+    appId,
+    metadata: { entrypoints: ["default", "UserConnection"] },
+    modules: [],
+    manifest: {},
+  });
+  await environment.database.db.insert(deployments).values({
+    id: deploymentId,
+    appId,
+    artifactId,
+    status: "succeeded",
+    requestId: crypto.randomUUID(),
+  });
+  await environment.database.db
+    .update(apps)
+    .set({ activeDeploymentId: deploymentId })
+    .where(eq(apps.id, appId));
+  environment.authControl.userConnection((input) => {
+    identities.push(input.identity);
+
+    return Response.json({ setup: "ready", connection: "disconnected", account: null });
+  });
+
+  try {
+    // Company sign-in to management, against the emulated Entra tenant.
+    await page.goto("/sign-in");
+    await page.getByLabel("Email", { exact: true }).fill("sso@example.test");
+    await page.getByRole("button", { name: "Continue with email", exact: true }).click();
+    await page.getByRole("button", { name: /sso@example.test/ }).click();
+    await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
+
+    const [signedIn] = await environment.database.db
+      .select({ userId: account.userId, subject: account.accountId })
+      .from(account)
+      .innerJoin(user, eq(user.id, account.userId))
+      .where(
+        and(
+          eq(account.providerId, z.string().parse(provider?.providerId)),
+          eq(user.email, "sso@example.test"),
+        ),
+      );
+
+    // Entra accounts are keyed by object ID, the subject app sign-in issues.
+    expect(z.uuid().safeParse(signedIn?.subject).success).toBe(true);
+
+    const expected = {
+      issuer: `${environment.environment.ENTRA_AUTHORITY}/${environment.environment.ENTRA_TENANT_ID}/v2.0`,
+      subject: z.string().parse(signedIn?.subject),
+      name: "SSO Test User",
+    };
+
+    await page.goto("/connections");
+    await expect(page.getByRole("heading", { name: "Company GitHub", exact: true })).toBeVisible();
+    expect(identities.at(-1)).toEqual(expected);
+  } finally {
+    environment.authControl.userConnection(undefined);
+    await environment.database.db.delete(apps).where(eq(apps.id, appId));
+    await environment.database.db
+      .update(ssoProvider)
+      .set({ domainVerified: provider?.domainVerified ?? false });
+  }
+});
