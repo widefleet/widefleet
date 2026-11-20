@@ -16,6 +16,7 @@ import { appAccessSnapshot } from "./app-access.ts";
 import { networkSnapshot } from "./network.ts";
 import { migrationEntry } from "./migrations.ts";
 import { workflowName, workflowRequest } from "./workflows.ts";
+import { templatePath } from "./templates.ts";
 
 export * from "./migrations.ts";
 
@@ -87,6 +88,18 @@ export const deployment = z.strictObject({
   createdAt: z.iso.datetime(),
   finishedAt: z.iso.datetime().nullable(),
   message: z.string().nullable(),
+});
+
+export const templateInstallInput = templatePath.extend({
+  /** The new app's name; the template ID by default. */
+  name: appSlug.optional(),
+});
+
+export const templateInstall = z.strictObject({
+  app,
+  deployment,
+  /** Build notes, such as dependencies whose types could not be installed. */
+  warnings: z.array(z.string()),
 });
 
 export const deploymentEvent = z.strictObject({

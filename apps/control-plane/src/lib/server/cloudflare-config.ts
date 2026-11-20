@@ -40,6 +40,9 @@ export interface CloudflareBindings extends CloudflareAuthRateLimitBindings {
   DEPLOYMENTS?: Workflow<z.infer<typeof deploymentWorkflowCommand>>;
   APP_OPERATIONS?: Workflow<z.infer<typeof cloudflareAppOperation>>;
   APP_RUNTIME?: Fetcher;
+  /** App builder Workers for one-click template installs, one per build phase. */
+  APP_BUILDER?: Fetcher;
+  APP_DOCUMENTER?: Fetcher;
   APP_COOKIE_SECRET?: string;
   CLOUDFLARE_ACCOUNT_ID?: string;
   CLOUDFLARE_API_TOKEN?: string;

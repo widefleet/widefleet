@@ -44,6 +44,7 @@ import { InvalidOperation, StorageUnavailable } from "../src/lib/server/errors.t
 import { transact } from "../src/lib/server/transactions.ts";
 import { createStorage } from "../src/lib/server/storage.ts";
 import { createUploadService } from "../src/lib/server/uploads.ts";
+import { createTemplateInstalls } from "../src/lib/server/template-installs.ts";
 import { createTestEnvironment } from "./environment.ts";
 import { createTelemetry } from "../src/lib/server/telemetry.ts";
 
@@ -125,6 +126,11 @@ describe("Platform API with PostgreSQL and RustFS", () => {
       ),
       releases: createRuntimeReleaseService(environment.database.db, storage),
       uploads: createUploadService(environment.database.db, storage, configuration),
+      templates: createTemplateInstalls(
+        configuration,
+        createAppService(environment.database.db, configuration),
+        createUploadService(environment.database.db, storage, configuration),
+      ),
       telemetry: createTelemetry(environment.database.db, storage, configuration),
     });
     const admin = environment.users.createUser({ email: "admin@example.test" });

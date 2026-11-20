@@ -512,6 +512,34 @@ export const createAppService = (
         ),
       });
     }),
+  /**
+   * The organization's app of this name, visible to the caller or not, and
+   * whether it was ever deployed.
+   */
+  named: (principal: Principal, slug: string) =>
+    transact(database, async (transaction) => {
+      const [existing] = await transaction
+        .select({ id: apps.id })
+        .from(apps)
+        .where(
+          and(
+            isNull(apps.removedAt),
+            eq(apps.organizationId, principal.application.organizationId),
+            eq(apps.slug, slug),
+          ),
+        )
+        .limit(1);
+
+      if (!existing) return Result.ok(null);
+
+      const [deployment] = await transaction
+        .select({ id: deployments.id })
+        .from(deployments)
+        .where(eq(deployments.appId, existing.id))
+        .limit(1);
+
+      return Result.ok({ id: existing.id, deployed: deployment !== undefined });
+    }),
   create: (principal: Principal, input: z.infer<typeof contract.createAppInput>) =>
     provisionApp(database, configuration, principal, input, "create", observation),
   resolve: (principal: Principal, slug: string) =>

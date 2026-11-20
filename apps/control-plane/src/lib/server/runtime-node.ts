@@ -3,6 +3,7 @@ import { sveltekitCookies } from "better-auth/svelte-kit";
 import { initializeRuntime } from "./runtime-initialization.ts";
 import { createReporting } from "./reporting.ts";
 import { createRuntime, type Runtime } from "./runtime-services.ts";
+import { httpAppBuilder } from "./app-builder.ts";
 import { createStorage } from "./storage.ts";
 import { createProductAnalytics } from "./analytics.ts";
 import { analyticsEnvironmentSchema } from "../analytics-config.ts";
@@ -34,7 +35,7 @@ const startRuntime = async () => {
       .catch((cause: unknown) => console.error("Database shutdown failed", cause));
   });
 
-  return createRuntime({
+  const options: Parameters<typeof createRuntime>[0] = {
     ...extension,
     observation,
     configuration,
@@ -44,7 +45,12 @@ const startRuntime = async () => {
     reporting,
     encryptionKey,
     authCookies: sveltekitCookies(getRequestEvent),
-  });
+  };
+
+  if (configuration.PLATFORM_APP_BUILDER_URL)
+    options.builder = httpAppBuilder(configuration.PLATFORM_APP_BUILDER_URL);
+
+  return createRuntime(options);
 };
 
 let runtime: Promise<Runtime> | undefined;
