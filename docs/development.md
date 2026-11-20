@@ -120,7 +120,9 @@ When testing the built server, use `BODY_SIZE_LIMIT=32M` for supported Worker up
 
 ## Dependency constraints
 
-Better Auth 1.7.27 supports SvelteKit 3 without a peer-dependency exception. Its integration is covered by tests against the built server. The [device authorization patch](../patches/better-auth@1.7.27.patch) and [OAuth provider patch](../patches/@better-auth__oauth-provider@1.7.27.patch) persist the approving session and its consent reference with the device code. Token issuance and refresh keep that reference, so a company login cannot widen its authority through the CLI. Review these patches when upgrading.
+Better Auth 1.7.27 supports SvelteKit 3 without a peer-dependency exception. Its integration is covered by tests against the built server. The [device authorization patch](../patches/better-auth@1.7.27.patch) and [OAuth provider patch](../patches/@better-auth__oauth-provider@1.7.27.patch) persist the approving session and its consent reference with the device code. Token issuance and refresh keep that reference, so a company login cannot widen its authority through the CLI. The same Better Auth patch and the [core patch](../patches/@better-auth__core@1.7.27.patch) add a `keys` option, with which the connector templates sign cookies and encrypt saved tokens through `WIDEFLEET_KEYS` instead of a secret. Review these patches when upgrading.
+
+Templates install standalone, so each declares the patches it needs in its own `pnpm-workspace.yaml` and carries copies of the root patch files; `apps/control-plane/tests/template-patches.test.ts` keeps them identical. That file makes a template directory its own pnpm workspace: run pnpm commands for templates from the repository root, such as `pnpm -r --filter './templates/*' typecheck`. A pnpm command inside a template directory installs it standalone.
 
 The TypeScript version remains 6.0.3 for the selected Svelte compiler integration. Keep compiler upgrades covered by the starter and control-plane checks.
 

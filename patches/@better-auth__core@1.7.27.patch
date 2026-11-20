@@ -11,6 +11,29 @@ index b59a5a92e37358992b2a49eef734ebc79cbcfa82..f2f52b8d4e48c7496d2719c669776ed5
  			return {
  				user: {
  					name: user.name,
+diff --git a/dist/types/init-options.d.mts b/dist/types/init-options.d.mts
+index dbd062fe15786fba29b7b71bb02955608d3072b3..224047a7909c30df65764d9dcb6168d91bb1e96c 100644
+--- a/dist/types/init-options.d.mts
++++ b/dist/types/init-options.d.mts
+@@ -538,6 +538,18 @@ export type BetterAuthOptions = {
+     version: number;
+     value: string;
+   }> | undefined;
++  /**
++   * Key operations that replace the secret for signing cookies and encrypting
++   * OAuth tokens, for keys kept outside the application. When set, `secret`
++   * is not required. Features that still need a secret fail instead of using
++   * a default.
++   */
++  keys?: {
++    sign(value: string): Promise<string>;
++    verify(value: string, signature: string): Promise<boolean>;
++    encrypt(value: string): Promise<string>;
++    decrypt(value: string): Promise<string>;
++  } | undefined;
+   /**
+    * Database configuration
+    */
 diff --git a/src/social-providers/microsoft-entra-id.ts b/src/social-providers/microsoft-entra-id.ts
 index f3a243bc7eb8dbb21bf02dce32190fe409aca62f..983c6500807327c0a3b3c19d7f92cb1552033df4 100644
 --- a/src/social-providers/microsoft-entra-id.ts
@@ -36,3 +59,28 @@ index f3a243bc7eb8dbb21bf02dce32190fe409aca62f..983c6500807327c0a3b3c19d7f92cb15
  								user.verified_secondary_email?.includes(user.email))
  						? true
  						: false;
+diff --git a/src/types/init-options.ts b/src/types/init-options.ts
+index b3026375bd9a1a41419253d85bd31e43e55e50c7..007a6f1033004038210cc7b450e48ea3e7376dfc 100644
+--- a/src/types/init-options.ts
++++ b/src/types/init-options.ts
+@@ -616,6 +616,20 @@ export type BetterAuthOptions = {
+ 	 * for decrypting bare-hex payloads that predate the envelope format.
+ 	 */
+ 	secrets?: Array<{ version: number; value: string }> | undefined;
++	/**
++	 * Key operations that replace the secret for signing cookies and encrypting
++	 * OAuth tokens, for keys kept outside the application. When set, `secret`
++	 * is not required. Features that still need a secret fail instead of using
++	 * a default.
++	 */
++	keys?:
++		| {
++				sign(value: string): Promise<string>;
++				verify(value: string, signature: string): Promise<boolean>;
++				encrypt(value: string): Promise<string>;
++				decrypt(value: string): Promise<string>;
++		  }
++		| undefined;
+ 	/**
+ 	 * Database configuration
+ 	 */

@@ -35,20 +35,14 @@ for (const [template, kind, prefix, profile] of [
     let upstream: ReturnType<typeof oauthProvider>;
     let script: string;
     let relayScript: string;
-    let legacyScript: string;
     beforeAll(async () => {
-      [script, relayScript, legacyScript] = await Promise.all([
+      [script, relayScript] = await Promise.all([
         compile(`templates/${template}/tests/worker.ts`),
         compile("packages/app-runtime/fixtures/oauth.ts"),
-        compile("apps/control-plane/tests/fixtures/legacy-oauth-account.ts"),
       ]);
     });
 
-    const configuration = (
-      custom: "none" | "complete" | "partial" = "none",
-      managed = true,
-      legacy = false,
-    ) =>
+    const configuration = (custom: "none" | "complete" | "partial" = "none", managed = true) =>
       ({
         telemetry: { enabled: false },
         workers: [
@@ -59,7 +53,7 @@ for (const [template, kind, prefix, profile] of [
               compatibilityFlags: ["nodejs_compat"],
               manifest: {
                 mainModule: "worker.js",
-                modules: { "worker.js": { type: "esm", contents: legacy ? legacyScript : script } },
+                modules: { "worker.js": { type: "esm", contents: script } },
               },
               env: {
                 TEST_OAUTH: { type: "worker", worker: "relay", exportName: "TestOAuth" },
@@ -72,10 +66,6 @@ for (const [template, kind, prefix, profile] of [
                 [`${prefix}_CLIENT_SECRET`]: {
                   type: "json",
                   value: custom === "complete" ? `test-${kind}-secret` : "",
-                },
-                AUTH_SECRET: {
-                  type: "json",
-                  value: "synthetic-secret-with-at-least-32-characters",
                 },
               },
             },
@@ -302,66 +292,6 @@ for (const [template, kind, prefix, profile] of [
         missing: [`${prefix}_CLIENT_SECRET`],
       });
     });
-    it.each(
-      [false, true].flatMap((managed) =>
-        (kind === "github" ? [false, true] : [true]).map((expiring) => ({ managed, expiring })),
-      ),
-    )(
-      "preserves main-format custom accounts (managed=$managed, expiring=$expiring)",
-      async ({ managed, expiring }) => {
-        await runtime.setOptions(configuration("complete", false, true));
-        upstream.state.expiring = expiring;
-
-        const issued = z
-          .object({
-            access_token: z.string(),
-            refresh_token: z.string().optional(),
-            scope: z.string(),
-          })
-          .parse(await upstream.tokens("101").json());
-
-        const seeded = await runtime.dispatchFetch(origin, {
-          method: "POST",
-          body: JSON.stringify({
-            provider: kind,
-            scope: issued.scope,
-            accessToken: issued.access_token,
-            refreshToken: issued.refresh_token,
-            expiresAt: expiring ? Date.now() + 3600_000 : null,
-          }),
-        });
-
-        expect(seeded.status).toBe(204);
-
-        const saved = await (
-          await runtime.getD1Database("DB", "template")
-        )
-          .prepare("SELECT * FROM account")
-          .first();
-
-        await runtime.setOptions(configuration("complete", managed));
-        const db = await runtime.getD1Database("DB", "template");
-        const alice = browser("alice");
-
-        for (const path of ["/rpc/status", "/rpc/list"])
-          expect(await (await alice.request(path)).json()).toMatchObject({ status: "connected" });
-        expect(await (await alice.request("/")).text()).toContain("connected</h1>");
-        expect(await db.prepare("SELECT * FROM account").first()).toEqual(saved);
-        expect(
-          await db
-            .prepare("SELECT name FROM sqlite_master WHERE name = 'oauth_registration'")
-            .first(),
-        ).toBeNull();
-
-        if (expiring) await expire();
-        expect(await (await alice.request("/rpc/list")).json()).toMatchObject({
-          status: "connected",
-        });
-        expect(upstream.state.refreshes).toBe(expiring ? 1 : 0);
-        expect(upstream.state.exchanges).toBe(0);
-      },
-    );
-
     it("rejects missing or forged caller proofs and callbacks to deleted apps", async () => {
       const relay = await runtime.getWorker("relay");
 

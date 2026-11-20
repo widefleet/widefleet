@@ -48,10 +48,6 @@ describe("OneDrive personal account app", () => {
                 type: "json",
                 value: configured ? "test-microsoft-secret" : "",
               },
-              AUTH_SECRET: {
-                type: "json",
-                value: configured ? "synthetic-secret-with-at-least-32-characters" : "",
-              },
             },
           },
           dev: { outboundService: { type: "fetcher", handler: upstream.fetch } },
@@ -115,7 +111,7 @@ describe("OneDrive personal account app", () => {
     const alice = browser("alice");
     expect(await (await alice.request("/rpc/status")).json()).toMatchObject({
       status: "setup_required",
-      missing: ["MICROSOFT_CLIENT_ID", "MICROSOFT_CLIENT_SECRET", "AUTH_SECRET"],
+      missing: ["MICROSOFT_CLIENT_ID", "MICROSOFT_CLIENT_SECRET"],
     });
     const page = await (await alice.request("/")).text();
     expect(page).toContain("/auth/callback/microsoft");
@@ -157,6 +153,8 @@ describe("OneDrive personal account app", () => {
       .parse(await db.prepare("SELECT accessToken, refreshToken FROM account").first());
 
     expect(saved.accessToken).not.toContain("synthetic-access-");
+    // Encrypted through the app key binding, not with an app-held secret.
+    expect(saved.accessToken).toMatch(/^v1\./);
     expect(saved.refreshToken).not.toContain("synthetic-refresh-");
   });
   it("rejects changed callback identities, replay, cross-origin forms and public token endpoints", async () => {

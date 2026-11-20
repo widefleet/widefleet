@@ -48,10 +48,6 @@ describe("GitHub personal account app", () => {
                 type: "json",
                 value: configured ? "test-github-secret" : "",
               },
-              AUTH_SECRET: {
-                type: "json",
-                value: configured ? "synthetic-secret-with-at-least-32-characters" : "",
-              },
             },
           },
           dev: { outboundService: { type: "fetcher", handler: upstream.fetch } },
@@ -115,7 +111,7 @@ describe("GitHub personal account app", () => {
     const alice = browser("alice");
     expect(await (await alice.request("/rpc/status")).json()).toMatchObject({
       status: "setup_required",
-      missing: ["GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "AUTH_SECRET"],
+      missing: ["GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET"],
     });
     const page = await (await alice.request("/")).text();
     expect(page).toContain("/auth/callback/github");
@@ -159,6 +155,8 @@ describe("GitHub personal account app", () => {
       );
 
     expect(saved.accessToken).not.toContain("synthetic-access-");
+    // Encrypted through the app key binding, not with an app-held secret.
+    expect(saved.accessToken).toMatch(/^v1\./);
     expect(upstream.state.refreshes).toBe(0);
     alice.identity.issuer = "https://identity.example.test";
     expect(await (await alice.request("/rpc/list")).json()).toMatchObject({ status: "connected" });

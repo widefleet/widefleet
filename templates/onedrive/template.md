@@ -21,6 +21,10 @@ widefleet deploy
 Choose the app name in `wrangler.jsonc` before deploying. The CLI creates the app
 and its declared database. Keep your local source for subsequent changes.
 
+Keep `pnpm-workspace.yaml` and `patches/` with the source. They patch Better Auth to
+sign cookies and encrypt saved account tokens with the app's Widefleet keys, which
+the app never reads.
+
 ## Configure Microsoft
 
 An administrator needs to:
@@ -30,12 +34,10 @@ An administrator needs to:
    accounts.
 2. Add `https://YOUR-APP-URL/auth/callback/microsoft` as a **Web** redirect URI and
    add the delegated Microsoft Graph permission `Files.Read`.
-3. Create a client secret. Set the app secrets `MICROSOFT_CLIENT_ID`,
-   `MICROSOFT_CLIENT_SECRET` and `AUTH_SECRET`. Use the application client ID and
-   the client secret's **value**, not its ID. Generate `AUTH_SECRET` randomly with
-   at least 32 characters and keep it stable; it encrypts the saved account tokens.
-   Use the app's Secrets page or `widefleet secret put NAME --file /path/to/secret`
-   to provide values.
+3. Create a client secret. Set the app secrets `MICROSOFT_CLIENT_ID` and
+   `MICROSOFT_CLIENT_SECRET`. Use the application client ID and the client secret's
+   **value**, not its ID. Use the app's Secrets page or
+   `widefleet secret put NAME --file /path/to/secret` to provide values.
 4. Allow these backend origins from the app directory:
 
    ```sh

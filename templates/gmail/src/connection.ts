@@ -47,7 +47,6 @@ export const accountConnection = (environment: Environment, properties: Properti
         missing,
         connectUrl: environment.WIDEFLEET_ORIGIN,
       } as const;
-    z.string().min(32).parse(credentials.authSecret);
 
     return { status: "configured", credentials } as const;
   };

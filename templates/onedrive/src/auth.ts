@@ -15,7 +15,14 @@ export const authentication = (
 ) =>
   betterAuth({
     database: environment.DB,
-    secret: credentials.authSecret,
+    // Cookies are signed and saved tokens encrypted with the app's keys.
+    keys: {
+      sign: (value) => environment.WIDEFLEET_KEYS.sign("cookies", value),
+      verify: (value, signature) => environment.WIDEFLEET_KEYS.verify("cookies", value, signature),
+      encrypt: (value) => environment.WIDEFLEET_KEYS.encrypt("tokens", value),
+      decrypt: async (value) =>
+        new TextDecoder().decode(await environment.WIDEFLEET_KEYS.decrypt("tokens", value)),
+    },
     baseURL: environment.WIDEFLEET_ORIGIN,
     basePath: "/auth",
     trustedOrigins: [environment.WIDEFLEET_ORIGIN],
