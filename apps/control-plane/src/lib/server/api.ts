@@ -13,7 +13,7 @@ import { binaryPaths, binarySchemas } from "./openapi-binary.ts";
 import { DirectoryUnavailable } from "./directory.ts";
 import { InvalidOperation, TelemetryNotConfigured, TelemetryUnavailable } from "./errors.ts";
 import { readInstallation } from "./installation-store.ts";
-import { templateCatalog, readTemplate } from "./app-templates.ts";
+import { templateCatalog, readTemplate, readTemplateIcon } from "./app-templates.ts";
 import { readAppIcon } from "./app-icons.ts";
 
 import { changeMemberRole, listMembers, removeMember } from "./members.ts";
@@ -87,6 +87,18 @@ const idempotencyKey = (request: Request) => {
 
   return parsed.data;
 };
+
+// Icons are SVG, ICO or PNG from apps and templates: never sniffed, scripted or embedded elsewhere.
+const iconResponse = (icon: { bytes: Uint8Array; contentType: string }, cacheControl: string) =>
+  new Response(Buffer.from(icon.bytes), {
+    headers: {
+      "content-type": icon.contentType,
+      "cache-control": cacheControl,
+      "x-content-type-options": "nosniff",
+      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+      "cross-origin-resource-policy": "same-origin",
+    },
+  });
 
 export const createApi = (runtime: Runtime) => {
   const principals = new WeakMap<Request, Principal>();
@@ -1034,14 +1046,24 @@ export const createApi = (runtime: Runtime) => {
         await readAppIcon(runtime.database.db, runtime.storage, principal, appId),
       );
 
-      return new Response(Buffer.from(result.bytes), {
-        headers: {
-          "content-type": result.contentType,
-          "x-content-type-options": "nosniff",
-          "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
-          "cross-origin-resource-policy": "same-origin",
-        },
-      });
+      // An icon URL that names the active deployment never changes; others revalidate.
+      return iconResponse(
+        result,
+        url.searchParams.get("deployment") === result.deploymentId
+          ? "private, max-age=31536000, immutable"
+          : "private, no-cache",
+      );
+    }
+
+    const templateIcon = /^\/api\/v1\/catalog\/templates\/([^/]+)\/icon$/.exec(url.pathname);
+
+    if (templateIcon && request.method === "GET") {
+      const principal = unwrap(await runtime.identity.authenticate(request, "platform:read"));
+      principals.set(request, principal);
+      const id = contract.templateId.parse(templateIcon[1]);
+
+      // Templates change on GitHub without a version in the URL.
+      return iconResponse(unwrap(await readTemplateIcon(id)), "private, max-age=3600");
     }
 
     const upload = /^\/api\/v1\/apps\/([^/]+)\/(worker|assets\/([^/]+)\/([^/]+))$/.exec(
@@ -1153,7 +1175,9 @@ export const createApi = (runtime: Runtime) => {
   return async (request: Request) => {
     try {
       const response = await dispatch(request);
-      response.headers.set("cache-control", "no-store");
+
+      // Responses are private and uncached unless a route chose a policy, as icons do.
+      if (!response.headers.has("cache-control")) response.headers.set("cache-control", "no-store");
 
       return response;
     } catch (cause) {

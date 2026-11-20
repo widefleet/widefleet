@@ -88,7 +88,7 @@ describe("Personal connector accounts", () => {
       .set({ state: "active", activeDeploymentId: deploymentId, catalogListed: listed })
       .where(eq(apps.id, app.id));
 
-    return app;
+    return { ...app, activeDeploymentId: deploymentId };
   };
 
   beforeAll(async () => {
@@ -131,6 +131,7 @@ describe("Personal connector accounts", () => {
         appId: app.id,
         displayName: app.slug,
         hostname: app.hostname,
+        activeDeploymentId: app.activeDeploymentId,
         status: disconnected,
         unavailable: false,
       })),
@@ -204,6 +205,7 @@ describe("Personal connector accounts", () => {
         appId: app.id,
         displayName: "visible",
         hostname: app.hostname,
+        activeDeploymentId: app.activeDeploymentId,
         status: null,
         unavailable: true,
       },

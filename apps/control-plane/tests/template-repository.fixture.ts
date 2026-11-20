@@ -56,14 +56,14 @@ export const templateRepository = async (url: URL) => {
   if (pinned?.[1]) return new Response(await readFile(new URL(pinned[1], root)));
 
   const match =
-    /^\/widefleet\/widefleet\/main\/templates\/([a-z][a-z0-9-]*)\/(template\.md|widefleet\.jsonc)$/u.exec(
+    /^\/widefleet\/widefleet\/main\/templates\/([a-z][a-z0-9-]*)\/((?:[A-Za-z0-9_-][A-Za-z0-9._-]*\/)*[A-Za-z0-9_-][A-Za-z0-9._-]*)$/u.exec(
       url.pathname,
     );
 
   if (!match?.[1] || !match[2]) throw new Error(`Unexpected repository request: ${url.href}`);
 
   try {
-    return new Response(await readFile(new URL(`${match[1]}/${match[2]}`, root), "utf8"));
+    return new Response(await readFile(new URL(`${match[1]}/${match[2]}`, root)));
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT")
       return new Response(null, { status: 404 });

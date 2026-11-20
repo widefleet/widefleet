@@ -580,3 +580,29 @@ it("keeps templates on agent setup when no builder is configured", async () => {
   expect(response.status).toBe(400);
   expect(await response.text()).toContain("does not build templates");
 });
+
+it("serves a template's favicon from its static assets for the catalog", async () => {
+  const runtime = await runtimeWith(builder);
+  const api = createApi(runtime);
+
+  const response = await api(new Request("http://localhost/api/v1/catalog/templates/github/icon"));
+
+  expect(response.status).toBe(200);
+  expect(response.headers.get("content-type")).toBe("image/svg+xml");
+  expect(response.headers.get("cache-control")).toBe("private, max-age=3600");
+  expect(response.headers.get("content-security-policy")).toContain("sandbox");
+  expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+  expect(new Uint8Array(await response.arrayBuffer())).toEqual(
+    new Uint8Array(
+      await readFile(new URL("../../../templates/github/public/favicon.svg", import.meta.url)),
+    ),
+  );
+
+  // Unknown templates have no icon, and template IDs are validated.
+  expect(
+    (await api(new Request("http://localhost/api/v1/catalog/templates/missing/icon"))).status,
+  ).toBe(404);
+  expect(
+    (await api(new Request("http://localhost/api/v1/catalog/templates/Bad%2Fid/icon"))).status,
+  ).toBe(400);
+});

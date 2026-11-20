@@ -416,7 +416,12 @@ export const createAppService = (
   catalog: (principal: Principal) =>
     transact(database, async (transaction) => {
       const records = await transaction
-        .select({ id: apps.id, displayName: apps.displayName, hostname: apps.hostname })
+        .select({
+          id: apps.id,
+          displayName: apps.displayName,
+          hostname: apps.hostname,
+          activeDeploymentId: apps.activeDeploymentId,
+        })
         .from(apps)
         .where(
           and(

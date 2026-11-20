@@ -163,6 +163,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
                     appId: app.id,
                     displayName: app.displayName,
                     hostname: app.hostname,
+                    activeDeploymentId: crypto.randomUUID(),
                     status: { setup: "ready", connection: "disconnected", account: null },
                     unavailable: false,
                   },

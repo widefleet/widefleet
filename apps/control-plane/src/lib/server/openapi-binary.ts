@@ -33,11 +33,17 @@ export const binaryPaths = {
   "/apps/{appId}/icon": {
     get: {
       operationId: "getAppIcon",
-      summary: "Read the managed app's favicon from its active deployment",
+      summary: "Read an app's favicon from its active deployment",
       description:
-        "Returns a conventional SVG, ICO or PNG favicon from uploaded assets, up to 256 KiB. Requires app management access. Missing icons return 404.",
+        "Returns a conventional SVG, ICO or PNG favicon from uploaded assets, up to 256 KiB. Requires app management access, or membership in the app's organization for apps in the catalog and apps with personal connections. Missing icons return 404. With the active deployment ID as `deployment`, the response may be cached until the app is deployed again.",
       parameters: [
         { name: "appId", in: "path", required: true, schema: { type: "string", format: "uuid" } },
+        {
+          name: "deployment",
+          in: "query",
+          required: false,
+          schema: { type: "string", format: "uuid" },
+        },
       ],
       responses: {
         "200": {
@@ -49,6 +55,33 @@ export const binaryPaths = {
           },
         },
         "404": { description: "No accessible active app icon" },
+      },
+    },
+  },
+  "/catalog/templates/{templateId}/icon": {
+    get: {
+      operationId: "getTemplateIcon",
+      summary: "Read an app template's favicon",
+      description:
+        "Returns the SVG, ICO or PNG favicon from the template's static assets on the main branch, up to 256 KiB, as an install would deploy it. Missing icons return 404.",
+      parameters: [
+        {
+          name: "templateId",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^[a-z][a-z0-9-]*$" },
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Template icon",
+          content: {
+            "image/svg+xml": { schema: { type: "string", format: "binary" } },
+            "image/x-icon": { schema: { type: "string", format: "binary" } },
+            "image/png": { schema: { type: "string", format: "binary" } },
+          },
+        },
+        "404": { description: "No template icon" },
       },
     },
   },

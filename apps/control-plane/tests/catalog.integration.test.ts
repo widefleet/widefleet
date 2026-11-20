@@ -54,16 +54,19 @@ describe("App catalog", () => {
     (await service.create(creator, { slug, displayName: slug, parentId: null })).unwrap();
 
   const activate = async (appId: string) => {
+    const activeDeploymentId = crypto.randomUUID();
     await environment.database.db
       .update(apps)
-      .set({ state: "active", activeDeploymentId: crypto.randomUUID() })
+      .set({ state: "active", activeDeploymentId })
       .where(eq(apps.id, appId));
+
+    return activeDeploymentId;
   };
 
   it("requires explicit listing and exposes only launch information without management access", async () => {
     const app = await createApp("team-notes");
     expect(app.catalogListed).toBe(false);
-    await activate(app.id);
+    const activeDeploymentId = await activate(app.id);
     expect((await service.catalog(colleague)).unwrap()).toEqual([]);
 
     (await service.setCatalogListing(creator, app.id, true)).unwrap();
@@ -73,6 +76,7 @@ describe("App catalog", () => {
         displayName: "team-notes",
         hostname: "team-notes.apps.localhost",
         url: "https://team-notes.apps.localhost:25453/",
+        activeDeploymentId,
       },
     ]);
     expect((await service.list(colleague)).unwrap()).toEqual([]);

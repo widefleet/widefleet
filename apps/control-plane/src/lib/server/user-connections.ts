@@ -30,7 +30,12 @@ export const createUserConnections = (
 ) => {
   const candidates = (principal: Principal) =>
     database
-      .select({ appId: apps.id, displayName: apps.displayName, hostname: apps.hostname })
+      .select({
+        appId: apps.id,
+        displayName: apps.displayName,
+        hostname: apps.hostname,
+        activeDeploymentId: deployments.id,
+      })
       .from(apps)
       .innerJoin(deployments, eq(deployments.id, apps.activeDeploymentId))
       .innerJoin(artifacts, eq(artifacts.id, deployments.artifactId))

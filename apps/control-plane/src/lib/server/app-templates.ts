@@ -6,12 +6,15 @@ import {
   templateId,
 } from "@platform/contracts";
 import { Result } from "better-result";
+import { buildSourcePath } from "@platform/contracts/builds";
 import { parseJsonc } from "@platform/contracts/jsonc";
 import { parse } from "yaml";
 import { z } from "zod";
 import type { Principal } from "./identity.ts";
 import type { Configuration } from "./config.ts";
 import { InvalidOperation, StorageUnavailable } from "./errors.ts";
+import { iconPaths, maxIconBytes } from "./app-icons.ts";
+import { declaredAssets } from "./template-project.ts";
 
 const repository = "https://github.com/widefleet/widefleet/tree/main/templates";
 
@@ -238,4 +241,48 @@ export const templateSources = (configuration: Pick<Configuration, "GITHUB_TOKEN
     );
 
     return Result.ok({ commit: tree.commit, files });
+  });
+
+/**
+ * A template's favicon from the static assets on the main branch, for the
+ * catalog. It is read as a deployed app's icon would be, by its root path.
+ */
+export const readTemplateIcon = (id: string) =>
+  Result.gen(async function* () {
+    const missing = () =>
+      new InvalidOperation({ code: "NOT_FOUND", message: "Template icon not found" });
+
+    const read = (path: string) =>
+      Result.tryPromise({
+        try: async () => {
+          const response = await fetch(`${files}/${id}/${path}`, {
+            signal: AbortSignal.timeout(10_000),
+          });
+
+          if (response.status === 404) return null;
+
+          if (!response.ok) throw new Error(`GitHub returned HTTP ${response.status}`);
+
+          return new Uint8Array(await response.arrayBuffer());
+        },
+        catch: (cause) =>
+          new StorageUnavailable({
+            message: "App templates are unavailable. Try again later.",
+            cause,
+          }),
+      });
+
+    const wrangler = yield* Result.await(read("wrangler.jsonc"));
+    const assets = declaredAssets(wrangler ? new TextDecoder().decode(wrangler) : undefined);
+
+    if (!assets || !buildSourcePath.safeParse(assets.directory).success) return yield* missing();
+
+    for (const [path, contentType] of iconPaths) {
+      const bytes = yield* Result.await(read(`${assets.directory}${path}`));
+
+      if (bytes && bytes.byteLength > 0 && bytes.byteLength <= maxIconBytes)
+        return Result.ok({ bytes, contentType });
+    }
+
+    return yield* missing();
   });
