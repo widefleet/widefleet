@@ -116,6 +116,10 @@ describe("Microsoft email domain proof", () => {
     { label: "numeric true", claims: { xms_edov: 1 } },
     { label: "null proof", claims: { xms_edov: null } },
     { label: "explicit unverified email", claims: { xms_edov: true, email_verified: false } },
+    {
+      label: "explicit unverified email as a string",
+      claims: { xms_edov: true, email_verified: "false" },
+    },
     { label: "missing email", claims: { xms_edov: true, email: undefined } },
     { label: "empty email", claims: { xms_edov: true, email: "" } },
     {
@@ -134,6 +138,7 @@ describe("Microsoft email domain proof", () => {
 
   it.each([
     { label: "verified email", claims: { email_verified: true } },
+    { label: "verified email as a string", claims: { email_verified: "true" } },
     { label: "verified primary address", claims: { verified_primary_email: [email] } },
     { label: "verified secondary address", claims: { verified_secondary_email: [email] } },
     {
