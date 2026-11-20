@@ -14,6 +14,13 @@ export interface Environment {
   DB: D1Database;
   WIDEFLEET_ORIGIN: string;
   WIDEFLEET_SECRETS: { get(name: string): Promise<string> };
+  // Keys the app uses but never reads; Widefleet keeps them in the runtime.
+  WIDEFLEET_KEYS: {
+    sign(name: string, data: string): Promise<string>;
+    verify(name: string, data: string, signature: string): Promise<boolean>;
+    encrypt(name: string, data: string): Promise<string>;
+    decrypt(name: string, ciphertext: string): Promise<Uint8Array>;
+  };
 }
 
 export interface Properties {

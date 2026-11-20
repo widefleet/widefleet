@@ -36,7 +36,6 @@ export type OAuthBinding = {
 export type OAuthCredentials = {
   clientId: string;
   clientSecret: string;
-  authSecret: string;
   managed: boolean;
 };
 
@@ -63,10 +62,7 @@ export const oauthCredentials = async (
 
   const clientId = await read(`${prefix}_CLIENT_ID`);
   const clientSecret = await read(`${prefix}_CLIENT_SECRET`);
-  const authSecret = await read("AUTH_SECRET");
   const missing: string[] = [];
-
-  if (!authSecret) missing.push("AUTH_SECRET");
 
   // A partial custom registration is a configuration error, never a fallback.
   if (clientId || clientSecret) {
@@ -74,7 +70,7 @@ export const oauthCredentials = async (
 
     if (!clientId) missing.unshift(`${prefix}_CLIENT_ID`);
 
-    return { missing, credentials: { clientId, clientSecret, authSecret, managed: false } };
+    return { missing, credentials: { clientId, clientSecret, managed: false } };
   }
 
   const managed = environment.WIDEFLEET_OAUTH
@@ -90,13 +86,12 @@ export const oauthCredentials = async (
       credentials: {
         clientId: z.object({ clientId: z.string().min(1) }).parse(managed).clientId,
         clientSecret: "",
-        authSecret,
         managed: true,
       },
     };
   missing.unshift(`${prefix}_CLIENT_ID`, `${prefix}_CLIENT_SECRET`);
 
-  return { missing, credentials: { clientId, clientSecret, authSecret, managed: false } };
+  return { missing, credentials: { clientId, clientSecret, managed: false } };
 };
 
 // Kept inside each standalone template so copying its directory needs no workspace package.

@@ -20,6 +20,10 @@ widefleet deploy
 Choose the app name in `wrangler.jsonc` before deploying. The CLI creates the app
 and its declared database. Keep your local source for subsequent changes.
 
+Keep `pnpm-workspace.yaml` and `patches/` with the source. They patch Better Auth to
+sign cookies and encrypt saved account tokens with the app's Widefleet keys, which
+the app never reads.
+
 ## Configure Google
 
 An administrator needs to:
@@ -29,10 +33,9 @@ An administrator needs to:
    that will connect as test users.
 2. Create an OAuth client with the **Web application** type. Register
    `https://YOUR-APP-URL/auth/callback/google` as an authorized redirect URI.
-3. Set the app secrets `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `AUTH_SECRET`.
-   Generate `AUTH_SECRET` randomly with at least 32 characters and keep it stable;
-   it encrypts the saved account tokens. Use the app's Secrets page or
-   `widefleet secret put NAME --file /path/to/secret` to provide values.
+3. Set the app secrets `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. Use the app's
+   Secrets page or `widefleet secret put NAME --file /path/to/secret` to provide
+   values.
 4. Allow these backend origins from the app directory:
 
    ```sh

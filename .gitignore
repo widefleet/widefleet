@@ -17,3 +17,5 @@ test-results/
 .env.*
 !.env.example
 *.tsbuildinfo
+# Templates are standalone pnpm projects when installed inside their directory.
+/templates/*/pnpm-lock.yaml
