@@ -19,7 +19,7 @@
   },
   "dependencies": {
     "@platform/contracts": "workspace:*",
-    "better-auth": "1.7.12",
+    "better-auth": "1.7.27",
     "jose": "6.2.10",
     "zod": "4.6.5"
   }

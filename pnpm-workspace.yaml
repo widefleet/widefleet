@@ -15,14 +15,14 @@ peerDependencyRules:
 
 patchedDependencies:
   "@opencode/codemode@2.3.0": patches/@opencode__codemode@2.3.0.patch
-  "@better-auth/core@1.7.12": patches/@better-auth__core@1.7.12.patch
-  "@better-auth/oauth-provider@1.7.12": patches/@better-auth__oauth-provider@1.7.12.patch
+  "@better-auth/core@1.7.27": patches/@better-auth__core@1.7.27.patch
+  "@better-auth/oauth-provider@1.7.27": patches/@better-auth__oauth-provider@1.7.27.patch
   "@cloudflare/workers-oauth-provider@1.2.4": patches/@cloudflare__workers-oauth-provider@1.2.4.patch
   # Resolve packages with the bundler's export conditions and browser fields, match
   # externals exactly, stream package archives, keep only the files a build reads,
   # and restart esbuild between builds so its heap does not persist.
   "@cloudflare/worker-bundler@0.2.6": patches/@cloudflare__worker-bundler@0.2.6.patch
-  better-auth@1.7.12: patches/better-auth@1.7.12.patch
+  better-auth@1.7.27: patches/better-auth@1.7.27.patch
   blume@2.1.1: patches/blume@2.1.1.patch
   # Persist terminal workflow failures and prevent steps from starting after pause
   # so local pause/resume and replay match the native workflow contract.
@@ -35,14 +35,14 @@ allowBuilds:
   workerd: true
 
 minimumReleaseAgeExclude:
-  - "@better-auth/core@1.7.12"
-  - "@better-auth/drizzle-adapter@1.7.12"
-  - "@better-auth/kysely-adapter@1.7.12"
-  - "@better-auth/memory-adapter@1.7.12"
-  - "@better-auth/mongo-adapter@1.7.12"
-  - "@better-auth/oauth-provider@1.7.12"
-  - "@better-auth/prisma-adapter@1.7.12"
-  - "@better-auth/telemetry@1.7.12"
-  - better-auth@1.7.12
-  - better-call@1.4.4
-  - "@better-auth/sso@1.7.12"
+  - "@better-auth/core@1.7.27"
+  - "@better-auth/drizzle-adapter@1.7.27"
+  - "@better-auth/kysely-adapter@1.7.27"
+  - "@better-auth/memory-adapter@1.7.27"
+  - "@better-auth/mongo-adapter@1.7.27"
+  - "@better-auth/oauth-provider@1.7.27"
+  - "@better-auth/prisma-adapter@1.7.27"
+  - "@better-auth/telemetry@1.7.27"
+  - better-auth@1.7.27
+  - better-call@1.4.6
+  - "@better-auth/sso@1.7.27"

@@ -1,8 +1,8 @@
 diff --git a/dist/plugins/device-authorization/index.d.mts b/dist/plugins/device-authorization/index.d.mts
-index b8a205fc2687e61a3b0843d40428e915edfd61cf..f154ad61b9e88eea0a198c60ad53ed7eadd365af 100644
+index f725a9ddf49f698163cab77b9b21fd349abb74f2..d53bd6801749472d4fd5f63d38e9cf8d43dc4d71 100644
 --- a/dist/plugins/device-authorization/index.d.mts
 +++ b/dist/plugins/device-authorization/index.d.mts
-@@ -90,6 +90,11 @@ interface DeviceAuthorizationGrant<RequestFields extends z.ZodRawShape = z.ZodRa
+@@ -86,6 +86,11 @@ export interface DeviceAuthorizationGrant<RequestFields extends z.ZodRawShape =
      ctx: GenericEndpointContext;
      request: DeviceAuthorizationRequest & z.infer<z.ZodObject<RequestFields>>;
    }) => DeviceAuthorizationGrantAuthorization | undefined | Promise<DeviceAuthorizationGrantAuthorization | undefined>;
@@ -15,10 +15,10 @@ index b8a205fc2687e61a3b0843d40428e915edfd61cf..f154ad61b9e88eea0a198c60ad53ed7e
    assertSessionRedemption: (input: {
      ctx: GenericEndpointContext;
 diff --git a/dist/plugins/device-authorization/index.mjs b/dist/plugins/device-authorization/index.mjs
-index 05c1b6d944cd79951894361f105acea1b82858ff..2f407b5c65e4908372f0fd4860e8b2af81fa798e 100644
+index 0ce48b4af40ce973d81c3bba709aaa0083ca1952..8cb0f13d93d16d328010c68537712f6786e51141 100644
 --- a/dist/plugins/device-authorization/index.mjs
 +++ b/dist/plugins/device-authorization/index.mjs
-@@ -66,7 +66,7 @@ const deviceAuthorization = (options = {}) => {
+@@ -67,7 +67,7 @@ const deviceAuthorization = (options = {}) => {
  			deviceCode: deviceCode(opts, grant),
  			deviceToken: deviceToken(opts, grant),
  			deviceVerify: deviceVerify(grant),
@@ -28,10 +28,10 @@ index 05c1b6d944cd79951894361f105acea1b82858ff..2f407b5c65e4908372f0fd4860e8b2af
  		},
  		rateLimit: [{
 diff --git a/dist/plugins/device-authorization/routes.mjs b/dist/plugins/device-authorization/routes.mjs
-index 615077ddc8b50e753a6dea7d2322e803e23c785d..bc371747458cc5aee780843e42593027f91d0578 100644
+index 3167f911f34d70427ba8fd194a3e16d48ea4b67b..b9122b44e2ea68ebf037278137ede8c3fdb28570 100644
 --- a/dist/plugins/device-authorization/routes.mjs
 +++ b/dist/plugins/device-authorization/routes.mjs
-@@ -561,7 +561,7 @@ const deviceVerify = (grant) => createAuthEndpoint("/device", {
+@@ -579,7 +579,7 @@ const deviceVerify = (grant) => createAuthEndpoint("/device", {
  	};
  	return ctx.json(response);
  });
@@ -40,7 +40,7 @@ index 615077ddc8b50e753a6dea7d2322e803e23c785d..bc371747458cc5aee780843e42593027
  	method: "POST",
  	body: z.object({ userCode: z.string().meta({ description: "The user code to approve" }) }),
  	error: z.object({
-@@ -613,17 +613,23 @@ const deviceApprove = createAuthEndpoint("/device/approve", {
+@@ -631,17 +631,23 @@ const deviceApprove = createAuthEndpoint("/device/approve", {
  		error: "access_denied",
  		error_description: "You are not authorized to approve this device authorization"
  	});

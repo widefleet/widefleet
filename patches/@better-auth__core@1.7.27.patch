@@ -1,21 +1,21 @@
 diff --git a/dist/social-providers/microsoft-entra-id.mjs b/dist/social-providers/microsoft-entra-id.mjs
-index 9d33dd4c36b27d1d638912f3706eb1d63bd3c2ff..99c808c18d5e22e4f628fdaa627371911670bad6 100644
+index b59a5a92e37358992b2a49eef734ebc79cbcfa82..f2f52b8d4e48c7496d2719c669776ed53df24fd6 100644
 --- a/dist/social-providers/microsoft-entra-id.mjs
 +++ b/dist/social-providers/microsoft-entra-id.mjs
-@@ -117,7 +117,7 @@ const microsoft = (options) => {
+@@ -119,7 +119,7 @@ const microsoft = (options) => {
  				}
  			});
  			const userMap = await options.mapProfileToUser?.(user);
--			const emailVerified = user.email_verified !== void 0 ? user.email_verified : user.email && (user.verified_primary_email?.includes(user.email) || user.verified_secondary_email?.includes(user.email)) ? true : false;
-+			const emailVerified = user.email_verified !== void 0 ? user.email_verified : user.email && (user.xms_edov === true || user.verified_primary_email?.includes(user.email) || user.verified_secondary_email?.includes(user.email)) ? true : false;
+-			const emailVerified = user.email_verified !== void 0 ? parseStringBoolean(user.email_verified) ?? false : user.email && (user.verified_primary_email?.includes(user.email) || user.verified_secondary_email?.includes(user.email)) ? true : false;
++			const emailVerified = user.email_verified !== void 0 ? parseStringBoolean(user.email_verified) ?? false : user.email && (user.xms_edov === true || user.verified_primary_email?.includes(user.email) || user.verified_secondary_email?.includes(user.email)) ? true : false;
  			return {
  				user: {
  					name: user.name,
 diff --git a/src/social-providers/microsoft-entra-id.ts b/src/social-providers/microsoft-entra-id.ts
-index 22d9e28da28b089c0e8bf2c29700ee06e9b42b01..d9efd17e466b7fbf4eeb294ab7a485a9593d3c67 100644
+index f3a243bc7eb8dbb21bf02dce32190fe409aca62f..983c6500807327c0a3b3c19d7f92cb1552033df4 100644
 --- a/src/social-providers/microsoft-entra-id.ts
 +++ b/src/social-providers/microsoft-entra-id.ts
-@@ -315,15 +315,15 @@ export const microsoft = (options: MicrosoftOptions) => {
+@@ -317,15 +317,15 @@ export const microsoft = (options: MicrosoftOptions) => {
  				);
  			}
  			const userMap = await options.mapProfileToUser?.(user);
@@ -28,7 +28,7 @@ index 22d9e28da28b089c0e8bf2c29700ee06e9b42b01..d9efd17e466b7fbf4eeb294ab7a485a9
 +			// https://learn.microsoft.com/en-us/entra/identity-platform/optional-claims-reference
  			const emailVerified =
  				user.email_verified !== undefined
- 					? user.email_verified
+ 					? (parseStringBoolean(user.email_verified) ?? false)
  					: user.email &&
 -							(user.verified_primary_email?.includes(user.email) ||
 +							(user.xms_edov === true ||
