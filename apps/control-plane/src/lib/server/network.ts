@@ -1,12 +1,12 @@
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import type { z } from "zod";
 import { managedApp } from "./apps.ts";
-import type { Database } from "./database.ts";
+import type { Database, DatabaseExecutor } from "./database.ts";
 import { InvalidOperation } from "./errors.ts";
 import type { Principal } from "./identity.ts";
-import { apps, jobs } from "./schema.ts";
+import { apps, artifacts, deployments, jobs } from "./schema.ts";
 import { transact, type Transaction } from "./transactions.ts";
 import type { HostedExecution } from "./deployment-execution.ts";
 
@@ -102,6 +102,40 @@ export const applyNetworkChange = async (
   return Result.ok(present(updated));
 };
 
+// The origins the app's latest deployment declares, as the current version.
+const declaredNetwork = async (database: DatabaseExecutor, appId: string) => {
+  const [latest] = await database
+    .select({ metadata: artifacts.metadata })
+    .from(deployments)
+    .innerJoin(artifacts, eq(artifacts.id, deployments.artifactId))
+    .where(eq(deployments.appId, appId))
+    .orderBy(desc(deployments.createdAt), desc(deployments.id))
+    .limit(1);
+
+  return latest ? (contract.workerMetadata.parse(latest.metadata).network ?? null) : null;
+};
+
+const missing = (wanted: readonly string[], present: readonly string[]) =>
+  wanted.filter((origin) => !present.includes(origin));
+
+export const withDeclaration = (
+  state: z.infer<typeof contract.networkState>,
+  declaration: z.infer<typeof contract.networkDeclaration> | null,
+) =>
+  declaration
+    ? contract.networkState.parse({
+        ...state,
+        requested: {
+          backend: missing(declaration.backend, state.policy.backend),
+          browser: missing(declaration.browser, state.policy.browser),
+        },
+        undeclared: {
+          backend: missing(state.policy.backend, declaration.backend),
+          browser: missing(state.policy.browser, declaration.browser),
+        },
+      })
+    : state;
+
 export const createNetworkService = (database: Database, execution?: HostedExecution) => ({
   read: (principal: Pick<Principal, "id" | "admin" | "application">, appId: string) =>
     transact(database, async (transaction) => {
@@ -109,16 +143,23 @@ export const createNetworkService = (database: Database, execution?: HostedExecu
 
       if (app.isErr()) return app;
 
-      return Result.ok(present(app.value));
+      return Result.ok(
+        withDeclaration(present(app.value), await declaredNetwork(transaction, appId)),
+      );
     }),
-  change: (
+  change: async (
     principal: Pick<Principal, "id" | "admin" | "application">,
     appId: string,
     input: z.infer<typeof contract.networkChange>,
-  ) =>
-    execution
+  ) => {
+    const changed = await (execution
       ? execution.network(principal, appId, input)
       : transact(database, (transaction) =>
           applyNetworkChange(transaction, principal, appId, input),
-        ),
+        ));
+
+    if (changed.isErr()) return changed;
+
+    return Result.ok(withDeclaration(changed.value, await declaredNetwork(database, appId)));
+  },
 });

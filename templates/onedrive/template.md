@@ -38,11 +38,13 @@ An administrator needs to:
    `MICROSOFT_CLIENT_SECRET`. Use the application client ID and the client secret's
    **value**, not its ID. Use the app's Secrets page or
    `widefleet secret put NAME --file /path/to/secret` to provide values.
-4. Allow these backend origins from the app directory:
+4. Allow the backend origins that `widefleet.jsonc` declares. A one-click install
+   from the template page allows them, as does `widefleet catalog templates install`
+   with the CLI's `network:manage` scope. After `widefleet deploy`, run from the app
+   directory:
 
    ```sh
-   widefleet network allow https://login.microsoftonline.com
-   widefleet network allow https://graph.microsoft.com
+   widefleet network allow https://login.microsoftonline.com https://graph.microsoft.com
    ```
 
 Network changes require the CLI's `network:manage` scope. Wait for the configuration

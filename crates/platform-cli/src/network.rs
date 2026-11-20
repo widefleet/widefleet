@@ -55,6 +55,48 @@ struct State {
     applied_revision: Option<u64>,
     state: String,
     error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    requested: Option<NetworkPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    undeclared: Option<NetworkPolicy>,
+}
+
+/// The declared origins the app is not allowed to reach yet, when any. A
+/// deployment token without read access only skips this report.
+pub(crate) async fn requested(
+    api: &Api,
+    credentials: &auth::Credentials,
+    app: Uuid,
+) -> Option<NetworkPolicy> {
+    let requested = status(api, credentials, app).await.ok()?.requested?;
+    (!requested.backend.is_empty() || !requested.browser.is_empty()).then_some(requested)
+}
+
+// Origins come from the app, so the printed commands quote every argument for
+// POSIX shells.
+fn quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+/// Prints the commands that allow the requested origins for this exact app on
+/// the same platform and organization, so a preview's request never changes
+/// its parent app.
+pub(crate) fn print_requested(api: &Api, app: Uuid, requested: &NetworkPolicy) {
+    eprintln!("This version requests network access that is not allowed yet.");
+    eprintln!("The app's owner or an administrator can allow it:");
+    let mut prefix = format!("widefleet --url {}", quote(&api.origin_text()));
+    if let Some(organization) = api.organization_text() {
+        prefix.push_str(&format!(" --organization {}", quote(&organization)));
+    }
+    for (flag, origins) in [("", &requested.backend), (" --browser", &requested.browser)] {
+        if !origins.is_empty() {
+            let origins: Vec<String> = origins.iter().map(|origin| quote(origin)).collect();
+            eprintln!(
+                "  {prefix} network allow --app {app}{flag} {}",
+                origins.join(" ")
+            );
+        }
+    }
 }
 
 async fn status(api: &Api, credentials: &auth::Credentials, app: Uuid) -> Result<State> {
@@ -67,7 +109,7 @@ async fn status(api: &Api, credentials: &auth::Credentials, app: Uuid) -> Result
     .await
 }
 
-fn output(state: &State, json_output: bool) -> Result<()> {
+fn output(api: &Api, app: Uuid, state: &State, json_output: bool) -> Result<()> {
     if json_output {
         return super::print_json(state);
     }
@@ -83,6 +125,21 @@ fn output(state: &State, json_output: bool) -> Result<()> {
         for origin in origins {
             println!("  {origin}");
         }
+    }
+    if let Some(undeclared) = &state.undeclared {
+        for (name, origins) in [
+            ("backend", &undeclared.backend),
+            ("browser", &undeclared.browser),
+        ] {
+            for origin in origins {
+                println!("Allowed {name} origin {origin} is not requested by the current version");
+            }
+        }
+    }
+    if let Some(requested) = &state.requested
+        && (!requested.backend.is_empty() || !requested.browser.is_empty())
+    {
+        print_requested(api, app, requested);
     }
     if state.state == "saved" {
         println!("Saved for the app's first deployment.");
@@ -100,7 +157,7 @@ pub async fn run(api: &Api, credentials: &auth::Credentials, options: Options) -
         Some(Command::Allow(change)) => ("allow", change),
         Some(Command::Deny(change)) => ("deny", change),
         Some(Command::Show) | None => {
-            return output(&status(api, credentials, app).await?, json_output);
+            return output(api, app, &status(api, credentials, app).await?, json_output);
         }
     };
     let token = auth::access_token(api, credentials).await?;
@@ -120,7 +177,7 @@ pub async fn run(api: &Api, credentials: &auth::Credentials, options: Options) -
             }
         }
     }
-    output(&current, json_output)?;
+    output(api, app, &current, json_output)?;
     if current.state == "failed" {
         return Err(Error::invalid(
             current
@@ -129,4 +186,18 @@ pub async fn run(api: &Api, credentials: &auth::Credentials, options: Options) -
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::quote;
+
+    #[test]
+    fn printed_origins_never_reach_the_shell_unquoted() {
+        assert_eq!(
+            quote("https://api.example.test$(id)"),
+            "'https://api.example.test$(id)'"
+        );
+        assert_eq!(quote("it's"), r"'it'\''s'");
+    }
 }

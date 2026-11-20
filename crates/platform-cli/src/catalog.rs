@@ -2,6 +2,7 @@ use clap::{Args, Subcommand};
 use platform_core::{
     Error, Result,
     http::{Api, json},
+    model::NetworkPolicy,
 };
 use reqwest::Method;
 use serde_json::{Value, json as value};
@@ -63,6 +64,12 @@ fn template_id(template: &str) -> Result<&str> {
 
 pub async fn run(api: &Api, token: &str, options: Options) -> Result<()> {
     let listed = matches!(&options.command, Command::Publish { .. });
+    let installing = matches!(
+        &options.command,
+        Command::Templates {
+            command: TemplateCommand::Install { .. }
+        }
+    );
     let request = match options.command {
         Command::List => api.authenticated(Method::GET, "/catalog", token),
         Command::Templates { command } => match command {
@@ -91,5 +98,20 @@ pub async fn run(api: &Api, token: &str, options: Options) -> Result<()> {
             .authenticated(Method::PUT, &format!("/apps/{app}/catalog"), token)
             .json(&value!({ "listed": listed })),
     };
-    super::print_json(&json::<Value>(request.send().await?).await?)
+    let result = json::<Value>(request.send().await?).await?;
+    super::print_json(&result)?;
+    // Without the network:manage scope, the template's origins stay requested.
+    if installing
+        && let (Some(app), Some(requested)) = (
+            result["app"]["id"]
+                .as_str()
+                .and_then(|id| Uuid::parse_str(id).ok()),
+            result
+                .get("requestedNetwork")
+                .and_then(|value| serde_json::from_value::<NetworkPolicy>(value.clone()).ok()),
+        )
+    {
+        crate::network::print_requested(api, app, &requested);
+    }
+    Ok(())
 }

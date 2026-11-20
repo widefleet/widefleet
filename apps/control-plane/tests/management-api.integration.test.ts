@@ -89,6 +89,7 @@ it("lets members discover templates without creating apps or granting management
     expect(response.status).toBe(200);
     const template = contract.appTemplate.parse(await response.json());
     expect(template.id).toBe(id);
+    expect(template.network?.backend.length).toBeGreaterThan(0);
     expect(template.source).toBe(
       `https://github.com/widefleet/widefleet/tree/main/templates/${id}`,
     );
@@ -163,7 +164,8 @@ it.each([undefined, "", "fixture-catalog-token"])(
       (request) => new URL(request.url).hostname === "raw.githubusercontent.com",
     );
 
-    expect(documents).toHaveLength(4);
+    // Three listed templates, then the detail's template.md and widefleet.jsonc.
+    expect(documents).toHaveLength(5);
 
     for (const document of documents) expect(document.headers.has("authorization")).toBe(false);
   },
@@ -187,6 +189,9 @@ it("reads a new template from its directory and frontmatter without provider-spe
     if (url.pathname.endsWith("/no-template/template.md"))
       return new Response(null, { status: 404 });
 
+    // A template without widefleet.jsonc declares no network access.
+    if (url.pathname.endsWith("/widefleet.jsonc")) return new Response(null, { status: 404 });
+
     return new Response(
       `\uFEFF---\r\nname: Team board\r\ndescription: >-\r\n  Organize tasks\r\n  together.\r\n---\r\n${markdown}`,
     );
@@ -201,6 +206,7 @@ it("reads a new template from its directory and frontmatter without provider-spe
   expect(response.status).toBe(200);
   const template = contract.appTemplate.parse(await response.json());
   expect(template.markdown).toBe(markdown);
+  expect(template.network).toBeUndefined();
   expect(template.source).toBe("https://github.com/widefleet/widefleet/tree/main/templates/kanban");
   expect(template.prompt).toContain("catalog templates show kanban");
   expect(template.prompt).not.toMatch(/OAuth|personal account/i);

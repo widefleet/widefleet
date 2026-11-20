@@ -1,0 +1,12 @@
+{
+  // The provider origins this connector calls. Deploying requests them; the
+  // app's owner or an administrator allows them.
+  "network": {
+    "backend": [
+      "https://accounts.google.com",
+      "https://oauth2.googleapis.com",
+      "https://www.googleapis.com",
+      "https://gmail.googleapis.com",
+    ],
+  },
+}

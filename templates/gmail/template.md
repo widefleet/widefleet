@@ -36,13 +36,13 @@ An administrator needs to:
 3. Set the app secrets `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. Use the app's
    Secrets page or `widefleet secret put NAME --file /path/to/secret` to provide
    values.
-4. Allow these backend origins from the app directory:
+4. Allow the backend origins that `widefleet.jsonc` declares. A one-click install
+   from the template page allows them, as does `widefleet catalog templates install`
+   with the CLI's `network:manage` scope. After `widefleet deploy`, run from the app
+   directory:
 
    ```sh
-   widefleet network allow https://accounts.google.com
-   widefleet network allow https://oauth2.googleapis.com
-   widefleet network allow https://www.googleapis.com
-   widefleet network allow https://gmail.googleapis.com
+   widefleet network allow https://accounts.google.com https://oauth2.googleapis.com https://www.googleapis.com https://gmail.googleapis.com
    ```
 
 Network changes require the CLI's `network:manage` scope. Wait for the configuration

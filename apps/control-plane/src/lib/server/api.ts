@@ -663,9 +663,20 @@ export const createApi = (runtime: Runtime) => {
       .route({ method: "POST", path: "/catalog/templates/{templateId}/install" })
       .input(contract.templateInstallInput)
       .output(contract.templateInstall)
-      .handler(async ({ context, input }) =>
-        unwrap(await runtime.templates.install(context.principal, input)),
-      ),
+      .handler(async ({ context, input }) => {
+        // As `widefleet network allow`, granting the template's declared
+        // origins requires the network:manage scope; without it they stay
+        // requested.
+        const manage = await runtime.identity.authenticate(context.request, "network:manage");
+
+        return unwrap(
+          await runtime.templates.install(
+            context.principal,
+            input,
+            manage.isOk() ? { consentedNetwork: "declared" } : {},
+          ),
+        );
+      }),
     setCatalogListing: write
       .route({ method: "PUT", path: "/apps/{appId}/catalog" })
       .input(contract.catalogListingInput)

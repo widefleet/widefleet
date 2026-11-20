@@ -33,11 +33,13 @@ An administrator needs to:
 2. Set the app secrets `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET`. Use the app's
    Secrets page or `widefleet secret put NAME --file /path/to/secret` to provide
    values.
-3. Allow these backend origins from the app directory:
+3. Allow the backend origins that `widefleet.jsonc` declares. A one-click install
+   from the template page allows them, as does `widefleet catalog templates install`
+   with the CLI's `network:manage` scope. After `widefleet deploy`, run from the app
+   directory:
 
    ```sh
-   widefleet network allow https://github.com
-   widefleet network allow https://api.github.com
+   widefleet network allow https://github.com https://api.github.com
    ```
 
 Network changes require the CLI's `network:manage` scope. Wait for the configuration

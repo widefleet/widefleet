@@ -123,6 +123,8 @@ export const createRuntime = ({
     Boolean(source),
   );
 
+  const network = createNetworkService(database.db, execution);
+
   const uploads = createUploadService(database.db, storage, configuration, execution, source);
 
   const runtime = {
@@ -168,7 +170,7 @@ export const createRuntime = ({
       configuration.APP_HTTPS_PORT,
       source,
     ),
-    network: createNetworkService(database.db, execution),
+    network,
     appAccess: createAppAccessService(database.db, execution),
     workflows: createWorkflowService(database.db, execution),
     migrations: createMigrationService(database.db, storage, execution),
@@ -176,7 +178,7 @@ export const createRuntime = ({
     appSecrets: createAppSecrets(database.db, encryptionKey, execution),
     releases: createRuntimeReleaseService(database.db, storage, execution),
     uploads,
-    templates: createTemplateInstalls(configuration, apps, uploads, builder),
+    templates: createTemplateInstalls(configuration, apps, uploads, network, builder),
     telemetry: createTelemetry(database.db, storage, configuration, hostedLogs),
   };
 

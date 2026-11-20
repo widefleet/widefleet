@@ -224,6 +224,7 @@ describe.runIf(process.env["RUN_TELEMETRY_TESTS"] === "1")(
           configuration,
           createAppService(environment.database.db, configuration),
           createUploadService(environment.database.db, storage, configuration),
+          createNetworkService(environment.database.db),
         ),
       });
       const admin = environment.users.createUser({ email: "telemetry-admin@example.test" });
