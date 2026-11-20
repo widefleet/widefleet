@@ -52,7 +52,8 @@ export const templateRepository = async (url: URL) => {
     url.pathname,
   );
 
-  if (pinned?.[1]) return new Response(await readFile(new URL(pinned[1], root), "utf8"));
+  // Pinned files are served as bytes, like GitHub serves static assets.
+  if (pinned?.[1]) return new Response(await readFile(new URL(pinned[1], root)));
 
   const match =
     /^\/widefleet\/widefleet\/main\/templates\/([a-z][a-z0-9-]*)\/(template\.md|widefleet\.jsonc)$/u.exec(

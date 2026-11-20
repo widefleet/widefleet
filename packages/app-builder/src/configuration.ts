@@ -70,9 +70,6 @@ export const readConfiguration = (files: Readonly<Record<string, string>>) => {
   if (!parsed.success)
     throw new BuildError(`Invalid Wrangler configuration: ${z.prettifyError(parsed.error)}`);
 
-  if (parsed.data.assets)
-    throw new BuildError("Projects with static assets are deployed with the Widefleet CLI");
-
   return parsed.data;
 };
 
@@ -149,8 +146,9 @@ export const workerMetadata = (
       })),
     ],
     debug,
+    // As the CLI: static assets or a default export give the app a URL.
     // Service entrypoints are module exports; Workflow classes are not.
-    web: exports.includes("default"),
+    web: configuration.assets !== undefined || exports.includes("default"),
     entrypoints: exports.filter(
       (name) => !configuration.workflows.some((workflow) => workflow.class_name === name),
     ),

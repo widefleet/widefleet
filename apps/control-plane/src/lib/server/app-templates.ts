@@ -163,8 +163,8 @@ const github = async <T>(url: string, schema: z.ZodType<T>, headers: Headers) =>
 const testFile = /(?:^|\/)(?:tests|__tests__)\/|\.(?:test|spec)\.[cm]?[jt]sx?$/;
 
 /**
- * A template's source files at the current commit, by path relative to its
- * directory, without tests.
+ * A template's files at the current commit, by path relative to its
+ * directory, without tests. Static assets can be binary, so files are bytes.
  */
 export const templateSources = (configuration: Pick<Configuration, "GITHUB_TOKEN">, id: string) =>
   Result.gen(async function* () {
@@ -225,7 +225,7 @@ export const templateSources = (configuration: Pick<Configuration, "GITHUB_TOKEN
 
                   if (!response.ok) throw new Error(`GitHub returned HTTP ${response.status}`);
 
-                  return [path, await response.text()] as const;
+                  return [path, new Uint8Array(await response.arrayBuffer())] as const;
                 }),
             ),
           ),
