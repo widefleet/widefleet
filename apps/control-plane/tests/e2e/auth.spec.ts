@@ -6,7 +6,7 @@ import { EventEmitter, once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { app, artifact, workerMetadata } from "@platform/contracts";
+import { app, artifact, workerMetadata, type userConnectionInvocation } from "@platform/contracts";
 import {
   account,
   member,
@@ -22,7 +22,9 @@ import {
   deployments,
   jobs,
   organizationSettings,
+  appUserIdentities,
 } from "../../src/lib/server/schema.ts";
+import { graphGroup } from "./graph.fixture.ts";
 import { apiResource, cliClientId } from "../../src/lib/server/auth-options.ts";
 import { createTestEnvironment } from "../environment.ts";
 import { authConfiguration, createAuthProxy } from "@platform/auth-proxy";
@@ -61,7 +63,13 @@ test.beforeAll(async () => {
   await once(edge, "listening");
   server = spawn(
     process.execPath,
-    ["--import", fileURLToPath(new URL("./templates.fixture.ts", import.meta.url)), "build"],
+    [
+      "--import",
+      fileURLToPath(new URL("./templates.fixture.ts", import.meta.url)),
+      "--import",
+      fileURLToPath(new URL("./graph.fixture.ts", import.meta.url)),
+      "build",
+    ],
     {
       cwd: fileURLToPath(new URL("../../", import.meta.url)),
       env: {
@@ -3586,3 +3594,100 @@ for (const javaScriptEnabled of [true, false])
       await environment.database.db.update(organizationSettings).set({ ssoRequired: true });
     }
   });
+
+test("personal connections assert the identity of the latest company sign-in", async ({ page }) => {
+  const [provider] = await environment.database.db.select().from(ssoProvider);
+  const appId = crypto.randomUUID();
+  const artifactId = crypto.randomUUID();
+  const deploymentId = crypto.randomUUID();
+  const identities: z.infer<typeof userConnectionInvocation>["identity"][] = [];
+
+  await environment.database.db.update(ssoProvider).set({ domainVerified: true });
+  await environment.database.db.insert(apps).values({
+    id: appId,
+    slug: "company-github",
+    displayName: "Company GitHub",
+    hostname: "company-github.apps.localhost",
+    ownerId: environment.owner.id,
+    organizationId: "widefleet",
+    state: "active",
+    catalogListed: true,
+  });
+  await environment.database.db.insert(artifacts).values({
+    id: artifactId,
+    appId,
+    metadata: { entrypoints: ["default", "UserConnection"] },
+    modules: [],
+    manifest: {},
+  });
+  await environment.database.db.insert(deployments).values({
+    id: deploymentId,
+    appId,
+    artifactId,
+    status: "succeeded",
+    requestId: crypto.randomUUID(),
+  });
+  await environment.database.db
+    .update(apps)
+    .set({ activeDeploymentId: deploymentId })
+    .where(eq(apps.id, appId));
+  environment.authControl.userConnection((input) => {
+    identities.push(input.identity);
+
+    return Response.json({ setup: "ready", connection: "disconnected", account: null });
+  });
+
+  try {
+    // Company sign-in to management, against the emulated Entra tenant.
+    await page.goto("/sign-in");
+    await page.getByLabel("Email", { exact: true }).fill("sso@example.test");
+    await page.getByRole("button", { name: "Continue with email", exact: true }).click();
+    await page.getByRole("button", { name: /sso@example.test/ }).click();
+    await expect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
+
+    const [signedIn] = await environment.database.db
+      .select({ userId: account.userId, subject: account.accountId })
+      .from(account)
+      .innerJoin(user, eq(user.id, account.userId))
+      .where(
+        and(
+          eq(account.providerId, z.string().parse(provider?.providerId)),
+          eq(user.email, "sso@example.test"),
+        ),
+      );
+
+    const expected = {
+      issuer: `${environment.environment.ENTRA_AUTHORITY}/${environment.environment.ENTRA_TENANT_ID}/v2.0`,
+      subject: z.string().parse(signedIn?.subject),
+      name: "SSO Test User",
+      groups: [graphGroup],
+    };
+
+    await page.goto("/connections");
+    await expect(page.getByRole("heading", { name: "Company GitHub", exact: true })).toBeVisible();
+    expect(identities.at(-1)).toEqual(expected);
+
+    // Without a recorded identity, the member signs in again and returns here.
+    await environment.database.db
+      .delete(appUserIdentities)
+      .where(eq(appUserIdentities.userId, z.string().parse(signedIn?.userId)));
+    const before = identities.length;
+    await page.reload();
+    await expect(
+      page.getByText("Sign in with your company account again to check your connections."),
+    ).toBeVisible();
+    expect(identities).toHaveLength(before);
+    await page.getByRole("link", { name: "Sign in", exact: true }).click();
+    await page.getByRole("button", { name: "Sign in with Microsoft" }).click();
+    await page.getByRole("button", { name: /sso@example.test/ }).click();
+    await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}/connections`);
+    await expect(page.getByRole("heading", { name: "Company GitHub", exact: true })).toBeVisible();
+    expect(identities.at(-1)).toEqual(expected);
+  } finally {
+    environment.authControl.userConnection(undefined);
+    await environment.database.db.delete(apps).where(eq(apps.id, appId));
+    await environment.database.db
+      .update(ssoProvider)
+      .set({ domainVerified: provider?.domainVerified ?? false });
+  }
+});
