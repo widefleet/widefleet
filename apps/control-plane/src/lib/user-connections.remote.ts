@@ -37,7 +37,8 @@ export const prepareUserConnection = form(input, async ({ appId, organizationId 
     throw cause;
   }
 
-  redirect(303, destination);
+  // The runtime only returns launch links on the connector's own origin.
+  redirect(303, destination, { external: [new URL(destination).origin] });
 });
 
 export const disconnectUserConnection = form(input, async ({ appId, organizationId }) => {

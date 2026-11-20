@@ -122,19 +122,20 @@ describe("Personal connector accounts", () => {
     await environment.close();
   });
 
-  it("lets ordinary members manage only published opt-in connectors under their app identity", async () => {
+  it("lets ordinary members manage only opt-in connectors under their app identity", async () => {
     const visible = await deploy("visible");
-    await deploy("ordinary", ["default"]);
-    const hidden = await deploy("hidden", ["UserConnection"], false);
-    expect(await service().list(principal())).toEqual([
-      {
-        appId: visible.id,
-        displayName: "visible",
-        hostname: visible.hostname,
+    const ordinary = await deploy("ordinary", ["default"]);
+    // Access rules decide who sees a connector; a catalog listing is not required.
+    const unlisted = await deploy("unlisted", ["UserConnection"], false);
+    expect(await service().list(principal())).toEqual(
+      [unlisted, visible].map((app) => ({
+        appId: app.id,
+        displayName: app.slug,
+        hostname: app.hostname,
         status: disconnected,
         unavailable: false,
-      },
-    ]);
+      })),
+    );
     expect(calls[0]?.identity).toEqual({
       issuer: `${environment.configuration.PLATFORM_URL}/api/auth`,
       subject: environment.owner.id,
@@ -147,7 +148,7 @@ describe("Personal connector accounts", () => {
       action: "prepare",
       completionUrl: `${environment.configuration.PLATFORM_URL}/connections?completed=${visible.id}`,
     });
-    await expect(service().prepare(principal(), hidden.id)).rejects.toMatchObject({
+    await expect(service().prepare(principal(), ordinary.id)).rejects.toMatchObject({
       code: "NOT_FOUND",
     });
     expect(await service().disconnect(principal(), visible.id)).toEqual({ disconnected: true });

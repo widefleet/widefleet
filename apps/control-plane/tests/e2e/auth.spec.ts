@@ -3301,6 +3301,17 @@ for (const javaScriptEnabled of [true, false])
     let expectedUser = person.id;
     let launches = 0;
     let statusReads = 0;
+    let completion = "";
+
+    // Stands in for the connector's origin, which completes authorization and
+    // returns the browser to its completion URL.
+    const connectorServer = createServer((_request, response) => {
+      response.writeHead(303, { location: completion }).end();
+    });
+
+    connectorServer.listen(0, "127.0.0.1");
+    await once(connectorServer, "listening");
+    const connector = `http://127.0.0.1:${z.object({ port: z.number() }).parse(connectorServer.address()).port}`;
 
     const context = await browser.newContext({
       javaScriptEnabled,
@@ -3394,11 +3405,12 @@ for (const javaScriptEnabled of [true, false])
 
         launches++;
         connected.add(input.appId);
+        completion = input.operation.completionUrl;
 
-        // Runtime and provider redirect correctness is covered with the real loader;
-        // the UI fixture completes the browser round trip at its approved return URL.
+        // Runtime and provider redirect correctness is covered with the real loader.
+        // The launch link is on another origin, as real connectors return it.
         return Response.json({
-          url: input.operation.completionUrl,
+          url: `${connector}/connect/start?ticket=synthetic`,
           expiresAt: new Date(Date.now() + 120_000).toISOString(),
         });
       });
@@ -3567,9 +3579,10 @@ for (const javaScriptEnabled of [true, false])
       await expect(page.getByText("personal-github.apps.localhost", { exact: true })).toBeVisible();
       await expect(page.getByText("personal-gmail.apps.localhost", { exact: true })).toBeVisible();
       // Incomplete setup remains visible when opening connection management.
+      // Connectors the member cannot access are not listed.
       await environment.database.db
         .update(apps)
-        .set({ catalogListed: false })
+        .set({ accessGroups: ["restricted-group"] })
         .where(inArray(apps.id, [github, files]));
       await page.goto("/");
       await expect(page).toHaveURL(environment.configuration.PLATFORM_URL + "/");
@@ -3577,7 +3590,7 @@ for (const javaScriptEnabled of [true, false])
       await expect(page.getByText("Awaiting administrator setup")).toBeVisible();
       await environment.database.db
         .update(apps)
-        .set({ catalogListed: false })
+        .set({ accessGroups: ["restricted-group"] })
         .where(inArray(apps.id, appIds));
       await page.reload();
       await expect(page.getByText("No personal connections available")).toBeVisible();
@@ -3589,6 +3602,7 @@ for (const javaScriptEnabled of [true, false])
         });
     } finally {
       environment.authControl.userConnection(undefined);
+      connectorServer.close();
       await context.close();
       await environment.database.db.delete(apps).where(inArray(apps.id, appIds));
       await environment.database.db.update(organizationSettings).set({ ssoRequired: true });

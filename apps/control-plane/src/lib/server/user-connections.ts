@@ -45,7 +45,6 @@ export const createUserConnections = (
           eq(apps.organizationId, principal.application.organizationId),
           isNull(apps.removedAt),
           isNull(apps.parentId),
-          eq(apps.catalogListed, true),
           eq(apps.webEnabled, true),
           eq(apps.state, "active"),
           sql`${artifacts.metadata}->'entrypoints' ? 'UserConnection'`,
