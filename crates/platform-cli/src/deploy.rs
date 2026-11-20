@@ -1,7 +1,7 @@
 use crate::{auth, installation, preview, source, upload};
 use clap::Args;
 use platform_core::{
-    Error, Result, asset_hash,
+    Error, FailureReason, Result, asset_hash,
     http::{Api, json},
     model::{
         App, Asset, AssetManifest, Binding, DebugMetadata, Deployment, ModuleType, QueueConsumer,
@@ -303,7 +303,7 @@ async fn publish(
                 character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
             })
         {
-            return Err(Error::invalid("Set a valid name in the Wrangler configuration: 1-48 lowercase letters, digits or hyphens, starting with a letter and ending with a letter or digit; auth and mcp are reserved".into()));
+            return Err(Error::invalid("Set a valid name in the Wrangler configuration: 1-48 lowercase letters, digits or hyphens, starting with a letter and ending with a letter or digit; auth and mcp are reserved".into()).with_reason(FailureReason::InvalidAppName));
         }
         eprintln!("Target: {} on {}", name, api.origin_text());
     }
@@ -373,18 +373,8 @@ async fn publish(
                 .any(|workflow| workflow.class_name == *name)
         })
         .collect();
-    // Type analysis can outlast the server's keep-alive timeout. Keep the async
-    // workers free to observe closed connections before the next API request.
-    let service_documentation = {
-        let project = project.to_owned();
-        let output = temporary.path().to_owned();
-        let entrypoints = entrypoints.clone();
-        tokio::task::spawn_blocking(move || {
-            crate::service_docs::extract(&project, &output, &entrypoints)
-        })
-        .await
-        .map_err(|error| Error::invalid(format!("Service documentation failed: {error}")))??
-    };
+    let service_documentation =
+        crate::service_docs::extract(project, temporary.path(), &entrypoints).await?;
     let worker = bundled.source;
     if worker.len() > 20 * 1024 * 1024 {
         return Err(Error::invalid("Worker exceeds 20 MiB".into()));
@@ -430,6 +420,7 @@ async fn publish(
         Target::App(None) => {
             let name = configuration.name.as_deref().ok_or_else(|| {
                 Error::invalid("Set name in the Wrangler configuration before deploying".into())
+                    .with_reason(FailureReason::AppNameMissing)
             })?;
             let token = auth::access_token(api, credentials).await?;
             let mut url = api.origin.clone();
@@ -489,6 +480,7 @@ async fn publish(
     for hash in &session.missing {
         let path = assets.files.get(hash).ok_or_else(|| {
             Error::invalid("Server requested an asset outside the manifest".into())
+                .with_reason(FailureReason::AssetManifestMismatch)
         })?;
         let bytes = std::fs::read(path)?;
         let token = auth::access_token(api, credentials).await?;
@@ -746,7 +738,7 @@ pub async fn wait(
         biased;
         signal = tokio::signal::ctrl_c() => {
             signal?;
-            Err(Error::invalid("Stopped waiting; the queued deployment continues on the agent".into()))
+            Err(Error::invalid("Stopped waiting; the queued deployment continues on the agent".into()).with_reason(FailureReason::DeploymentWaitCancelled))
         }
         result = poll_deployment(api, credentials, app, deployment) => result,
     }
@@ -790,7 +782,10 @@ async fn poll_deployment(
         let current = history
             .into_iter()
             .find(|item| item.id == deployment)
-            .ok_or_else(|| Error::invalid("Deployment no longer appears in history".into()))?;
+            .ok_or_else(|| {
+                Error::invalid("Deployment no longer appears in history".into())
+                    .with_reason(FailureReason::DeploymentMissing)
+            })?;
         match current.status.as_str() {
             "succeeded" => return Ok(current),
             "failed" => {
@@ -798,13 +793,15 @@ async fn poll_deployment(
                     current
                         .message
                         .unwrap_or_else(|| "Deployment failed".into()),
-                ));
+                )
+                .with_reason(FailureReason::DeploymentFailed));
             }
             "queued" | "running" => {}
             status => {
-                return Err(Error::invalid(format!(
-                    "Unknown deployment status: {status}"
-                )));
+                return Err(
+                    Error::invalid(format!("Unknown deployment status: {status}"))
+                        .with_reason(FailureReason::DeploymentStatusInvalid),
+                );
             }
         }
         tokio::time::sleep(Duration::from_secs(2)).await;

@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -80,6 +80,9 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")("CLI authentication diagnos
       expect(result.stderr).toContain("PLATFORM_ACCESS_TOKEN");
       expect(result.stderr).not.toContain("zbus");
       expect(result.stderr).not.toContain("No default store has been set");
+      expect(result.stderr).toContain('"error_code":"session_unreachable"');
+      expect(result.stderr).toContain('"error_category":"usage"');
+      expect(result.stderr).not.toContain('"event":"$exception"');
     },
   );
 
@@ -106,7 +109,8 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1" && process.platform !== "win
     let origin: string;
     let configFile: string;
     let sessionFile: string;
-    let denyLogin = false;
+    let tokenError: string | undefined;
+    let incompleteTokens = false;
 
     const requests: string[] = [];
 
@@ -128,12 +132,12 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1" && process.platform !== "win
           );
           break;
         case "/api/auth/oauth2/token":
-          if (denyLogin) response.writeHead(400).end(JSON.stringify({ error: "access_denied" }));
+          if (tokenError) response.writeHead(400).end(JSON.stringify({ error: tokenError }));
           else
             response.end(
               JSON.stringify({
                 access_token: "synthetic-access-token-never-log",
-                refresh_token: "synthetic-refresh-token-never-log",
+                refresh_token: incompleteTokens ? "" : "synthetic-refresh-token-never-log",
                 expires_in: 300,
                 token_type: "Bearer",
               }),
@@ -161,7 +165,8 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1" && process.platform !== "win
       const id = crypto.randomUUID();
       configFile = join(directory, `${id}.json`);
       sessionFile = join(directory, id, "session.json");
-      denyLogin = false;
+      tokenError = undefined;
+      incompleteTokens = false;
       requests.length = 0;
     });
 
@@ -236,11 +241,95 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1" && process.platform !== "win
 
     it("keeps the previous URL when a new login is denied", async () => {
       await cli(["config", "set-url", "https://previous.example.test"]);
-      denyLogin = true;
+      tokenError = "access_denied";
       await expect(cli(["--url", origin, "login"])).rejects.toThrow("Device login was denied");
       expect(JSON.parse(await readFile(configFile, "utf8"))).toEqual({
         platform_url: "https://previous.example.test",
       });
+    });
+
+    const reportFailure = async (command: string) => {
+      const result = await cli(["--url", origin, command], {
+        CI: undefined,
+        WIDEFLEET_TELEMETRY_DEBUG: "1",
+        WIDEFLEET_TELEMETRY_DISABLED: "0",
+        PLATFORM_USAGE_REPORTING: undefined,
+        PLATFORM_CRASH_REPORTING: undefined,
+      }).then(
+        () => {
+          throw new Error("Expected command to fail");
+        },
+        (cause: unknown) => failedCommand.parse(cause),
+      );
+
+      expect(result.code).toBe(1);
+
+      const telemetry = result.stderr
+        .split("\n")
+        .filter((line) => line.startsWith("[widefleet telemetry] "))
+        .join("\n");
+
+      expect(telemetry).toContain('"event":"cli_command_completed"');
+      expect(telemetry).toContain('"outcome":"failed"');
+
+      for (const privateValue of [
+        origin,
+        sessionFile,
+        "synthetic-access-token-never-log",
+        "synthetic-refresh-token-never-log",
+        "private-error-never-log",
+      ]) {
+        expect(telemetry).not.toContain(privateValue);
+      }
+
+      return telemetry;
+    };
+
+    it.each([
+      { response: "access_denied", code: "login_denied", category: "usage", issue: false },
+      { response: "expired_token", code: "login_expired", category: "usage", issue: false },
+      {
+        response: "private-error-never-log",
+        code: "invalid_login_response",
+        category: "technical",
+        issue: true,
+      },
+    ])(
+      "keeps OAuth $response visible with its concrete cause",
+      async ({ response, code, category, issue }) => {
+        tokenError = response;
+        const telemetry = await reportFailure("login");
+        expect(telemetry).toContain(`"error_code":"${code}"`);
+        expect(telemetry).toContain(`"error_category":"${category}"`);
+        expect(telemetry.includes('"event":"$exception"')).toBe(issue);
+      },
+    );
+
+    it("reports incomplete credentials as a server defect", async () => {
+      incompleteTokens = true;
+      const telemetry = await reportFailure("login");
+      expect(telemetry).toContain('"error_code":"incomplete_credentials"');
+      expect(telemetry).toContain('"error_category":"technical"');
+      expect(telemetry).toContain('"event":"$exception"');
+      await expect(readFile(sessionFile)).rejects.toMatchObject({ code: "ENOENT" });
+    });
+
+    it("distinguishes missing, corrupt and unsafe session storage", async () => {
+      const missing = await reportFailure("whoami");
+      expect(missing).toContain('"error_code":"login_required"');
+      expect(missing).toContain('"error_category":"usage"');
+      expect(missing).not.toContain('"event":"$exception"');
+      await writeFile(sessionFile, "private-error-never-log", { mode: 0o600 });
+      const corrupt = await reportFailure("whoami");
+      expect(corrupt).toContain('"error_code":"session_corrupt"');
+      expect(corrupt).toContain('"error_category":"technical"');
+      expect(corrupt).toContain('"event":"$exception"');
+      await chmod(sessionFile, 0o644);
+      const unsafe = await reportFailure("whoami");
+      expect(unsafe).toContain('"error_code":"session_permissions"');
+      expect(unsafe).toContain('"error_category":"usage"');
+      expect(unsafe).not.toContain('"event":"$exception"');
+      expect(requests).toEqual([]);
     });
 
     it("inspects, replaces and clears configuration without contacting an API", async () => {

@@ -1,7 +1,7 @@
 use crate::{app_bindings, apps, auth, deploy};
 use clap::{Args, Subcommand, ValueEnum};
 use platform_core::{
-    Error, Result,
+    Error, FailureReason, Result,
     http::{Api, json},
     model::{CapabilityGrant, Deployment},
 };
@@ -253,7 +253,8 @@ pub async fn secrets(api: &Api, credentials: &auth::Credentials, options: Secret
                 .message
                 .clone()
                 .unwrap_or_else(|| "Secret activation failed".into()),
-        ));
+        )
+        .with_reason(FailureReason::DeploymentFailed));
     }
     if changing
         && !options.no_wait

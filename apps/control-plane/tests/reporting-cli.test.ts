@@ -88,7 +88,9 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
 
         expect(failure?.code).toBe(1);
         expect(failure?.stderr).toContain('"event":"cli_command_completed"');
-        expect(failure?.stderr).toContain('"event":"$exception"');
+        expect(failure?.stderr).not.toContain('"event":"$exception"');
+        expect(failure?.stderr).toContain('"outcome":"failed"');
+        expect(failure?.stderr).toContain('"error_category":"usage"');
         expect(failure?.stderr).not.toContain('"message":');
         const diagnostic = failure?.stderr.split("[widefleet telemetry]")[0];
 
@@ -101,36 +103,8 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
           );
         }
 
-        const line = failure?.stderr
-          .split("\n")
-          .find(
-            (entry) =>
-              entry.startsWith("[widefleet telemetry] ") && entry.includes('"event":"$exception"'),
-          );
-
-        const captured = z
-          .object({
-            properties: z.object({
-              $exception_list: z.array(
-                z.object({
-                  stacktrace: z.object({
-                    frames: z.array(
-                      z.object({
-                        platform: z.literal("custom"),
-                        lang: z.literal("rust"),
-                        function: z.string(),
-                        filename: z.string(),
-                      }),
-                    ),
-                  }),
-                }),
-              ),
-            }),
-          })
-          .parse(JSON.parse(z.string().parse(line).slice("[widefleet telemetry] ".length)));
-
-        expect(captured.properties.$exception_list[0]?.stacktrace.frames[0]?.filename).toBe(
-          `crates/platform-cli/src/${command === "login" ? "auth" : "main"}.rs`,
+        expect(failure?.stderr).toContain(
+          `"error_code":"${command === "apps" ? "platform_not_configured" : "invalid_login_scope"}"`,
         );
 
         await execute(binary, ["telemetry", "disable"], { env: environment() });
@@ -146,6 +120,152 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         expect(disabled?.stderr).not.toContain("[widefleet telemetry]");
       },
     );
+    it.each([400, 401, 403, 404, 409, 422, 429, 500, 503])(
+      "classifies HTTP %i and excludes sensitive response details from telemetry",
+      async (httpStatus) => {
+        await execute(binary, ["telemetry", "enable"], { env: environment() });
+        const secret = "private-token user@example.test /private/customer/file";
+
+        const server = createServer((request, response) => {
+          request.resume();
+          response.writeHead(httpStatus, { "content-type": "application/json" });
+          response.end(JSON.stringify({ message: secret }));
+        });
+
+        server.listen(0, "127.0.0.1");
+        await once(server, "listening");
+
+        try {
+          const { port } = z.object({ port: z.number() }).parse(server.address());
+
+          const failed = await execute(binary, ["--url", `http://127.0.0.1:${port}`, "whoami"], {
+            env: { ...environment(), PLATFORM_ACCESS_TOKEN: "synthetic-telemetry-test-token" },
+            timeout: 10_000,
+          }).then(
+            () => null,
+            (cause: unknown) => z.object({ code: z.number(), stderr: z.string() }).parse(cause),
+          );
+
+          expect(failed?.code).toBe(1);
+          expect(failed?.stderr.split("[widefleet telemetry]")[0]).toContain(secret);
+
+          const lines = z
+            .string()
+            .parse(failed?.stderr)
+            .split("\n")
+            .filter((line) => line.startsWith("[widefleet telemetry] "));
+
+          const events = lines.map((line) =>
+            z
+              .object({
+                event: z.string(),
+                properties: z.record(z.string(), z.json()),
+              })
+              .parse(JSON.parse(line.slice("[widefleet telemetry] ".length))),
+          );
+
+          expect(lines.join("\n")).not.toContain(secret);
+          expect(lines.join("\n")).not.toContain("synthetic-telemetry-test-token");
+          expect(lines.join("\n")).not.toContain("127.0.0.1");
+          expect(events[0]).toMatchObject({
+            event: "cli_command_completed",
+            properties: {
+              command: "whoami",
+              outcome: "failed",
+              http_status: httpStatus,
+              error_code: httpStatus < 500 ? "api_rejected" : "api_failure",
+              error_category: httpStatus < 500 ? "unknown" : "technical",
+            },
+          });
+
+          const summary = httpStatus < 500 ? "API rejected the request" : "API request failed";
+          expect(events).toHaveLength(2);
+          expect(events[1]).toMatchObject({
+            event: "$exception",
+            properties: {
+              $issue_name: `whoami: ${summary} (HTTP ${httpStatus})`,
+              http_status: httpStatus,
+              $exception_list: [
+                {
+                  type: "Api",
+                  value: `whoami: ${summary} (HTTP ${httpStatus})`,
+                  mechanism: { handled: true, synthetic: true },
+                  stacktrace: { frames: [{ filename: "crates/platform-core/src/http.rs" }] },
+                },
+              ],
+            },
+          });
+          expect(lines.join("\n")).not.toContain("<unknown>");
+        } finally {
+          const closed = once(server, "close");
+          server.close();
+          await closed;
+        }
+      },
+    );
+
+    it.each([
+      { httpStatus: 404, code: "NOT_FOUND", category: "usage", errorCode: "api_rejected" },
+      { httpStatus: 403, code: "FORBIDDEN", category: "usage", errorCode: "api_rejected" },
+      {
+        httpStatus: 404,
+        code: "ROUTE_NOT_FOUND",
+        category: "technical",
+        errorCode: "api_route_not_found",
+      },
+      {
+        httpStatus: 400,
+        code: "INVALID_REQUEST",
+        category: "technical",
+        errorCode: "api_invalid_request",
+      },
+      { httpStatus: 404, code: "private value", category: "unknown", errorCode: "api_rejected" },
+    ])(
+      "classifies HTTP $httpStatus with server code $code as $category",
+      async ({ httpStatus, code, category, errorCode }) => {
+        await execute(binary, ["telemetry", "enable"], { env: environment() });
+
+        const server = createServer((request, response) => {
+          request.resume();
+          response.writeHead(httpStatus, { "content-type": "application/json" });
+          response.end(JSON.stringify({ code, message: "private-response-never-log" }));
+        });
+
+        server.listen(0, "127.0.0.1");
+        await once(server, "listening");
+
+        try {
+          const { port } = z.object({ port: z.number() }).parse(server.address());
+
+          const failed = await execute(binary, ["--url", `http://127.0.0.1:${port}`, "whoami"], {
+            env: { ...environment(), PLATFORM_ACCESS_TOKEN: "synthetic-telemetry-test-token" },
+            timeout: 10_000,
+          }).then(
+            () => null,
+            (cause: unknown) => z.object({ code: z.number(), stderr: z.string() }).parse(cause),
+          );
+
+          const telemetry = z
+            .string()
+            .parse(failed?.stderr)
+            .split("\n")
+            .filter((line) => line.startsWith("[widefleet telemetry] "))
+            .join("\n");
+
+          expect(failed?.code).toBe(1);
+          expect(telemetry).toContain(`"error_code":"${errorCode}"`);
+          expect(telemetry).toContain(`"error_category":"${category}"`);
+          expect(telemetry.includes('"api_error_code"')).toBe(category !== "unknown");
+          expect(telemetry.includes('"event":"$exception"')).toBe(category !== "usage");
+          expect(telemetry).not.toContain("private");
+        } finally {
+          const closed = once(server, "close");
+          server.close();
+          await closed;
+        }
+      },
+    );
+
     it("preserves both opt-outs when preference updates run concurrently", async () => {
       for (let attempt = 0; attempt < 5; attempt += 1) {
         await execute(binary, ["telemetry", "enable"], { env: environment() });
@@ -175,7 +295,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         const server = createServer((request, response) => {
           request.resume();
           gate.once("respond", () => {
-            response.writeHead(400, { "content-type": "application/json" });
+            response.writeHead(503, { "content-type": "application/json" });
             response.end(JSON.stringify({ error: "synthetic API failure" }));
           });
         });

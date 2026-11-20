@@ -1,3 +1,6 @@
+mod diagnostics;
+pub use diagnostics::{FailureCategory, FailureReason};
+
 pub mod http;
 pub mod migrations;
 pub mod model;
@@ -13,6 +16,7 @@ pub struct Error {
     #[source]
     kind: ErrorKind,
     location: &'static std::panic::Location<'static>,
+    reason: Option<FailureReason>,
 }
 
 #[derive(Debug, Error)]
@@ -22,7 +26,12 @@ pub enum ErrorKind {
     #[error("HTTP request failed: {0}")]
     Http(#[from] reqwest::Error),
     #[error("API returned {status}: {message}")]
-    Api { status: u16, message: String },
+    Api {
+        status: u16,
+        // The server's machine-readable error code, if it sent a valid one.
+        code: Option<String>,
+        message: String,
+    },
     #[error("I/O failed: {0}")]
     Io(#[from] std::io::Error),
     #[error("Invalid JSON: {0}")]
@@ -37,6 +46,7 @@ impl Error {
         Self {
             kind,
             location: std::panic::Location::caller(),
+            reason: None,
         }
     }
 
@@ -51,8 +61,22 @@ impl Error {
     }
 
     #[track_caller]
-    pub fn api(status: u16, message: String) -> Self {
-        Self::new(ErrorKind::Api { status, message })
+    pub fn api(status: u16, code: Option<String>, message: String) -> Self {
+        Self::new(ErrorKind::Api {
+            status,
+            code,
+            message,
+        })
+    }
+
+    // Outer operations may add context, but must preserve a more specific cause.
+    pub fn with_reason(mut self, reason: FailureReason) -> Self {
+        self.reason.get_or_insert(reason);
+        self
+    }
+
+    pub fn reason(&self) -> Option<FailureReason> {
+        self.reason
     }
 
     pub fn kind(&self) -> &ErrorKind {

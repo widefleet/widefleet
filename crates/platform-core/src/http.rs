@@ -79,17 +79,73 @@ pub async fn json<T: DeserializeOwned>(response: Response) -> Result<T> {
     let status = response.status();
     let bytes = response.bytes().await?;
     if !status.is_success() {
-        #[derive(serde::Deserialize)]
-        struct Failure {
-            message: Option<String>,
-            error_description: Option<String>,
-            error: Option<String>,
-        }
-        let message = serde_json::from_slice::<Failure>(&bytes)
-            .ok()
-            .and_then(|body| body.message.or(body.error_description).or(body.error))
-            .unwrap_or_else(|| status.canonical_reason().unwrap_or("Request failed").into());
-        return Err(Error::api(status.as_u16(), message));
+        return Err(failure(status, &bytes));
     }
     Ok(serde_json::from_slice(&bytes)?)
+}
+
+// Read each field on its own: gateways may send other types for any of them,
+// and one unexpected field must not hide the others.
+#[track_caller]
+fn failure(status: reqwest::StatusCode, bytes: &[u8]) -> Error {
+    let body = serde_json::from_slice::<serde_json::Value>(bytes).ok();
+    let field = |name| {
+        body.as_ref()
+            .and_then(|body| body.get(name))
+            .and_then(serde_json::Value::as_str)
+    };
+    // Codes are reported in telemetry, so accept only constant identifiers.
+    let code = field("code")
+        .filter(|code| {
+            code.len() <= 64
+                && code.starts_with(|character: char| character.is_ascii_uppercase())
+                && code.chars().all(|character| {
+                    character.is_ascii_uppercase() || character.is_ascii_digit() || character == '_'
+                })
+        })
+        .map(str::to_owned);
+    let message = field("message")
+        .or_else(|| field("error_description"))
+        .or_else(|| field("error"))
+        .map(str::to_owned)
+        .unwrap_or_else(|| status.canonical_reason().unwrap_or("Request failed").into());
+    Error::api(status.as_u16(), code, message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ErrorKind;
+
+    fn parts(body: &str) -> (Option<String>, String) {
+        match failure(reqwest::StatusCode::FORBIDDEN, body.as_bytes()).kind {
+            ErrorKind::Api { code, message, .. } => (code, message),
+            _ => unreachable!("failure always builds an API error"),
+        }
+    }
+
+    #[test]
+    fn error_responses_keep_messages_when_a_field_has_another_type() {
+        assert_eq!(
+            parts(r#"{"code":1234,"message":"Request blocked by gateway"}"#),
+            (None, "Request blocked by gateway".into())
+        );
+        assert_eq!(
+            parts(r#"{"code":{"id":1},"message":7,"error":"denied"}"#),
+            (None, "denied".into())
+        );
+        assert_eq!(
+            parts(r#"{"code":"FORBIDDEN","message":"No access"}"#),
+            (Some("FORBIDDEN".into()), "No access".into())
+        );
+    }
+
+    #[test]
+    fn error_codes_accept_only_constant_identifiers() {
+        for code in ["forbidden", "NOT FOUND", "", "1CODE", &"A".repeat(65)] {
+            let body = serde_json::json!({ "code": code }).to_string();
+            assert_eq!(parts(&body).0, None, "{code}");
+        }
+        assert_eq!(parts("<html>Forbidden</html>"), (None, "Forbidden".into()));
+    }
 }

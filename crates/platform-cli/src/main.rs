@@ -208,7 +208,7 @@ async fn run(args: Arguments) -> Result<()> {
                 }
                 None => return Err(platform_core::Error::invalid(
                     "No platform is configured. Run widefleet login; it opens company discovery in your browser".into(),
-                )),
+                ).with_reason(platform_core::FailureReason::PlatformNotConfigured)),
             },
         }
     };
@@ -482,7 +482,8 @@ async fn main() {
     let succeeded = result.is_ok();
     let report = capture
         .and_then(|capture| capture.take())
-        .or_else(|| result.as_ref().err().map(platform_core::reporting::error));
+        .map(reporting::Failure::panic)
+        .or_else(|| result.as_ref().err().map(reporting::Failure::error));
 
     // Make the original failure visible before reporting can wait on the network.
     if let Err(error) = result {

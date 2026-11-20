@@ -1,5 +1,5 @@
 use platform_core::{
-    Error, Result,
+    Error, FailureReason, Result,
     http::{Api, json},
     sha256,
 };
@@ -50,7 +50,10 @@ impl Credentials {
             } else {
                 match credential_entry(&origin)?.get_password() {
                     Ok(_) | Err(keyring::Error::NoEntry) => {}
-                    Err(error) => return Err(Error::credentials(error.to_string())),
+                    Err(error) => {
+                        return Err(Error::credentials(error.to_string())
+                            .with_reason(FailureReason::CredentialReadFailed));
+                    }
                 }
             }
             Ok(())
@@ -135,16 +138,20 @@ struct FileSession {
 }
 
 fn read_file_session(file: &file::SessionFile, origin: &str) -> Result<Option<Session>> {
-    let Some(bytes) = file.read()? else {
+    let Some(bytes) = file
+        .read()
+        .map_err(|error| error.with_reason(FailureReason::CredentialReadFailed))?
+    else {
         return Ok(None);
     };
     let stored: FileSession = serde_json::from_slice(&bytes).map_err(|_| {
         Error::credentials("Invalid session file; choose a new file and run widefleet login".into())
+            .with_reason(FailureReason::SessionCorrupt)
     })?;
     if stored.origin != origin {
         return Err(Error::credentials(
             "The session file belongs to a different platform; use a separate file for each platform origin".into(),
-        ));
+        ).with_reason(FailureReason::SessionPlatformMismatch));
     }
     Ok(Some(stored.session))
 }
@@ -167,10 +174,11 @@ fn credential_entry(origin: &str) -> Result<keyring::Entry> {
         };
         Error::credentials(format!(
             "Could not initialize the operating system credential store: {error}. {guidance}"
-        ))
+        )).with_reason(FailureReason::CredentialStoreUnavailable)
     })?;
-    keyring::Entry::new("app-platform", origin)
-        .map_err(|error| Error::credentials(error.to_string()))
+    keyring::Entry::new("app-platform", origin).map_err(|error| {
+        Error::credentials(error.to_string()).with_reason(FailureReason::CredentialStoreUnavailable)
+    })
 }
 
 async fn read_session(origin: String, credentials: &Credentials) -> Result<Session> {
@@ -179,22 +187,33 @@ async fn read_session(origin: String, credentials: &Credentials) -> Result<Sessi
         if let Some(file) = file {
             return read_file_session(&file, &origin)?.ok_or_else(|| Error::credentials(
                 "No session is stored in this file. Run widefleet login with the same --session-file or PLATFORM_SESSION_FILE".into(),
-            ));
+            ).with_reason(FailureReason::LoginRequired));
         }
-        // Without a credential store, Unix logins use the private file checked above.
+        // Without a credential store, Unix logins use the private file checked
+        // above. Its absence means either no login or a store that held one and
+        // is now unreachable. Neither is a CLI defect; keep both measurable
+        // apart from established missing logins.
         let entry = credential_entry(&origin).map_err(|error| {
             if cfg!(unix) {
                 Error::credentials(format!(
                     "No session is stored for {origin}. Run widefleet login first. If this environment discards files outside the working directory between commands, set PLATFORM_SESSION_FILE to a file there, outside the app project, before logging in. For noninteractive use, set PLATFORM_ACCESS_TOKEN"
-                ))
+                )).with_reason(FailureReason::SessionUnreachable)
             } else {
                 error
             }
         })?;
         let value = entry
             .get_password()
-            .map_err(|error| Error::credentials(format!("{error}. Run widefleet login first")))?;
-        Ok(serde_json::from_str(&value)?)
+            .map_err(|error| {
+                let reason = if matches!(error, keyring::Error::NoEntry) {
+                    FailureReason::LoginRequired
+                } else {
+                    FailureReason::CredentialReadFailed
+                };
+                Error::credentials(format!("{error}. Run widefleet login first")).with_reason(reason)
+            })?;
+        serde_json::from_str(&value)
+            .map_err(|error| Error::from(error).with_reason(FailureReason::SessionCorrupt))
     })
     .await
     .map_err(|error| Error::credentials(error.to_string()))?
@@ -208,15 +227,16 @@ async fn save_session(
     if tokens.refresh_token.is_empty() {
         return Err(Error::invalid(
             "The OAuth server did not issue a refresh token. Login requires offline_access; run widefleet login again".into(),
-        ));
+        ).with_reason(FailureReason::IncompleteCredentials));
     }
     if !tokens.token_type.eq_ignore_ascii_case("bearer")
         || tokens.expires_in == 0
         || tokens.access_token.is_empty()
     {
-        return Err(Error::invalid(
-            "The OAuth server returned incomplete credentials".into(),
-        ));
+        return Err(
+            Error::invalid("The OAuth server returned incomplete credentials".into())
+                .with_reason(FailureReason::IncompleteCredentials),
+        );
     }
     let session = Session {
         expires_at: epoch()?.saturating_add(tokens.expires_in),
@@ -228,13 +248,17 @@ async fn save_session(
             // Recheck the origin under the same lock used by refresh and logout.
             read_file_session(&file, &origin)?;
             let stored = FileSession { origin, session };
-            file.write(&serde_json::to_vec(&stored)?)?;
+            file.write(&serde_json::to_vec(&stored)?)
+                .map_err(|error| error.with_reason(FailureReason::CredentialWriteFailed))?;
             return Ok(stored.session);
         }
         let entry = credential_entry(&origin)?;
         entry
             .set_password(&serde_json::to_string(&session)?)
-            .map_err(|error| Error::credentials(error.to_string()))?;
+            .map_err(|error| {
+                Error::credentials(error.to_string())
+                    .with_reason(FailureReason::CredentialWriteFailed)
+            })?;
         Ok(session)
     })
     .await
@@ -282,9 +306,10 @@ fn private_file(key: &str) -> Result<file::SessionFile> {
         })
         .ok_or_else(|| Error::credentials("No user state directory is configured".into()))?;
     if !base.is_absolute() {
-        return Err(Error::credentials(
-            "The user state directory must be absolute".into(),
-        ));
+        return Err(
+            Error::credentials("The user state directory must be absolute".into())
+                .with_reason(FailureReason::SessionPathInvalid),
+        );
     }
     Ok(file::SessionFile(
         base.join("widefleet/credentials")
@@ -302,7 +327,8 @@ fn login_scope(options: &LoginOptions) -> Result<String> {
         if scope.is_empty() || scope.chars().any(char::is_whitespace) {
             return Err(Error::invalid(
                 "Pass each scope as a separate argument or comma-separated value".into(),
-            ));
+            )
+            .with_reason(FailureReason::InvalidLoginScope));
         }
         if !scopes.contains(scope) {
             scopes.push(scope.clone());
@@ -314,7 +340,8 @@ fn login_scope(options: &LoginOptions) -> Result<String> {
 pub async fn access_token(api: &Api, credentials: &Credentials) -> Result<String> {
     if let Ok(token) = std::env::var("PLATFORM_ACCESS_TOKEN") {
         if token.is_empty() {
-            return Err(Error::invalid("PLATFORM_ACCESS_TOKEN is empty".into()));
+            return Err(Error::invalid("PLATFORM_ACCESS_TOKEN is empty".into())
+                .with_reason(FailureReason::EmptyAccessToken));
         }
         return Ok(token);
     }
@@ -359,12 +386,14 @@ pub async fn logout(api: &Api, credentials: &Credentials) -> Result<()> {
     let file = credentials.stored_file(&origin)?;
     tokio::task::spawn_blocking(move || {
         if let Some(file) = file {
-            return file.delete();
+            return file
+                .delete()
+                .map_err(|error| error.with_reason(FailureReason::CredentialDeleteFailed));
         }
         let entry = credential_entry(&origin)?;
-        entry
-            .delete_credential()
-            .map_err(|error| Error::credentials(error.to_string()))
+        entry.delete_credential().map_err(|error| {
+            Error::credentials(error.to_string()).with_reason(FailureReason::CredentialDeleteFailed)
+        })
     })
     .await
     .map_err(|error| Error::credentials(error.to_string()))??;

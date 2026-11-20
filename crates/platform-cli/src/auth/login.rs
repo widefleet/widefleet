@@ -1,6 +1,6 @@
 use super::{CLIENT_ID, Credentials, DeviceCode, LoginOptions, login_scope, save_session};
 use platform_core::{
-    Error, Result,
+    Error, FailureReason, Result,
     http::{Api, json},
 };
 use reqwest::{Method, Url};
@@ -29,15 +29,17 @@ impl Routing {
                 .await?,
         )
         .await?;
-        let url = Url::parse(&routing.verification_uri)
-            .map_err(|error| Error::invalid(error.to_string()))?;
+        let url = Url::parse(&routing.verification_uri).map_err(|error| {
+            Error::invalid(error.to_string()).with_reason(FailureReason::InvalidLoginResponse)
+        })?;
         if url.origin() != cloud.origin.origin()
             || url.path() != "/cli-login"
             || !url.username().is_empty()
             || url.password().is_some()
             || url.fragment().is_some()
         {
-            return Err(Error::invalid("Invalid Cloud discovery link".into()));
+            return Err(Error::invalid("Invalid Cloud discovery link".into())
+                .with_reason(FailureReason::InvalidLoginResponse));
         }
         println!(
             "Open {} to find your Widefleet installation. Keep this login running until you approve it.",
@@ -49,7 +51,8 @@ impl Routing {
             if Instant::now() >= deadline {
                 return Err(Error::invalid(
                     "Company discovery expired. Run widefleet login again".into(),
-                ));
+                )
+                .with_reason(FailureReason::DiscoveryExpired));
             }
             #[derive(Deserialize)]
             struct Selected {
@@ -59,9 +62,11 @@ impl Routing {
                 .json(&serde_json::json!({ "request_id": routing.request_id, "cli_token": routing.cli_token }))
                 .send().await?).await?;
             if let Some(origin) = selected.platform_url {
-                let target = Api::new(&origin)?;
+                let target = Api::new(&origin)
+                    .map_err(|error| error.with_reason(FailureReason::InvalidLoginResponse))?;
                 if target.origin.scheme() != "https" {
-                    return Err(Error::invalid("Company discovery requires HTTPS".into()));
+                    return Err(Error::invalid("Company discovery requires HTTPS".into())
+                        .with_reason(FailureReason::InvalidLoginResponse));
                 }
                 return Ok((routing, target));
             }
@@ -110,8 +115,9 @@ pub async fn login(
             .await?,
     )
     .await?;
-    let mut verification =
-        Url::parse(&device.verification_uri).map_err(|error| Error::invalid(error.to_string()))?;
+    let mut verification = Url::parse(&device.verification_uri).map_err(|error| {
+        Error::invalid(error.to_string()).with_reason(FailureReason::InvalidLoginResponse)
+    })?;
     if verification.origin() != target.origin.origin()
         || verification.path() != "/device"
         || !verification.username().is_empty()
@@ -119,7 +125,8 @@ pub async fn login(
     {
         return Err(Error::invalid(
             "The device verification URL does not belong to this platform".into(),
-        ));
+        )
+        .with_reason(FailureReason::InvalidLoginResponse));
     }
     verification.set_fragment(None);
     verification.set_query(None);
@@ -153,9 +160,10 @@ pub async fn login(
         }
         wait = true;
         if Instant::now() >= deadline {
-            return Err(Error::invalid(
-                "Device login expired. Run widefleet login again".into(),
-            ));
+            return Err(
+                Error::invalid("Device login expired. Run widefleet login again".into())
+                    .with_reason(FailureReason::LoginExpired),
+            );
         }
         let response = target
             .request(Method::POST, "/api/auth/oauth2/token")
@@ -189,13 +197,19 @@ pub async fn login(
         match failure.error.as_str() {
             "authorization_pending" => {}
             "slow_down" => interval = interval.saturating_add(5),
-            "access_denied" => return Err(Error::invalid("Device login was denied".into())),
-            "expired_token" => return Err(Error::invalid("Device login expired".into())),
+            "access_denied" => {
+                return Err(Error::invalid("Device login was denied".into())
+                    .with_reason(FailureReason::LoginDenied));
+            }
+            "expired_token" => {
+                return Err(Error::invalid("Device login expired".into())
+                    .with_reason(FailureReason::LoginExpired));
+            }
             _ => {
-                return Err(Error::invalid(format!(
-                    "Device login failed: {}",
-                    failure.error
-                )));
+                return Err(
+                    Error::invalid(format!("Device login failed: {}", failure.error))
+                        .with_reason(FailureReason::InvalidLoginResponse),
+                );
             }
         }
     }

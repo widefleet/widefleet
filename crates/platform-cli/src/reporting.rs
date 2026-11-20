@@ -1,7 +1,7 @@
 use clap::{Args, Subcommand};
 use platform_core::{
-    Error, Result,
-    reporting::{self, Preferences, Report},
+    Error, FailureCategory, Result,
+    reporting::{self, Preferences},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -12,6 +12,12 @@ use std::{
     time::Duration,
 };
 use uuid::Uuid;
+
+mod failure;
+pub use failure::Failure;
+
+#[cfg(test)]
+mod tests;
 
 #[derive(Args)]
 pub struct Options {
@@ -151,26 +157,115 @@ fn envelope(configuration: &Configuration, event: &str, properties: Value) -> Va
     json!({ "api_key": reporting::PROJECT_TOKEN, "event": event, "uuid": Uuid::new_v4(), "properties": common })
 }
 
+fn events(
+    configuration: &Configuration,
+    preferences: Preferences,
+    command: &'static str,
+    elapsed: Duration,
+    succeeded: bool,
+    failure: Option<Failure>,
+) -> Vec<Value> {
+    let mut events = Vec::new();
+    let mut diagnostic = json!({});
+    if let Some(failure) = &failure {
+        diagnostic["error_code"] = json!(failure.code);
+        diagnostic["error_category"] = json!(failure.category);
+        if let Some(status) = failure.http_status {
+            diagnostic["http_status"] = json!(status);
+        }
+        if let Some(code) = &failure.api_code {
+            diagnostic["api_error_code"] = json!(code);
+        }
+    }
+    if preferences.usage {
+        let mut properties = diagnostic.clone();
+        properties["command"] = json!(command);
+        properties["elapsed_ms"] = json!(elapsed.as_millis().min(u128::from(u64::MAX)) as u64);
+        properties["outcome"] = json!(if succeeded {
+            "succeeded"
+        } else if failure
+            .as_ref()
+            .is_some_and(|failure| failure.category == FailureCategory::Cancelled)
+        {
+            "cancelled"
+        } else {
+            "failed"
+        });
+        events.push(envelope(configuration, "cli_command_completed", properties));
+    }
+    // Known usage failures stay measurable above without creating issues.
+    // Unknown causes remain reportable; broad error kinds and HTTP statuses
+    // alone cannot establish that an operation failed as expected.
+    if preferences.crashes
+        && let Some(failure) = failure
+        && matches!(
+            failure.category,
+            FailureCategory::Technical | FailureCategory::Unknown
+        )
+    {
+        let handled = failure.code != "panic";
+        let title = format!("{command}: {}", failure.summary);
+        // Separate statuses and commands that otherwise all share http.rs's
+        // error construction site. Source files separate call sites; line and
+        // column numbers would split one failure into a new issue per release.
+        let files: Vec<_> = failure
+            .report
+            .frames
+            .iter()
+            .map(|frame| frame.filename.as_str())
+            .collect();
+        let fingerprint = platform_core::sha256(
+            json!([
+                "cli-v2",
+                command,
+                failure.code,
+                failure.http_status,
+                failure.api_code,
+                files
+            ])
+            .to_string()
+            .as_bytes(),
+        );
+        let mut properties = diagnostic;
+        properties["command"] = json!(command);
+        properties["$issue_name"] = json!(title);
+        properties["$exception_fingerprint"] = json!(fingerprint);
+        properties["$exception_level"] = json!("error");
+        properties["$exception_list"] = json!([{
+            "type": failure.report.kind,
+            "value": title,
+            "mechanism": { "type": "generic", "handled": handled, "synthetic": handled },
+            "stacktrace": {
+                "type": "raw",
+                "frames": failure.report.frames.into_iter().rev().map(|frame| json!({
+                    "platform": "custom", "lang": "rust", "filename": frame.filename,
+                    "lineno": frame.lineno, "colno": frame.colno, "in_app": true,
+                })).collect::<Vec<_>>()
+            }
+        }]);
+        events.push(envelope(configuration, "$exception", properties));
+    }
+    events
+}
+
 pub async fn finish(
     configuration: Option<Configuration>,
     command: &'static str,
     elapsed: Duration,
     succeeded: bool,
-    report: Option<Report>,
+    failure: Option<Failure>,
 ) {
     let Some(configuration) = configuration.as_ref().and_then(current) else {
         return;
     };
-    let preferences = configuration.preferences.effective();
-    let mut events = Vec::new();
-    if preferences.usage {
-        events.push(envelope(&configuration, "cli_command_completed", json!({ "command": command, "elapsed_ms": elapsed.as_millis().min(u128::from(u64::MAX)) as u64, "outcome": if succeeded { "succeeded" } else { "failed" } })));
-    }
-    if preferences.crashes
-        && let Some(report) = report
-    {
-        events.push(envelope(&configuration, "$exception", json!({ "command": command, "$exception_level": "error", "$exception_list": [{ "type": report.kind, "value": "Widefleet CLI error", "stacktrace": { "type": "raw", "frames": report.frames.into_iter().rev().map(|frame| json!({ "platform": "custom", "lang": "rust", "function": "<unknown>", "filename": frame.filename, "lineno": frame.lineno, "colno": frame.colno, "in_app": true, "resolved": true })).collect::<Vec<_>>() } }] })));
-    }
+    let events = events(
+        &configuration,
+        configuration.preferences.effective(),
+        command,
+        elapsed,
+        succeeded,
+        failure,
+    );
     let debug = std::env::var("WIDEFLEET_TELEMETRY_DEBUG").is_ok_and(|value| value == "1");
     let Ok(client) = reporting::client() else {
         return;

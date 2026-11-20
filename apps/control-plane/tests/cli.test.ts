@@ -81,6 +81,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
     let preparations = 0;
     let sourceTarget = { supported: false, branch: "main", preview: false };
     const checkedTargets: z.infer<typeof contract.sourceDeployTargetInput>[] = [];
+    let expireSourceLookup = false;
 
     const server = createServer((request, response) => {
       request.resume();
@@ -107,6 +108,13 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         });
         request.on("end", () => {
           checkedTargets.push(contract.sourceDeployTargetInput.parse(JSON.parse(body)));
+
+          if (expireSourceLookup) {
+            // Close the completed lookup before the next request, independently
+            // of compiler speed and the server's keep-alive timer.
+            response.once("finish", () => request.socket.end());
+          }
+
           response.end(JSON.stringify(sourceTarget));
         });
 
@@ -519,7 +527,17 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
       executeCli(join(state, "installation", executableName), ["deploy", ...args], {
         cwd: join(state, "project with spaces"),
         timeout: 15_000,
-        env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken },
+        env: {
+          ...process.env,
+          PLATFORM_URL: origin,
+          PLATFORM_ACCESS_TOKEN: accessToken,
+          XDG_STATE_HOME: state,
+          CI: undefined,
+          WIDEFLEET_TELEMETRY_DISABLED: "0",
+          WIDEFLEET_TELEMETRY_DEBUG: "1",
+          PLATFORM_USAGE_REPORTING: undefined,
+          PLATFORM_CRASH_REPORTING: undefined,
+        },
       });
 
     const previewCli = (...args: string[]) =>
@@ -528,6 +546,49 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         timeout: 15_000,
         env: { ...process.env, PLATFORM_URL: origin, PLATFORM_ACCESS_TOKEN: accessToken },
       });
+
+    it("deploys a large worker after the source lookup connection expires", async () => {
+      const worker = join(state, "project with spaces", "worker.js");
+      const original = await readFile(worker, "utf8");
+      let connections = 0;
+
+      const connected = () => {
+        connections += 1;
+      };
+
+      server.on("connection", connected);
+      expireSourceLookup = true;
+
+      try {
+        await writeFile(
+          worker,
+          `const values = [${Array.from({ length: 250_000 }, (_, index) => index).join(",")}]; export default { fetch() { return Response.json(values); } };`,
+        );
+
+        const result = await executeCli(
+          join(state, "installation", executableName),
+          ["deploy", "--skip-build", "--no-wait", "--json"],
+          {
+            cwd: join(state, "project with spaces"),
+            timeout: 30_000,
+            env: {
+              ...process.env,
+              PLATFORM_URL: origin,
+              PLATFORM_ACCESS_TOKEN: accessToken,
+              TOKIO_WORKER_THREADS: "1",
+              WIDEFLEET_TELEMETRY_DISABLED: "1",
+            },
+          },
+        );
+
+        expect(JSON.parse(result.stdout)).toMatchObject({ status: "queued" });
+        expect(connections).toBeGreaterThan(1);
+      } finally {
+        server.off("connection", connected);
+        expireSourceLookup = false;
+        await writeFile(worker, original);
+      }
+    });
 
     it.each([{ args: [] }, { args: [app.id] }])(
       "rejects an unconfirmed main-app branch mismatch before building: %j",
@@ -1575,6 +1636,10 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
           if (settled.status === "rejected") throw settled.reason;
           expect(settled.value).toMatchObject({ code: 1, stdout: "" });
           expect(settled.value.stderr).toContain("Stopped waiting");
+          expect(settled.value.stderr).toContain('"error_code":"deployment_wait_cancelled"');
+          expect(settled.value.stderr).toContain('"error_category":"cancelled"');
+          expect(settled.value.stderr).toContain('"outcome":"cancelled"');
+          expect(settled.value.stderr).not.toContain('"event":"$exception"');
         } finally {
           deployment.child.kill("SIGKILL");
           await interrupted;
@@ -1589,8 +1654,20 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
         const result = await failure(cli(...args, "--skip-build"));
         expect(result).toMatchObject({ code: 1, stdout: "" });
         expect(result.stderr).toContain("Synthetic activation failure");
+        expect(result.stderr).toContain('"error_code":"deployment_failed"');
+        expect(result.stderr).toContain('"error_category":"technical"');
+        expect(result.stderr).toContain('"event":"$exception"');
       },
     );
+
+    it("reports an unknown deployment status as a protocol failure", async () => {
+      outcome = "unknown-server-status";
+      const result = await failure(cli("--json", "--skip-build"));
+      expect(result).toMatchObject({ code: 1, stdout: "" });
+      expect(result.stderr).toContain('"error_code":"deployment_status_invalid"');
+      expect(result.stderr).toContain('"error_category":"technical"');
+      expect(result.stderr).toContain('"event":"$exception"');
+    });
 
     it("requires a server-provided URL before uploading to an older server", async () => {
       includeUrl = false;

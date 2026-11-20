@@ -110,12 +110,15 @@ it("lets members discover templates without creating apps or granting management
   ).toEqual(["github"]);
   const empty = await api(new Request("http://localhost/api/v1/catalog/templates?search=missing"));
   expect(contract.appTemplateCatalog.parse(await empty.json()).templates).toEqual([]);
-  expect((await api(new Request("http://localhost/api/v1/catalog/templates/missing"))).status).toBe(
-    404,
-  );
-  expect((await api(new Request("http://localhost/api/v1/catalog/templates/INVALID"))).status).toBe(
-    400,
-  );
+  const missing = await api(new Request("http://localhost/api/v1/catalog/templates/missing"));
+  expect(missing.status).toBe(404);
+  expect(await missing.json()).toMatchObject({ code: "NOT_FOUND" });
+  const invalid = await api(new Request("http://localhost/api/v1/catalog/templates/INVALID"));
+  expect(invalid.status).toBe(400);
+  expect(await invalid.json()).toMatchObject({ code: "INVALID_REQUEST" });
+  const unknownRoute = await api(new Request("http://localhost/api/v1/catalog/unknown-route"));
+  expect(unknownRoute.status).toBe(404);
+  expect(await unknownRoute.json()).toEqual({ code: "ROUTE_NOT_FOUND", message: "Not found" });
   expect(create).not.toHaveBeenCalled();
   expect(runtime.identity.authenticate).toHaveBeenLastCalledWith(
     expect.any(Request),
