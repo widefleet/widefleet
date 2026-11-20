@@ -10,22 +10,26 @@
 export const mergeEnvironment = <S extends object, T extends object>(source: S, target: T): T => {
   if (Object.is(target, source)) return target;
 
-  const missing: PropertyDescriptorMap = {};
+  // A list, not a descriptor map: binding names may be `__proto__`.
+  const missing: [string | symbol, PropertyDescriptor][] = [];
 
   for (const name of Reflect.ownKeys(source)) {
     if (Object.prototype.hasOwnProperty.call(target, name)) continue;
 
     // SAFETY: `name` is one of the source's own keys, so it indexes the source.
     const value = source[name as keyof S];
-    missing[name] = { value, enumerable: true, writable: true, configurable: true };
+    missing.push([name, { value, enumerable: true, writable: true, configurable: true }]);
   }
 
-  if (Object.isExtensible(target)) return Object.defineProperties(target, missing);
+  if (Object.isExtensible(target)) {
+    for (const [name, descriptor] of missing) Object.defineProperty(target, name, descriptor);
 
-  const merged = Object.defineProperties(
-    {},
-    { ...Object.getOwnPropertyDescriptors(target), ...missing },
-  );
+    return target;
+  }
+
+  const merged = Object.defineProperties({}, Object.getOwnPropertyDescriptors(target));
+
+  for (const [name, descriptor] of missing) Object.defineProperty(merged, name, descriptor);
 
   // SAFETY: The copy carries every own property descriptor of `target`.
   return merged as T;

@@ -62,6 +62,16 @@ describe("Environment of app entrypoints", () => {
     });
   });
 
+  it("adds a binding named __proto__ as an own property", () => {
+    const source: Environment = {};
+    Object.defineProperty(source, "__proto__", { value: "binding", enumerable: true });
+    const received: Environment = {};
+
+    mergeEnvironment(source, received);
+    expect(Object.getOwnPropertyDescriptor(received, "__proto__")?.value).toBe("binding");
+    expect(Object.getPrototypeOf(received)).toBe(Object.prototype);
+  });
+
   it("keeps the importable env itself unchanged", () => {
     const source = platform();
 
