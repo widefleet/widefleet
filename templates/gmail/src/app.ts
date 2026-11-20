@@ -112,3 +112,18 @@ export default class Gmail extends WorkerEntrypoint<Environment, Properties> {
     return this.#connection().fetch(request);
   }
 }
+
+/** Personal account controls used by Widefleet's My connections page. */
+export class UserConnection extends WorkerEntrypoint<Environment, Properties> {
+  async status() {
+    return accountConnection(this.env, this.ctx.props).personalStatus();
+  }
+
+  async prepare(input: { completionUrl: string }) {
+    return accountConnection(this.env, this.ctx.props).prepare(input);
+  }
+
+  async disconnect() {
+    return accountConnection(this.env, this.ctx.props).disconnect();
+  }
+}

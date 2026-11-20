@@ -1,3 +1,4 @@
+import { connectionLaunch } from "./connection-launch.ts";
 import { oauthCredentials, revokeManagedGrant } from "./oauth.ts";
 import { z } from "zod";
 import { authentication, gmailScope } from "./auth.ts";
@@ -13,7 +14,11 @@ const linkedAccount = z.object({
 });
 
 const redirect = (location: string, cookies: string[] = []) => {
-  const headers = new Headers({ location, "cache-control": "no-store" });
+  const headers = new Headers({
+    location,
+    "cache-control": "no-store",
+    "referrer-policy": "no-referrer",
+  });
 
   for (const cookie of cookies) headers.append("set-cookie", cookie);
 
@@ -122,7 +127,90 @@ export const accountConnection = (environment: Environment, properties: Properti
     return connected;
   };
 
+  // Starts provider authorization from the connector's page or from a
+  // single-use launch ticket, which returns to the completion URL afterwards.
+  const start = async (request: Request, completionUrl?: string) => {
+    const { identity, id } = await context();
+    const config = await configuration();
+
+    if (config.status !== "configured")
+      return redirect(completionUrl ? `${completionUrl}&error=setup` : "/");
+    const auth = authentication(environment, identity, id, config.credentials);
+
+    const established = await auth.api.establishSession({
+      headers: request.headers,
+      asResponse: true,
+    });
+
+    if (!established.ok) throw new Error("Could not establish the account-linking session");
+    const cookies = established.headers.getSetCookie();
+
+    const headers = new Headers({
+      origin: environment.WIDEFLEET_ORIGIN,
+      cookie: cookies.map((cookie) => cookie.split(";")[0]).join("; "),
+    });
+
+    const linked = await auth.api.linkSocialAccount({
+      headers,
+      body: {
+        provider: "google",
+        callbackURL: completionUrl ?? `${environment.WIDEFLEET_ORIGIN}/`,
+        errorCallbackURL: completionUrl
+          ? `${completionUrl}&error=connection`
+          : `${environment.WIDEFLEET_ORIGIN}/?error=connection`,
+        disableRedirect: true,
+      },
+      asResponse: true,
+    });
+
+    if (!linked.ok)
+      return redirect(
+        completionUrl ? `${completionUrl}&error=connection` : "/?error=connection",
+        cookies,
+      );
+    const destination = z.object({ url: z.url() }).parse(await linked.json()).url;
+
+    return authorizationPage(destination, [...cookies, ...linked.headers.getSetCookie()]);
+  };
+
+  const disconnect = async () => {
+    const { id } = await context();
+    await revoke(id);
+    await environment.DB.batch([
+      environment.DB.prepare("DELETE FROM account WHERE userId = ? AND providerId = ?").bind(
+        id,
+        "google",
+      ),
+      environment.DB.prepare("DELETE FROM session WHERE userId = ?").bind(id),
+    ]);
+
+    return { disconnected: true } as const;
+  };
+
   return {
+    disconnect,
+    prepare: async (input: { completionUrl: string }) => {
+      const { id } = await context();
+      const config = await configuration();
+
+      if (config.status !== "configured")
+        throw new Error("The connector requires administrator setup");
+
+      return connectionLaunch(environment.DB, id, environment.WIDEFLEET_ORIGIN).prepare(input);
+    },
+    personalStatus: async () => {
+      const { id } = await context();
+      const config = await configuration();
+      const linked = await account(id);
+
+      return {
+        setup: config.status === "configured" ? "ready" : "required",
+        connection: linked ? "connected" : "disconnected",
+        account: linked
+          ? { id: linked.accountId, label: linked.providerEmail ?? linked.accountId }
+          : null,
+      } as const;
+    },
     status: async () => {
       if (!caller.safeParse(properties.caller).success)
         return { status: "authentication_required" } as const;
@@ -169,6 +257,45 @@ export const accountConnection = (environment: Environment, properties: Properti
 
       if (url.origin !== environment.WIDEFLEET_ORIGIN) return new Response(null, { status: 400 });
 
+      if (
+        request.method === "GET" &&
+        ["/connect/start", "/connect/complete"].includes(url.pathname)
+      ) {
+        const launch = connectionLaunch(environment.DB, id, url.origin);
+        const ticket = url.searchParams.get("ticket") ?? "";
+
+        if (url.pathname === "/connect/start") {
+          const completionUrl = await launch.start(ticket);
+
+          if (!completionUrl)
+            return new Response(
+              "This connection link expired or was already used. Return to Widefleet and try again.",
+              {
+                status: 410,
+                headers: { "cache-control": "no-store", "referrer-policy": "no-referrer" },
+              },
+            );
+
+          return start(request, completionUrl);
+        }
+
+        const completionUrl = await launch.complete(ticket);
+
+        if (!completionUrl)
+          return new Response(
+            "This connection has already completed or expired. Return to Widefleet to check your connection.",
+            {
+              status: 410,
+              headers: { "cache-control": "no-store", "referrer-policy": "no-referrer" },
+            },
+          );
+        const destination = new URL(completionUrl);
+
+        if (url.searchParams.has("error")) destination.searchParams.set("connectionError", "1");
+
+        return redirect(destination.href);
+      }
+
       if (url.pathname === "/" && request.method === "GET") {
         const linked = await account(id);
         const config = await configuration();
@@ -187,51 +314,12 @@ export const accountConnection = (environment: Environment, properties: Properti
           return new Response("Invalid origin", { status: 403 });
 
         if (url.pathname === "/disconnect") {
-          await revoke(id);
-          await environment.DB.batch([
-            environment.DB.prepare("DELETE FROM account WHERE userId = ? AND providerId = ?").bind(
-              id,
-              "google",
-            ),
-            environment.DB.prepare("DELETE FROM session WHERE userId = ?").bind(id),
-          ]);
+          await disconnect();
 
           return redirect("/");
         }
 
-        const config = await configuration();
-
-        if (config.status !== "configured") return redirect("/");
-        const auth = authentication(environment, identity, id, config.credentials);
-
-        const established = await auth.api.establishSession({
-          headers: request.headers,
-          asResponse: true,
-        });
-
-        if (!established.ok) throw new Error("Could not establish the account-linking session");
-        const cookies = established.headers.getSetCookie();
-
-        const headers = new Headers({
-          origin: url.origin,
-          cookie: cookies.map((cookie) => cookie.split(";")[0]).join("; "),
-        });
-
-        const linked = await auth.api.linkSocialAccount({
-          headers,
-          body: {
-            provider: "google",
-            callbackURL: `${url.origin}/`,
-            errorCallbackURL: `${url.origin}/?error=connection`,
-            disableRedirect: true,
-          },
-          asResponse: true,
-        });
-
-        if (!linked.ok) return redirect("/?error=connection", cookies);
-        const destination = z.object({ url: z.url() }).parse(await linked.json()).url;
-
-        return authorizationPage(destination, [...cookies, ...linked.headers.getSetCookie()]);
+        return start(request);
       }
 
       if (url.pathname === "/auth/callback/google" && request.method === "GET") {
