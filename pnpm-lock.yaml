@@ -165,6 +165,7 @@ settings:
 patchedDependencies:
   '@better-auth/core@1.7.12': f34d12debadb6c2cd6877fa45dbd214cd6d3a053917954e1d24d79ee03b70bd7
   '@better-auth/oauth-provider@1.7.12': 127edeb68aa744f6d0f897e046bbb0aead935dee19824176112d7d79f65c2207
+  '@cloudflare/worker-bundler@0.2.6': 354a50f9c00e7a8b0f06d52b4aa332a1ab30fd8da42d5b16594e9d7987286262
   '@cloudflare/workers-oauth-provider@1.2.4': f21d52790d10f0313efdc1b0a03895a0f63f54f7dfd6b6bd51c889c69415b5d5
   '@opencode/codemode@2.3.0': 74a3d62cb776da99648b8b8841dac898697a072918fc2c1b31477eb2273c744a
   better-auth@1.7.12: 59cc85d92370b210ec1e241d7f02cff726ee2f33b968ea405e3e826d753217d9
@@ -360,6 +361,34 @@ importers:
       wrangler:
         specifier: 4.147.0
         version: 4.147.0(@cloudflare/workers-types@5.20261003.1)(@types/node@22.20.5)
+
+  packages/app-builder:
+    dependencies:
+      '@cloudflare/worker-bundler':
+        specifier: 0.2.6
+        version: 0.2.6(patch_hash=354a50f9c00e7a8b0f06d52b4aa332a1ab30fd8da42d5b16594e9d7987286262)(supports-color@10.2.2)
+      '@platform/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@platform/service-docs':
+        specifier: workspace:*
+        version: link:../service-docs
+      es-module-lexer:
+        specifier: 2.3.2
+        version: 2.3.2
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: 5.20261003.1
+        version: 5.20261003.1
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
+      miniflare:
+        specifier: 5.20261001.0-alpha
+        version: 5.20261001.0-alpha(patch_hash=14a20cb93d5b33de95aab0b33f8ba5c91a75a9c1eb4438753b017be53fb04f73)(@types/node@26.6.4)
 
   packages/app-runtime:
     dependencies:
@@ -1298,6 +1327,10 @@ packages:
     peerDependencies:
       vite: ^6.1.0 || ^7.0.0 || ^8.0.0
       wrangler: ^4.143.0
+
+  '@cloudflare/worker-bundler@0.2.6':
+    resolution: {integrity: sha512-sepIAqELILFuzB4vj9VMEHYx2LtO6fXDuan8dijDKtRIyr/arJuHTIRipsrU5gByhdWUAT4nAyPWuWzHOyrSSg==}
+    engines: {node: '>=22'}
 
   '@cloudflare/workerd-darwin-64@1.20260926.1':
     resolution: {integrity: sha512-VCIpwgJu5Dm1o+VHLclNOKIdpttEqss7oDHS5DYxgVoonM9Dxxxr1xCQvJbh6IXFuQ1DDrbm5krjte5NsTgX3Q==}
@@ -4629,6 +4662,11 @@ packages:
   es-toolkit@1.52.0:
     resolution: {integrity: sha512-XTNEJQh1tY1ZJVcf6ayP/2n4ZPyaHlW2FWs7xvw5ddPuhUVjLD3olQVQS7kf58JbAB48iL0uL/jerTrjtV3lDA==}
 
+  esbuild-wasm@0.28.1:
+    resolution: {integrity: sha512-p/GD4E8oYRjg3kjdKrnMb0s4PzXgJF42e0MF4H0+ACyK/kIlFRp3e0fzOleIG+wBBm6MM3XQrbpe7soEA+vJIA==}
+    engines: {node: '>=18'}
+    hasBin: true
+
   esbuild@0.28.1:
     resolution: {integrity: sha512-HrJrvZv5ayxBzPfwphOoNzkzOIIlifzk0KJrGK2c8R4+LKpMtpYLQeUdjnwjWv/LZlkH2laZk+4w78pi99D4Vw==}
     engines: {node: '>=18'}
@@ -4766,6 +4804,9 @@ packages:
 
   fflate@0.4.9:
     resolution: {integrity: sha512-zdxgIEddhfsyCaWpJ2SdXEP8ZMrKJ6+5jl4OupODcywU0IhRk6gdXuVGcPICyfx2H97hVK7xmJtRLPjkxAX8Vw==}
+
+  fflate@0.8.3:
+    resolution: {integrity: sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA==}
 
   file-uri-to-path@1.0.0:
     resolution: {integrity: sha512-0Zt+s3L7Vf1biwWZ29aARiVYLx7iMGnEUl9x33fbB/j3jR81u/O2LbqK+Bm1CDSNDKVtJ/YjwY7TUd5SkeLQLw==}
@@ -6098,6 +6139,10 @@ packages:
 
   resolve-pkg-maps@1.0.0:
     resolution: {integrity: sha512-seS2Tj26TBVOC2NIc2rOe2y2ZO7efxITtLZcGSOnHHNOQ7CkiUBfw0Iw2ck6xkIhPwLhKNLS8BO+hEpngQlqzw==}
+
+  resolve.exports@2.0.4:
+    resolution: {integrity: sha512-zepuGL0ulf+nt+XaFrlKeaiTJeyPFPLLY62+ncq1/VTHBdt3HsfXOH60priZ6tnXQozdGcDeIF5JVTanvIcYWQ==}
+    engines: {node: '>=10'}
 
   retext-smartypants@6.2.0:
     resolution: {integrity: sha512-kk0jOU7+zGv//kfjXEBjdIryL1Acl4i9XNkHxtM7Tm5lFiCog576fjNC9hjoR7LTKQ0DsPWy09JummSsH1uqfQ==}
@@ -7980,6 +8025,20 @@ snapshots:
       - '@types/node'
       - bufferutil
       - utf-8-validate
+
+  '@cloudflare/worker-bundler@0.2.6(patch_hash=354a50f9c00e7a8b0f06d52b4aa332a1ab30fd8da42d5b16594e9d7987286262)(supports-color@10.2.2)':
+    dependencies:
+      '@typescript/vfs': 1.6.5(supports-color@10.2.2)(typescript@6.0.3)
+      es-module-lexer: 2.3.2
+      esbuild-wasm: 0.28.1
+      fflate: 0.8.3
+      resolve.exports: 2.0.4
+      semver: 7.8.5
+      smol-toml: 1.9.0
+      sucrase: 3.35.1
+      typescript: 6.0.3
+    transitivePeerDependencies:
+      - supports-color
 
   '@cloudflare/workerd-darwin-64@1.20260926.1':
     optional: true
@@ -11176,6 +11235,8 @@ snapshots:
 
   es-toolkit@1.52.0: {}
 
+  esbuild-wasm@0.28.1: {}
+
   esbuild@0.28.1:
     optionalDependencies:
       '@esbuild/aix-ppc64': 0.28.1
@@ -11374,6 +11435,8 @@ snapshots:
   fetchdts@0.1.7: {}
 
   fflate@0.4.9: {}
+
+  fflate@0.8.3: {}
 
   file-uri-to-path@1.0.0: {}
 
@@ -12886,6 +12949,8 @@ snapshots:
   resolve-from@5.0.0: {}
 
   resolve-pkg-maps@1.0.0: {}
+
+  resolve.exports@2.0.4: {}
 
   retext-smartypants@6.2.0:
     dependencies:

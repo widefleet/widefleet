@@ -46,6 +46,17 @@ const docs = z
   .object({ dependencies: z.object({ blume: z.string() }) })
   .parse(JSON.parse(await readFile(new URL("../../docs/package.json", import.meta.url), "utf8")));
 
+const builder = z
+  .object({ dependencies: z.object({ "@cloudflare/worker-bundler": z.string() }) })
+  .parse(
+    JSON.parse(
+      await readFile(
+        new URL("../../../packages/app-builder/package.json", import.meta.url),
+        "utf8",
+      ),
+    ),
+  );
+
 const patches = z
   .record(z.string(), z.string())
   .parse(
@@ -54,6 +65,9 @@ const patches = z
 
 // Blume belongs to documentation and is absent from the server dependency graph.
 delete patches[`blume@${docs.dependencies.blume}`];
+
+// The app builder is a separate Worker, outside the packaged server.
+delete patches[`@cloudflare/worker-bundler@${builder.dependencies["@cloudflare/worker-bundler"]}`];
 
 // Miniflare is used by Wrangler during development, not by the packaged server.
 for (const name of Object.keys(patches)) {
