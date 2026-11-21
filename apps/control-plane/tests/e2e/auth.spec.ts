@@ -844,10 +844,21 @@ test("selects an organization, repairs stale selection and explains removed acce
   await page.getByRole("button", { name: "Widefleet Member" }).click();
   await expect(page).toHaveURL("http://localhost:25430/");
   await expect(page.getByRole("link", { name: "Choose organization: Widefleet" })).toBeVisible();
+  await page.goto("/catalog/templates");
+  await expect(page.getByRole("heading", { name: "Start from a template" })).toBeVisible();
   await environment.database.db
     .update(authSession)
     .set({ activeOrganizationId: "unavailable" })
     .where(eq(authSession.userId, person.id));
+
+  // Client navigation to a query-only page reaches the server only through its query. Its error
+  // page continues through a full page load, where the request hook keeps the return path.
+  await page.getByRole("link", { name: /^Gmail/ }).click();
+  await expect(page.getByRole("heading", { name: "Choose an organization." })).toBeVisible();
+  await page.getByRole("link", { name: "Continue", exact: true }).click();
+  await expect(page).toHaveURL(
+    `http://localhost:25430/organizations?${new URLSearchParams({ next: "/catalog/templates/gmail" })}`,
+  );
 
   // Page queries may run alongside the page loads. The request hook's organization-selection
   // redirect must still reach the client when those queries reject access.

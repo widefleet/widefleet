@@ -555,3 +555,27 @@ test("switches organizations from the sidebar menu", async ({ browser }) => {
     await context.close();
   }
 });
+
+test("updates an open tab after another tab switches organizations", async ({ browser }) => {
+  const { context } = await organizationSession(browser, true);
+
+  try {
+    const first = await context.newPage();
+    const second = await context.newPage();
+    await first.goto("/organizations");
+    await first.getByRole("button", { name: /^Alpha admin$/i }).click();
+    await expect(first).toHaveURL(`${environment.configuration.PLATFORM_URL}/`);
+    await first.goto("/apps");
+    await expect(first.getByRole("link", { name: "Choose organization: Alpha" })).toBeVisible();
+
+    await second.goto("/organizations");
+    await second.getByRole("button", { name: /^Beta admin$/i }).click();
+    await expect(second.getByRole("link", { name: "Choose organization: Beta" })).toBeVisible();
+
+    // Returning to a tab fires visibilitychange. Headless pages stay visible, so dispatch it.
+    await first.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await expect(first.getByRole("link", { name: "Choose organization: Beta" })).toBeVisible();
+  } finally {
+    await context.close();
+  }
+});
