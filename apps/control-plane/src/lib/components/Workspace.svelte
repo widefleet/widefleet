@@ -16,7 +16,7 @@
   import type { z } from "zod";
   import type { organizationChoice } from "@platform/contracts";
   import type { Principal } from "#server/identity";
-  import { resetClientContext } from "#lib/analytics-client";
+  import { resetClientContext, updateClientContext } from "#lib/analytics-client";
   import { authClient } from "#lib/auth-client";
   import { selectOrganization } from "#lib/organizations.remote";
   import { setWorkspaceContext } from "#lib/workspace-context";
@@ -43,10 +43,20 @@
     },
   });
 
-  const organizationName = $derived(
-    organizations.find((organization) => organization.id === principal.application.organizationId)
-      ?.name ?? "Organization",
+  const organization = $derived(
+    organizations.find((entry) => entry.id === principal.application.organizationId),
   );
+
+  const organizationName = $derived(organization?.name ?? "Organization");
+
+  $effect(() => {
+    updateClientContext({
+      user: principal,
+      organization: organization ? { id: organization.id, name: organization.name } : null,
+      role: principal.role,
+      analytics: page.data.analytics ?? null,
+    });
+  });
 
   const roleLabel = (role: string) =>
     role === "owner" ? "Owner" : principal.application.admin ? "Administrator" : "Member";

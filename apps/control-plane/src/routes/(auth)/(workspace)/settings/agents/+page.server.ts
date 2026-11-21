@@ -1,9 +1,10 @@
 import { error } from "@sveltejs/kit";
+import { pagePrincipal } from "#server/page-auth";
 import type { PageServerLoad } from "./$types";
 
-export const load: PageServerLoad = async ({ parent, setHeaders }) => {
+export const load: PageServerLoad = async ({ setHeaders }) => {
   setHeaders({ "cache-control": "private, no-store" });
-  const { principal } = await parent();
+  const principal = await pagePrincipal();
 
   if (!principal.admin) error(403, "This page is only available to administrators.");
 };

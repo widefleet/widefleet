@@ -10,6 +10,7 @@ import {
 import { z } from "zod";
 import { changeMemberRole, listMembers, memberRoleInput, removeMember } from "#server/members";
 import { formValue, queryValue, remoteContext, remoteOperation } from "#server/remote-support";
+import { getWorkspace } from "#lib/workspace.remote";
 
 export const getMembers = query(memberQuery, async ({ search, page }) => {
   const { runtime, principal } = await remoteContext();
@@ -49,6 +50,8 @@ export const setMemberRole = form(
       ),
     );
     await getMembers({ search, page }).refresh();
+    // A changed own role changes the workspace navigation.
+    await getWorkspace().refresh();
 
     if (!getRequestEvent().isRemoteRequest)
       redirect(
