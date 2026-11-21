@@ -23,7 +23,7 @@
         if (result.error)
           message =
             "This link has expired or has already been used. Generate a new link on the server.";
-        else await goto("/settings");
+        else await goto("/settings/company-sign-in");
       })
       .catch(() => {
         message = "Recovery access is temporarily unavailable.";

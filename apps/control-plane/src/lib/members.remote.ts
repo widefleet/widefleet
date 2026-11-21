@@ -53,7 +53,7 @@ export const setMemberRole = form(
     if (!getRequestEvent().isRemoteRequest)
       redirect(
         303,
-        `/members?${new URLSearchParams({ q: search, page: String(page), saved: "1" })}`,
+        `/settings/members?${new URLSearchParams({ q: search, page: String(page), saved: "1" })}`,
       );
 
     return { saved: true };
@@ -76,7 +76,7 @@ export const inviteMember = form(
         headers: request.headers,
       }),
     );
-    redirect(303, "/members?invited=1");
+    redirect(303, "/settings/members?invited=1");
   },
 );
 
@@ -90,7 +90,7 @@ export const cancelInvitation = form(
         headers: request.headers,
       }),
     );
-    redirect(303, "/members");
+    redirect(303, "/settings/members");
   },
 );
 
@@ -104,6 +104,6 @@ export const deleteMember = form(
         headers: request.headers,
       }),
     );
-    redirect(303, "/members");
+    redirect(303, "/settings/members");
   },
 );

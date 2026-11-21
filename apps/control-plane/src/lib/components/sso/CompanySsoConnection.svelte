@@ -60,7 +60,7 @@
     () => organizationId,
     async () => {
       baseline = JSON.stringify(draft);
-      await goto("/settings", { reset: false });
+      await goto("/settings/company-sign-in", { reset: false });
       saved = true;
     },
   );
@@ -84,7 +84,7 @@
     draft = ssoDraft(view, organizationId);
     baseline = JSON.stringify(draft);
     saved = false;
-    void goto("/settings?edit", { reset: false });
+    void goto("/settings/company-sign-in?edit", { reset: false });
   };
 
   const save = (event: SubmitEvent) => {
@@ -95,7 +95,7 @@
   const test = async () => {
     if (!view.sso) return;
     testing = true;
-    testError = (await startCompanySignIn(view.sso.providerId, "/settings")) ?? "";
+    testError = (await startCompanySignIn(view.sso.providerId, "/settings/company-sign-in")) ?? "";
     testing = false;
   };
 
@@ -132,7 +132,7 @@
             Members keep their current sign-in until you activate company SSO.
           </p>
         </div>
-        <Button href={`/settings/sso/setup?step=${nextSetupStep(view, linked)}`}
+        <Button href={`/settings/company-sign-in/setup?step=${nextSetupStep(view, linked)}`}
           >Continue setup</Button
         >
       </section>
@@ -160,7 +160,7 @@
             <Button
               variant="outline"
               disabled={edits.busy}
-              onclick={() => goto("/settings", { reset: false })}>Cancel</Button
+              onclick={() => goto("/settings/company-sign-in", { reset: false })}>Cancel</Button
             >
             <Button id="identity-save" type="submit" disabled={edits.busy}
               >{edits.busy ? "Saving …" : "Save"}</Button

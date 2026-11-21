@@ -170,10 +170,10 @@ test("opens organization settings without installation reporting privileges", as
     const page = await context.newPage();
     await page.goto("/organizations");
     await page.getByRole("button", { name: /Alpha/ }).click();
-    const response = await page.goto("/settings");
+    const response = await page.goto("/settings/company-sign-in");
 
     expect(response?.status()).toBe(200);
-    await expect(page.getByRole("heading", { name: "Settings", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Company sign-in", exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: "Privacy", exact: true })).toHaveCount(0);
     const current = await context.request.get("/api/v1/me");
     expect(await current.json()).toMatchObject({

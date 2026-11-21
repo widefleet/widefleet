@@ -1,16 +1,7 @@
-import { getSettings } from "#lib/settings.remote";
-import { z } from "zod";
+import { redirect } from "@sveltejs/kit";
 import type { PageServerLoad } from "./$types";
 
-export const load: PageServerLoad = async ({ setHeaders, url }) => {
-  setHeaders({ "cache-control": "private, no-store" });
-  await getSettings();
-
-  return {
-    loginFailed: url.searchParams.has("error"),
-    section: z
-      .enum(["identity", "management"])
-      .catch("identity")
-      .parse(url.searchParams.get("section")),
-  };
+// Settings has no overview; earlier links and sign-in callbacks keep their query on the first section.
+export const load: PageServerLoad = ({ url }) => {
+  redirect(308, `/settings/company-sign-in${url.search}`);
 };

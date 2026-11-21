@@ -44,13 +44,13 @@
 		tooltipContent,
 		tooltipContentProps,
 		...restProps
-	}: WithElementRef<HTMLAttributes<HTMLButtonElement>, HTMLButtonElement> & {
+	}: WithElementRef<HTMLAttributes<HTMLElement>, HTMLButtonElement> & {
 		isActive?: boolean;
 		variant?: SidebarMenuButtonVariant;
 		size?: SidebarMenuButtonSize;
 		tooltipContent?: Snippet | string;
 		tooltipContentProps?: WithoutChildrenOrChild<ComponentProps<typeof Tooltip.Content>>;
-		child?: Snippet<[{ props: HTMLAttributes<HTMLButtonElement> & { "data-slot": string; "data-sidebar": string; "data-size": SidebarMenuButtonSize; "data-active": boolean } }]>;
+		child?: Snippet<[{ props: HTMLAttributes<HTMLElement> & { "data-slot": string; "data-sidebar": string; "data-size": SidebarMenuButtonSize; "data-active": boolean } }]>;
 	} = $props();
 
 	const sidebar = useSidebar();
@@ -65,7 +65,7 @@
 	});
 </script>
 
-{#snippet Button({ props }: { props?: { [K in keyof HTMLAttributes<HTMLButtonElement>]: HTMLAttributes<HTMLButtonElement>[K] } })}
+{#snippet Button({ props }: { props?: { [K in keyof HTMLAttributes<HTMLElement>]: HTMLAttributes<HTMLElement>[K] } })}
 	{@const mergedProps = mergeProps(buttonProps, props)}
 	{#if child}
 		{@render child({ props: mergedProps })}

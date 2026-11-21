@@ -980,16 +980,16 @@ test("protects auth-group documents and data requests even when every layout is 
   for (const path of [
     "/",
     "/account",
-    "/agents",
+    "/settings/agents",
     "/apps",
     "/apps/new",
     "/apps/fixture/connections",
     "/catalog",
     "/catalog/templates?q=mail",
     "/catalog/templates/gmail",
-    "/members?q=reader&page=2",
+    "/settings/members?q=reader&page=2",
     "/services",
-    "/settings",
+    "/settings/company-sign-in",
     "/welcome",
     "/organizations",
     "/device?user_code=ABCD1234",
@@ -1487,12 +1487,12 @@ test("registers an agent, creates an app and an isolated preview, then requests 
     })),
   );
 
-  await page.goto("/agents");
+  await page.goto("/settings/agents");
   await page.getByText("Register deployment agent", { exact: true }).click();
   await page.getByLabel("Agent name", { exact: true }).fill("Local deployment host");
   await page.getByRole("button", { name: "Register agent" }).click();
   await expect(page.getByRole("status")).toContainText("agent_");
-  await page.goto("/agents");
+  await page.goto("/settings/agents");
   await expect(page.getByRole("status")).toHaveCount(0);
   await page.getByRole("link", { name: "My apps", exact: true }).click();
   await page.getByRole("link", { name: "Create app", exact: true }).click();
@@ -1575,8 +1575,8 @@ test("manages organization roles and app access by name while members create the
     );
     const memberPage = await memberContext.newPage();
     await memberPage.goto("/apps");
-    await expect(memberPage.getByRole("link", { name: "Settings", exact: true })).toHaveCount(0);
-    expect((await memberContext.request.get("/members")).status()).toBe(403);
+    await expect(memberPage.getByRole("button", { name: "Settings", exact: true })).toHaveCount(0);
+    expect((await memberContext.request.get("/settings/members")).status()).toBe(403);
     await memberPage.getByRole("link", { name: "Create app", exact: true }).click();
     await memberPage.getByLabel("App name", { exact: true }).fill("Member Workspace");
     await memberPage.getByLabel("URL slug").fill("member-workspace");
@@ -1584,7 +1584,7 @@ test("manages organization roles and app access by name while members create the
     await expect(memberPage.getByRole("heading", { level: 1 })).toHaveText("Member Workspace");
 
     await page.goto("/");
-    await page.getByRole("link", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("link", { name: "Members", exact: true }).click();
     await page.getByLabel("Search by name or email").fill("member-ui@");
     await page.getByRole("button", { name: "Search", exact: true }).click();
@@ -1596,7 +1596,7 @@ test("manages organization roles and app access by name while members create the
       .getByRole("navigation", { name: "Main navigation" })
       .getByRole("link", { name: "My apps", exact: true })
       .click();
-    await expect(memberPage.getByRole("link", { name: "Settings", exact: true })).toBeVisible();
+    await expect(memberPage.getByRole("button", { name: "Settings", exact: true })).toBeVisible();
     await expect(
       memberPage
         .getByRole("button", { name: /^Account:/ })
@@ -1612,10 +1612,10 @@ test("manages organization roles and app access by name while members create the
       .getByRole("button", { name: "Save role" })
       .click();
     await expect(page.getByRole("status")).toContainText("Role saved");
-    expect((await memberContext.request.get("/members")).status()).toBe(403);
+    expect((await memberContext.request.get("/settings/members")).status()).toBe(403);
 
     await memberPage.getByRole("link", { name: "Create app", exact: true }).click();
-    await expect(memberPage.getByRole("link", { name: "Settings", exact: true })).toHaveCount(0);
+    await expect(memberPage.getByRole("button", { name: "Settings", exact: true })).toHaveCount(0);
     await expect(
       memberPage.getByRole("button", { name: /^Account:/ }).getByText("Member", { exact: true }),
     ).toBeVisible();
@@ -2081,7 +2081,7 @@ test.describe("member forms without JavaScript", () => {
 
     await environment.users.saveUser(target);
     await environment.linkMicrosoftUser(target.id);
-    await page.goto("/members?q=Native+Role&page=2");
+    await page.goto("/settings/members?q=Native+Role&page=2");
     const form = page.getByRole("form", { name: "Role for Native Role Target" });
     await form.getByLabel("Role", { exact: true }).selectOption("admin");
     await form.getByRole("button", { name: "Save role" }).click();
@@ -2348,7 +2348,7 @@ test("remote endpoints recheck sessions, roles, input and request origin", async
       secure: false,
     })),
   );
-  await page.goto("/agents");
+  await page.goto("/settings/agents");
   await page.getByText("Register deployment agent", { exact: true }).click();
   const form = page.locator("form").filter({ has: page.getByLabel("Agent name", { exact: true }) });
 
@@ -2381,7 +2381,7 @@ test("remote endpoints recheck sessions, roles, input and request origin", async
 
   // Remote callers control their page-context headers. Neither an auth-group
   // page nor a public page may replace the remote function's own authorization.
-  for (const pathname of ["/agents", "/sign-in"]) {
+  for (const pathname of ["/settings/agents", "/sign-in"]) {
     const response = await request.get(queryUrl, {
       headers: { "x-sveltekit-pathname": pathname },
       maxRedirects: 0,
@@ -2789,7 +2789,8 @@ test.describe("workspace experience", () => {
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
       .toBe(true);
     await page.getByText("Menu", { exact: true }).click();
-    await page.getByRole("link", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("link", { name: "Company sign-in", exact: true }).click();
     await expect(page.getByRole("navigation", { name: "Main navigation" })).toHaveCount(0);
     await expect
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
@@ -2918,7 +2919,7 @@ test.describe("workspace experience", () => {
     context,
   }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-    await page.goto("/agents");
+    await page.goto("/settings/agents");
 
     const previousAgents = await page
       .getByRole("list", { name: "Deployment agents" })
@@ -3017,7 +3018,7 @@ test.describe("workspace experience", () => {
         })),
       );
       const page = await context.newPage();
-      await page.goto("/agents");
+      await page.goto("/settings/agents");
       await page.getByText("Register deployment agent", { exact: true }).click();
       await page.getByLabel("Agent name", { exact: true }).fill("   ");
       await page.getByRole("button", { name: "Register agent", exact: true }).click();

@@ -19,7 +19,6 @@
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
   import Users from "@lucide/svelte/icons/users";
   import PageHeading from "#shadcn/components/PageHeading.svelte";
-  import SettingsTabs from "#shadcn/components/SettingsTabs.svelte";
   import EmptyState from "#shadcn/components/EmptyState.svelte";
   import Feedback from "#shadcn/components/Feedback.svelte";
   import type { PageData } from "./$types";
@@ -31,11 +30,10 @@
   let saved = $derived(route.saved);
 
   const pageLink = (page: number) =>
-    `/members?${new URLSearchParams({ q: route.search, page: String(page) })}`;
+    `/settings/members?${new URLSearchParams({ q: route.search, page: String(page) })}`;
 </script>
 
 <svelte:head><title>Members · Widefleet</title></svelte:head>
-<SettingsTabs />
 <PageHeading title="Members" description="The people in your workspace and their permissions." />
 {#if route.invited}<div class="mt-5">
     <Feedback kind="success"
@@ -85,7 +83,7 @@
       />
     </div>
     <Button type="submit" variant="outline" class="h-9">Search</Button>{#if route.search}<Button
-        href="/members"
+        href="/settings/members"
         variant="ghost"
         class="h-9">Reset</Button
       >{/if}
@@ -99,7 +97,7 @@
 {#if data.members.length === 0}<EmptyState
     title="No members found"
     description="Try another name or email address."
-    >{#snippet icon()}<Users />{/snippet}<Button href="/members" variant="outline"
+    >{#snippet icon()}<Users />{/snippet}<Button href="/settings/members" variant="outline"
       >All members</Button
     ></EmptyState
   >

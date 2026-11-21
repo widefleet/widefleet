@@ -133,8 +133,8 @@
 
   const stepHref = (id: string) =>
     !view.sso && chosen
-      ? `/settings/sso/setup?provider=${chosen}&step=${id}`
-      : `/settings/sso/setup?step=${id}`;
+      ? `/settings/company-sign-in/setup?provider=${chosen}&step=${id}`
+      : `/settings/company-sign-in/setup?step=${id}`;
 
   const go = (id: string) => goto(stepHref(id));
 
@@ -161,7 +161,7 @@
   };
 
   const chooseProvider = (id: keyof typeof ssoProviders) =>
-    goto(`/settings/sso/setup?provider=${id}&step=register`);
+    goto(`/settings/company-sign-in/setup?provider=${id}&step=register`);
 
   const save = (event: SubmitEvent) => {
     event.preventDefault();
@@ -184,7 +184,7 @@
 
       const failure = await startCompanySignIn(
         view.sso.providerId,
-        "/settings/sso/setup?step=test",
+        "/settings/company-sign-in/setup?step=test",
       );
 
       if (failure) error = failure;
@@ -196,7 +196,7 @@
       await activateCompanySso({ organizationId: workspace.organizationId });
 
       // Activation replaces this browser's email session with a company one.
-      const failure = await startCompanySignIn(view.sso.providerId, "/settings");
+      const failure = await startCompanySignIn(view.sso.providerId, "/settings/company-sign-in");
 
       if (failure) error = failure;
     }, "Could not activate company SSO.");
@@ -206,7 +206,7 @@
 
 <svelte:head><title>Set up company SSO · Widefleet</title></svelte:head>
 <a
-  href="/settings"
+  href="/settings/company-sign-in"
   class="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs"
   ><ChevronLeft class="size-3.5" />Settings</a
 >
@@ -218,7 +218,9 @@
     </p>
   </div>
   <!-- A saved connection's credentials, domains and removal stay reachable during setup. -->
-  {#if view.sso}<Button variant="outline" size="sm" href="/settings">Manage connection</Button>{/if}
+  {#if view.sso}<Button variant="outline" size="sm" href="/settings/company-sign-in"
+      >Manage connection</Button
+    >{/if}
 </div>
 
 <div class="mt-8 grid gap-8 md:grid-cols-[13rem_minmax(0,1fr)]">
@@ -383,7 +385,7 @@
           <p class="text-muted-foreground text-sm leading-6">
             Add the email domain of your members, then verify it with a DNS record.
           </p>
-          <Button href="/settings?add">Add email domain</Button>
+          <Button href="/settings/company-sign-in?add">Add email domain</Button>
         {/if}
       {:else if step === "test"}
         <p class="text-muted-foreground text-sm leading-6">
@@ -394,7 +396,8 @@
           <Feedback kind="error"
             >Company sign-in failed. Check your provider, redirect URIs and credentials.</Feedback
           >
-          <Button variant="outline" href="/settings?edit">Edit configuration</Button>
+          <Button variant="outline" href="/settings/company-sign-in?edit">Edit configuration</Button
+          >
         {/if}
         {#if data.tested}
           <Feedback kind="success"
