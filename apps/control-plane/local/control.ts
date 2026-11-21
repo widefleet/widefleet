@@ -104,7 +104,12 @@ if (command === "agent") {
       });
     }
 
-    const auth = createAuthentication(configuration, database.db);
+    const keys = await installationKeys(configuration);
+
+    // The SSO plugin must encrypt provider settings with the key the settings service reads.
+    const auth = createAuthentication(configuration, database.db, {
+      encryptionKey: keys.encryption,
+    });
 
     const identities = await database.db
       .select()
@@ -118,7 +123,6 @@ if (command === "agent") {
         .update(member)
         .set({ role: "owner" })
         .where(eq(member.userId, "local-admin"));
-      const keys = await installationKeys(configuration);
 
       const settings = createSettingsService(
         configuration,
