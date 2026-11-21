@@ -354,18 +354,27 @@ try {
     PLATFORM_BOOTSTRAP_FILE: bootstrapFile,
   });
 
-  // The control plane binds both builder Workers, so they deploy first.
-  for (const [file, config] of [
-    ["builder.json", configs.builder],
-    ["documenter.json", configs.documenter],
-  ] as const)
-    await run("pnpm", [
-      "exec",
-      "wrangler",
-      "deploy",
-      "--config",
-      await write(file, JSON.stringify(config)),
-    ]);
+  // The control plane binds both builder Workers, so they deploy first. They are
+  // independent of each other; wait for both before reporting a failure, because
+  // cleanup removes the configuration files a running deployment still reads.
+  const builders = await Promise.allSettled(
+    (
+      [
+        ["builder.json", configs.builder],
+        ["documenter.json", configs.documenter],
+      ] as const
+    ).map(async ([file, config]) =>
+      run("pnpm", [
+        "exec",
+        "wrangler",
+        "deploy",
+        "--config",
+        await write(file, JSON.stringify(config)),
+      ]),
+    ),
+  );
+
+  for (const builder of builders) if (builder.status === "rejected") throw builder.reason;
 
   await run("pnpm", [
     "exec",
