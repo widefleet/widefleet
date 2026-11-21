@@ -33,7 +33,9 @@
       </h2>
       <p class="text-muted-foreground mt-2 text-sm leading-6">{template.description}</p>
     </div>
-    {#if template.installable}
+    {#if template.installedAppId}
+      <Button href={`/apps/${template.installedAppId}`} class="w-full sm:w-auto">Open</Button>
+    {:else if template.installable}
       <form {...installTemplate} class="flex w-full gap-2 sm:w-auto">
         <OrganizationField field={installTemplate.fields.organizationId} />
         <input {...installTemplate.fields.templateId.as("hidden", template.id)} />
@@ -65,7 +67,7 @@
     {/if}
   </div>
   <FormIssues issues={installTemplate.fields.allIssues()} />
-  {#if template.installable && template.network && template.network.backend.length + template.network.browser.length > 0}
+  {#if !template.installedAppId && template.installable && template.network && template.network.backend.length + template.network.browser.length > 0}
     <p class="text-muted-foreground mt-3 text-sm leading-6">
       Installing allows the app to connect to
       {#each [...new Set( [...template.network.backend, ...template.network.browser] )] as origin, index (origin)}

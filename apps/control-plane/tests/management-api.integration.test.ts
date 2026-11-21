@@ -200,7 +200,12 @@ it("reads a new template from its directory and frontmatter without provider-spe
   const listing = await api(new Request("http://localhost/api/v1/catalog/templates"));
   expect(listing.status).toBe(200);
   expect(contract.appTemplateCatalog.parse(await listing.json()).templates).toEqual([
-    { id: "kanban", name: "Team board", description: "Organize tasks together." },
+    {
+      id: "kanban",
+      name: "Team board",
+      description: "Organize tasks together.",
+      installedAppId: null,
+    },
   ]);
   const response = await api(new Request("http://localhost/api/v1/catalog/templates/kanban"));
   expect(response.status).toBe(200);
@@ -218,6 +223,11 @@ it.each([
   { status: 200, content: "No frontmatter" },
   { status: 200, content: "---\nname: [broken\n---\nInstructions" },
   { status: 200, content: "---\nname: Gmail\n---\nInstructions" },
+  // Frontmatter cannot claim an installed app.
+  {
+    status: 200,
+    content: `---\nname: Gmail\ndescription: Mail\ninstalledAppId: ${crypto.randomUUID()}\n---\n`,
+  },
 ])("reports unavailable template content ($status, $content)", async ({ status, content }) => {
   vi.mocked(globalThis.fetch).mockResolvedValue(new Response(content, { status }));
 

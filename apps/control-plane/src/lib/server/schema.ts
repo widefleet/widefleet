@@ -88,6 +88,9 @@ export const apps = pgTable(
       .default("created"),
     activeDeploymentId: uuid("active_deployment_id"),
     sourceBranch: text("source_branch"),
+    // The catalog template the app was installed from, and its commit.
+    templateId: text("template_id"),
+    templateCommit: text("template_commit"),
     webEnabled: boolean("web_enabled").notNull().default(true),
     secrets: jsonb().notNull().default({}),
     secretRevision: integer("secret_revision").notNull().default(0),

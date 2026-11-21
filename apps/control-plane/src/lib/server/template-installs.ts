@@ -78,7 +78,10 @@ export const createTemplateInstalls = (
 
       if (existing?.deployed) return yield* nameTaken();
 
-      const { files } = yield* Result.await(templateSources(configuration, input.templateId));
+      const { commit, files } = yield* Result.await(
+        templateSources(configuration, input.templateId),
+      );
+
       // The builder bundles the code; static assets are uploaded as the CLI does.
       const { sources, assets } = yield* templateProject(files);
       const built = yield* Result.await(builder.bundle(sources));
@@ -160,7 +163,7 @@ export const createTemplateInstalls = (
         metadata,
         modules,
         crypto.randomUUID(),
-        { firstDeployment: true },
+        { firstDeployment: true, template: { id: input.templateId, commit } },
       );
 
       if (

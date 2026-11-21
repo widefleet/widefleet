@@ -517,6 +517,22 @@ export const createAppService = (
         ),
       });
     }),
+  /** The newest app the caller manages per catalog template it was installed from. */
+  templateInstalls: (principal: Principal) =>
+    transact(database, async (transaction) => {
+      const records = await transaction
+        .select({ id: apps.id, templateId: apps.templateId })
+        .from(apps)
+        .where(and(appVisibility(transaction, principal), isNotNull(apps.templateId)))
+        .orderBy(desc(apps.createdAt));
+
+      const installed = new Map<string, string>();
+
+      for (const { id, templateId } of records)
+        if (templateId && !installed.has(templateId)) installed.set(templateId, id);
+
+      return Result.ok(installed);
+    }),
   /**
    * The organization's app of this name, visible to the caller or not, and
    * whether it was ever deployed.

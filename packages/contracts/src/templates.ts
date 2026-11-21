@@ -15,6 +15,8 @@ export const appTemplateSummary = z.strictObject({
   id: templateId,
   name: z.string(),
   description: z.string(),
+  /** The newest app the caller manages that was installed from this template. */
+  installedAppId: z.uuid().nullable(),
 });
 
 export const appTemplate = appTemplateSummary.extend({

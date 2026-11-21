@@ -675,7 +675,14 @@ export const createApi = (runtime: Runtime) => {
       .input(contract.templateSearch)
       .output(contract.appTemplateCatalog)
       .handler(async ({ context, input }) =>
-        unwrap(await templateCatalog(context.principal, runtime.configuration, input.search)),
+        unwrap(
+          await templateCatalog(
+            context.principal,
+            runtime.configuration,
+            unwrap(await runtime.apps.templateInstalls(context.principal)),
+            input.search,
+          ),
+        ),
       ),
     getTemplate: read
       .route({ method: "GET", path: "/catalog/templates/{templateId}" })
@@ -688,6 +695,7 @@ export const createApi = (runtime: Runtime) => {
             runtime.configuration,
             input.templateId,
             runtime.templates.available,
+            unwrap(await runtime.apps.templateInstalls(context.principal)),
           ),
         ),
       ),
