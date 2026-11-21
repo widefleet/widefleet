@@ -517,6 +517,10 @@ test("shows versioned service documentation through authenticated API and access
   await environment.database.db
     .insert(artifacts)
     .values({ id: artifactId, appId: record.id, metadata, manifest: {}, modules: [] });
+  await page.goto(`/apps/${record.id}/api`);
+  await expect(
+    page.getByText("Deploy this app to see what it exposes.", { exact: true }),
+  ).toBeVisible();
   await environment.database.db.insert(deployments).values({
     id: deploymentId,
     appId: record.id,
@@ -562,9 +566,52 @@ test("shows versioned service documentation through authenticated API and access
     }
   }
 
-  await page.getByRole("link", { name: "Back to app APIs" }).focus();
+  await page.getByRole("main").getByRole("link", { name: "Home", exact: true }).focus();
   await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(/\/services$/);
+  await expect(page).toHaveURL(/localhost:25430\/$/);
+
+  // The app's own pages show the same reference in a tab.
+  await page.goto(`/apps/${record.id}`);
+  await page
+    .getByRole("navigation", { name: "App sections" })
+    .getByRole("link", { name: "API", exact: true })
+    .click();
+  await expect(page).toHaveURL(new RegExp(`/apps/${record.id}/api$`));
+  await expect(page.getByRole("heading", { name: "findItems", exact: true })).toBeVisible();
+
+  // A member who does not manage the app is led to what it exposes.
+  const reader = environment.users.createUser({
+    name: "API Reader",
+    email: "api-reader@example.test",
+  });
+
+  await environment.users.saveUser(reader);
+  await environment.linkMicrosoftUser(reader.id);
+
+  const readerContext = await browser.newContext({
+    baseURL: environment.configuration.PLATFORM_URL,
+    extraHTTPHeaders: { "x-forwarded-proto": "http" },
+  });
+
+  try {
+    await readerContext.addCookies(
+      (await environment.users.login({ userId: reader.id })).cookies.map((cookie) => ({
+        ...cookie,
+        domain: "localhost",
+        sameSite: "Lax" as const,
+        secure: false,
+      })),
+    );
+    const readerPage = await readerContext.newPage();
+    await readerPage.goto(`/apps/${record.id}/secrets`);
+    await expect(readerPage).toHaveURL(new RegExp(`/services/${record.id}$`));
+    await expect(
+      readerPage.getByRole("heading", { name: "Inventory service", exact: true }),
+    ).toBeVisible();
+    await expect(readerPage.getByRole("navigation", { name: "App sections" })).toHaveCount(0);
+  } finally {
+    await readerContext.close();
+  }
 
   const noScript = await browser.newContext({
     javaScriptEnabled: false,
@@ -2302,10 +2349,15 @@ for (const javaScriptEnabled of [true, false]) {
           page.getByRole("button", { name: "Remove from catalog", exact: true }),
         ).toBeVisible();
         await readerPage.reload();
-        await expect(readerPage.getByRole("link", { name: record.displayName })).toHaveAttribute(
-          "href",
-          record.url,
-        );
+        await expect(
+          readerPage.getByRole("link", { name: record.displayName, exact: true }),
+        ).toHaveAttribute("href", `/apps/${record.id}`);
+        await expect(
+          readerPage.getByRole("link", {
+            name: `Open app ${record.displayName} in a new tab`,
+            exact: true,
+          }),
+        ).toHaveAttribute("href", record.url);
         expect((await readerContext.request.get(`/apps/${record.id}`)).status()).toBe(404);
         expect((await readerContext.request.get(`/api/v1/apps/${record.id}`)).status()).toBe(404);
         const catalog = await readerContext.request.get(queryUrl);

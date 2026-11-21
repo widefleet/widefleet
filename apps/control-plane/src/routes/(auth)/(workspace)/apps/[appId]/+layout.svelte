@@ -102,6 +102,7 @@
     { id: "overview", label: "Overview" },
     { id: "deployments", label: "Deployments" },
     ...(data.source.supported ? [{ id: "source", label: "Source" }] : []),
+    { id: "api", label: "API" },
     { id: "connections", label: "Connections" },
     { id: "workflows", label: "Workflows" },
     { id: "secrets", label: "Secrets" },
