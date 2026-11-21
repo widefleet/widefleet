@@ -21,8 +21,16 @@ export const remoteContext = async (write?: { organizationId: string }) => {
   if (principal.isErr()) {
     if (principal.error instanceof DatabaseUnavailable) return pageFailure(principal.error);
 
-    if (principal.error.code === "CONFLICT") error(409, principal.error.message);
-    error(principal.error.code === "UNAUTHORIZED" ? 401 : 403, principal.error.message);
+    const { code, message } = principal.error;
+
+    if (code === "CONFLICT") error(409, message);
+
+    if (code === "UNAUTHORIZED") error(401, message);
+
+    if (code === "SSO_REQUIRED") error(403, { message, code });
+
+    // A forbidden principal means the shared organization selection is no longer available.
+    error(403, { message, code: "ORGANIZATION_REQUIRED" });
   }
 
   if (write && write.organizationId !== principal.value.application.organizationId)

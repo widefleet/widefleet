@@ -2,6 +2,7 @@
   import type { Component, Snippet } from "svelte";
   import { page } from "$app/state";
   import { afterNavigate } from "$app/navigation";
+  import { getWorkspace } from "#lib/workspace.remote";
   import House from "@lucide/svelte/icons/house";
   import Layers2 from "@lucide/svelte/icons/layers-2";
   import Link2 from "@lucide/svelte/icons/link-2";
@@ -15,7 +16,7 @@
   import type { z } from "zod";
   import type { organizationChoice } from "@platform/contracts";
   import type { Principal } from "#server/identity";
-  import { resetClientContext } from "#lib/analytics-client";
+  import { resetClientContext, updateClientContext } from "#lib/analytics-client";
   import { authClient } from "#lib/auth-client";
   import { setWorkspaceContext } from "#lib/workspace-context";
   import { Button } from "@platform/ui/button";
@@ -40,10 +41,20 @@
     },
   });
 
-  const organizationName = $derived(
-    organizations.find((organization) => organization.id === principal.application.organizationId)
-      ?.name ?? "Organization",
+  const organization = $derived(
+    organizations.find((entry) => entry.id === principal.application.organizationId),
   );
+
+  const organizationName = $derived(organization?.name ?? "Organization");
+
+  $effect(() => {
+    updateClientContext({
+      user: principal,
+      organization: organization ? { id: organization.id, name: organization.name } : null,
+      role: principal.role,
+      analytics: page.data.analytics ?? null,
+    });
+  });
 
   let signingOut = $state(false);
 
@@ -151,7 +162,28 @@
       signingOut = false;
     }
   };
+
+  // Tabs share one session, so another tab can switch the organization or the member's role.
+  // Recheck when this tab returns. After an organization switch, reload the page so that
+  // unfinished forms cannot submit to the newly selected organization.
+  const recheckWorkspace = async () => {
+    if (document.visibilityState !== "visible") return;
+    const shown = principal.application.organizationId;
+    const workspace = getWorkspace();
+
+    try {
+      await workspace.refresh();
+    } catch {
+      // The query keeps its last confirmed value and exposes the failure.
+      return;
+    }
+
+    if (workspace.current && workspace.current.principal.application.organizationId !== shown)
+      window.location.reload();
+  };
 </script>
+
+<svelte:document onvisibilitychange={recheckWorkspace} />
 
 <svelte:window
   onkeydown={(event) => {
