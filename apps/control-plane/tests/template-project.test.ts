@@ -6,7 +6,7 @@ const encoder = new TextEncoder();
 
 const icon = Uint8Array.from([0, 159, 146, 150, 255]);
 
-type Assets = { directory: string; binding: string } | undefined;
+type Assets = { directory: string; binding?: string } | undefined;
 
 const project = (assets: Assets, extra: Record<string, Uint8Array> = {}) => ({
   "wrangler.jsonc": encoder.encode(
@@ -47,6 +47,8 @@ describe("template projects", () => {
   it.each([
     [{ directory: "../shared", binding: "ASSETS" }, {}, "must be inside the template"],
     [{ directory: ".", binding: "ASSETS" }, {}, "must be inside the template"],
+    [{ directory: "public", binding: "STATIC-FILES" }, {}, "binding name of letters"],
+    [{ directory: "public" }, {}, "need a directory and a binding name"],
     [
       { directory: "public", binding: "ASSETS" },
       { "public/.assetsignore": encoder.encode("*.map") },

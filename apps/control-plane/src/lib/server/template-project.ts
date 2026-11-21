@@ -14,32 +14,49 @@ const maxAssetTotal = 250 * 1024 * 1024;
 
 const maxAssets = 10_000;
 
-const assetsConfiguration = z.looseObject({
-  assets: z.strictObject({ directory: z.string().min(1), binding: bindingName }).optional(),
-});
+const wranglerConfiguration = z.looseObject({ assets: z.unknown() });
+
+const assetsSettings = z.strictObject({ directory: z.string().min(1), binding: bindingName });
 
 const invalid = (message: string) => new InvalidOperation({ code: "BAD_REQUEST", message });
 
 const decoder = new TextDecoder();
 
+/**
+ * The static assets a Wrangler file declares, with the directory relative to
+ * the project. The builder reports an unreadable Wrangler file with its own
+ * message, but asset settings that the upload cannot use fail here.
+ */
+export const declaredAssets = (wrangler: string | undefined) => {
+  const configuration = wranglerConfiguration.safeParse(
+    wrangler === undefined ? null : Result.try(() => parseJsonc(wrangler)).unwrapOr(null),
+  );
+
+  if (!configuration.success || configuration.data.assets === undefined)
+    return Result.ok(undefined);
+
+  const assets = assetsSettings.safeParse(configuration.data.assets);
+
+  if (!assets.success)
+    return Result.err(
+      invalid(
+        "Static assets need a directory and a binding name of letters, digits and underscores",
+      ),
+    );
+
+  const directory = assets.data.directory.replace(/^\.\//, "").replace(/\/+$/, "");
+
+  if (!buildSourcePath.safeParse(directory).success)
+    return Result.err(invalid("The static asset directory must be inside the template"));
+
+  return Result.ok({ binding: assets.data.binding, directory });
+};
+
 export const templateProject = (files: Readonly<Record<string, Uint8Array>>) =>
   Result.gen(function* () {
     const wrangler = files["wrangler.jsonc"] ?? files["wrangler.json"];
-
-    const configuration = wrangler
-      ? assetsConfiguration.safeParse(
-          Result.try(() => parseJsonc(decoder.decode(wrangler))).unwrapOr(null),
-        )
-      : null;
-
-    // The builder reports an invalid Wrangler file with its own message.
-    const assets = configuration?.success ? configuration.data.assets : undefined;
-
-    const directory = assets?.directory.replace(/^\.\//, "").replace(/\/+$/, "");
-
-    if (directory !== undefined && !buildSourcePath.safeParse(directory).success)
-      return yield* invalid("The static asset directory must be inside the template");
-
+    const assets = yield* declaredAssets(wrangler && decoder.decode(wrangler));
+    const directory = assets?.directory;
     const prefix = directory === undefined ? undefined : `${directory}/`;
     const sources: Record<string, string> = {};
     const manifest: z.infer<typeof assetManifest> = {};
