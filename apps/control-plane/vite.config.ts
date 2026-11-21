@@ -35,7 +35,14 @@ export const controlPlaneConfig = (target: "node" | "cloudflare") =>
     // state, which loses the pending OAuth request across social sign-in.
     ssr: { external: ["better-auth"] },
     define: { "process.env.WIDEFLEET_BUILD_VERSION": JSON.stringify(release.version) },
-    build: { sourcemap: target === "cloudflare" ? true : "hidden" },
+    build: {
+      sourcemap: target === "cloudflare" ? true : "hidden",
+      // Wrangler bundles the SvelteKit output together with the Workflow entrypoints,
+      // which import the same release from source. Leaving it external keeps one copy.
+      ...(target === "cloudflare" && {
+        rollupOptions: { external: ["@platform/app-runtime/release"] },
+      }),
+    },
     plugins: [
       tailwindcss(),
       sveltekit({
