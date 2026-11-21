@@ -84,7 +84,7 @@ export const authentication = (
           );
 
           if (result.status !== "connected") return null;
-          const account = profile.parse(JSON.parse(result.text));
+          const account = profile.parse(result.result);
 
           return {
             user: {
