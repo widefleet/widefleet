@@ -79,7 +79,7 @@ it("lets members discover templates without creating apps or granting management
   const listing = await api(new Request("http://localhost/api/v1/catalog/templates"));
   expect(listing.status).toBe(200);
   const catalog = contract.appTemplateCatalog.parse(await listing.json());
-  expect(catalog.templates.map(({ id }) => id)).toEqual(["github", "gmail", "onedrive"]);
+  expect(catalog.templates.map(({ id }) => id)).toEqual(["github", "gmail", "linear", "onedrive"]);
   expect(catalog.createPrompt).toContain(
     `--organization '${principal.application.organizationId}'`,
   );
@@ -143,7 +143,7 @@ it.each([undefined, "", "fixture-catalog-token"])(
     const listing = await api(new Request("http://localhost/api/v1/catalog/templates"));
     expect(listing.status).toBe(200);
     const catalog = contract.appTemplateCatalog.parse(await listing.json());
-    expect(catalog.templates).toHaveLength(3);
+    expect(catalog.templates).toHaveLength(4);
     const detail = await api(new Request("http://localhost/api/v1/catalog/templates/gmail"));
     expect(detail.status).toBe(200);
     const template = contract.appTemplate.parse(await detail.json());
@@ -164,8 +164,8 @@ it.each([undefined, "", "fixture-catalog-token"])(
       (request) => new URL(request.url).hostname === "raw.githubusercontent.com",
     );
 
-    // Three listed templates, then the detail's template.md and widefleet.jsonc.
-    expect(documents).toHaveLength(5);
+    // Four listed templates, then the detail's template.md and widefleet.jsonc.
+    expect(documents).toHaveLength(6);
 
     for (const document of documents) expect(document.headers.has("authorization")).toBe(false);
   },
