@@ -5,6 +5,7 @@
   import { prepareUserConnection, disconnectUserConnection } from "#lib/user-connections.remote";
   import OrganizationField from "#shadcn/OrganizationField.svelte";
   import FormIssues from "#shadcn/FormIssues.svelte";
+  import AppIcon from "#shadcn/components/AppIcon.svelte";
   import { Button, buttonVariants } from "@platform/ui/button";
   import Check from "@lucide/svelte/icons/check";
   import Ellipsis from "@lucide/svelte/icons/ellipsis";
@@ -53,31 +54,34 @@
 
 <li class="py-4" aria-labelledby={`connection-${connection.appId}`}>
   <div class="flex items-center justify-between gap-4">
-    <div class="min-w-0">
-      <h2 id={`connection-${connection.appId}`} class="text-sm font-medium wrap-anywhere">
-        {connection.displayName}
-      </h2>
-      {#if showHostname}
-        <p class="text-muted-foreground mt-1 text-xs wrap-anywhere">{connection.hostname}</p>
-      {/if}
-      {#if status?.connection === "connected"}
-        <p class="text-muted-foreground mt-1 flex items-start gap-1.5 text-sm">
-          <Check aria-hidden="true" class="mt-0.5 size-3.5 shrink-0" />
-          <span class="wrap-anywhere">
-            {#if connection.unavailable}Last checked:
-            {/if}
-            {#if status.account}<span class="sr-only">Connected as </span>{status.account.label}
-            {:else}Connected{/if}
-          </span>
-        </p>
-      {/if}
-      {#if connection.unavailable}
-        <p role="status" class="text-muted-foreground mt-1 text-sm">
-          Could not check this account.
-        </p>
-      {:else if status?.setup === "required"}
-        <p class="text-muted-foreground mt-1 text-sm">Awaiting administrator setup</p>
-      {/if}
+    <div class="flex min-w-0 items-start gap-3">
+      <AppIcon appId={connection.appId} deploymentId={connection.activeDeploymentId} />
+      <div class="min-w-0">
+        <h2 id={`connection-${connection.appId}`} class="text-sm font-medium wrap-anywhere">
+          {connection.displayName}
+        </h2>
+        {#if showHostname}
+          <p class="text-muted-foreground mt-1 text-xs wrap-anywhere">{connection.hostname}</p>
+        {/if}
+        {#if status?.connection === "connected"}
+          <p class="text-muted-foreground mt-1 flex items-start gap-1.5 text-sm">
+            <Check aria-hidden="true" class="mt-0.5 size-3.5 shrink-0" />
+            <span class="wrap-anywhere">
+              {#if connection.unavailable}Last checked:
+              {/if}
+              {#if status.account}<span class="sr-only">Connected as </span>{status.account.label}
+              {:else}Connected{/if}
+            </span>
+          </p>
+        {/if}
+        {#if connection.unavailable}
+          <p role="status" class="text-muted-foreground mt-1 text-sm">
+            Could not check this account.
+          </p>
+        {:else if status?.setup === "required"}
+          <p class="text-muted-foreground mt-1 text-sm">Awaiting administrator setup</p>
+        {/if}
+      </div>
     </div>
     {#if !connection.unavailable && status?.connection === "connected"}
       <details

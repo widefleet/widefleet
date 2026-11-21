@@ -2320,15 +2320,13 @@ describe("Platform API with PostgreSQL and RustFS", () => {
   it("exposes catalog discovery without management access and restricts publication to owners or administrators", async () => {
     const app = await createApp("catalog-api");
     const path = `/apps/${app.id}/catalog`;
+    const activeDeploymentId = crypto.randomUUID();
     expect((await json("/catalog", "GET", undefined, new Headers())).status).toBe(401);
     expect((await json(path, "PUT", { listed: true }, new Headers())).status).toBe(401);
     expect((await json(path, "PUT", { listed: true })).status).toBe(409);
     await environment.database.db
       .update(apps)
-      .set({
-        state: "active",
-        activeDeploymentId: crypto.randomUUID(),
-      })
+      .set({ state: "active", activeDeploymentId })
       .where(eq(apps.id, app.id));
     expect(await (await json("/catalog", "GET", undefined, outsiderHeaders)).json()).toEqual([]);
     expect((await json(path, "PUT", { listed: true }, outsiderHeaders)).status).toBe(404);
@@ -2344,6 +2342,7 @@ describe("Platform API with PostgreSQL and RustFS", () => {
         displayName: app.displayName,
         hostname: app.hostname,
         url: app.url,
+        activeDeploymentId,
       }),
     ]);
     expect((await json(`/apps/${app.id}`, "GET", undefined, outsiderHeaders)).status).toBe(404);
@@ -2382,11 +2381,38 @@ describe("Platform API with PostgreSQL and RustFS", () => {
     const response = await json(path, "GET");
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("image/svg+xml");
-    expect(response.headers.get("cache-control")).toBe("no-store");
+    // Only a URL naming the active deployment is immutable.
+    expect(response.headers.get("cache-control")).toBe("private, no-cache");
     expect(response.headers.get("content-security-policy")).toContain("sandbox");
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     expect(response.headers.get("cross-origin-resource-policy")).toBe("same-origin");
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
+    expect(
+      (await json(`${path}?deployment=${deployment.id}`, "GET")).headers.get("cache-control"),
+    ).toBe("private, max-age=31536000, immutable");
+
+    // Members see the icons of apps the catalog and My connections list for them.
+    await environment.database.db
+      .update(apps)
+      .set({ catalogListed: true })
+      .where(eq(apps.id, app.id));
+    expect((await json(path, "GET", undefined, outsiderHeaders)).status).toBe(200);
+    await environment.database.db
+      .update(apps)
+      .set({ catalogListed: false })
+      .where(eq(apps.id, app.id));
+    await environment.database.db
+      .update(artifacts)
+      .set({
+        metadata: sql`jsonb_set(${artifacts.metadata}, '{entrypoints}', '["UserConnection"]')`,
+      })
+      .where(eq(artifacts.id, deployment.artifactId));
+    expect((await json(path, "GET", undefined, outsiderHeaders)).status).toBe(200);
+    await environment.database.db
+      .update(artifacts)
+      .set({ metadata: sql`jsonb_set(${artifacts.metadata}, '{entrypoints}', '["default"]')` })
+      .where(eq(artifacts.id, deployment.artifactId));
+    expect((await json(path, "GET", undefined, outsiderHeaders)).status).toBe(404);
 
     const foreignOrganizationId = crypto.randomUUID();
     await environment.database.db.insert(organization).values({

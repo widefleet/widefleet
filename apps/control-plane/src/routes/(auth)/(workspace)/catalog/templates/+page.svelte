@@ -5,6 +5,7 @@
   import { Input } from "@platform/ui/input";
   import EmptyState from "#shadcn/components/EmptyState.svelte";
   import CopyValue from "#shadcn/components/CopyValue.svelte";
+  import TemplateIcon from "#shadcn/components/TemplateIcon.svelte";
   import Search from "@lucide/svelte/icons/search";
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
 
@@ -54,9 +55,12 @@
           href={`/catalog/templates/${template.id}`}
           class="hover:bg-muted/40 group flex items-center justify-between gap-5 rounded-md px-2 py-5"
         >
-          <div class="min-w-0">
-            <h3 class="text-sm font-semibold">{template.name}</h3>
-            <p class="text-muted-foreground mt-1 text-sm leading-6">{template.description}</p>
+          <div class="flex min-w-0 items-start gap-3">
+            <TemplateIcon templateId={template.id} />
+            <div class="min-w-0">
+              <h3 class="text-sm font-semibold">{template.name}</h3>
+              <p class="text-muted-foreground mt-1 text-sm leading-6">{template.description}</p>
+            </div>
           </div>
           <ArrowRight class="text-muted-foreground size-4 shrink-0" />
         </a>

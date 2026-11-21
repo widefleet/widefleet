@@ -1,6 +1,6 @@
 import { assetManifest } from "@platform/contracts";
 import { Result } from "better-result";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
 import type { z } from "zod";
 import { appVisibility } from "./apps.ts";
 import type { Database } from "./database.ts";
@@ -10,14 +10,14 @@ import { apps, artifacts, deployments } from "./schema.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import { transact } from "./transactions.ts";
 
-const iconPaths = new Map([
+export const iconPaths = new Map([
   ["/favicon.svg", "image/svg+xml"],
   ["/favicon.ico", "image/x-icon"],
   ["/favicon.png", "image/png"],
   ["/apple-touch-icon.png", "image/png"],
 ]);
 
-const maxIconBytes = 256 * 1024;
+export const maxIconBytes = 256 * 1024;
 
 export const findAppIcon = (manifest: z.infer<typeof assetManifest>) => {
   for (const [path, contentType] of iconPaths) {
@@ -30,6 +30,7 @@ export const findAppIcon = (manifest: z.infer<typeof assetManifest>) => {
 };
 
 // Read only the selected app's active artifact, never fetch an app URL or bypass its login.
+// Members also see the icons of apps the catalog and My connections list for them.
 export const readAppIcon = async (
   database: Database,
   storage: ArtifactStorage,
@@ -38,7 +39,7 @@ export const readAppIcon = async (
 ) => {
   const selected = await transact(database, async (transaction) => {
     const [record] = await transaction
-      .select({ manifest: artifacts.manifest })
+      .select({ manifest: artifacts.manifest, deploymentId: deployments.id })
       .from(apps)
       .innerJoin(
         deployments,
@@ -51,7 +52,18 @@ export const readAppIcon = async (
       .where(
         and(
           eq(apps.id, appId),
-          appVisibility(transaction, principal),
+          or(
+            appVisibility(transaction, principal),
+            and(
+              isNull(apps.removedAt),
+              isNull(apps.parentId),
+              eq(apps.organizationId, principal.application.organizationId),
+              or(
+                eq(apps.catalogListed, true),
+                sql`${artifacts.metadata}->'entrypoints' ? 'UserConnection'`,
+              ),
+            ),
+          ),
           eq(apps.webEnabled, true),
           eq(apps.state, "active"),
         ),
@@ -59,8 +71,8 @@ export const readAppIcon = async (
 
     const icon = record ? findAppIcon(assetManifest.parse(record.manifest)) : null;
 
-    return icon
-      ? Result.ok(icon)
+    return icon && record
+      ? Result.ok({ ...icon, deploymentId: record.deploymentId })
       : Result.err(new InvalidOperation({ code: "NOT_FOUND", message: "App icon not found" }));
   });
 
@@ -73,5 +85,9 @@ export const readAppIcon = async (
   if (downloaded.value.byteLength !== icon.size)
     return Result.err(new InvalidOperation({ code: "NOT_FOUND", message: "App icon not found" }));
 
-  return Result.ok({ bytes: downloaded.value, contentType: icon.contentType });
+  return Result.ok({
+    bytes: downloaded.value,
+    contentType: icon.contentType,
+    deploymentId: icon.deploymentId,
+  });
 };

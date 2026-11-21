@@ -33,6 +33,8 @@ export const userConnectionEntry = z.strictObject({
   appId: z.uuid(),
   displayName: z.string(),
   hostname: z.string(),
+  /** Selects the app icon, as in the app list. */
+  activeDeploymentId: z.uuid(),
   status: userConnectionStatus.nullable(),
   unavailable: z.boolean(),
 });

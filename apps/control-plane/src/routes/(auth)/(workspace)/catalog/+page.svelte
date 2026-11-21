@@ -4,6 +4,7 @@
   import { Button } from "@platform/ui/button";
   import { Input } from "@platform/ui/input";
   import EmptyState from "#shadcn/components/EmptyState.svelte";
+  import AppIcon from "#shadcn/components/AppIcon.svelte";
   import LayoutGrid from "@lucide/svelte/icons/layout-grid";
   import ArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
   import Search from "@lucide/svelte/icons/search";
@@ -67,7 +68,7 @@
           >
             <div class="mb-5 flex items-center justify-between">
               <span class="bg-primary/5 text-primary grid size-10 place-items-center rounded-xl"
-                ><LayoutGrid class="size-5" /></span
+                ><AppIcon appId={app.id} deploymentId={app.activeDeploymentId} /></span
               ><ArrowUpRight class="text-muted-foreground group-hover:text-primary size-4" />
             </div>
             <span class="text-sm font-semibold wrap-anywhere">{app.displayName}</span>
