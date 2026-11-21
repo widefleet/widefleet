@@ -23,8 +23,10 @@ import { createCloudflareProvisioner } from "../../src/lib/server/cloudflare-pro
 import {
   capabilitiesSource,
   deploymentSource,
+  recordInstallationRuntime,
   seedDeployment,
 } from "../cloudflare-deployment.fixture.ts";
+import { StorageUnavailable } from "../../src/lib/server/errors.ts";
 import { cloudflareRemovalId } from "../../src/lib/server/cloudflare-removal-command.ts";
 import { user, member } from "../../src/lib/server/auth-schema.ts";
 import { initializeCloudflareRuntime } from "../../src/lib/server/organization-runtime.ts";
@@ -1093,6 +1095,20 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")(
         }),
       );
       worker = await start();
+      await recordInstallationRuntime(environment.database.db, {
+        put: (key, bytes) =>
+          Result.tryPromise({
+            try: async () => {
+              const response = await worker.fetch(`http://fixture/storage?key=${key}`, {
+                method: "PUT",
+                body: Buffer.from(bytes),
+              });
+
+              if (!response.ok) throw new Error(`Storage fixture failed (HTTP ${response.status})`);
+            },
+            catch: (cause) => new StorageUnavailable({ message: "Runtime upload failed", cause }),
+          }),
+      });
       await publishIdentity();
       await seed(first);
       await seed(preview);

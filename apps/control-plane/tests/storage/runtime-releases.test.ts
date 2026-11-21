@@ -9,6 +9,7 @@ import {
   ensureOrganizationRuntime,
   loadRuntime,
 } from "../../src/lib/server/runtime-releases.ts";
+import { loadBundledRuntime } from "../../src/lib/server/bundled-runtime.ts";
 import { organizationRuntimes, jobs, runtimeReleases } from "../../src/lib/server/schema.ts";
 import { transact } from "../../src/lib/server/transactions.ts";
 import { createTestEnvironment } from "../environment.ts";
@@ -248,6 +249,27 @@ describe("Runtime installation with PostgreSQL and Azure Blob Storage", () => {
     expect(await environment.database.db.select().from(jobs)).toHaveLength(0);
   });
 
+  it("requires an explicit runtime installation when the distribution bundles none", async () => {
+    const [execution] = await environment.database.db.select().from(organizationRuntimes);
+
+    if (!execution) throw new Error("Missing default execution");
+
+    const failed = await transact(environment.database.db, async (transaction) =>
+      Result.ok(
+        await ensureOrganizationRuntime(
+          transaction,
+          fixture.storage,
+          execution.organizationId,
+          undefined,
+        ),
+      ),
+    );
+
+    expect(failed.isErr() && failed.error).toMatchObject({ code: "CONFLICT" });
+    expect(await environment.database.db.select().from(runtimeReleases)).toHaveLength(0);
+    expect(fixture.objects.size).toBe(0);
+  });
+
   it("still bootstraps the bundled runtime for app jobs and reuses it during explicit installation", async () => {
     const [execution] = await environment.database.db.select().from(organizationRuntimes);
 
@@ -255,7 +277,12 @@ describe("Runtime installation with PostgreSQL and Azure Blob Storage", () => {
 
     const initialized = await transact(environment.database.db, async (transaction) =>
       Result.ok(
-        await ensureOrganizationRuntime(transaction, fixture.storage, execution.organizationId),
+        await ensureOrganizationRuntime(
+          transaction,
+          fixture.storage,
+          execution.organizationId,
+          loadBundledRuntime,
+        ),
       ),
     );
 

@@ -49,7 +49,7 @@ export const createCloudflareExecution = (
         );
 
         return unwrap(
-          await registerCloudflareOperation(database, storage, deploymentCommand.parse(command)),
+          await registerCloudflareOperation(database, deploymentCommand.parse(command)),
         );
       },
       catch: (error) =>
