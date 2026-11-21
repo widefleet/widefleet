@@ -30,6 +30,8 @@ Follow the [release setup and tag-push instructions](cli-releases.md#publish-a-v
 
 Release jobs use the same [image build workflow](../.github/workflows/build-release-images.yaml) as relevant pull requests and `main` pushes. Publication must use the artifacts tested in that release run and verify anonymous digest pulls so an authenticated maintainer's successful pull cannot hide a private or inaccessible release image.
 
+Image checks keep the runtime, agent and control plane on the same source revision and test them together. Dockerfile-specific ignore files isolate their build inputs so unrelated source changes can reuse cached layers. The Node builds retain every workspace package manifest for the frozen dependency install. These ignore files replace the root `.dockerignore`, so they must also retain its exclusions; `RUN_IMAGE_CONTEXT_TESTS=1 pnpm exec vitest run apps/control-plane/tests/installation/image-context.test.ts` verifies the actual Docker contexts and cache behavior.
+
 Images use exact version tags and source commit labels. There is no floating `latest` tag and no update to running installations. Published version tags are never replaced by the workflow. Enable Docker Hub tag immutability for the version tags as an additional registry control if available for your account.
 
 ## Retry a partial publication
