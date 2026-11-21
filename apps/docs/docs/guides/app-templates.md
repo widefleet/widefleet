@@ -1,7 +1,7 @@
 ---
 title: Use an app template
 description: Find a ready-made app and set it up with your agent or the CLI.
-lastModified: 2026-11-16
+lastModified: 2026-11-18
 ---
 
 App templates give you source code and instructions for a working app. Deploy a
@@ -13,15 +13,13 @@ Check the template's instructions for any credentials or permissions it requires
 
 ## Start from the catalog
 
-1. Open **App catalog → Templates** in the control plane.
+1. Open **App catalog → Templates** in Widefleet.
 2. Choose a template and read its description and instructions.
 3. Copy the prompt under **Set up with your agent** and paste it into your agent.
 
 The prompt selects your installation and organization. Your agent reads the same
 instructions through the CLI, checks for an existing app to reuse, and helps you
 deploy and configure the app.
-
-If copying is unavailable, select the prompt text and copy it manually.
 
 ## Find templates from the CLI
 

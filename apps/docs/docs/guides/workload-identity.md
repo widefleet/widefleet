@@ -1,26 +1,21 @@
 ---
 title: Authenticate apps to external APIs
 description: Use short-lived app identities to call APIs without storing an API key in each app.
-lastModified: 2026-11-17
+lastModified: 2026-11-18
 ---
 
 Widefleet apps can request a signed token identifying their organization and app.
 An external API verifies that token and decides which data the app may access.
 This works without a signed-in user and without an API key in the app.
 
-Use matching Widefleet **0.7.2 or newer** releases for the platform, deployment
-tools, native agent and app runtime. For an existing installation,
-[update the installation components](/self-hosting/installation#versions-and-updates)
-and [activate the matching app runtime](/reference/runtime#versions-and-updates).
-Run `widefleet runtime status` to check the selected and active versions.
-
-The receiving API must support RS256 JWT verification and trust your installation's
+The receiving API needs RS256 JWT verification and must trust your installation's
 workload issuer.
 
 ## Call an API from an app
 
-The runtime provides `WIDEFLEET_IDENTITY` automatically to deployed apps, including
-headless services and previews. Do not declare it in `wrangler.jsonc`.
+Every deployed app, including headless services and previews, receives the
+`WIDEFLEET_IDENTITY` binding automatically. It needs no `wrangler.jsonc` entry;
+`WIDEFLEET_` binding names are reserved for the platform.
 
 The following Worker calls a data API using `https://data.example.com` as its
 audience. Replace the API address and audience with the receiving API's values.
@@ -55,15 +50,14 @@ widefleet network allow https://data.example.com
 
 After the receiving API grants this app access, opening the authenticated app URL
 returns its orders. Keep tokens in server-side code: do not return them to the
-browser or write them to logs. Cache a token only until shortly before `expiresAt`,
-which is a Unix timestamp in seconds. A fresh `getToken` call issues a fresh token;
-there is no refresh token.
+browser or write them to logs. Cache a token until shortly before `expiresAt`,
+a Unix timestamp in seconds, then call `getToken` again for a fresh token.
 
 The audience is an exact, case-sensitive identifier chosen by the receiving API.
 It can be a URL or another nonempty printable ASCII string without spaces, up to
-2048 characters. Widefleet does not require audience registration and does not
-contact the audience. [Network permissions](/guides/network) still govern the
-app's outbound HTTP requests.
+2048 characters. Use it directly: Widefleet needs no audience registration and
+never contacts the audience. Outbound requests follow the app's
+[network permissions](/guides/network).
 
 ## Verify and authorize on the receiving API
 
@@ -79,12 +73,9 @@ For an installation with app domain `apps.example.com`, configure these trusted 
 
 Load issuer and key URLs from your API's configuration, never from an unverified
 token. Verify the signature, exact issuer, your expected audience and expiry before
-using any claims. The trusted app runtime signs tokens and serves the public JWKS. Workload keys
-are separate from the keys used for user and CLI authentication.
-
-For an installation with a custom app HTTPS port, include that port in the issuer
-and key URLs. Configure your verifier to refresh JWKS when it encounters an unknown
-key ID, as `createRemoteJWKSet` does.
+using any claims. For an installation with a custom app HTTPS port, include that
+port in the issuer and key URLs. Configure your verifier to refresh the JWKS when
+it encounters an unknown key ID, as `createRemoteJWKSet` does.
 
 For a JavaScript API, install `jose` and use a verification function like this:
 
@@ -131,11 +122,11 @@ export async function authorizeWorkload(token: string) {
 }
 ```
 
-Pass the Bearer token from the incoming request to this function. Reject the
+Pass the Bearer token from the incoming request to this function and reject the
 request if verification or authorization fails. Use the returned `dataScope` to
-restrict database queries; do not let a request parameter select another
-organization's data. A valid token proves identity, while the API's grant determines
-access. Requesting your API's audience alone gives an app no data permissions.
+restrict database queries, so a request parameter cannot select another
+organization's data. A valid token proves the app's identity; your API's grant
+decides what that app may access.
 
 ## Identity and lifecycle
 
@@ -152,30 +143,27 @@ access. Requesting your API's audience alone gives an app no data permissions.
 - Tokens contain no user identity or user permissions. They work in HTTP, service,
   cron, queue and Workflow code. User-specific access requires a separate check by
   the app or service.
-- An app stops receiving tokens when its published route is removed or replaced.
-  The runtime also applies its existing organization-availability checks when
-  configured. Already issued tokens remain valid until their five-minute
-  expiry unless the receiving API revokes its grant sooner.
+- An app stops receiving new tokens when its published route is removed or
+  replaced, or when the runtime marks its organization unavailable. Issued tokens
+  stay valid until their five-minute expiry unless the receiving API revokes its
+  grant sooner.
 
 To revoke data access, remove the app's grant on the receiving API. To stop new
-token issuance, remove its published route or use the installation's runtime
-suspension controls. These changes take effect when they reach the runtime.
-
-Token issuance and key discovery remain available during a control-plane outage
-while the app runtime and its storage are healthy. Installation backups must
-preserve runtime storage and its encryption key together; see
-[backup and restore](/self-hosting/installation#whole-installation-backup-and-restore).
+token issuance, remove the app's published route or use the installation's runtime
+suspension controls; either applies once the runtime receives the change.
+Operators find runtime storage and backup guidance under
+[backup and restore](/self-hosting/operations#back-up-and-restore).
 
 ## Troubleshooting
 
-| Symptom                         | Check                                                                                                                                |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `WIDEFLEET_IDENTITY` is missing | Upgrade all platform components. Local standalone Wrangler development needs a test binding; it cannot mint deployed app identities. |
-| Token issuance fails            | Check the configured issuer, published app identity, runtime suspension state, and availability of storage and its encryption key.   |
-| Signature or issuer is rejected | Use the workload issuer and its advertised JWKS. The receiving library must support RS256.                                           |
-| Audience is rejected            | Match the API's configured audience exactly in `getToken`.                                                                           |
-| API returns forbidden           | Grant the executing app's ID access on the API; check whether the caller is a preview or a service app.                              |
-| Outbound request is blocked     | Allow the API origin in the app's backend network permissions.                                                                       |
+| Symptom                         | Check                                                                                                                                                                                 |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WIDEFLEET_IDENTITY` is missing | Ask the installation operator to update all platform components. For local standalone Wrangler development, provide a test binding; deployed app identities come only from Widefleet. |
+| Token issuance fails            | Check that the app is published and not suspended. Ask the installation operator to check the workload issuer, runtime storage and its encryption key.                                |
+| Signature or issuer is rejected | Use the workload issuer and its advertised JWKS. The receiving library must support RS256.                                                                                            |
+| Audience is rejected            | Match the API's configured audience exactly in `getToken`.                                                                                                                            |
+| API returns forbidden           | Grant the executing app's ID access on the API; check whether the caller is a preview or a service app.                                                                               |
+| Outbound request is blocked     | Allow the API origin in the app's backend network permissions.                                                                                                                        |
 
 For a third-party federation service, check that it accepts your workload issuer,
 RS256 signatures and the app identity claims. Use direct verification for APIs you

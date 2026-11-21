@@ -8,10 +8,9 @@ An app can expose exported Worker entrypoints to other apps in its organization.
 It uses the same deployment, resources, networking and logs as any other app.
 Use a headless app when the service does not need browser access.
 
-Use Widefleet platform, CLI and runtime **0.7.1 or newer**. Publishing requires app
-creation or collaboration permissions. To connect a caller, you must
-manage that app. The provider and caller must belong to the same organization.
-Organization administrators decide whether each API needs approval.
+Publishing requires app creation or collaboration permissions. To connect a
+caller, you manage that app; the provider and caller belong to the same
+organization. Organization administrators decide whether each API needs approval.
 
 People can also call published services from AI clients through [MCP](/guides/mcp).
 
@@ -68,16 +67,19 @@ command also accepts redirected standard input. `widefleet services` now lists
 `inventory-api` and its `Reader` entrypoint; secret status should show matching
 desired and applied revisions.
 
-An app with only named service exports and no static assets has no browser launch
-link and returns `404` for browser requests. Named service entrypoints still support
-RPC and `fetch()`. A default export or configured static assets enables the app URL;
-web apps can expose named service entrypoints alongside their browser UI.
-**App APIs** and `widefleet services` list named entrypoints. They list a default export
-when it has RPC methods or a TSDoc comment. A default export with only an undocumented
-`fetch()` handler serves the app itself and is not listed; `widefleet connect` can still
-bind it explicitly. To publish an HTTP API, describe it in a TSDoc comment on the default
-export or export it as a named `WorkerEntrypoint`.
-No Widefleet-specific properties belong in `wrangler.jsonc`.
+What the app exports decides whether it has a browser URL and which entrypoints
+**App APIs** and `widefleet services` list:
+
+| Export                                                  | Browser URL                                   | Listed as an API                          |
+| ------------------------------------------------------- | --------------------------------------------- | ----------------------------------------- |
+| Named `WorkerEntrypoint` classes only, no static assets | No launch link; browser requests return `404` | Yes, each named entrypoint                |
+| Default export with RPC methods or a TSDoc comment      | Yes                                           | Yes, as `default`                         |
+| Default export with only an undocumented `fetch()`      | Yes, it serves the app                        | No; `widefleet connect` can still bind it |
+
+Static assets also give an app a browser URL, and web apps can expose named
+entrypoints alongside their UI. Named entrypoints support RPC and `fetch()`. To
+publish an HTTP API, document the default export with TSDoc or export it as a
+named `WorkerEntrypoint`. `wrangler.jsonc` needs no Widefleet-specific properties.
 
 ## Document service methods
 
@@ -175,16 +177,15 @@ export class Profile extends WorkerEntrypoint<{}, { caller: Caller | null }> {
 ```
 
 Use the pair `(issuer, subject)` as the stable user key. Names and email addresses
-are display data. The trusted runtime verifies the caller at each app boundary;
-request headers, method arguments and changes to the caller object cannot select
-another user. Company login cookies and tokens stay outside app code.
+are display data. Widefleet verifies the caller at each app boundary, so request
+headers, method arguments and changes to the caller object cannot select another
+user. Company login cookies and tokens stay outside app code.
 
-Connections authorize the calling app to use the API. Services must additionally
-validate arguments and enforce their own per-user permissions. Calls without an
-authenticated HTTP invocation, such as cron, queues and workflows, have no verified
-user; a service receives `caller: null`. Delegation expires after five minutes and
-further service hops do not extend it. Start a new authenticated request for later
-user actions; do not persist delegation proofs in jobs.
+A connection lets the calling app use the API; the service validates arguments and
+enforces its own per-user permissions. Cron, queue and Workflow calls have no
+signed-in user, so a service receives `caller: null`. The user identity stays valid
+for five minutes from the original request, across all service hops. For later user
+actions, start a new authenticated request rather than storing the identity in a job.
 
 Apps with a browser UI can manage provider OAuth on their own HTTPS URL.
 `env.WIDEFLEET_ORIGIN` contains that canonical origin. App cookies are forwarded,
@@ -286,8 +287,8 @@ you manage.
 
 For a restricted API, choose **Set up connection** in the catalog and select the
 caller app. Choose the entrypoint and an unused binding name, then choose
-**Submit request**. The confirmation page shows the requested connection and
-explains that the app has no access until an administrator approves it. From the CLI:
+**Submit request**. The app gets access once an administrator approves the
+request. From the CLI:
 
 ```sh
 widefleet connect inventory-api --app CALLER --as INVENTORY --entrypoint Reader --request
@@ -310,35 +311,38 @@ widefleet services reject REQUEST_UUID
 ```
 
 Approval rechecks the requester's current app permissions, the available API and
-the binding name before saving the connection. If these have changed, the request
-stays pending and the administrator sees an error. After restoring access or
-fixing the API, any organization administrator can retry approval. To change the
-requested settings, reject the stale request and submit a new one.
+the binding name. If any of these changed, the request stays pending and the
+administrator sees the reason; after access or the API is restored, any
+organization administrator can approve it again. To change the requested settings,
+reject the request and submit a new one. You can also submit a new request after a
+rejection.
 
-**Approved** confirms the connection was saved. Wait for **Active** on the caller's
-**Connections** page or check `widefleet connections --app CALLER` before using the
-API. You can submit another request after a rejection. Personal OAuth sign-in to an
-external service remains separate from this approval.
+**Approved** means the connection is saved. Use the API once the caller's
+**Connections** page or `widefleet connections --app CALLER` shows **Active**.
+Personal OAuth sign-in to an external service is separate from this approval.
 
 ## Activation and updates
 
-Connections can be saved before the caller's first deployment. Otherwise the
-CLI waits for activation unless `--no-wait` is set. **Saved**, **pending**,
-**active** and **failed** describe grant activation independently of code updates.
-Retry a failed change by submitting it again and inspect `widefleet connections`.
-App owners and collaborators can retry an unchanged saved connection even when
-its provider requires approval. On the caller's **Connections** page, expand the
-binding and choose **Retry connection**, or repeat the original `widefleet connect`
-command. Changing its target or entrypoint still requires permission, and a
-removed connection cannot be restored using its old approval.
+Connection and secret changes share the same activation states: **saved** before
+the app's first deployment, then **pending**, **active** or **failed**, independent
+of code updates. The CLI waits for activation unless `--no-wait` is set and reports
+a failed activation with a nonzero exit status. A failed secret change keeps the
+previous value in service. Repeat the change to retry it, and check
+`widefleet connections` or `widefleet secret list`.
 
-Each new call resolves the provider's active app version. Calls already running
-retain their selected code and secret snapshot. A caller does not need to be
-redeployed after a provider update. Code rollback preserves current connection
-grants and desired secrets. Previews start without inherited connections or secrets.
+App owners and collaborators can retry an unchanged saved connection even when its
+provider requires approval: on the caller's **Connections** page, expand the binding
+and choose **Retry connection**, or repeat the original `widefleet connect` command.
+Changing the target or entrypoint needs permission again, and a removed
+connection needs a new approval.
 
-Widefleet rejects cross-organization grants and connection cycles. Disconnect
-consumers and wait for activation before removing an entrypoint or deleting its app:
+Each new call uses the provider's active app version, so callers need no redeploy
+after a provider update. Calls already running keep their code and secrets. Code
+rollback keeps the current connection grants and secrets. Previews start without
+connections or secrets.
+
+Connections stay within one organization and cannot form cycles. Before removing an
+entrypoint or deleting its app, disconnect its consumers and wait for activation:
 
 ```sh
 widefleet disconnect INVENTORY
@@ -355,40 +359,34 @@ widefleet secret put API_TOKEN --file /secure/path/api-token
 widefleet secret delete API_TOKEN
 ```
 
-Names and activation status are readable; saved values are not. Values contain
-1–5000 UTF-8 bytes. Variables and secrets together have a limit of 128 entries;
-`WIDEFLEET_` names are reserved. App code reads secrets asynchronously through
-`env.WIDEFLEET_SECRETS.get(NAME)`. Missing secrets reject the read.
+`widefleet secret list` shows names and activation status; saved values stay
+write-only. Values contain 1–5000 UTF-8 bytes. An app can have up to 128 variables
+and secrets combined; `WIDEFLEET_` names are reserved. App code reads secrets
+asynchronously through `env.WIDEFLEET_SECRETS.get(NAME)`, and reading a missing
+secret rejects.
 
-A secret edit triggers a normal deployment using the latest accepted code
-selection, or waits for the first deployment if no artifact exists. Confirm
-activation before relying on the new value. Failed changes leave the previous
-serving snapshot intact; repeat the edit to retry.
+A secret change deploys the app's current code with the new value, or waits for
+the first deployment. Use the new value once it is active; see
+[activation and updates](#activation-and-updates). Resumed Workflows use the
+current secrets with their original code version.
 
-`widefleet secret list` returns names and activation status immediately. Secret
-changes wait for activation unless `--no-wait` is set and report known activation
-failures with a nonzero exit status. Resumed workflows use the current secrets
-while retaining their pinned code version.
-
-Back up PostgreSQL with its installation encryption key. Also preserve runtime
-object storage and its encryption key. Hosted operators supply
-`WIDEFLEET_SECRETS_KEY`, 32 random bytes encoded as 64 lowercase hexadecimal
-characters, through their deployment configuration. Self-hosted runtimes persist
-the generated key in their runtime state. Retained snapshots require that key.
+Installation operators back up secrets with the rest of the installation; see
+[backup and restore](/self-hosting/operations#back-up-and-restore).
 
 ## Runtime limits and troubleshooting
 
-RPC supports transferable data values, including arrays, dates, maps, sets and
-byte arrays. Callbacks, returned RPC objects and custom-RPC streams are outside
-the shared contract. Use a `fetch()` handler for HTTP bodies; native buffering
-and log coverage differ as described in [runtime compatibility](/reference/runtime-compatibility).
-Dynamic apps cannot declare Durable Objects.
+RPC passes data values, including arrays, dates, maps, sets and byte arrays.
+Callbacks, returned RPC objects and streams over custom RPC are not part of the
+shared contract. Use a `fetch()` handler for HTTP bodies; see
+[runtime compatibility](/reference/runtime-compatibility) for buffering and log
+coverage. Apps keep state in D1, R2 and KV; Durable Object declarations are not
+available.
 
-Use ordinary `widefleet logs --app APP` and app deployment history for service
-errors. An unavailable service can indicate a removed deployment, a missing
-entrypoint or organization suspension. Confirm the target is deployed, the grant
-is active and the selected organization is correct. Hosted service calls use the
-operator's [`service` execution budget](/reference/configuration#dynamic-worker-execution-limits).
+Find service errors with `widefleet logs --app APP` and the app's deployment
+history. If a service is unavailable, confirm that the target is deployed, the
+entrypoint still exists, the grant is active and the selected organization is
+correct and not suspended. Service calls run under the installation's
+[`service` execution limits](/reference/configuration#dynamic-worker-execution-limits).
 
 ### Missing API documentation
 

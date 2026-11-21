@@ -1,7 +1,7 @@
 ---
 title: Company sign-in settings
 description: Configure company sign-in through the CLI or API, manage credentials and check OpenID Connect requirements.
-lastModified: 2026-11-15
+lastModified: 2026-11-18
 ---
 
 For setup through the browser, follow [Set up company sign-in](/guides/company-sign-in).
@@ -69,9 +69,8 @@ widefleet login
 The new login replaces CLI credentials authorized through email sign-in.
 `widefleet account` shows the account's company-link status and browser URL.
 
-A company login grants access within that organization. Selecting another
-organization does not extend that login's authority; an organization with a
-different company provider requires its own company sign-in.
+A company login covers its own organization. Each organization with a different
+company provider needs its own company sign-in.
 
 ## Provider values
 
@@ -134,37 +133,55 @@ Google project and add the group scope to `sso.oidcConfig.scopes`:
 Complete the [group permission setup](/guides/company-sign-in#allow-app-access-by-google-group)
 and use each group's primary email address in app access rules. No directory
 credentials are needed. The runtime calls Cloud Identity with the signed-in
-user's access token. Without the configured scope, or when the user declines it,
-the runtime makes no group request and the user's app identity contains no groups.
+user's access token. The user's app identity includes groups only when the scope
+is configured and the user grants it.
 
-Groups must allow the user to view their membership lists. Only direct groups
-returned by Google's [searchDirectGroups API](https://docs.cloud.google.com/identity/docs/reference/rest/v1/groups.memberships/searchDirectGroups)
-can grant access. Company-wide Google group-name search is not supported; enter
+Direct group memberships returned by Google's
+[searchDirectGroups API](https://docs.cloud.google.com/identity/docs/reference/rest/v1/groups.memberships/searchDirectGroups)
+grant access. Groups must allow the user to view their membership lists. Enter
 group addresses directly through the UI, CLI or app access API.
 
 ## Change credentials or providers
 
-Exports omit `sso.oidcConfig.clientSecret` and `directory.clientSecret`.
-Omitting these fields in an update preserves their saved values for the same
-provider. Blank secret fields in the browser have the same effect. To rotate a
-secret, enter its replacement and save; no platform restart is needed.
+Exports omit `sso.oidcConfig.clientSecret` and `directory.clientSecret`. An update
+without these fields keeps their saved values for the same provider; blank secret
+fields in the browser do the same.
 
-Setting `directory` to `null` removes the saved Entra search connection and secret.
-Use `null` when switching to Google or generic OIDC. Adding or removing Google's
-group scope requires fresh app sign-in after configuration activation; existing
-app group restrictions remain in effect.
+### Rotate a secret
 
-Rotating only the sign-in client secret preserves domain verification, linked
-accounts and app sessions. Other changes to the sign-in configuration can
-require users to sign in to apps again.
+1. Export the settings with `widefleet settings export > settings.json`.
+2. Add only the secret you are replacing, such as `sso.oidcConfig.clientSecret`.
+3. Run `widefleet settings plan --file settings.json`, then
+   `widefleet settings apply --file settings.json`.
 
-Changes to the issuer or client identity are rejected while provider accounts
-are linked. Before replacing a provider, arrange another usable administrator
-login; self-hosted operators can use [administrator recovery](/self-hosting/installation#secrets-and-administrator-recovery).
-Removing company SSO explicitly removes its account links. Provider changes
-do not themselves revoke existing workspace sessions or CLI refresh grants;
-current organization authorization still applies, and API access tokens last
-five minutes. Follow [access removal](/guides/members#remove-someones-access)
+The new secret applies without a platform restart. Rotating only the sign-in
+client secret keeps domain verification, linked accounts and app sessions.
+
+### Change other settings
+
+Other changes to the sign-in configuration can require users to sign in to apps again.
+
+- **Remove Entra group search:** set `directory` to `null`. This removes the saved
+  search connection and its secret. Use `null` when switching to Google or generic OIDC.
+- **Add or remove Google's group scope:** users pick up the change at their next
+  app sign-in after the configuration is active. Existing app group restrictions
+  stay in effect.
+
+### Replace the provider
+
+Widefleet rejects changes to the issuer or client identity while provider
+accounts are linked. To move to another provider:
+
+1. Arrange another usable administrator login. Self-hosted operators can use
+   [administrator recovery](/self-hosting/sign-in-and-settings#secrets-and-administrator-recovery).
+2. Set `"sso": null`, then plan and apply. Removing company SSO also removes its
+   account links.
+3. Add the new provider object and continue with
+   [export and apply settings](#export-and-apply-settings).
+
+Existing workspace sessions and CLI refresh grants stay valid through provider
+changes. Every request still checks current organization authorization, and API
+access tokens last five minutes. Follow [access removal](/guides/members#remove-someones-access)
 when offboarding a person.
 
 ## OpenID Connect requirements
