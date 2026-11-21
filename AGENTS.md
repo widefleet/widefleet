@@ -51,6 +51,11 @@ Most code changes do not need an internal documentation change. Read the relevan
 - Keep release-dependent docs in draft until a published release includes all documented changes and the required artifacts are available. A feature merge, tag or draft release alone does not unblock publication.
 - After every release, review open docs PRs against the released code and artifacts. Update examples and version references, validate the docs, and merge eligible PRs through the normal review and production-approval process. Leave PRs for unreleased changes in draft.
 
+## Svelte and SvelteKit
+
+Before changing Svelte or SvelteKit code, read the [Svelte best practices](https://svelte.dev/docs/svelte/best-practices) and the complete official docs page for every Svelte or SvelteKit feature the change uses, such as remote functions or `load`. Each docs page is available as Markdown at its URL followed by `/llms.txt`.
+Follow the documented patterns. Check patterns found in existing code against the docs before reusing them.
+
 ## Control-plane UI
 
 Before changing control-plane UI, read [the design guidelines](docs/design.md) and inspect the closest existing flow and shared components.
