@@ -525,8 +525,8 @@ for (const javaScriptEnabled of [true, false]) {
   });
 }
 
-test("updates an open tab after another tab switches organizations", async ({ browser }) => {
-  const { context } = await organizationSession(browser, true);
+test("reloads an open tab after another tab switches organizations", async ({ browser }) => {
+  const { beta, context } = await organizationSession(browser, true);
 
   try {
     const first = await context.newPage();
@@ -534,16 +534,25 @@ test("updates an open tab after another tab switches organizations", async ({ br
     await first.goto("/organizations");
     await first.getByRole("button", { name: /^Alpha admin$/i }).click();
     await expect(first).toHaveURL(`${environment.configuration.PLATFORM_URL}/`);
-    await first.goto("/apps");
+    await first.goto("/apps/new");
     await expect(first.getByRole("link", { name: "Choose organization: Alpha" })).toBeVisible();
+    await first.getByLabel("App name", { exact: true }).fill("Unfinished Alpha app");
 
     await second.goto("/organizations");
     await second.getByRole("button", { name: /^Beta admin$/i }).click();
     await expect(second.getByRole("link", { name: "Choose organization: Beta" })).toBeVisible();
 
-    // Returning to a tab fires visibilitychange. Headless pages stay visible, so dispatch it.
-    await first.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
-    await expect(first.getByRole("link", { name: "Choose organization: Beta" })).toBeVisible();
+    // Returning to a tab fires visibilitychange. Headless pages stay visible, so dispatch it, and
+    // repeat until the listener is hydrated and the tab has reloaded.
+    await expect(async () => {
+      await first.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+      await expect(first.getByRole("link", { name: "Choose organization: Beta" })).toBeVisible({
+        timeout: 1_000,
+      });
+    }).toPass();
+    // The page reloads, so the unfinished form cannot submit to the new organization.
+    await expect(first.getByLabel("App name", { exact: true })).toHaveValue("");
+    await expect(first.locator('input[name^="organizationId/"]')).toHaveValue(beta);
   } finally {
     await context.close();
   }
