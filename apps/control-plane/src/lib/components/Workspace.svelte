@@ -24,6 +24,7 @@
   import * as Collapsible from "@platform/ui/collapsible";
   import * as DropdownMenu from "@platform/ui/dropdown-menu";
   import * as Sidebar from "@platform/ui/sidebar";
+  import { mergeProps } from "bits-ui";
   import Feedback from "./Feedback.svelte";
 
   let {
@@ -50,24 +51,7 @@
   const roleLabel = (role: string) =>
     role === "owner" ? "Owner" : principal.application.admin ? "Administrator" : "Member";
 
-  const forms: Record<string, HTMLFormElement> = $state({});
-
   let switching = $state(false);
-
-  // Switching mirrors the organization chooser; SSO organizations must sign in first.
-  const switchOrganization = (organization: z.infer<typeof organizationChoice>) => {
-    if (switching || organization.id === principal.application.organizationId) return;
-
-    if (organization.ssoRequired)
-      window.location.assign(
-        `/sign-in?${new URLSearchParams({ organization: organization.slug, next: "/" })}`,
-      );
-    else forms[organization.id]?.requestSubmit();
-  };
-
-  const shortcutPrefix = $derived(
-    typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.userAgent) ? "⌘" : "Ctrl+",
-  );
 
   let signingOut = $state(false);
 
@@ -179,23 +163,6 @@
 
 <svelte:window
   onkeydown={(event) => {
-    const position = Number(event.key);
-
-    if (
-      (event.metaKey || event.ctrlKey) &&
-      !event.altKey &&
-      !event.shiftKey &&
-      position >= 1 &&
-      position <= Math.min(organizations.length, 9)
-    ) {
-      const organization = organizations[position - 1];
-
-      if (organization) {
-        event.preventDefault();
-        switchOrganization(organization);
-      }
-    }
-
     if (event.key === "Escape" && mobileOpen) {
       mobileOpen = false;
       mobileTrigger?.focus();
@@ -264,42 +231,97 @@
 >
   <aside class="sticky top-0 hidden h-svh flex-col px-3 py-5 md:flex">
     <DropdownMenu.Root>
-      <DropdownMenu.Trigger
-        aria-label={`Choose organization: ${organizationName}`}
-        class="hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent mb-6 flex w-full items-center gap-2.5 rounded-md p-2 text-left"
-      >
-        <span
-          class="bg-primary text-primary-foreground grid size-8 shrink-0 place-items-center rounded-lg text-xs font-medium"
-          aria-hidden="true">{organizationName.charAt(0).toUpperCase()}</span
-        >
-        <span class="min-w-0 flex-1"
-          ><span class="block truncate text-[13px] font-medium">{organizationName}</span><span
-            class="text-muted-foreground block truncate text-[11px]"
-            >{roleLabel(principal.role)}</span
-          ></span
-        >
-        <ChevronsUpDown class="text-muted-foreground size-3.5" />
+      <!-- A link keeps the organization chooser reachable before hydration and without JavaScript. -->
+      <DropdownMenu.Trigger>
+        {#snippet child({ props })}<a
+            {...mergeProps(props, { onclick: (event: MouseEvent) => event.preventDefault() })}
+            href="/organizations"
+            aria-label={`Choose organization: ${organizationName}`}
+            class="hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent mb-6 flex w-full items-center gap-2.5 rounded-md p-2 text-left"
+          >
+            <span
+              class="bg-primary text-primary-foreground grid size-8 shrink-0 place-items-center rounded-lg text-xs font-medium"
+              aria-hidden="true">{organizationName.charAt(0).toUpperCase()}</span
+            >
+            <span class="min-w-0 flex-1"
+              ><span class="block truncate text-[13px] font-medium">{organizationName}</span><span
+                class="text-muted-foreground block truncate text-[11px]"
+                >{roleLabel(principal.role)}</span
+              ></span
+            >
+            <ChevronsUpDown class="text-muted-foreground size-3.5" />
+          </a>{/snippet}
       </DropdownMenu.Trigger>
-      <DropdownMenu.Content side="right" align="start" sideOffset={4} class="w-60">
+      <DropdownMenu.Content
+        side="right"
+        align="start"
+        sideOffset={4}
+        class="w-60"
+        onkeydown={(event: KeyboardEvent) => {
+          // Browsers reserve Ctrl/⌘ with digits for tabs, so plain digits work inside the open menu.
+          if (event.metaKey || event.ctrlKey || event.altKey || !/^[1-9]$/.test(event.key)) return;
+          const target = event.currentTarget;
+
+          if (!(target instanceof HTMLElement)) return;
+          event.preventDefault();
+          target.querySelector<HTMLElement>(`[data-organization-shortcut="${event.key}"]`)?.click();
+        }}
+      >
         <DropdownMenu.Group>
           <DropdownMenu.Label class="text-muted-foreground text-xs"
             >Organizations</DropdownMenu.Label
           >
           {#each organizations as organization, index (organization.id)}
-            <DropdownMenu.Item
-              disabled={switching}
-              onSelect={() => switchOrganization(organization)}
-              class="gap-2 p-2"
-            >
-              <span
+            {@const shortcut = index < 9 ? String(index + 1) : undefined}
+            {#snippet row()}<span
                 class="grid size-6 shrink-0 place-items-center rounded-md border text-[11px] font-medium"
                 aria-hidden="true">{organization.name.charAt(0).toUpperCase()}</span
+              ><span class="min-w-0 flex-1 truncate">{organization.name}</span
+              >{#if shortcut}<DropdownMenu.Shortcut>{shortcut}</DropdownMenu.Shortcut
+                >{/if}{/snippet}
+            {#if organization.id === principal.application.organizationId}
+              <DropdownMenu.Item class="gap-2 p-2" data-organization-shortcut={shortcut}
+                >{@render row()}</DropdownMenu.Item
               >
-              <span class="min-w-0 flex-1 truncate">{organization.name}</span>
-              {#if index < 9}<DropdownMenu.Shortcut
-                  >{shortcutPrefix}{index + 1}</DropdownMenu.Shortcut
-                >{/if}
-            </DropdownMenu.Item>
+            {:else if organization.ssoRequired}
+              <DropdownMenu.Item class="gap-2 p-2">
+                {#snippet child({ props })}<a
+                    {...props}
+                    href={`/sign-in?${new URLSearchParams({ organization: organization.slug, next: "/" })}`}
+                    data-organization-shortcut={shortcut}>{@render row()}</a
+                  >{/snippet}
+              </DropdownMenu.Item>
+            {:else}
+              {@const selection = selectOrganization.for(organization.id)}
+              <!-- Switching mirrors the organization chooser; the menu stays open while it submits. -->
+              <form
+                {...selection.enhance(async ({ submit }) => {
+                  if (switching) return;
+                  switching = true;
+                  error = "";
+                  try {
+                    await submit();
+                    // A full navigation drops cached queries and forms from the previous organization.
+                    if (selection.result?.selected) window.location.assign(selection.result.next);
+                  } catch {
+                    error = "Could not switch organization. Refresh the page and try again.";
+                  } finally {
+                    switching = false;
+                  }
+                })}
+              >
+                <input {...selection.fields.organizationId.as("hidden", organization.id)} />
+                <input {...selection.fields.next.as("hidden", "/")} />
+                <DropdownMenu.Item class="gap-2 p-2" closeOnSelect={false} disabled={switching}>
+                  {#snippet child({ props })}<button
+                      {...props}
+                      type="submit"
+                      class={`${String(props["class"] ?? "")} w-full text-left`}
+                      data-organization-shortcut={shortcut}>{@render row()}</button
+                    >{/snippet}
+                </DropdownMenu.Item>
+              </form>
+            {/if}
           {/each}
         </DropdownMenu.Group>
         <DropdownMenu.Separator />
@@ -313,29 +335,6 @@
         </DropdownMenu.Item>
       </DropdownMenu.Content>
     </DropdownMenu.Root>
-    {#each organizations as organization (organization.id)}
-      {@const selection = selectOrganization.for(organization.id)}
-      <form
-        bind:this={forms[organization.id]}
-        hidden
-        {...selection.enhance(async ({ submit }) => {
-          switching = true;
-          error = "";
-          try {
-            await submit();
-            // A full navigation drops cached queries and forms from the previous organization.
-            if (selection.result?.selected) window.location.assign(selection.result.next);
-          } catch {
-            error = "Could not switch organization. Refresh the page and try again.";
-          } finally {
-            switching = false;
-          }
-        })}
-      >
-        <input {...selection.fields.organizationId.as("hidden", organization.id)} />
-        <input {...selection.fields.next.as("hidden", "/")} />
-      </form>
-    {/each}
     {@render navigationLinks()}
     <div class="mt-auto space-y-3 pt-8">
       <a

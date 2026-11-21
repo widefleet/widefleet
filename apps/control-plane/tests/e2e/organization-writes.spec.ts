@@ -524,3 +524,34 @@ for (const javaScriptEnabled of [true, false]) {
     }
   });
 }
+
+test("switches organizations from the sidebar menu", async ({ browser }) => {
+  const { alpha, beta, context } = await organizationSession(browser, true);
+
+  try {
+    const page = await context.newPage();
+    await page.goto("/organizations");
+    await page.getByRole("button", { name: /^Alpha admin$/i }).click();
+    await expect(page).toHaveURL(`${environment.configuration.PLATFORM_URL}/`);
+    // Before hydration the trigger is a plain link to the chooser.
+    await page.waitForLoadState("networkidle");
+    await page.getByRole("link", { name: "Choose organization: Alpha" }).click();
+    await page.getByRole("menuitem", { name: /Beta/ }).click();
+    await expect(page.getByRole("link", { name: "Choose organization: Beta" })).toBeVisible();
+    expect(await (await context.request.get("/api/v1/me")).json()).toMatchObject({
+      application: { organizationId: beta },
+    });
+
+    // Plain digits pick an organization while the menu is open.
+    await page.waitForLoadState("networkidle");
+    await page.getByRole("link", { name: "Choose organization: Beta" }).click();
+    await expect(page.getByRole("menu")).toBeVisible();
+    await page.keyboard.press("1");
+    await expect(page.getByRole("link", { name: "Choose organization: Alpha" })).toBeVisible();
+    expect(await (await context.request.get("/api/v1/me")).json()).toMatchObject({
+      application: { organizationId: alpha },
+    });
+  } finally {
+    await context.close();
+  }
+});
