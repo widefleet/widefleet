@@ -740,8 +740,9 @@ describe.runIf(process.env["RUN_CLOUDFLARE_TESTS"] === "1")("Cloudflare control 
       await page.getByLabel("Email", { exact: true }).fill("sso@example.test");
       await page.getByRole("button", { name: "Continue with email", exact: true }).click();
       await page.getByRole("button", { name: /sso@example.test/ }).click();
-      await browserExpect(page.getByRole("heading", { name: "Apps", exact: true })).toBeVisible();
+      await browserExpect(page.getByRole("heading", { name: "Home", exact: true })).toBeVisible();
       await browserExpect(page.getByText("SSO Test User", { exact: true })).toBeVisible();
+      await page.getByRole("link", { name: "My apps", exact: true }).click();
       await page.getByRole("link", { name: "Create app", exact: true }).click();
       await page.getByLabel("App name", { exact: true }).fill("Worker Browser App");
       await page.getByLabel("URL slug").fill("worker-browser-app");
