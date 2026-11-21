@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { isHttpError } from "@sveltejs/kit";
   import { getTemplates } from "#lib/catalog.remote";
   import { page } from "$app/state";
   import { Button } from "@platform/ui/button";
@@ -11,12 +12,10 @@
 
   const search = $derived((page.url.searchParams.get("q") ?? "").trim().slice(0, 200));
 
-  const templates = $derived(getTemplates({ search }));
-
   // GitHub hosts the templates. The page around them stays usable when it cannot be reached.
   const catalog = $derived(
-    await templates.catch((cause: unknown) => {
-      if (templates.error && templates.error.status >= 500) return null;
+    await getTemplates({ search }).catch((cause: unknown) => {
+      if (isHttpError(cause) && cause.status >= 500) return null;
       throw cause;
     }),
   );

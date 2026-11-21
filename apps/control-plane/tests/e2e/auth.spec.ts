@@ -1,4 +1,6 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 import { spawn } from "node:child_process";
 import { createServer, request as httpRequest } from "node:http";
@@ -35,6 +37,9 @@ let server: ReturnType<typeof spawn>;
 
 let logs = "";
 
+// While this file exists, the server's template source answers the list with an error.
+const templateOutage = join(tmpdir(), `widefleet-template-outage-${process.pid}`);
+
 // Model the trusted reverse proxy for browser and OAuth back-channel requests.
 const edge = createServer((request, response) => {
   const upstream = httpRequest(
@@ -68,6 +73,7 @@ test.beforeAll(async () => {
         ...process.env,
         ...environment.environment,
         LOGIN_CODE_DELIVERY: "console",
+        TEMPLATE_OUTAGE: templateOutage,
         GOOGLE_CLIENT_ID: "synthetic-google-client",
         GOOGLE_CLIENT_SECRET: "synthetic-google-secret",
         MICROSOFT_CLIENT_ID: "synthetic-microsoft-client",
@@ -3141,6 +3147,60 @@ test("keeps the email step usable after a failed send and clears feedback on bac
 for (const javaScriptEnabled of [true, false]) {
   test.describe(`app templates with JavaScript ${javaScriptEnabled ? "enabled" : "disabled"}`, () => {
     test.use({ javaScriptEnabled });
+
+    test("keeps My apps and the template list usable while templates are unavailable", async ({
+      page,
+      context,
+    }) => {
+      const person = environment.users.createUser({
+        name: "Template Outage",
+        email: `template-outage-${javaScriptEnabled}@example.test`,
+      });
+
+      await environment.users.saveUser(person);
+      await environment.linkMicrosoftUser(person.id);
+      const session = await environment.users.login({ userId: person.id });
+      await context.addCookies(
+        session.cookies.map((cookie) => ({
+          ...cookie,
+          domain: "localhost",
+          sameSite: "Lax",
+          secure: false,
+        })),
+      );
+
+      const unavailable = page.getByText("Templates are unavailable right now. Try again later.", {
+        exact: true,
+      });
+
+      await writeFile(templateOutage, "");
+
+      try {
+        // A member without apps sees the templates on My apps.
+        const mine = await page.goto("/apps");
+        expect(mine?.status()).toBe(200);
+        await expect(page.getByRole("heading", { name: "My apps", exact: true })).toBeVisible();
+        await expect(page.getByRole("link", { name: "Create app", exact: true })).toBeVisible();
+        await expect(
+          page.getByRole("searchbox", { name: "Search templates", exact: true }),
+        ).toBeVisible();
+        await expect(unavailable).toBeVisible();
+
+        const list = await page.goto("/catalog/templates");
+        expect(list?.status()).toBe(200);
+        await expect(page.getByRole("heading", { name: "Templates", exact: true })).toBeVisible();
+        await expect(
+          page.getByRole("main").getByRole("link", { name: "My apps", exact: true }),
+        ).toBeVisible();
+        await expect(unavailable).toBeVisible();
+      } finally {
+        await rm(templateOutage, { force: true });
+      }
+
+      await page.reload();
+      await expect(unavailable).toHaveCount(0);
+      await expect(page.getByRole("heading", { name: "Gmail", exact: true })).toBeVisible();
+    });
 
     test("lets a member find a template and copy its setup prompt", async ({
       page,
