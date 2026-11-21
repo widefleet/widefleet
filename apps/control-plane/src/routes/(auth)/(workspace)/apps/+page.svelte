@@ -44,7 +44,6 @@
 
 <svelte:head><title>My apps · Widefleet</title></svelte:head>
 <PageHeading title="My apps">
-  <Button href="/services" variant="outline">App APIs</Button>
   {#if data.principal.creator}<Button href="/apps/new"><Plus />Create app</Button>{/if}
 </PageHeading>
 {#if data.apps.length === 0}
