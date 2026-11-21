@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { observeDatabase } from "./d1-observation.ts";
+import { observeSession } from "./d1-observation.ts";
 import type { DatabaseObservation } from "./runtime-extension.ts";
 import type { Json } from "./types.ts";
 
@@ -15,47 +15,54 @@ const sessionSend = z.object({
   _send: z.custom<Send>((value) => z.function().safeParse(value).success),
 });
 
+/** Like workerd's D1 session, which keeps its transport in a private field since November 2026. */
+class NativeSession {
+  readonly #transport: Send;
+
+  constructor(transport: Send) {
+    this.#transport = transport;
+  }
+
+  async _send(...args: Parameters<Send>) {
+    return this.#transport(...args);
+  }
+
+  prepare(): D1PreparedStatement {
+    throw new Error("Unused fixture method");
+  }
+
+  async batch<T>(): Promise<D1Result<T>[]> {
+    throw new Error("Unused fixture method");
+  }
+
+  getBookmark() {
+    return null;
+  }
+}
+
 const fixture = (transport: Send) => {
-  const session = () => ({
-    _send: transport,
-    prepare() {
-      throw new Error("Unused fixture method");
-    },
-    async batch() {
-      throw new Error("Unused fixture method");
-    },
-    getBookmark() {
-      return null;
-    },
-  });
-
-  const native = {
-    ...session(),
-    alwaysPrimarySession: session(),
-    withSession: session,
-    async exec() {
-      throw new Error("Unused fixture method");
-    },
-    async dump() {
-      throw new Error("Unused fixture method");
-    },
-  };
-
   const pending: Promise<void>[] = [];
   const events: Omit<DatabaseObservation, "binding" | "operation">[] = [];
   const context = { waitUntil: (promise: Promise<void>) => void pending.push(promise) };
-  const database = native;
-  const observed = observeDatabase(database, context, async (event) => void events.push(event));
 
-  const invoke = (queries: string | string[] = "private SQL") => {
-    const session = observed.withSession();
+  const observe = (
+    session: D1DatabaseSession = new NativeSession(transport),
+    collect = async (event: (typeof events)[number]) => void events.push(event),
+  ) => observeSession(session, context, collect);
 
-    return sessionSend
+  const invoke = async (queries: string | string[] = "private SQL") => {
+    const { session, complete } = observe();
+
+    const response = await sessionSend
       .parse(session)
       ._send.call(session, "/query", queries, ["private parameter"], "ROWS_AND_COLUMNS");
+
+    complete();
+
+    return response;
   };
 
-  return { native, database, observed, context, pending, events, invoke };
+  return { context, pending, events, observe, invoke };
 };
 
 describe("D1 response observation", () => {
@@ -82,10 +89,10 @@ describe("D1 response observation", () => {
         return event;
       }),
     ).toEqual([{ statements: 1, outcome: "ok", rowsRead: 2, rowsWritten: 1 }]);
-    expect(Object.getPrototypeOf(test.observed)).toBe(test.database);
-    expect(test.native.alwaysPrimarySession._send).not.toBe(
-      sessionSend.parse(test.observed.withSession())._send,
-    );
+    const native = new NativeSession(async () => response);
+
+    expect(test.observe(native).session).toBe(native);
+    expect(Object.hasOwn(new NativeSession(async () => response), "_send")).toBe(false);
     expect(JSON.stringify(test.events)).not.toMatch(/private|total_attempts/);
   });
 
@@ -188,106 +195,55 @@ describe("D1 response observation", () => {
       return response;
     });
 
-    const observed = observeDatabase(test.database, test.context, async () => {
+    const { session } = test.observe(undefined, async () => {
       throw new Error("Collector unavailable");
     });
 
-    expect(await sessionSend.parse(observed.withSession())._send("/query", "write", [])).toBe(
+    expect(await sessionSend.parse(session)._send.call(session, "/query", "write", [])).toBe(
       response,
     );
     await expect(Promise.all(test.pending)).rejects.toThrow("Collector unavailable");
     expect(calls).toBe(1);
   });
 
-  it.each(["primary", "primary-send", "session-send", "sealed-session"])(
-    "preserves native execution and errors when setup is incompatible: %s",
+  const unavailable = async (pending: Promise<void>[]) => {
+    const failures = await Promise.allSettled(pending);
+
+    expect(failures).toHaveLength(1);
+
+    const rejected = z
+      .object({ status: z.literal("rejected"), reason: z.instanceof(Error) })
+      .parse(failures[0]);
+
+    expect(rejected.reason.message).toBe("D1 observation unavailable: incompatible native binding");
+  };
+
+  it.each(["session-send", "sealed-session"])(
+    "keeps the native session and reports when setup is incompatible: %s",
     async (incompatible) => {
-      for (const fails of [false, true]) {
-        const test = fixture(async () => ({ success: true }));
-        const result = { count: 1, duration: 0 };
-        const failure = new Error("Native SQL failure");
-        let calls = 0;
+      const test = fixture(async () => ({ success: true }));
+      const native = new NativeSession(async () => ({ success: true }));
 
-        const execute = async () => {
-          calls++;
+      if (incompatible === "session-send")
+        Object.defineProperty(native, "_send", { value: undefined });
+      else Object.freeze(native);
 
-          if (fails) throw failure;
+      const { session, complete } = test.observe(native);
 
-          return result;
-        };
-
-        const nativeSession = test.native.withSession();
-        const rows: D1Result[] = [];
-        let receivedBookmark: string | undefined;
-
-        Object.defineProperty(nativeSession, "batch", {
-          async value(this: D1DatabaseSession) {
-            expect(this).toBe(nativeSession);
-            await execute();
-
-            return rows;
-          },
-        });
-        Object.defineProperty(nativeSession, "getBookmark", { value: () => "native-bookmark" });
-        Object.defineProperty(test.native, "exec", {
-          value(this: D1Database) {
-            expect(this).toBe(test.native);
-
-            return execute();
-          },
-        });
-        Object.defineProperty(test.native, "withSession", {
-          value(bookmark?: string) {
-            receivedBookmark = bookmark;
-
-            return nativeSession;
-          },
-        });
-
-        if (incompatible === "primary")
-          Object.defineProperty(test.native, "alwaysPrimarySession", { value: undefined });
-        else if (incompatible === "primary-send")
-          Object.defineProperty(test.native.alwaysPrimarySession, "_send", { value: undefined });
-        else if (incompatible === "session-send")
-          Object.defineProperty(nativeSession, "_send", { value: undefined });
-        else Object.freeze(nativeSession);
-
-        const observed = observeDatabase(
-          test.native,
-          test.context,
-          async (event) => void test.events.push(event),
-        );
-
-        const session = observed.withSession("previous-bookmark");
-        const background = Promise.allSettled(test.pending);
-
-        expect(session).toBe(nativeSession);
-        expect(receivedBookmark).toBe("previous-bookmark");
-        expect(session.getBookmark()).toBe("native-bookmark");
-        expect(calls).toBe(0);
-
-        const primary = incompatible === "primary" || incompatible === "primary-send";
-
-        if (primary) expect(observed).toBe(test.native);
-
-        const execution = primary ? observed.exec("write") : session.batch([]);
-
-        if (fails) await expect(execution).rejects.toBe(failure);
-        else expect(await execution).toBe(primary ? result : rows);
-        expect(calls).toBe(1);
-        expect(test.events).toEqual([]);
-        const failures = await background;
-
-        expect(failures).toHaveLength(1);
-
-        const rejected = z
-          .object({ status: z.literal("rejected"), reason: z.instanceof(Error) })
-          .parse(failures[0]);
-
-        expect(rejected.reason.message).toBe(
-          "D1 observation unavailable: incompatible native binding",
-        );
-      }
+      expect(session).toBe(native);
+      complete();
+      expect(test.events).toEqual([]);
+      await unavailable(test.pending);
     },
   );
+
+  it("reports a query that completed without passing through the measured transport", async () => {
+    const test = fixture(async () => ({ success: true }));
+    const { complete } = test.observe();
+
+    // As when D1 queries take a path other than _send, such as its JSRPC binding.
+    complete();
+    expect(test.events).toEqual([]);
+    await unavailable(test.pending);
+  });
 });

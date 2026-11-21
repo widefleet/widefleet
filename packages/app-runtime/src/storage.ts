@@ -4,7 +4,7 @@ import type { BindingProperties, Json, ParentEnvironment } from "./types.ts";
 import { nativeBinding } from "./native-binding.ts";
 import { runtimeExtension } from "#runtime-extension";
 import type { KeyValueObservation, WorkerIdentity } from "./runtime-extension.ts";
-import { observeDatabase } from "./d1-observation.ts";
+import { observeSession } from "./d1-observation.ts";
 
 const statement = z.object({
   sql: z.string(),
@@ -25,6 +25,31 @@ const databaseRequest = z.discriminatedUnion("method", [
 
 export type DatabaseRequest = z.infer<typeof databaseRequest>;
 
+// Native exec runs on a primary-only session that Cloudflare keeps private, where
+// no usage can be measured. Like it, this treats each line as one statement, and
+// runs them as one batch, which also rolls back together when a statement fails.
+const exec = async (session: D1DatabaseSession, sql: string): Promise<D1ExecResult> => {
+  const lines = sql.trim().split("\n");
+
+  try {
+    const results = await session.batch(lines.map((line) => session.prepare(line)));
+
+    return {
+      count: results.length,
+      duration: results.reduce((total, result) => total + result.meta.duration, 0),
+    };
+  } catch (cause) {
+    if (!(cause instanceof Error)) throw cause;
+    // D1 keeps its unprefixed message in the cause.
+    const message = cause.cause instanceof Error ? cause.cause.message : cause.message;
+
+    // Native exec reports the first line, whichever statement failed.
+    throw new Error(`D1_EXEC_ERROR: Error in line 1: ${lines[0]}: ${message}`, {
+      cause: new Error(message),
+    });
+  }
+};
+
 export class Database extends WorkerEntrypoint<
   ParentEnvironment,
   BindingProperties & { binding: string; identity: WorkerIdentity }
@@ -34,17 +59,18 @@ export class Database extends WorkerEntrypoint<
     const nativeDatabase = nativeBinding(this.env, this.ctx.props.name, "d1");
     const observe = runtimeExtension.database;
 
-    const database = observe
-      ? observeDatabase(nativeDatabase, this.ctx, (event) =>
+    const session = nativeDatabase.withSession(bookmark);
+
+    const observation = observe
+      ? observeSession(session, this.ctx, (event) =>
           observe(
             { ...event, binding: this.ctx.props.binding, operation: request.method },
             this.ctx.props.identity,
             (name, schema) => schema.parse(this.env[name]),
           ),
         )
-      : nativeDatabase;
+      : undefined;
 
-    const session = database.withSession(bookmark);
     const prepare = (input: StatementInput) => session.prepare(input.sql).bind(...input.parameters);
 
     const execute = async () => {
@@ -62,11 +88,13 @@ export class Database extends WorkerEntrypoint<
         case "batch":
           return session.batch<Record<string, Json>>(request.statements.map(prepare));
         case "exec":
-          return database.exec(request.sql);
+          return exec(session, request.sql);
       }
     };
 
     const result = await execute();
+
+    observation?.complete();
 
     return { result, bookmark: session.getBookmark() };
   }

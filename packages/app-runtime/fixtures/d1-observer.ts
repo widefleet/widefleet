@@ -3,7 +3,7 @@ import { publishedApp } from "@platform/contracts";
 import { workerCode } from "../src/worker.ts";
 import { digest } from "./digest.ts";
 import { nativeBinding } from "../src/native-binding.ts";
-import { observeDatabase } from "../src/d1-observation.ts";
+import { observeSession } from "../src/d1-observation.ts";
 import { exerciseDatabase } from "./d1-scenarios.ts";
 import type { ParentEnvironment } from "../src/types.ts";
 
@@ -50,19 +50,10 @@ export default {
     }
 
     if (path === "/state") {
-      const internal = z
-        .object({
-          alwaysPrimarySession: z.custom<D1DatabaseSession>(
-            (value) => z.object({ getBookmark: z.function() }).safeParse(value).success,
-          ),
-        })
-        .parse(db);
-
       return Response.json({
         n: await db.prepare("SELECT n FROM counter").first("n"),
-        unchanged:
-          !Object.hasOwn(internal.alwaysPrimarySession, "_send") &&
-          !Object.hasOwn(db, "withSession"),
+        // Observation changes only the fresh session of one query.
+        unchanged: !Object.hasOwn(db, "withSession") && !Object.hasOwn(db.withSession(), "_send"),
       });
     }
 
@@ -75,22 +66,22 @@ export default {
     }
 
     if (path === "/unobservable") {
-      // Model a binding with unchanged public methods and unavailable internals.
-      const database = observeDatabase(
-        {
-          prepare: db.prepare.bind(db),
-          batch: db.batch.bind(db),
-          exec: db.exec.bind(db),
-          dump: db.dump.bind(db),
-          withSession: db.withSession.bind(db),
-        },
-        ctx,
-        async () => {
-          throw new Error("Unavailable observation must not produce a measurement");
-        },
-      );
+      // Model a session with unchanged public methods and an unavailable transport.
+      const native = db.withSession();
 
-      return Response.json(await exerciseDatabase(database, "raw-write"));
+      const session = {
+        prepare: native.prepare.bind(native),
+        batch: native.batch.bind(native),
+        getBookmark: native.getBookmark.bind(native),
+      };
+
+      observeSession(session, ctx, async () => {
+        throw new Error("Unavailable observation must not produce a measurement");
+      });
+
+      return Response.json(
+        await session.prepare("UPDATE counter SET n=n+1 RETURNING n AS x,n+10 AS x").raw(),
+      );
     }
 
     const scope = path.startsWith("/service") ? "service" : "app";
