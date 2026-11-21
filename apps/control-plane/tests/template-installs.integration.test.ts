@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import * as contract from "@platform/contracts";
 import { bundleResult, documentRequest } from "@platform/contracts/builds";
 import { Result } from "better-result";
@@ -10,6 +11,7 @@ import { templateNetworkChanged } from "../src/lib/server/template-installs.ts";
 import { InvalidOperation } from "../src/lib/server/errors.ts";
 import { AuthenticationFailed } from "../src/lib/server/identity.ts";
 import { createStorage } from "../src/lib/server/storage.ts";
+import { hashAsset } from "../src/lib/server/asset-hash.ts";
 import { createTestEnvironment } from "./environment.ts";
 import { memoryStorage } from "./memory-storage.fixture.ts";
 import { templateRepository } from "./template-repository.fixture.ts";
@@ -182,6 +184,8 @@ it("builds a template's sources and deploys them as the CLI would", async () => 
   expect(
     Object.keys(files).filter((path) => path.startsWith("tests/") || path.includes(".test.")),
   ).toEqual([]);
+  // Static assets are uploaded by the control plane, not bundled.
+  expect(Object.keys(files).filter((path) => path.startsWith("public/"))).toEqual([]);
 
   const document = builderRequests.find(({ phase }) => phase === "document");
   const documentInput = documentRequest.parse(JSON.parse(document?.body ?? "{}"));
@@ -201,6 +205,18 @@ it("builds a template's sources and deploys them as the CLI would", async () => 
   const metadata = contract.workerMetadata.parse(artifact?.metadata);
 
   expect(metadata.service_documentation).toEqual(documentation);
+  expect(metadata.assets.binding).toBe("ASSETS");
+
+  // The template's static assets are part of the deployment, as with the CLI.
+  const favicon = new Uint8Array(
+    await readFile(new URL("../../../templates/gmail/public/favicon.svg", import.meta.url)),
+  );
+
+  const icon = { hash: hashAsset("/favicon.svg", favicon), size: favicon.byteLength };
+
+  expect(contract.assetManifest.parse(artifact?.manifest)).toEqual({ "/favicon.svg": icon });
+  const stored = await runtime.storage.get(`apps/${result.app.id}/assets/${icon.hash}`);
+  expect(stored.isOk() && new Uint8Array(stored.value)).toEqual(favicon);
   expect(metadata.bindings).toEqual([{ type: "d1", name: "DB", database_name: "accounts" }]);
   expect(metadata.debug?.source_maps).toEqual({ "worker.js": mapName });
   expect(

@@ -498,13 +498,18 @@ describe.runIf(process.env["RUN_BUILDER_TESTS"] === "1")("app builder", () => {
           compatibility_date: "2026-10-01",
           assets: { directory: "public", binding: "ASSETS" },
         }),
+        "src/app.ts":
+          'import { WorkerEntrypoint } from "cloudflare:workers";\nexport class Notes extends WorkerEntrypoint {}\n',
       },
     });
 
-    expect(assets.status).toBe(422);
-    expect(await failure(assets)).toBe(
-      "Projects with static assets are deployed with the Widefleet CLI",
-    );
+    // The control plane uploads static assets; the bundle needs only the code.
+    // As with the CLI, static assets give an app without a default export a URL.
+    expect(assets.status).toBe(200);
+    expect(bundleResult.parse(await assets.json()).metadata).toMatchObject({
+      web: true,
+      entrypoints: ["Notes"],
+    });
 
     const flags = await post("/bundle", {
       files: {

@@ -8,6 +8,7 @@ import { Result } from "better-result";
 import { z } from "zod";
 import type { AppBuilder } from "./app-builder.ts";
 import { templateSources } from "./app-templates.ts";
+import { templateProject } from "./template-project.ts";
 import type { createAppService } from "./apps.ts";
 import type { Configuration } from "./config.ts";
 import { InvalidOperation } from "./errors.ts";
@@ -23,7 +24,7 @@ export const templateNetworkChanged =
 export const createTemplateInstalls = (
   configuration: Pick<Configuration, "GITHUB_TOKEN">,
   apps: Pick<ReturnType<typeof createAppService>, "named" | "create" | "resolve">,
-  uploads: Pick<ReturnType<typeof createUploadService>, "start" | "publish">,
+  uploads: Pick<ReturnType<typeof createUploadService>, "start" | "putAsset" | "publish">,
   network: Pick<ReturnType<typeof createNetworkService>, "change" | "read">,
   builder?: AppBuilder,
 ) => ({
@@ -78,7 +79,9 @@ export const createTemplateInstalls = (
       if (existing?.deployed) return yield* nameTaken();
 
       const { files } = yield* Result.await(templateSources(configuration, input.templateId));
-      const built = yield* Result.await(builder.bundle(files));
+      // The builder bundles the code; static assets are uploaded as the CLI does.
+      const { sources, assets } = yield* templateProject(files);
+      const built = yield* Result.await(builder.bundle(sources));
 
       const declared = contract.networkPolicy.parse({
         backend: built.metadata.network?.backend ?? [],
@@ -103,7 +106,7 @@ export const createTemplateInstalls = (
 
       const documented = yield* Result.await(
         builder.document({
-          files,
+          files: sources,
           worker: built.worker,
           map: built.map,
           entry: built.entry,
@@ -126,13 +129,20 @@ export const createTemplateInstalls = (
         return yield* nameTaken();
 
       const installed = yield* created;
-      const session = yield* Result.await(uploads.start(principal, installed.id, {}));
+      const session = yield* Result.await(uploads.start(principal, installed.id, assets.manifest));
+
+      const missing = new Set(session.missing);
+
+      for (const [hash, bytes] of assets.bytes)
+        if (missing.has(hash))
+          yield* Result.await(uploads.putAsset(principal, installed.id, session.id, hash, bytes));
+
       const mapName = built.metadata.debug?.source_maps["worker.js"];
 
       const metadata = contract.workerMetadata.parse({
         ...built.metadata,
         service_documentation: documented.documentation,
-        assets: { upload_session: session.id, binding: "ASSETS" },
+        assets: { upload_session: session.id, binding: assets.binding },
       });
 
       const modules = [
