@@ -2846,7 +2846,7 @@ test.describe("workspace experience", () => {
     await expect(page.getByRole("button", { name: "Copied", exact: true })).toBeVisible();
   });
 
-  test("reconciles deployment completion and reports refresh failures without losing the last result", async ({
+  test("reconciles deployment completion on tab return and reports refresh failures without losing the last result", async ({
     page,
     context,
   }) => {
@@ -2889,9 +2889,13 @@ test.describe("workspace experience", () => {
       .update(apps)
       .set({ state: "active", activeDeploymentId: deploymentId })
       .where(eq(apps.id, record.id));
-    await expect(page.getByText("Current version", { exact: true })).toBeVisible({
-      timeout: 12_000,
-    });
+    // The page may still be hydrating, so repeat the tab return until the layout handles it.
+    await expect(async () => {
+      await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+      await expect(page.getByText("Current version", { exact: true })).toBeVisible({
+        timeout: 1000,
+      });
+    }).toPass();
     await expect(page.getByRole("link", { name: "Open app", exact: true })).toBeVisible();
     await page.route("**/_app/remote/**", (route) => route.abort());
     await page.getByRole("button", { name: "Refresh app", exact: true }).click();

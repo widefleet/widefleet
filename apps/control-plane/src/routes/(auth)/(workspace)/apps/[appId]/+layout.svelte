@@ -9,7 +9,7 @@
   import RefreshCw from "@lucide/svelte/icons/refresh-cw";
   import AppStatus from "#shadcn/components/AppStatus.svelte";
   import Feedback from "#shadcn/components/Feedback.svelte";
-  import { onMount, type Snippet } from "svelte";
+  import type { Snippet } from "svelte";
   import { setAppContext } from "#lib/app-context";
   import type { LayoutData } from "./$types";
 
@@ -62,13 +62,10 @@
     }
   };
 
-  onMount(() => {
-    const timer = setInterval(() => {
-      if (document.visibilityState === "visible") void refresh();
-    }, 5000);
-
-    return () => clearInterval(timer);
-  });
+  // Deployments from the CLI or an agent change the app outside this tab.
+  const refreshOnReturn = () => {
+    if (document.visibilityState === "visible") void refresh();
+  };
 
   setAppContext({
     get data() {
@@ -110,6 +107,7 @@
   ]);
 </script>
 
+<svelte:document onvisibilitychange={refreshOnReturn} />
 <svelte:head><title>{data.app.displayName} · Widefleet</title></svelte:head>
 <a
   href="/apps"
