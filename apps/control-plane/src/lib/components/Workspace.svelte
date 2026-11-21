@@ -1,7 +1,8 @@
 <script lang="ts">
   import type { Component, Snippet } from "svelte";
   import { page } from "$app/state";
-  import { afterNavigate } from "$app/navigation";
+  import { afterNavigate, refreshAll } from "$app/navigation";
+  import { getWorkspace } from "#lib/workspace.remote";
   import House from "@lucide/svelte/icons/house";
   import Layers2 from "@lucide/svelte/icons/layers-2";
   import Link2 from "@lucide/svelte/icons/link-2";
@@ -161,7 +162,27 @@
       signingOut = false;
     }
   };
+
+  // Tabs share one session, so another tab can switch the organization or the member's role.
+  // Recheck when this tab returns, and reload every page query if the organization changed.
+  const recheckWorkspace = async () => {
+    if (document.visibilityState !== "visible") return;
+    const shown = principal.application.organizationId;
+    const workspace = getWorkspace();
+
+    try {
+      await workspace.refresh();
+    } catch {
+      // The query keeps its last confirmed value and exposes the failure.
+      return;
+    }
+
+    if (workspace.current && workspace.current.principal.application.organizationId !== shown)
+      await refreshAll();
+  };
 </script>
+
+<svelte:document onvisibilitychange={recheckWorkspace} />
 
 <svelte:window
   onkeydown={(event) => {
