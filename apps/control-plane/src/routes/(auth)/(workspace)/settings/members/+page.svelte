@@ -1,6 +1,5 @@
 <script lang="ts">
   import OrganizationField from "#shadcn/OrganizationField.svelte";
-  import { invalidate } from "$app/navigation";
   import {
     getMembers,
     setMemberRole,
@@ -128,7 +127,6 @@
             {...roleForm.enhance(async ({ submit }) => {
               saved = false;
               const submitted = await submit();
-              if (submitted) await invalidate("workspace:principal");
               saved = submitted;
             })}
             aria-label={`Role for ${person.name}`}

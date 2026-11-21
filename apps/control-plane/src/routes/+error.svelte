@@ -15,22 +15,32 @@
   <h1 class="text-2xl font-semibold tracking-tight">
     {page.status === 404
       ? "Nothing here yet."
-      : page.status === 403
-        ? "You don't have access to this page."
-        : page.status === 409
-          ? "This action could not be completed."
-          : "Something went wrong."}
+      : page.status === 401
+        ? "Your session has ended."
+        : page.status === 403
+          ? "You don't have access to this page."
+          : page.status === 409
+            ? "This action could not be completed."
+            : "Something went wrong."}
   </h1>
   <p class="text-muted-foreground mt-3 text-sm leading-6">
     {page.status === 404
       ? "This page does not exist or you don't have access to it. Find your available apps in the overview."
-      : page.status === 403
-        ? "Contact an administrator if you need access to this page."
-        : page.status === 409
-          ? page.error?.message
-          : "Please try again. If the problem continues, contact an administrator."}
+      : page.status === 401
+        ? "Sign in again to continue where you left off."
+        : page.status === 403
+          ? "Contact an administrator if you need access to this page."
+          : page.status === 409
+            ? page.error?.message
+            : "Please try again. If the problem continues, contact an administrator."}
   </p>
-  {#if page.status === 409}
+  {#if page.status === 401}
+    <Button
+      href={`/sign-in?${new URLSearchParams({ next: page.url.pathname + page.url.search })}`}
+      data-sveltekit-reload
+      class="mt-6">Sign in</Button
+    >
+  {:else if page.status === 409}
     <Button href={page.url.pathname} data-sveltekit-reload variant="outline" class="mt-6">
       Reload page
     </Button>
