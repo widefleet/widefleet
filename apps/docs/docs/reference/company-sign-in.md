@@ -1,7 +1,7 @@
 ---
 title: Company sign-in settings
 description: Configure company sign-in through the CLI or API, manage credentials and check OpenID Connect requirements.
-lastModified: 2026-11-15
+lastModified: 2026-11-18
 ---
 
 For setup through the browser, follow [Set up company sign-in](/guides/company-sign-in).
@@ -52,7 +52,8 @@ widefleet settings domain-verification
 ```
 
 If the plan requires it, add `--acknowledge-restart` to the apply command.
-Publish the returned TXT record in your company's DNS, then verify it:
+The response lists a TXT record for each pending domain in `records`. Publish
+each record at the DNS provider of its domain, then verify them:
 
 ```sh
 widefleet settings verify-domain
@@ -81,10 +82,17 @@ different company provider requires its own company sign-in.
 | `google`          | `https://accounts.google.com`                      | Cloud Identity API with optional user consent, direct membership only |
 | `oidc` (default)  | Your provider's issuer URL                         | The ID-token field named by `oidcConfig.mapping.extraFields.groups`   |
 
-`domain` is the company email domain, without a URL or wildcard. For Google it
-must match the user's Workspace domain. For generic OIDC, the default name, email
-and group fields are `name`, `email` and `groups`; its mapping is shared by workspace
-and app sign-in. Google app identity uses its standard verified email, name and
+`domain` lists the company email domains, separated by commas, without a URL
+or wildcard. Each domain matches exactly; list subdomains separately. It is
+required for a new connection. When present in later updates, it replaces the
+list: new domains start pending and removed domains stop granting company
+sign-in. Omit it to keep the current domains. Up to 20 domains are supported;
+Google app identity supports one, which must be the user's Workspace domain.
+`widefleet settings verify-domain` verifies every pending domain whose record is
+published and reports the others.
+
+For generic OIDC, the default name, email and group fields are `name`, `email`
+and `groups`; its mapping is shared by workspace and app sign-in. Google app identity uses its standard verified email, name and
 subject claims.
 
 ### Directory credentials

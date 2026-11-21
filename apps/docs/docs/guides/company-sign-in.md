@@ -1,7 +1,7 @@
 ---
 title: Set up company sign-in
 description: Connect Microsoft Entra, Google Workspace or another identity provider, then check that colleagues can sign in and open the right apps.
-lastModified: 2026-11-15
+lastModified: 2026-11-18
 ---
 
 Connect your company's login so colleagues can use their work accounts for
@@ -16,7 +16,8 @@ that should be allowed to open it and one that should not.
 
 1. Select the organization you want to configure and open **Settings → Company sign-in**.
 2. Choose **Configure company SSO** if no connection exists yet.
-3. Enter your **Company email domain**, such as `example.com`.
+3. Enter your **Company email domain**, such as `example.com`. You can add
+   more domains after saving.
 4. Copy the **Workspace redirect URI** and **App redirect URI**. Your provider
    needs both so people can sign in to Widefleet and open published apps.
 5. Complete the section for [Microsoft Entra](#microsoft-entra),
@@ -92,8 +93,9 @@ connection.
 3. In Widefleet, select **Google Workspace** under **App identity provider**.
    This fills **Issuer URL** with `https://accounts.google.com`.
 4. Enter the OAuth client's **Client ID** and **Client secret**. Set **Company
-   email domain** to the Workspace domain your users belong to. Keep **OAuth
-   scopes** at `openid profile email` for sign-in only.
+   email domain** to the Workspace domain your users belong to; Google app
+   identity supports one domain. Keep **OAuth scopes** at `openid profile email`
+   for sign-in only.
 5. Choose **Save**. If all signed-in colleagues should be able to open your apps,
    continue with [verify and activate](#verify-and-activate).
 
@@ -154,9 +156,10 @@ Continue with [verify and activate](#verify-and-activate).
 
 ## Verify and activate
 
-1. Choose **Get verification record**. Add the displayed TXT record to your
-   company domain's DNS, then choose **Verify domain**.
-2. Choose **Test company sign-in**. Use the company account with the same email
+1. Open **Settings → Email domains** and choose **Verify** next to your domain.
+   Add the displayed TXT record at your DNS provider, then choose **Verify
+   domain**. The domain shows **Verified**.
+2. Return to **Company sign-in** and choose **Test company sign-in**. Use the company account with the same email
    as your Widefleet administrator account.
 3. Check that Widefleet reports **Company sign-in and administrator access
    verified successfully**. Resolve any error before continuing.
@@ -166,6 +169,22 @@ Continue with [verify and activate](#verify-and-activate).
 Members must now use the company provider for this organization. Existing
 accounts with matching verified company email addresses keep their memberships
 and roles. Colleagues who use the CLI need to run `widefleet login` again.
+
+## Add more email domains
+
+If your provider issues addresses on several domains, such as a Google
+Workspace with secondary domains, add each one. Members with an address on any
+verified domain sign in through company SSO.
+
+1. Open **Settings → Email domains** and choose **Add domain**.
+2. Enter the part of the email addresses after the @ and choose **Add domain**.
+3. Add the displayed TXT record at your DNS provider, then choose **Verify
+   domain**. You can also close the dialog and choose **Verify** later.
+
+A pending domain does not affect domains that are already verified or active
+company SSO. While company SSO is required, keep at least one verified domain.
+Accounts created earlier with an address on a newly verified domain are
+verified on their next company sign-in.
 
 ## Check app access
 
@@ -190,7 +209,7 @@ expected result. Next, [share the app with colleagues](/guides/applications).
 | What you see                                         | What to do                                                                                                                                                                                      |
 | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Redirect URI mismatch                                | Copy both redirect URIs from Widefleet again and register them exactly, including the path, on the same provider client.                                                                        |
-| Domain verification fails                            | Check the displayed DNS name and TXT value. Allow the DNS change to propagate, then choose **Verify domain** again.                                                                             |
+| Domain verification fails                            | Check the displayed DNS name and TXT value for that domain. Allow the DNS change to propagate, then choose **Verify domain** again.                                                             |
 | Google group access is unavailable                   | Check that Cloud Identity API is enabled in the OAuth client's project, the group scope is configured, and your organization permits it.                                                        |
 | Google sign-in works, but group access is denied     | Check the group's primary email address, direct membership and **Who can view members** setting. If the user declined group permission, repeat sign-in in a fresh browser profile and allow it. |
 | Sign-in works, but a colleague cannot open the app   | Check the app's allowed groups and the colleague's membership. Repeat the test in a fresh browser profile.                                                                                      |
