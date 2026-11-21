@@ -10,9 +10,9 @@ import { bootstrapConfiguration, runtimeRelease } from "@platform/contracts";
 import { getPlatformProxy } from "wrangler";
 import { z } from "zod";
 import { managedOAuthConfiguration } from "@platform/app-runtime/oauth";
+import { createProductAnalytics } from "../src/lib/server/analytics.ts";
 import { cloudflareConfigurationSchema } from "../src/lib/server/cloudflare-config.ts";
 import { socialSignInConfiguration } from "../src/lib/server/social-sign-in.ts";
-import type { CloudflareBindings } from "../src/lib/server/cloudflare-config.ts";
 import { createCloudflareProvisioner } from "../src/lib/server/cloudflare-provisioning.ts";
 import {
   readCloudflareRuntimeVersion,
@@ -29,6 +29,10 @@ import {
   readHostedInstallation,
 } from "./hosted-configuration.ts";
 import { provisionHostedResources } from "./hosted-resources.ts";
+import {
+  initializeCloudflareInstallation,
+  type InitializationPlatform,
+} from "./cloudflare-initialization.ts";
 import { deployHostedRuntime } from "./hosted-runtime.ts";
 
 const execute = promisify(execFile);
@@ -220,6 +224,10 @@ const write = async (name: string, contents: string) => {
   return path;
 };
 
+// The runtime check and the installation settings share one connection to the
+// deployed Workers, because each remote session takes a while to establish.
+let proxy: Awaited<ReturnType<typeof getPlatformProxy<InitializationPlatform>>> | undefined;
+
 try {
   console.info(`Preparing Hosted installation ${installation.name}`);
   await migrate(database.db, { migrationsFolder: resolve(controlDirectory, "migrations") });
@@ -263,6 +271,12 @@ try {
       vars: configs.controlPlane.vars,
     }),
   );
+
+  const platform = async () =>
+    (proxy ??= await getPlatformProxy<InitializationPlatform>({
+      configPath: initializeConfig,
+      persist: false,
+    })).env;
 
   const runtimeSecrets = await write(
     "runtime-secrets.json",
@@ -324,17 +338,8 @@ try {
         ...(confirmedBindingTag ? ["--tag", confirmedBindingTag] : []),
       ]);
 
-      const proxy = await getPlatformProxy<Pick<CloudflareBindings, "APP_RUNTIME">>({
-        configPath: initializeConfig,
-        persist: false,
-      });
-
-      try {
-        if ((await readCloudflareRuntimeVersion(proxy.env)) !== release.version)
-          throw new Error("The requested Runtime version is not active");
-      } finally {
-        await proxy.dispose();
-      }
+      if ((await readCloudflareRuntimeVersion(await platform())) !== release.version)
+        throw new Error("The requested Runtime version is not active");
     },
   );
 
@@ -342,17 +347,37 @@ try {
     ? await write("bootstrap.json", JSON.stringify(bootstrap))
     : undefined;
 
-  await run(process.execPath, ["tools/initialize-cloudflare.ts"], {
+  const initializationEnvironment = {
     ...childEnvironment,
     PLATFORM_URL: installation.platformUrl,
     APP_DOMAIN: installation.appDomain,
     LOGIN_CODE_DELIVERY: configs.controlPlane.vars.LOGIN_CODE_DELIVERY,
     PLATFORM_USAGE_REPORTING: "false",
     PLATFORM_CRASH_REPORTING: "false",
-    WIDEFLEET_INITIALIZE_CONFIG: initializeConfig,
-    WIDEFLEET_INITIALIZE_SECRETS_FILE: controlSecrets,
-    PLATFORM_BOOTSTRAP_FILE: bootstrapFile,
-  });
+  };
+
+  const initializationConfiguration =
+    cloudflareConfigurationSchema.parse(initializationEnvironment);
+
+  const observation = createProductAnalytics(initializationConfiguration);
+
+  try {
+    await initializeCloudflareInstallation({
+      configuration: initializationConfiguration,
+      database: database.db,
+      observation,
+      environment: initializationEnvironment,
+      configPath: initializeConfig,
+      secretsPath: controlSecrets,
+      bootstrapFile,
+      platform,
+    });
+  } catch (cause) {
+    console.error(redact(cause instanceof Error ? (cause.stack ?? cause.message) : String(cause)));
+    throw new Error("Hosted installation initialization failed; see the sanitized output above");
+  } finally {
+    await observation.close();
+  }
 
   // The control plane binds both builder Workers, so they deploy first. They are
   // independent of each other; wait for both before reporting a failure, because
@@ -387,6 +412,10 @@ try {
   ]);
   console.info(`Hosted installation deployed: ${installation.platformUrl}`);
 } finally {
-  await database.close();
-  await rm(directory, { recursive: true, force: true });
+  try {
+    await proxy?.dispose();
+  } finally {
+    await database.close();
+    await rm(directory, { recursive: true, force: true });
+  }
 }
