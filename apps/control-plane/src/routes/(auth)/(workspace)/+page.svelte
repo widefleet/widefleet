@@ -90,8 +90,5 @@
         </li>
       {/each}
     </ul>
-    <p class="text-muted-foreground mt-6 text-xs leading-6">
-      Sign in with your company account. Some apps may require membership in specific groups.
-    </p>
   {/if}
 </section>
