@@ -40,7 +40,10 @@ try {
     },
   });
 } finally {
-  await proxy?.dispose();
-  await observation.close();
-  await database.close();
+  try {
+    await proxy?.dispose();
+  } finally {
+    await observation.close();
+    await database.close();
+  }
 }

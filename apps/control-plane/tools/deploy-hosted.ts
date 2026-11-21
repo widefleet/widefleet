@@ -403,7 +403,10 @@ try {
   ]);
   console.info(`Hosted installation deployed: ${installation.platformUrl}`);
 } finally {
-  await proxy?.dispose();
-  await database.close();
-  await rm(directory, { recursive: true, force: true });
+  try {
+    await proxy?.dispose();
+  } finally {
+    await database.close();
+    await rm(directory, { recursive: true, force: true });
+  }
 }
