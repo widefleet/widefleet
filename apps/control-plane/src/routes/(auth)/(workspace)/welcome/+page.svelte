@@ -23,7 +23,8 @@
         This installation deploys apps through an agent. Make sure your administrator has connected
         and started it before deploying.
       </p>
-      {#if data.installationAdmin}<Button href="/agents" variant="outline">Manage agents</Button
+      {#if data.installationAdmin}<Button href="/settings/agents" variant="outline"
+          >Manage agents</Button
         >{/if}
     </section>
   {/if}
@@ -47,9 +48,9 @@
       ></pre>
   </section>
   <div class="flex flex-wrap gap-3">
-    <Button href="/apps">Open apps</Button><Button href="/members" variant="outline"
+    <Button href="/apps">Open apps</Button><Button href="/settings/members" variant="outline"
       >Invite your team</Button
-    ><Button href="/settings" variant="ghost">Organization settings</Button>
+    ><Button href="/settings/company-sign-in" variant="ghost">Organization settings</Button>
   </div>
   <p class="text-muted-foreground text-sm">
     Company SSO and directory search can be configured later in organization settings. <a

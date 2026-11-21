@@ -12,7 +12,8 @@ export const load: PageServerLoad = async ({ parent, setHeaders }) => {
   if (principal.application.admin) {
     const settings = await runtime.settings.read(principal);
 
-    if (settings.error || settings.activation.state !== "active") redirect(303, "/settings");
+    if (settings.error || settings.activation.state !== "active")
+      redirect(303, "/settings/company-sign-in");
   }
 
   const [execution] = await runtime.database.db

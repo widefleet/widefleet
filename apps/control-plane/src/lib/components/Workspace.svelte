@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Snippet } from "svelte";
+  import type { Component, Snippet } from "svelte";
   import { page } from "$app/state";
   import { afterNavigate } from "$app/navigation";
   import House from "@lucide/svelte/icons/house";
@@ -19,7 +19,9 @@
   import { authClient } from "#lib/auth-client";
   import { setWorkspaceContext } from "#lib/workspace-context";
   import { Button } from "@platform/ui/button";
+  import * as Collapsible from "@platform/ui/collapsible";
   import * as DropdownMenu from "@platform/ui/dropdown-menu";
+  import * as Sidebar from "@platform/ui/sidebar";
   import Feedback from "./Feedback.svelte";
 
   let {
@@ -55,8 +57,16 @@
 
   let error = $state("");
 
+  type NavigationItem = {
+    href: string;
+    label: string;
+    icon: Component;
+    paths: string[];
+    items?: { href: string; label: string; current: (url: typeof page.url) => boolean }[];
+  };
+
   // Each item also covers the pages reached from it, so the sidebar keeps showing where they belong.
-  const navigation = $derived([
+  const navigation = $derived<NavigationItem[]>([
     { href: "/", label: "Home", icon: House, paths: [] },
     { href: "/connections", label: "My connections", icon: Link2, paths: ["/connections"] },
     {
@@ -68,10 +78,40 @@
     ...(principal.application.admin
       ? [
           {
-            href: "/settings",
+            href: "/settings/company-sign-in",
             label: "Settings",
             icon: Settings2,
-            paths: ["/settings", "/members", "/agents"],
+            paths: ["/settings"],
+            items: [
+              {
+                href: "/settings/company-sign-in",
+                label: "Company sign-in",
+                current: (url: typeof page.url) =>
+                  url.pathname.startsWith("/settings/company-sign-in"),
+              },
+              {
+                href: "/settings/members",
+                label: "Members",
+                current: (url: typeof page.url) => url.pathname.startsWith("/settings/members"),
+              },
+              // Deployment agents belong to the installation, so only its administrators see them.
+              ...(principal.admin
+                ? [
+                    {
+                      href: "/settings/agents",
+                      label: "Deployment agents",
+                      current: (url: typeof page.url) =>
+                        url.pathname.startsWith("/settings/agents"),
+                    },
+                  ]
+                : []),
+              {
+                href: "/settings/administration",
+                label: "Administration",
+                current: (url: typeof page.url) =>
+                  url.pathname.startsWith("/settings/administration"),
+              },
+            ],
           },
         ]
       : []),
@@ -123,15 +163,53 @@
 />
 
 {#snippet navigationLinks()}
-  <nav aria-label="Main navigation" class="space-y-1">
-    {#each navigation as item (item.href)}
-      <a
-        href={item.href}
-        aria-current={active(item) ? "page" : undefined}
-        class={`flex items-center gap-2.5 rounded-md px-3 py-2 text-[13px] transition-colors ${active(item) ? "bg-sidebar-accent text-foreground font-medium" : "text-muted-foreground hover:bg-sidebar-accent/70 hover:text-foreground"}`}
-        ><item.icon class="size-4 shrink-0" />{item.label}</a
-      >
-    {/each}
+  <nav aria-label="Main navigation">
+    <Sidebar.Menu class="gap-1">
+      {#each navigation as item (item.href)}
+        {#if item.items}
+          <Collapsible.Root open={active(item)} class="group/collapsible">
+            {#snippet child({ props })}
+              <Sidebar.MenuItem {...props}>
+                <Collapsible.Trigger>
+                  {#snippet child({ props })}
+                    <Sidebar.MenuButton {...props}
+                      ><item.icon /><span>{item.label}</span><ChevronRight
+                        class="text-muted-foreground ms-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90 motion-reduce:transition-none"
+                      /></Sidebar.MenuButton
+                    >
+                  {/snippet}
+                </Collapsible.Trigger>
+                <Collapsible.Content>
+                  <Sidebar.MenuSub class="mt-1">
+                    {#each item.items as subItem (subItem.href)}
+                      {@const current = subItem.current(page.url)}
+                      <Sidebar.MenuSubItem>
+                        <Sidebar.MenuSubButton
+                          href={subItem.href}
+                          isActive={current}
+                          aria-current={current ? "page" : undefined}
+                          ><span>{subItem.label}</span></Sidebar.MenuSubButton
+                        >
+                      </Sidebar.MenuSubItem>
+                    {/each}
+                  </Sidebar.MenuSub>
+                </Collapsible.Content>
+              </Sidebar.MenuItem>
+            {/snippet}
+          </Collapsible.Root>
+        {:else}
+          <Sidebar.MenuItem>
+            <Sidebar.MenuButton isActive={active(item)}>
+              {#snippet child({ props })}
+                <a href={item.href} aria-current={active(item) ? "page" : undefined} {...props}
+                  ><item.icon /><span>{item.label}</span></a
+                >
+              {/snippet}
+            </Sidebar.MenuButton>
+          </Sidebar.MenuItem>
+        {/if}
+      {/each}
+    </Sidebar.Menu>
   </nav>
 {/snippet}
 

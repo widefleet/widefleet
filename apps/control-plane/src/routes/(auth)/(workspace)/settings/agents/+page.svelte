@@ -12,7 +12,6 @@
   import KeyRound from "@lucide/svelte/icons/key-round";
   import FormIssues from "#shadcn/FormIssues.svelte";
   import PageHeading from "#shadcn/components/PageHeading.svelte";
-  import SettingsTabs from "#shadcn/components/SettingsTabs.svelte";
   import CopyValue from "#shadcn/components/CopyValue.svelte";
   import Feedback from "#shadcn/components/Feedback.svelte";
   import EmptyState from "#shadcn/components/EmptyState.svelte";
@@ -48,7 +47,6 @@
 </script>
 
 <svelte:head><title>Deployment agents · Widefleet</title></svelte:head>
-<SettingsTabs />
 <PageHeading
   title="Deployment agents"
   description="Agents deploy your apps on your infrastructure."

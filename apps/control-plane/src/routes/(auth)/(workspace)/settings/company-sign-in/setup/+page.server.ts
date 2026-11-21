@@ -6,7 +6,7 @@ export const load: PageServerLoad = async ({ setHeaders, url }) => {
   setHeaders({ "cache-control": "private, no-store" });
 
   // An active connection is managed on its own page.
-  if ((await getSettings()).view.ssoRequired) redirect(303, "/settings");
+  if ((await getSettings()).view.ssoRequired) redirect(303, "/settings/company-sign-in");
 
   return { loginFailed: url.searchParams.has("error") };
 };
