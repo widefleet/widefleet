@@ -23,7 +23,10 @@ export const templateNetworkChanged =
 
 export const createTemplateInstalls = (
   configuration: Pick<Configuration, "GITHUB_TOKEN">,
-  apps: Pick<ReturnType<typeof createAppService>, "named" | "create" | "resolve">,
+  apps: Pick<
+    ReturnType<typeof createAppService>,
+    "named" | "create" | "resolve" | "recordTemplateInstall"
+  >,
   uploads: Pick<ReturnType<typeof createUploadService>, "start" | "putAsset" | "publish">,
   network: Pick<ReturnType<typeof createNetworkService>, "change" | "read">,
   builder?: AppBuilder,
@@ -163,7 +166,7 @@ export const createTemplateInstalls = (
         metadata,
         modules,
         crypto.randomUUID(),
-        { firstDeployment: true, template: { id: input.templateId, commit } },
+        { firstDeployment: true },
       );
 
       if (
@@ -175,11 +178,21 @@ export const createTemplateInstalls = (
 
       const deployment = yield* published;
 
+      const notes: string[] = [];
+
+      // Recorded once the deployment was accepted, so a rejected install
+      // keeps offering Install in the catalog.
+      const recorded = await apps.recordTemplateInstall(installed.id, deployment.id, {
+        id: input.templateId,
+        commit,
+      });
+
+      if (recorded.isErr())
+        notes.push("The catalog could not record this install and still offers the template.");
+
       // Granted only once this install owns the app's first deployment, so a
       // rejected install leaves permissions unchanged. The app is installed by
       // then: a grant that fails stays requested for the owner to allow.
-      const notes: string[] = [];
-
       if (consented)
         for (const target of ["backend", "browser"] as const)
           if (declared[target].length > 0) {

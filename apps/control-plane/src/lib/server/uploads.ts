@@ -11,7 +11,7 @@ import type { Database } from "./database.ts";
 import { InvalidOperation } from "./errors.ts";
 import type { Principal } from "./identity.ts";
 import type { HostedExecution } from "./deployment-execution.ts";
-import { apps, artifacts, deployments, uploadSessions } from "./schema.ts";
+import { artifacts, deployments, uploadSessions } from "./schema.ts";
 import { sourceOperation, type SourceBackend } from "./source-backend.ts";
 import type { ArtifactStorage } from "./storage.ts";
 import { transact, type Transaction } from "./transactions.ts";
@@ -130,11 +130,7 @@ export const createUploadService = (
     metadata: z.infer<typeof contract.workerMetadata>,
     modules: WorkerModule[],
     requestId: string,
-    options: {
-      firstDeployment?: boolean;
-      /** The catalog template this first deployment installs. */
-      template?: { id: string; commit: string };
-    } = {},
+    options: { firstDeployment?: boolean } = {},
   ) => {
     const prepared = await transact(database, (transaction) =>
       Result.gen(async function* () {
@@ -154,14 +150,6 @@ export const createUploadService = (
 
           if (deployed)
             return yield* new InvalidOperation({ code: "CONFLICT", message: appAlreadyDeployed });
-
-          // Recorded with the deployment that installs it, so an app that was
-          // never deployed from the template is never marked as installed.
-          if (options.template)
-            await transaction
-              .update(apps)
-              .set({ templateId: options.template.id, templateCommit: options.template.commit })
-              .where(eq(apps.id, appId));
         }
 
         if (

@@ -559,6 +559,25 @@ it("does not install over an app deployed while the template builds", async () =
   expect(record).toMatchObject({ templateId: null, templateCommit: null });
 });
 
+it("keeps offering a template whose deployment was rejected", async () => {
+  const runtime = await runtimeWith(builder);
+
+  // As when Cloudflare rejects a hosted deployment after the app was prepared.
+  vi.spyOn(runtime.uploads, "publish").mockResolvedValue(
+    Result.err(new InvalidOperation({ code: "BAD_REQUEST", message: "Deployment rejected" })),
+  );
+
+  const response = await install(runtime, "gmail", { name: "mail-rejected" });
+
+  expect(response.status).toBe(400);
+
+  const record = await environment.database.db.query.apps.findFirst({
+    where: (apps, { eq }) => eq(apps.slug, "mail-rejected"),
+  });
+
+  expect(record).toMatchObject({ templateId: null, templateCommit: null });
+});
+
 it("reports build errors and missing templates", async () => {
   const runtime = await runtimeWith(builder);
 

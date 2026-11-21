@@ -2,7 +2,19 @@ import { requireAvailableHostname } from "./hostnames.ts";
 import { checkServiceConsumers } from "./app-services.ts";
 import * as contract from "@platform/contracts";
 import { Result } from "better-result";
-import { and, desc, eq, exists, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  exists,
+  inArray,
+  isNotNull,
+  isNull,
+  ne,
+  notExists,
+  or,
+  sql,
+} from "drizzle-orm";
 import { z } from "zod";
 import type { Configuration } from "./config.ts";
 import type { Database } from "./database.ts";
@@ -516,6 +528,35 @@ export const createAppService = (
           sourceSupported,
         ),
       });
+    }),
+  /**
+   * Records the template an install deployed, once that deployment was
+   * accepted. Only the app's first deployment installs a template, so an app
+   * someone else deployed meanwhile is not marked.
+   */
+  recordTemplateInstall: (
+    appId: string,
+    deploymentId: string,
+    template: { id: string; commit: string },
+  ) =>
+    transact(database, async (transaction) => {
+      await transaction
+        .update(apps)
+        .set({ templateId: template.id, templateCommit: template.commit })
+        .where(
+          and(
+            eq(apps.id, appId),
+            isNull(apps.templateId),
+            notExists(
+              transaction
+                .select({ id: deployments.id })
+                .from(deployments)
+                .where(and(eq(deployments.appId, appId), ne(deployments.id, deploymentId))),
+            ),
+          ),
+        );
+
+      return Result.ok(undefined);
     }),
   /** The newest app the caller manages per catalog template it was installed from. */
   templateInstalls: (principal: Principal) =>
