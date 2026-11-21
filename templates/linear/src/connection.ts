@@ -4,7 +4,7 @@ import { z } from "zod";
 import { authentication } from "./auth.ts";
 import { caller, callerId, type Environment, type Properties } from "./context.ts";
 import { initialize } from "./database.ts";
-import { type Tool, type toolInputs, toolRequest, toolResult } from "./linear.ts";
+import { LinearRequestError, type Rpc, rpcRequest, rpcResult } from "./linear.ts";
 import { authorizationPage, connectionPage } from "./page.ts";
 
 const linkedAccount = z.object({
@@ -225,12 +225,12 @@ export const accountConnection = (environment: Environment, properties: Properti
         connectUrl: environment.WIDEFLEET_ORIGIN,
       } as const;
     },
-    call: async <Name extends Tool>(tool: Name, input: z.infer<(typeof toolInputs)[Name]>) => {
+    rpc: async <Result extends z.ZodType>(rpc: Rpc<Result>) => {
       const result = await token();
 
       if (result.status !== "connected") return result;
 
-      const response = await fetch(toolRequest(tool, input, result.accessToken), {
+      const response = await fetch(rpcRequest(rpc, result.accessToken), {
         redirect: "manual",
       });
 
@@ -244,7 +244,13 @@ export const accountConnection = (environment: Environment, properties: Properti
 
       if (!response.ok) throw new Error(`Linear request failed (HTTP ${response.status})`);
 
-      return toolResult(response);
+      try {
+        return { status: "connected", result: await rpcResult(rpc, response) } as const;
+      } catch (error) {
+        if (!(error instanceof LinearRequestError)) throw error;
+
+        return { status: "linear_error", message: error.message } as const;
+      }
     },
     fetch: async (request: Request) => {
       if (!caller.safeParse(properties.caller).success) return new Response(null, { status: 401 });

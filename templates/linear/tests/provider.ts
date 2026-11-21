@@ -4,12 +4,42 @@ import { z } from "zod";
 
 const kind = "linear";
 
-const toolCall = z.object({
-  jsonrpc: z.literal("2.0"),
-  id: z.literal(1),
-  method: z.literal("tools/call"),
-  params: z.object({ name: z.string(), arguments: z.record(z.string(), z.unknown()) }),
-});
+const rpc = z.discriminatedUnion("method", [
+  z.object({
+    jsonrpc: z.literal("2.0"),
+    id: z.literal(1),
+    method: z.literal("tools/list"),
+    params: z.object({ cursor: z.string().optional() }),
+  }),
+  z.object({
+    jsonrpc: z.literal("2.0"),
+    id: z.literal(1),
+    method: z.literal("tools/call"),
+    params: z.object({ name: z.string(), arguments: z.record(z.string(), z.json()) }),
+  }),
+]);
+
+// Linear's tools as tools/list describes them, over two pages.
+const toolPages = [
+  [
+    {
+      name: "list_issues",
+      title: "List issues",
+      description: "List issues in the user's Linear workspace.",
+      inputSchema: { type: "object", properties: { assignee: { type: "string" } } },
+      annotations: { readOnlyHint: true, destructiveHint: false },
+      icons: [{ src: "https://static.linear.app/icon.svg" }],
+    },
+  ],
+  [
+    {
+      name: "save_issue",
+      description: "Create or update an issue.",
+      inputSchema: { type: "object", properties: { title: { type: "string" } } },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    },
+  ],
+];
 
 const issue = (id: string) => ({
   id,
@@ -33,7 +63,9 @@ export const provider = () => {
   const codes = new Map<string, { user: string; challenge: string | null; redirect: string }>();
   const access = new Map<string, string>();
   const refresh = new Map<string, string>();
-  const calls: z.infer<typeof toolCall>["params"][] = [];
+
+  const calls: { name: string; arguments: Record<string, z.infer<ReturnType<typeof z.json>>> }[] =
+    [];
 
   const state = {
     refreshes: 0,
@@ -58,7 +90,7 @@ export const provider = () => {
     });
   };
 
-  const event = (result: { content: { type: string; text: string }[]; isError?: boolean }) =>
+  const event = (result: z.infer<ReturnType<typeof z.json>>) =>
     new Response(`event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: 1, result })}\n\n`, {
       headers: { "content-type": "text/event-stream" },
     });
@@ -146,7 +178,17 @@ export const provider = () => {
 
       if (!request.headers.get("accept")?.includes("text/event-stream"))
         return new Response(null, { status: 406 });
-      const { params } = toolCall.parse(await request.json());
+      const body = rpc.parse(await request.json());
+
+      if (body.method === "tools/list") {
+        const [first, second] = toolPages;
+
+        return body.params.cursor === "page-2"
+          ? event({ tools: second ?? [] })
+          : event({ tools: first ?? [], nextCursor: "page-2" });
+      }
+
+      const { params } = body;
 
       if (params.name === "get_user")
         return output({
@@ -164,19 +206,22 @@ export const provider = () => {
       if (state.toolError)
         return event({ content: [{ type: "text", text: state.toolError }], isError: true });
 
-      if (params.name === "list_teams")
-        return output({
-          teams: [{ id: "team-1", key: "ENG", name: "Engineering", parentId: null }],
-          hasNextPage: true,
-          cursor: "next-teams",
+      if (params.name === "list_issues")
+        return output({ issues: [issue("ENG-1")], hasNextPage: false });
+
+      if (params.name === "save_issue")
+        return output({ ...issue("ENG-2"), title: z.string().parse(params.arguments["title"]) });
+
+      if (params.name === "extract_images")
+        return event({
+          content: [{ type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" }],
         });
 
-      if (params.name === "list_issues")
-        return output({ issues: [issue("ENG-1")], hasNextPage: false, cursor: "end" });
-
-      if (params.name === "get_issue")
-        return output({ ...issue(String(params.arguments["id"])), description: "Details" });
-      throw new Error(`Unexpected tool: ${params.name}`);
+      // Linear answers a tool its token cannot use as unknown.
+      return new Response(
+        `event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: 1, error: { code: -32602, message: `Tool ${params.name} not found` } })}\n\n`,
+        { headers: { "content-type": "text/event-stream" } },
+      );
     },
   };
 };

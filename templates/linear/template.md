@@ -1,10 +1,11 @@
 ---
 name: Linear
-description: Read teams and issues from a Linear workspace.
+description: Use every tool of Linear's MCP server to read and change a Linear workspace.
 ---
 
-Connect a personal Linear account to list teams and read issues through Linear's
-MCP server. Each signed-in user connects their own account.
+Connect a personal Linear account and use every tool of Linear's MCP server: issues,
+projects, comments, documents, cycles and more. Each signed-in user connects their own
+account.
 
 ## Deploy
 
@@ -46,7 +47,7 @@ widefleet network allow https://mcp.linear.app https://api.linear.app
 
 Network changes require the CLI's `network:manage` scope. Wait for the configuration
 to activate, then open the app URL and connect your Linear account. The connector
-requests the `read` scope, so its token cannot change the workspace.
+requests the `read` and `write` scopes, so callers can use Linear's writing tools.
 
 ## Use from another app
 
@@ -60,20 +61,26 @@ Replace `linear` if you chose another name. Call the service while handling a
 signed-in user's request so Widefleet forwards the verified caller identity.
 
 ```ts
-const result = await env.LINEAR.listIssues({ assignee: "me", state: "started" });
+const result = await env.LINEAR.callTool({
+  name: "list_issues",
+  arguments: { assignee: "me", state: "started" },
+});
 if (result.status === "connected") {
-  for (const issue of result.issues) console.log(issue.id, issue.title);
+  const { issues } = JSON.parse(result.text);
 }
 ```
 
-The app exposes `connectionStatus`, `listTeams`, `listIssues` and `getIssue`. See
-`src/app.ts` for inputs and results. Pass a result's `cursor` to read the next page.
+The app exposes `connectionStatus`, `listTools` and `callTool`. `listTools` returns
+Linear's current tools with their input schemas as JSON Schema text and their hints:
+`readOnlyHint` marks tools that only read, `destructiveHint` tools that can delete or
+overwrite data. `callTool` passes the arguments to Linear unchanged; `text` holds the
+tool's JSON result and `content` every part Linear returned.
 
 A `setup_required` result lists missing secrets. `connection_required` and
 `reconnect_required` provide a `connectUrl` for the user. `authentication_required`
 means the call has no signed-in user. `linear_error` carries Linear's message, for
-example for an unknown issue. Retry `refresh_failed` after a provider outage;
-respect `retryAfter` for `rate_limited`.
+example for an unknown issue or invalid arguments. Retry `refresh_failed` after a
+provider outage; respect `retryAfter` for `rate_limited`.
 
 After connecting, verify an issue read through the consuming app. Users can
 disconnect their account on the Linear app's page.

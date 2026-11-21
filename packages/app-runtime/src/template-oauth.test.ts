@@ -51,7 +51,7 @@ const clients = {
     tokenUrl: "https://mcp.linear.app/token",
     resource: "https://mcp.linear.app/mcp",
     revocationUrl: "https://mcp.linear.app/token",
-    scopes: ["read"],
+    scopes: ["read", "write"],
     hosts: ["https://mcp.linear.app"],
   },
 };
