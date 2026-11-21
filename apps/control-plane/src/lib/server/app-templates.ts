@@ -41,7 +41,10 @@ const loadTemplate = async (id: string) => {
   const parts = /^\uFEFF?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/u.exec(text);
 
   if (!parts) throw new Error(`Missing frontmatter in ${id}/template.md`);
-  const metadata = appTemplateSummary.omit({ id: true }).parse(parse(parts[1] ?? ""));
+
+  const metadata = appTemplateSummary
+    .omit({ id: true, installedAppId: true })
+    .parse(parse(parts[1] ?? ""));
 
   return { id, ...metadata, source: `${repository}/${id}`, markdown: parts[2] ?? "" };
 };
@@ -63,6 +66,7 @@ const loadNetwork = async (id: string) => {
 export const templateCatalog = (
   principal: Principal,
   configuration: Pick<Configuration, "PLATFORM_URL" | "GITHUB_TOKEN">,
+  installed: ReadonlyMap<string, string>,
   search = "",
 ) =>
   Result.tryPromise({
@@ -99,7 +103,14 @@ export const templateCatalog = (
       return appTemplateCatalog.parse({
         templates: templates.flatMap((template) =>
           template && `${template.name} ${template.description}`.toLowerCase().includes(term)
-            ? [{ id: template.id, name: template.name, description: template.description }]
+            ? [
+                {
+                  id: template.id,
+                  name: template.name,
+                  description: template.description,
+                  installedAppId: installed.get(template.id) ?? null,
+                },
+              ]
             : [],
         ),
         createPrompt: `Help me create an app on Widefleet. Ask what it should do. Read https://widefleet.com/SKILL.md. Use ${cli(principal, configuration)} for this installation and organization. Check existing apps and templates, then build, test and deploy the app and help me complete its setup.`,
@@ -114,6 +125,7 @@ export const readTemplate = (
   configuration: Pick<Configuration, "PLATFORM_URL">,
   id: string,
   installable: boolean,
+  installed: ReadonlyMap<string, string>,
 ) =>
   Result.gen(async function* () {
     const template = yield* Result.await(
@@ -139,6 +151,7 @@ export const readTemplate = (
         ...template,
         prompt: `Set up the ${template.name} app on Widefleet. Read https://widefleet.com/SKILL.md, then run ${cli(principal, configuration)} catalog templates show ${id} and follow its template instructions. Reuse a suitable existing app where possible. Help me finish setup and report its URL and any steps that still need my attention.`,
         installable,
+        installedAppId: installed.get(id) ?? null,
       }),
     );
   });

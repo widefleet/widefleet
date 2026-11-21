@@ -62,7 +62,10 @@
               <p class="text-muted-foreground mt-1 text-sm leading-6">{template.description}</p>
             </div>
           </div>
-          <ArrowRight class="text-muted-foreground size-4 shrink-0" />
+          <span class="text-muted-foreground flex shrink-0 items-center gap-3 text-sm">
+            {#if template.installedAppId}Installed{/if}
+            <ArrowRight class="size-4" />
+          </span>
         </a>
       </li>
     {/each}

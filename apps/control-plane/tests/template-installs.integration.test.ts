@@ -14,7 +14,7 @@ import { createStorage } from "../src/lib/server/storage.ts";
 import { hashAsset } from "../src/lib/server/asset-hash.ts";
 import { createTestEnvironment } from "./environment.ts";
 import { memoryStorage } from "./memory-storage.fixture.ts";
-import { templateRepository } from "./template-repository.fixture.ts";
+import { templateCommit, templateRepository } from "./template-repository.fixture.ts";
 
 let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
 
@@ -169,6 +169,41 @@ it("builds a template's sources and deploys them as the CLI would", async () => 
   expect(result.app.slug).toBe("mail-reader");
   expect(result.deployment).toMatchObject({ appId: result.app.id, status: "queued" });
   expect(result.warnings).toEqual(["A bundling note"]);
+
+  // The app records the template it was installed from, and the catalog
+  // leads to it instead of offering another install.
+  const record = await environment.database.db.query.apps.findFirst({
+    where: (apps, { eq }) => eq(apps.id, result.app.id),
+  });
+
+  expect(record).toMatchObject({ templateId: "gmail", templateCommit });
+
+  const api = createApi(runtime);
+
+  const installedTemplate = contract.appTemplate.parse(
+    await (await api(new Request("http://localhost/api/v1/catalog/templates/gmail"))).json(),
+  );
+
+  expect(installedTemplate.installedAppId).toBe(result.app.id);
+
+  const catalog = contract.appTemplateCatalog.parse(
+    await (await api(new Request("http://localhost/api/v1/catalog/templates"))).json(),
+  );
+
+  expect(catalog.templates.find(({ id }) => id === "gmail")?.installedAppId).toBe(result.app.id);
+
+  // Members who cannot manage the app are not led to it.
+  const principal = (
+    await runtime.identity.authenticate(new Request("http://localhost"), "platform:read")
+  ).unwrap();
+
+  const member = {
+    ...principal,
+    id: crypto.randomUUID(),
+    application: { ...principal.application, admin: false },
+  };
+
+  expect((await runtime.apps.templateInstalls(member)).unwrap().has("gmail")).toBe(false);
 
   // The builder receives the template's sources without its tests.
   const bundle = builderRequests.find(({ phase }) => phase === "bundle");
@@ -515,6 +550,32 @@ it("does not install over an app deployed while the template builds", async () =
 
   // Only the concurrent deployment exists.
   expect(deployments).toHaveLength(1);
+
+  // The other deployment's app is not marked as installed from the template.
+  const record = await environment.database.db.query.apps.findFirst({
+    where: (apps, { eq }) => eq(apps.id, app.id),
+  });
+
+  expect(record).toMatchObject({ templateId: null, templateCommit: null });
+});
+
+it("keeps offering a template whose deployment was rejected", async () => {
+  const runtime = await runtimeWith(builder);
+
+  // As when Cloudflare rejects a hosted deployment after the app was prepared.
+  vi.spyOn(runtime.uploads, "publish").mockResolvedValue(
+    Result.err(new InvalidOperation({ code: "BAD_REQUEST", message: "Deployment rejected" })),
+  );
+
+  const response = await install(runtime, "gmail", { name: "mail-rejected" });
+
+  expect(response.status).toBe(400);
+
+  const record = await environment.database.db.query.apps.findFirst({
+    where: (apps, { eq }) => eq(apps.slug, "mail-rejected"),
+  });
+
+  expect(record).toMatchObject({ templateId: null, templateCommit: null });
 });
 
 it("reports build errors and missing templates", async () => {

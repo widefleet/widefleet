@@ -44,7 +44,9 @@ export const setCatalogListing = form(
 export const getTemplates = query(templateSearch, async ({ search }) => {
   const { runtime, principal } = await remoteContext();
 
-  return queryValue(await templateCatalog(principal, runtime.configuration, search));
+  const installed = queryValue(await runtime.apps.templateInstalls(principal));
+
+  return queryValue(await templateCatalog(principal, runtime.configuration, installed, search));
 });
 
 export const installTemplate = form(
@@ -97,8 +99,16 @@ export const installTemplate = form(
 export const getTemplate = query(templatePath, async ({ templateId }) => {
   const { runtime, principal } = await remoteContext();
 
+  const installed = queryValue(await runtime.apps.templateInstalls(principal));
+
   const template = queryValue(
-    await readTemplate(principal, runtime.configuration, templateId, runtime.templates.available),
+    await readTemplate(
+      principal,
+      runtime.configuration,
+      templateId,
+      runtime.templates.available,
+      installed,
+    ),
   );
 
   return { ...template, html: new MarkdownIt({ html: false }).render(template.markdown) };

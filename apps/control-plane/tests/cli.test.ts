@@ -186,7 +186,9 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
             request.url.includes("/gmail")
               ? { id: "gmail", markdown: "Deploy this synthetic template" }
               : {
-                  templates: [{ id: "gmail", name: "Gmail", description: "Read mail" }],
+                  templates: [
+                    { id: "gmail", name: "Gmail", description: "Read mail", installedAppId: null },
+                  ],
                   createPrompt: "Create an app",
                 },
           ),
