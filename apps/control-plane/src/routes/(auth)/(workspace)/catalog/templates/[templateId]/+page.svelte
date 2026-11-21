@@ -28,9 +28,9 @@
 <div class="max-w-3xl">
   <div class="flex flex-wrap items-start justify-between gap-4">
     <div class="min-w-0">
-      <h2 class="flex items-center gap-3 text-2xl font-semibold">
+      <h1 class="flex items-center gap-3 text-2xl font-semibold tracking-tight">
         <TemplateIcon templateId={template.id} />{template.name}
-      </h2>
+      </h1>
       <p class="text-muted-foreground mt-2 text-sm leading-6">{template.description}</p>
     </div>
     {#if template.installedAppId}

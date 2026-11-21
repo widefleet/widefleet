@@ -112,9 +112,9 @@
 
 <svelte:head><title>{data.app.displayName} · Widefleet</title></svelte:head>
 <a
-  href="/"
+  href="/apps"
   class="text-muted-foreground hover:text-foreground mb-6 inline-flex items-center gap-2 text-xs"
-  ><ArrowLeft class="size-3.5" />All apps</a
+  ><ArrowLeft class="size-3.5" />My apps</a
 >
 <div class="flex flex-wrap items-start justify-between gap-4">
   <div class="min-w-0">

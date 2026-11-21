@@ -20,9 +20,9 @@
 <svelte:head><title>Create app · Widefleet</title></svelte:head>
 <div class="mx-auto max-w-xl">
   <a
-    href="/"
+    href="/apps"
     class="text-muted-foreground hover:text-foreground mb-8 inline-flex items-center gap-2 text-xs"
-    ><ArrowLeft class="size-3.5" />All apps</a
+    ><ArrowLeft class="size-3.5" />My apps</a
   >
   <PageHeading
     title={route.parentId ? "Create preview" : "A new app"}
@@ -83,7 +83,7 @@
       </div>
     </details>
     <div class="flex items-center justify-between border-t pt-6">
-      <Button href="/" variant="ghost">Cancel</Button><Button
+      <Button href="/apps" variant="ghost">Cancel</Button><Button
         type="submit"
         disabled={createApp.pending > 0}
         >{createApp.pending ? "Creating app …" : "Create app"}<ArrowRight /></Button

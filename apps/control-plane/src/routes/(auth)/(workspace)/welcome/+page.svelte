@@ -47,7 +47,7 @@
       ></pre>
   </section>
   <div class="flex flex-wrap gap-3">
-    <Button href="/">Open apps</Button><Button href="/members" variant="outline"
+    <Button href="/apps">Open apps</Button><Button href="/members" variant="outline"
       >Invite your team</Button
     ><Button href="/settings" variant="ghost">Organization settings</Button>
   </div>

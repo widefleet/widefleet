@@ -54,8 +54,7 @@
       {:else}<p class="text-muted-foreground mt-4 text-xs leading-6">
           You can publish this app to the catalog after its first successful deployment.
         </p>{/if}
-      <a href="/catalog" class="text-primary mt-4 inline-block text-xs hover:underline"
-        >Open app catalog</a
+      <a href="/" class="text-primary mt-4 inline-block text-xs hover:underline">Open app catalog</a
       >
     </section>{/if}
   <section class="rounded-xl border border-destructive/25 p-5 sm:p-6">

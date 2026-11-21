@@ -19,6 +19,7 @@
   import ArrowRight from "@lucide/svelte/icons/arrow-right";
   import Users from "@lucide/svelte/icons/users";
   import PageHeading from "#shadcn/components/PageHeading.svelte";
+  import SettingsTabs from "#shadcn/components/SettingsTabs.svelte";
   import EmptyState from "#shadcn/components/EmptyState.svelte";
   import Feedback from "#shadcn/components/Feedback.svelte";
   import type { PageData } from "./$types";
@@ -34,6 +35,7 @@
 </script>
 
 <svelte:head><title>Members · Widefleet</title></svelte:head>
+<SettingsTabs />
 <PageHeading title="Members" description="The people in your workspace and their permissions." />
 {#if route.invited}<div class="mt-5">
     <Feedback kind="success"

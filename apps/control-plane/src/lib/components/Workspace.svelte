@@ -2,13 +2,11 @@
   import type { Snippet } from "svelte";
   import { page } from "$app/state";
   import { afterNavigate } from "$app/navigation";
+  import House from "@lucide/svelte/icons/house";
   import Layers2 from "@lucide/svelte/icons/layers-2";
-  import LayoutGrid from "@lucide/svelte/icons/layout-grid";
   import Link2 from "@lucide/svelte/icons/link-2";
-  import Plug from "@lucide/svelte/icons/plug";
   import Users from "@lucide/svelte/icons/users";
   import Settings2 from "@lucide/svelte/icons/settings-2";
-  import Server from "@lucide/svelte/icons/server";
   import Terminal from "@lucide/svelte/icons/terminal";
   import ChevronsUpDown from "@lucide/svelte/icons/chevrons-up-down";
   import LogOut from "@lucide/svelte/icons/log-out";
@@ -22,7 +20,6 @@
   import { setWorkspaceContext } from "#lib/workspace-context";
   import { Button } from "@platform/ui/button";
   import * as DropdownMenu from "@platform/ui/dropdown-menu";
-  import Brand from "@platform/ui/brand";
   import Feedback from "./Feedback.svelte";
 
   let {
@@ -58,22 +55,34 @@
 
   let error = $state("");
 
-  const navigation = [
-    { href: "/", label: "All apps", icon: Layers2 },
-    { href: "/catalog", label: "App catalog", icon: LayoutGrid },
-    { href: "/services", label: "App APIs", icon: Plug },
-    { href: "/connections", label: "My connections", icon: Link2 },
-    { href: "/members", label: "Members", icon: Users },
-    { href: "/agents", label: "Deployment agents", icon: Server },
-    { href: "/settings", label: "Settings", icon: Settings2 },
-  ];
+  // Each item also covers the pages reached from it, so the sidebar keeps showing where they belong.
+  const navigation = $derived([
+    { href: "/", label: "Home", icon: House, paths: [] },
+    { href: "/connections", label: "My connections", icon: Link2, paths: ["/connections"] },
+    {
+      href: "/apps",
+      label: "My apps",
+      icon: Layers2,
+      paths: ["/apps", "/catalog/templates", "/services"],
+    },
+    ...(principal.application.admin
+      ? [
+          {
+            href: "/settings",
+            label: "Settings",
+            icon: Settings2,
+            paths: ["/settings", "/members", "/agents"],
+          },
+        ]
+      : []),
+  ]);
 
-  const active = (href: string) =>
-    href === "/"
-      ? page.url.pathname === "/" || page.url.pathname.startsWith("/apps/")
-      : page.url.pathname.startsWith(href);
+  const active = (item: { href: string; paths: string[] }) =>
+    item.href === "/"
+      ? page.url.pathname === "/"
+      : item.paths.some((path) => page.url.pathname.startsWith(path));
 
-  const section = $derived(navigation.find((item) => active(item.href))?.label ?? "Workspace");
+  const section = $derived(navigation.find((item) => active(item))?.label ?? "Workspace");
 
   const initials = $derived(
     principal.name
@@ -115,20 +124,13 @@
 
 {#snippet navigationLinks()}
   <nav aria-label="Main navigation" class="space-y-1">
-    {#each navigation as item, index (item.href)}
-      {#if index < 4 || (item.href === "/agents" ? principal.admin : principal.application.admin)}
-        {#if index === 4}<p
-            class="text-muted-foreground px-3 pt-7 pb-2 text-[11px] font-medium tracking-wider uppercase"
-          >
-            Administration
-          </p>{/if}
-        <a
-          href={item.href}
-          aria-current={active(item.href) ? "page" : undefined}
-          class={`flex items-center gap-2.5 rounded-md px-3 py-2 text-[13px] transition-colors ${active(item.href) ? "bg-sidebar-accent text-foreground font-medium" : "text-muted-foreground hover:bg-sidebar-accent/70 hover:text-foreground"}`}
-          ><item.icon class="size-4 shrink-0" />{item.label}</a
-        >
-      {/if}
+    {#each navigation as item (item.href)}
+      <a
+        href={item.href}
+        aria-current={active(item) ? "page" : undefined}
+        class={`flex items-center gap-2.5 rounded-md px-3 py-2 text-[13px] transition-colors ${active(item) ? "bg-sidebar-accent text-foreground font-medium" : "text-muted-foreground hover:bg-sidebar-accent/70 hover:text-foreground"}`}
+        ><item.icon class="size-4 shrink-0" />{item.label}</a
+      >
     {/each}
   </nav>
 {/snippet}
@@ -142,7 +144,18 @@
   class="bg-sidebar min-h-svh md:grid md:grid-cols-[224px_minmax(0,1fr)] lg:grid-cols-[240px_minmax(0,1fr)]"
 >
   <aside class="sticky top-0 hidden h-svh flex-col px-3 py-5 md:flex">
-    <a href="/" class="mb-8 px-3" aria-label="Widefleet home"><Brand /></a>
+    <a
+      href="/organizations"
+      aria-label={`Choose organization: ${organizationName}`}
+      class="hover:bg-sidebar-accent mb-6 flex items-center gap-2.5 rounded-md p-2"
+    >
+      <span
+        class="bg-primary text-primary-foreground grid size-8 shrink-0 place-items-center rounded-lg text-xs font-medium"
+        aria-hidden="true">{organizationName.charAt(0).toUpperCase()}</span
+      >
+      <span class="min-w-0 flex-1 truncate text-[13px] font-medium">{organizationName}</span>
+      <ChevronsUpDown class="text-muted-foreground size-3.5" />
+    </a>
     {@render navigationLinks()}
     <div class="mt-auto space-y-3 pt-8">
       <a
@@ -196,8 +209,8 @@
         <a
           href="/organizations"
           aria-label={`Choose organization: ${organizationName}`}
-          class="hover:text-foreground max-w-40 truncate">{organizationName}</a
-        ><ChevronRight class="hidden size-3 sm:block" /><span class="text-foreground"
+          class="hover:text-foreground max-w-40 truncate md:hidden">{organizationName}</a
+        ><ChevronRight class="hidden size-3 sm:block md:hidden" /><span class="text-foreground"
           >{section}</span
         >
       </div>
