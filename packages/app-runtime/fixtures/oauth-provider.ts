@@ -11,8 +11,12 @@ const base64url = (value: Uint8Array) =>
 const encode = (value: string) => base64url(new TextEncoder().encode(value));
 
 // Synthetic providers check PKCE, callback URI, credentials and one-use codes.
-export const oauthProvider = (kind: "google" | "github" | "microsoft") => {
-  const codes = new Map<string, { user: string; challenge: string; redirect: string }>();
+// Linear's MCP authorization server knows the installation by its Client ID
+// Metadata Document; Linear OAuth applications use a registered client.
+const linearDocument = "https://oauth.example.test:25453/oauth/client-metadata.json";
+
+export const oauthProvider = (kind: "google" | "github" | "microsoft" | "linear") => {
+  const codes = new Map<string, { user: string; challenge: string | null; redirect: string }>();
   const access = new Map<string, string>();
   const refresh = new Map<string, string>();
   const state = { refreshes: 0, exchanges: 0, revocations: 0, unavailable: false, expiring: true };
@@ -31,13 +35,17 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft") => {
     google: "openid profile email https://www.googleapis.com/auth/gmail.readonly",
     github: "repo read:user user:email",
     microsoft: "openid profile email offline_access User.Read Files.Read",
+    linear: "read write",
   };
 
   const tokenURLs = {
     google: "https://oauth2.googleapis.com/token",
     github: "https://github.com/login/oauth/access_token",
     microsoft: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+    linear: "https://api.linear.app/oauth/token",
   };
+
+  const linearToken = "https://mcp.linear.app/token";
 
   const tokens = (user: string) => {
     const accessToken = `synthetic-access-${crypto.randomUUID()}`;
@@ -78,14 +86,18 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft") => {
 
     const signature = base64url(sign("RSA-SHA256", unsigned, keys.privateKey));
 
-    return Response.json({
+    const result = {
       access_token: accessToken,
       refresh_token: refreshToken,
-      id_token: `${unsigned}.${signature}`,
       expires_in: 3600,
       token_type: "Bearer",
       scope: scopes[kind],
-    });
+    };
+
+    // Linear's token responses carry no ID token without the openid scope.
+    return Response.json(
+      kind === "linear" ? result : { ...result, id_token: `${unsigned}.${signature}` },
+    );
   };
 
   return {
@@ -94,10 +106,18 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft") => {
     authorize(location: string, user: string) {
       const url = new URL(location);
       const redirect = z.url().parse(url.searchParams.get("redirect_uri"));
-      const challenge = z.string().min(1).parse(url.searchParams.get("code_challenge"));
+
+      // Linear OAuth applications make PKCE optional; Better Auth's Linear provider omits it.
+      const optional = kind === "linear" && !url.searchParams.has("code_challenge");
+
+      const challenge = optional
+        ? null
+        : z.string().min(1).parse(url.searchParams.get("code_challenge"));
+
       const oauthState = z.string().min(1).parse(url.searchParams.get("state"));
 
-      if (url.searchParams.get("code_challenge_method") !== "S256") throw new Error("Missing PKCE");
+      if (!optional && url.searchParams.get("code_challenge_method") !== "S256")
+        throw new Error("Missing PKCE");
       const code = crypto.randomUUID();
       codes.set(code, { user, challenge, redirect });
       const callback = new URL(redirect);
@@ -128,25 +148,44 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft") => {
         return new Response(null);
       }
 
-      if (url.href === tokenURLs[kind]) {
+      const metadataDocumentClient = kind === "linear" && url.href === linearToken;
+
+      if (url.href === tokenURLs[kind] || metadataDocumentClient) {
         const form = request.headers.get("content-type")?.includes("application/json")
           ? new URLSearchParams(z.record(z.string(), z.string()).parse(await request.json()))
           : new URLSearchParams(await request.text());
 
+        // A public client authenticates by PKCE alone and names its tokens' resource.
         if (
-          form.get("client_id") !== `test-${kind}-client` ||
-          form.get("client_secret") !== `test-${kind}-secret`
+          metadataDocumentClient
+            ? form.get("client_id") !== linearDocument ||
+              form.has("client_secret") ||
+              (form.has("grant_type") && form.get("resource") !== "https://mcp.linear.app/mcp")
+            : form.get("client_id") !== `test-${kind}-client` ||
+              form.get("client_secret") !== `test-${kind}-secret`
         )
           return Response.json({ error: "invalid_client" }, { status: 400 });
+
+        // Linear revokes at its token endpoint (RFC 7009).
+        if (metadataDocumentClient && !form.has("grant_type")) {
+          const token = form.get("token") ?? "";
+
+          if (!(refresh.delete(token) || access.delete(token)))
+            return Response.json({ error: "invalid_token" }, { status: 400 });
+          state.revocations++;
+
+          return new Response(null);
+        }
 
         if (form.get("grant_type") === "authorization_code") {
           const code = form.get("code") ?? "";
           const saved = codes.get(code);
           codes.delete(code);
 
-          const challenge = createHash("sha256")
-            .update(form.get("code_verifier") ?? "")
-            .digest("base64url");
+          const verifier = form.get("code_verifier");
+
+          const challenge =
+            verifier === null ? null : createHash("sha256").update(verifier).digest("base64url");
 
           if (
             !saved ||
@@ -193,6 +232,23 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft") => {
       if (url.pathname === "/gmail/v1/users/me/messages") return Response.json({ messages: [] });
 
       if (url.pathname === "/v1.0/me/drive/root/children") return Response.json({ value: [] });
+
+      if (url.href === "https://mcp.linear.app/mcp") {
+        const { name } = z
+          .object({ params: z.object({ name: z.string() }) })
+          .parse(await request.json()).params;
+
+        const output =
+          name === "get_user"
+            ? { id: user, name: user, email: `${user}@example.test` }
+            : { issues: [], hasNextPage: false };
+
+        return new Response(
+          `event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: 1, result: { content: [{ type: "text", text: JSON.stringify(output) }] } })}\n\n`,
+          { headers: { "content-type": "text/event-stream" } },
+        );
+      }
+
       throw new Error(`Unexpected request: ${url.origin}${url.pathname}`);
     },
   };

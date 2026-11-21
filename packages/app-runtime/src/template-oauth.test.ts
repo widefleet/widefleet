@@ -45,6 +45,24 @@ const clients = {
     hosts: ["https://graph.microsoft.com"],
     issuer: "https://login.microsoftonline.com/{tenantid}/v2.0",
   },
+  linear: {
+    registration: "client-id-metadata-document",
+    authorizationUrl: "https://mcp.linear.app/authorize",
+    tokenUrl: "https://mcp.linear.app/token",
+    resource: "https://mcp.linear.app/mcp",
+    revocationUrl: "https://mcp.linear.app/token",
+    scopes: ["read", "write"],
+    hosts: ["https://mcp.linear.app"],
+  },
+};
+
+// Registered clients carry the operator's credentials; a metadata document client has none.
+const managedClient = (kind: keyof typeof clients) => {
+  const client = clients[kind];
+
+  return "registration" in client
+    ? client
+    : { ...client, clientId: `test-${kind}-client`, clientSecret: `test-${kind}-secret` };
 };
 
 // Origins the synthetic providers serve, as an app's network policy allows them.
@@ -57,15 +75,20 @@ const origins = [
   "https://api.github.com",
   "https://login.microsoftonline.com",
   "https://graph.microsoft.com",
+  "https://api.linear.app",
+  "https://mcp.linear.app",
 ];
 
 for (const [template, kind, prefix] of [
   ["gmail", "google", "GOOGLE"],
   ["github", "github", "GITHUB"],
   ["onedrive", "microsoft", "MICROSOFT"],
+  ["linear", "linear", "LINEAR"],
 ] as const)
   describe(`${template} managed OAuth`, () => {
     const origin = `https://${template}.example.test:25453`;
+    // Managed clients with an RFC 7009 endpoint revoke grants on disconnect.
+    const revokes = "revocationUrl" in clients[kind];
     let runtime: Miniflare;
     let upstream: ReturnType<typeof oauthProvider>;
     let script: string;
@@ -129,13 +152,7 @@ for (const [template, kind, prefix] of [
                   value: managed
                     ? JSON.stringify({
                         origin: "https://oauth.example.test:25453",
-                        clients: {
-                          [kind]: {
-                            ...clients[kind],
-                            clientId: `test-${kind}-client`,
-                            clientSecret: `test-${kind}-secret`,
-                          },
-                        },
+                        clients: { [kind]: managedClient(kind) },
                       })
                     : "",
                 },
@@ -324,7 +341,7 @@ for (const [template, kind, prefix] of [
           account: null,
         });
         // The entrypoint shares the page's disconnection, including revocation.
-        expect(upstream.state.revocations).toBe(kind === "google" && custom === "none" ? 1 : 0);
+        expect(upstream.state.revocations).toBe(revokes && custom === "none" ? 1 : 0);
       },
     );
 
@@ -430,7 +447,7 @@ for (const [template, kind, prefix] of [
       await alice.request("/disconnect", "POST");
       expect(await db.prepare("SELECT COUNT(*) AS count FROM account").first("count")).toBe(0);
       // Disconnecting revokes the grant where the provider supports RFC 7009.
-      expect(upstream.state.revocations).toBe(kind === "google" ? 1 : 0);
+      expect(upstream.state.revocations).toBe(revokes ? 1 : 0);
     });
     it("keeps custom credentials preferred and switches registrations after disconnecting", async () => {
       await runtime.setOptions(configuration("complete"));
