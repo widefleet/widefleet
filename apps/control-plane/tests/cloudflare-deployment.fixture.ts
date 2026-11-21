@@ -1,10 +1,34 @@
 import { createHash } from "node:crypto";
 import * as contract from "@platform/contracts";
+import { Result } from "better-result";
 import { eq } from "drizzle-orm";
 import type { z } from "zod";
+import { installationOrganizationId } from "../src/lib/organization.ts";
+import { loadBundledRuntime } from "../src/lib/server/bundled-runtime.ts";
 import { deploymentCommand } from "../src/lib/server/deployment-execution.ts";
 import type { Database } from "../src/lib/server/database.ts";
+import { saveRuntime } from "../src/lib/server/runtime-releases.ts";
 import { apps, artifacts, organizationRuntimes } from "../src/lib/server/schema.ts";
+import type { ArtifactStorage } from "../src/lib/server/storage.ts";
+import { transact } from "../src/lib/server/transactions.ts";
+
+// A Hosted deployment records the installation runtime before apps deploy.
+export const recordInstallationRuntime = async (
+  database: Database,
+  storage: Pick<ArtifactStorage, "put">,
+) =>
+  (
+    await transact(database, async (transaction) => {
+      const reference = await saveRuntime(transaction, storage, await loadBundledRuntime());
+
+      await transaction
+        .update(organizationRuntimes)
+        .set({ runtime: reference, appliedRuntime: reference })
+        .where(eq(organizationRuntimes.organizationId, installationOrganizationId));
+
+      return Result.ok(reference);
+    })
+  ).unwrap();
 
 export const deploymentSource = `export default { async fetch(request, env) {
   if (new URL(request.url).pathname === '/resources') {

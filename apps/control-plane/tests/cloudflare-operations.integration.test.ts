@@ -1,12 +1,13 @@
 import { createConnectionService } from "../src/lib/server/connections.ts";
 import { connectionRequests } from "../src/lib/server/schema.ts";
+import { organization } from "../src/lib/server/auth-schema.ts";
 import { checkServiceConsumers } from "../src/lib/server/app-services.ts";
 import { Result } from "better-result";
 import { transact } from "../src/lib/server/transactions.ts";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { createTestEnvironment } from "./environment.ts";
-import { seedDeployment } from "./cloudflare-deployment.fixture.ts";
+import { recordInstallationRuntime, seedDeployment } from "./cloudflare-deployment.fixture.ts";
 import { createArtifactStorage } from "../src/lib/server/artifact-storage.ts";
 import { registerCloudflareOperation } from "../src/lib/server/cloudflare-operations.ts";
 import { deploymentCommand } from "../src/lib/server/deployment-execution.ts";
@@ -46,9 +47,11 @@ const storage = createArtifactStorage({
 
 describe("Cloudflare operation history", () => {
   let environment: Awaited<ReturnType<typeof createTestEnvironment>>;
+  let installationRuntime: Awaited<ReturnType<typeof recordInstallationRuntime>>;
   beforeAll(async () => {
     environment = await createTestEnvironment();
     (await initializeCloudflareRuntime(environment.database.db)).unwrap();
+    installationRuntime = await recordInstallationRuntime(environment.database.db, storage);
   });
   beforeEach(async () => {
     await environment.database.db.delete(apps);
@@ -63,7 +66,7 @@ describe("Cloudflare operation history", () => {
 
     const attempts = await Promise.all(
       Array.from({ length: 5 }, () =>
-        registerCloudflareOperation(environment.database.db, storage, entry.command),
+        registerCloudflareOperation(environment.database.db, entry.command),
       ),
     );
 
@@ -71,6 +74,61 @@ describe("Cloudflare operation history", () => {
     expect(await environment.database.db.select().from(cloudflareOperations)).toHaveLength(1);
     expect(await environment.database.db.select().from(deployments)).toHaveLength(1);
     expect(await environment.database.db.select().from(jobs)).toHaveLength(0);
+  });
+
+  it("targets the installation runtime for apps of every organization", async () => {
+    const organizationId = crypto.randomUUID();
+    await environment.database.db
+      .insert(organization)
+      .values({ id: organizationId, name: "Tenant", slug: "tenant", createdAt: new Date() });
+    await environment.database.db
+      .insert(organizationRuntimes)
+      .values({ organizationId, executor: "cloudflare", appHostnameSuffix: "tenant" });
+
+    const appId = crypto.randomUUID();
+    await environment.database.db.insert(apps).values({
+      id: appId,
+      slug: "tenant-app",
+      displayName: "Tenant app",
+      organizationId,
+      ownerId: "fixture-owner",
+      hostname: "tenant-app.example.test",
+    });
+
+    const entry = await seedDeployment(environment.database.db, { appId });
+
+    const record = (
+      await registerCloudflareOperation(environment.database.db, entry.command)
+    ).unwrap();
+
+    expect(record.targets).toEqual([expect.objectContaining({ runtime: installationRuntime })]);
+
+    const [tenant] = await environment.database.db
+      .select()
+      .from(organizationRuntimes)
+      .where(eq(organizationRuntimes.organizationId, organizationId));
+
+    expect(tenant).toMatchObject({ runtime: null, appliedRuntime: null });
+  });
+
+  it("rejects app operations before the installation runtime is deployed", async () => {
+    await environment.database.db
+      .update(organizationRuntimes)
+      .set({ appliedRuntime: null })
+      .where(eq(organizationRuntimes.organizationId, "widefleet"));
+
+    try {
+      const entry = await seedDeployment(environment.database.db);
+      const failed = await registerCloudflareOperation(environment.database.db, entry.command);
+
+      expect(failed.isErr() && failed.error).toMatchObject({ code: "CONFLICT" });
+      expect(await environment.database.db.select().from(deployments)).toHaveLength(0);
+    } finally {
+      await environment.database.db
+        .update(organizationRuntimes)
+        .set({ appliedRuntime: installationRuntime })
+        .where(eq(organizationRuntimes.organizationId, "widefleet"));
+    }
   });
 
   it("approves a connection in the same transaction as its hosted command and replays it only once", async () => {
@@ -88,7 +146,7 @@ describe("Cloudflare operation history", () => {
     const target = await seedDeployment(environment.database.db, { entrypoints: ["Reader"] });
 
     for (const entry of [source, target]) {
-      (await registerCloudflareOperation(environment.database.db, storage, entry.command)).unwrap();
+      (await registerCloudflareOperation(environment.database.db, entry.command)).unwrap();
       await environment.database.db
         .update(apps)
         .set({ ownerId: principal.id, activeDeploymentId: entry.command.id })
@@ -130,7 +188,7 @@ describe("Cloudflare operation history", () => {
     });
 
     expect(
-      (await registerCloudflareOperation(environment.database.db, storage, rejectedActor)).isErr(),
+      (await registerCloudflareOperation(environment.database.db, rejectedActor)).isErr(),
     ).toBe(true);
 
     const [pending] = await environment.database.db
@@ -140,17 +198,15 @@ describe("Cloudflare operation history", () => {
 
     expect(pending?.status).toBe("pending");
 
-    const first = (
-      await registerCloudflareOperation(environment.database.db, storage, command)
-    ).unwrap();
+    const first = (await registerCloudflareOperation(environment.database.db, command)).unwrap();
 
     expect(first.result).toMatchObject({
       revision: 1,
       grants: { ERP: { app: target.appId, entrypoint: "Reader" } },
     });
-    expect(
-      (await registerCloudflareOperation(environment.database.db, storage, command)).unwrap(),
-    ).toEqual(first);
+    expect((await registerCloudflareOperation(environment.database.db, command)).unwrap()).toEqual(
+      first,
+    );
     expect((await services.requests(principal)).unwrap()).toContainEqual({
       ...request,
       status: "approved",
@@ -163,7 +219,7 @@ describe("Cloudflare operation history", () => {
     const second = await seedDeployment(environment.database.db);
 
     for (const entry of [first, second])
-      (await registerCloudflareOperation(environment.database.db, storage, entry.command)).unwrap();
+      (await registerCloudflareOperation(environment.database.db, entry.command)).unwrap();
     expect(await environment.database.db.select().from(cloudflareOperations)).toHaveLength(2);
     expect(await environment.database.db.select().from(jobs)).toHaveLength(0);
   });
@@ -171,8 +227,8 @@ describe("Cloudflare operation history", () => {
   it("refreshes secrets using the newest admitted code and persists that choice across retries", async () => {
     const first = await seedDeployment(environment.database.db);
     const second = await seedDeployment(environment.database.db, { appId: first.appId });
-    (await registerCloudflareOperation(environment.database.db, storage, first.command)).unwrap();
-    (await registerCloudflareOperation(environment.database.db, storage, second.command)).unwrap();
+    (await registerCloudflareOperation(environment.database.db, first.command)).unwrap();
+    (await registerCloudflareOperation(environment.database.db, second.command)).unwrap();
 
     const refresh = deploymentCommand.parse({
       ...first.command,
@@ -181,16 +237,13 @@ describe("Cloudflare operation history", () => {
       refreshSecrets: true,
     });
 
-    const accepted = (
-      await registerCloudflareOperation(environment.database.db, storage, refresh)
-    ).unwrap();
+    const accepted = (await registerCloudflareOperation(environment.database.db, refresh)).unwrap();
 
     expect(accepted.command).toMatchObject({ artifactId: second.artifact.id });
     const third = await seedDeployment(environment.database.db, { appId: first.appId });
-    (await registerCloudflareOperation(environment.database.db, storage, third.command)).unwrap();
+    (await registerCloudflareOperation(environment.database.db, third.command)).unwrap();
     expect(
-      (await registerCloudflareOperation(environment.database.db, storage, refresh)).unwrap()
-        .command,
+      (await registerCloudflareOperation(environment.database.db, refresh)).unwrap().command,
     ).toEqual(accepted.command);
 
     const [deployment] = await environment.database.db
@@ -218,13 +271,9 @@ describe("Cloudflare operation history", () => {
       createdAt: new Date().toISOString(),
     });
 
-    const original = (
-      await registerCloudflareOperation(environment.database.db, storage, command)
-    ).unwrap();
+    const original = (await registerCloudflareOperation(environment.database.db, command)).unwrap();
 
-    const retry = (
-      await registerCloudflareOperation(environment.database.db, storage, command)
-    ).unwrap();
+    const retry = (await registerCloudflareOperation(environment.database.db, command)).unwrap();
 
     expect(retry.result).toEqual(original.result);
     expect(original.result).toMatchObject({ revision: 2, state: "saved", groups: ["support"] });
@@ -258,9 +307,9 @@ describe("Cloudflare operation history", () => {
         createdAt: new Date().toISOString(),
       });
 
-      expect(
-        (await registerCloudflareOperation(environment.database.db, storage, command)).isErr(),
-      ).toBe(true);
+      expect((await registerCloudflareOperation(environment.database.db, command)).isErr()).toBe(
+        true,
+      );
     }
 
     expect(await environment.database.db.select().from(cloudflareOperations)).toHaveLength(0);
@@ -329,7 +378,7 @@ describe("Cloudflare operation history", () => {
       createdAt: new Date().toISOString(),
     });
 
-    (await registerCloudflareOperation(environment.database.db, storage, command)).unwrap();
+    (await registerCloudflareOperation(environment.database.db, command)).unwrap();
     await environment.database.db
       .update(apps)
       .set({ capabilities: {}, capabilityRevision: 2 })

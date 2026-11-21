@@ -22,6 +22,8 @@ The control plane owns desired configuration and deployment jobs; serving apps u
 
 Resources belong directly to their organization. Each organization has one execution configuration, using either a private celld runtime or Cloudflare; it cannot combine both. Agent replacement must reuse that organization's storage, persistent node state and routes. Neither an agent registration nor an individual node owns these resources. See [execution configuration](../apps/control-plane/src/lib/server/organization-runtime.ts) and [runtime storage](../crates/platform-agent/src/execution.rs).
 
+Each agent-backed organization selects its own runtime release; the Node distribution installs its bundled release for the first app job. A Cloudflare installation has one runtime Worker for all organizations, so app operations record the installation organization's applied runtime and other organizations keep no runtime selection. The Cloudflare Worker therefore does not bundle a runtime release; a Hosted deployment installs it before apps deploy.
+
 App SSO also preserves validated configuration for restart without management. Changes to identity setup must retain this separation; the [SSO restart tests](../apps/control-plane/tests/installation/sso-supervisor.test.ts) exercise it.
 
 Apps run in separate V8 isolates with app-scoped resource bindings. The reference installation uses one managed node and shared storage credentials. Multiple managed nodes and automatic load balancing are not implemented.

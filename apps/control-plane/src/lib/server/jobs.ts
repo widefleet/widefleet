@@ -20,7 +20,12 @@ import {
   jobReceipts,
   jobs,
 } from "./schema.ts";
-import { ensureOrganizationRuntime, loadRuntime, runtimeReference } from "./runtime-releases.ts";
+import {
+  ensureOrganizationRuntime,
+  loadRuntime,
+  runtimeReference,
+  type BundledRuntime,
+} from "./runtime-releases.ts";
 import { decryptSecret } from "./secret-encryption.ts";
 import { lockOrganizationRuntime } from "./organization-runtime.ts";
 import type { ArtifactStorage } from "./storage.ts";
@@ -62,6 +67,7 @@ export const createJobService = (
   report: (event: z.infer<typeof contract.reportingOperation>) => void = () => {},
   appHttpsPort = 443,
   source?: SourceBackend,
+  bundledRuntime?: BundledRuntime,
 ) => ({
   authenticate: (token: string) =>
     transact(database, async (transaction) => {
@@ -197,7 +203,12 @@ export const createJobService = (
           ? runtimeReference.parse(candidate.job.runtime)
           : execution.appliedRuntime
             ? runtimeReference.parse(execution.appliedRuntime)
-            : await ensureOrganizationRuntime(transaction, storage, execution.organizationId);
+            : await ensureOrganizationRuntime(
+                transaction,
+                storage,
+                execution.organizationId,
+                bundledRuntime,
+              );
 
       const [claimed] = await transaction
         .update(jobs)
