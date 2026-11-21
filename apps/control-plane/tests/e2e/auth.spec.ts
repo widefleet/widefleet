@@ -805,6 +805,7 @@ for (const navigation of ["document", "client"])
 
     if (navigation === "client") {
       await page.getByRole("link", { name: "Choose organization: Widefleet" }).click();
+      await page.getByRole("menuitem", { name: "Add organization" }).click();
       await expect(page).toHaveURL(/\/sign-in\?/);
       await expect(page.locator("html")).toHaveAttribute("data-session-fixture", "same-document");
     } else {
