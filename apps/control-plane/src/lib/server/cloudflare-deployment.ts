@@ -14,7 +14,6 @@ import * as contract from "@platform/contracts";
 import { Result } from "better-result";
 import { and, eq, ne, sql } from "drizzle-orm";
 import { z } from "zod";
-import { createArtifactStorage } from "./artifact-storage.ts";
 import type { CloudflareBindings } from "./cloudflare-config.ts";
 import { withCloudflareDatabase } from "./cloudflare-database.ts";
 import { operationTarget, registerCloudflareOperation } from "./cloudflare-operations.ts";
@@ -34,7 +33,6 @@ import {
   deployments,
   runtimeReleases,
 } from "./schema.ts";
-import { createR2Storage } from "./storage/r2.ts";
 import { transact } from "./transactions.ts";
 import { publishAuthRoute } from "./cloudflare-auth-proxy.ts";
 import { refreshCloudflareServiceIndex } from "./cloudflare-service-index.ts";
@@ -57,8 +55,6 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
   const runtime = bindings.APP_RUNTIME;
 
   if (!runtime) throw new Error("The app runtime service binding is missing");
-
-  const storage = createArtifactStorage(createR2Storage(bindings.ARTIFACTS));
 
   const provisioner = createCloudflareProvisioner(
     {
@@ -110,7 +106,7 @@ export const createCloudflareDeployment = (bindings: CloudflareBindings, transpo
   return {
     register: (command: z.infer<typeof deploymentCommand>) =>
       withCloudflareDatabase(bindings, async ({ db }) => {
-        const record = value(await registerCloudflareOperation(db, storage, command));
+        const record = value(await registerCloudflareOperation(db, command));
 
         if (command.kind === "deploy" && (!record.finishedAt || record.error))
           await db

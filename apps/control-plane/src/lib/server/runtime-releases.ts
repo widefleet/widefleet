@@ -66,20 +66,27 @@ export const loadRuntime = async (
   return { runtime };
 };
 
+// The distribution supplies its bundled release; without one, an organization
+// needs an explicit runtime installation before its first app job.
+export type BundledRuntime = () => Promise<z.infer<typeof contract.runtimeRelease>>;
+
 export const ensureOrganizationRuntime = async (
   transaction: Transaction,
   storage: ArtifactStorage,
   organizationId: string,
+  bundled: BundledRuntime | undefined,
 ) => {
   const execution = await lockOrganizationRuntime(transaction, organizationId);
 
   if (execution.runtime) return runtimeReference.parse(execution.runtime);
 
-  const { default: bundled } = await import("@platform/app-runtime/release", {
-    with: { type: "json" },
-  });
+  if (!bundled)
+    throw new InvalidOperation({
+      code: "CONFLICT",
+      message: "Install a runtime with widefleet runtime update before deploying apps",
+    });
 
-  const release = contract.runtimeRelease.parse(bundled);
+  const release = await bundled();
 
   const reference = await saveRuntime(transaction, storage, release);
   await transaction

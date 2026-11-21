@@ -8,6 +8,7 @@ import { createAppService } from "../src/lib/server/apps.ts";
 import { createRuntime } from "../src/lib/server/runtime-services.ts";
 import { createApi } from "../src/lib/server/api.ts";
 import { createDatabase } from "../src/lib/server/database.ts";
+import { loadBundledRuntime } from "../src/lib/server/bundled-runtime.ts";
 import { createStorage } from "../src/lib/server/storage.ts";
 import { createUploadService } from "../src/lib/server/uploads.ts";
 import { apps, artifacts, deployments } from "../src/lib/server/schema.ts";
@@ -579,6 +580,7 @@ describe("App source repositories", () => {
       reporting: environment.reporting,
       encryptionKey: environment.environment.PLATFORM_ENCRYPTION_KEY,
       source: backend,
+      bundledRuntime: loadBundledRuntime,
     })();
 
     const app = await create();

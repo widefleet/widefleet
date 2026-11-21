@@ -253,6 +253,13 @@
       "when": 1795046400000,
       "tag": "0035_app_template",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1795132800000,
+      "tag": "0036_cloudflare_installation_runtime",
+      "breakpoints": true
     }
   ]
 }

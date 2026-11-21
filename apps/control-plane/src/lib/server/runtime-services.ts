@@ -14,7 +14,7 @@ import { createAuthentication } from "./auth.ts";
 import { createIdentityService } from "./identity.ts";
 import { createAppService } from "./apps.ts";
 import { createAgentService } from "./agents.ts";
-import { createRuntimeReleaseService } from "./runtime-releases.ts";
+import { createRuntimeReleaseService, type BundledRuntime } from "./runtime-releases.ts";
 import { createAppAccessService } from "./app-access.ts";
 import { createNetworkService } from "./network.ts";
 import { createWorkflowService } from "./workflows.ts";
@@ -60,6 +60,7 @@ export const createRuntime = ({
   source,
   discoveryTransport = "node",
   builder,
+  bundledRuntime,
 }: {
   configuration: Configuration & { BETTER_AUTH_SECRET: string };
   database: ReturnType<typeof createDatabase>;
@@ -81,6 +82,7 @@ export const createRuntime = ({
   userConnectionRequest?: UserConnectionRequest;
   discoveryTransport?: "node" | "cloudflare";
   builder?: AppBuilder;
+  bundledRuntime?: BundledRuntime;
 }) => {
   const publicSignup = Boolean(createOrganization);
 
@@ -180,6 +182,7 @@ export const createRuntime = ({
       reporting.operation,
       configuration.APP_HTTPS_PORT,
       source,
+      bundledRuntime,
     ),
     network,
     appAccess: createAppAccessService(database.db, execution),
