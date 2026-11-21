@@ -203,6 +203,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
               displayName: app.displayName,
               hostname: app.hostname,
               url: app.url,
+              activeDeploymentId: queued.id,
             },
           ]),
         );
@@ -920,6 +921,7 @@ describe.runIf(process.env["RUN_CLI_TESTS"] === "1")(
           displayName: app.displayName,
           hostname: app.hostname,
           url: app.url,
+          activeDeploymentId: queued.id,
         },
       ]);
 

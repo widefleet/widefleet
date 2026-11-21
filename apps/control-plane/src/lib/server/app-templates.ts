@@ -6,7 +6,6 @@ import {
   templateId,
 } from "@platform/contracts";
 import { Result } from "better-result";
-import { buildSourcePath } from "@platform/contracts/builds";
 import { parseJsonc } from "@platform/contracts/jsonc";
 import { parse } from "yaml";
 import { z } from "zod";
@@ -15,6 +14,9 @@ import type { Configuration } from "./config.ts";
 import { InvalidOperation, StorageUnavailable } from "./errors.ts";
 import { iconPaths, maxIconBytes } from "./app-icons.ts";
 import { declaredAssets } from "./template-project.ts";
+import { readBody } from "./upload-body.ts";
+
+const maxWranglerBytes = 1024 * 1024;
 
 const repository = "https://github.com/widefleet/widefleet/tree/main/templates";
 
@@ -252,36 +254,42 @@ export const readTemplateIcon = (id: string) =>
     const missing = () =>
       new InvalidOperation({ code: "NOT_FOUND", message: "Template icon not found" });
 
-    const read = (path: string) =>
+    const unavailable = (cause: unknown) =>
+      new StorageUnavailable({ message: "App templates are unavailable. Try again later.", cause });
+
+    // A file above the limit is unusable, so it stops downloading at the limit.
+    const read = (path: string, limit: number) =>
       Result.tryPromise({
         try: async () => {
           const response = await fetch(`${files}/${id}/${path}`, {
             signal: AbortSignal.timeout(10_000),
           });
 
+          if (response.ok) return (await readBody(response, limit)).unwrapOr(null);
+          await response.body?.cancel();
+
           if (response.status === 404) return null;
 
-          if (!response.ok) throw new Error(`GitHub returned HTTP ${response.status}`);
-
-          return new Uint8Array(await response.arrayBuffer());
+          throw new Error(`GitHub returned HTTP ${response.status}`);
         },
-        catch: (cause) =>
-          new StorageUnavailable({
-            message: "App templates are unavailable. Try again later.",
-            cause,
-          }),
+        catch: unavailable,
       });
 
-    const wrangler = yield* Result.await(read("wrangler.jsonc"));
-    const assets = declaredAssets(wrangler ? new TextDecoder().decode(wrangler) : undefined);
+    // The installer's precedence for the Wrangler file.
+    const wrangler =
+      (yield* Result.await(read("wrangler.jsonc", maxWranglerBytes))) ??
+      (yield* Result.await(read("wrangler.json", maxWranglerBytes)));
 
-    if (!assets || !buildSourcePath.safeParse(assets.directory).success) return yield* missing();
+    const assets = declaredAssets(
+      wrangler ? new TextDecoder().decode(wrangler) : undefined,
+    ).unwrapOr(undefined);
+
+    if (!assets) return yield* missing();
 
     for (const [path, contentType] of iconPaths) {
-      const bytes = yield* Result.await(read(`${assets.directory}${path}`));
+      const bytes = yield* Result.await(read(`${assets.directory}${path}`, maxIconBytes));
 
-      if (bytes && bytes.byteLength > 0 && bytes.byteLength <= maxIconBytes)
-        return Result.ok({ bytes, contentType });
+      if (bytes && bytes.byteLength > 0) return Result.ok({ bytes, contentType });
     }
 
     return yield* missing();
