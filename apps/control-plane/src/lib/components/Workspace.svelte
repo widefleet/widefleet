@@ -12,11 +12,13 @@
   import LogOut from "@lucide/svelte/icons/log-out";
   import Menu from "@lucide/svelte/icons/menu";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import Plus from "@lucide/svelte/icons/plus";
   import type { z } from "zod";
   import type { organizationChoice } from "@platform/contracts";
   import type { Principal } from "#server/identity";
   import { resetClientContext } from "#lib/analytics-client";
   import { authClient } from "#lib/auth-client";
+  import { selectOrganization } from "#lib/organizations.remote";
   import { setWorkspaceContext } from "#lib/workspace-context";
   import { Button } from "@platform/ui/button";
   import * as Collapsible from "@platform/ui/collapsible";
@@ -43,6 +45,28 @@
   const organizationName = $derived(
     organizations.find((organization) => organization.id === principal.application.organizationId)
       ?.name ?? "Organization",
+  );
+
+  const roleLabel = (role: string) =>
+    role === "owner" ? "Owner" : principal.application.admin ? "Administrator" : "Member";
+
+  const forms: Record<string, HTMLFormElement> = $state({});
+
+  let switching = $state(false);
+
+  // Switching mirrors the organization chooser; SSO organizations must sign in first.
+  const switchOrganization = (organization: z.infer<typeof organizationChoice>) => {
+    if (switching || organization.id === principal.application.organizationId) return;
+
+    if (organization.ssoRequired)
+      window.location.assign(
+        `/sign-in?${new URLSearchParams({ organization: organization.slug, next: "/" })}`,
+      );
+    else forms[organization.id]?.requestSubmit();
+  };
+
+  const shortcutPrefix = $derived(
+    typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.userAgent) ? "⌘" : "Ctrl+",
   );
 
   let signingOut = $state(false);
@@ -155,6 +179,23 @@
 
 <svelte:window
   onkeydown={(event) => {
+    const position = Number(event.key);
+
+    if (
+      (event.metaKey || event.ctrlKey) &&
+      !event.altKey &&
+      !event.shiftKey &&
+      position >= 1 &&
+      position <= Math.min(organizations.length, 9)
+    ) {
+      const organization = organizations[position - 1];
+
+      if (organization) {
+        event.preventDefault();
+        switchOrganization(organization);
+      }
+    }
+
     if (event.key === "Escape" && mobileOpen) {
       mobileOpen = false;
       mobileTrigger?.focus();
@@ -222,18 +263,79 @@
   class="bg-sidebar min-h-svh md:grid md:grid-cols-[224px_minmax(0,1fr)] lg:grid-cols-[240px_minmax(0,1fr)]"
 >
   <aside class="sticky top-0 hidden h-svh flex-col px-3 py-5 md:flex">
-    <a
-      href="/organizations"
-      aria-label={`Choose organization: ${organizationName}`}
-      class="hover:bg-sidebar-accent mb-6 flex items-center gap-2.5 rounded-md p-2"
-    >
-      <span
-        class="bg-primary text-primary-foreground grid size-8 shrink-0 place-items-center rounded-lg text-xs font-medium"
-        aria-hidden="true">{organizationName.charAt(0).toUpperCase()}</span
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger
+        aria-label={`Choose organization: ${organizationName}`}
+        class="hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent mb-6 flex w-full items-center gap-2.5 rounded-md p-2 text-left"
       >
-      <span class="min-w-0 flex-1 truncate text-[13px] font-medium">{organizationName}</span>
-      <ChevronsUpDown class="text-muted-foreground size-3.5" />
-    </a>
+        <span
+          class="bg-primary text-primary-foreground grid size-8 shrink-0 place-items-center rounded-lg text-xs font-medium"
+          aria-hidden="true">{organizationName.charAt(0).toUpperCase()}</span
+        >
+        <span class="min-w-0 flex-1"
+          ><span class="block truncate text-[13px] font-medium">{organizationName}</span><span
+            class="text-muted-foreground block truncate text-[11px]"
+            >{roleLabel(principal.role)}</span
+          ></span
+        >
+        <ChevronsUpDown class="text-muted-foreground size-3.5" />
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Content side="right" align="start" sideOffset={4} class="w-60">
+        <DropdownMenu.Group>
+          <DropdownMenu.Label class="text-muted-foreground text-xs"
+            >Organizations</DropdownMenu.Label
+          >
+          {#each organizations as organization, index (organization.id)}
+            <DropdownMenu.Item
+              disabled={switching}
+              onSelect={() => switchOrganization(organization)}
+              class="gap-2 p-2"
+            >
+              <span
+                class="grid size-6 shrink-0 place-items-center rounded-md border text-[11px] font-medium"
+                aria-hidden="true">{organization.name.charAt(0).toUpperCase()}</span
+              >
+              <span class="min-w-0 flex-1 truncate">{organization.name}</span>
+              {#if index < 9}<DropdownMenu.Shortcut
+                  >{shortcutPrefix}{index + 1}</DropdownMenu.Shortcut
+                >{/if}
+            </DropdownMenu.Item>
+          {/each}
+        </DropdownMenu.Group>
+        <DropdownMenu.Separator />
+        <DropdownMenu.Item class="gap-2 p-2">
+          {#snippet child({ props })}<a {...props} href="/organizations"
+              ><span
+                class="bg-background grid size-6 place-items-center rounded-md border"
+                aria-hidden="true"><Plus class="size-4" /></span
+              ><span class="text-muted-foreground font-medium">Add organization</span></a
+            >{/snippet}
+        </DropdownMenu.Item>
+      </DropdownMenu.Content>
+    </DropdownMenu.Root>
+    {#each organizations as organization (organization.id)}
+      {@const selection = selectOrganization.for(organization.id)}
+      <form
+        bind:this={forms[organization.id]}
+        hidden
+        {...selection.enhance(async ({ submit }) => {
+          switching = true;
+          error = "";
+          try {
+            await submit();
+            // A full navigation drops cached queries and forms from the previous organization.
+            if (selection.result?.selected) window.location.assign(selection.result.next);
+          } catch {
+            error = "Could not switch organization. Refresh the page and try again.";
+          } finally {
+            switching = false;
+          }
+        })}
+      >
+        <input {...selection.fields.organizationId.as("hidden", organization.id)} />
+        <input {...selection.fields.next.as("hidden", "/")} />
+      </form>
+    {/each}
     {@render navigationLinks()}
     <div class="mt-auto space-y-3 pt-8">
       <a
@@ -253,12 +355,7 @@
             >
             <span class="min-w-0 flex-1"
               ><span class="block truncate text-xs font-medium">{principal.name}</span><span
-                class="text-muted-foreground block text-[11px]"
-                >{principal.role === "owner"
-                  ? "Owner"
-                  : principal.application.admin
-                    ? "Administrator"
-                    : "Member"}</span
+                class="text-muted-foreground block text-[11px]">{roleLabel(principal.role)}</span
               ></span
             ><ChevronsUpDown class="text-muted-foreground size-3.5" />
           </DropdownMenu.Trigger>
