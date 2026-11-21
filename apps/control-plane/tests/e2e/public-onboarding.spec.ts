@@ -182,7 +182,7 @@ for (const entry of ["registration", "sign-in", "plain-form"] as const)
         `--organization ${created.id}`,
       );
       await page.getByRole("link", { name: "Open apps", exact: true }).click();
-      await expect(page.getByText("Room for your first idea", { exact: true })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "My apps", exact: true })).toBeVisible();
 
       const other = await page.request.get("/api/v1/apps", {
         headers: { "x-widefleet-organization": "widefleet" },

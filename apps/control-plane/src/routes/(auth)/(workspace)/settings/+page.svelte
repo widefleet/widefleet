@@ -9,6 +9,7 @@
   import { failureMessage, SettingsWriter } from "#lib/sso-setup.svelte";
   import { Button } from "@platform/ui/button";
   import PageHeading from "#shadcn/components/PageHeading.svelte";
+  import SettingsTabs from "#shadcn/components/SettingsTabs.svelte";
   import Feedback from "#shadcn/components/Feedback.svelte";
   import EmptyState from "#shadcn/components/EmptyState.svelte";
   import CompanySsoConnection from "#shadcn/components/sso/CompanySsoConnection.svelte";
@@ -96,6 +97,7 @@
 </script>
 
 <svelte:head><title>Settings · Widefleet</title></svelte:head>
+<SettingsTabs />
 <PageHeading title="Settings" description="Sign-in and workspace administration." />
 <nav aria-label="Settings sections" class="mt-7 mb-8 flex gap-6 overflow-x-auto border-b">
   {#each sections as section (section.id)}

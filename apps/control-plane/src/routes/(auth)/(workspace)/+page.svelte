@@ -1,139 +1,88 @@
 <script lang="ts">
-  import { getApps } from "#lib/apps.remote";
+  import { getCatalog } from "#lib/catalog.remote";
+  import { page } from "$app/state";
   import { Button } from "@platform/ui/button";
   import { Input } from "@platform/ui/input";
-  import { Badge } from "@platform/ui/badge";
-  import Plus from "@lucide/svelte/icons/plus";
-  import Search from "@lucide/svelte/icons/search";
-  import Layers2 from "@lucide/svelte/icons/layers-2";
-  import ChevronRight from "@lucide/svelte/icons/chevron-right";
-  import ArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
   import PageHeading from "#shadcn/components/PageHeading.svelte";
   import EmptyState from "#shadcn/components/EmptyState.svelte";
   import AppIcon from "#shadcn/components/AppIcon.svelte";
-  import AppStatus from "#shadcn/components/AppStatus.svelte";
-  import type { PageData } from "./$types";
+  import LayoutGrid from "@lucide/svelte/icons/layout-grid";
+  import ArrowUpRight from "@lucide/svelte/icons/arrow-up-right";
+  import Search from "@lucide/svelte/icons/search";
 
-  let { data: route }: { data: PageData } = $props();
+  const apps = $derived(await getCatalog());
 
-  const data = $derived(await getApps());
+  const search = $derived((page.url.searchParams.get("q") ?? "").trim().slice(0, 200));
 
-  const apps = $derived(
-    data.apps.filter((app) => {
-      const matches = `${app.displayName} ${app.hostname}`
+  const matches = $derived(
+    apps.filter((app) =>
+      `${app.displayName} ${app.hostname}`
         .toLocaleLowerCase("en")
-        .includes(route.search.toLocaleLowerCase("en"));
-
-      return (
-        matches &&
-        (route.filter === "active"
-          ? app.state === "active"
-          : route.filter === "preview"
-            ? Boolean(app.parentId)
-            : true)
-      );
-    }),
+        .includes(search.toLocaleLowerCase("en")),
+    ),
   );
-
-  const filters = [
-    { value: "all", label: "All apps" },
-    { value: "active", label: "Active" },
-    { value: "preview", label: "Previews" },
-  ];
 </script>
 
-<svelte:head><title>Apps · Widefleet</title></svelte:head>
-<PageHeading title="Apps">
-  {#if data.principal.creator}<Button href="/apps/new"><Plus />Create app</Button>{/if}
-</PageHeading>
-<div class="mt-8 flex flex-wrap items-center justify-between gap-4 border-b pb-4">
-  <nav aria-label="Filter apps" class="bg-muted/60 flex items-center gap-1 rounded-lg p-1">
-    {#each filters as filter (filter.value)}<a
-        href={`/?${new URLSearchParams({ filter: filter.value, q: route.search })}`}
-        aria-current={route.filter === filter.value ? "page" : undefined}
-        class={`rounded-md px-3 py-1.5 text-xs font-medium ${route.filter === filter.value ? "bg-background text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"}`}
-        >{filter.label}{#if filter.value === "all"}<span
-            class="text-muted-foreground ml-2 tabular-nums">{data.apps.length}</span
-          >{/if}</a
-      >{/each}
-  </nav>
-  <form method="GET" class="flex w-full items-center gap-2 sm:w-auto" role="search">
-    <input type="hidden" name="filter" value={route.filter} />
-    <div class="relative flex-1">
-      <Search
-        class="text-muted-foreground pointer-events-none absolute top-2.5 left-2.5 size-3.5"
-      /><Input
-        aria-label="Search apps"
-        type="search"
-        name="q"
-        value={route.search}
-        placeholder="Search apps …"
-        maxlength={200}
-        class="h-9 pl-8 sm:w-52"
-      />
-    </div>
-    <Button type="submit" variant="outline" class="h-9">Search</Button>
+<svelte:head><title>Home · Widefleet</title></svelte:head>
+<PageHeading title="Home" />
+<div class="mt-8 flex flex-wrap items-center justify-between gap-4 border-b pb-5">
+  <p class="text-muted-foreground text-xs">
+    {apps.length}
+    {apps.length === 1 ? "app" : "apps"} in your organization
+  </p>
+  <form method="GET" role="search" class="flex w-full gap-2 sm:w-auto">
+    <Input
+      type="search"
+      name="q"
+      value={search}
+      maxlength={200}
+      placeholder="Search apps …"
+      aria-label="Search apps"
+      class="sm:w-64"
+    />
+    <Button type="submit" variant="outline"
+      ><Search /><span class="sr-only sm:not-sr-only">Search</span></Button
+    >
   </form>
 </div>
-{#if data.apps.length === 0}
-  <EmptyState
-    title="Room for your first idea"
-    description={data.principal.creator
-      ? "A small utility or an everyday tool: create your first app and publish it with the CLI."
-      : "Apps you can manage appear here. Ask an app owner for access."}
-  >
-    {#snippet icon()}<Layers2 />{/snippet}
-    {#if data.principal.creator}<Button href="/apps/new"><Plus />Create your first app</Button>{/if}
-  </EmptyState>
-{:else if apps.length === 0}
-  <EmptyState title="No matching apps" description="Try another search or show all apps again.">
-    {#snippet icon()}<Search />{/snippet}<Button href="/" variant="outline">Reset filters</Button>
-  </EmptyState>
-{:else}
-  <div
-    class="text-muted-foreground hidden grid-cols-[minmax(0,1fr)_190px_24px] gap-4 px-3 pt-5 pb-2 text-[11px] font-medium sm:grid"
-  >
-    <span>NAME</span><span>STATUS</span><span></span>
-  </div>
-  <ul class="divide-y" aria-label="Apps">
-    {#each apps as app (app.id)}
-      <li
-        class="group relative grid grid-cols-[minmax(0,1fr)_24px] items-center gap-4 rounded-md px-3 py-3 hover:bg-muted/40 sm:grid-cols-[minmax(0,1fr)_190px_24px]"
-      >
-        <div class="flex min-w-0 items-center gap-3">
-          <AppIcon
-            appId={app.id}
-            deploymentId={app.web && app.state === "active" ? app.activeDeploymentId : null}
-          />
-          <div class="min-w-0">
-            <div class="flex items-center gap-2">
-              <a
-                href={`/apps/${app.id}`}
-                class="truncate text-sm font-medium after:absolute after:inset-0 after:rounded-md"
-                >{app.displayName}</a
-              >{#if app.parentId}<Badge variant="secondary" class="text-[10px]">Preview</Badge>{/if}
-            </div>
-            <p class="text-muted-foreground mt-1 truncate text-xs">
-              {app.web ? app.hostname : "Service only"}
-            </p>
-            <div class="mt-2 sm:hidden"><AppStatus state={app.state} /></div>
-          </div>
-        </div>
-        <div class="hidden sm:block"><AppStatus state={app.state} /></div>
-        <ChevronRight class="text-muted-foreground/50 group-hover:text-foreground size-4" />
-      </li>
-    {/each}
-  </ul>
-  <div
-    class="text-muted-foreground mt-6 flex flex-wrap items-center justify-between gap-3 border-t pt-4 text-xs"
-  >
-    <span
-      >{apps.length}
-      {apps.length === 1 ? "App" : "Apps"}{route.search
-        ? ` matching “${route.search}”`
-        : " in your workspace"}</span
-    ><a href="/device" class="hover:text-foreground inline-flex items-center gap-1"
-      >Work with the CLI<ArrowUpRight class="size-3" /></a
+<section aria-label="Apps in your organization">
+  {#if apps.length === 0}
+    <EmptyState
+      title="No apps to discover yet"
+      description="Apps appear here once their owners publish them to the catalog."
+      >{#snippet icon()}<LayoutGrid />{/snippet}<Button href="/apps" variant="outline"
+        >Go to My apps</Button
+      ></EmptyState
     >
-  </div>
-{/if}
+  {:else if matches.length === 0}
+    <EmptyState title="No matching apps" description="Try another search or show all apps again."
+      >{#snippet icon()}<Search />{/snippet}<Button href="/" variant="outline">Reset search</Button
+      ></EmptyState
+    >
+  {:else}
+    <ul class="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      {#each matches as app (app.id)}
+        <li>
+          <a
+            href={app.url}
+            target="_blank"
+            rel="noreferrer"
+            class="hover:border-primary/30 hover:bg-muted/30 group flex h-full flex-col rounded-xl border p-5 transition-colors"
+          >
+            <div class="mb-5 flex items-center justify-between">
+              <span class="bg-primary/5 text-primary grid size-10 place-items-center rounded-xl"
+                ><AppIcon appId={app.id} deploymentId={app.activeDeploymentId} /></span
+              ><ArrowUpRight class="text-muted-foreground group-hover:text-primary size-4" />
+            </div>
+            <span class="text-sm font-semibold wrap-anywhere">{app.displayName}</span>
+            <span class="text-muted-foreground mt-2 text-xs wrap-anywhere">{app.hostname}</span>
+            <span class="sr-only">Opens in a new tab</span>
+          </a>
+        </li>
+      {/each}
+    </ul>
+    <p class="text-muted-foreground mt-6 text-xs leading-6">
+      Sign in with your company account. Some apps may require membership in specific groups.
+    </p>
+  {/if}
+</section>

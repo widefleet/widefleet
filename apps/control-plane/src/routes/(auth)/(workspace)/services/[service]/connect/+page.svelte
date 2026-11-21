@@ -61,7 +61,7 @@
       <p class="text-muted-foreground text-sm">
         You need an app you own or collaborate on before you can connect this API.
       </p>
-      <Button href="/">Go to your apps</Button>
+      <Button href="/apps">Go to your apps</Button>
     {/if}
   {:else}
     <PageHeading

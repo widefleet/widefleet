@@ -124,6 +124,6 @@ export const removeApp = form(
     const { runtime, principal } = await remoteContext({ organizationId });
     formValue(await runtime.apps.remove(principal, appId));
     await getApps().refresh();
-    redirect(303, "/");
+    redirect(303, "/apps");
   },
 );

@@ -1,7 +1,9 @@
-import { getCatalog } from "#lib/catalog.remote";
+import { redirect } from "@sveltejs/kit";
 import type { PageServerLoad } from "./$types";
 
-export const load: PageServerLoad = async ({ setHeaders }) => {
-  setHeaders({ "cache-control": "private, no-store" });
-  await getCatalog();
+// The catalog of published apps is the home page. Links from before the move keep working.
+export const load: PageServerLoad = async ({ parent }) => {
+  // Sign-in and organization selection redirect first.
+  await parent();
+  redirect(308, "/");
 };
