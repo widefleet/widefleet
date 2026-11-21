@@ -149,14 +149,28 @@ export default class Host extends WorkerEntrypoint<TestEnvironment> {
 
     if (path === "/rpc/status") return Response.json(await app.connectionStatus());
 
-    if (path === "/rpc/list") return Response.json(await app.listIssues());
+    if (path === "/rpc/list")
+      return Response.json(
+        await app.callTool({ name: "list_issues", arguments: { assignee: "me" } }),
+      );
 
-    if (path === "/rpc/teams") return Response.json(await app.listTeams({ query: "eng" }));
+    if (path === "/rpc/tools") return Response.json(await app.listTools());
 
-    if (path === "/rpc/mine")
-      return Response.json(await app.listIssues({ assignee: "me", state: "started", limit: 10 }));
+    if (path === "/rpc/unknown")
+      return Response.json(await app.callTool({ name: "delete_everything" }));
 
-    if (path === "/rpc/issue") return Response.json(await app.getIssue({ id: "ENG-7" }));
+    if (path === "/rpc/image")
+      return Response.json(
+        await app.callTool({ name: "extract_images", arguments: { markdown: "![](x)" } }),
+      );
+
+    if (path === "/rpc/create")
+      return Response.json(
+        await app.callTool({
+          name: "save_issue",
+          arguments: { title: "From Widefleet", team: "ENG", labels: ["bug"] },
+        }),
+      );
 
     return app.fetch(request);
   }

@@ -117,7 +117,7 @@ describe("Linear personal account app", () => {
     expect(page).toContain("/auth/callback/linear");
     expect((await alice.request("/connect", "POST")).headers.get("location")).toBe("/");
   });
-  it("reads through the MCP server and isolates users and identity issuers", async () => {
+  it("lists and calls every Linear tool and isolates users and identity issuers", async () => {
     const alice = browser("alice");
     const bob = browser("bob");
     expect(await (await alice.request("/rpc/list")).json()).toMatchObject({
@@ -131,33 +131,51 @@ describe("Linear personal account app", () => {
     expect(await (await alice.request("/rpc/personal/status")).json()).toMatchObject({
       account: { id: "user-alice", label: "alice@example.test" },
     });
-    expect(await (await alice.request("/rpc/teams")).json()).toEqual({
+    expect(await (await alice.request("/rpc/tools")).json()).toEqual({
       status: "connected",
-      teams: [{ id: "team-1", key: "ENG", name: "Engineering" }],
-      cursor: "next-teams",
+      tools: [
+        {
+          name: "list_issues",
+          title: "List issues",
+          description: "List issues in the user's Linear workspace.",
+          inputSchema: '{"type":"object","properties":{"assignee":{"type":"string"}}}',
+          annotations: { readOnlyHint: true, destructiveHint: false },
+        },
+        {
+          name: "save_issue",
+          description: "Create or update an issue.",
+          inputSchema: '{"type":"object","properties":{"title":{"type":"string"}}}',
+          annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+        },
+      ],
     });
-    expect(await (await alice.request("/rpc/mine")).json()).toMatchObject({
+
+    const listed = z
+      .object({ status: z.literal("connected"), text: z.string() })
+      .parse(await (await alice.request("/rpc/list")).json());
+
+    expect(JSON.parse(listed.text)).toMatchObject({
+      issues: [{ id: "ENG-1", title: "Synthetic issue" }],
+      hasNextPage: false,
+    });
+
+    const created = z
+      .object({ status: z.literal("connected"), text: z.string() })
+      .parse(await (await alice.request("/rpc/create")).json());
+
+    expect(JSON.parse(created.text)).toMatchObject({ id: "ENG-2", title: "From Widefleet" });
+
+    // Parts other than text stay as the server sent them.
+    expect(await (await alice.request("/rpc/image")).json()).toEqual({
       status: "connected",
-      issues: [{ id: "ENG-1", title: "Synthetic issue", priority: { name: "High" } }],
-      cursor: null,
+      text: "",
+      content: [{ type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" }],
     });
-    expect(await (await alice.request("/rpc/issue")).json()).toMatchObject({
-      status: "connected",
-      issue: { id: "ENG-7", description: "Details" },
-    });
-    expect(upstream.calls.map(({ name }) => name)).toEqual([
-      "list_teams",
-      "list_issues",
-      "get_issue",
+    expect(upstream.calls).toEqual([
+      { name: "list_issues", arguments: { assignee: "me" } },
+      { name: "save_issue", arguments: { title: "From Widefleet", team: "ENG", labels: ["bug"] } },
+      { name: "extract_images", arguments: { markdown: "![](x)" } },
     ]);
-    expect(upstream.calls[0]?.arguments).toEqual({ query: "eng", limit: 50 });
-    expect(upstream.calls[1]?.arguments).toMatchObject({
-      assignee: "me",
-      state: "started",
-      limit: 10,
-    });
-    expect(upstream.calls[2]?.arguments).toMatchObject({ id: "ENG-7" });
-    expect(upstream.calls[2]?.arguments["fields"]).toContain("description");
     expect(await (await bob.request("/rpc/status")).json()).toMatchObject({
       status: "connection_required",
     });
@@ -241,11 +259,15 @@ describe("Linear personal account app", () => {
     await connect(alice, "alice");
     upstream.state.toolError =
       '{"error":"invalid_request","message":"Could not find referenced Issue."}';
-    expect(await (await alice.request("/rpc/issue")).json()).toEqual({
+    expect(await (await alice.request("/rpc/list")).json()).toEqual({
       status: "linear_error",
       message: '{"error":"invalid_request","message":"Could not find referenced Issue."}',
     });
     upstream.state.toolError = "";
+    expect(await (await alice.request("/rpc/unknown")).json()).toEqual({
+      status: "linear_error",
+      message: "Tool delete_everything not found",
+    });
     upstream.state.apiStatus = 429;
     upstream.state.apiHeaders.set("retry-after", "30");
     expect(await (await alice.request("/rpc/list")).json()).toEqual({

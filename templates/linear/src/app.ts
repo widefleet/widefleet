@@ -1,19 +1,14 @@
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { accountConnection } from "./connection.ts";
 import type { Environment, Properties } from "./context.ts";
-import { z } from "zod";
-import {
-  issue,
-  issueDetails,
-  issueFields,
-  issueInput,
-  issuesInput,
-  nextPage,
-  team,
-  teamsInput,
-} from "./linear.ts";
+import type { z } from "zod";
+import { callTool, listTools, tool, toolCallInput, toolOutput } from "./linear.ts";
 
-/** Read teams and issues accessible to the current user's Linear connection. */
+// Linear lists its tools on one page today; the bound keeps a misbehaving
+// server from paging forever.
+const maxToolPages = 20;
+
+/** Use the current user's Linear workspace through every tool of Linear's MCP server. */
 export default class Linear extends WorkerEntrypoint<Environment, Properties> {
   #connection() {
     return accountConnection(this.env, this.ctx.props);
@@ -24,62 +19,43 @@ export default class Linear extends WorkerEntrypoint<Environment, Properties> {
     return this.#connection().status();
   }
 
-  /** List teams in the connected workspace. Pass cursor to continue. */
-  async listTeams(input: z.input<typeof teamsInput> = {}) {
-    const result = await this.#connection().call("list_teams", teamsInput.parse(input));
+  /**
+   * List Linear's tools with their input schemas, as JSON Schema text, and hints. `readOnlyHint`
+   * marks tools that only read; `destructiveHint` marks tools that can delete
+   * or overwrite data.
+   */
+  async listTools() {
+    const tools: z.output<typeof tool>[] = [];
+    let cursor: string | undefined;
 
-    if (result.status !== "connected") return result;
+    for (let page = 0; page < maxToolPages; page++) {
+      const response = await this.#connection().rpc(listTools(cursor));
 
-    const output = z
-      .object({ teams: z.array(team) })
-      .extend(nextPage.shape)
-      .parse(result.output);
+      if (response.status !== "connected") return response;
+      tools.push(...response.result.tools);
+      cursor = response.result.nextCursor;
 
-    return {
-      status: "connected",
-      teams: output.teams,
-      cursor: output.hasNextPage ? (output.cursor ?? null) : null,
-    } as const;
+      if (!cursor) return { status: "connected", tools } as const;
+    }
+
+    throw new Error("Linear's tool list did not end");
   }
 
   /**
-   * List issues, most recently updated first. team, state and assignee take a
-   * name or ID; assignee also takes "me". Pass cursor to continue.
+   * Call a Linear tool by name with arguments that match its input schema from
+   * listTools. `text` holds the tool's JSON result.
    * @example
    * ```ts
-   * await env.LINEAR.listIssues({ assignee: "me", state: "started" });
+   * const result = await env.LINEAR.callTool({ name: "list_issues", arguments: { assignee: "me" } });
+   * if (result.status === "connected") console.log(JSON.parse(result.text));
    * ```
    */
-  async listIssues(input: z.input<typeof issuesInput> = {}) {
-    const result = await this.#connection().call("list_issues", {
-      ...issuesInput.parse(input),
-      fields: issueFields,
-    });
+  async callTool(input: z.input<typeof toolCallInput>) {
+    const response = await this.#connection().rpc(callTool(toolCallInput.parse(input)));
 
-    if (result.status !== "connected") return result;
+    if (response.status !== "connected") return response;
 
-    const output = z
-      .object({ issues: z.array(issue) })
-      .extend(nextPage.shape)
-      .parse(result.output);
-
-    return {
-      status: "connected",
-      issues: output.issues,
-      cursor: output.hasNextPage ? (output.cursor ?? null) : null,
-    } as const;
-  }
-
-  /** Read one issue with its description. id is an identifier such as ENG-123 or the issue ID. */
-  async getIssue(input: z.input<typeof issueInput>) {
-    const result = await this.#connection().call("get_issue", {
-      ...issueInput.parse(input),
-      fields: [...issueFields, "description"],
-    });
-
-    if (result.status !== "connected") return result;
-
-    return { status: "connected", issue: issueDetails.parse(result.output) } as const;
+    return toolOutput(response.result);
   }
 
   override async fetch(request: Request) {

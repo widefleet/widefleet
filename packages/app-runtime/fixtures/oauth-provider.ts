@@ -35,7 +35,7 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft" | "linear"
     google: "openid profile email https://www.googleapis.com/auth/gmail.readonly",
     github: "repo read:user user:email",
     microsoft: "openid profile email offline_access User.Read Files.Read",
-    linear: "read",
+    linear: "read write",
   };
 
   const tokenURLs = {
@@ -94,7 +94,7 @@ export const oauthProvider = (kind: "google" | "github" | "microsoft" | "linear"
       scope: scopes[kind],
     };
 
-    // Linear's token responses carry no ID token for the read scope.
+    // Linear's token responses carry no ID token without the openid scope.
     return Response.json(
       kind === "linear" ? result : { ...result, id_token: `${unsigned}.${signature}` },
     );

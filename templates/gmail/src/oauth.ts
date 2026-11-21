@@ -23,7 +23,7 @@ const clients = {
     client: "microsoft",
     scopes: ["openid", "profile", "email", "offline_access", "User.Read", "Files.Read"],
   },
-  linear: { client: "linear", scopes: ["read"] },
+  linear: { client: "linear", scopes: ["read", "write"] },
 } as const;
 
 type Provider = keyof typeof clients;
