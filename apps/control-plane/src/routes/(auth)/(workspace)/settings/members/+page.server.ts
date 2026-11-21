@@ -1,8 +1,7 @@
 import { z } from "zod";
-import { getMembers } from "#lib/members.remote";
 import type { PageServerLoad } from "./$types";
 
-export const load: PageServerLoad = async ({ request, url, setHeaders }) => {
+export const load: PageServerLoad = ({ request, url, setHeaders }) => {
   setHeaders({ "cache-control": "private, no-store" });
   const search = (url.searchParams.get("q") ?? "").trim().slice(0, 200);
 
@@ -13,8 +12,6 @@ export const load: PageServerLoad = async ({ request, url, setHeaders }) => {
     .max(100_000)
     .catch(1)
     .parse(url.searchParams.get("page") ?? 1);
-
-  await getMembers({ search, page });
 
   return {
     search,
