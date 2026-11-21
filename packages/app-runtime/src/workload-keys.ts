@@ -78,9 +78,13 @@ export const workloadKeys = async (
       changed = true;
     }
 
-    const current = ring.keys.filter((key) => key.activatesAt <= now).at(-1);
+    const signing = ring.keys.filter((key) => key.privateKey);
 
-    if (!current?.privateKey) throw new Error("No active workload signing key");
+    // A call that read the clock just before another call created or rotated the
+    // ring finds no key active yet. The next key is already published, so it signs early.
+    const current = signing.filter((key) => key.activatesAt <= now).at(-1) ?? signing[0];
+
+    if (!current) throw new Error("No active workload signing key");
 
     const retained = ring.keys.filter(
       (key) =>
