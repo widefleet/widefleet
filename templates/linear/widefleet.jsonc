@@ -1,0 +1,7 @@
+{
+  // The provider origins this connector calls. Deploying requests them; the
+  // app's owner or an administrator allows them.
+  "network": {
+    "backend": ["https://mcp.linear.app", "https://api.linear.app"],
+  },
+}
